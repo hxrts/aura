@@ -1,0 +1,36 @@
+# Event-sourced account journal - CRDT-based event log with derived state
+[package]
+name = "aura-journal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# CRDT
+automerge = { workspace = true }
+
+# Cryptography
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_cbor = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+time = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+

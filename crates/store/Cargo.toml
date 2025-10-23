@@ -1,0 +1,41 @@
+# Encrypted blob store - orchestration for encrypted chunk storage
+[package]
+name = "aura-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Workspace crates
+aura-journal = { path = "../journal" }
+aura-transport = { path = "../transport" }
+aura-crypto = { path = "../crypto" }
+
+# Storage
+redb = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_cbor = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+time = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.8"
+

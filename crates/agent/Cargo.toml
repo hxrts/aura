@@ -1,0 +1,53 @@
+# DeviceAgent implementation - provides high-level identity and key derivation APIs
+[package]
+name = "aura-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Workspace crates
+aura-coordination = { path = "../coordination" }
+aura-journal = { path = "../journal" }
+aura-policy = { path = "../policy" }
+aura-crypto = { path = "../crypto" }
+aura-transport = { path = "../transport" }
+
+# Cryptography
+frost-ed25519 = { workspace = true }
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+hpke = { workspace = true }
+zeroize = { workspace = true }
+qrcode = { version = "0.13", optional = true }
+
+# Serialization
+serde = { workspace = true }
+serde_cbor = { workspace = true }
+serde_json = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+time = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }
+toml = { workspace = true }
+
+[features]
+default = []
+qrcode = ["dep:qrcode"]
+
+[dev-dependencies]
+tokio-test = "0.4"
+

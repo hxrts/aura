@@ -1,0 +1,40 @@
+# CLI for smoke tests and operator tooling
+[package]
+name = "aura-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aura"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace crates
+aura-agent = { path = "../agent" }
+aura-coordination = { path = "../coordination" }
+aura-crypto = { path = "../crypto" }
+aura-journal = { path = "../journal" }
+aura-policy = { path = "../policy" }
+
+# CLI
+clap = { workspace = true }
+toml = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+
+# Utilities
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_cbor = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+uuid = { workspace = true }
+ed25519-dalek = { workspace = true }
+frost-ed25519 = { workspace = true }
+

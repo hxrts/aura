@@ -1,0 +1,41 @@
+# Common cryptographic utilities for secure key/data sealing
+[package]
+name = "aura-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Workspace crates
+aura-journal = { path = "../journal" }
+
+# Cryptography
+aes-gcm = { workspace = true }
+blake3 = { workspace = true }
+zeroize = { workspace = true }
+ed25519-dalek = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+hpke = { workspace = true }
+frost-core = { workspace = true }
+frost-ed25519 = { workspace = true }
+
+# Curve operations (transitive dependency from ed25519-dalek but we use it directly)
+curve25519-dalek = "4.1"
+
+# Serialization
+serde = { workspace = true }
+serde_cbor = { workspace = true }
+bincode = { workspace = true }
+
+# Utilities
+thiserror = { workspace = true }
+rand = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+

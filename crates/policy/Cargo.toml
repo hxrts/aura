@@ -1,0 +1,32 @@
+# Policy engine integration - Cedar + Biscuit for authorization and delegation
+[package]
+name = "aura-policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Workspace crates
+aura-journal = { path = "../journal" }
+aura-coordination = { path = "../coordination" }
+aura-crypto = { path = "../crypto" }
+
+# Authorization
+biscuit-auth = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+time = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+

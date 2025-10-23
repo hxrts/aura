@@ -1,0 +1,36 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+CLAUDE.md
+.claude/
+
+# Aura test artifacts
+.aura/
+.aura-test/
+*.sealed
+*.dat
+
+# Nix
+result
+result-*
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Working
+work/
+ext/

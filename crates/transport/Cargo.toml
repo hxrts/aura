@@ -1,0 +1,38 @@
+# Pluggable transport layer with presence ticket enforcement
+[package]
+name = "aura-transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Networking
+reqwest = { workspace = true }
+snow = { workspace = true }
+async-trait = { workspace = true }
+
+# Cryptography
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_cbor = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+

@@ -1,0 +1,47 @@
+# Protocol coordination - manages distributed protocols (DKD, Resharing, Locking, Recovery)
+[package]
+name = "aura-coordination"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Workspace crates
+aura-crypto = { path = "../crypto" }
+aura-journal = { path = "../journal" }
+aura-transport = { path = "../transport" }
+
+# Curve operations
+curve25519-dalek = { workspace = true }
+
+# Cryptography
+frost-core = { workspace = true }
+frost-ed25519 = { workspace = true }
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+zeroize = { workspace = true }
+aes-gcm = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_cbor = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = "0.1"
+dyn-clone = "1.0"
+
+# Utilities
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
