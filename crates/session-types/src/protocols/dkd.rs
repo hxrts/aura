@@ -1,70 +1,14 @@
-//! Session Type States for DKD Choreography
+//! Session Type States for DKD Choreography (Refactored with Macros)
 //!
 //! This module defines the session type states for the DKD (Deterministic Key Derivation)
 //! protocol, providing compile-time safety for state transitions.
 
-use crate::core::{
-    ChoreographicProtocol, SessionProtocol, SessionState,
-};
+use crate::core::{ChoreographicProtocol, SessionProtocol, SessionState};
 use crate::witnesses::{
-    CollectedCommitments, CommitmentConfig, RevealConfig, VerifiedReveals, RuntimeWitness,
+    CollectedCommitments, CommitmentConfig, RevealConfig, RuntimeWitness, VerifiedReveals,
 };
-use aura_journal::{Event, DeviceId};
+use aura_journal::{DeviceId, Event};
 use uuid::Uuid;
-
-// ========== DKD Session States ==========
-
-/// Initial state when DKD protocol begins
-#[derive(Debug, Clone)]
-pub struct InitializationPhase;
-
-impl SessionState for InitializationPhase {
-    const NAME: &'static str = "InitializationPhase";
-}
-
-/// State during commitment phase - collecting commitments from participants
-#[derive(Debug, Clone)]
-pub struct CommitmentPhase;
-
-impl SessionState for CommitmentPhase {
-    const NAME: &'static str = "CommitmentPhase";
-}
-
-/// State during reveal phase - collecting and verifying reveals
-#[derive(Debug, Clone)]
-pub struct RevealPhase;
-
-impl SessionState for RevealPhase {
-    const NAME: &'static str = "RevealPhase";
-}
-
-/// State during finalization - aggregating points and generating result
-#[derive(Debug, Clone)]
-pub struct FinalizationPhase;
-
-impl SessionState for FinalizationPhase {
-    const NAME: &'static str = "FinalizationPhase";
-}
-
-/// Final state when DKD protocol is complete
-#[derive(Debug, Clone)]
-pub struct CompletionPhase;
-
-impl SessionState for CompletionPhase {
-    const NAME: &'static str = "CompletionPhase";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-/// Failure state when DKD protocol encounters an error
-#[derive(Debug, Clone)]
-pub struct Failure;
-
-impl SessionState for Failure {
-    const NAME: &'static str = "Failure";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
 
 // ========== DKD Protocol Core ==========
 
@@ -92,38 +36,52 @@ impl DkdProtocolCore {
     }
 }
 
-// ========== Session Protocol Implementation ==========
+// ========== Error Type ==========
+
+/// Error type for DKD session protocols
+#[derive(Debug, thiserror::Error)]
+pub enum DkdSessionError {
+    #[error("Protocol error: {0}")]
+    ProtocolError(String),
+    #[error("Invalid state transition")]
+    InvalidTransition,
+    #[error("Insufficient participants")]
+    InsufficientParticipants,
+    #[error("Timeout occurred")]
+    Timeout,
+}
+
+// ========== Protocol Definition using Macros ==========
+
+define_protocol! {
+    Protocol: DkdProtocol,
+    Core: DkdProtocolCore,
+    Error: DkdSessionError,
+    Union: DkdProtocolState,
+
+    States {
+        InitializationPhase => (),
+        CommitmentPhase => (),
+        RevealPhase => (),
+        FinalizationPhase => (),
+        CompletionPhase @ final => Vec<u8>,
+        Failure @ final => (),
+    }
+
+    Extract {
+        session_id: |core| core.session_id,
+        device_id: |core| core.device_id,
+    }
+}
+
+// ========== Protocol Type Alias ==========
 
 /// Session-typed DKD protocol wrapper
 pub type DkdProtocol<S> = ChoreographicProtocol<DkdProtocolCore, S>;
 
-impl<S: SessionState> SessionProtocol for ChoreographicProtocol<DkdProtocolCore, S> {
-    type State = S;
-    type Output = Vec<u8>; // Derived key bytes
-    type Error = DkdSessionError;
+// ========== Protocol Methods ==========
 
-    fn session_id(&self) -> Uuid {
-        self.core().session_id
-    }
-
-    fn state_name(&self) -> &'static str {
-        S::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        S::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        self.core().session_id
-    }
-
-    fn device_id(&self) -> DeviceId {
-        self.core().device_id
-    }
-}
-
-impl<S: SessionState> ChoreographicProtocol<DkdProtocolCore, S> {
+impl<S: crate::core::SessionState> ChoreographicProtocol<DkdProtocolCore, S> {
     /// Get reference to the protocol core
     pub fn core(&self) -> &DkdProtocolCore {
         &self.inner
@@ -149,8 +107,6 @@ impl ChoreographicProtocol<DkdProtocolCore, InitializationPhase> {
         ChoreographicProtocol::transition_to(self)
     }
 }
-
-// Note: WitnessedTransition is implemented via the specific transition methods below
 
 impl ChoreographicProtocol<DkdProtocolCore, CommitmentPhase> {
     /// Transition to reveal phase after collecting sufficient commitments
@@ -182,7 +138,7 @@ impl ChoreographicProtocol<DkdProtocolCore, FinalizationPhase> {
 }
 
 /// Transition to Failure state from any state (no witness needed)
-impl<S: SessionState> ChoreographicProtocol<DkdProtocolCore, S> {
+impl<S: crate::core::SessionState> ChoreographicProtocol<DkdProtocolCore, S> {
     /// Fail the protocol (can be called from any state)
     pub fn fail(self) -> ChoreographicProtocol<DkdProtocolCore, Failure> {
         ChoreographicProtocol::transition_to(self)
@@ -322,9 +278,9 @@ pub fn rehydrate_dkd_protocol(
             ChoreographicProtocol::new(core),
         ))
     } else if has_commitments {
-        Ok(DkdProtocolState::RevealPhase(
-            ChoreographicProtocol::new(core),
-        ))
+        Ok(DkdProtocolState::RevealPhase(ChoreographicProtocol::new(
+            core,
+        )))
     } else if has_initiate {
         Ok(DkdProtocolState::CommitmentPhase(
             ChoreographicProtocol::new(core),
@@ -333,42 +289,6 @@ pub fn rehydrate_dkd_protocol(
         Ok(DkdProtocolState::InitializationPhase(
             ChoreographicProtocol::new(core),
         ))
-    }
-}
-
-/// Enum representing the possible states of a DKD protocol
-pub enum DkdProtocolState {
-    InitializationPhase(ChoreographicProtocol<DkdProtocolCore, InitializationPhase>),
-    CommitmentPhase(ChoreographicProtocol<DkdProtocolCore, CommitmentPhase>),
-    RevealPhase(ChoreographicProtocol<DkdProtocolCore, RevealPhase>),
-    FinalizationPhase(ChoreographicProtocol<DkdProtocolCore, FinalizationPhase>),
-    CompletionPhase(ChoreographicProtocol<DkdProtocolCore, CompletionPhase>),
-    Failure(ChoreographicProtocol<DkdProtocolCore, Failure>),
-}
-
-impl DkdProtocolState {
-    /// Get the current state name
-    pub fn state_name(&self) -> &'static str {
-        match self {
-            DkdProtocolState::InitializationPhase(p) => p.state_name(),
-            DkdProtocolState::CommitmentPhase(p) => p.state_name(),
-            DkdProtocolState::RevealPhase(p) => p.state_name(),
-            DkdProtocolState::FinalizationPhase(p) => p.state_name(),
-            DkdProtocolState::CompletionPhase(p) => p.state_name(),
-            DkdProtocolState::Failure(p) => p.state_name(),
-        }
-    }
-
-    /// Check if the protocol can be terminated
-    pub fn can_terminate(&self) -> bool {
-        match self {
-            DkdProtocolState::InitializationPhase(p) => p.can_terminate(),
-            DkdProtocolState::CommitmentPhase(p) => p.can_terminate(),
-            DkdProtocolState::RevealPhase(p) => p.can_terminate(),
-            DkdProtocolState::FinalizationPhase(p) => p.can_terminate(),
-            DkdProtocolState::CompletionPhase(p) => p.can_terminate(),
-            DkdProtocolState::Failure(p) => p.can_terminate(),
-        }
     }
 }
 
@@ -381,19 +301,6 @@ pub struct DkdCompleted {
     pub session_id: Uuid,
 }
 
-/// Error type for DKD session protocols
-#[derive(Debug, thiserror::Error)]
-pub enum DkdSessionError {
-    #[error("Protocol error: {0}")]
-    ProtocolError(String),
-    #[error("Invalid state transition")]
-    InvalidTransition,
-    #[error("Insufficient participants")]
-    InsufficientParticipants,
-    #[error("Timeout occurred")]
-    Timeout,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,8 +310,13 @@ mod tests {
     fn test_dkd_state_transitions() {
         let effects = Effects::test();
         let device_id = aura_journal::DeviceId::new_with_effects(&effects);
-        
-        let protocol = new_dkd_protocol(device_id, "test-app".to_string(), "test-context".to_string()).unwrap();
+
+        let protocol = new_dkd_protocol(
+            device_id,
+            "test-app".to_string(),
+            "test-context".to_string(),
+        )
+        .unwrap();
 
         // Should start in InitializationPhase state
         assert_eq!(protocol.state_name(), "InitializationPhase");
@@ -424,8 +336,13 @@ mod tests {
     fn test_dkd_state_operations() {
         let effects = Effects::test();
         let device_id = aura_journal::DeviceId::new_with_effects(&effects);
-        
-        let protocol = new_dkd_protocol(device_id, "test-app".to_string(), "test-context".to_string()).unwrap();
+
+        let protocol = new_dkd_protocol(
+            device_id,
+            "test-app".to_string(),
+            "test-context".to_string(),
+        )
+        .unwrap();
         let commitment_phase = protocol.begin_commitment_phase();
 
         // Should be able to call commitment-phase specific operations
@@ -441,17 +358,18 @@ mod tests {
         let effects = Effects::test();
         let device_id = aura_journal::DeviceId::new_with_effects(&effects);
         let session_id = Uuid::new_v4();
-        
+
         let events = vec![];
 
         // Empty events should result in InitializationPhase state
         let state = rehydrate_dkd_protocol(
-            device_id, 
-            &events, 
-            session_id, 
-            "test-app".to_string(), 
-            "test-context".to_string()
-        ).unwrap();
+            device_id,
+            &events,
+            session_id,
+            "test-app".to_string(),
+            "test-context".to_string(),
+        )
+        .unwrap();
         assert_eq!(state.state_name(), "InitializationPhase");
         assert!(!state.can_terminate());
     }

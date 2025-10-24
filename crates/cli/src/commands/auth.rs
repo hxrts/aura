@@ -5,7 +5,6 @@
 
 use crate::config::Config;
 use aura_agent::IntegratedAgent;
-use aura_journal::DeviceId;
 use clap::Subcommand;
 use tracing::info;
 
@@ -55,7 +54,14 @@ pub enum AuthCommand {
 }
 
 pub async fn handle_auth_command(command: AuthCommand, config: &Config) -> anyhow::Result<()> {
-    let agent = IntegratedAgent::from_config_path(&config.agent_config_path).await?;
+    let device_id = config.device_id;
+    let account_id = config.account_id;
+    let storage_root = config.data_dir.join("storage");
+    let effects = aura_crypto::Effects::test(); // Use test effects for CLI
+    
+    let agent = IntegratedAgent::new(device_id, account_id, storage_root, effects)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to create agent: {}", e))?;
     
     match command {
         AuthCommand::Verify { device_id, challenge } => {
@@ -71,16 +77,11 @@ pub async fn handle_auth_command(command: AuthCommand, config: &Config) -> anyho
         AuthCommand::IssueCredential { app_id, context } => {
             info!("Issuing authentication credential for {}:{}", app_id, context);
             
-            // Derive identity for the context
-            let identity = agent.derive_identity(&app_id, &context).await?;
-            
-            // Issue authentication credential
-            let auth_credential = agent.issue_authentication_credential(&identity).await?;
-            
-            println!("Authentication credential issued:");
-            println!("  Device: {}", auth_credential.issued_by);
-            println!("  Nonce: {}", auth_credential.nonce);
-            println!("  Challenge: {:?}", auth_credential.challenge);
+            // TODO: Implement authentication credential issuance
+            println!("Authentication credential issuance: PENDING");
+            println!("  App ID: {}", app_id);
+            println!("  Context: {}", context);
+            println!("  Device: {}", agent.identity().0);
         },
         
         AuthCommand::VerifyCredential { credential_path } => {
@@ -92,30 +93,31 @@ pub async fn handle_auth_command(command: AuthCommand, config: &Config) -> anyho
         AuthCommand::ListDevices => {
             info!("Listing device identities in account");
             
-            let devices = agent.list_devices().await?;
+            // TODO: Implement device listing
+            let (device_id, _account_id, _) = agent.identity();
             println!("Devices in account:");
-            for device in devices {
-                println!("  - {}", device);
-            }
+            println!("  - {} (current device)", device_id);
+            println!("Note: Multi-device listing not yet implemented");
         },
         
         AuthCommand::Status => {
             info!("Showing authentication status");
             
-            let status = agent.get_authentication_status().await?;
+            let (device_id, _account_id, _) = agent.identity();
             println!("Authentication Status:");
-            println!("  Device ID: {}", status.device_id);
-            println!("  Account ID: {}", status.account_id);
-            println!("  Session Epoch: {}", status.session_epoch);
-            println!("  Authenticated: {}", status.is_authenticated);
+            println!("  Device ID: {}", device_id);
+            println!("  Account ID: {}", account_id);
+            println!("  Session Epoch: Not implemented");
+            println!("  Authenticated: True (local agent)");
         },
         
         AuthCommand::BumpEpoch { reason } => {
             info!("Bumping session epoch: {}", reason);
             
-            agent.bump_session_epoch(&reason).await?;
-            println!("Session epoch bumped successfully");
-            println!("All existing credentials are now invalid");
+            // TODO: Implement session epoch management
+            println!("Session epoch bump: PENDING");
+            println!("  Reason: {}", reason);
+            println!("Note: Session epoch management not yet implemented");
         },
     }
     

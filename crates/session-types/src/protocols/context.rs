@@ -1,15 +1,18 @@
-//! Session Type States for Protocol Context
+//! Session Type States for Protocol Context (Refactored with Macros)
 //!
 //! This module defines session types for the ProtocolContext execution environment,
 //! providing compile-time safety for protocol execution phases and instruction flows.
 
-use crate::{SessionState, ChoreographicProtocol, SessionProtocol, WitnessedTransition, RuntimeWitness};
-use aura_journal::{Event, ProtocolType};
+use crate::core::{ChoreographicProtocol, SessionProtocol, SessionState, WitnessedTransition};
+use crate::define_protocol;
+use crate::witnesses::RuntimeWitness;
+use aura_journal::{DeviceId, Event, ProtocolType};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-// Protocol execution types
+// ========== Protocol execution types ==========
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instruction {
     WriteToLedger(aura_journal::Event),
@@ -27,15 +30,35 @@ pub enum InstructionResult {
     Error { message: String },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum ProtocolError {
+    #[error("Execution failed: {0}")]
+    ExecutionFailed(String),
+    #[error("Invalid instruction: {0}")]
+    InvalidInstruction(String),
+}
+
+// ========== Core Protocol Structure ==========
+
+/// Core data structure for protocol context execution
 #[derive(Debug, Clone)]
-pub struct ProtocolContext {
+pub struct ProtocolContextCore {
     pub context_id: Uuid,
     pub session_id: Uuid,
-    pub device_id: aura_journal::DeviceId,
+    pub device_id: DeviceId,
     pub protocol_type: ProtocolType,
 }
 
-impl ProtocolContext {
+impl ProtocolContextCore {
+    pub fn new(context_id: Uuid, session_id: Uuid, device_id: DeviceId, protocol_type: ProtocolType) -> Self {
+        Self {
+            context_id,
+            session_id,
+            device_id,
+            protocol_type,
+        }
+    }
+
     pub async fn execute(&mut self, instruction: Instruction) -> Result<InstructionResult, ProtocolError> {
         // Placeholder implementation - this will be properly implemented
         // when the session types are integrated with the actual execution runtime
@@ -56,80 +79,73 @@ impl ProtocolContext {
     }
 }
 
+// ========== Error Type ==========
+
 #[derive(Debug, thiserror::Error)]
-pub enum ProtocolError {
-    #[error("Execution failed: {0}")]
+pub enum ContextSessionError {
+    #[error("Protocol error: {0}")]
+    ProtocolError(String),
+    #[error("Invalid instruction for current state")]
+    InvalidInstruction,
+    #[error("Context execution failed: {0}")]
     ExecutionFailed(String),
-    #[error("Invalid instruction: {0}")]
-    InvalidInstruction(String),
+    #[error("Timeout occurred")]
+    Timeout,
 }
 
-// ========== Protocol Context Session States ==========
-
-/// Initial state when protocol context is created
-#[derive(Debug, Clone)]
-pub struct ContextInitialized;
-
-impl SessionState for ContextInitialized {
-    const NAME: &'static str = "ContextInitialized";
+impl From<ProtocolError> for ContextSessionError {
+    fn from(err: ProtocolError) -> Self {
+        ContextSessionError::ProtocolError(err.to_string())
+    }
 }
 
-/// State when context is actively executing instructions
-#[derive(Debug, Clone)]
-pub struct ExecutingInstructions;
+// ========== Protocol Definition using Macros ==========
 
-impl SessionState for ExecutingInstructions {
-    const NAME: &'static str = "ExecutingInstructions";
+define_protocol! {
+    Protocol: ContextProtocol,
+    Core: ProtocolContextCore,
+    Error: ContextSessionError,
+    Union: ContextSessionState,
+
+    States {
+        ContextInitialized => (),
+        ExecutingInstructions => InstructionResult,
+        AwaitingCondition => (),
+        WritingToLedger => (),
+        ExecutingSubProtocol => (),
+        ExecutionComplete @ final => InstructionResult,
+        ExecutionFailed @ final => (),
+    }
+
+    Extract {
+        session_id: |core| core.session_id,
+        device_id: |core| core.device_id,
+    }
 }
 
-/// State when context is waiting for events or conditions
-#[derive(Debug, Clone)]
-pub struct AwaitingCondition;
-
-impl SessionState for AwaitingCondition {
-    const NAME: &'static str = "AwaitingCondition";
-}
-
-/// State when context is writing to ledger
-#[derive(Debug, Clone)]
-pub struct WritingToLedger;
-
-impl SessionState for WritingToLedger {
-    const NAME: &'static str = "WritingToLedger";
-}
-
-/// State when context is executing a sub-protocol
-#[derive(Debug, Clone)]
-pub struct ExecutingSubProtocol;
-
-impl SessionState for ExecutingSubProtocol {
-    const NAME: &'static str = "ExecutingSubProtocol";
-}
-
-/// State when protocol execution is complete
-#[derive(Debug, Clone)]
-pub struct ExecutionComplete;
-
-impl SessionState for ExecutionComplete {
-    const NAME: &'static str = "ExecutionComplete";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-/// State when protocol execution has failed
-#[derive(Debug, Clone)]
-pub struct ExecutionFailed;
-
-impl SessionState for ExecutionFailed {
-    const NAME: &'static str = "ExecutionFailed";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-// ========== Context Protocol Wrapper ==========
+// ========== Protocol Type Alias ==========
 
 /// Session-typed protocol context wrapper
-pub type SessionTypedContext<S> = ChoreographicProtocol<ProtocolContext, S>;
+pub type ContextProtocol<S> = ChoreographicProtocol<ProtocolContextCore, S>;
+
+// ========== Protocol Methods ==========
+
+impl<S: SessionState> ChoreographicProtocol<ProtocolContextCore, S> {
+    /// Get reference to the protocol core
+    pub fn core(&self) -> &ProtocolContextCore {
+        &self.inner
+    }
+
+    /// Get the context ID
+    pub fn context_id(&self) -> Uuid {
+        self.core().context_id
+    }
+
+    /// Get the protocol type
+    pub fn protocol_type(&self) -> ProtocolType {
+        self.core().protocol_type
+    }
+}
 
 // ========== Runtime Witnesses for Context Operations ==========
 
@@ -215,311 +231,107 @@ impl RuntimeWitness for SubProtocolComplete {
     }
 }
 
-// ========== Concrete Error Type ==========
-
-#[derive(Debug, thiserror::Error)]
-pub enum ContextSessionError {
-    #[error("Protocol error: {0}")]
-    ProtocolError(String),
-    #[error("Invalid instruction for current state")]
-    InvalidInstruction,
-    #[error("Context execution failed: {0}")]
-    ExecutionFailed(String),
-    #[error("Timeout occurred")]
-    Timeout,
-}
-
-impl From<ProtocolError> for ContextSessionError {
-    fn from(err: ProtocolError) -> Self {
-        ContextSessionError::ProtocolError(err.to_string())
-    }
-}
-
-// ========== SessionProtocol Implementations ==========
-
-impl SessionProtocol for ChoreographicProtocol<ProtocolContext, ContextInitialized> {
-    type State = ContextInitialized;
-    type Output = InstructionResult;
-    type Error = ContextSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        self.inner.context_id
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<ProtocolContext, ExecutingInstructions> {
-    type State = ExecutingInstructions;
-    type Output = InstructionResult;
-    type Error = ContextSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        self.inner.context_id
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<ProtocolContext, AwaitingCondition> {
-    type State = AwaitingCondition;
-    type Output = InstructionResult;
-    type Error = ContextSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        self.inner.context_id
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<ProtocolContext, WritingToLedger> {
-    type State = WritingToLedger;
-    type Output = InstructionResult;
-    type Error = ContextSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        self.inner.context_id
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<ProtocolContext, ExecutingSubProtocol> {
-    type State = ExecutingSubProtocol;
-    type Output = InstructionResult;
-    type Error = ContextSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        self.inner.context_id
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<ProtocolContext, ExecutionComplete> {
-    type State = ExecutionComplete;
-    type Output = InstructionResult;
-    type Error = ContextSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        self.inner.context_id
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<ProtocolContext, ExecutionFailed> {
-    type State = ExecutionFailed;
-    type Output = InstructionResult;
-    type Error = ContextSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        self.inner.context_id
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
 // ========== State Transitions ==========
 
 /// Transition from ContextInitialized to ExecutingInstructions (no witness needed)
-impl ChoreographicProtocol<ProtocolContext, ContextInitialized> {
+impl ChoreographicProtocol<ProtocolContextCore, ContextInitialized> {
     /// Begin executing instructions
-    pub fn begin_execution(self) -> ChoreographicProtocol<ProtocolContext, ExecutingInstructions> {
-        self.transition_to()
+    pub fn begin_execution(self) -> ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from ExecutingInstructions to various states based on instruction type
-impl ChoreographicProtocol<ProtocolContext, ExecutingInstructions> {
+impl ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
     /// Transition to awaiting condition state
-    pub fn await_condition(self) -> ChoreographicProtocol<ProtocolContext, AwaitingCondition> {
-        self.transition_to()
+    pub fn await_condition(self) -> ChoreographicProtocol<ProtocolContextCore, AwaitingCondition> {
+        ChoreographicProtocol::transition_to(self)
     }
     
     /// Transition to writing to ledger state
-    pub fn write_to_ledger(self) -> ChoreographicProtocol<ProtocolContext, WritingToLedger> {
-        self.transition_to()
+    pub fn write_to_ledger(self) -> ChoreographicProtocol<ProtocolContextCore, WritingToLedger> {
+        ChoreographicProtocol::transition_to(self)
     }
     
     /// Transition to executing sub-protocol state
-    pub fn execute_sub_protocol(self) -> ChoreographicProtocol<ProtocolContext, ExecutingSubProtocol> {
-        self.transition_to()
+    pub fn execute_sub_protocol(self) -> ChoreographicProtocol<ProtocolContextCore, ExecutingSubProtocol> {
+        ChoreographicProtocol::transition_to(self)
     }
     
     /// Complete execution successfully
-    pub fn complete_execution(self) -> ChoreographicProtocol<ProtocolContext, ExecutionComplete> {
-        self.transition_to()
+    pub fn complete_execution(self) -> ChoreographicProtocol<ProtocolContextCore, ExecutionComplete> {
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from AwaitingCondition back to ExecutingInstructions (requires ThresholdEventsMet witness for threshold operations)
 impl WitnessedTransition<AwaitingCondition, ExecutingInstructions> 
-    for ChoreographicProtocol<ProtocolContext, AwaitingCondition> 
+    for ChoreographicProtocol<ProtocolContextCore, AwaitingCondition> 
 {
     type Witness = ThresholdEventsMet;
-    type Target = ChoreographicProtocol<ProtocolContext, ExecutingInstructions>;
+    type Target = ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions>;
     
     /// Resume execution after threshold condition is met
     fn transition_with_witness(
         self, 
         _witness: Self::Witness
     ) -> Self::Target {
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Simple transition from AwaitingCondition to ExecutingInstructions (for non-threshold operations)
-impl ChoreographicProtocol<ProtocolContext, AwaitingCondition> {
+impl ChoreographicProtocol<ProtocolContextCore, AwaitingCondition> {
     /// Resume execution after simple condition is met
-    pub fn resume_execution(self) -> ChoreographicProtocol<ProtocolContext, ExecutingInstructions> {
-        self.transition_to()
+    pub fn resume_execution(self) -> ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from WritingToLedger back to ExecutingInstructions (requires LedgerWriteComplete witness)
 impl WitnessedTransition<WritingToLedger, ExecutingInstructions>
-    for ChoreographicProtocol<ProtocolContext, WritingToLedger>
+    for ChoreographicProtocol<ProtocolContextCore, WritingToLedger>
 {
     type Witness = LedgerWriteComplete;
-    type Target = ChoreographicProtocol<ProtocolContext, ExecutingInstructions>;
+    type Target = ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions>;
     
     /// Resume execution after ledger write is complete
     fn transition_with_witness(
         self, 
         _witness: Self::Witness
     ) -> Self::Target {
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from ExecutingSubProtocol back to ExecutingInstructions (requires SubProtocolComplete witness)
 impl WitnessedTransition<ExecutingSubProtocol, ExecutingInstructions> 
-    for ChoreographicProtocol<ProtocolContext, ExecutingSubProtocol> 
+    for ChoreographicProtocol<ProtocolContextCore, ExecutingSubProtocol> 
 {
     type Witness = SubProtocolComplete;
-    type Target = ChoreographicProtocol<ProtocolContext, ExecutingInstructions>;
+    type Target = ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions>;
     
     /// Resume execution after sub-protocol completes
     fn transition_with_witness(
         self, 
         _witness: Self::Witness
     ) -> Self::Target {
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition to ExecutionFailed from any state (no witness needed)
-impl<S: SessionState> ChoreographicProtocol<ProtocolContext, S> {
+impl<S: SessionState> ChoreographicProtocol<ProtocolContextCore, S> {
     /// Fail the execution (can be called from any state)
-    pub fn fail_execution(self) -> ChoreographicProtocol<ProtocolContext, ExecutionFailed> {
-        self.transition_to()
+    pub fn fail_execution(self) -> ChoreographicProtocol<ProtocolContextCore, ExecutionFailed> {
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 // ========== Context-Specific Operations ==========
 
 /// Operations only available in ExecutingInstructions state
-impl ChoreographicProtocol<ProtocolContext, ExecutingInstructions> {
+impl ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
     /// Execute an instruction that doesn't require state transition tracking
     pub async fn execute_simple_instruction(&mut self, instruction: Instruction) -> Result<InstructionResult, ContextSessionError> {
         self.inner.execute(instruction).await.map_err(Into::into)
@@ -537,7 +349,7 @@ impl ChoreographicProtocol<ProtocolContext, ExecutingInstructions> {
 }
 
 /// Operations only available in AwaitingCondition state
-impl ChoreographicProtocol<ProtocolContext, AwaitingCondition> {
+impl ChoreographicProtocol<ProtocolContextCore, AwaitingCondition> {
     /// Check if threshold condition has been met
     pub async fn check_threshold_condition(
         &mut self, 
@@ -551,7 +363,7 @@ impl ChoreographicProtocol<ProtocolContext, AwaitingCondition> {
 }
 
 /// Operations only available in WritingToLedger state
-impl ChoreographicProtocol<ProtocolContext, WritingToLedger> {
+impl ChoreographicProtocol<ProtocolContextCore, WritingToLedger> {
     /// Execute the ledger write and check completion
     pub async fn execute_ledger_write(
         &mut self, 
@@ -565,7 +377,7 @@ impl ChoreographicProtocol<ProtocolContext, WritingToLedger> {
 }
 
 /// Operations only available in ExecutingSubProtocol state
-impl ChoreographicProtocol<ProtocolContext, ExecutingSubProtocol> {
+impl ChoreographicProtocol<ProtocolContextCore, ExecutingSubProtocol> {
     /// Execute sub-protocol and check completion
     pub async fn execute_sub_protocol_instruction(
         &mut self, 
@@ -587,14 +399,14 @@ impl ChoreographicProtocol<ProtocolContext, ExecutingSubProtocol> {
 }
 
 /// Operations available in final states
-impl ChoreographicProtocol<ProtocolContext, ExecutionComplete> {
+impl ChoreographicProtocol<ProtocolContextCore, ExecutionComplete> {
     /// Get the final execution result
     pub fn get_execution_result(&self) -> Option<String> {
         Some("Execution completed successfully".to_string())
     }
 }
 
-impl ChoreographicProtocol<ProtocolContext, ExecutionFailed> {
+impl ChoreographicProtocol<ProtocolContextCore, ExecutionFailed> {
     /// Get the failure reason
     pub fn get_failure_reason(&self) -> Option<String> {
         Some("Execution failed".to_string())
@@ -605,79 +417,36 @@ impl ChoreographicProtocol<ProtocolContext, ExecutionFailed> {
 
 /// Create a new session-typed protocol context
 pub fn new_session_typed_context(
-    context: ProtocolContext
-) -> ChoreographicProtocol<ProtocolContext, ContextInitialized> {
-    ChoreographicProtocol::new(context)
+    context_id: Uuid,
+    session_id: Uuid,
+    device_id: DeviceId,
+    protocol_type: ProtocolType,
+) -> ChoreographicProtocol<ProtocolContextCore, ContextInitialized> {
+    let core = ProtocolContextCore::new(context_id, session_id, device_id, protocol_type);
+    ChoreographicProtocol::new(core)
 }
 
 /// Rehydrate a protocol context session from execution state
 pub fn rehydrate_context_session(
-    context: ProtocolContext,
+    context_id: Uuid,
+    session_id: Uuid,
+    device_id: DeviceId,
+    protocol_type: ProtocolType,
     last_instruction: Option<&Instruction>
 ) -> ContextSessionState {
+    let core = ProtocolContextCore::new(context_id, session_id, device_id, protocol_type);
+    
     match last_instruction {
         Some(Instruction::WriteToLedger(_)) => ContextSessionState::WritingToLedger(
-            ChoreographicProtocol::new(context)
+            ChoreographicProtocol::new(core)
         ),
         Some(Instruction::AwaitEvent { .. }) | Some(Instruction::AwaitThreshold { .. }) => {
-            ContextSessionState::AwaitingCondition(ChoreographicProtocol::new(context))
+            ContextSessionState::AwaitingCondition(ChoreographicProtocol::new(core))
         },
         Some(Instruction::RunSubProtocol { .. }) => ContextSessionState::ExecutingSubProtocol(
-            ChoreographicProtocol::new(context)
+            ChoreographicProtocol::new(core)
         ),
-        _ => ContextSessionState::ExecutingInstructions(ChoreographicProtocol::new(context)),
-    }
-}
-
-/// Enum representing the possible states of a protocol context session
-pub enum ContextSessionState {
-    ContextInitialized(ChoreographicProtocol<ProtocolContext, ContextInitialized>),
-    ExecutingInstructions(ChoreographicProtocol<ProtocolContext, ExecutingInstructions>),
-    AwaitingCondition(ChoreographicProtocol<ProtocolContext, AwaitingCondition>),
-    WritingToLedger(ChoreographicProtocol<ProtocolContext, WritingToLedger>),
-    ExecutingSubProtocol(ChoreographicProtocol<ProtocolContext, ExecutingSubProtocol>),
-    ExecutionComplete(ChoreographicProtocol<ProtocolContext, ExecutionComplete>),
-    ExecutionFailed(ChoreographicProtocol<ProtocolContext, ExecutionFailed>),
-}
-
-impl ContextSessionState {
-    /// Get the current state name
-    pub fn state_name(&self) -> &'static str {
-        match self {
-            ContextSessionState::ContextInitialized(p) => p.current_state_name(),
-            ContextSessionState::ExecutingInstructions(p) => p.current_state_name(),
-            ContextSessionState::AwaitingCondition(p) => p.current_state_name(),
-            ContextSessionState::WritingToLedger(p) => p.current_state_name(),
-            ContextSessionState::ExecutingSubProtocol(p) => p.current_state_name(),
-            ContextSessionState::ExecutionComplete(p) => p.current_state_name(),
-            ContextSessionState::ExecutionFailed(p) => p.current_state_name(),
-        }
-    }
-    
-    /// Check if the context can be terminated
-    pub fn can_terminate(&self) -> bool {
-        match self {
-            ContextSessionState::ContextInitialized(p) => p.can_terminate(),
-            ContextSessionState::ExecutingInstructions(p) => p.can_terminate(),
-            ContextSessionState::AwaitingCondition(p) => p.can_terminate(),
-            ContextSessionState::WritingToLedger(p) => p.can_terminate(),
-            ContextSessionState::ExecutingSubProtocol(p) => p.can_terminate(),
-            ContextSessionState::ExecutionComplete(p) => p.can_terminate(),
-            ContextSessionState::ExecutionFailed(p) => p.can_terminate(),
-        }
-    }
-    
-    /// Check if the context is in a final state
-    pub fn is_final(&self) -> bool {
-        match self {
-            ContextSessionState::ContextInitialized(p) => p.is_final(),
-            ContextSessionState::ExecutingInstructions(p) => p.is_final(),
-            ContextSessionState::AwaitingCondition(p) => p.is_final(),
-            ContextSessionState::WritingToLedger(p) => p.is_final(),
-            ContextSessionState::ExecutingSubProtocol(p) => p.is_final(),
-            ContextSessionState::ExecutionComplete(p) => p.is_final(),
-            ContextSessionState::ExecutionFailed(p) => p.is_final(),
-        }
+        _ => ContextSessionState::ExecutingInstructions(ChoreographicProtocol::new(core)),
     }
 }
 
@@ -685,66 +454,31 @@ impl ContextSessionState {
 mod tests {
     use super::*;
     use aura_crypto::Effects;
-    use aura_journal::{AccountLedger, AccountState, DeviceId};
-    use aura_transport::StubTransport;
-    use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use aura_journal::DeviceId;
     
     #[test]
     fn test_context_state_transitions() {
-        // Create a minimal context for testing
         let effects = Effects::test();
+        let context_id = effects.gen_uuid();
         let session_id = effects.gen_uuid();
-        let device_id = effects.gen_uuid();
-        
-        let device_metadata = aura_journal::DeviceMetadata {
-            device_id: DeviceId(device_id),
-            device_name: "test-device".to_string(),
-            device_type: aura_journal::DeviceType::Native,
-            public_key: ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(),
-            added_at: 0,
-            last_seen: 0,
-            dkd_commitment_proofs: std::collections::BTreeMap::new(),
-        };
-
-        let state = AccountState::new(
-            aura_journal::AccountId(effects.gen_uuid()),
-            ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(),
-            device_metadata,
-            2,
-            3,
-        );
-
-        let ledger = Arc::new(RwLock::new(AccountLedger::new(state).unwrap()));
-        let device_key = ed25519_dalek::SigningKey::from_bytes(&[0u8; 32]);
-
-        let context = ProtocolContext::new(
-            session_id,
-            device_id,
-            vec![],
-            Some(2),
-            ledger,
-            Arc::new(StubTransport::default()),
-            Effects::test(),
-            device_key,
-            Box::new(crate::ProductionTimeSource::new()),
-        );
+        let device_id = DeviceId::new_with_effects(&effects);
+        let protocol_type = ProtocolType::DkdSession;
         
         // Test basic state transitions
-        let session_context = new_session_typed_context(context);
+        let session_context = new_session_typed_context(context_id, session_id, device_id, protocol_type);
         
         // Should start in ContextInitialized state
-        assert_eq!(session_context.current_state_name(), "ContextInitialized");
+        assert_eq!(session_context.state_name(), "ContextInitialized");
         assert!(!session_context.can_terminate());
         assert!(!session_context.is_final());
         
         // Transition to ExecutingInstructions
         let executing_context = session_context.begin_execution();
-        assert_eq!(executing_context.current_state_name(), "ExecutingInstructions");
+        assert_eq!(executing_context.state_name(), "ExecutingInstructions");
         
         // Can fail from any state
         let failed_context = executing_context.fail_execution();
-        assert_eq!(failed_context.current_state_name(), "ExecutionFailed");
+        assert_eq!(failed_context.state_name(), "ExecutionFailed");
         assert!(failed_context.can_terminate());
         assert!(failed_context.is_final());
     }
@@ -757,9 +491,7 @@ mod tests {
         assert!(witness.is_none()); // Not enough events
         
         // Test with sufficient events
-        let events = vec![
-            // Would create real events here, using placeholder for test
-        ];
+        let events = vec![];
         let witness = ThresholdEventsMet::verify((events, 0), ());
         assert!(witness.is_some());
     }
@@ -767,46 +499,74 @@ mod tests {
     #[test]
     fn test_context_rehydration() {
         let effects = Effects::test();
+        let context_id = effects.gen_uuid();
         let session_id = effects.gen_uuid();
-        let device_id = effects.gen_uuid();
-        
-        let device_metadata = aura_journal::DeviceMetadata {
-            device_id: DeviceId(device_id),
-            device_name: "test-device".to_string(),
-            device_type: aura_journal::DeviceType::Native,
-            public_key: ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(),
-            added_at: 0,
-            last_seen: 0,
-            dkd_commitment_proofs: std::collections::BTreeMap::new(),
-        };
-
-        let state = AccountState::new(
-            aura_journal::AccountId(effects.gen_uuid()),
-            ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(),
-            device_metadata,
-            2,
-            3,
-        );
-
-        let ledger = Arc::new(RwLock::new(AccountLedger::new(state).unwrap()));
-        let device_key = ed25519_dalek::SigningKey::from_bytes(&[0u8; 32]);
-
-        let context = ProtocolContext::new(
-            session_id,
-            device_id,
-            vec![],
-            Some(2),
-            ledger,
-            Arc::new(StubTransport::default()),
-            Effects::test(),
-            device_key,
-            Box::new(crate::ProductionTimeSource::new()),
-        );
+        let device_id = DeviceId::new_with_effects(&effects);
+        let protocol_type = ProtocolType::DkdSession;
         
         // Test rehydration without last instruction
-        let state = rehydrate_context_session(context, None);
+        let state = rehydrate_context_session(context_id, session_id, device_id, protocol_type, None);
         assert_eq!(state.state_name(), "ExecutingInstructions");
         assert!(!state.can_terminate());
         assert!(!state.is_final());
+    }
+
+    #[test]
+    fn test_context_specific_operations() {
+        let effects = Effects::test();
+        let context_id = effects.gen_uuid();
+        let session_id = effects.gen_uuid();
+        let device_id = DeviceId::new_with_effects(&effects);
+        let protocol_type = ProtocolType::DkdSession;
+        
+        let session_context = new_session_typed_context(context_id, session_id, device_id, protocol_type);
+        let executing_context = session_context.begin_execution();
+        
+        // Create a test event for instruction testing
+        let dummy_signature = ed25519_dalek::Signature::from_bytes(&[0u8; 64]);
+        let test_event = aura_journal::Event::new(
+            aura_journal::AccountId(effects.gen_uuid()),
+            1,
+            None,
+            0,
+            aura_journal::EventType::SetEpoch(aura_journal::SetEpochEvent { new_epoch: 1 }),
+            aura_journal::EventAuthorization {
+                device_id,
+                signature: dummy_signature,
+            },
+            &effects,
+        ).unwrap();
+        
+        // Test instruction type checking
+        let write_instruction = Instruction::WriteToLedger(test_event);
+        assert!(executing_context.requires_state_transition(&write_instruction));
+        
+        // Transition to different states
+        let awaiting_context = executing_context.await_condition();
+        assert_eq!(awaiting_context.state_name(), "AwaitingCondition");
+        
+        // Resume execution
+        let resumed_context = awaiting_context.resume_execution();
+        assert_eq!(resumed_context.state_name(), "ExecutingInstructions");
+    }
+
+    #[test]
+    fn test_union_type_functionality() {
+        let effects = Effects::test();
+        let context_id = effects.gen_uuid();
+        let session_id = effects.gen_uuid();
+        let device_id = DeviceId::new_with_effects(&effects);
+        let protocol_type = ProtocolType::DkdSession;
+        
+        let state = rehydrate_context_session(context_id, session_id, device_id, protocol_type, None);
+        
+        // Test union type methods
+        assert_eq!(state.state_name(), "ExecutingInstructions");
+        assert!(!state.can_terminate());
+        assert!(!state.is_final());
+        
+        // Test protocol_id and device_id delegation
+        assert_eq!(state.protocol_id(), context_id);
+        assert_eq!(state.device_id(), device_id);
     }
 }

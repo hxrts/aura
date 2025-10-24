@@ -328,7 +328,7 @@ impl LocalSessionRuntime {
         info!(
             "Started DKD session {} in state {}",
             session_id,
-            dkd_protocol.current_state_name()
+            dkd_state.state_name()
         );
         Ok(session_id)
     }

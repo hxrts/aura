@@ -1,10 +1,10 @@
 // Account status display
 
-use aura_agent::IdentityConfig;
+use crate::config::Config;
 
 pub async fn show_status(config_path: &str) -> anyhow::Result<()> {
     // Load config
-    let config = match IdentityConfig::load(config_path) {
+    let config = match Config::load(config_path).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error loading config from {}: {}", config_path, e);
@@ -19,14 +19,10 @@ pub async fn show_status(config_path: &str) -> anyhow::Result<()> {
 
     println!("Account ID:     {}", config.account_id.0);
     println!("Device ID:      {}", config.device_id.0);
-    println!("Participant ID: {}", config.participant_id.as_u16());
-    println!(
-        "Threshold:      {}-of-{}",
-        config.threshold, config.total_participants
-    );
+    println!("Data Directory: {}", config.data_dir.display());
 
-    // Try to load ledger
-    let ledger_path = config_path.replace("config.toml", "ledger.cbor");
+    // Try to load ledger from data directory
+    let ledger_path = config.data_dir.join("ledger.cbor");
     if let Ok(ledger_bytes) = std::fs::read(&ledger_path) {
         // For MVP, we just show that ledger exists
         println!("\n--- Ledger State ---");
@@ -34,14 +30,15 @@ pub async fn show_status(config_path: &str) -> anyhow::Result<()> {
         println!("Ledger loaded:  OK");
     }
 
-    // Try to load key share
-    if std::path::Path::new(&config.share_path).exists() {
+    // Try to load key share from data directory
+    let share_path = config.data_dir.join("key_share.cbor");
+    if share_path.exists() {
         println!("\n--- Key Share ---");
-        println!("Share path:     {}", config.share_path);
+        println!("Share path:     {}", share_path.display());
         println!("Share loaded:   OK");
     } else {
         println!("\n--- Key Share ---");
-        println!("Share path:     {} (not found)", config.share_path);
+        println!("Share path:     {} (not found)", share_path.display());
     }
 
     println!("\n═══════════════════════════════════════════════\n");

@@ -97,6 +97,7 @@ This Storage system integrates with three distinct but complementary Aura subsys
 - Social replica placement using SBB trust graphs
 - Trust-weighted quotas and social eviction policies
 - Dynamic peer discovery and relationship-based storage
+- Proxy re-encryption for capability delegation without key sharing
 
 ## 2. Data Structures
 
@@ -173,6 +174,9 @@ struct KeyDerivationSpec {
     permission_context: Option<PermissionKeyContext>,  // For permission-scoped keys
     derivation_path: Vec<u8>,    // Additional context bytes
     key_version: u32,            // For independent rotation per subsystem
+    
+    // Future: Proxy re-encryption support (Phase 2+)
+    // proxy_reencryption_hint: Option<ProxyReencryptionHint>,
 }
 
 // Identity-based key derivation (authentication)
@@ -260,6 +264,10 @@ pub struct UnifiedAccountLedger {
     pub storage_quotas: Map<AccountId, Quota>,
     pub chunk_metadata: Map<ChunkId, ChunkInfo>,
     pub storage_refs: Map<Cid, ReferenceType>, // "pin:<device>" | "cache:<peer>"
+    
+    // Future: Proxy re-encryption state (Phase 2+)
+    // pub proxy_reencryption_keys: Map<(SourceKeyId, TargetKeyId), ProxyKey>,
+    // pub capability_transformations: Map<CapabilityId, ProxyTransformation>,
 
     // --- SBB State (now part of main ledger) ---
     pub sbb_envelopes: Map<Cid, SealedEnvelope>,
@@ -503,6 +511,7 @@ pub struct BasicQuotaManager {
 - Coordinated deletion across social network
 - Proof-of-storage with manifest-stored digests (see corrected design below)
 - Automatic replica cleanup choreography
+- Proxy re-encryption for efficient key rotation without full re-encryption using [rust-umbral](https://github.com/nucypher/rust-umbral)
 
 ## 6.1. Corrected Proof-of-Storage Design (Future)
 
@@ -714,6 +723,7 @@ The unified architecture naturally evolves toward sophisticated distributed stor
 - **Trust-Based Replication**: Use social graph for intelligent replica placement across relationship boundaries
 - **Capability-Driven Social Quotas**: Manage storage permissions through convergent capabilities with social backing
 - **Relationship-Aware Caching**: Optimize cache placement using SBB relationship strength and interaction patterns
+- **Proxy Re-encryption Integration**: Enable capability delegation and key rotation without exposing plaintext to storage providers using [rust-umbral](https://github.com/nucypher/rust-umbral) threshold proxy re-encryption
 
 ### Phase 3: Encrypt-then-Erasure-Code (6 weeks)
 - **Privacy-First Erasure Coding**: Implement Tahoe's encrypt-before-encode pattern with capability-derived keys

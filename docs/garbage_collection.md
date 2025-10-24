@@ -53,6 +53,7 @@ Certain cryptographic operations, by their nature, render old data obsolete, pro
 Examples include:
 *   **Key Rotation:** When pairwise SBB keys are rotated, all envelopes encrypted with the old keys become undecipherable and can be pruned.
 *   **Capability Revocation:** When a peer's capability to store data is revoked, they are signaled to prune the data they are no longer authorized to hold.
+*   **Future: Proxy Re-encryption Triggers:** Key rotation events could trigger proxy re-encryption transformations instead of immediate deletion, enabling gradual migration to new encryption.
 
 ## 4. Proposed Architecture
 
@@ -128,6 +129,14 @@ pub enum JournalEvent {
         threshold_signature: Vec<u8>,
     },
 
+    // Future: Proxy re-encryption events (Phase 2+)
+    // ProxyReencryptionKeyGenerated {
+    //     source_key_id: KeyId,
+    //     target_key_id: KeyId,
+    //     proxy_key_cid: Cid,
+    //     transformation_epoch: u64,
+    // },
+
     // Note: Events like `CapabilityRevoked` and `MemberRemoved` also act as
     // implicit GC signals for the affected peers.
 }
@@ -195,6 +204,7 @@ The GC system enables the safe pruning of several types of data.
 | **Revoked Items** | Revoked capabilities, removed devices, etc., can be pruned once a snapshot is committed *after* their revocation. | The snapshot proves that the revocation has been seen by the whole group, so no peer will be left thinking the item is still valid. |
 | **Invalidated Replicas** | Prune local data chunks when the capability granting storage permission is revoked or the peer/group relationship is terminated. | The `CapabilityRevoked` or `MemberRemoved` event in the `Journal` is the authoritative signal. A device can safely delete local data when it is no longer authorized to hold it. The data owner is responsible for re-replicating the data elsewhere. |
 | **Orphaned Chunks** | (Advanced) Storage chunks not referenced by any `ObjectManifest` in the latest snapshot. | This requires a separate, slower "mark and sweep" process that scans all manifests. This should be considered a separate GC process from the main state compaction. |
+| **Future: Transformed Chunks** | (Phase 2+) Chunks encrypted with old keys after proxy re-encryption transformation is complete. | Proxy re-encryption enables gradual migration: old encrypted chunks can be deleted once transformation to new encryption is verified and replicated. |
 
 ## 7. Safety & New Peer Synchronization
 
@@ -234,6 +244,7 @@ This allows the group as a whole to retain its history while allowing individual
 ### Phase 3: Advanced GC (Future)
 
 *   **Orphaned Storage Chunks:** Design and implement the "mark and sweep" process for finding and deleting unreferenced storage chunks. This is a more complex process and should be tackled after the core state compaction is proven to be robust.
+*   **Proxy Re-encryption Integration:** Add GC support for proxy re-encryption transformations, enabling efficient key rotation without immediate chunk deletion.
 
 ## 9. Conclusion
 

@@ -5,13 +5,6 @@
 
 use crate::config::Config;
 use aura_agent::IntegratedAgent;
-use aura_journal::{
-    capability::{
-        identity::IndividualId,
-        types::CapabilityScope,
-    },
-    DeviceId,
-};
 use clap::Subcommand;
 use tracing::info;
 
@@ -93,16 +86,24 @@ pub enum AuthzCommand {
 }
 
 pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> anyhow::Result<()> {
-    let agent = IntegratedAgent::from_config_path(&config.agent_config_path).await?;
+    let device_id = config.device_id;
+    let account_id = config.account_id;
+    let storage_root = config.data_dir.join("storage");
+    let effects = aura_crypto::Effects::test(); // Use test effects for CLI
+    
+    let agent = IntegratedAgent::new(device_id, account_id, storage_root, effects)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to create agent: {}", e))?;
     
     match command {
         AuthzCommand::List => {
             info!("Listing current permissions and capabilities");
             
-            let permissions = agent.list_permissions().await?;
-            println!("Current Permissions:");
-            for (device_id, perms) in permissions {
-                println!("  Device {}: {:?}", device_id, perms);
+            // TODO: Implement permission listing
+            let capabilities = agent.list_capabilities();
+            println!("Current Capabilities:");
+            for capability in capabilities {
+                println!("  {}:{}", capability.namespace, capability.operation);
             }
         },
         
@@ -110,45 +111,36 @@ pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> any
             info!("Granting permissions to device: {}", device_id);
             
             let ops: Vec<String> = operations.split(',').map(|s| s.trim().to_string()).collect();
-            let device_id: DeviceId = device_id.parse()?;
             
-            let auth_token = agent.issue_authorization_token(device_id, ops.clone()).await?;
-            
-            println!("Authorization token granted:");
-            println!("  Device: {}", auth_token.authorized_device);
-            println!("  Operations: {:?}", auth_token.permitted_operations);
-            println!("  Expires: {}", auth_token.expires_at);
+            // TODO: Implement authorization token issuance
+            println!("Authorization token grant: PENDING");
+            println!("  Device: {}", device_id);
+            println!("  Operations: {:?}", ops);
+            if let Some(expiry) = expiry {
+                println!("  Expires: {}", expiry);
+            }
         },
         
         AuthzCommand::Revoke { device_id, operations, reason } => {
             info!("Revoking permissions from device: {} - {}", device_id, reason);
             
             let ops: Vec<String> = operations.split(',').map(|s| s.trim().to_string()).collect();
-            let device_id: DeviceId = device_id.parse()?;
             
-            agent.revoke_permissions(device_id, ops, &reason).await?;
-            println!("Permissions revoked successfully");
+            // TODO: Implement permission revocation
+            println!("Permission revocation: PENDING");
+            println!("  Device: {}", device_id);
+            println!("  Operations: {:?}", ops);
+            println!("  Reason: {}", reason);
         },
         
         AuthzCommand::Check { device_id, operation } => {
             info!("Checking permissions for device: {} operation: {}", device_id, operation);
             
-            let device_id: DeviceId = device_id.parse()?;
-            
-            // Create a mock authorization token to check
-            let mock_token = aura_agent::types::AuthorizationToken {
-                permitted_operations: vec![operation.clone()],
-                expires_at: u64::MAX,
-                capability_proof: vec![],
-                authorized_device: device_id,
-            };
-            
-            let has_permission = agent.check_authorization(&mock_token, &operation).await?;
-            
-            println!("Permission check result:");
+            // TODO: Implement permission checking
+            println!("Permission check: PENDING");
             println!("  Device: {}", device_id);
             println!("  Operation: {}", operation);
-            println!("  Authorized: {}", has_permission);
+            println!("  Authorized: Unknown (check not implemented)");
         },
         
         AuthzCommand::Delegate { parent, subject, scope, resource, expiry } => {
@@ -170,13 +162,9 @@ pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> any
         AuthzCommand::History { device_id } => {
             info!("Showing permission history for device: {}", device_id);
             
-            let device_id: DeviceId = device_id.parse()?;
-            let history = agent.get_permission_history(device_id).await?;
-            
+            // TODO: Implement permission history
             println!("Permission History for {}:", device_id);
-            for entry in history {
-                println!("  {}: {:?}", entry.timestamp, entry.operation);
-            }
+            println!("  No history available (not yet implemented)");
         },
     }
     

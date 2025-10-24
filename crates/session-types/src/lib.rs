@@ -46,6 +46,9 @@
 
 #![allow(missing_docs)] // TODO: Add comprehensive documentation
 
+#[macro_use]
+pub mod macros;
+
 pub mod core;
 pub mod protocols;
 pub mod witnesses;
@@ -93,7 +96,7 @@ pub use protocols::{
     recovery::{
         RecoveryInitialized, CollectingApprovals, EnforcingCooldown, CollectingShares,
         ReconstructingKey, RecoveryProtocolCompleted, RecoveryAborted,
-        SessionTypedRecovery, RecoveryProtocolCore, RecoverySessionError, RecoverySessionState,
+        RecoveryProtocol as SessionTypedRecovery, RecoveryProtocolCore, RecoverySessionError, RecoverySessionState,
         new_session_typed_recovery, rehydrate_recovery_session,
     },
     
@@ -129,7 +132,8 @@ pub use protocols::{
         LedgerCompacting, LedgerOperationFailed, SessionCreating, SessionActive,
         SessionCompleting, SessionCompleted, SessionTerminated, OperationUnlocked,
         LockRequesting, JournalOperationLocked, LockReleasing, LockFailed,
-        SessionTypedJournal, JournalProtocolCore, JournalSessionError, JournalSessionState,
+        JournalProtocol as SessionTypedJournal, JournalProtocolCore, JournalSessionError, 
+        JournalProtocolState as JournalSessionState,
         new_session_typed_journal, rehydrate_journal_session,
     },
     
@@ -145,7 +149,7 @@ pub use protocols::{
     context::{
         ContextInitialized, ExecutingInstructions, AwaitingCondition, WritingToLedger,
         ExecutingSubProtocol, ExecutionComplete, ExecutionFailed,
-        SessionTypedContext, ContextSessionError, ContextSessionState,
+        ContextProtocol as SessionTypedContext, ProtocolContextCore, ContextSessionError, ContextSessionState,
         new_session_typed_context, rehydrate_context_session,
     },
 };

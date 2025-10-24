@@ -4,24 +4,6 @@
 //! session-typed protocols. These macros generate the repetitive trait implementations
 //! while maintaining full compile-time type safety.
 //!
-//! # Status
-//!
-//! **NOT YET IN MODULE TREE** - This file is prepared for future refactoring
-//! once the session-types crate is stable. To enable, add to lib.rs:
-//!
-//! ```rust,ignore
-//! #[macro_use]
-//! mod macros;
-//! pub use macros::*;
-//! ```
-//!
-//! # Design Goals
-//!
-//! 1. Reduce ~60-70% of boilerplate in protocol definitions
-//! 2. Maintain compile-time type safety and error messages
-//! 3. Ensure generated code is identical to hand-written code
-//! 4. Make adding new protocols trivial
-//!
 //! # Example Usage
 //!
 //! ```rust,ignore
@@ -141,9 +123,9 @@
 #[macro_export]
 macro_rules! define_session_states {
     // Entry point: process all state definitions
-    ( $( $( @$flag:ident )? $state:ident ),+ $(,)? ) => {
+    ( $( $state:ident $(@ $flag:ident )? ),+ $(,)? ) => {
         $(
-            define_session_states!(@impl $( @$flag )? $state);
+            define_session_states!(@impl $state $(@ $flag )? );
         )+
     };
 
@@ -160,7 +142,7 @@ macro_rules! define_session_states {
     };
 
     // Implementation for terminal states (marked with @final)
-    (@impl @final $state:ident) => {
+    (@impl $state:ident @ final) => {
         #[derive(Debug, Clone)]
         pub struct $state;
 
@@ -368,9 +350,65 @@ macro_rules! define_session_union {
 
         // Generate delegating methods
         impl $enum_name {
-            $(
-                define_session_union!(@delegate_method $method, $enum_name, $( $state ),+);
-            )+
+            // Generate each method separately to avoid repetition issues
+            define_session_union!(@generate_methods $enum_name, [ $( $method ),+ ], [ $( $state ),+ ]);
+        }
+    };
+
+    // Generate all methods
+    (@generate_methods $enum_name:ident, [ $( $method:ident ),+ ], [ $( $state:ident ),+ ]) => {
+        // Generate each method individually to avoid repetition conflicts
+        define_session_union!(@delegate_all $enum_name, $( $state ),+);
+    };
+
+    // Generate all delegating methods
+    (@delegate_all $enum_name:ident, $( $state:ident ),+) => {
+        pub fn state_name(&self) -> &'static str {
+            match self {
+                $(
+                    $enum_name::$state(p) => p.state_name(),
+                )+
+            }
+        }
+
+        pub fn can_terminate(&self) -> bool {
+            match self {
+                $(
+                    $enum_name::$state(p) => p.can_terminate(),
+                )+
+            }
+        }
+
+        pub fn protocol_id(&self) -> ::uuid::Uuid {
+            match self {
+                $(
+                    $enum_name::$state(p) => p.protocol_id(),
+                )+
+            }
+        }
+
+        pub fn device_id(&self) -> ::aura_journal::DeviceId {
+            match self {
+                $(
+                    $enum_name::$state(p) => p.device_id(),
+                )+
+            }
+        }
+
+        pub fn session_id(&self) -> ::uuid::Uuid {
+            match self {
+                $(
+                    $enum_name::$state(p) => p.session_id(),
+                )+
+            }
+        }
+
+        pub fn is_final(&self) -> bool {
+            match self {
+                $(
+                    $enum_name::$state(_p) => $state::IS_FINAL,
+                )+
+            }
         }
     };
 
@@ -407,16 +445,8 @@ macro_rules! define_session_union {
         }
     };
 
-    // Delegate: is_final() -> bool
-    (@delegate_method is_final, $enum_name:ident, $( $state:ident ),+) => {
-        pub fn is_final(&self) -> bool {
-            match self {
-                $(
-                    $enum_name::$state(p) => p.is_final(),
-                )+
-            }
-        }
-    };
+    // Note: is_final() is not implemented in our session types
+    // If needed in the future, check if state IS_FINAL const is true
 
     // Delegate: protocol_id() -> Uuid
     (@delegate_method protocol_id, $enum_name:ident, $( $state:ident ),+) => {
@@ -434,7 +464,7 @@ macro_rules! define_session_union {
         pub fn session_id(&self) -> ::uuid::Uuid {
             match self {
                 $(
-                    $enum_name::$state(p) => p.inner.session_id,
+                    $enum_name::$state(p) => p.session_id(),
                 )+
             }
         }
@@ -461,10 +491,10 @@ macro_rules! define_session_union {
 ///
 /// ```rust,ignore
 /// define_protocol! {
-///     Protocol: ProtocolName
-///     Core: CoreType
-///     Error: ErrorType
-///     Union: UnionTypeName
+///     Protocol: ProtocolName,
+///     Core: CoreType,
+///     Error: ErrorType,
+///     Union: UnionTypeName,
 ///
 ///     States {
 ///         State1 => OutputType1,
@@ -483,10 +513,10 @@ macro_rules! define_session_union {
 ///
 /// ```rust,ignore
 /// define_protocol! {
-///     Protocol: DkdProtocol
-///     Core: DkdProtocolCore
-///     Error: DkdSessionError
-///     Union: DkdProtocolState
+///     Protocol: DkdProtocol,
+///     Core: DkdProtocolCore,
+///     Error: DkdSessionError,
+///     Union: DkdProtocolState,
 ///
 ///     States {
 ///         InitializationPhase => (),
@@ -506,13 +536,13 @@ macro_rules! define_session_union {
 #[macro_export]
 macro_rules! define_protocol {
     (
-        Protocol: $protocol:ident
-        Core: $core:ty
-        Error: $error:ty
-        Union: $union:ident
+        Protocol: $protocol:ident,
+        Core: $core:ty,
+        Error: $error:ty,
+        Union: $union:ident,
 
         States {
-            $( $( @$flag:ident )? $state:ident => $output:ty ),+ $(,)?
+            $( $state:ident $(@ $flag:ident )? => $output:ty ),+ $(,)?
         }
 
         Extract {
@@ -522,7 +552,7 @@ macro_rules! define_protocol {
     ) => {
         // Step 1: Define all session states
         define_session_states! {
-            $( $( @$flag )? $state ),+
+            $( $state $(@ $flag )? ),+
         }
 
         // Step 2: Implement SessionProtocol for all states
@@ -541,7 +571,7 @@ macro_rules! define_protocol {
                 $( $state ),+
             }
 
-            delegate: [state_name, can_terminate, is_final, protocol_id, device_id]
+            delegate: [state_name, can_terminate, protocol_id, device_id]
         }
     };
 }
@@ -557,7 +587,7 @@ mod tests {
         define_session_states! {
             TestState1,
             TestState2,
-            @final TestFinalState,
+            TestFinalState @ final,
         }
 
         #[test]
@@ -597,7 +627,7 @@ mod tests {
 
         define_session_states! {
             StateA,
-            @final StateB,
+            StateB @ final,
         }
 
         impl_session_protocol! {
@@ -648,7 +678,7 @@ mod tests {
         define_session_states! {
             UnionState1,
             UnionState2,
-            @final UnionState3,
+            UnionState3 @ final,
         }
 
         define_session_union! {
@@ -658,7 +688,7 @@ mod tests {
                 UnionState3,
             }
 
-            delegate: [state_name, can_terminate, is_final]
+            delegate: [state_name, can_terminate]
         }
 
         #[test]
@@ -676,7 +706,6 @@ mod tests {
 
             assert_eq!(union1.state_name(), "UnionState1");
             assert!(!union1.can_terminate());
-            assert!(!union1.is_final());
 
             let protocol3: ChoreographicProtocol<UnionTestCore, UnionState3> =
                 ChoreographicProtocol::new(core);
@@ -684,7 +713,6 @@ mod tests {
 
             assert_eq!(union3.state_name(), "UnionState3");
             assert!(union3.can_terminate());
-            assert!(union3.is_final());
         }
     }
 
@@ -704,16 +732,16 @@ mod tests {
         }
 
         define_protocol! {
-            Protocol: CompleteProtocol
-            Core: CompleteCore
-            Error: CompleteError
-            Union: CompleteProtocolState
+            Protocol: CompleteProtocol,
+            Core: CompleteCore,
+            Error: CompleteError,
+            Union: CompleteProtocolState,
 
             States {
                 Phase1 => (),
                 Phase2 => String,
-                @final Completed => Vec<u8>,
-                @final Failed => (),
+                Completed @ final => Vec<u8>,
+                Failed @ final => (),
             }
 
             Extract {

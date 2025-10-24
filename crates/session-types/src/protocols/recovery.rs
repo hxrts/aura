@@ -1,76 +1,15 @@
-//! Session Type States for Recovery Protocol Choreography
+//! Session Type States for Recovery Protocol Choreography (Refactored with Macros)
 //!
 //! This module defines session types for the guardian-based recovery protocol,
 //! providing compile-time safety for recovery phases and guardian coordination.
 
-use crate::{SessionState, ChoreographicProtocol, SessionProtocol, WitnessedTransition, RuntimeWitness};
-use aura_journal::{GuardianId, DeviceId, EventType, Event};
-use uuid::Uuid;
+use crate::core::{ChoreographicProtocol, SessionProtocol, SessionState, WitnessedTransition};
+use crate::witnesses::RuntimeWitness;
+use aura_journal::{DeviceId, Event, EventType, GuardianId};
 use std::collections::BTreeMap;
+use uuid::Uuid;
 
-// ========== Recovery Protocol Session States ==========
-
-/// Initial state when recovery protocol is being set up
-#[derive(Debug, Clone)]
-pub struct RecoveryInitialized;
-
-impl SessionState for RecoveryInitialized {
-    const NAME: &'static str = "RecoveryInitialized";
-}
-
-/// State when recovery has been initiated and waiting for guardian approvals
-#[derive(Debug, Clone)]
-pub struct CollectingApprovals;
-
-impl SessionState for CollectingApprovals {
-    const NAME: &'static str = "CollectingApprovals";
-}
-
-/// State when sufficient approvals received, enforcing cooldown period
-#[derive(Debug, Clone)]
-pub struct EnforcingCooldown;
-
-impl SessionState for EnforcingCooldown {
-    const NAME: &'static str = "EnforcingCooldown";
-}
-
-/// State when collecting encrypted recovery shares from guardians
-#[derive(Debug, Clone)]
-pub struct CollectingShares;
-
-impl SessionState for CollectingShares {
-    const NAME: &'static str = "CollectingShares";
-}
-
-/// State when reconstructing the recovery key from collected shares
-#[derive(Debug, Clone)]
-pub struct ReconstructingKey;
-
-impl SessionState for ReconstructingKey {
-    const NAME: &'static str = "ReconstructingKey";
-}
-
-/// State when recovery protocol has completed successfully
-#[derive(Debug, Clone)]
-pub struct RecoveryProtocolCompleted;
-
-impl SessionState for RecoveryProtocolCompleted {
-    const NAME: &'static str = "RecoveryCompleted";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-/// State when recovery protocol has been aborted or failed
-#[derive(Debug, Clone)]
-pub struct RecoveryAborted;
-
-impl SessionState for RecoveryAborted {
-    const NAME: &'static str = "RecoveryAborted";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-// ========== Recovery Protocol Wrapper ==========
+// ========== Recovery Protocol Core ==========
 
 /// Core recovery protocol data without session state
 #[derive(Debug, Clone)]
@@ -104,243 +43,9 @@ impl RecoveryProtocolCore {
     }
 }
 
-/// Session-typed recovery protocol wrapper
-pub type SessionTypedRecovery<S> = ChoreographicProtocol<RecoveryProtocolCore, S>;
+// ========== Error Type ==========
 
-// ========== Runtime Witnesses for Recovery Operations ==========
-
-/// Witness that recovery has been successfully initiated
-#[derive(Debug, Clone)]
-pub struct RecoveryInitiated {
-    pub recovery_id: Uuid,
-    pub initiation_timestamp: u64,
-    pub guardian_count: usize,
-}
-
-impl RuntimeWitness for RecoveryInitiated {
-    type Evidence = Event;
-    type Config = ();
-    
-    fn verify(evidence: Event, _config: ()) -> Option<Self> {
-        if let EventType::InitiateRecovery(initiate_event) = evidence.event_type {
-            Some(RecoveryInitiated {
-                recovery_id: initiate_event.recovery_id,
-                initiation_timestamp: evidence.timestamp,
-                guardian_count: initiate_event.required_guardians.len(),
-            })
-        } else {
-            None
-        }
-    }
-    
-    fn description(&self) -> &'static str {
-        "Recovery successfully initiated"
-    }
-}
-
-/// Witness that guardian approval threshold has been met
-#[derive(Debug, Clone)]
-pub struct RecoveryApprovalThresholdMet {
-    pub recovery_id: Uuid,
-    pub approved_guardians: Vec<GuardianId>,
-    pub approval_count: usize,
-    pub required_threshold: u16,
-}
-
-impl RuntimeWitness for RecoveryApprovalThresholdMet {
-    type Evidence = (Vec<Event>, u16);
-    type Config = ();
-    
-    fn verify(evidence: (Vec<Event>, u16), _config: ()) -> Option<Self> {
-        let (events, threshold) = evidence;
-        let mut approved_guardians = Vec::new();
-        let mut recovery_id = None;
-        
-        for event in events {
-            if let EventType::CollectGuardianApproval(approval_event) = event.event_type {
-                if recovery_id.is_none() {
-                    recovery_id = Some(approval_event.recovery_id);
-                }
-                
-                if let Some(rid) = recovery_id {
-                    if approval_event.recovery_id == rid && approval_event.approved {
-                        approved_guardians.push(approval_event.guardian_id);
-                    }
-                }
-            }
-        }
-        
-        let approval_count = approved_guardians.len();
-        if approval_count >= threshold as usize {
-            Some(RecoveryApprovalThresholdMet {
-                recovery_id: recovery_id?,
-                approved_guardians,
-                approval_count,
-                required_threshold: threshold,
-            })
-        } else {
-            None
-        }
-    }
-    
-    fn description(&self) -> &'static str {
-        "Guardian approval threshold met"
-    }
-}
-
-/// Witness that cooldown period has been successfully enforced
-#[derive(Debug, Clone)]
-pub struct CooldownCompleted {
-    pub recovery_id: Uuid,
-    pub cooldown_start: u64,
-    pub cooldown_end: u64,
-    pub no_vetoes: bool,
-}
-
-impl RuntimeWitness for CooldownCompleted {
-    type Evidence = (Uuid, u64, Vec<Event>);
-    type Config = u64; // Cooldown duration in epochs
-    
-    fn verify(evidence: (Uuid, u64, Vec<Event>), config: u64) -> Option<Self> {
-        let (recovery_id, start_epoch, veto_events) = evidence;
-        let current_epoch = start_epoch + config;
-        
-        // Check for any veto events during cooldown period
-        let has_vetoes = veto_events.iter().any(|event| {
-            matches!(event.event_type, EventType::AbortRecovery(_)) &&
-            event.timestamp >= start_epoch && event.timestamp <= current_epoch
-        });
-        
-        if !has_vetoes {
-            Some(CooldownCompleted {
-                recovery_id,
-                cooldown_start: start_epoch,
-                cooldown_end: current_epoch,
-                no_vetoes: true,
-            })
-        } else {
-            None
-        }
-    }
-    
-    fn description(&self) -> &'static str {
-        "Cooldown period completed without vetoes"
-    }
-}
-
-/// Witness that guardian shares have been collected
-#[derive(Debug, Clone)]
-pub struct RecoverySharesCollected {
-    pub recovery_id: Uuid,
-    pub collected_shares: BTreeMap<GuardianId, Vec<u8>>,
-    pub share_count: usize,
-    pub required_threshold: u16,
-}
-
-impl RuntimeWitness for RecoverySharesCollected {
-    type Evidence = (Vec<Event>, u16);
-    type Config = ();
-    
-    fn verify(evidence: (Vec<Event>, u16), _config: ()) -> Option<Self> {
-        let (events, threshold) = evidence;
-        let mut collected_shares = BTreeMap::new();
-        let mut recovery_id = None;
-        
-        for event in events {
-            if let EventType::SubmitRecoveryShare(share_event) = event.event_type {
-                if recovery_id.is_none() {
-                    recovery_id = Some(share_event.recovery_id);
-                }
-                
-                if let Some(rid) = recovery_id {
-                    if share_event.recovery_id == rid {
-                        collected_shares.insert(share_event.guardian_id, share_event.encrypted_share.clone());
-                    }
-                }
-            }
-        }
-        
-        let share_count = collected_shares.len();
-        if share_count >= threshold as usize {
-            Some(RecoverySharesCollected {
-                recovery_id: recovery_id?,
-                share_count,
-                collected_shares,
-                required_threshold: threshold,
-            })
-        } else {
-            None
-        }
-    }
-    
-    fn description(&self) -> &'static str {
-        "Guardian recovery shares collected"
-    }
-}
-
-/// Witness that recovery key has been successfully reconstructed
-#[derive(Debug, Clone)]
-pub struct KeyReconstructed {
-    pub recovery_id: Uuid,
-    pub reconstructed_key: Vec<u8>,
-    pub shares_used: usize,
-}
-
-impl RuntimeWitness for KeyReconstructed {
-    type Evidence = (Uuid, Vec<u8>);
-    type Config = usize; // Number of shares used
-    
-    fn verify(evidence: (Uuid, Vec<u8>), config: usize) -> Option<Self> {
-        let (recovery_id, key_bytes) = evidence;
-        
-        // Verify key is valid length for Ed25519
-        if key_bytes.len() == 32 && config > 0 {
-            Some(KeyReconstructed {
-                recovery_id,
-                reconstructed_key: key_bytes,
-                shares_used: config,
-            })
-        } else {
-            None
-        }
-    }
-    
-    fn description(&self) -> &'static str {
-        "Recovery key successfully reconstructed"
-    }
-}
-
-/// Witness that recovery has been aborted
-#[derive(Debug, Clone)]
-pub struct RecoveryAbort {
-    pub recovery_id: Uuid,
-    pub abort_reason: String,
-    pub aborted_by: Option<GuardianId>,
-}
-
-impl RuntimeWitness for RecoveryAbort {
-    type Evidence = Event;
-    type Config = ();
-    
-    fn verify(evidence: Event, _config: ()) -> Option<Self> {
-        if let EventType::AbortRecovery(abort_event) = evidence.event_type {
-            Some(RecoveryAbort {
-                recovery_id: abort_event.recovery_id,
-                abort_reason: format!("{:?}", abort_event.reason),
-                aborted_by: None, // Would be extracted from event author
-            })
-        } else {
-            None
-        }
-    }
-    
-    fn description(&self) -> &'static str {
-        "Recovery protocol aborted"
-    }
-}
-
-// ========== Concrete Error Type ==========
-
+/// Error type for recovery session protocols
 #[derive(Debug, thiserror::Error)]
 pub enum RecoverySessionError {
     #[error("Recovery protocol error: {0}")]
@@ -359,219 +64,293 @@ pub enum RecoverySessionError {
     RecoveryAborted(String),
 }
 
-// ========== SessionProtocol Implementations ==========
+// ========== Protocol Definition using Macros ==========
 
-impl SessionProtocol for ChoreographicProtocol<RecoveryProtocolCore, RecoveryInitialized> {
-    type State = RecoveryInitialized;
-    type Output = Vec<u8>; // Recovered key
-    type Error = RecoverySessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.recovery_id
+define_protocol! {
+    Protocol: RecoveryProtocol,
+    Core: RecoveryProtocolCore,
+    Error: RecoverySessionError,
+    Union: RecoverySessionState,
+
+    States {
+        RecoveryInitialized => Vec<u8>,
+        CollectingApprovals => Vec<u8>,
+        EnforcingCooldown => Vec<u8>,
+        CollectingShares => Vec<u8>,
+        ReconstructingKey => Vec<u8>,
+        RecoveryProtocolCompleted @ final => Vec<u8>,
+        RecoveryAborted @ final => Vec<u8>,
     }
-    
-    fn state_name(&self) -> &'static str {
-        RecoveryInitialized::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        RecoveryInitialized::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.recovery_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.new_device_id
+
+    Extract {
+        session_id: |core| core.recovery_id,
+        device_id: |core| core.new_device_id,
     }
 }
 
-impl SessionProtocol for ChoreographicProtocol<RecoveryProtocolCore, CollectingApprovals> {
-    type State = CollectingApprovals;
-    type Output = Vec<u8>;
-    type Error = RecoverySessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.recovery_id
+// ========== Protocol Type Alias ==========
+
+/// Session-typed recovery protocol wrapper
+pub type RecoveryProtocol<S> = ChoreographicProtocol<RecoveryProtocolCore, S>;
+
+// ========== Runtime Witnesses for Recovery Operations ==========
+
+/// Witness that recovery has been successfully initiated
+#[derive(Debug, Clone)]
+pub struct RecoveryInitiated {
+    pub recovery_id: Uuid,
+    pub initiation_timestamp: u64,
+    pub guardian_count: usize,
+}
+
+impl RuntimeWitness for RecoveryInitiated {
+    type Evidence = Event;
+    type Config = ();
+
+    fn verify(evidence: Event, _config: ()) -> Option<Self> {
+        if let EventType::InitiateRecovery(initiate_event) = evidence.event_type {
+            Some(RecoveryInitiated {
+                recovery_id: initiate_event.recovery_id,
+                initiation_timestamp: evidence.timestamp,
+                guardian_count: initiate_event.required_guardians.len(),
+            })
+        } else {
+            None
+        }
     }
-    
-    fn state_name(&self) -> &'static str {
-        CollectingApprovals::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        CollectingApprovals::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.recovery_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.new_device_id
+
+    fn description(&self) -> &'static str {
+        "Recovery successfully initiated"
     }
 }
 
-impl SessionProtocol for ChoreographicProtocol<RecoveryProtocolCore, EnforcingCooldown> {
-    type State = EnforcingCooldown;
-    type Output = Vec<u8>;
-    type Error = RecoverySessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.recovery_id
+/// Witness that guardian approval threshold has been met
+#[derive(Debug, Clone)]
+pub struct RecoveryApprovalThresholdMet {
+    pub recovery_id: Uuid,
+    pub approved_guardians: Vec<GuardianId>,
+    pub approval_count: usize,
+    pub required_threshold: u16,
+}
+
+impl RuntimeWitness for RecoveryApprovalThresholdMet {
+    type Evidence = (Vec<Event>, u16);
+    type Config = ();
+
+    fn verify(evidence: (Vec<Event>, u16), _config: ()) -> Option<Self> {
+        let (events, threshold) = evidence;
+        let mut approved_guardians = Vec::new();
+        let mut recovery_id = None;
+
+        for event in events {
+            if let EventType::CollectGuardianApproval(approval_event) = event.event_type {
+                if recovery_id.is_none() {
+                    recovery_id = Some(approval_event.recovery_id);
+                }
+
+                if let Some(rid) = recovery_id {
+                    if approval_event.recovery_id == rid && approval_event.approved {
+                        approved_guardians.push(approval_event.guardian_id);
+                    }
+                }
+            }
+        }
+
+        let approval_count = approved_guardians.len();
+        if approval_count >= threshold as usize {
+            Some(RecoveryApprovalThresholdMet {
+                recovery_id: recovery_id?,
+                approved_guardians,
+                approval_count,
+                required_threshold: threshold,
+            })
+        } else {
+            None
+        }
     }
-    
-    fn state_name(&self) -> &'static str {
-        EnforcingCooldown::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        EnforcingCooldown::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.recovery_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.new_device_id
+
+    fn description(&self) -> &'static str {
+        "Guardian approval threshold met"
     }
 }
 
-impl SessionProtocol for ChoreographicProtocol<RecoveryProtocolCore, CollectingShares> {
-    type State = CollectingShares;
-    type Output = Vec<u8>;
-    type Error = RecoverySessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.recovery_id
+/// Witness that cooldown period has been successfully enforced
+#[derive(Debug, Clone)]
+pub struct CooldownCompleted {
+    pub recovery_id: Uuid,
+    pub cooldown_start: u64,
+    pub cooldown_end: u64,
+    pub no_vetoes: bool,
+}
+
+impl RuntimeWitness for CooldownCompleted {
+    type Evidence = (Uuid, u64, Vec<Event>);
+    type Config = u64; // Cooldown duration in epochs
+
+    fn verify(evidence: (Uuid, u64, Vec<Event>), config: u64) -> Option<Self> {
+        let (recovery_id, start_epoch, veto_events) = evidence;
+        let current_epoch = start_epoch + config;
+
+        // Check for any veto events during cooldown period
+        let has_vetoes = veto_events.iter().any(|event| {
+            matches!(event.event_type, EventType::AbortRecovery(_))
+                && event.timestamp >= start_epoch
+                && event.timestamp <= current_epoch
+        });
+
+        if !has_vetoes {
+            Some(CooldownCompleted {
+                recovery_id,
+                cooldown_start: start_epoch,
+                cooldown_end: current_epoch,
+                no_vetoes: true,
+            })
+        } else {
+            None
+        }
     }
-    
-    fn state_name(&self) -> &'static str {
-        CollectingShares::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        CollectingShares::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.recovery_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.new_device_id
+
+    fn description(&self) -> &'static str {
+        "Cooldown period completed without vetoes"
     }
 }
 
-impl SessionProtocol for ChoreographicProtocol<RecoveryProtocolCore, ReconstructingKey> {
-    type State = ReconstructingKey;
-    type Output = Vec<u8>;
-    type Error = RecoverySessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.recovery_id
+/// Witness that guardian shares have been collected
+#[derive(Debug, Clone)]
+pub struct RecoverySharesCollected {
+    pub recovery_id: Uuid,
+    pub collected_shares: BTreeMap<GuardianId, Vec<u8>>,
+    pub share_count: usize,
+    pub required_threshold: u16,
+}
+
+impl RuntimeWitness for RecoverySharesCollected {
+    type Evidence = (Vec<Event>, u16);
+    type Config = ();
+
+    fn verify(evidence: (Vec<Event>, u16), _config: ()) -> Option<Self> {
+        let (events, threshold) = evidence;
+        let mut collected_shares = BTreeMap::new();
+        let mut recovery_id = None;
+
+        for event in events {
+            if let EventType::SubmitRecoveryShare(share_event) = event.event_type {
+                if recovery_id.is_none() {
+                    recovery_id = Some(share_event.recovery_id);
+                }
+
+                if let Some(rid) = recovery_id {
+                    if share_event.recovery_id == rid {
+                        collected_shares
+                            .insert(share_event.guardian_id, share_event.encrypted_share.clone());
+                    }
+                }
+            }
+        }
+
+        let share_count = collected_shares.len();
+        if share_count >= threshold as usize {
+            Some(RecoverySharesCollected {
+                recovery_id: recovery_id?,
+                share_count,
+                collected_shares,
+                required_threshold: threshold,
+            })
+        } else {
+            None
+        }
     }
-    
-    fn state_name(&self) -> &'static str {
-        ReconstructingKey::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        ReconstructingKey::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.recovery_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.new_device_id
+
+    fn description(&self) -> &'static str {
+        "Guardian recovery shares collected"
     }
 }
 
-impl SessionProtocol for ChoreographicProtocol<RecoveryProtocolCore, RecoveryProtocolCompleted> {
-    type State = RecoveryProtocolCompleted;
-    type Output = Vec<u8>;
-    type Error = RecoverySessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.recovery_id
+/// Witness that recovery key has been successfully reconstructed
+#[derive(Debug, Clone)]
+pub struct KeyReconstructed {
+    pub recovery_id: Uuid,
+    pub reconstructed_key: Vec<u8>,
+    pub shares_used: usize,
+}
+
+impl RuntimeWitness for KeyReconstructed {
+    type Evidence = (Uuid, Vec<u8>);
+    type Config = usize; // Number of shares used
+
+    fn verify(evidence: (Uuid, Vec<u8>), config: usize) -> Option<Self> {
+        let (recovery_id, key_bytes) = evidence;
+
+        // Verify key is valid length for Ed25519
+        if key_bytes.len() == 32 && config > 0 {
+            Some(KeyReconstructed {
+                recovery_id,
+                reconstructed_key: key_bytes,
+                shares_used: config,
+            })
+        } else {
+            None
+        }
     }
-    
-    fn state_name(&self) -> &'static str {
-        RecoveryProtocolCompleted::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        RecoveryProtocolCompleted::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.recovery_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.new_device_id
+
+    fn description(&self) -> &'static str {
+        "Recovery key successfully reconstructed"
     }
 }
 
-impl SessionProtocol for ChoreographicProtocol<RecoveryProtocolCore, RecoveryAborted> {
-    type State = RecoveryAborted;
-    type Output = Vec<u8>;
-    type Error = RecoverySessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.recovery_id
+/// Witness that recovery has been aborted
+#[derive(Debug, Clone)]
+pub struct RecoveryAbort {
+    pub recovery_id: Uuid,
+    pub abort_reason: String,
+    pub aborted_by: Option<GuardianId>,
+}
+
+impl RuntimeWitness for RecoveryAbort {
+    type Evidence = Event;
+    type Config = ();
+
+    fn verify(evidence: Event, _config: ()) -> Option<Self> {
+        if let EventType::AbortRecovery(abort_event) = evidence.event_type {
+            Some(RecoveryAbort {
+                recovery_id: abort_event.recovery_id,
+                abort_reason: format!("{:?}", abort_event.reason),
+                aborted_by: None, // Would be extracted from event author
+            })
+        } else {
+            None
+        }
     }
-    
-    fn state_name(&self) -> &'static str {
-        RecoveryAborted::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        RecoveryAborted::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.recovery_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.new_device_id
+
+    fn description(&self) -> &'static str {
+        "Recovery protocol aborted"
     }
 }
 
 // ========== State Transitions ==========
 
 /// Transition from RecoveryInitialized to CollectingApprovals (requires RecoveryInitiated witness)
-impl WitnessedTransition<RecoveryInitialized, CollectingApprovals> 
-    for ChoreographicProtocol<RecoveryProtocolCore, RecoveryInitialized> 
+impl WitnessedTransition<RecoveryInitialized, CollectingApprovals>
+    for ChoreographicProtocol<RecoveryProtocolCore, RecoveryInitialized>
 {
     type Witness = RecoveryInitiated;
     type Target = ChoreographicProtocol<RecoveryProtocolCore, CollectingApprovals>;
-    
+
     /// Begin collecting guardian approvals
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(self, _witness: Self::Witness) -> Self::Target {
         self.transition_to()
     }
 }
 
 /// Transition from CollectingApprovals to EnforcingCooldown (requires RecoveryApprovalThresholdMet witness)
-impl WitnessedTransition<CollectingApprovals, EnforcingCooldown> 
-    for ChoreographicProtocol<RecoveryProtocolCore, CollectingApprovals> 
+impl WitnessedTransition<CollectingApprovals, EnforcingCooldown>
+    for ChoreographicProtocol<RecoveryProtocolCore, CollectingApprovals>
 {
     type Witness = RecoveryApprovalThresholdMet;
     type Target = ChoreographicProtocol<RecoveryProtocolCore, EnforcingCooldown>;
+
     /// Begin cooldown period after sufficient approvals
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         // Update collected approvals
         for guardian_id in witness.approved_guardians {
             self.inner.collected_approvals.insert(guardian_id, true);
@@ -581,33 +360,27 @@ impl WitnessedTransition<CollectingApprovals, EnforcingCooldown>
 }
 
 /// Transition from EnforcingCooldown to CollectingShares (requires CooldownCompleted witness)
-impl WitnessedTransition<EnforcingCooldown, CollectingShares> 
-    for ChoreographicProtocol<RecoveryProtocolCore, EnforcingCooldown> 
+impl WitnessedTransition<EnforcingCooldown, CollectingShares>
+    for ChoreographicProtocol<RecoveryProtocolCore, EnforcingCooldown>
 {
     type Witness = CooldownCompleted;
     type Target = ChoreographicProtocol<RecoveryProtocolCore, CollectingShares>;
-    
+
     /// Begin collecting recovery shares after cooldown
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(self, _witness: Self::Witness) -> Self::Target {
         self.transition_to()
     }
 }
 
 /// Transition from CollectingShares to ReconstructingKey (requires RecoverySharesCollected witness)
-impl WitnessedTransition<CollectingShares, ReconstructingKey> 
-    for ChoreographicProtocol<RecoveryProtocolCore, CollectingShares> 
+impl WitnessedTransition<CollectingShares, ReconstructingKey>
+    for ChoreographicProtocol<RecoveryProtocolCore, CollectingShares>
 {
     type Witness = RecoverySharesCollected;
     type Target = ChoreographicProtocol<RecoveryProtocolCore, ReconstructingKey>;
-    
+
     /// Begin key reconstruction with collected shares
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         // Update collected shares
         self.inner.collected_shares = witness.collected_shares;
         self.transition_to()
@@ -615,35 +388,29 @@ impl WitnessedTransition<CollectingShares, ReconstructingKey>
 }
 
 /// Transition from ReconstructingKey to RecoveryProtocolCompleted (requires KeyReconstructed witness)
-impl WitnessedTransition<ReconstructingKey, RecoveryProtocolCompleted> 
-    for ChoreographicProtocol<RecoveryProtocolCore, ReconstructingKey> 
+impl WitnessedTransition<ReconstructingKey, RecoveryProtocolCompleted>
+    for ChoreographicProtocol<RecoveryProtocolCore, ReconstructingKey>
 {
     type Witness = KeyReconstructed;
     type Target = ChoreographicProtocol<RecoveryProtocolCore, RecoveryProtocolCompleted>;
-    
+
     /// Complete recovery with reconstructed key
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(self, _witness: Self::Witness) -> Self::Target {
         self.transition_to()
     }
 }
 
 /// Transition to RecoveryAborted from any state (requires RecoveryAbort witness)
-impl<S: SessionState> WitnessedTransition<S, RecoveryAborted> 
-    for ChoreographicProtocol<RecoveryProtocolCore, S> 
+impl<S: SessionState> WitnessedTransition<S, RecoveryAborted>
+    for ChoreographicProtocol<RecoveryProtocolCore, S>
 where
-    Self: SessionProtocol<State = S, Output = (), Error = RecoverySessionError>,
+    Self: SessionProtocol<State = S, Output = Vec<u8>, Error = RecoverySessionError>,
 {
     type Witness = RecoveryAbort;
     type Target = ChoreographicProtocol<RecoveryProtocolCore, RecoveryAborted>;
-    
+
     /// Abort recovery due to veto or timeout
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(self, _witness: Self::Witness) -> Self::Target {
         self.transition_to()
     }
 }
@@ -662,12 +429,12 @@ impl ChoreographicProtocol<RecoveryProtocolCore, RecoveryInitialized> {
             guardian_count: self.inner.guardian_ids.len(),
         })
     }
-    
+
     /// Get the guardian IDs that need to approve
     pub fn required_guardians(&self) -> &[GuardianId] {
         &self.inner.guardian_ids
     }
-    
+
     /// Get the approval threshold
     pub fn approval_threshold(&self) -> u16 {
         self.inner.threshold
@@ -677,18 +444,29 @@ impl ChoreographicProtocol<RecoveryProtocolCore, RecoveryInitialized> {
 /// Operations only available in CollectingApprovals state
 impl ChoreographicProtocol<RecoveryProtocolCore, CollectingApprovals> {
     /// Check approval progress
-    pub async fn check_approval_progress(&self, events: Vec<Event>) -> Option<RecoveryApprovalThresholdMet> {
+    pub async fn check_approval_progress(
+        &self,
+        events: Vec<Event>,
+    ) -> Option<RecoveryApprovalThresholdMet> {
         RecoveryApprovalThresholdMet::verify((events, self.inner.threshold), ())
     }
-    
+
     /// Get current approval count
     pub fn current_approval_count(&self) -> usize {
-        self.inner.collected_approvals.values().filter(|&&approved| approved).count()
+        self.inner
+            .collected_approvals
+            .values()
+            .filter(|&&approved| approved)
+            .count()
     }
-    
+
     /// Check if specific guardian has approved
     pub fn has_guardian_approved(&self, guardian_id: &GuardianId) -> bool {
-        self.inner.collected_approvals.get(guardian_id).copied().unwrap_or(false)
+        self.inner
+            .collected_approvals
+            .get(guardian_id)
+            .copied()
+            .unwrap_or(false)
     }
 }
 
@@ -696,17 +474,17 @@ impl ChoreographicProtocol<RecoveryProtocolCore, CollectingApprovals> {
 impl ChoreographicProtocol<RecoveryProtocolCore, EnforcingCooldown> {
     /// Check cooldown completion
     pub async fn check_cooldown_completion(
-        &self, 
-        start_epoch: u64, 
-        veto_events: Vec<Event>
+        &self,
+        start_epoch: u64,
+        veto_events: Vec<Event>,
     ) -> Option<CooldownCompleted> {
         let cooldown_duration = self.inner.cooldown_hours.unwrap_or(48); // Default 48 hours
         CooldownCompleted::verify(
-            (self.inner.recovery_id, start_epoch, veto_events), 
-            cooldown_duration
+            (self.inner.recovery_id, start_epoch, veto_events),
+            cooldown_duration,
         )
     }
-    
+
     /// Get cooldown period in hours
     pub fn cooldown_hours(&self) -> u64 {
         self.inner.cooldown_hours.unwrap_or(48)
@@ -716,15 +494,18 @@ impl ChoreographicProtocol<RecoveryProtocolCore, EnforcingCooldown> {
 /// Operations only available in CollectingShares state
 impl ChoreographicProtocol<RecoveryProtocolCore, CollectingShares> {
     /// Check shares collection progress
-    pub async fn check_shares_progress(&self, events: Vec<Event>) -> Option<RecoverySharesCollected> {
+    pub async fn check_shares_progress(
+        &self,
+        events: Vec<Event>,
+    ) -> Option<RecoverySharesCollected> {
         RecoverySharesCollected::verify((events, self.inner.threshold), ())
     }
-    
+
     /// Get current share count
     pub fn current_share_count(&self) -> usize {
         self.inner.collected_shares.len()
     }
-    
+
     /// Check if specific guardian has submitted share
     pub fn has_guardian_shared(&self, guardian_id: &GuardianId) -> bool {
         self.inner.collected_shares.contains_key(guardian_id)
@@ -738,15 +519,18 @@ impl ChoreographicProtocol<RecoveryProtocolCore, ReconstructingKey> {
         // This would use the actual Lagrange interpolation from the choreography
         // For now, return a mock reconstruction
         let mock_key = vec![0u8; 32]; // Would be actual reconstructed key
-        
+
         KeyReconstructed::verify(
-            (self.inner.recovery_id, mock_key.clone()), 
-            self.inner.collected_shares.len()
-        ).ok_or_else(|| RecoverySessionError::KeyReconstructionFailed(
-            "Failed to reconstruct key from shares".to_string()
-        ))
+            (self.inner.recovery_id, mock_key.clone()),
+            self.inner.collected_shares.len(),
+        )
+        .ok_or_else(|| {
+            RecoverySessionError::KeyReconstructionFailed(
+                "Failed to reconstruct key from shares".to_string(),
+            )
+        })
     }
-    
+
     /// Get the collected shares for reconstruction
     pub fn collected_shares(&self) -> &BTreeMap<GuardianId, Vec<u8>> {
         &self.inner.collected_shares
@@ -759,7 +543,7 @@ impl ChoreographicProtocol<RecoveryProtocolCore, RecoveryProtocolCompleted> {
     pub fn get_recovery_result(&self) -> Option<String> {
         Some("Recovery completed successfully".to_string())
     }
-    
+
     /// Get the new device ID that was recovered
     pub fn recovered_device_id(&self) -> DeviceId {
         self.inner.new_device_id
@@ -783,7 +567,13 @@ pub fn new_session_typed_recovery(
     threshold: u16,
     cooldown_hours: Option<u64>,
 ) -> ChoreographicProtocol<RecoveryProtocolCore, RecoveryInitialized> {
-    let core = RecoveryProtocolCore::new(recovery_id, new_device_id, guardian_ids, threshold, cooldown_hours);
+    let core = RecoveryProtocolCore::new(
+        recovery_id,
+        new_device_id,
+        guardian_ids,
+        threshold,
+        cooldown_hours,
+    );
     ChoreographicProtocol::new(core)
 }
 
@@ -796,8 +586,14 @@ pub fn rehydrate_recovery_session(
     cooldown_hours: Option<u64>,
     events: Vec<Event>,
 ) -> RecoverySessionState {
-    let mut core = RecoveryProtocolCore::new(recovery_id, new_device_id, guardian_ids, threshold, cooldown_hours);
-    
+    let mut core = RecoveryProtocolCore::new(
+        recovery_id,
+        new_device_id,
+        guardian_ids,
+        threshold,
+        cooldown_hours,
+    );
+
     // Analyze events to determine current state
     let mut has_initiation = false;
     let mut has_sufficient_approvals = false;
@@ -805,7 +601,7 @@ pub fn rehydrate_recovery_session(
     let mut has_sufficient_shares = false;
     let mut has_completion = false;
     let mut has_abort = false;
-    
+
     for event in &events {
         match &event.event_type {
             EventType::InitiateRecovery(_) => has_initiation = true,
@@ -813,27 +609,28 @@ pub fn rehydrate_recovery_session(
                 if approval.approved {
                     core.collected_approvals.insert(approval.guardian_id, true);
                 }
-            },
+            }
             EventType::SubmitRecoveryShare(share) => {
-                core.collected_shares.insert(share.guardian_id, share.encrypted_share.clone());
-            },
+                core.collected_shares
+                    .insert(share.guardian_id, share.encrypted_share.clone());
+            }
             EventType::CompleteRecovery(_) => has_completion = true,
             EventType::AbortRecovery(_) => has_abort = true,
             _ => {}
         }
     }
-    
+
     // Determine state based on events
     has_sufficient_approvals = core.collected_approvals.len() >= threshold as usize;
     has_sufficient_shares = core.collected_shares.len() >= threshold as usize;
-    
+
     // TODO: Check cooldown completion properly based on timestamps
     has_cooldown_complete = has_sufficient_approvals; // Simplified for now
-    
+
     if has_abort {
         RecoverySessionState::RecoveryAborted(ChoreographicProtocol::new(core))
     } else if has_completion {
-        RecoverySessionState::RecoveryCompleted(ChoreographicProtocol::new(core))
+        RecoverySessionState::RecoveryProtocolCompleted(ChoreographicProtocol::new(core))
     } else if has_sufficient_shares {
         RecoverySessionState::ReconstructingKey(ChoreographicProtocol::new(core))
     } else if has_cooldown_complete {
@@ -847,109 +644,43 @@ pub fn rehydrate_recovery_session(
     }
 }
 
-/// Enum representing the possible states of a recovery session
-pub enum RecoverySessionState {
-    RecoveryInitialized(ChoreographicProtocol<RecoveryProtocolCore, RecoveryInitialized>),
-    CollectingApprovals(ChoreographicProtocol<RecoveryProtocolCore, CollectingApprovals>),
-    EnforcingCooldown(ChoreographicProtocol<RecoveryProtocolCore, EnforcingCooldown>),
-    CollectingShares(ChoreographicProtocol<RecoveryProtocolCore, CollectingShares>),
-    ReconstructingKey(ChoreographicProtocol<RecoveryProtocolCore, ReconstructingKey>),
-    RecoveryCompleted(ChoreographicProtocol<RecoveryProtocolCore, RecoveryProtocolCompleted>),
-    RecoveryAborted(ChoreographicProtocol<RecoveryProtocolCore, RecoveryAborted>),
-}
-
-impl RecoverySessionState {
-    /// Get the current state name
-    pub fn state_name(&self) -> &'static str {
-        match self {
-            RecoverySessionState::RecoveryInitialized(r) => r.current_state_name(),
-            RecoverySessionState::CollectingApprovals(r) => r.current_state_name(),
-            RecoverySessionState::EnforcingCooldown(r) => r.current_state_name(),
-            RecoverySessionState::CollectingShares(r) => r.current_state_name(),
-            RecoverySessionState::ReconstructingKey(r) => r.current_state_name(),
-            RecoverySessionState::RecoveryCompleted(r) => r.current_state_name(),
-            RecoverySessionState::RecoveryAborted(r) => r.current_state_name(),
-        }
-    }
-    
-    /// Check if the recovery can be terminated
-    pub fn can_terminate(&self) -> bool {
-        match self {
-            RecoverySessionState::RecoveryInitialized(r) => r.can_terminate(),
-            RecoverySessionState::CollectingApprovals(r) => r.can_terminate(),
-            RecoverySessionState::EnforcingCooldown(r) => r.can_terminate(),
-            RecoverySessionState::CollectingShares(r) => r.can_terminate(),
-            RecoverySessionState::ReconstructingKey(r) => r.can_terminate(),
-            RecoverySessionState::RecoveryCompleted(r) => r.can_terminate(),
-            RecoverySessionState::RecoveryAborted(r) => r.can_terminate(),
-        }
-    }
-    
-    /// Check if the recovery is in a final state
-    pub fn is_final(&self) -> bool {
-        match self {
-            RecoverySessionState::RecoveryInitialized(r) => r.is_final(),
-            RecoverySessionState::CollectingApprovals(r) => r.is_final(),
-            RecoverySessionState::EnforcingCooldown(r) => r.is_final(),
-            RecoverySessionState::CollectingShares(r) => r.is_final(),
-            RecoverySessionState::ReconstructingKey(r) => r.is_final(),
-            RecoverySessionState::RecoveryCompleted(r) => r.is_final(),
-            RecoverySessionState::RecoveryAborted(r) => r.is_final(),
-        }
-    }
-    
-    /// Get the recovery ID
-    pub fn recovery_id(&self) -> Uuid {
-        match self {
-            RecoverySessionState::RecoveryInitialized(r) => r.inner.recovery_id,
-            RecoverySessionState::CollectingApprovals(r) => r.inner.recovery_id,
-            RecoverySessionState::EnforcingCooldown(r) => r.inner.recovery_id,
-            RecoverySessionState::CollectingShares(r) => r.inner.recovery_id,
-            RecoverySessionState::ReconstructingKey(r) => r.inner.recovery_id,
-            RecoverySessionState::RecoveryCompleted(r) => r.inner.recovery_id,
-            RecoverySessionState::RecoveryAborted(r) => r.inner.recovery_id,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_journal::{InitiateRecoveryEvent, EventId, AccountId, EventAuthorization};
-    
+    use aura_journal::{AccountId, EventAuthorization, EventId, InitiateRecoveryEvent};
+
     #[test]
     fn test_recovery_state_transitions() {
         let recovery_id = Uuid::new_v4();
         let new_device_id = DeviceId(Uuid::new_v4());
         let guardian_ids = vec![GuardianId(Uuid::new_v4()), GuardianId(Uuid::new_v4())];
-        
+
         // Create a new recovery protocol
         let recovery = new_session_typed_recovery(
             recovery_id,
             new_device_id,
             guardian_ids.clone(),
-            2, // threshold
+            2,        // threshold
             Some(48), // cooldown hours
         );
-        
+
         // Should start in RecoveryInitialized state
-        assert_eq!(recovery.current_state_name(), "RecoveryInitialized");
+        assert_eq!(recovery.state_name(), "RecoveryInitialized");
         assert!(!recovery.can_terminate());
-        assert!(!recovery.is_final());
         assert_eq!(recovery.required_guardians(), &guardian_ids);
         assert_eq!(recovery.approval_threshold(), 2);
-        
+
         // Transition to CollectingApprovals with witness
         let initiation_witness = RecoveryInitiated {
             recovery_id,
             initiation_timestamp: 1000,
             guardian_count: guardian_ids.len(),
         };
-        
+
         let collecting_recovery = recovery.transition_with_witness(initiation_witness);
-        assert_eq!(collecting_recovery.current_state_name(), "CollectingApprovals");
+        assert_eq!(collecting_recovery.state_name(), "CollectingApprovals");
         assert_eq!(collecting_recovery.current_approval_count(), 0);
-        
+
         // Can transition to cooldown with approval witness
         let approval_witness = RecoveryApprovalThresholdMet {
             recovery_id,
@@ -957,17 +688,17 @@ mod tests {
             approval_count: 2,
             required_threshold: 2,
         };
-        
+
         let cooldown_recovery = collecting_recovery.transition_with_witness(approval_witness);
-        assert_eq!(cooldown_recovery.current_state_name(), "EnforcingCooldown");
+        assert_eq!(cooldown_recovery.state_name(), "EnforcingCooldown");
         assert_eq!(cooldown_recovery.cooldown_hours(), 48);
     }
-    
+
     #[test]
     fn test_recovery_witness_verification() {
         let recovery_id = Uuid::new_v4();
         let guardian_id = GuardianId(Uuid::new_v4());
-        
+
         // Test RecoveryInitiated witness
         let initiate_event = Event {
             version: 1,
@@ -990,20 +721,20 @@ mod tests {
                 signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]),
             },
         };
-        
+
         let witness = RecoveryInitiated::verify(initiate_event, ());
         assert!(witness.is_some());
         let witness = witness.unwrap();
         assert_eq!(witness.recovery_id, recovery_id);
         assert_eq!(witness.guardian_count, 1);
     }
-    
+
     #[test]
     fn test_recovery_rehydration() {
         let recovery_id = Uuid::new_v4();
         let new_device_id = DeviceId(Uuid::new_v4());
         let guardian_ids = vec![GuardianId(Uuid::new_v4())];
-        
+
         // Test rehydration without events
         let state = rehydrate_recovery_session(
             recovery_id,
@@ -1015,9 +746,8 @@ mod tests {
         );
         assert_eq!(state.state_name(), "RecoveryInitialized");
         assert!(!state.can_terminate());
-        assert!(!state.is_final());
-        assert_eq!(state.recovery_id(), recovery_id);
-        
+        assert_eq!(state.session_id(), recovery_id);
+
         // Test rehydration with initiation event
         let initiate_event = Event {
             version: 1,
@@ -1040,7 +770,7 @@ mod tests {
                 signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]),
             },
         };
-        
+
         let state = rehydrate_recovery_session(
             recovery_id,
             new_device_id,
@@ -1051,6 +781,5 @@ mod tests {
         );
         assert_eq!(state.state_name(), "CollectingApprovals");
         assert!(!state.can_terminate());
-        assert!(!state.is_final());
     }
 }

@@ -13,7 +13,7 @@ use aura_coordination::{ProtocolContext, ProtocolError};
 use aura_coordination::execution::{SimulatedTimeSource, SimulationScheduler};
 use aura_crypto::Effects;
 use aura_journal::{AccountLedger, DeviceId};
-use aura_transport::Transport;
+use aura_coordination::Transport;
 use ed25519_dalek::SigningKey;
 use std::sync::Arc;
 use tokio::sync::RwLock;

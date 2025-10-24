@@ -7,14 +7,14 @@ use crate::{
     AgentError, ContextCapsule, DerivedIdentity, IdentityConfig, Result, SessionCredential,
 };
 use aura_coordination::{
-    LocalSessionRuntime, SessionCommand, SessionEffect, SessionEvent, SessionProtocolType,
+    LocalSessionRuntime, SessionCommand, SessionProtocolType,
 };
 use aura_session_types::{
-    new_session_typed_agent, AgentIdle, AgentRecoveryCompleted, AgentSessionState, DkdCompleted,
-    DkdInProgress, ProtocolFailed, RecoveryInProgress, SessionTypedAgent,
+    new_session_typed_agent, AgentIdle, AgentSessionState,
+    DkdInProgress, AgentFailed, RecoveryInProgress, SessionTypedAgent,
 };
 use aura_crypto::Effects;
-use aura_journal::{AccountId, AccountLedger, DeviceId};
+use aura_journal::AccountLedger;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;

@@ -5,8 +5,10 @@
 
 use async_trait::async_trait;
 use aura_transport::{
-    BroadcastResult, Connection, ConnectionBuilder, PresenceTicket, Result, Transport,
+    BroadcastResult, Connection, ConnectionBuilder, PresenceTicket, Result, 
+    Transport as AuraTransport,
 };
+use aura_coordination::Transport as CoordinationTransport;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -61,7 +63,7 @@ impl SimulatedTransport {
 }
 
 #[async_trait]
-impl Transport for SimulatedTransport {
+impl AuraTransport for SimulatedTransport {
     async fn connect(
         &self,
         peer_id: &str,
@@ -151,6 +153,36 @@ impl Transport for SimulatedTransport {
     async fn is_connected(&self, conn: &Connection) -> bool {
         let connections = self.connections.read().await;
         connections.contains_key(conn.peer_id())
+    }
+}
+
+/// Implementation of aura_coordination::Transport for simulator compatibility
+#[async_trait]
+impl CoordinationTransport for SimulatedTransport {
+    async fn send_message(&self, peer_id: &str, message: &[u8]) -> std::result::Result<(), String> {
+        // Convert to aura_transport format by finding the connection
+        let connections = self.connections.read().await;
+        if let Some(conn) = connections.get(peer_id) {
+            self.send(conn, message).await
+                .map_err(|e| format!("Transport error: {:?}", e))
+        } else {
+            Err(format!("Peer {} not connected", peer_id))
+        }
+    }
+    
+    async fn broadcast_message(&self, message: &[u8]) -> std::result::Result<(), String> {
+        let connections = self.connections.read().await;
+        let conn_list: Vec<Connection> = connections.values().cloned().collect();
+        drop(connections);
+        
+        self.broadcast(&conn_list, message).await
+            .map(|_| ()) // Ignore broadcast result details for coordination layer
+            .map_err(|e| format!("Broadcast error: {:?}", e))
+    }
+    
+    async fn is_peer_reachable(&self, peer_id: &str) -> bool {
+        let connections = self.connections.read().await;
+        connections.contains_key(peer_id)
     }
 }
 

@@ -1,165 +1,16 @@
-//! Session Type States for Journal/Ledger Protocol
+//! Session Type States for Journal/Ledger Protocol (Refactored with Macros)
 //!
 //! This module defines session types for the CRDT-based authenticated ledger,
 //! providing compile-time safety for event processing and ledger state management.
 
-use crate::{SessionState, ChoreographicProtocol, SessionProtocol, WitnessedTransition, RuntimeWitness};
+use crate::core::{ChoreographicProtocol, SessionProtocol, SessionState};
+use crate::witnesses::RuntimeWitness;
 use aura_journal::{AccountLedger, AccountState, Event, LedgerError, Session, SessionStatus, SessionOutcome, ProtocolType, OperationType, ParticipantId};
 use uuid::Uuid;
 use std::collections::BTreeMap;
 use std::fmt;
 
-// ========== Ledger Session States ==========
-
-/// Initial state when ledger is empty or ready for operations
-#[derive(Debug, Clone)]
-pub struct LedgerEmpty;
-
-impl SessionState for LedgerEmpty {
-    const NAME: &'static str = "LedgerEmpty";
-}
-
-/// State when events are being written to the ledger
-#[derive(Debug, Clone)]
-pub struct EventWriting;
-
-impl SessionState for EventWriting {
-    const NAME: &'static str = "EventWriting";
-}
-
-/// State when events are being validated before application
-#[derive(Debug, Clone)]
-pub struct EventValidating;
-
-impl SessionState for EventValidating {
-    const NAME: &'static str = "EventValidating";
-}
-
-/// State when events are being applied to account state
-#[derive(Debug, Clone)]
-pub struct EventApplying;
-
-impl SessionState for EventApplying {
-    const NAME: &'static str = "EventApplying";
-}
-
-/// State when events have been successfully applied
-#[derive(Debug, Clone)]
-pub struct EventsApplied;
-
-impl SessionState for EventsApplied {
-    const NAME: &'static str = "EventsApplied";
-}
-
-/// State when ledger is being compacted
-#[derive(Debug, Clone)]
-pub struct LedgerCompacting;
-
-impl SessionState for LedgerCompacting {
-    const NAME: &'static str = "LedgerCompacting";
-}
-
-/// State when ledger operations have failed
-#[derive(Debug, Clone)]
-pub struct LedgerOperationFailed;
-
-impl SessionState for LedgerOperationFailed {
-    const NAME: &'static str = "LedgerOperationFailed";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-// ========== Session Management States ==========
-
-/// State when session is being created
-#[derive(Debug, Clone)]
-pub struct SessionCreating;
-
-impl SessionState for SessionCreating {
-    const NAME: &'static str = "SessionCreating";
-}
-
-/// State when session is active and running
-#[derive(Debug, Clone)]
-pub struct SessionActive;
-
-impl SessionState for SessionActive {
-    const NAME: &'static str = "SessionActive";
-}
-
-/// State when session is being completed
-#[derive(Debug, Clone)]
-pub struct SessionCompleting;
-
-impl SessionState for SessionCompleting {
-    const NAME: &'static str = "SessionCompleting";
-}
-
-/// State when session has completed successfully
-#[derive(Debug, Clone)]
-pub struct SessionCompleted;
-
-impl SessionState for SessionCompleted {
-    const NAME: &'static str = "SessionCompleted";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-/// State when session has failed or expired
-#[derive(Debug, Clone)]
-pub struct SessionTerminated;
-
-impl SessionState for SessionTerminated {
-    const NAME: &'static str = "SessionTerminated";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-// ========== Operation Lock States ==========
-
-/// State when no operation is locked (default state)
-#[derive(Debug, Clone)]
-pub struct OperationUnlocked;
-
-impl SessionState for OperationUnlocked {
-    const NAME: &'static str = "OperationUnlocked";
-}
-
-/// State when operation lock is being requested
-#[derive(Debug, Clone)]
-pub struct LockRequesting;
-
-impl SessionState for LockRequesting {
-    const NAME: &'static str = "LockRequesting";
-}
-
-/// State when operation is locked and exclusive access granted
-#[derive(Debug, Clone)]
-pub struct JournalOperationLocked;
-
-impl SessionState for JournalOperationLocked {
-    const NAME: &'static str = "JournalOperationLocked";
-}
-
-/// State when operation lock is being released
-#[derive(Debug, Clone)]
-pub struct LockReleasing;
-
-impl SessionState for LockReleasing {
-    const NAME: &'static str = "LockReleasing";
-}
-
-/// State when lock operation has failed
-#[derive(Debug, Clone)]
-pub struct LockFailed;
-
-impl SessionState for LockFailed {
-    const NAME: &'static str = "LockFailed";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-// ========== Journal Protocol Wrapper ==========
+// ========== Journal Protocol Core ==========
 
 /// Core journal protocol data without session state
 pub struct JournalProtocolCore {
@@ -249,8 +100,81 @@ impl Clone for JournalProtocolCore {
     }
 }
 
+// ========== Error Type ==========
+
+#[derive(Debug, thiserror::Error)]
+pub enum JournalSessionError {
+    #[error("Journal protocol error: {0}")]
+    ProtocolError(String),
+    #[error("Invalid operation for current journal state")]
+    InvalidOperation,
+    #[error("Event validation failed: {0}")]
+    EventValidationFailed(String),
+    #[error("Event application failed: {0}")]
+    EventApplicationFailed(String),
+    #[error("Session management error: {0}")]
+    SessionError(String),
+    #[error("Lock operation failed: {0}")]
+    LockOperationFailed(String),
+    #[error("Compaction failed: {0}")]
+    CompactionFailed(String),
+    #[error("Ledger error: {0}")]
+    LedgerError(String),
+}
+
+// ========== Protocol Definition using Macros ==========
+
+define_protocol! {
+    Protocol: JournalProtocol,
+    Core: JournalProtocolCore,
+    Error: JournalSessionError,
+    Union: JournalProtocolState,
+
+    States {
+        // Ledger operation states
+        LedgerEmpty => AccountState,
+        EventWriting => AccountState,
+        EventValidating => AccountState,
+        EventApplying => AccountState,
+        EventsApplied => AccountState,
+        LedgerCompacting => AccountState,
+        LedgerOperationFailed @ final => AccountState,
+        
+        // Session management states
+        SessionCreating => Session,
+        SessionActive => Session,
+        SessionCompleting => Session,
+        SessionCompleted @ final => Session,
+        SessionTerminated @ final => Session,
+        
+        // Operation lock states
+        OperationUnlocked => (),
+        LockRequesting => (),
+        JournalOperationLocked => (),
+        LockReleasing => (),
+        LockFailed @ final => (),
+    }
+
+    Extract {
+        session_id: |core| {
+            let account_hash = blake3::hash(core.account_id.to_string().as_bytes());
+            Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
+        },
+        device_id: |core| {
+            core.lock_requests.last()
+                .map(|req| req.device_id)
+                .unwrap_or_else(|| {
+                    let effects = aura_crypto::Effects::test();
+                    aura_journal::DeviceId::new_with_effects(&effects)
+                })
+        },
+    }
+}
+
+// ========== Protocol Type Alias ==========
+
 /// Session-typed journal protocol wrapper
-pub type SessionTypedJournal<S> = ChoreographicProtocol<JournalProtocolCore, S>;
+pub type JournalProtocol<S> = ChoreographicProtocol<JournalProtocolCore, S>;
 
 // ========== Runtime Witnesses for Journal Operations ==========
 
@@ -512,747 +436,111 @@ impl RuntimeWitness for JournalOperationFailure {
     }
 }
 
-// ========== Concrete Error Type ==========
+// ========== Protocol Methods ==========
 
-#[derive(Debug, thiserror::Error)]
-pub enum JournalSessionError {
-    #[error("Journal protocol error: {0}")]
-    ProtocolError(String),
-    #[error("Invalid operation for current journal state")]
-    InvalidOperation,
-    #[error("Event validation failed: {0}")]
-    EventValidationFailed(String),
-    #[error("Event application failed: {0}")]
-    EventApplicationFailed(String),
-    #[error("Session management error: {0}")]
-    SessionError(String),
-    #[error("Lock operation failed: {0}")]
-    LockOperationFailed(String),
-    #[error("Compaction failed: {0}")]
-    CompactionFailed(String),
-    #[error("Ledger error: {0}")]
-    LedgerError(String),
-}
+impl<S: SessionState> ChoreographicProtocol<JournalProtocolCore, S> {
+    /// Get reference to the protocol core
+    pub fn core(&self) -> &JournalProtocolCore {
+        &self.inner
+    }
 
-// ========== SessionProtocol Implementations ==========
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, LedgerEmpty> {
-    type State = LedgerEmpty;
-    type Output = AccountState;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        // Use account_id hash as session identifier
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        // Use account_id as protocol identifier for journal protocols
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        // Get device_id from the most recent lock request, or derive from account_id
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, EventWriting> {
-    type State = EventWriting;
-    type Output = AccountState;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, EventValidating> {
-    type State = EventValidating;
-    type Output = AccountState;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, EventApplying> {
-    type State = EventApplying;
-    type Output = AccountState;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, EventsApplied> {
-    type State = EventsApplied;
-    type Output = AccountState;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, LedgerCompacting> {
-    type State = LedgerCompacting;
-    type Output = AccountState;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, LedgerOperationFailed> {
-    type State = LedgerOperationFailed;
-    type Output = AccountState;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-// Additional SessionProtocol implementations for session management states
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, SessionCreating> {
-    type State = SessionCreating;
-    type Output = Session;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, SessionActive> {
-    type State = SessionActive;
-    type Output = Session;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, SessionCompleting> {
-    type State = SessionCompleting;
-    type Output = Session;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, SessionCompleted> {
-    type State = SessionCompleted;
-    type Output = Session;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, SessionTerminated> {
-    type State = SessionTerminated;
-    type Output = Session;
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-// SessionProtocol implementations for operation lock states
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, OperationUnlocked> {
-    type State = OperationUnlocked;
-    type Output = ();
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, LockRequesting> {
-    type State = LockRequesting;
-    type Output = ();
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, JournalOperationLocked> {
-    type State = JournalOperationLocked;
-    type Output = ();
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, LockReleasing> {
-    type State = LockReleasing;
-    type Output = ();
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<JournalProtocolCore, LockFailed> {
-    type State = LockFailed;
-    type Output = ();
-    type Error = JournalSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        let account_hash = blake3::hash(self.inner.account_id.to_string().as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        let account_hash = blake3::hash(format!("journal-{}", self.inner.account_id).as_bytes());
-        Uuid::from_bytes(account_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.lock_requests.last()
-            .map(|req| req.device_id)
-            .unwrap_or_else(|| {
-                let effects = aura_crypto::Effects::test();
-                aura_journal::DeviceId::new_with_effects(&effects)
-            })
+    /// Get the account ID
+    pub fn account_id(&self) -> aura_journal::AccountId {
+        self.core().account_id
     }
 }
 
 // ========== State Transitions ==========
 
 /// Transition from LedgerEmpty to EventWriting (when events are queued)
-impl WitnessedTransition<LedgerEmpty, EventWriting> 
-    for ChoreographicProtocol<JournalProtocolCore, LedgerEmpty> 
-{
-    type Witness = Vec<Event>;
-    type Target = ChoreographicProtocol<JournalProtocolCore, EventWriting>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, LedgerEmpty> {
     /// Begin writing events to the ledger
-    fn transition_with_witness(
+    pub fn transition_with_events(
         mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+        events: Vec<Event>
+    ) -> ChoreographicProtocol<JournalProtocolCore, EventWriting> {
         // Store pending events
-        self.inner.pending_events = witness;
-        self.transition_to()
+        self.inner.pending_events = events;
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from EventWriting to EventValidating (with events to validate)
-impl WitnessedTransition<EventWriting, EventValidating> 
-    for ChoreographicProtocol<JournalProtocolCore, EventWriting> 
-{
-    type Witness = Vec<Event>;
-    type Target = ChoreographicProtocol<JournalProtocolCore, EventValidating>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, EventWriting> {
     /// Begin validating written events
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
-        self.transition_to()
+    pub fn begin_validation(self) -> ChoreographicProtocol<JournalProtocolCore, EventValidating> {
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from EventValidating to EventApplying (requires EventsValidated witness)
-impl WitnessedTransition<EventValidating, EventApplying> 
-    for ChoreographicProtocol<JournalProtocolCore, EventValidating> 
-{
-    type Witness = EventsValidated;
-    type Target = ChoreographicProtocol<JournalProtocolCore, EventApplying>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, EventValidating> {
     /// Begin applying validated events
-    fn transition_with_witness(
+    pub fn transition_with_validated_events(
         self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
-        self.transition_to()
+        _witness: EventsValidated
+    ) -> ChoreographicProtocol<JournalProtocolCore, EventApplying> {
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from EventApplying to EventsApplied (requires EventsAppliedSuccessfully witness)
-impl WitnessedTransition<EventApplying, EventsApplied> 
-    for ChoreographicProtocol<JournalProtocolCore, EventApplying> 
-{
-    type Witness = EventsAppliedSuccessfully;
-    type Target = ChoreographicProtocol<JournalProtocolCore, EventsApplied>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, EventApplying> {
     /// Complete event application
-    fn transition_with_witness(
+    pub fn transition_with_applied_events(
         mut self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+        _witness: EventsAppliedSuccessfully
+    ) -> ChoreographicProtocol<JournalProtocolCore, EventsApplied> {
         // Clear pending events as they're now applied
         self.inner.pending_events.clear();
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from EventsApplied back to LedgerEmpty (ready for next batch)
-impl WitnessedTransition<EventsApplied, LedgerEmpty> 
-    for ChoreographicProtocol<JournalProtocolCore, EventsApplied> 
-{
-    type Witness = ();
-    type Target = ChoreographicProtocol<JournalProtocolCore, LedgerEmpty>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, EventsApplied> {
     /// Return to empty state ready for next operations
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
-        self.transition_to()
+    pub fn reset_to_empty(self) -> ChoreographicProtocol<JournalProtocolCore, LedgerEmpty> {
+        ChoreographicProtocol::transition_to(self)
     }
-}
-
-/// Transition from EventsApplied to LedgerCompacting (requires CompactionReady witness)
-impl WitnessedTransition<EventsApplied, LedgerCompacting> 
-    for ChoreographicProtocol<JournalProtocolCore, EventsApplied> 
-{
-    type Witness = CompactionReady;
-    type Target = ChoreographicProtocol<JournalProtocolCore, LedgerCompacting>;
     
     /// Begin ledger compaction
-    fn transition_with_witness(
+    pub fn transition_to_compaction(
         mut self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+        _witness: CompactionReady
+    ) -> ChoreographicProtocol<JournalProtocolCore, LedgerCompacting> {
         self.inner.compaction_pending = true;
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from LedgerCompacting back to LedgerEmpty (compaction complete)
-impl WitnessedTransition<LedgerCompacting, LedgerEmpty> 
-    for ChoreographicProtocol<JournalProtocolCore, LedgerCompacting> 
-{
-    type Witness = ();
-    type Target = ChoreographicProtocol<JournalProtocolCore, LedgerEmpty>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, LedgerCompacting> {
     /// Complete compaction and return to empty state
-    fn transition_with_witness(
-        mut self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+    pub fn complete_compaction(mut self) -> ChoreographicProtocol<JournalProtocolCore, LedgerEmpty> {
         self.inner.compaction_pending = false;
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
-/// Transition to LedgerOperationFailed from any state (requires JournalOperationFailure witness)
-impl<S: SessionState> WitnessedTransition<S, LedgerOperationFailed> 
-    for ChoreographicProtocol<JournalProtocolCore, S> 
-where
-    Self: SessionProtocol<State = S, Output = (), Error = JournalSessionError>,
-{
-    type Witness = JournalOperationFailure;
-    type Target = ChoreographicProtocol<JournalProtocolCore, LedgerOperationFailed>;
-    
+/// Transition to LedgerOperationFailed from any state
+impl<S: SessionState> ChoreographicProtocol<JournalProtocolCore, S> {
     /// Fail journal operations due to error
-    fn transition_with_witness(
+    pub fn fail_with_error(
         self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
-        self.transition_to()
+        _witness: JournalOperationFailure
+    ) -> ChoreographicProtocol<JournalProtocolCore, LedgerOperationFailed> {
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 // Session management transitions
-/// Transition from SessionCreating to SessionActive (requires SessionCreated witness)
-impl WitnessedTransition<SessionCreating, SessionActive> 
-    for ChoreographicProtocol<JournalProtocolCore, SessionCreating> 
-{
-    type Witness = SessionCreated;
-    type Target = ChoreographicProtocol<JournalProtocolCore, SessionActive>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, SessionCreating> {
     /// Activate the created session
-    fn transition_with_witness(
+    pub fn transition_with_created_session(
         mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+        witness: SessionCreated
+    ) -> ChoreographicProtocol<JournalProtocolCore, SessionActive> {
         // Add session to active sessions
         let session = Session::new(
             aura_journal::SessionId(witness.session_id),
@@ -1263,155 +551,99 @@ impl WitnessedTransition<SessionCreating, SessionActive>
             witness.started_at,
         );
         self.inner.active_sessions.insert(witness.session_id, session);
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
-/// Transition from SessionActive to SessionCompleting (requires SessionCompletionReady witness)
-impl WitnessedTransition<SessionActive, SessionCompleting> 
-    for ChoreographicProtocol<JournalProtocolCore, SessionActive> 
-{
-    type Witness = SessionCompletionReady;
-    type Target = ChoreographicProtocol<JournalProtocolCore, SessionCompleting>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, SessionActive> {
     /// Begin session completion
-    fn transition_with_witness(
+    pub fn begin_completion(
         self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
-        self.transition_to()
+        _witness: SessionCompletionReady
+    ) -> ChoreographicProtocol<JournalProtocolCore, SessionCompleting> {
+        ChoreographicProtocol::transition_to(self)
     }
-}
-
-/// Transition from SessionCompleting to SessionCompleted (completion successful)
-impl WitnessedTransition<SessionCompleting, SessionCompleted> 
-    for ChoreographicProtocol<JournalProtocolCore, SessionCompleting> 
-{
-    type Witness = SessionOutcome;
-    type Target = ChoreographicProtocol<JournalProtocolCore, SessionCompleted>;
-    
-    /// Complete the session
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
-        // Update session status in active sessions
-        for session in self.inner.active_sessions.values_mut() {
-            if !session.is_terminal() {
-                session.complete(witness, 0); // Would use actual timestamp
-                break;
-            }
-        }
-        self.transition_to()
-    }
-}
-
-/// Transition from SessionActive to SessionTerminated (session failed/expired)
-impl WitnessedTransition<SessionActive, SessionTerminated> 
-    for ChoreographicProtocol<JournalProtocolCore, SessionActive> 
-{
-    type Witness = String;
-    type Target = ChoreographicProtocol<JournalProtocolCore, SessionTerminated>;
     
     /// Terminate the session
-    fn transition_with_witness(
+    pub fn terminate_session(
         mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+        reason: String
+    ) -> ChoreographicProtocol<JournalProtocolCore, SessionTerminated> {
         // Mark session as failed
         for session in self.inner.active_sessions.values_mut() {
             if !session.is_terminal() {
-                session.abort(&witness, None, 0); // Would use actual timestamp
+                session.abort(&reason, None, 0); // Would use actual timestamp
                 break;
             }
         }
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
+    }
+}
+
+impl ChoreographicProtocol<JournalProtocolCore, SessionCompleting> {
+    /// Complete the session
+    pub fn complete_session(
+        mut self, 
+        outcome: SessionOutcome
+    ) -> ChoreographicProtocol<JournalProtocolCore, SessionCompleted> {
+        // Update session status in active sessions
+        for session in self.inner.active_sessions.values_mut() {
+            if !session.is_terminal() {
+                session.complete(outcome, 0); // Would use actual timestamp
+                break;
+            }
+        }
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 // Operation lock transitions
-/// Transition from OperationUnlocked to LockRequesting (when lock is requested)
-impl WitnessedTransition<OperationUnlocked, LockRequesting> 
-    for ChoreographicProtocol<JournalProtocolCore, OperationUnlocked> 
-{
-    type Witness = LockRequest;
-    type Target = ChoreographicProtocol<JournalProtocolCore, LockRequesting>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, OperationUnlocked> {
     /// Begin lock request
-    fn transition_with_witness(
+    pub fn request_operation_lock(
         mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
-        self.inner.lock_requests.push(witness);
-        self.transition_to()
+        request: LockRequest
+    ) -> ChoreographicProtocol<JournalProtocolCore, LockRequesting> {
+        self.inner.lock_requests.push(request);
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
-/// Transition from LockRequesting to JournalOperationLocked (requires JournalLockAcquired witness)
-impl WitnessedTransition<LockRequesting, JournalOperationLocked> 
-    for ChoreographicProtocol<JournalProtocolCore, LockRequesting> 
-{
-    type Witness = JournalLockAcquired;
-    type Target = ChoreographicProtocol<JournalProtocolCore, JournalOperationLocked>;
-    
+impl ChoreographicProtocol<JournalProtocolCore, LockRequesting> {
     /// Acquire the operation lock
-    fn transition_with_witness(
+    pub fn acquire_lock(
         mut self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+        _witness: JournalLockAcquired
+    ) -> ChoreographicProtocol<JournalProtocolCore, JournalOperationLocked> {
         // Clear pending lock requests
         self.inner.lock_requests.clear();
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
-}
-
-/// Transition from JournalOperationLocked to LockReleasing (when releasing lock)
-impl WitnessedTransition<JournalOperationLocked, LockReleasing> 
-    for ChoreographicProtocol<JournalProtocolCore, JournalOperationLocked> 
-{
-    type Witness = ();
-    type Target = ChoreographicProtocol<JournalProtocolCore, LockReleasing>;
-    
-    /// Begin lock release
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
-        self.transition_to()
-    }
-}
-
-/// Transition from LockReleasing to OperationUnlocked (requires LockReleased witness)
-impl WitnessedTransition<LockReleasing, OperationUnlocked> 
-    for ChoreographicProtocol<JournalProtocolCore, LockReleasing> 
-{
-    type Witness = LockReleased;
-    type Target = ChoreographicProtocol<JournalProtocolCore, OperationUnlocked>;
-    
-    /// Complete lock release
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
-        self.transition_to()
-    }
-}
-
-/// Transition to LockFailed from lock states (requires failure reason)
-impl<S: SessionState> WitnessedTransition<S, LockFailed> 
-    for ChoreographicProtocol<JournalProtocolCore, S> 
-    where Self: SessionProtocol<State = S, Output = (), Error = JournalSessionError>
-{
-    type Witness = String;
-    type Target = ChoreographicProtocol<JournalProtocolCore, LockFailed>;
     
     /// Fail lock operation
-    fn transition_with_witness(
+    pub fn fail_lock(
         mut self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+        _reason: String
+    ) -> ChoreographicProtocol<JournalProtocolCore, LockFailed> {
         self.inner.lock_requests.clear();
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
+    }
+}
+
+impl ChoreographicProtocol<JournalProtocolCore, JournalOperationLocked> {
+    /// Begin lock release
+    pub fn begin_release(self) -> ChoreographicProtocol<JournalProtocolCore, LockReleasing> {
+        ChoreographicProtocol::transition_to(self)
+    }
+}
+
+impl ChoreographicProtocol<JournalProtocolCore, LockReleasing> {
+    /// Complete lock release
+    pub fn complete_release(
+        self, 
+        _witness: LockReleased
+    ) -> ChoreographicProtocol<JournalProtocolCore, OperationUnlocked> {
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
@@ -1446,7 +678,6 @@ impl ChoreographicProtocol<JournalProtocolCore, LedgerEmpty> {
             current_epoch: self.inner.ledger.lamport_clock(),
         }
     }
-    
 }
 
 /// Operations only available in EventValidating state
@@ -1625,8 +856,6 @@ impl ChoreographicProtocol<JournalProtocolCore, JournalOperationLocked> {
     }
 }
 
-// ========== Helper Types ==========
-
 // ========== Factory Functions ==========
 
 /// Create a new session-typed journal protocol
@@ -1645,133 +874,18 @@ pub fn rehydrate_journal_session(
     has_pending_events: bool,
     has_pending_locks: bool,
     is_compacting: bool,
-) -> JournalSessionState {
+) -> JournalProtocolState {
     let core = JournalProtocolCore::new(account_id, ledger);
     
     // Determine state based on ledger condition
     if is_compacting {
-        JournalSessionState::LedgerCompacting(ChoreographicProtocol::new(core))
+        JournalProtocolState::LedgerCompacting(ChoreographicProtocol::new(core))
     } else if has_pending_events {
-        JournalSessionState::EventWriting(ChoreographicProtocol::new(core))
+        JournalProtocolState::EventWriting(ChoreographicProtocol::new(core))
     } else if has_pending_locks {
-        JournalSessionState::LockRequesting(ChoreographicProtocol::new(core))
+        JournalProtocolState::LockRequesting(ChoreographicProtocol::new(core))
     } else {
-        JournalSessionState::LedgerEmpty(ChoreographicProtocol::new(core))
-    }
-}
-
-/// Enum representing the possible states of a journal session
-pub enum JournalSessionState {
-    LedgerEmpty(ChoreographicProtocol<JournalProtocolCore, LedgerEmpty>),
-    EventWriting(ChoreographicProtocol<JournalProtocolCore, EventWriting>),
-    EventValidating(ChoreographicProtocol<JournalProtocolCore, EventValidating>),
-    EventApplying(ChoreographicProtocol<JournalProtocolCore, EventApplying>),
-    EventsApplied(ChoreographicProtocol<JournalProtocolCore, EventsApplied>),
-    LedgerCompacting(ChoreographicProtocol<JournalProtocolCore, LedgerCompacting>),
-    LedgerOperationFailed(ChoreographicProtocol<JournalProtocolCore, LedgerOperationFailed>),
-    SessionCreating(ChoreographicProtocol<JournalProtocolCore, SessionCreating>),
-    SessionActive(ChoreographicProtocol<JournalProtocolCore, SessionActive>),
-    SessionCompleting(ChoreographicProtocol<JournalProtocolCore, SessionCompleting>),
-    SessionCompleted(ChoreographicProtocol<JournalProtocolCore, SessionCompleted>),
-    SessionTerminated(ChoreographicProtocol<JournalProtocolCore, SessionTerminated>),
-    OperationUnlocked(ChoreographicProtocol<JournalProtocolCore, OperationUnlocked>),
-    LockRequesting(ChoreographicProtocol<JournalProtocolCore, LockRequesting>),
-    JournalOperationLocked(ChoreographicProtocol<JournalProtocolCore, JournalOperationLocked>),
-    LockReleasing(ChoreographicProtocol<JournalProtocolCore, LockReleasing>),
-    LockFailed(ChoreographicProtocol<JournalProtocolCore, LockFailed>),
-}
-
-impl JournalSessionState {
-    /// Get the current state name
-    pub fn state_name(&self) -> &'static str {
-        match self {
-            JournalSessionState::LedgerEmpty(s) => s.current_state_name(),
-            JournalSessionState::EventWriting(s) => s.current_state_name(),
-            JournalSessionState::EventValidating(s) => s.current_state_name(),
-            JournalSessionState::EventApplying(s) => s.current_state_name(),
-            JournalSessionState::EventsApplied(s) => s.current_state_name(),
-            JournalSessionState::LedgerCompacting(s) => s.current_state_name(),
-            JournalSessionState::LedgerOperationFailed(s) => s.current_state_name(),
-            JournalSessionState::SessionCreating(s) => s.current_state_name(),
-            JournalSessionState::SessionActive(s) => s.current_state_name(),
-            JournalSessionState::SessionCompleting(s) => s.current_state_name(),
-            JournalSessionState::SessionCompleted(s) => s.current_state_name(),
-            JournalSessionState::SessionTerminated(s) => s.current_state_name(),
-            JournalSessionState::OperationUnlocked(s) => s.current_state_name(),
-            JournalSessionState::LockRequesting(s) => s.current_state_name(),
-            JournalSessionState::JournalOperationLocked(s) => s.current_state_name(),
-            JournalSessionState::LockReleasing(s) => s.current_state_name(),
-            JournalSessionState::LockFailed(s) => s.current_state_name(),
-        }
-    }
-    
-    /// Check if the session can be terminated
-    pub fn can_terminate(&self) -> bool {
-        match self {
-            JournalSessionState::LedgerEmpty(s) => s.can_terminate(),
-            JournalSessionState::EventWriting(s) => s.can_terminate(),
-            JournalSessionState::EventValidating(s) => s.can_terminate(),
-            JournalSessionState::EventApplying(s) => s.can_terminate(),
-            JournalSessionState::EventsApplied(s) => s.can_terminate(),
-            JournalSessionState::LedgerCompacting(s) => s.can_terminate(),
-            JournalSessionState::LedgerOperationFailed(s) => s.can_terminate(),
-            JournalSessionState::SessionCreating(s) => s.can_terminate(),
-            JournalSessionState::SessionActive(s) => s.can_terminate(),
-            JournalSessionState::SessionCompleting(s) => s.can_terminate(),
-            JournalSessionState::SessionCompleted(s) => s.can_terminate(),
-            JournalSessionState::SessionTerminated(s) => s.can_terminate(),
-            JournalSessionState::OperationUnlocked(s) => s.can_terminate(),
-            JournalSessionState::LockRequesting(s) => s.can_terminate(),
-            JournalSessionState::JournalOperationLocked(s) => s.can_terminate(),
-            JournalSessionState::LockReleasing(s) => s.can_terminate(),
-            JournalSessionState::LockFailed(s) => s.can_terminate(),
-        }
-    }
-    
-    /// Check if the session is in a final state
-    pub fn is_final(&self) -> bool {
-        match self {
-            JournalSessionState::LedgerEmpty(s) => s.is_final(),
-            JournalSessionState::EventWriting(s) => s.is_final(),
-            JournalSessionState::EventValidating(s) => s.is_final(),
-            JournalSessionState::EventApplying(s) => s.is_final(),
-            JournalSessionState::EventsApplied(s) => s.is_final(),
-            JournalSessionState::LedgerCompacting(s) => s.is_final(),
-            JournalSessionState::LedgerOperationFailed(s) => s.is_final(),
-            JournalSessionState::SessionCreating(s) => s.is_final(),
-            JournalSessionState::SessionActive(s) => s.is_final(),
-            JournalSessionState::SessionCompleting(s) => s.is_final(),
-            JournalSessionState::SessionCompleted(s) => s.is_final(),
-            JournalSessionState::SessionTerminated(s) => s.is_final(),
-            JournalSessionState::OperationUnlocked(s) => s.is_final(),
-            JournalSessionState::LockRequesting(s) => s.is_final(),
-            JournalSessionState::JournalOperationLocked(s) => s.is_final(),
-            JournalSessionState::LockReleasing(s) => s.is_final(),
-            JournalSessionState::LockFailed(s) => s.is_final(),
-        }
-    }
-    
-    /// Get the account ID
-    pub fn account_id(&self) -> aura_journal::AccountId {
-        match self {
-            JournalSessionState::LedgerEmpty(s) => s.inner.account_id,
-            JournalSessionState::EventWriting(s) => s.inner.account_id,
-            JournalSessionState::EventValidating(s) => s.inner.account_id,
-            JournalSessionState::EventApplying(s) => s.inner.account_id,
-            JournalSessionState::EventsApplied(s) => s.inner.account_id,
-            JournalSessionState::LedgerCompacting(s) => s.inner.account_id,
-            JournalSessionState::LedgerOperationFailed(s) => s.inner.account_id,
-            JournalSessionState::SessionCreating(s) => s.inner.account_id,
-            JournalSessionState::SessionActive(s) => s.inner.account_id,
-            JournalSessionState::SessionCompleting(s) => s.inner.account_id,
-            JournalSessionState::SessionCompleted(s) => s.inner.account_id,
-            JournalSessionState::SessionTerminated(s) => s.inner.account_id,
-            JournalSessionState::OperationUnlocked(s) => s.inner.account_id,
-            JournalSessionState::LockRequesting(s) => s.inner.account_id,
-            JournalSessionState::JournalOperationLocked(s) => s.inner.account_id,
-            JournalSessionState::LockReleasing(s) => s.inner.account_id,
-            JournalSessionState::LockFailed(s) => s.inner.account_id,
-        }
+        JournalProtocolState::LedgerEmpty(ChoreographicProtocol::new(core))
     }
 }
 
@@ -1812,9 +926,8 @@ mod tests {
         // Create a new journal session
         let journal_session = new_session_typed_journal(account_id, ledger);
         
-        assert_eq!(journal_session.current_state_name(), "LedgerEmpty");
+        assert_eq!(journal_session.state_name(), "LedgerEmpty");
         assert!(!journal_session.can_terminate());
-        assert!(!journal_session.is_final());
         assert_eq!(journal_session.inner.account_id, account_id);
     }
     
@@ -1845,16 +958,16 @@ mod tests {
         
         // Create session and test transitions
         let session = new_session_typed_journal(account_id, ledger);
-        assert_eq!(session.current_state_name(), "LedgerEmpty");
+        assert_eq!(session.state_name(), "LedgerEmpty");
         
         // Transition to EventWriting with events
         let events = vec![]; // Empty for now, would need proper Event construction
-        let writing_session = session.transition_with_witness(events);
-        assert_eq!(writing_session.current_state_name(), "EventWriting");
+        let writing_session = session.transition_with_events(events);
+        assert_eq!(writing_session.state_name(), "EventWriting");
         
         // Can transition to validation
-        let validating_session = writing_session.transition_with_witness(vec![]);
-        assert_eq!(validating_session.current_state_name(), "EventValidating");
+        let validating_session = writing_session.begin_validation();
+        assert_eq!(validating_session.state_name(), "EventValidating");
     }
     
     #[test]
@@ -1899,7 +1012,6 @@ mod tests {
         let state = rehydrate_journal_session(account_id, ledger, false, false, false);
         assert_eq!(state.state_name(), "LedgerEmpty");
         assert!(!state.can_terminate());
-        assert!(!state.is_final());
         assert_eq!(state.account_id(), account_id);
     }
 }

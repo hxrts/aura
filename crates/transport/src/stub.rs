@@ -325,15 +325,17 @@ mod tests {
 // Implementation of coordination's Transport trait for StubTransport
 // This allows coordination protocols to use the transport layer
 #[async_trait]
-impl aura_coordination::Transport for StubTransport {
-    async fn send_message(&self, peer_id: &str, message: &[u8]) -> Result<(), String> {
+impl aura_coordination::execution::context::Transport for StubTransport {
+    async fn send_message(&self, peer_id: &str, message: &[u8]) -> std::result::Result<(), String> {
         // Create a dummy ticket for the connection
         let dummy_ticket = PresenceTicket {
             device_id: uuid::Uuid::new_v4(),
+            account_id: uuid::Uuid::new_v4(),
             session_epoch: 1,
-            issued_at_ms: 0,
-            expires_at_ms: u64::MAX,
-            signature: vec![0u8; 64],
+            issued_at: 0,
+            expires_at: u64::MAX,
+            capabilities: vec!["read".to_string(), "write".to_string()],
+            signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]),
         };
         
         // Connect and send message
@@ -345,18 +347,15 @@ impl aura_coordination::Transport for StubTransport {
         }
     }
     
-    async fn broadcast_message(&self, message: &[u8]) -> Result<(), String> {
-        // Create dummy ticket for broadcast
-        let dummy_ticket = PresenceTicket {
-            device_id: uuid::Uuid::new_v4(),
-            session_epoch: 1,
-            issued_at_ms: 0,
-            expires_at_ms: u64::MAX,
-            signature: vec![0u8; 64],
+    async fn broadcast_message(&self, message: &[u8]) -> std::result::Result<(), String> {
+        // Get all active connections for broadcast
+        let connections: Vec<Connection> = {
+            let connections_map = self.connections.lock().unwrap();
+            connections_map.values().cloned().collect()
         };
         
         // Broadcast to all known connections
-        match self.broadcast(&dummy_ticket, message).await {
+        match self.broadcast(&connections, message).await {
             Ok(_) => Ok(()),
             Err(e) => Err(e.to_string())
         }

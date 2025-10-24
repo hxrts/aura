@@ -925,18 +925,6 @@ impl RuntimeWitness for crate::protocols::transport::BroadcastContext {
 }
 
 /// RuntimeWitness implementation for FrostSigningContext
-impl RuntimeWitness for crate::protocols::frost::FrostSigningContext {
-    type Evidence = crate::protocols::frost::FrostSigningContext;
-    type Config = ();
-    
-    fn verify(evidence: crate::protocols::frost::FrostSigningContext, _config: ()) -> Option<Self> {
-        Some(evidence)
-    }
-    
-    fn description(&self) -> &'static str {
-        "FROST signing context provided"
-    }
-}
 
 /// RuntimeWitness implementation for SigningCommitment
 impl RuntimeWitness for aura_crypto::SigningCommitment {
@@ -1050,30 +1038,3 @@ impl RuntimeWitness for crate::protocols::journal::LockRequest {
     }
 }
 
-/// RuntimeWitness implementation for AccountInitContext
-impl RuntimeWitness for crate::protocols::cli::AccountInitContext {
-    type Evidence = crate::protocols::cli::AccountInitContext;
-    type Config = ();
-    
-    fn verify(evidence: crate::protocols::cli::AccountInitContext, _config: ()) -> Option<Self> {
-        Some(evidence)
-    }
-    
-    fn description(&self) -> &'static str {
-        "Account initialization context provided"
-    }
-}
-
-/// RuntimeWitness implementation for CliCommandContext
-impl RuntimeWitness for crate::protocols::cli::CliCommandContext {
-    type Evidence = crate::protocols::cli::CliCommandContext;
-    type Config = ();
-    
-    fn verify(evidence: crate::protocols::cli::CliCommandContext, _config: ()) -> Option<Self> {
-        Some(evidence)
-    }
-    
-    fn description(&self) -> &'static str {
-        "CLI command context provided"
-    }
-}

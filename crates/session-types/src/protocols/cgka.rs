@@ -1,11 +1,10 @@
-//! Session Type States for CGKA (Continuous Group Key Agreement) Protocol
+//! Session Type States for CGKA (Continuous Group Key Agreement) Protocol (Refactored with Macros)
 //!
 //! This module defines session types for the BeeKEM CGKA protocol,
 //! providing compile-time safety for group state management and operation validation.
 
-use crate::{
-    ChoreographicProtocol, RuntimeWitness, SessionProtocol, SessionState, WitnessedTransition,
-};
+use crate::core::{ChoreographicProtocol, SessionProtocol, SessionState, WitnessedTransition};
+use crate::{RuntimeWitness, define_protocol};
 use aura_groups::{
     ApplicationSecret, BeeKemTree, CgkaError, CgkaState, Epoch, KeyhiveCgkaOperation, MemberId,
     OperationId, RosterDelta, TreeUpdate,
@@ -13,134 +12,7 @@ use aura_groups::{
 use aura_journal::{Event, EventType};
 use uuid::Uuid;
 
-// ========== CGKA Group Session States ==========
-
-/// Initial state when CGKA group is being set up
-#[derive(Debug, Clone)]
-pub struct CgkaGroupInitialized;
-
-impl SessionState for CgkaGroupInitialized {
-    const NAME: &'static str = "CgkaGroupInitialized";
-}
-
-/// State when group membership is being changed (add/remove members)
-#[derive(Debug, Clone)]
-pub struct GroupMembershipChange;
-
-impl SessionState for GroupMembershipChange {
-    const NAME: &'static str = "GroupMembershipChange";
-}
-
-/// State when transitioning between epochs
-#[derive(Debug, Clone)]
-pub struct EpochTransition;
-
-impl SessionState for EpochTransition {
-    const NAME: &'static str = "EpochTransition";
-}
-
-/// State when group is stable and ready for operations
-#[derive(Debug, Clone)]
-pub struct GroupStable;
-
-impl SessionState for GroupStable {
-    const NAME: &'static str = "GroupStable";
-}
-
-/// State when group operation is failed and needs recovery
-#[derive(Debug, Clone)]
-pub struct GroupOperationFailed;
-
-impl SessionState for GroupOperationFailed {
-    const NAME: &'static str = "GroupOperationFailed";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-// ========== CGKA Operation Session States ==========
-
-/// State when operation is pending validation
-#[derive(Debug, Clone)]
-pub struct OperationPending;
-
-impl SessionState for OperationPending {
-    const NAME: &'static str = "OperationPending";
-}
-
-/// State when operation is being validated
-#[derive(Debug, Clone)]
-pub struct OperationValidating;
-
-impl SessionState for OperationValidating {
-    const NAME: &'static str = "OperationValidating";
-}
-
-/// State when operation is being applied to state
-#[derive(Debug, Clone)]
-pub struct OperationApplying;
-
-impl SessionState for OperationApplying {
-    const NAME: &'static str = "OperationApplying";
-}
-
-/// State when operation has been successfully applied
-#[derive(Debug, Clone)]
-pub struct OperationApplied;
-
-impl SessionState for OperationApplied {
-    const NAME: &'static str = "OperationApplied";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-/// State when operation has failed
-#[derive(Debug, Clone)]
-pub struct OperationFailed;
-
-impl SessionState for OperationFailed {
-    const NAME: &'static str = "OperationFailed";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-// ========== BeeKEM Tree Session States ==========
-
-/// State when tree is being built or initialized
-#[derive(Debug, Clone)]
-pub struct TreeBuilding;
-
-impl SessionState for TreeBuilding {
-    const NAME: &'static str = "TreeBuilding";
-}
-
-/// State when tree updates are being applied
-#[derive(Debug, Clone)]
-pub struct TreeUpdating;
-
-impl SessionState for TreeUpdating {
-    const NAME: &'static str = "TreeUpdating";
-}
-
-/// State when tree is complete and ready
-#[derive(Debug, Clone)]
-pub struct TreeComplete;
-
-impl SessionState for TreeComplete {
-    const NAME: &'static str = "TreeComplete";
-    const CAN_TERMINATE: bool = true;
-}
-
-/// State when tree operation has failed
-#[derive(Debug, Clone)]
-pub struct TreeFailed;
-
-impl SessionState for TreeFailed {
-    const NAME: &'static str = "TreeFailed";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-// ========== CGKA Protocol Wrapper ==========
+// ========== CGKA Protocol Core ==========
 
 /// Core CGKA protocol data without session state
 #[derive(Debug, Clone)]
@@ -165,6 +37,62 @@ impl CgkaProtocolCore {
         }
     }
 }
+
+// ========== Error Type ==========
+
+#[derive(Debug, thiserror::Error)]
+pub enum CgkaSessionError {
+    #[error("CGKA protocol error: {0}")]
+    ProtocolError(String),
+    #[error("Invalid operation for current CGKA state")]
+    InvalidOperation,
+    #[error("CGKA operation failed: {0}")]
+    OperationFailed(String),
+    #[error("Group membership error: {0}")]
+    MembershipError(String),
+    #[error("Epoch transition failed: {0}")]
+    EpochTransitionFailed(String),
+    #[error("Tree update failed: {0}")]
+    TreeUpdateFailed(String),
+    #[error("CGKA validation error: {0}")]
+    ValidationError(String),
+}
+
+// ========== Protocol Definition using Macros ==========
+
+define_protocol! {
+    Protocol: CgkaProtocol,
+    Core: CgkaProtocolCore,
+    Error: CgkaSessionError,
+    Union: CgkaSessionState,
+
+    States {
+        CgkaGroupInitialized => CgkaState,
+        GroupMembershipChange => CgkaState,
+        EpochTransition => CgkaState,
+        GroupStable => CgkaState,
+        OperationPending => CgkaState,
+        OperationValidating => CgkaState,
+        OperationApplying => CgkaState,
+        TreeBuilding => CgkaState,
+        TreeUpdating => CgkaState,
+        TreeComplete => CgkaState,
+        GroupOperationFailed @ final => (),
+        OperationApplied @ final => (),
+        OperationFailed @ final => (),
+        TreeFailed @ final => (),
+    }
+
+    Extract {
+        session_id: |core| {
+            let group_hash = blake3::hash(core.group_id.as_bytes());
+            Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
+        },
+        device_id: |core| core.device_id,
+    }
+}
+
+// ========== Protocol Type Aliases ==========
 
 /// Session-typed CGKA protocol wrapper
 pub type SessionTypedCgka<S> = ChoreographicProtocol<CgkaProtocolCore, S>;
@@ -549,167 +477,22 @@ impl RuntimeWitness for TreeUpdatesCompleted {
     }
 }
 
-// ========== Concrete Error Type ==========
+// ========== Protocol Methods ==========
 
-#[derive(Debug, thiserror::Error)]
-pub enum CgkaSessionError {
-    #[error("CGKA protocol error: {0}")]
-    ProtocolError(String),
-    #[error("Invalid operation for current CGKA state")]
-    InvalidOperation,
-    #[error("CGKA operation failed: {0}")]
-    OperationFailed(String),
-    #[error("Group membership error: {0}")]
-    MembershipError(String),
-    #[error("Epoch transition failed: {0}")]
-    EpochTransitionFailed(String),
-    #[error("Tree update failed: {0}")]
-    TreeUpdateFailed(String),
-    #[error("CGKA validation error: {0}")]
-    ValidationError(String),
-}
-
-// ========== SessionProtocol Implementations ==========
-
-impl SessionProtocol for ChoreographicProtocol<CgkaProtocolCore, CgkaGroupInitialized> {
-    type State = CgkaGroupInitialized;
-    type Output = CgkaState;
-    type Error = CgkaSessionError;
-
-    fn session_id(&self) -> Uuid {
-        // Use group_id hash as session identifier
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
+impl<S: SessionState> ChoreographicProtocol<CgkaProtocolCore, S> {
+    /// Get reference to the protocol core
+    pub fn core(&self) -> &CgkaProtocolCore {
+        &self.inner
     }
 
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
+    /// Get the group ID
+    pub fn group_id(&self) -> &str {
+        &self.core().group_id
     }
 
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        // Use group_id hash as protocol identifier
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CgkaProtocolCore, GroupMembershipChange> {
-    type State = GroupMembershipChange;
-    type Output = CgkaState;
-    type Error = CgkaSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CgkaProtocolCore, EpochTransition> {
-    type State = EpochTransition;
-    type Output = CgkaState;
-    type Error = CgkaSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CgkaProtocolCore, GroupStable> {
-    type State = GroupStable;
-    type Output = CgkaState;
-    type Error = CgkaSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CgkaProtocolCore, GroupOperationFailed> {
-    type State = GroupOperationFailed;
-    type Output = CgkaState;
-    type Error = CgkaSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-
-    fn protocol_id(&self) -> Uuid {
-        let group_hash = blake3::hash(self.inner.group_id.as_bytes());
-        Uuid::from_bytes(group_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
+    /// Get the current epoch
+    pub fn current_epoch(&self) -> Epoch {
+        self.core().current_state.current_epoch
     }
 }
 
@@ -725,7 +508,7 @@ impl WitnessedTransition<CgkaGroupInitialized, GroupMembershipChange> for Choreo
         self,
         _witness: Self::Witness,
     ) -> Self::Target {
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
@@ -739,7 +522,7 @@ impl WitnessedTransition<GroupMembershipChange, EpochTransition> for Choreograph
         self,
         _witness: Self::Witness,
     ) -> Self::Target {
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
@@ -758,7 +541,7 @@ impl WitnessedTransition<EpochTransition, GroupStable>
         // Update protocol state with epoch transition
         self.inner.current_state.current_epoch = witness.target_epoch;
         self.inner.last_epoch_transition = Some(witness.target_epoch.value());
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
@@ -772,14 +555,14 @@ impl WitnessedTransition<GroupStable, GroupMembershipChange> for ChoreographicPr
         self,
         _witness: Self::Witness,
     ) -> Self::Target {
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition to GroupOperationFailed from any state (requires OperationFailure witness)
 impl<S: SessionState> WitnessedTransition<S, GroupOperationFailed> for ChoreographicProtocol<CgkaProtocolCore, S> 
 where
-    Self: SessionProtocol<State = S, Output = (), Error = CgkaSessionError>,
+    Self: SessionProtocol<State = S, Output = CgkaState, Error = CgkaSessionError>,
 {
     type Witness = OperationFailure;
     type Target = ChoreographicProtocol<CgkaProtocolCore, GroupOperationFailed>;
@@ -789,7 +572,7 @@ where
         self,
         _witness: Self::Witness,
     ) -> Self::Target {
-        self.transition_to()
+        ChoreographicProtocol::transition_to(self)
     }
 }
 
@@ -1040,72 +823,6 @@ pub fn rehydrate_cgka_session(
     }
 }
 
-/// Enum representing the possible states of a CGKA session
-pub enum CgkaSessionState {
-    CgkaGroupInitialized(ChoreographicProtocol<CgkaProtocolCore, CgkaGroupInitialized>),
-    GroupMembershipChange(ChoreographicProtocol<CgkaProtocolCore, GroupMembershipChange>),
-    EpochTransition(ChoreographicProtocol<CgkaProtocolCore, EpochTransition>),
-    GroupStable(ChoreographicProtocol<CgkaProtocolCore, GroupStable>),
-    GroupOperationFailed(ChoreographicProtocol<CgkaProtocolCore, GroupOperationFailed>),
-}
-
-impl CgkaSessionState {
-    /// Get the current state name
-    pub fn state_name(&self) -> &'static str {
-        match self {
-            CgkaSessionState::CgkaGroupInitialized(s) => s.current_state_name(),
-            CgkaSessionState::GroupMembershipChange(s) => s.current_state_name(),
-            CgkaSessionState::EpochTransition(s) => s.current_state_name(),
-            CgkaSessionState::GroupStable(s) => s.current_state_name(),
-            CgkaSessionState::GroupOperationFailed(s) => s.current_state_name(),
-        }
-    }
-
-    /// Check if the session can be terminated
-    pub fn can_terminate(&self) -> bool {
-        match self {
-            CgkaSessionState::CgkaGroupInitialized(s) => s.can_terminate(),
-            CgkaSessionState::GroupMembershipChange(s) => s.can_terminate(),
-            CgkaSessionState::EpochTransition(s) => s.can_terminate(),
-            CgkaSessionState::GroupStable(s) => s.can_terminate(),
-            CgkaSessionState::GroupOperationFailed(s) => s.can_terminate(),
-        }
-    }
-
-    /// Check if the session is in a final state
-    pub fn is_final(&self) -> bool {
-        match self {
-            CgkaSessionState::CgkaGroupInitialized(s) => s.is_final(),
-            CgkaSessionState::GroupMembershipChange(s) => s.is_final(),
-            CgkaSessionState::EpochTransition(s) => s.is_final(),
-            CgkaSessionState::GroupStable(s) => s.is_final(),
-            CgkaSessionState::GroupOperationFailed(s) => s.is_final(),
-        }
-    }
-
-    /// Get the group ID
-    pub fn group_id(&self) -> String {
-        match self {
-            CgkaSessionState::CgkaGroupInitialized(s) => s.inner.group_id.clone(),
-            CgkaSessionState::GroupMembershipChange(s) => s.inner.group_id.clone(),
-            CgkaSessionState::EpochTransition(s) => s.inner.group_id.clone(),
-            CgkaSessionState::GroupStable(s) => s.inner.group_id.clone(),
-            CgkaSessionState::GroupOperationFailed(s) => s.inner.group_id.clone(),
-        }
-    }
-
-    /// Get the current epoch
-    pub fn current_epoch(&self) -> Epoch {
-        match self {
-            CgkaSessionState::CgkaGroupInitialized(s) => s.inner.current_state.current_epoch,
-            CgkaSessionState::GroupMembershipChange(s) => s.inner.current_state.current_epoch,
-            CgkaSessionState::EpochTransition(s) => s.inner.current_state.current_epoch,
-            CgkaSessionState::GroupStable(s) => s.inner.current_state.current_epoch,
-            CgkaSessionState::GroupOperationFailed(s) => s.inner.current_state.current_epoch,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1124,9 +841,8 @@ mod tests {
         assert!(cgka_session.is_ok());
 
         let session = cgka_session.unwrap();
-        assert_eq!(session.current_state_name(), "CgkaGroupInitialized");
+        assert_eq!(session.state_name(), "CgkaGroupInitialized");
         assert!(!session.can_terminate());
-        assert!(!session.is_final());
         assert_eq!(session.inner.group_id, group_id);
         assert_eq!(session.inner.current_state.roster.member_count(), 2);
     }
@@ -1141,7 +857,7 @@ mod tests {
         // Create session
         let session =
             new_session_typed_cgka(group_id.clone(), device_id, initial_members.clone(), &effects).unwrap();
-        assert_eq!(session.current_state_name(), "CgkaGroupInitialized");
+        assert_eq!(session.state_name(), "CgkaGroupInitialized");
 
         // Transition to membership change with witness
         let init_witness = CgkaGroupInitiated {
@@ -1153,7 +869,7 @@ mod tests {
 
         let membership_session = session.transition_with_witness(init_witness);
         assert_eq!(
-            membership_session.current_state_name(),
+            membership_session.state_name(),
             "GroupMembershipChange"
         );
         assert_eq!(membership_session.current_member_count(), 1);
@@ -1169,7 +885,7 @@ mod tests {
         };
 
         let transition_session = membership_session.transition_with_witness(membership_witness);
-        assert_eq!(transition_session.current_state_name(), "EpochTransition");
+        assert_eq!(transition_session.state_name(), "EpochTransition");
         let (epoch, size) = transition_session.current_epoch_info();
         assert_eq!(epoch, Epoch::initial());
         assert_eq!(size, 1);
@@ -1189,7 +905,6 @@ mod tests {
         let state = rehydrate_cgka_session(group_id.clone(), device_id, initial_state.clone(), vec![]);
         assert_eq!(state.state_name(), "CgkaGroupInitialized");
         assert!(!state.can_terminate());
-        assert!(!state.is_final());
         assert_eq!(state.group_id(), group_id);
         assert_eq!(state.current_epoch(), Epoch::initial());
 
@@ -1201,7 +916,6 @@ mod tests {
     #[test]
     fn test_cgka_witnesses() {
         let group_id = "test-group".to_string();
-        let initial_members = vec!["member1".to_string()];
 
         // Test CgkaGroupInitiated witness
         // Note: Full witness testing would require proper Event creation

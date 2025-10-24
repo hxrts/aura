@@ -1,7 +1,7 @@
 // DeviceAgent - high-level API for applications
 
 use crate::{
-    ContextCapsule, DerivedIdentity, IdentityConfig, SessionCredential, SessionStatistics, Result,
+    ContextCapsule, DerivedIdentity, IdentityConfig, SessionCredential, SessionStatistics, Result, AgentError,
 };
 use aura_journal::{AccountLedger, AccountState, DeviceId, DeviceMetadata, SessionEpoch};
 use aura_coordination::{KeyShare, ProductionTimeSource};
@@ -22,7 +22,7 @@ pub struct DeviceAgent {
     config: IdentityConfig,
     key_share: Arc<RwLock<KeyShare>>,
     ledger: Arc<RwLock<AccountLedger>>,
-    transport: Arc<dyn aura_transport::Transport>,
+    transport: Arc<dyn aura_coordination::execution::context::Transport>,
     device_key_manager: Arc<RwLock<DeviceKeyManager>>,
     effects: Effects,
 }
@@ -33,7 +33,7 @@ impl DeviceAgent {
         config: IdentityConfig,
         key_share: KeyShare,
         ledger: AccountLedger,
-        transport: Arc<dyn aura_transport::Transport>,
+        transport: Arc<dyn aura_coordination::execution::context::Transport>,
         device_key_manager: DeviceKeyManager,
         effects: Effects,
     ) -> Result<Self> {
@@ -62,7 +62,7 @@ impl DeviceAgent {
         let ledger = create_mock_ledger(config)?;
         
         // Create stub transport for MVP
-        let transport = Arc::new(aura_transport::StubTransport::default());
+        let transport = Arc::new(aura_transport::StubTransport::default()) as Arc<dyn aura_coordination::execution::context::Transport>;
         
         // Create device key manager and generate device key
         let mut device_key_manager = DeviceKeyManager::new(Effects::production());
@@ -248,7 +248,7 @@ impl DeviceAgent {
         // Create capability proof using threshold signature
         // The proof includes session epoch, device ID, operations, and expiration time
         let capability_proof = self.create_capability_proof(
-            _session_epoch,
+            _session_epoch.0,
             device_id,
             &operations,
             expires_at,
@@ -1187,7 +1187,7 @@ mod tests {
         let device_id = config.device_id;
         
         // Create transport and device key manager for agent
-        let transport = Arc::new(aura_transport::StubTransport::default());
+        let transport = Arc::new(aura_transport::StubTransport::default()) as Arc<dyn aura_coordination::execution::context::Transport>;
         let mut device_key_manager = DeviceKeyManager::new(aura_crypto::Effects::test());
         device_key_manager.generate_device_key(device_id.0).unwrap();
         

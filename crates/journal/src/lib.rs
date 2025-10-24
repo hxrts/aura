@@ -21,6 +21,8 @@
 
 /// Event application logic and state transitions
 pub mod apply_event;
+/// Trait for applying events to AccountState
+pub mod appliable;
 /// Account bootstrap with capability-based authorization
 pub mod bootstrap;
 /// Capability-based authorization system

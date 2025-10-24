@@ -500,6 +500,82 @@ impl<T: Transport> CapabilityTransportAdapter<T> {
         self.send_message(message).await
     }
 
+    /// Send capability revocation to peers
+    pub async fn send_capability_revocation(
+        &self,
+        revocation: CapabilityRevocation,
+        recipients: Option<BTreeSet<IndividualId>>,
+    ) -> Result<Uuid> {
+        info!(
+            "Sending capability revocation: {}",
+            revocation.capability_id.as_hex()
+        );
+
+        let mut message = CapabilityMessage {
+            message_id: self.effects.gen_uuid(),
+            sender: self.individual_id.clone(),
+            recipients: recipients.clone(),
+            required_scope: CapabilityScope::simple("capability", "revoke"),
+            content: MessageContent::CapabilityRevocation(revocation),
+            timestamp: self.effects.now().unwrap_or(0),
+            signature: Vec::new(),
+        };
+
+        // Sign message with device key
+        message.signature = self.sign_message(&message)?;
+
+        self.send_message(message).await
+    }
+
+    /// Send data with capability requirements
+    pub async fn send_data(
+        &self,
+        data: Vec<u8>,
+        context: String,
+        required_scope: CapabilityScope,
+        recipients: Option<BTreeSet<IndividualId>>,
+    ) -> Result<Uuid> {
+        info!(
+            "Sending data message with context: {} (scope: {}:{})",
+            context, required_scope.namespace, required_scope.operation
+        );
+
+        let mut message = CapabilityMessage {
+            message_id: self.effects.gen_uuid(),
+            sender: self.individual_id.clone(),
+            recipients: recipients.clone(),
+            required_scope,
+            content: MessageContent::Data { data, context },
+            timestamp: self.effects.now().unwrap_or(0),
+            signature: Vec::new(),
+        };
+
+        // Sign message with device key
+        message.signature = self.sign_message(&message)?;
+
+        self.send_message(message).await
+    }
+
+    /// Update the authority graph used for capability evaluation
+    pub async fn update_authority_graph(&self, authority_graph: AuthorityGraph) {
+        info!("Updating authority graph");
+        let mut graph = self.authority_graph.write().await;
+        *graph = authority_graph;
+    }
+
+    /// Get count of pending outbound messages
+    pub async fn pending_messages_count(&self) -> usize {
+        let queue = self.outbound_queue.read().await;
+        queue.len()
+    }
+
+    /// Flush the outbound message queue
+    pub async fn flush_outbound_queue(&self) {
+        info!("Flushing outbound message queue");
+        let mut queue = self.outbound_queue.write().await;
+        queue.clear();
+    }
+
     /// Send message with capability authentication
     async fn send_message(&self, message: CapabilityMessage) -> Result<Uuid> {
         // Verify sender has required capability
@@ -598,6 +674,31 @@ impl<T: Transport> CapabilityTransportAdapter<T> {
         })?;
 
         Ok(signature)
+    }
+    
+    /// Remove a peer from transport and cleanup connections
+    pub async fn remove_peer(&self, peer: &IndividualId) {
+        info!("Removing peer: {}", peer.0);
+        
+        // Remove from connected peers
+        {
+            let mut peers = self.connected_peers.write().await;
+            peers.remove(&peer.0);
+        }
+        
+        // Remove connection
+        {
+            let mut connections = self.connections.write().await;
+            connections.remove(&peer.0);
+        }
+        
+        info!("Peer {} removed successfully", peer.0);
+    }
+    
+    /// Get list of connected peers
+    pub async fn get_peers(&self) -> Vec<IndividualId> {
+        let peers = self.connected_peers.read().await;
+        peers.values().cloned().collect()
     }
 }
 

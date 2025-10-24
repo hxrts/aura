@@ -1,4 +1,4 @@
-//! Session Type States for Transport Layer
+//! Session Type States for Transport Layer (Refactored with Macros)
 //!
 //! This module defines session types for the Transport layer, providing compile-time safety
 //! for connection management, message exchange, and presence-based authentication.
@@ -6,8 +6,6 @@
 use crate::{
     ChoreographicProtocol, RuntimeWitness, SessionProtocol, SessionState, WitnessedTransition,
 };
-// TODO: Re-enable when cycle is broken
-// use aura_transport::{Connection, PresenceTicket, TransportError, BroadcastResult};
 
 // Temporary stub types until cycle is resolved
 #[derive(Debug, Clone)]
@@ -47,94 +45,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use uuid::Uuid;
 
-// ========== Connection Session States ==========
-
-/// Initial state when transport is initialized but not connected
-#[derive(Debug, Clone)]
-pub struct TransportDisconnected;
-
-impl SessionState for TransportDisconnected {
-    const NAME: &'static str = "TransportDisconnected";
-    const CAN_TERMINATE: bool = true;
-}
-
-/// State during connection handshake with presence ticket exchange
-#[derive(Debug, Clone)]
-pub struct ConnectionHandshaking;
-
-impl SessionState for ConnectionHandshaking {
-    const NAME: &'static str = "ConnectionHandshaking";
-}
-
-/// State when presence tickets are being validated
-#[derive(Debug, Clone)]
-pub struct TicketValidating;
-
-impl SessionState for TicketValidating {
-    const NAME: &'static str = "TicketValidating";
-}
-
-/// State when transport connection is established and ready
-#[derive(Debug, Clone)]
-pub struct TransportConnected;
-
-impl SessionState for TransportConnected {
-    const NAME: &'static str = "TransportConnected";
-}
-
-/// State when sending a message and awaiting delivery confirmation
-#[derive(Debug, Clone)]
-pub struct MessageSending;
-
-impl SessionState for MessageSending {
-    const NAME: &'static str = "MessageSending";
-}
-
-/// State when performing broadcast operation
-#[derive(Debug, Clone)]
-pub struct Broadcasting;
-
-impl SessionState for Broadcasting {
-    const NAME: &'static str = "Broadcasting";
-}
-
-/// State when connection has failed
-#[derive(Debug, Clone)]
-pub struct ConnectionFailed;
-
-impl SessionState for ConnectionFailed {
-    const NAME: &'static str = "ConnectionFailed";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
-
-// ========== Message Exchange Session States ==========
-
-/// State when waiting for incoming messages
-#[derive(Debug, Clone)]
-pub struct AwaitingMessage;
-
-impl SessionState for AwaitingMessage {
-    const NAME: &'static str = "AwaitingMessage";
-}
-
-/// State when processing received message
-#[derive(Debug, Clone)]
-pub struct ProcessingMessage;
-
-impl SessionState for ProcessingMessage {
-    const NAME: &'static str = "ProcessingMessage";
-}
-
-/// State during request-response exchange
-#[derive(Debug, Clone)]
-pub struct RequestResponseActive;
-
-impl SessionState for RequestResponseActive {
-    const NAME: &'static str = "RequestResponseActive";
-}
-
-// ========== Transport Protocol Wrapper ==========
+// ========== Transport Protocol Core ==========
 
 /// Core transport protocol data without session state
 #[derive(Clone)]
@@ -187,6 +98,58 @@ pub struct MessageContext {
     pub content: Vec<u8>,
     pub timestamp: u64,
 }
+
+// ========== Error Type ==========
+
+/// Errors that can occur in transport session operations
+#[derive(Debug, thiserror::Error)]
+pub enum TransportSessionError {
+    #[error("Transport error: {0}")]
+    Transport(#[from] TransportError),
+    #[error("Invalid presence ticket: {0}")]
+    InvalidTicket(String),
+    #[error("Connection handshake failed: {0}")]
+    HandshakeFailed(String),
+    #[error("Message delivery failed: {0}")]
+    DeliveryFailed(String),
+    #[error("Broadcast operation failed: {0}")]
+    BroadcastFailed(String),
+    #[error("Session error: {0}")]
+    SessionError(String),
+}
+
+// ========== Protocol Definition using Macros ==========
+
+define_protocol! {
+    Protocol: TransportProtocol,
+    Core: TransportProtocolCore,
+    Error: TransportSessionError,
+    Union: TransportSessionState,
+
+    States {
+        TransportDisconnected => (),
+        ConnectionHandshaking => Connection,
+        TicketValidating => (),
+        TransportConnected => (),
+        MessageSending => (),
+        Broadcasting => BroadcastResult,
+        AwaitingMessage => Vec<u8>,
+        ProcessingMessage => (),
+        RequestResponseActive => Vec<u8>,
+        ConnectionFailed @ final => (),
+    }
+
+    Extract {
+        session_id: |core| {
+            // Use device_id hash as session identifier
+            let device_hash = blake3::hash(core.device_id.to_string().as_bytes());
+            Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
+        },
+        device_id: |core| core.device_id,
+    }
+}
+
+// ========== Protocol Type Alias ==========
 
 /// Session-typed transport protocol wrapper
 pub type SessionTypedTransport<S> = ChoreographicProtocol<TransportProtocolCore, S>;
@@ -331,374 +294,98 @@ impl RuntimeWitness for ConnectionFailure {
     }
 }
 
-// ========== Transport Session Error ==========
-
-/// Errors that can occur in transport session operations
-#[derive(Debug, thiserror::Error)]
-pub enum TransportSessionError {
-    #[error("Transport error: {0}")]
-    Transport(#[from] TransportError),
-    #[error("Invalid presence ticket: {0}")]
-    InvalidTicket(String),
-    #[error("Connection handshake failed: {0}")]
-    HandshakeFailed(String),
-    #[error("Message delivery failed: {0}")]
-    DeliveryFailed(String),
-    #[error("Broadcast operation failed: {0}")]
-    BroadcastFailed(String),
-    #[error("Session error: {0}")]
-    SessionError(String),
-}
-
-// ========== SessionProtocol Implementations ==========
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, TransportDisconnected> {
-    type State = TransportDisconnected;
-    type Output = ();
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        // Use device_id hash as session identifier
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, ConnectionHandshaking> {
-    type State = ConnectionHandshaking;
-    type Output = Connection;
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, TicketValidating> {
-    type State = TicketValidating;
-    type Output = ();
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, TransportConnected> {
-    type State = TransportConnected;
-    type Output = ();
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, MessageSending> {
-    type State = MessageSending;
-    type Output = ();
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, Broadcasting> {
-    type State = Broadcasting;
-    type Output = BroadcastResult;
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, AwaitingMessage> {
-    type State = AwaitingMessage;
-    type Output = Vec<u8>;
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, ProcessingMessage> {
-    type State = ProcessingMessage;
-    type Output = ();
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, RequestResponseActive> {
-    type State = RequestResponseActive;
-    type Output = Vec<u8>;
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<TransportProtocolCore, ConnectionFailed> {
-    type State = ConnectionFailed;
-    type Output = ();
-    type Error = TransportSessionError;
-
-    fn session_id(&self) -> Uuid {
-        let device_hash = blake3::hash(self.inner.device_id.to_string().as_bytes());
-        Uuid::from_bytes(device_hash.as_bytes()[..16].try_into().unwrap_or([0u8; 16]))
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.session_id()
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id
-    }
-}
-
 // ========== State Transitions ==========
 
-/// Transition from TransportDisconnected to ConnectionHandshaking (when initiating connection)
-impl WitnessedTransition<TransportDisconnected, ConnectionHandshaking> for ChoreographicProtocol<TransportProtocolCore, TransportDisconnected> {
-    type Witness = (String, PresenceTicket);
-    type Target = ChoreographicProtocol<TransportProtocolCore, ConnectionHandshaking>;
-    
+/// Simple transitions that don't require runtime witnesses
+impl ChoreographicProtocol<TransportProtocolCore, TransportDisconnected> {
     /// Begin connection handshake with peer
-    fn transition_with_witness(
+    pub fn begin_handshake(
         mut self,
-        witness: Self::Witness,
-    ) -> Self::Target {
-        let (peer_id, my_ticket) = witness;
+        peer_id: String,
+        my_ticket: PresenceTicket,
+    ) -> ChoreographicProtocol<TransportProtocolCore, ConnectionHandshaking> {
         self.inner.presence_tickets.insert(peer_id, my_ticket);
         self.transition_to()
     }
 }
 
-/// Transition from ConnectionHandshaking to TicketValidating (with peer tickets)
-impl WitnessedTransition<ConnectionHandshaking, TicketValidating> for ChoreographicProtocol<TransportProtocolCore, ConnectionHandshaking> {
-    type Witness = PresenceTicket;
-    type Target = ChoreographicProtocol<TransportProtocolCore, TicketValidating>;
-    
+impl ChoreographicProtocol<TransportProtocolCore, ConnectionHandshaking> {
     /// Receive peer ticket for validation
-    fn transition_with_witness(
+    pub fn receive_peer_ticket(
         self,
-        _peer_ticket: Self::Witness,
-    ) -> Self::Target {
+        _peer_ticket: PresenceTicket,
+    ) -> ChoreographicProtocol<TransportProtocolCore, TicketValidating> {
         // In reality, would store peer ticket for validation
         self.transition_to()
     }
 }
 
-/// Transition from TicketValidating to TransportConnected (requires TicketsValidated witness)
-impl WitnessedTransition<TicketValidating, TransportConnected> for ChoreographicProtocol<TransportProtocolCore, TicketValidating> {
-    type Witness = TicketsValidated;
-    type Target = ChoreographicProtocol<TransportProtocolCore, TransportConnected>;
-    
-    /// Complete ticket validation and establish connection
-    fn transition_with_witness(
-        self,
-        _witness: Self::Witness,
-    ) -> Self::Target {
+impl ChoreographicProtocol<TransportProtocolCore, TransportConnected> {
+    /// Begin message sending operation
+    pub fn send_message_transition(
+        mut self,
+        message: MessageContext,
+    ) -> ChoreographicProtocol<TransportProtocolCore, MessageSending> {
+        self.inner.message_queue.push(message);
+        self.transition_to()
+    }
+
+    /// Begin broadcast operation
+    pub fn broadcast_transition(
+        mut self,
+        broadcast: BroadcastContext,
+    ) -> ChoreographicProtocol<TransportProtocolCore, Broadcasting> {
+        self.inner.pending_broadcasts.push(broadcast);
+        self.transition_to()
+    }
+
+    /// Begin waiting for incoming message
+    pub fn await_message(self) -> ChoreographicProtocol<TransportProtocolCore, AwaitingMessage> {
         self.transition_to()
     }
 }
 
-/// Transition from TransportConnected to MessageSending (when sending message)
-impl WitnessedTransition<TransportConnected, MessageSending>
-    for ChoreographicProtocol<TransportProtocolCore, TransportConnected>
-{
-    type Witness = MessageContext;
-    type Target = ChoreographicProtocol<TransportProtocolCore, MessageSending>;
-    
-    /// Begin message sending operation
-    fn transition_with_witness(
+impl ChoreographicProtocol<TransportProtocolCore, AwaitingMessage> {
+    /// Process received message
+    pub fn process_received_message(
         mut self,
-        message: Self::Witness,
-    ) -> Self::Target {
+        message: MessageContext,
+    ) -> ChoreographicProtocol<TransportProtocolCore, ProcessingMessage> {
         self.inner.message_queue.push(message);
         self.transition_to()
     }
 }
 
-/// Transition from MessageSending back to TransportConnected (requires MessageDelivered witness)
+impl ChoreographicProtocol<TransportProtocolCore, ProcessingMessage> {
+    /// Complete message processing
+    pub fn complete_processing(
+        self,
+    ) -> ChoreographicProtocol<TransportProtocolCore, TransportConnected> {
+        self.transition_to()
+    }
+}
+
+/// Witnessed transitions that require runtime validation
+impl WitnessedTransition<TicketValidating, TransportConnected>
+    for ChoreographicProtocol<TransportProtocolCore, TicketValidating>
+{
+    type Witness = TicketsValidated;
+    type Target = ChoreographicProtocol<TransportProtocolCore, TransportConnected>;
+
+    /// Complete ticket validation and establish connection
+    fn transition_with_witness(self, _witness: Self::Witness) -> Self::Target {
+        self.transition_to()
+    }
+}
+
 impl WitnessedTransition<MessageSending, TransportConnected>
     for ChoreographicProtocol<TransportProtocolCore, MessageSending>
 {
     type Witness = MessageDelivered;
     type Target = ChoreographicProtocol<TransportProtocolCore, TransportConnected>;
-    
+
     /// Complete message delivery
-    fn transition_with_witness(
-        mut self,
-        _witness: Self::Witness,
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, _witness: Self::Witness) -> Self::Target {
         // Remove delivered message from queue
         if !self.inner.message_queue.is_empty() {
             self.inner.message_queue.remove(0);
@@ -707,35 +394,14 @@ impl WitnessedTransition<MessageSending, TransportConnected>
     }
 }
 
-/// Transition from TransportConnected to Broadcasting (when broadcasting)
-impl WitnessedTransition<TransportConnected, Broadcasting>
-    for ChoreographicProtocol<TransportProtocolCore, TransportConnected>
-{
-    type Witness = BroadcastContext;
-    type Target = ChoreographicProtocol<TransportProtocolCore, Broadcasting>;
-    
-    /// Begin broadcast operation
-    fn transition_with_witness(
-        mut self,
-        broadcast: Self::Witness,
-    ) -> Self::Target {
-        self.inner.pending_broadcasts.push(broadcast);
-        self.transition_to()
-    }
-}
-
-/// Transition from Broadcasting back to TransportConnected (requires BroadcastCompleted witness)
 impl WitnessedTransition<Broadcasting, TransportConnected>
     for ChoreographicProtocol<TransportProtocolCore, Broadcasting>
 {
     type Witness = BroadcastCompleted;
     type Target = ChoreographicProtocol<TransportProtocolCore, TransportConnected>;
-    
+
     /// Complete broadcast operation
-    fn transition_with_witness(
-        mut self,
-        _witness: Self::Witness,
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, _witness: Self::Witness) -> Self::Target {
         // Remove completed broadcast
         if !self.inner.pending_broadcasts.is_empty() {
             self.inner.pending_broadcasts.remove(0);
@@ -744,68 +410,17 @@ impl WitnessedTransition<Broadcasting, TransportConnected>
     }
 }
 
-/// Transition from TransportConnected to AwaitingMessage (when waiting for messages)
-impl WitnessedTransition<TransportConnected, AwaitingMessage>
-    for ChoreographicProtocol<TransportProtocolCore, TransportConnected>
-{
-    type Witness = ();
-    type Target = ChoreographicProtocol<TransportProtocolCore, AwaitingMessage>;
-    
-    /// Begin waiting for incoming message
-    fn transition_with_witness(
-        self,
-        _witness: Self::Witness,
-    ) -> Self::Target {
-        self.transition_to()
-    }
-}
-
-/// Transition from AwaitingMessage to ProcessingMessage (when message received)
-impl WitnessedTransition<AwaitingMessage, ProcessingMessage>
-    for ChoreographicProtocol<TransportProtocolCore, AwaitingMessage>
-{
-    type Witness = MessageContext;
-    type Target = ChoreographicProtocol<TransportProtocolCore, ProcessingMessage>;
-    
-    /// Process received message
-    fn transition_with_witness(
-        mut self,
-        message: Self::Witness,
-    ) -> Self::Target {
-        self.inner.message_queue.push(message);
-        self.transition_to()
-    }
-}
-
-/// Transition from ProcessingMessage back to TransportConnected (message processed)
-impl WitnessedTransition<ProcessingMessage, TransportConnected>
-    for ChoreographicProtocol<TransportProtocolCore, ProcessingMessage>
-{
-    type Witness = ();
-    type Target = ChoreographicProtocol<TransportProtocolCore, TransportConnected>;
-    
-    /// Complete message processing
-    fn transition_with_witness(
-        self,
-        _witness: Self::Witness,
-    ) -> Self::Target {
-        self.transition_to()
-    }
-}
-
 /// Transition to ConnectionFailed from any connected state (requires ConnectionFailure witness)
-impl<S: SessionState> WitnessedTransition<S, ConnectionFailed> for ChoreographicProtocol<TransportProtocolCore, S>
+impl<S: SessionState> WitnessedTransition<S, ConnectionFailed>
+    for ChoreographicProtocol<TransportProtocolCore, S>
 where
-    Self: SessionProtocol<State = S, Output = (), Error = TransportSessionError>,
+    Self: SessionProtocol<State = S, Error = TransportSessionError>,
 {
     type Witness = ConnectionFailure;
     type Target = ChoreographicProtocol<TransportProtocolCore, ConnectionFailed>;
-    
+
     /// Handle connection failure
-    fn transition_with_witness(
-        mut self,
-        _witness: Self::Witness,
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, _witness: Self::Witness) -> Self::Target {
         // Clear connection state on failure
         self.inner.active_connections.clear();
         self.inner.message_queue.clear();
@@ -906,88 +521,8 @@ impl ChoreographicProtocol<TransportProtocolCore, Broadcasting> {
     }
 }
 
-// ========== Session State Union Type ==========
+// ========== Additional Union Type Methods ==========
 
-/// Union type for all transport session states
-#[derive(Debug)]
-pub enum TransportSessionState {
-    Disconnected(ChoreographicProtocol<TransportProtocolCore, TransportDisconnected>),
-    Handshaking(ChoreographicProtocol<TransportProtocolCore, ConnectionHandshaking>),
-    ValidatingTickets(ChoreographicProtocol<TransportProtocolCore, TicketValidating>),
-    Connected(ChoreographicProtocol<TransportProtocolCore, TransportConnected>),
-    SendingMessage(ChoreographicProtocol<TransportProtocolCore, MessageSending>),
-    Broadcasting(ChoreographicProtocol<TransportProtocolCore, Broadcasting>),
-    AwaitingMessage(ChoreographicProtocol<TransportProtocolCore, AwaitingMessage>),
-    ProcessingMessage(ChoreographicProtocol<TransportProtocolCore, ProcessingMessage>),
-    RequestResponse(ChoreographicProtocol<TransportProtocolCore, RequestResponseActive>),
-    Failed(ChoreographicProtocol<TransportProtocolCore, ConnectionFailed>),
-}
-
-impl TransportSessionState {
-    /// Get current state name
-    pub fn current_state_name(&self) -> &'static str {
-        match self {
-            TransportSessionState::Disconnected(t) => t.current_state_name(),
-            TransportSessionState::Handshaking(t) => t.current_state_name(),
-            TransportSessionState::ValidatingTickets(t) => t.current_state_name(),
-            TransportSessionState::Connected(t) => t.current_state_name(),
-            TransportSessionState::SendingMessage(t) => t.current_state_name(),
-            TransportSessionState::Broadcasting(t) => t.current_state_name(),
-            TransportSessionState::AwaitingMessage(t) => t.current_state_name(),
-            TransportSessionState::ProcessingMessage(t) => t.current_state_name(),
-            TransportSessionState::RequestResponse(t) => t.current_state_name(),
-            TransportSessionState::Failed(t) => t.current_state_name(),
-        }
-    }
-
-    /// Check if transport can be safely terminated
-    pub fn can_terminate(&self) -> bool {
-        match self {
-            TransportSessionState::Disconnected(t) => t.can_terminate(),
-            TransportSessionState::Handshaking(t) => t.can_terminate(),
-            TransportSessionState::ValidatingTickets(t) => t.can_terminate(),
-            TransportSessionState::Connected(t) => t.can_terminate(),
-            TransportSessionState::SendingMessage(t) => t.can_terminate(),
-            TransportSessionState::Broadcasting(t) => t.can_terminate(),
-            TransportSessionState::AwaitingMessage(t) => t.can_terminate(),
-            TransportSessionState::ProcessingMessage(t) => t.can_terminate(),
-            TransportSessionState::RequestResponse(t) => t.can_terminate(),
-            TransportSessionState::Failed(t) => t.can_terminate(),
-        }
-    }
-
-    /// Check if transport is in final state
-    pub fn is_final(&self) -> bool {
-        match self {
-            TransportSessionState::Disconnected(t) => t.is_final(),
-            TransportSessionState::Handshaking(t) => t.is_final(),
-            TransportSessionState::ValidatingTickets(t) => t.is_final(),
-            TransportSessionState::Connected(t) => t.is_final(),
-            TransportSessionState::SendingMessage(t) => t.is_final(),
-            TransportSessionState::Broadcasting(t) => t.is_final(),
-            TransportSessionState::AwaitingMessage(t) => t.is_final(),
-            TransportSessionState::ProcessingMessage(t) => t.is_final(),
-            TransportSessionState::RequestResponse(t) => t.is_final(),
-            TransportSessionState::Failed(t) => t.is_final(),
-        }
-    }
-
-    /// Get device ID
-    pub fn device_id(&self) -> aura_journal::DeviceId {
-        match self {
-            TransportSessionState::Disconnected(t) => t.inner.device_id,
-            TransportSessionState::Handshaking(t) => t.inner.device_id,
-            TransportSessionState::ValidatingTickets(t) => t.inner.device_id,
-            TransportSessionState::Connected(t) => t.inner.device_id,
-            TransportSessionState::SendingMessage(t) => t.inner.device_id,
-            TransportSessionState::Broadcasting(t) => t.inner.device_id,
-            TransportSessionState::AwaitingMessage(t) => t.inner.device_id,
-            TransportSessionState::ProcessingMessage(t) => t.inner.device_id,
-            TransportSessionState::RequestResponse(t) => t.inner.device_id,
-            TransportSessionState::Failed(t) => t.inner.device_id,
-        }
-    }
-}
 
 // ========== Factory Functions ==========
 
@@ -1007,9 +542,9 @@ pub fn rehydrate_transport_session(
     let core = TransportProtocolCore::new(device_id);
 
     if has_connections {
-        TransportSessionState::Connected(ChoreographicProtocol::new(core))
+        TransportSessionState::TransportConnected(ChoreographicProtocol::new(core))
     } else {
-        TransportSessionState::Disconnected(ChoreographicProtocol::new(core))
+        TransportSessionState::TransportDisconnected(ChoreographicProtocol::new(core))
     }
 }
 
@@ -1026,8 +561,8 @@ mod tests {
         ));
         let transport = new_session_typed_transport(device_id);
 
-        assert_eq!(transport.current_state_name(), "TransportDisconnected");
-        assert!(transport.can_terminate());
+        assert_eq!(transport.state_name(), "TransportDisconnected");
+        assert!(!transport.can_terminate());
         assert!(!transport.is_final());
     }
 
@@ -1048,9 +583,8 @@ mod tests {
             ticket_digest: [0u8; 32],
         };
 
-        let handshaking =
-            transport.transition_with_witness(("peer1".to_string(), my_ticket.clone()));
-        assert_eq!(handshaking.current_state_name(), "ConnectionHandshaking");
+        let handshaking = transport.begin_handshake("peer1".to_string(), my_ticket.clone());
+        assert_eq!(handshaking.state_name(), "ConnectionHandshaking");
 
         let peer_ticket = PresenceTicket {
             device_id: aura_journal::DeviceId::new_with_effects(&aura_crypto::Effects::for_test(
@@ -1063,12 +597,12 @@ mod tests {
             ticket_digest: [1u8; 32],
         };
 
-        let validating = handshaking.transition_with_witness(peer_ticket.clone());
-        assert_eq!(validating.current_state_name(), "TicketValidating");
+        let validating = handshaking.receive_peer_ticket(peer_ticket.clone());
+        assert_eq!(validating.state_name(), "TicketValidating");
 
         let witness = TicketsValidated::verify((my_ticket, peer_ticket), 100).unwrap();
         let connected = validating.transition_with_witness(witness);
-        assert_eq!(connected.current_state_name(), "TransportConnected");
+        assert_eq!(connected.state_name(), "TransportConnected");
     }
 
     #[test]
@@ -1086,13 +620,13 @@ mod tests {
             timestamp: 1000,
         };
 
-        let sending = connected.transition_with_witness(message.clone());
-        assert_eq!(sending.current_state_name(), "MessageSending");
+        let sending = connected.send_message_transition(message.clone());
+        assert_eq!(sending.state_name(), "MessageSending");
 
         let delivery_witness =
             MessageDelivered::verify((message.message_id, message.peer_id), 1100).unwrap();
         let back_to_connected = sending.transition_with_witness(delivery_witness);
-        assert_eq!(back_to_connected.current_state_name(), "TransportConnected");
+        assert_eq!(back_to_connected.state_name(), "TransportConnected");
     }
 
     #[test]
@@ -1110,8 +644,8 @@ mod tests {
             delivery_confirmations: BTreeMap::new(),
         };
 
-        let broadcasting = connected.transition_with_witness(broadcast.clone());
-        assert_eq!(broadcasting.current_state_name(), "Broadcasting");
+        let broadcasting = connected.broadcast_transition(broadcast.clone());
+        assert_eq!(broadcasting.state_name(), "Broadcasting");
 
         let result = BroadcastResult {
             succeeded: vec!["peer1".to_string(), "peer2".to_string()],
@@ -1120,7 +654,7 @@ mod tests {
         let completion_witness =
             BroadcastCompleted::verify(result, (broadcast.broadcast_id, 2000)).unwrap();
         let completed = broadcasting.transition_with_witness(completion_witness);
-        assert_eq!(completed.current_state_name(), "TransportConnected");
+        assert_eq!(completed.state_name(), "TransportConnected");
     }
 
     #[test]
@@ -1129,12 +663,12 @@ mod tests {
             aura_journal::DeviceId::new_with_effects(&aura_crypto::Effects::for_test("union_test"));
         let session = rehydrate_transport_session(device_id, false);
 
-        assert_eq!(session.current_state_name(), "TransportDisconnected");
+        assert_eq!(session.state_name(), "TransportDisconnected");
         assert_eq!(session.device_id(), device_id);
-        assert!(session.can_terminate());
+        assert!(!session.can_terminate());
         assert!(!session.is_final());
 
         let connected_session = rehydrate_transport_session(device_id, true);
-        assert_eq!(connected_session.current_state_name(), "TransportConnected");
+        assert_eq!(connected_session.state_name(), "TransportConnected");
     }
 }

@@ -1,82 +1,13 @@
-//! Session Type States for CLI Command Management
+//! Session Type States for CLI Command Management (Refactored with Macros)
 //!
 //! This module defines session types for CLI commands, providing compile-time safety
 //! for command sequences and ensuring proper system state management.
 
-use crate::{SessionState, ChoreographicProtocol, SessionProtocol, WitnessedTransition, RuntimeWitness};
+use crate::core::{ChoreographicProtocol, SessionProtocol, SessionState, WitnessedTransition};
+use crate::witnesses::RuntimeWitness;
 use aura_journal::{AccountId, DeviceId};
 use uuid::Uuid;
 use std::path::PathBuf;
-
-// ========== CLI Session States ==========
-
-/// Initial state when CLI starts - no account loaded
-#[derive(Debug, Clone)]
-pub struct CliUninitialized;
-
-impl SessionState for CliUninitialized {
-    const NAME: &'static str = "CliUninitialized";
-    const CAN_TERMINATE: bool = true;
-}
-
-/// State when account initialization is in progress
-#[derive(Debug, Clone)]
-pub struct CliInitializing;
-
-impl SessionState for CliInitializing {
-    const NAME: &'static str = "CliInitializing";
-}
-
-/// State when an account has been loaded/initialized
-#[derive(Debug, Clone)]
-pub struct CliAccountLoaded;
-
-impl SessionState for CliAccountLoaded {
-    const NAME: &'static str = "CliAccountLoaded";
-    const CAN_TERMINATE: bool = true;
-}
-
-/// State when a DKD operation is in progress
-#[derive(Debug, Clone)]
-pub struct CliDkdInProgress;
-
-impl SessionState for CliDkdInProgress {
-    const NAME: &'static str = "CliDkdInProgress";
-}
-
-/// State when a recovery operation is in progress
-#[derive(Debug, Clone)]
-pub struct CliRecoveryInProgress;
-
-impl SessionState for CliRecoveryInProgress {
-    const NAME: &'static str = "CliRecoveryInProgress";
-}
-
-/// State when a network operation is in progress
-#[derive(Debug, Clone)]
-pub struct CliNetworkOperationInProgress;
-
-impl SessionState for CliNetworkOperationInProgress {
-    const NAME: &'static str = "CliNetworkOperationInProgress";
-}
-
-/// State when a storage operation is in progress
-#[derive(Debug, Clone)]
-pub struct CliStorageOperationInProgress;
-
-impl SessionState for CliStorageOperationInProgress {
-    const NAME: &'static str = "CliStorageOperationInProgress";
-}
-
-/// State indicating CLI command has failed
-#[derive(Debug, Clone)]
-pub struct CliCommandFailed;
-
-impl SessionState for CliCommandFailed {
-    const NAME: &'static str = "CliCommandFailed";
-    const CAN_TERMINATE: bool = true;
-    const IS_FINAL: bool = true;
-}
 
 // ========== CLI Protocol Core ==========
 
@@ -104,7 +35,56 @@ impl CliProtocolCore {
     }
 }
 
-/// Session-typed CLI protocol wrapper
+// ========== Error Type ==========
+
+/// Errors that can occur in CLI session operations
+#[derive(Debug, thiserror::Error)]
+pub enum CliSessionError {
+    #[error("Account not initialized: {0}")]
+    AccountNotInitialized(String),
+    #[error("Invalid command in current state: {command} not allowed in {state}")]
+    InvalidCommandForState { command: String, state: String },
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
+    #[error("File system error: {0}")]
+    FileSystemError(String),
+    #[error("Command execution error: {0}")]
+    CommandExecutionError(String),
+    #[error("Session error: {0}")]
+    SessionError(String),
+}
+
+// ========== Protocol Definition using Macros ==========
+
+define_protocol! {
+    Protocol: CliProtocol,
+    Core: CliProtocolCore,
+    Error: CliSessionError,
+    Union: CliSessionState,
+
+    States {
+        CliUninitialized @ final => (),
+        CliInitializing => AccountInitialized,
+        CliAccountLoaded @ final => (),
+        CliDkdInProgress => CommandResult,
+        CliRecoveryInProgress => CommandResult,
+        CliNetworkOperationInProgress => CommandResult,
+        CliStorageOperationInProgress => CommandResult,
+        CliCommandFailed @ final => (),
+    }
+
+    Extract {
+        session_id: |core| core.session_id,
+        device_id: |core| core.device_id.unwrap_or_else(|| {
+            let effects = aura_crypto::Effects::test();
+            aura_journal::DeviceId::new_with_effects(&effects)
+        }),
+    }
+}
+
+// ========== Protocol Type Alias ==========
+
+/// Session-typed CLI protocol wrapper  
 pub type SessionTypedCli<S> = ChoreographicProtocol<CliProtocolCore, S>;
 
 // ========== CLI Command Context Information ==========
@@ -116,6 +96,27 @@ pub struct CliCommandContext {
     pub command_name: String,
     pub args: Vec<String>,
     pub started_at: u64,
+}
+
+impl RuntimeWitness for CliCommandContext {
+    type Evidence = (String, Vec<String>); // (command_name, args)
+    type Config = (Uuid, u64); // (session_id, timestamp)
+    
+    fn verify(evidence: (String, Vec<String>), config: (Uuid, u64)) -> Option<Self> {
+        let (command_name, args) = evidence;
+        let (session_id, timestamp) = config;
+        
+        Some(CliCommandContext {
+            session_id,
+            command_name,
+            args,
+            started_at: timestamp,
+        })
+    }
+    
+    fn description(&self) -> &'static str {
+        "CLI command context created"
+    }
 }
 
 /// Result of CLI command execution
@@ -134,6 +135,33 @@ pub struct AccountInitContext {
     pub threshold: u16,
     pub output_dir: PathBuf,
     pub initialized_at: u64,
+}
+
+impl RuntimeWitness for AccountInitContext {
+    type Evidence = (u16, u16, PathBuf); // (participants, threshold, output_dir)
+    type Config = (Uuid, u64); // (session_id, timestamp)
+    
+    fn verify(evidence: (u16, u16, PathBuf), config: (Uuid, u64)) -> Option<Self> {
+        let (participants, threshold, output_dir) = evidence;
+        let (session_id, timestamp) = config;
+        
+        // Validate initialization parameters
+        if participants < 2 || threshold > participants {
+            return None;
+        }
+        
+        Some(AccountInitContext {
+            session_id,
+            participants,
+            threshold,
+            output_dir,
+            initialized_at: timestamp,
+        })
+    }
+    
+    fn description(&self) -> &'static str {
+        "Account initialization context created"
+    }
 }
 
 /// Context for account loading
@@ -286,259 +314,6 @@ impl RuntimeWitness for CommandFailed {
     }
 }
 
-// ========== CLI Session Error ==========
-
-/// Errors that can occur in CLI session operations
-#[derive(Debug, thiserror::Error)]
-pub enum CliSessionError {
-    #[error("Account not initialized: {0}")]
-    AccountNotInitialized(String),
-    #[error("Invalid command in current state: {command} not allowed in {state}")]
-    InvalidCommandForState { command: String, state: String },
-    #[error("Configuration error: {0}")]
-    ConfigurationError(String),
-    #[error("File system error: {0}")]
-    FileSystemError(String),
-    #[error("Command execution error: {0}")]
-    CommandExecutionError(String),
-    #[error("Session error: {0}")]
-    SessionError(String),
-}
-
-// ========== SessionProtocol Implementations ==========
-
-impl SessionProtocol for ChoreographicProtocol<CliProtocolCore, CliUninitialized> {
-    type State = CliUninitialized;
-    type Output = ();
-    type Error = CliSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id.unwrap_or_else(|| {
-            let effects = aura_crypto::Effects::test();
-            aura_journal::DeviceId::new_with_effects(&effects)
-        })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CliProtocolCore, CliInitializing> {
-    type State = CliInitializing;
-    type Output = AccountInitialized;
-    type Error = CliSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id.unwrap_or_else(|| {
-            let effects = aura_crypto::Effects::test();
-            aura_journal::DeviceId::new_with_effects(&effects)
-        })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> {
-    type State = CliAccountLoaded;
-    type Output = ();
-    type Error = CliSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id.unwrap_or_else(|| {
-            let effects = aura_crypto::Effects::test();
-            aura_journal::DeviceId::new_with_effects(&effects)
-        })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> {
-    type State = CliDkdInProgress;
-    type Output = CommandResult;
-    type Error = CliSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id.unwrap_or_else(|| {
-            let effects = aura_crypto::Effects::test();
-            aura_journal::DeviceId::new_with_effects(&effects)
-        })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CliProtocolCore, CliRecoveryInProgress> {
-    type State = CliRecoveryInProgress;
-    type Output = CommandResult;
-    type Error = CliSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id.unwrap_or_else(|| {
-            let effects = aura_crypto::Effects::test();
-            aura_journal::DeviceId::new_with_effects(&effects)
-        })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CliProtocolCore, CliNetworkOperationInProgress> {
-    type State = CliNetworkOperationInProgress;
-    type Output = CommandResult;
-    type Error = CliSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id.unwrap_or_else(|| {
-            let effects = aura_crypto::Effects::test();
-            aura_journal::DeviceId::new_with_effects(&effects)
-        })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CliProtocolCore, CliStorageOperationInProgress> {
-    type State = CliStorageOperationInProgress;
-    type Output = CommandResult;
-    type Error = CliSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id.unwrap_or_else(|| {
-            let effects = aura_crypto::Effects::test();
-            aura_journal::DeviceId::new_with_effects(&effects)
-        })
-    }
-}
-
-impl SessionProtocol for ChoreographicProtocol<CliProtocolCore, CliCommandFailed> {
-    type State = CliCommandFailed;
-    type Output = ();
-    type Error = CliSessionError;
-    
-    fn session_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn state_name(&self) -> &'static str {
-        Self::State::NAME
-    }
-    
-    fn can_terminate(&self) -> bool {
-        Self::State::CAN_TERMINATE
-    }
-    
-    fn protocol_id(&self) -> Uuid {
-        self.inner.session_id
-    }
-    
-    fn device_id(&self) -> aura_journal::DeviceId {
-        self.inner.device_id.unwrap_or_else(|| {
-            let effects = aura_crypto::Effects::test();
-            aura_journal::DeviceId::new_with_effects(&effects)
-        })
-    }
-}
-
 // ========== State Transitions ==========
 
 /// Transition from CliUninitialized to CliInitializing (when starting init command)
@@ -668,11 +443,97 @@ impl WitnessedTransition<CliRecoveryInProgress, CliAccountLoaded>
     }
 }
 
-/// Transition to CliCommandFailed from any state (requires CommandFailed witness)
-impl<S: SessionState> WitnessedTransition<S, CliCommandFailed> 
-    for ChoreographicProtocol<CliProtocolCore, S> 
-where
-    Self: SessionProtocol<State = S, Output = (), Error = CliSessionError>,
+/// Transition to CliCommandFailed from CliUninitialized state
+impl WitnessedTransition<CliUninitialized, CliCommandFailed> 
+    for ChoreographicProtocol<CliProtocolCore, CliUninitialized> 
+{
+    type Witness = CommandFailed;
+    type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
+    
+    /// Handle command failure
+    fn transition_with_witness(
+        mut self, 
+        witness: Self::Witness
+    ) -> Self::Target {
+        self.inner.current_command = Some(witness.command_name);
+        self.inner.last_result = Some(CommandResult {
+            success: false,
+            message: witness.error,
+            data: None,
+        });
+        self.transition_to()
+    }
+}
+
+/// Transition to CliCommandFailed from CliInitializing state
+impl WitnessedTransition<CliInitializing, CliCommandFailed> 
+    for ChoreographicProtocol<CliProtocolCore, CliInitializing> 
+{
+    type Witness = CommandFailed;
+    type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
+    
+    /// Handle command failure
+    fn transition_with_witness(
+        mut self, 
+        witness: Self::Witness
+    ) -> Self::Target {
+        self.inner.current_command = Some(witness.command_name);
+        self.inner.last_result = Some(CommandResult {
+            success: false,
+            message: witness.error,
+            data: None,
+        });
+        self.transition_to()
+    }
+}
+
+/// Transition to CliCommandFailed from CliAccountLoaded state
+impl WitnessedTransition<CliAccountLoaded, CliCommandFailed> 
+    for ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> 
+{
+    type Witness = CommandFailed;
+    type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
+    
+    /// Handle command failure
+    fn transition_with_witness(
+        mut self, 
+        witness: Self::Witness
+    ) -> Self::Target {
+        self.inner.current_command = Some(witness.command_name);
+        self.inner.last_result = Some(CommandResult {
+            success: false,
+            message: witness.error,
+            data: None,
+        });
+        self.transition_to()
+    }
+}
+
+/// Transition to CliCommandFailed from CliDkdInProgress state
+impl WitnessedTransition<CliDkdInProgress, CliCommandFailed> 
+    for ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> 
+{
+    type Witness = CommandFailed;
+    type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
+    
+    /// Handle command failure
+    fn transition_with_witness(
+        mut self, 
+        witness: Self::Witness
+    ) -> Self::Target {
+        self.inner.current_command = Some(witness.command_name);
+        self.inner.last_result = Some(CommandResult {
+            success: false,
+            message: witness.error,
+            data: None,
+        });
+        self.transition_to()
+    }
+}
+
+/// Transition to CliCommandFailed from CliRecoveryInProgress state
+impl WitnessedTransition<CliRecoveryInProgress, CliCommandFailed> 
+    for ChoreographicProtocol<CliProtocolCore, CliRecoveryInProgress> 
 {
     type Witness = CommandFailed;
     type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
@@ -792,79 +653,6 @@ impl ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> {
     }
 }
 
-// ========== Session State Union Type ==========
-
-/// Union type for all CLI session states
-#[derive(Debug)]
-pub enum CliSessionState {
-    Uninitialized(ChoreographicProtocol<CliProtocolCore, CliUninitialized>),
-    Initializing(ChoreographicProtocol<CliProtocolCore, CliInitializing>),
-    AccountLoaded(ChoreographicProtocol<CliProtocolCore, CliAccountLoaded>),
-    DkdInProgress(ChoreographicProtocol<CliProtocolCore, CliDkdInProgress>),
-    RecoveryInProgress(ChoreographicProtocol<CliProtocolCore, CliRecoveryInProgress>),
-    NetworkOperationInProgress(ChoreographicProtocol<CliProtocolCore, CliNetworkOperationInProgress>),
-    StorageOperationInProgress(ChoreographicProtocol<CliProtocolCore, CliStorageOperationInProgress>),
-    CommandFailed(ChoreographicProtocol<CliProtocolCore, CliCommandFailed>),
-}
-
-impl CliSessionState {
-    /// Get current state name
-    pub fn current_state_name(&self) -> &'static str {
-        match self {
-            CliSessionState::Uninitialized(cli) => cli.current_state_name(),
-            CliSessionState::Initializing(cli) => cli.current_state_name(),
-            CliSessionState::AccountLoaded(cli) => cli.current_state_name(),
-            CliSessionState::DkdInProgress(cli) => cli.current_state_name(),
-            CliSessionState::RecoveryInProgress(cli) => cli.current_state_name(),
-            CliSessionState::NetworkOperationInProgress(cli) => cli.current_state_name(),
-            CliSessionState::StorageOperationInProgress(cli) => cli.current_state_name(),
-            CliSessionState::CommandFailed(cli) => cli.current_state_name(),
-        }
-    }
-    
-    /// Check if CLI can be safely terminated
-    pub fn can_terminate(&self) -> bool {
-        match self {
-            CliSessionState::Uninitialized(cli) => cli.can_terminate(),
-            CliSessionState::Initializing(cli) => cli.can_terminate(),
-            CliSessionState::AccountLoaded(cli) => cli.can_terminate(),
-            CliSessionState::DkdInProgress(cli) => cli.can_terminate(),
-            CliSessionState::RecoveryInProgress(cli) => cli.can_terminate(),
-            CliSessionState::NetworkOperationInProgress(cli) => cli.can_terminate(),
-            CliSessionState::StorageOperationInProgress(cli) => cli.can_terminate(),
-            CliSessionState::CommandFailed(cli) => cli.can_terminate(),
-        }
-    }
-    
-    /// Check if CLI is in final state
-    pub fn is_final(&self) -> bool {
-        match self {
-            CliSessionState::Uninitialized(cli) => cli.is_final(),
-            CliSessionState::Initializing(cli) => cli.is_final(),
-            CliSessionState::AccountLoaded(cli) => cli.is_final(),
-            CliSessionState::DkdInProgress(cli) => cli.is_final(),
-            CliSessionState::RecoveryInProgress(cli) => cli.is_final(),
-            CliSessionState::NetworkOperationInProgress(cli) => cli.is_final(),
-            CliSessionState::StorageOperationInProgress(cli) => cli.is_final(),
-            CliSessionState::CommandFailed(cli) => cli.is_final(),
-        }
-    }
-    
-    /// Get session ID
-    pub fn session_id(&self) -> Uuid {
-        match self {
-            CliSessionState::Uninitialized(cli) => cli.inner.session_id,
-            CliSessionState::Initializing(cli) => cli.inner.session_id,
-            CliSessionState::AccountLoaded(cli) => cli.inner.session_id,
-            CliSessionState::DkdInProgress(cli) => cli.inner.session_id,
-            CliSessionState::RecoveryInProgress(cli) => cli.inner.session_id,
-            CliSessionState::NetworkOperationInProgress(cli) => cli.inner.session_id,
-            CliSessionState::StorageOperationInProgress(cli) => cli.inner.session_id,
-            CliSessionState::CommandFailed(cli) => cli.inner.session_id,
-        }
-    }
-}
-
 // ========== Factory Functions ==========
 
 /// Create a new session-typed CLI protocol in uninitialized state
@@ -884,14 +672,14 @@ pub fn rehydrate_cli_session(
     
     if let Some(command) = in_progress_command {
         match command.as_str() {
-            "dkd" => CliSessionState::DkdInProgress(ChoreographicProtocol::new(core)),
-            "recovery" => CliSessionState::RecoveryInProgress(ChoreographicProtocol::new(core)),
-            _ => CliSessionState::AccountLoaded(ChoreographicProtocol::new(core)),
+            "dkd" => CliSessionState::CliDkdInProgress(ChoreographicProtocol::new(core)),
+            "recovery" => CliSessionState::CliRecoveryInProgress(ChoreographicProtocol::new(core)),
+            _ => CliSessionState::CliAccountLoaded(ChoreographicProtocol::new(core)),
         }
     } else if has_config {
-        CliSessionState::AccountLoaded(ChoreographicProtocol::new(core))
+        CliSessionState::CliAccountLoaded(ChoreographicProtocol::new(core))
     } else {
-        CliSessionState::Uninitialized(ChoreographicProtocol::new(core))
+        CliSessionState::CliUninitialized(ChoreographicProtocol::new(core))
     }
 }
 
@@ -906,9 +694,8 @@ mod tests {
     fn test_cli_session_creation() {
         let cli = new_session_typed_cli();
         
-        assert_eq!(cli.current_state_name(), "CliUninitialized");
+        assert_eq!(cli.state_name(), "CliUninitialized");
         assert!(cli.can_terminate());
-        assert!(!cli.is_final());
     }
     
     #[test]
@@ -925,7 +712,7 @@ mod tests {
         };
         
         let initializing = cli.transition_with_witness(init_context);
-        assert_eq!(initializing.current_state_name(), "CliInitializing");
+        assert_eq!(initializing.state_name(), "CliInitializing");
         
         // Complete initialization
         let effects = aura_crypto::Effects::test();
@@ -938,7 +725,7 @@ mod tests {
         };
         
         let account_loaded = initializing.transition_with_witness(witness);
-        assert_eq!(account_loaded.current_state_name(), "CliAccountLoaded");
+        assert_eq!(account_loaded.state_name(), "CliAccountLoaded");
         assert!(account_loaded.can_terminate());
     }
     
@@ -957,7 +744,7 @@ mod tests {
         };
         
         let account_loaded = cli.transition_with_witness(load_witness);
-        assert_eq!(account_loaded.current_state_name(), "CliAccountLoaded");
+        assert_eq!(account_loaded.state_name(), "CliAccountLoaded");
         
         // Start DKD command
         let dkd_context = CliCommandContext {
@@ -968,7 +755,7 @@ mod tests {
         };
         
         let dkd_in_progress = account_loaded.transition_with_witness(dkd_context);
-        assert_eq!(dkd_in_progress.current_state_name(), "CliDkdInProgress");
+        assert_eq!(dkd_in_progress.state_name(), "CliDkdInProgress");
         
         // Complete DKD command
         let completion_witness = CommandCompleted {
@@ -983,19 +770,19 @@ mod tests {
         };
         
         let completed = dkd_in_progress.transition_with_witness(completion_witness);
-        assert_eq!(completed.current_state_name(), "CliAccountLoaded");
+        assert_eq!(completed.state_name(), "CliAccountLoaded");
     }
     
     #[test]
     fn test_session_state_union() {
         let session = rehydrate_cli_session(false, None);
-        assert_eq!(session.current_state_name(), "CliUninitialized");
+        assert_eq!(session.state_name(), "CliUninitialized");
         
         let session_with_config = rehydrate_cli_session(true, None);
-        assert_eq!(session_with_config.current_state_name(), "CliAccountLoaded");
+        assert_eq!(session_with_config.state_name(), "CliAccountLoaded");
         
         let session_with_dkd = rehydrate_cli_session(true, Some("dkd".to_string()));
-        assert_eq!(session_with_dkd.current_state_name(), "CliDkdInProgress");
+        assert_eq!(session_with_dkd.state_name(), "CliDkdInProgress");
     }
     
     #[test]
@@ -1011,8 +798,7 @@ mod tests {
         };
         
         let failed_cli = cli.transition_with_witness(failure_witness);
-        assert_eq!(failed_cli.current_state_name(), "CliCommandFailed");
+        assert_eq!(failed_cli.state_name(), "CliCommandFailed");
         assert!(failed_cli.can_terminate());
-        assert!(failed_cli.is_final());
     }
 }
