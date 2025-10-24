@@ -5,7 +5,7 @@
 
 use crate::channels::*;
 use aura_session_types::*;
-use aura_journal::{AccountId, DeviceId};
+use aura_journal::{AccountId, DeviceId, Event};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
@@ -78,7 +78,7 @@ impl LocalSessionRuntime {
         );
 
         // Create channels for the main event loop
-        let (command_tx, command_rx) = mpsc::unbounded_channel::<SessionCommand>();
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel::<SessionCommand>();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<SessionEvent>();
         let (effect_tx, mut effect_rx) = mpsc::unbounded_channel::<SessionEffect>();
 
@@ -305,15 +305,19 @@ impl LocalSessionRuntime {
         );
 
         // Create DKD protocol in initial state
-        let dkd_protocol = new_dkd_protocol().map_err(|e| RuntimeError::ProtocolError(e))?;
+        let dkd_protocol = new_dkd_protocol(self.device_id, app_id.clone(), context.clone())
+            .map_err(|e| RuntimeError::ProtocolError(e))?;
+        
+        // Wrap in state enum
+        let dkd_state = DkdProtocolState::InitializationPhase(dkd_protocol);
 
         // Register session
         let session = ActiveSession {
             session_id,
             protocol_type: SessionProtocolType::DKD,
-            current_state: dkd_protocol.current_state_name().to_string(),
-            can_terminate: dkd_protocol.can_terminate(),
-            is_final: dkd_protocol.is_final(),
+            current_state: dkd_state.state_name().to_string(),
+            can_terminate: dkd_state.can_terminate(),
+            is_final: false, // Will be true in CompletionPhase or Failure states
             started_at: 0,    // TODO: Use effects for timestamp
             last_activity: 0, // TODO: Use effects for timestamp
         };
@@ -482,26 +486,33 @@ impl LocalSessionRuntime {
         // Create protocol based on type
         let (current_state, can_terminate, is_final) = match protocol_type {
             SessionProtocolType::DKD => {
-                let protocol = new_dkd_protocol().map_err(|e| RuntimeError::ProtocolError(e))?;
-                (protocol.state_name().to_string(), protocol.can_terminate(), protocol.is_final())
+                // Extract app_id and context from config if available
+                let app_id = config.parameters.get("app_id").unwrap_or(&"default".to_string()).clone();
+                let context = config.parameters.get("context").unwrap_or(&"default".to_string()).clone();
+                
+                let protocol = new_dkd_protocol(self.device_id, app_id, context)
+                    .map_err(|e| RuntimeError::ProtocolError(e))?;
+                let state = DkdProtocolState::InitializationPhase(protocol);
+                (state.state_name().to_string(), state.can_terminate(), false)
             }
             SessionProtocolType::Recovery => {
-                let protocol = rehydrate_recovery_session().unwrap_or_else(|| {
+                let protocol = rehydrate_recovery_session(&[]).unwrap_or_else(|| {
                     // Create new recovery session as fallback
-                    new_session_typed_recovery(
-                        DeviceId(Uuid::new_v4()), // TODO: Use actual device ID
+                    RecoverySessionState::RecoveryInitialized(new_session_typed_recovery(
+                        Uuid::new_v4(),
+                        self.device_id,
                         vec![],                   // TODO: Use actual guardians
                         2,                        // TODO: Use actual threshold
                         Some(48),                 // TODO: Use actual cooldown
-                    )
+                    ))
                 });
-                (protocol.state_name().to_string(), protocol.can_terminate(), protocol.is_final())
+                (protocol.state_name().to_string(), protocol.can_terminate(), false)
             }
             SessionProtocolType::Agent => {
-                let protocol = rehydrate_agent_session().unwrap_or_else(|| {
-                    new_session_typed_agent(DeviceId(Uuid::new_v4())) // TODO: Use actual device ID
+                let protocol = rehydrate_agent_session(&[]).unwrap_or_else(|| {
+                    AgentSessionState::AgentIdle(new_session_typed_agent(self.device_id))
                 });
-                (protocol.state_name().to_string(), protocol.can_terminate(), protocol.is_final())
+                (protocol.state_name().to_string(), protocol.can_terminate(), false)
             }
             _ => {
                 return Err(RuntimeError::ProtocolError(format!("Unsupported protocol type: {:?}", protocol_type)));
@@ -776,7 +787,7 @@ impl LocalSessionRuntime {
                             protocol_type,
                             current_state: dkd_protocol.state_name().to_string(),
                             can_terminate: dkd_protocol.can_terminate(),
-                            is_final: dkd_protocol.is_final(),
+                            is_final: false, // DkdProtocolState doesn't have is_final method
                             started_at: 0,    // TODO: Extract from evidence
                             last_activity: 0, // TODO: Extract from evidence
                         };
@@ -868,11 +879,8 @@ pub enum RuntimeError {
 // Helper functions for rehydration (placeholder implementations)
 fn rehydrate_dkd_protocol(_evidence: &[u8]) -> Option<DkdProtocolState> {
     // TODO: Implement actual rehydration from journal evidence
-    if let Ok(protocol) = new_dkd_protocol() {
-        Some(DkdProtocolState::InitializationPhase(protocol))
-    } else {
-        None
-    }
+    // TODO: Implement actual rehydration from journal evidence
+    None
 }
 
 fn rehydrate_recovery_session(_evidence: &[u8]) -> Option<RecoverySessionState> {

@@ -360,6 +360,7 @@ pub enum ChannelError {
 }
 
 /// A registry for managing multiple typed channels
+#[derive(Clone)]
 pub struct ChannelRegistry {
     /// Command channels for different protocol types
     command_channels: std::collections::HashMap<SessionProtocolType, TypedSender<SessionCommand>>,
