@@ -41,4 +41,5 @@ hex = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
-
+rand_chacha = { workspace = true }
+proptest = { workspace = true }

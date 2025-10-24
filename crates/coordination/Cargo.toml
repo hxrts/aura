@@ -14,7 +14,11 @@ workspace = true
 # Workspace crates
 aura-crypto = { path = "../crypto" }
 aura-journal = { path = "../journal" }
-aura-transport = { path = "../transport" }
+aura-session-types = { path = "../session-types" }
+# Transport dependency removed to break circular dependency
+# Transport implements traits defined in coordination
+# aura-transport = { path = "../transport" }
+aura-groups = { path = "../groups" }
 
 # Curve operations
 curve25519-dalek = { workspace = true }
@@ -47,4 +51,3 @@ rand = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
-

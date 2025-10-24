@@ -1,7 +1,7 @@
-//! Continuous Group Key Agreement (CGKA) using BeeKEM protocol
+//! Group messaging and key agreement using BeeKEM protocol
 //!
-//! This crate implements the BeeKEM CGKA protocol for Aura, providing:
-//! - Concurrent TreeKEM variant optimized for CRDT environments  
+//! This crate implements the BeeKEM protocol for Aura, providing:
+//! - Concurrent TreeKEM variant optimized for CRDT environments
 //! - Forward secrecy and post-compromise security
 //! - Deterministic roster management from capability events
 //! - Causal encryption with predecessor key inclusion

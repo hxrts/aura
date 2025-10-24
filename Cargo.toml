@@ -3,11 +3,12 @@
 resolver = "2"
 members = [
     "crates/agent",
-    "crates/cgka",
+    "crates/groups",
     "crates/cli",
     "crates/coordination",
     "crates/crypto",
     "crates/journal",
+    "crates/session-types",
     "crates/simulator",
     "crates/store",
     "crates/transport",
@@ -70,6 +71,7 @@ rand = "0.8"
 rand_chacha = "0.3"
 hex = "0.4"
 indexmap = "2.0"
+proptest = "1.4"
 
 # Authorization & CGKA (placeholder until Keyhive is available)
 # keyhive_core = { git = "https://github.com/inkandswitch/keyhive", rev = "main" }
@@ -100,4 +102,3 @@ expect_used = "warn"
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
-

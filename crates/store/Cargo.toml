@@ -15,7 +15,7 @@ workspace = true
 aura-journal = { path = "../journal" }
 aura-transport = { path = "../transport" }
 aura-crypto = { path = "../crypto" }
-aura-cgka = { path = "../cgka" }
+aura-groups = { path = "../groups" }
 
 # Storage
 redb = { workspace = true }
@@ -42,4 +42,3 @@ blake3 = { workspace = true }
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3.8"
-

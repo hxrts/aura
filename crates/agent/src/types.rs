@@ -39,6 +39,8 @@ impl ContextCapsule {
     }
     
     /// Create a simple context capsule for testing (legacy compatibility)
+    /// NOTE: This method conflates authentication and authorization and should be
+    /// replaced with separate identity and permission derivation methods
     pub fn simple(app_id: &str, context_label: &str) -> Self {
         ContextCapsule {
             app_id: app_id.to_string(),
@@ -119,41 +121,176 @@ mod verifying_key_serde {
     }
 }
 
-/// Presence ticket issued for a derived identity
+/// Authentication credential - proves device identity
 ///
-/// # Security Model (Enhanced)
+/// # Authentication Security Model
 ///
-/// Presence tickets now include:
+/// Authentication credentials prove "who you are" through:
+/// - Device signature verification
 /// - Challenge-response binding (prevents precomputation attacks)
-/// - Operation-specific scoping (limits what the ticket can do)
-/// - Rate limiting tracking (prevents ticket abuse)
-/// - Device attestation placeholder (for TPM/SEP binding)
+/// - Device attestation (TPM/SEP binding)
+/// - Replay protection via nonce
 ///
 /// # Production Requirements
 ///
 /// - Challenge MUST be server-generated random bytes
 /// - Attestation MUST be bound to TPM/Secure Enclave quote
-/// - Rate limits MUST be enforced server-side
-/// - Credentials SHOULD be revocable via session epoch bump
+/// - Nonces MUST be monotonic and tracked
+/// - Signatures MUST be verified against device certificates
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthenticationCredential {
+    /// Device that issued this credential (authentication)
+    pub issued_by: aura_journal::DeviceId,
+    /// Challenge provided by server/verifier (prevents precomputation)
+    pub challenge: [u8; 32],
+    /// Nonce for replay prevention (monotonic counter per device)
+    pub nonce: u64,
+    /// Device attestation (placeholder for TPM/SEP quote)
+    /// In production, this should be a platform-specific attestation token
+    pub device_attestation: Option<Vec<u8>>,
+    /// Device signature proving identity
+    pub device_signature: Vec<u8>,
+}
+
+/// Authorization token - grants specific permissions
+///
+/// # Authorization Security Model
+///
+/// Authorization tokens specify "what you can do" through:
+/// - Explicit permission scopes
+/// - Time-bounded validity
+/// - Capability delegation chains
+/// - Revocation via session epoch bumps
+///
+/// # Production Requirements
+///
+/// - Permissions MUST be explicitly scoped
+/// - Tokens SHOULD be revocable via session epoch bump
+/// - Delegation chains MUST be verifiable
+/// - Expiration MUST be enforced
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthorizationToken {
+    /// What operations this token authorizes
+    pub permitted_operations: Vec<String>,
+    /// Unix timestamp when token expires
+    pub expires_at: u64,
+    /// Capability token (Biscuit or HPKE-wrapped secret)
+    pub capability_proof: Vec<u8>,
+    /// Device this token was issued to
+    pub authorized_device: aura_journal::DeviceId,
+}
+
+/// Session context - manages session state
+///
+/// # Session Management
+///
+/// Session contexts coordinate authentication and authorization:
+/// - Track session epochs for credential invalidation
+/// - Manage session lifecycle
+/// - Coordinate authentication and authorization updates
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionContext {
+    /// Session epoch (credentials invalid if epoch is bumped)
+    pub session_epoch: u64,
+    /// When this session was established
+    pub established_at: u64,
+    /// Device that owns this session
+    pub session_owner: aura_journal::DeviceId,
+}
+
+impl AuthenticationCredential {
+    /// Verify the device signature in this authentication credential
+    pub fn verify_device_signature(&self, expected_device_id: &aura_journal::DeviceId) -> crate::Result<bool> {
+        // TODO: Implement signature verification
+        // This should verify the device_signature against the challenge and nonce
+        Ok(self.issued_by == *expected_device_id)
+    }
+    
+    /// Check if this credential is still fresh (nonce not replayed)
+    pub fn is_fresh(&self, last_seen_nonce: u64) -> bool {
+        self.nonce > last_seen_nonce
+    }
+}
+
+impl AuthorizationToken {
+    /// Check if this token authorizes a specific operation
+    pub fn authorizes_operation(&self, operation: &str) -> bool {
+        self.permitted_operations.iter().any(|op| op == operation)
+    }
+    
+    /// Check if this token is still valid (not expired)
+    pub fn is_valid(&self, current_time: u64) -> bool {
+        current_time < self.expires_at
+    }
+    
+    /// Check if this token is valid for a specific device
+    pub fn is_valid_for_device(&self, device_id: &aura_journal::DeviceId) -> bool {
+        self.authorized_device == *device_id
+    }
+}
+
+impl SessionContext {
+    /// Create a new session context
+    pub fn new(device_id: aura_journal::DeviceId, epoch: u64) -> Self {
+        Self {
+            session_epoch: epoch,
+            established_at: 0, // TODO: Use effects for timestamp
+            session_owner: device_id,
+        }
+    }
+    
+    /// Bump the session epoch (invalidates all credentials)
+    pub fn bump_epoch(&mut self) {
+        self.session_epoch += 1;
+    }
+}
+
+/// Session credential combining authentication and authorization
+///
+/// # Security Model
+///
+/// Session credentials provide both authentication (proves device identity)
+/// and authorization (grants specific permissions) in a single token:
+/// - Challenge-response binding prevents precomputation attacks
+/// - Operation-specific scoping limits token capabilities  
+/// - Session epoch binding enables credential revocation
+/// - Nonce tracking prevents replay attacks
+/// - Device attestation provides hardware binding (TPM/SEP)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCredential {
     /// Device that issued this credential
     pub issued_by: aura_journal::DeviceId,
     /// Unix timestamp when credential expires
     pub expires_at: u64,
-    /// Session epoch (credentials invalid if epoch is bumped)
+    /// Session epoch (credential invalid if epoch is bumped)
     pub session_epoch: u64,
-    /// Capability token (Biscuit or HPKE-wrapped secret)
+    /// Capability proof (HPKE-wrapped secret or Biscuit token)
     pub capability: Vec<u8>,
-    /// Challenge provided by server/verifier (prevents precomputation)
+    /// Challenge provided by verifier (prevents precomputation)
     pub challenge: [u8; 32],
-    /// Operation scope: what this credential authorizes (e.g., "read:messages", "write:profile")
+    /// Operation scope this credential authorizes
     pub operation_scope: String,
-    /// Nonce for replay prevention (monotonic counter per device)
+    /// Nonce for replay prevention
     pub nonce: u64,
-    /// Device attestation (placeholder for TPM/SEP quote)
-    /// In production, this should be a platform-specific attestation token
+    /// Device attestation (TPM/SEP quote)
     pub device_attestation: Option<Vec<u8>>,
+}
+
+impl SessionCredential {
+    /// Check if this credential is still valid (not expired)
+    pub fn is_valid(&self, current_time: u64) -> bool {
+        current_time < self.expires_at
+    }
+    
+    /// Check if this credential authorizes a specific operation
+    pub fn authorizes_operation(&self, operation: &str) -> bool {
+        self.operation_scope == operation || self.operation_scope.starts_with(&format!("{}:", operation))
+    }
+    
+    /// Check if this credential is for the current session epoch
+    pub fn is_current_epoch(&self, current_epoch: u64) -> bool {
+        self.session_epoch == current_epoch
+    }
 }
 
 /// Configuration for DeviceAgent

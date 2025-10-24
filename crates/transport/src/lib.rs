@@ -7,16 +7,16 @@
 
 #![allow(missing_docs)] // TODO: Add comprehensive documentation in future work
 
-pub mod capability_transport;
+pub mod factory;
 pub mod presence;
 pub mod stub;
-pub mod transport;
+pub mod transport;  // Unified transport with session types and capabilities
 pub mod types;
 
-pub use capability_transport::*;
+pub use factory::*;
 pub use presence::*;
 pub use stub::*;
-pub use transport::*;
+pub use transport::*;  // This now includes session types and capability transport
 pub use types::*;
 
 use thiserror::Error;
@@ -37,6 +37,24 @@ pub enum TransportError {
 
     #[error("Timeout")]
     Timeout,
+
+    #[error("Invalid transport configuration: {0}")]
+    InvalidConfig(String),
+
+    #[error("Transport type not implemented: {0}")]
+    NotImplemented(String),
+
+    #[error("Transport not authorized: {0}")]
+    NotAuthorized(String),
+
+    #[error("Invalid transport state: {0}")]
+    InvalidState(String),
+
+    #[error("Runtime error: {0}")]
+    RuntimeError(String),
+
+    #[error("Insufficient capability: {0}")]
+    InsufficientCapability(String),
 }
 
 pub type Result<T> = std::result::Result<T, TransportError>;

@@ -1,6 +1,7 @@
 // Shared types for Aura cryptographic system
 
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// Device identifier
@@ -27,6 +28,14 @@ impl std::fmt::Display for DeviceId {
     }
 }
 
+impl FromStr for DeviceId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(DeviceId(Uuid::parse_str(s)?))
+    }
+}
+
 /// Guardian identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct GuardianId(pub Uuid);
@@ -46,6 +55,14 @@ impl std::fmt::Display for GuardianId {
     }
 }
 
+impl FromStr for GuardianId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(GuardianId(Uuid::parse_str(s)?))
+    }
+}
+
 /// Account identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct AccountId(pub Uuid);
@@ -62,6 +79,14 @@ impl AccountId {
 impl std::fmt::Display for AccountId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for AccountId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(AccountId(Uuid::parse_str(s)?))
     }
 }
 

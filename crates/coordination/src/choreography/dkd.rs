@@ -358,7 +358,7 @@ mod tests {
     use super::*;
     use aura_crypto::Effects;
     use aura_journal::{AccountLedger, AccountState};
-    use aura_transport::StubTransport;
+    use crate::execution::context::StubTransport;
     use std::sync::Arc;
     use tokio::sync::RwLock;
     use uuid::Uuid;

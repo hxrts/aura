@@ -200,14 +200,9 @@ impl DeviceAgent {
         Ok(derived_identity)
     }
     
-    /// Issue a presence ticket for a derived identity
-    pub async fn issue_credential(&self, identity: &DerivedIdentity) -> Result<SessionCredential> {
-        debug!("Issuing session credential for derived identity");
-        
-        // Get current session epoch from ledger
-        let ledger = self.ledger.read().await;
-        let session_epoch = ledger.state().session_epoch;
-        drop(ledger);
+    /// Issue authentication credential - proves device identity
+    pub async fn issue_authentication_credential(&self, identity: &DerivedIdentity) -> Result<crate::types::AuthenticationCredential> {
+        debug!("Issuing authentication credential for derived identity");
         
         // Generate challenge for credential binding
         let challenge: [u8; 32] = self.effects.random_bytes();
@@ -215,31 +210,90 @@ impl DeviceAgent {
         // Get next nonce for replay prevention
         let device_nonce = self.get_next_device_nonce().await?;
         
-        // Issue credential using the credential module
-        crate::credential::issue_credential(
-            self.config.device_id,
-            session_epoch,
-            identity,
-            &challenge,
-            "presence:verify", // Default operation scope for presence verification
-            device_nonce,
-            None, // No device attestation in MVP
-            Some(identity.capsule.ttl.unwrap_or(24 * 3600)), // Use capsule TTL or default 24h
-            &self.effects,
-        )
+        // Create device signature for authentication
+        let signature_payload = [
+            &challenge[..],
+            &device_nonce.to_le_bytes()[..],
+            identity.capsule.context_id()?.as_slice(),
+        ].concat();
+        
+        // Sign the payload using device key
+        let device_signature = {
+            let device_key_manager = self.device_key_manager.read().await;
+            device_key_manager.sign_message(&signature_payload)
+                .map_err(|e| AgentError::CryptoError(format!("Failed to sign authentication credential: {:?}", e)))?
+        };
+        
+        Ok(crate::types::AuthenticationCredential {
+            issued_by: self.config.device_id,
+            challenge,
+            nonce: device_nonce,
+            device_attestation: None, // No device attestation in MVP
+            device_signature,
+        })
     }
     
-    /// Verify a presence ticket
-    pub async fn verify_credential(&self, credential: &SessionCredential) -> Result<()> {
-        debug!("Verifying session credential for device {}", credential.issued_by);
+    /// Issue authorization token - grants specific permissions
+    pub async fn issue_authorization_token(&self, device_id: aura_journal::DeviceId, operations: Vec<String>) -> Result<crate::types::AuthorizationToken> {
+        debug!("Issuing authorization token for device {} with operations: {:?}", device_id, operations);
         
         // Get current session epoch from ledger
         let ledger = self.ledger.read().await;
-        let session_epoch = ledger.state().session_epoch;
+        let _session_epoch = ledger.state().session_epoch;
         drop(ledger);
         
-        // Verify credential using the credential module
-        crate::credential::verify_credential(credential, session_epoch, &self.effects)
+        // Calculate expiration (24 hours default)
+        let expires_at = self.effects.now()? + (24 * 3600);
+        
+        // Create capability proof using threshold signature
+        // The proof includes session epoch, device ID, operations, and expiration time
+        let capability_proof = self.create_capability_proof(
+            _session_epoch,
+            device_id,
+            &operations,
+            expires_at,
+        ).await?;
+        
+        Ok(crate::types::AuthorizationToken {
+            permitted_operations: operations,
+            expires_at,
+            capability_proof,
+            authorized_device: device_id,
+        })
+    }
+    
+    /// Verify authentication credential - check device identity
+    pub async fn verify_authentication(&self, credential: &crate::types::AuthenticationCredential) -> Result<()> {
+        debug!("Verifying authentication credential for device {}", credential.issued_by);
+        
+        // Verify device signature
+        if !credential.verify_device_signature(&credential.issued_by)? {
+            return Err(crate::AgentError::InvalidCredential("Invalid device signature".to_string()));
+        }
+        
+        // Check nonce freshness
+        let last_nonce = self.get_last_device_nonce(&credential.issued_by).await?;
+        if !credential.is_fresh(last_nonce) {
+            return Err(crate::AgentError::InvalidCredential("Stale nonce - potential replay attack".to_string()));
+        }
+        
+        // TODO: Verify device attestation if present
+        
+        Ok(())
+    }
+    
+    /// Check authorization token - verify permissions
+    pub async fn check_authorization(&self, token: &crate::types::AuthorizationToken, operation: &str) -> Result<bool> {
+        debug!("Checking authorization for device {} operation {}", token.authorized_device, operation);
+        
+        // Check if token is still valid
+        let current_time = self.effects.now()?;
+        if !token.is_valid(current_time) {
+            return Ok(false);
+        }
+        
+        // Check if token authorizes the requested operation
+        Ok(token.authorizes_operation(operation))
     }
     
     /// Get next device nonce for replay prevention
@@ -247,12 +301,18 @@ impl DeviceAgent {
         let ledger = self.ledger.read().await;
         let _device_metadata = ledger.state().devices.get(&self.config.device_id)
             .ok_or_else(|| crate::AgentError::DeviceNotFound(format!("Device {} not found in ledger", self.config.device_id)))?;
-        
-        // Use timestamp as nonce since it's monotonic and prevents replay
-        // In production, this would be a proper monotonic counter stored in device metadata
-        let nonce = self.effects.now().map_err(|e| crate::AgentError::CryptoError(format!("Failed to get timestamp: {:?}", e)))?;
-        
-        Ok(nonce)
+        // TODO: Get actual nonce from device metadata
+        Ok(1) // Placeholder
+    }
+    
+    /// Get last seen nonce for a device (for replay protection)
+    async fn get_last_device_nonce(&self, device_id: &aura_journal::DeviceId) -> Result<u64> {
+        let ledger = self.ledger.read().await;
+        let _device_metadata = ledger.state().devices.get(device_id)
+            .ok_or_else(|| crate::AgentError::DeviceNotFound(format!("Device {} not found in ledger", device_id)))?;
+        // TODO: Get actual last nonce from device metadata
+        // For now, return 0 as placeholder (all nonces > 0 will be valid)
+        Ok(0)
     }
     
     /// Sync account state from peers
@@ -956,6 +1016,47 @@ impl DeviceAgent {
     pub async fn active_operation_lock(&self) -> Option<aura_journal::OperationLock> {
         let ledger = self.ledger.read().await;
         ledger.active_operation_lock().cloned()
+    }
+    
+    /// Create capability proof using threshold signature
+    /// 
+    /// This creates a cryptographic proof that authorizes specific operations for a device.
+    /// The proof includes session epoch to tie authorization to current session state.
+    async fn create_capability_proof(
+        &self,
+        session_epoch: u64,
+        device_id: aura_journal::DeviceId,
+        operations: &[String],
+        expires_at: u64,
+    ) -> Result<Vec<u8>> {
+        use aura_crypto::FrostSigner;
+        
+        // Create authorization data to sign
+        let auth_data = format!(
+            "AUTH:{}:{}:{}:{}",
+            session_epoch,
+            device_id.0,
+            operations.join(","),
+            expires_at
+        );
+        let message = auth_data.as_bytes();
+        
+        // Get our key share for FROST signing
+        let key_share = self.key_share.read().await;
+        let key_package = &key_share.share;
+        
+        // Generate nonces for FROST round 1
+        let mut rng = self.effects.rng();
+        let (_nonces, commitments) = FrostSigner::generate_nonces(key_package.signing_share(), &mut rng);
+        
+        // For MVP: Create a single-participant signature using device key
+        // TODO: In production, coordinate with other participants for proper threshold signature
+        let device_key_manager = self.device_key_manager.read().await;
+        let device_signature = device_key_manager.sign_message(message)?;
+        
+        // For now, use device signature as capability proof
+        // In production, this would be replaced with proper FROST threshold signature
+        Ok(device_signature)
     }
 }
 

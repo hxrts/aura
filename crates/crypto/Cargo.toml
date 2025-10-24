@@ -39,4 +39,4 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
-
+proptest = { workspace = true }

@@ -321,3 +321,50 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+// Implementation of coordination's Transport trait for StubTransport
+// This allows coordination protocols to use the transport layer
+#[async_trait]
+impl aura_coordination::Transport for StubTransport {
+    async fn send_message(&self, peer_id: &str, message: &[u8]) -> Result<(), String> {
+        // Create a dummy ticket for the connection
+        let dummy_ticket = PresenceTicket {
+            device_id: uuid::Uuid::new_v4(),
+            session_epoch: 1,
+            issued_at_ms: 0,
+            expires_at_ms: u64::MAX,
+            signature: vec![0u8; 64],
+        };
+        
+        // Connect and send message
+        match self.connect(peer_id, &dummy_ticket, &dummy_ticket).await {
+            Ok(conn) => {
+                self.send(&conn, message).await.map_err(|e| e.to_string())
+            }
+            Err(e) => Err(e.to_string())
+        }
+    }
+    
+    async fn broadcast_message(&self, message: &[u8]) -> Result<(), String> {
+        // Create dummy ticket for broadcast
+        let dummy_ticket = PresenceTicket {
+            device_id: uuid::Uuid::new_v4(),
+            session_epoch: 1,
+            issued_at_ms: 0,
+            expires_at_ms: u64::MAX,
+            signature: vec![0u8; 64],
+        };
+        
+        // Broadcast to all known connections
+        match self.broadcast(&dummy_ticket, message).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.to_string())
+        }
+    }
+    
+    async fn is_peer_reachable(&self, peer_id: &str) -> bool {
+        // For stub transport, we'll consider all peers reachable
+        // In a real implementation, this would check network connectivity
+        !peer_id.is_empty()
+    }
+}

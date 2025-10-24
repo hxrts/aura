@@ -13,7 +13,46 @@ use super::time::{TimeSource, WakeCondition};
 use super::types::*;
 use aura_crypto::Effects;
 use aura_journal::{AccountLedger, Event, EventType, Session};
-use aura_transport::Transport;
+/// Transport abstraction for protocol execution
+/// 
+/// This trait defines the minimal interface that coordination protocols
+/// need from the transport layer. Transport implementations provide this.
+#[async_trait::async_trait]
+pub trait Transport: Send + Sync {
+    /// Send a message to a peer
+    async fn send_message(&self, peer_id: &str, message: &[u8]) -> Result<(), String>;
+    
+    /// Broadcast a message to all known peers
+    async fn broadcast_message(&self, message: &[u8]) -> Result<(), String>;
+    
+    /// Check if a peer is reachable
+    async fn is_peer_reachable(&self, peer_id: &str) -> bool;
+}
+/// Stub transport implementation for testing and development
+/// 
+/// This provides a no-op transport that can be used when testing protocols
+/// without actual network communication.
+#[derive(Debug, Default, Clone)]
+pub struct StubTransport;
+
+#[async_trait::async_trait]
+impl Transport for StubTransport {
+    async fn send_message(&self, _peer_id: &str, _message: &[u8]) -> Result<(), String> {
+        // No-op for testing
+        Ok(())
+    }
+    
+    async fn broadcast_message(&self, _message: &[u8]) -> Result<(), String> {
+        // No-op for testing
+        Ok(())
+    }
+    
+    async fn is_peer_reachable(&self, _peer_id: &str) -> bool {
+        // Always return true for testing
+        true
+    }
+}
+
 use ed25519_dalek::SigningKey;
 use rand::Rng;
 // Note: Using ctx.effects.rng() instead of direct rand usage for injectable effects
@@ -204,7 +243,10 @@ impl ProtocolContext {
             Instruction::CheckSessionCollision {
                 operation_type,
                 context_id,
-            } => self.check_session_collision(operation_type, context_id).await,
+            } => {
+                self.check_session_collision(operation_type, context_id)
+                    .await
+            }
         }
     }
 
@@ -214,11 +256,13 @@ impl ProtocolContext {
         // Write to ledger (may be shared in simulation for instant CRDT sync)
         let mut ledger = self.ledger.write().await;
 
-        ledger.append_event(event, &self.effects).map_err(|e| ProtocolError {
-            session_id: self.session_id,
-            error_type: ProtocolErrorType::Other,
-            message: format!("Failed to write event: {:?}", e),
-        })?;
+        ledger
+            .append_event(event, &self.effects)
+            .map_err(|e| ProtocolError {
+                session_id: self.session_id,
+                error_type: ProtocolErrorType::Other,
+                message: format!("Failed to write event: {:?}", e),
+            })?;
 
         // Note: In production, events would be broadcast via CRDT sync protocol
         // In simulation with shared ledger, the write is immediately visible to all
@@ -882,22 +926,23 @@ impl ProtocolContext {
     ) -> Result<InstructionResult, ProtocolError> {
         use crate::utils::{compute_lottery_ticket, determine_lock_winner};
         use aura_journal::RequestOperationLockEvent;
-        
+
         // Refresh events to get latest state
         self.refresh_pending_events().await?;
-        
+
         // Get current ledger state for last event hash
         let (last_event_hash, existing_sessions) = {
             let ledger = self.ledger.read().await;
             let last_event_hash = ledger.last_event_hash().unwrap_or([0u8; 32]);
-            let existing_sessions: Vec<Session> = ledger.active_sessions().into_iter().cloned().collect();
+            let existing_sessions: Vec<Session> =
+                ledger.active_sessions().into_iter().cloned().collect();
             (last_event_hash, existing_sessions)
         };
-        
+
         // Find all active sessions for this operation type and context
         let mut collision_sessions = Vec::new();
         let mut collision_requests = Vec::new();
-        
+
         for session in existing_sessions {
             // Check if this session matches our operation type and context
             let protocol_type = match operation_type {
@@ -906,19 +951,23 @@ impl ProtocolContext {
                 aura_journal::OperationType::Recovery => aura_journal::ProtocolType::Recovery,
                 aura_journal::OperationType::Locking => aura_journal::ProtocolType::Locking,
             };
-            
-            if session.protocol_type == protocol_type && !session.is_expired(self.time_source.current_epoch()) {
+
+            if session.protocol_type == protocol_type
+                && !session.is_expired(self.time_source.current_epoch())
+            {
                 // For now, we assume context_id is embedded in session metadata
                 // In practice, you'd need to check the actual context from session events
                 collision_sessions.push(session.clone());
-                
+
                 // Create a lottery request for this session
-                let device_id = if let Some(aura_journal::ParticipantId::Device(id)) = session.participants.first() {
+                let device_id = if let Some(aura_journal::ParticipantId::Device(id)) =
+                    session.participants.first()
+                {
                     id
                 } else {
                     continue;
                 };
-                
+
                 let lottery_ticket = compute_lottery_ticket(device_id, &last_event_hash);
                 collision_requests.push(RequestOperationLockEvent {
                     operation_type,
@@ -928,7 +977,7 @@ impl ProtocolContext {
                 });
             }
         }
-        
+
         // Add our own request to the lottery
         let my_device_id = aura_journal::DeviceId(self.device_id);
         let my_ticket = compute_lottery_ticket(&my_device_id, &last_event_hash);
@@ -938,18 +987,20 @@ impl ProtocolContext {
             device_id: my_device_id,
             lottery_ticket: my_ticket,
         });
-        
+
         // Determine winner if there's a collision
         let winner = if collision_requests.len() > 1 {
-            Some(determine_lock_winner(&collision_requests).map_err(|e| ProtocolError {
-                session_id: self.session_id,
-                error_type: ProtocolErrorType::Other,
-                message: format!("Failed to determine lottery winner: {:?}", e),
-            })?)
+            Some(
+                determine_lock_winner(&collision_requests).map_err(|e| ProtocolError {
+                    session_id: self.session_id,
+                    error_type: ProtocolErrorType::Other,
+                    message: format!("Failed to determine lottery winner: {:?}", e),
+                })?,
+            )
         } else {
             None
         };
-        
+
         Ok(InstructionResult::SessionStatus {
             existing_sessions: collision_sessions,
             winner,
@@ -1097,7 +1148,7 @@ mod tests {
             vec![],
             None,
             ledger,
-            Arc::new(aura_transport::StubTransport::default()),
+            Arc::new(StubTransport::default()),
             Effects::test(),
             device_key,
             Box::new(crate::ProductionTimeSource::new()),

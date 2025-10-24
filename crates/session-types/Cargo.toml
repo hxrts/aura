@@ -1,6 +1,6 @@
-# Continuous Group Key Agreement (CGKA) using BeeKEM protocol
+# Session Types for Choreographic Protocol Safety
 [package]
-name = "aura-cgka"
+name = "aura-session-types"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,31 +11,28 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+# Workspace crates - minimal dependencies to avoid cycles
+aura-crypto = { path = "../crypto" }
+aura-journal = { path = "../journal" }
+aura-groups = { path = "../groups" }
 
 # Cryptography
-ed25519-dalek = { workspace = true }
 blake3 = { workspace = true }
-rand = { workspace = true }
+frost-ed25519 = { workspace = true }
+ed25519-dalek = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_cbor = { workspace = true }
 
 # Async
 tokio = { workspace = true }
+futures = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }
-time = { workspace = true }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
-hex = { workspace = true }
-
-# Local dependencies
-aura-journal = { path = "../journal" }
-aura-crypto = { path = "../crypto" }
 
 [dev-dependencies]
 tokio-test = "0.4"

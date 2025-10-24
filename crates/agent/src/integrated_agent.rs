@@ -51,10 +51,10 @@ impl IntegratedAgent {
         
         // Create transport layer  
         let base_transport = Arc::new(aura_transport::StubTransport::new());
-        let transport = CapabilityTransport::new(base_transport, device_id, individual_id.clone(), device_key_manager, effects.clone());
+        let transport = CapabilityTransport::new(base_transport, individual_id.clone(), device_key_manager, effects.clone());
         
         // Create storage layer
-        let storage = CapabilityStorage::new(storage_root, device_id, individual_id, effects.clone())
+        let storage = CapabilityStorage::new(storage_root, individual_id, effects.clone())
             .await
             .map_err(|e| AgentError::SerializationError(e.to_string()))?;
         

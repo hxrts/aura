@@ -11,6 +11,8 @@ mod commands;
 
 use config::Config;
 use commands::{
+    auth::{AuthCommand, handle_auth_command},
+    authz::{AuthzCommand, handle_authz_command},
     capability::{CapabilityCommand, handle_capability_command},
     storage::{StorageCommand, handle_storage_command},
     network::{NetworkCommand, handle_network_command},
@@ -66,7 +68,15 @@ enum Commands {
         context: String,
     },
 
-    /// Capability management commands
+    /// Authentication commands - identity verification (who you are)
+    #[command(subcommand)]
+    Auth(AuthCommand),
+
+    /// Authorization commands - permission management (what you can do)
+    #[command(subcommand)]
+    Authz(AuthzCommand),
+
+    /// Legacy capability management commands (deprecated - use auth/authz instead)
     #[command(subcommand)]
     Capability(CapabilityCommand),
 
@@ -105,7 +115,18 @@ async fn main() -> anyhow::Result<()> {
             dkd::test_dkd(&cli.config.to_string_lossy(), &app_id, &context).await?;
         }
         
+        Commands::Auth(cmd) => {
+            let config = Config::load(&cli.config).await?;
+            handle_auth_command(cmd, &config).await?;
+        }
+        
+        Commands::Authz(cmd) => {
+            let config = Config::load(&cli.config).await?;
+            handle_authz_command(cmd, &config).await?;
+        }
+        
         Commands::Capability(cmd) => {
+            eprintln!("Warning: 'capability' commands are deprecated. Use 'auth' for authentication or 'authz' for authorization.");
             let config = Config::load(&cli.config).await?;
             handle_capability_command(cmd, &config).await?;
         }
