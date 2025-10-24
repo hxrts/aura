@@ -5,9 +5,11 @@ use crate::{
 };
 use aura_journal::{AccountLedger, AccountState, DeviceId, DeviceMetadata, SessionEpoch};
 use aura_coordination::{KeyShare, ProductionTimeSource};
+use aura_crypto::{DeviceKeyManager, Effects};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
+use bincode;
 
 /// DeviceAgent provides the high-level API for identity and key derivation
 /// 
@@ -21,7 +23,8 @@ pub struct DeviceAgent {
     key_share: Arc<RwLock<KeyShare>>,
     ledger: Arc<RwLock<AccountLedger>>,
     transport: Arc<dyn aura_transport::Transport>,
-    device_key: ed25519_dalek::SigningKey,
+    device_key_manager: Arc<RwLock<DeviceKeyManager>>,
+    effects: Effects,
 }
 
 impl DeviceAgent {
@@ -31,7 +34,8 @@ impl DeviceAgent {
         key_share: KeyShare,
         ledger: AccountLedger,
         transport: Arc<dyn aura_transport::Transport>,
-        device_key: ed25519_dalek::SigningKey,
+        device_key_manager: DeviceKeyManager,
+        effects: Effects,
     ) -> Result<Self> {
         info!("Initializing DeviceAgent for device {}", config.device_id);
         
@@ -40,7 +44,8 @@ impl DeviceAgent {
             key_share: Arc::new(RwLock::new(key_share)),
             ledger: Arc::new(RwLock::new(ledger)),
             transport,
-            device_key,
+            device_key_manager: Arc::new(RwLock::new(device_key_manager)),
+            effects,
         })
     }
     
@@ -59,10 +64,12 @@ impl DeviceAgent {
         // Create stub transport for MVP
         let transport = Arc::new(aura_transport::StubTransport::default());
         
-        // Create device key from config
-        let device_key = ed25519_dalek::SigningKey::from_bytes(&[0u8; 32]); // Placeholder for MVP
+        // Create device key manager and generate device key
+        let mut device_key_manager = DeviceKeyManager::new(Effects::production());
+        device_key_manager.generate_device_key(config.device_id.0)
+            .map_err(|e| crate::AgentError::CryptoError(format!("Failed to generate device key: {:?}", e)))?;
         
-        Self::new(config.clone(), key_share, ledger, transport, device_key).await
+        Self::new(config.clone(), key_share, ledger, transport, device_key_manager, Effects::production()).await
     }
     
     /// Derive a simple identity for an app context
@@ -127,7 +134,7 @@ impl DeviceAgent {
         );
         
         // Create protocol context for DKD choreography
-        let session_id = uuid::Uuid::new_v4();
+        let session_id = self.effects.gen_uuid();
         let ledger = self.ledger.clone();
         let _key_share = self.key_share.read().await.clone();
         
@@ -138,30 +145,27 @@ impl DeviceAgent {
             Some(threshold),
             ledger,
             self.transport.clone(),
-            aura_crypto::Effects::test(),
-            self.device_key.clone(),
+            self.effects.clone(),
+            // Get device signing key for protocol context
+            {
+                let device_key_manager = self.device_key_manager.read().await;
+                device_key_manager.get_raw_signing_key()
+                    .map_err(|e| crate::AgentError::CryptoError(format!("Failed to get device signing key: {:?}", e)))?
+            },
             Box::new(ProductionTimeSource::new()),
         );
         
-        // Set context for key derivation
-        // Convert ContextCapsule to BTreeMap for protocol context
-        let mut context_map = std::collections::BTreeMap::new();
-        context_map.insert("app_id".to_string(), capsule.app_id.clone());
-        context_map.insert("context_label".to_string(), capsule.context_label.clone());
-        if let Some(policy_hint) = &capsule.policy_hint {
-            context_map.insert("policy_hint".to_string(), policy_hint.clone());
-        }
-        if let Some(transport_hint) = &capsule.transport_hint {
-            context_map.insert("transport_hint".to_string(), transport_hint.clone());
-        }
-        if let Some(ttl) = capsule.ttl {
-            context_map.insert("ttl".to_string(), ttl.to_string());
-        }
-        context_map.insert("issued_at".to_string(), capsule.issued_at.to_string());
-        protocol_ctx.set_context_capsule(context_map)?;
+        // Set context for key derivation by creating context ID from capsule
+        let context_id = {
+            let mut context_bytes = Vec::new();
+            context_bytes.extend_from_slice(capsule.app_id.as_bytes());
+            context_bytes.push(0); // Separator
+            context_bytes.extend_from_slice(capsule.context_label.as_bytes());
+            context_bytes
+        };
         
-        // Execute DKD choreography
-        let derived_key_bytes = aura_coordination::choreography::dkd_choreography(&mut protocol_ctx).await
+        // Execute DKD choreography with context
+        let derived_key_bytes = aura_coordination::choreography::dkd_choreography(&mut protocol_ctx, context_id).await
             .map_err(|e| crate::AgentError::DkdFailed(format!("DKD choreography failed: {:?}", e)))?;
         
         // Convert derived key bytes to VerifyingKey
@@ -197,24 +201,58 @@ impl DeviceAgent {
     }
     
     /// Issue a presence ticket for a derived identity
-    /// 
-    /// **Note**: This uses the legacy simplified ticket issuance.
-    /// For production, use challenge-response with threshold signing.
-    pub async fn issue_credential(&self, _identity: &DerivedIdentity) -> Result<SessionCredential> {
-        // TODO: Implement proper presence ticket issuance
-        // This was in the old presence module that was refactored
-        Err(crate::AgentError::NotImplemented(
-            "Presence ticket issuance pending refactor".to_string()
-        ))
+    pub async fn issue_credential(&self, identity: &DerivedIdentity) -> Result<SessionCredential> {
+        debug!("Issuing session credential for derived identity");
+        
+        // Get current session epoch from ledger
+        let ledger = self.ledger.read().await;
+        let session_epoch = ledger.state().session_epoch;
+        drop(ledger);
+        
+        // Generate challenge for credential binding
+        let challenge: [u8; 32] = self.effects.random_bytes();
+        
+        // Get next nonce for replay prevention
+        let device_nonce = self.get_next_device_nonce().await?;
+        
+        // Issue credential using the credential module
+        crate::credential::issue_credential(
+            self.config.device_id,
+            session_epoch,
+            identity,
+            &challenge,
+            "presence:verify", // Default operation scope for presence verification
+            device_nonce,
+            None, // No device attestation in MVP
+            Some(identity.capsule.ttl.unwrap_or(24 * 3600)), // Use capsule TTL or default 24h
+            &self.effects,
+        )
     }
     
     /// Verify a presence ticket
-    pub async fn verify_credential(&self, _credential: &SessionCredential) -> Result<()> {
-        // TODO: Implement proper credential verification
-        // This was in the old presence module that was refactored
-        Err(crate::AgentError::NotImplemented(
-            "Credential verification pending refactor".to_string()
-        ))
+    pub async fn verify_credential(&self, credential: &SessionCredential) -> Result<()> {
+        debug!("Verifying session credential for device {}", credential.issued_by);
+        
+        // Get current session epoch from ledger
+        let ledger = self.ledger.read().await;
+        let session_epoch = ledger.state().session_epoch;
+        drop(ledger);
+        
+        // Verify credential using the credential module
+        crate::credential::verify_credential(credential, session_epoch, &self.effects)
+    }
+    
+    /// Get next device nonce for replay prevention
+    async fn get_next_device_nonce(&self) -> Result<u64> {
+        let ledger = self.ledger.read().await;
+        let _device_metadata = ledger.state().devices.get(&self.config.device_id)
+            .ok_or_else(|| crate::AgentError::DeviceNotFound(format!("Device {} not found in ledger", self.config.device_id)))?;
+        
+        // Use timestamp as nonce since it's monotonic and prevents replay
+        // In production, this would be a proper monotonic counter stored in device metadata
+        let nonce = self.effects.now().map_err(|e| crate::AgentError::CryptoError(format!("Failed to get timestamp: {:?}", e)))?;
+        
+        Ok(nonce)
     }
     
     /// Sync account state from peers
@@ -318,7 +356,7 @@ impl DeviceAgent {
         );
         
         // Create protocol context for resharing choreography
-        let session_id = uuid::Uuid::new_v4();
+        let session_id = self.effects.gen_uuid();
         let ledger = self.ledger.clone();
         let _key_share = self.key_share.read().await.clone();
         
@@ -337,14 +375,19 @@ impl DeviceAgent {
             Some(current_threshold),
             ledger,
             self.transport.clone(),
-            aura_crypto::Effects::test(),
-            self.device_key.clone(),
+            self.effects.clone(),
+            // Get device signing key for protocol context
+            {
+                let device_key_manager = self.device_key_manager.read().await;
+                device_key_manager.get_raw_signing_key()
+                    .map_err(|e| crate::AgentError::CryptoError(format!("Failed to get device signing key: {:?}", e)))?
+            },
             Box::new(ProductionTimeSource::new()),
         );
         
         // Set resharing parameters
-        protocol_ctx.set_new_participants(new_participants.clone())?;
-        protocol_ctx.set_new_threshold(new_threshold)?;
+        protocol_ctx.new_participants = Some(new_participants.clone());
+        protocol_ctx.new_threshold = Some(new_threshold);
         
         // Execute resharing choreography
         let _result = aura_coordination::choreography::resharing_choreography(&mut protocol_ctx, Some(new_threshold as u16), Some(new_participants)).await
@@ -373,7 +416,7 @@ impl DeviceAgent {
         }
         
         // Create protocol context for recovery choreography
-        let session_id = uuid::Uuid::new_v4();
+        let session_id = self.effects.gen_uuid();
         let ledger = self.ledger.clone();
         let _key_share = self.key_share.read().await.clone();
         
@@ -393,16 +436,21 @@ impl DeviceAgent {
             Some(current_threshold),
             ledger,
             self.transport.clone(),
-            aura_crypto::Effects::test(),
-            self.device_key.clone(),
+            self.effects.clone(),
+            // Get device signing key for protocol context
+            {
+                let device_key_manager = self.device_key_manager.read().await;
+                device_key_manager.get_raw_signing_key()
+                    .map_err(|e| crate::AgentError::CryptoError(format!("Failed to get device signing key: {:?}", e)))?
+            },
             Box::new(ProductionTimeSource::new()),
         );
         
         // Set recovery parameters
-        protocol_ctx.set_guardians(guardians.clone())?;
-        protocol_ctx.set_guardian_threshold(required_threshold)?;
-        protocol_ctx.set_cooldown_hours(cooldown_hours)?;
-        protocol_ctx.set_recovery_initiator(true)?;
+        protocol_ctx.guardians = Some(guardians.clone());
+        protocol_ctx.guardian_threshold = Some(required_threshold);
+        protocol_ctx.cooldown_hours = Some(cooldown_hours);
+        protocol_ctx.is_recovery_initiator = true;
         
         // Execute recovery choreography with guardian list and threshold
         let _result = aura_coordination::choreography::recovery_choreography(&mut protocol_ctx, guardians.clone(), required_threshold as u16).await
@@ -438,17 +486,42 @@ impl DeviceAgent {
             Some(current_threshold),
             ledger,
             self.transport.clone(),
-            aura_crypto::Effects::test(),
-            self.device_key.clone(),
+            self.effects.clone(),
+            // Get device signing key for protocol context
+            {
+                let device_key_manager = self.device_key_manager.read().await;
+                device_key_manager.get_raw_signing_key()
+                    .map_err(|e| crate::AgentError::CryptoError(format!("Failed to get device signing key: {:?}", e)))?
+            },
             Box::new(ProductionTimeSource::new()),
         );
         
         // Set guardian context
-        protocol_ctx.set_guardian_id(aura_journal::GuardianId(self.config.device_id.0))?; // Simplified: device_id as guardian_id
+        protocol_ctx.guardian_id = Some(aura_journal::GuardianId(self.config.device_id.0)); // Simplified: device_id as guardian_id
         
-        // Execute recovery choreography (guardian path) - TODO: pass actual guardian list and threshold
-        let guardian_id = aura_journal::GuardianId(self.config.device_id.0);
-        let _result = aura_coordination::choreography::recovery_choreography(&mut protocol_ctx, vec![guardian_id], 1).await
+        // Get actual guardian list and threshold from account state
+        let (guardian_list, guardian_threshold) = {
+            let ledger = self.ledger.read().await;
+            let state = ledger.state();
+            let guardians: Vec<aura_journal::GuardianId> = state.guardians.keys().cloned().collect();
+            let threshold = if guardians.is_empty() {
+                // Fallback: use device threshold if no guardians configured
+                state.threshold as u16
+            } else {
+                // Use majority threshold for guardians
+                ((guardians.len() / 2) + 1) as u16
+            };
+            
+            // If no guardians configured, use current device as emergency guardian
+            if guardians.is_empty() {
+                (vec![aura_journal::GuardianId(self.config.device_id.0)], 1u16)
+            } else {
+                (guardians, threshold)
+            }
+        };
+        
+        // Execute recovery choreography with actual guardian configuration
+        let _result = aura_coordination::choreography::recovery_choreography(&mut protocol_ctx, guardian_list, guardian_threshold).await
             .map_err(|e| crate::AgentError::DkdFailed(format!("Recovery approval failed: {:?}", e)))?;
         
         info!("Recovery approval completed");
@@ -481,13 +554,19 @@ impl DeviceAgent {
             Some(current_threshold),
             ledger,
             self.transport.clone(),
-            aura_crypto::Effects::test(),
-            self.device_key.clone(),
+            self.effects.clone(),
+            // Get device signing key for protocol context
+            {
+                let device_key_manager = self.device_key_manager.read().await;
+                device_key_manager.get_raw_signing_key()
+                    .map_err(|e| crate::AgentError::CryptoError(format!("Failed to get device signing key: {:?}", e)))?
+            },
             Box::new(ProductionTimeSource::new()),
         );
         
         // Execute nudge
-        aura_coordination::choreography::nudge_guardian(&mut protocol_ctx, guardian_id).await
+        let recovery_session_id = uuid::Uuid::new_v4(); // Generate recovery session ID
+        aura_coordination::choreography::nudge_guardian(&mut protocol_ctx, guardian_id, recovery_session_id).await
             .map_err(|e| crate::AgentError::DkdFailed(format!("Guardian nudge failed: {:?}", e)))?;
         
         info!("Guardian nudge sent");
@@ -495,20 +574,51 @@ impl DeviceAgent {
     }
     
     /// Generate binding proof for derived identity
+    /// 
+    /// Creates a cryptographic proof that binds the derived identity to this specific device.
+    /// The proof demonstrates that:
+    /// 1. The device possesses the private key corresponding to its device ID
+    /// 2. The derived key was generated by this device for the specified context
+    /// 3. The binding cannot be forged without access to the device's private key
     #[allow(dead_code)]
     async fn generate_binding_proof(
         &self,
         capsule: &ContextCapsule,
         derived_key: &[u8],
     ) -> Result<Vec<u8>> {
-        // Simplified binding proof: sign the derived key with device key
-        // In production, would use proper zero-knowledge proof
-        let proof_message = format!("binding_proof:{}:{}", 
-                                    capsule.app_id, hex::encode(derived_key));
+        debug!("Generating binding proof for app={}, derived_key={}", 
+               capsule.app_id, hex::encode(&derived_key[..8]));
         
-        // Use device's signing key to create proof
-        // TODO: Implement proper binding proof with device key
-        Ok(proof_message.into_bytes())
+        // Create binding proof message that includes:
+        // - Device ID (to identify the signing device)
+        // - App ID and context (to scope the binding)
+        // - Derived key (what we're binding to the device)
+        // - Timestamp (to prevent replay attacks)
+        let timestamp = self.effects.now()
+            .map_err(|e| crate::AgentError::CryptoError(format!("Failed to get timestamp: {:?}", e)))?;
+        
+        let proof_content = bincode::serialize(&(
+            &self.config.device_id,
+            &capsule.app_id,
+            &capsule.context_label,
+            derived_key,
+            timestamp,
+        )).map_err(|e| crate::AgentError::CryptoError(format!("Failed to serialize proof content: {:?}", e)))?;
+        
+        // Sign the proof content with device key to create binding proof
+        let device_key_manager = self.device_key_manager.read().await;
+        let signature = device_key_manager.sign_message(&proof_content)
+            .map_err(|e| crate::AgentError::CryptoError(format!("Failed to sign binding proof: {:?}", e)))?;
+        
+        // Create the complete binding proof structure
+        let binding_proof = bincode::serialize(&(
+            &self.config.device_id,
+            timestamp,
+            signature,
+        )).map_err(|e| crate::AgentError::CryptoError(format!("Failed to serialize binding proof: {:?}", e)))?;
+        
+        debug!("Generated binding proof of {} bytes", binding_proof.len());
+        Ok(binding_proof)
     }
     
     /// Get current session epoch  
@@ -549,12 +659,12 @@ impl DeviceAgent {
         participants: Vec<aura_journal::ParticipantId>,
         ttl_in_epochs: u64,
     ) -> Result<uuid::Uuid> {
-        let session_id = uuid::Uuid::new_v4();
+        let session_id = self.effects.gen_uuid();
         let current_epoch = self.get_current_epoch().await;
-        let timestamp = current_timestamp();
+        let timestamp = self.effects.now().map_err(|e| crate::AgentError::SystemTimeError(e.to_string()))?;
         
         let session = aura_journal::Session::new(
-            session_id,
+            aura_journal::SessionId(session_id),
             protocol_type,
             participants,
             current_epoch,
@@ -564,7 +674,7 @@ impl DeviceAgent {
         
         // Add session to ledger
         let mut ledger = self.ledger.write().await;
-        ledger.add_session(session);
+        ledger.add_session(session, &self.effects);
         
         info!("Created session {} for protocol {:?}", session_id, protocol_type);
         Ok(session_id)
@@ -593,7 +703,7 @@ impl DeviceAgent {
     /// Update session status
     pub async fn update_session_status(&self, session_id: uuid::Uuid, status: aura_journal::SessionStatus) -> Result<()> {
         let mut ledger = self.ledger.write().await;
-        ledger.update_session_status(session_id, status)
+        ledger.update_session_status(session_id, status, &self.effects)
             .map_err(|e| crate::AgentError::LedgerError(e.to_string()))?;
         
         debug!("Updated session {} status to {:?}", session_id, status);
@@ -603,7 +713,7 @@ impl DeviceAgent {
     /// Complete a session with success outcome
     pub async fn complete_session(&self, session_id: uuid::Uuid) -> Result<()> {
         let mut ledger = self.ledger.write().await;
-        ledger.complete_session(session_id, aura_journal::SessionOutcome::Success)
+        ledger.complete_session(session_id, aura_journal::SessionOutcome::Success, &self.effects)
             .map_err(|e| crate::AgentError::LedgerError(e.to_string()))?;
         
         info!("Completed session {} successfully", session_id);
@@ -613,7 +723,7 @@ impl DeviceAgent {
     /// Abort a session with failure
     pub async fn abort_session(&self, session_id: uuid::Uuid, reason: String, blamed_party: Option<aura_journal::ParticipantId>) -> Result<()> {
         let mut ledger = self.ledger.write().await;
-        ledger.abort_session(session_id, reason.clone(), blamed_party)
+        ledger.abort_session(session_id, reason.clone(), blamed_party, &self.effects)
             .map_err(|e| crate::AgentError::LedgerError(e.to_string()))?;
         
         info!("Aborted session {} with reason: {}", session_id, reason);
@@ -623,7 +733,7 @@ impl DeviceAgent {
     /// Clean up expired sessions
     pub async fn cleanup_expired_sessions(&self) -> Result<()> {
         let mut ledger = self.ledger.write().await;
-        ledger.cleanup_expired_sessions();
+        ledger.cleanup_expired_sessions(&self.effects);
         
         debug!("Cleaned up expired sessions");
         Ok(())
@@ -640,14 +750,6 @@ impl DeviceAgent {
         
         // Get participants based on protocol type
         let participants: Vec<aura_journal::ParticipantId> = match protocol_type {
-            aura_journal::ProtocolType::GenesisDkg => {
-                // Genesis involves all devices being initialized
-                let ledger = self.ledger.read().await;
-                let state = ledger.state();
-                state.devices.keys()
-                    .map(|device_id| aura_journal::ParticipantId::Device(*device_id))
-                    .collect()
-            },
             aura_journal::ProtocolType::Dkd | 
             aura_journal::ProtocolType::Resharing | 
             aura_journal::ProtocolType::LockAcquisition => {
@@ -658,7 +760,7 @@ impl DeviceAgent {
                     .map(|device_id| aura_journal::ParticipantId::Device(*device_id))
                     .collect()
             },
-            aura_journal::ProtocolType::GuardianRecovery => {
+            aura_journal::ProtocolType::Recovery => {
                 // Recovery involves guardians
                 let ledger = self.ledger.read().await;
                 let state = ledger.state();
@@ -666,7 +768,7 @@ impl DeviceAgent {
                     .map(|guardian_id| aura_journal::ParticipantId::Guardian(*guardian_id))
                     .collect()
             },
-            aura_journal::ProtocolType::Compaction => {
+            aura_journal::ProtocolType::Locking => {
                 // Compaction involves all devices
                 let ledger = self.ledger.read().await;
                 let state = ledger.state();
@@ -684,19 +786,18 @@ impl DeviceAgent {
         
         // Set appropriate TTL based on protocol type
         let ttl_in_epochs = match protocol_type {
-            aura_journal::ProtocolType::GenesisDkg => 100,        // Genesis can take time
             aura_journal::ProtocolType::Dkd => 50,               // DKD should be fast
             aura_journal::ProtocolType::Resharing => 100,        // Resharing can take time
-            aura_journal::ProtocolType::GuardianRecovery => 1000, // Recovery has cooldowns
-            aura_journal::ProtocolType::LockAcquisition => 10,   // Locks should be fast
-            aura_journal::ProtocolType::Compaction => 200,       // Compaction can take time
+            aura_journal::ProtocolType::Recovery => 1000, // Recovery has cooldowns
+            aura_journal::ProtocolType::Locking => 10,          // Locking should be fast
+            aura_journal::ProtocolType::LockAcquisition => 100,   // Lock acquisition can take time
         };
         
         self.create_session(protocol_type, participants, ttl_in_epochs).await
     }
     
     /// Monitor all active sessions and handle timeouts
-    pub async fn monitor_sessions(&self) -> Result<Vec<uuid::Uuid>> {
+    pub async fn monitor_sessions(&self) -> Result<Vec<aura_journal::SessionId>> {
         let current_epoch = self.get_current_epoch().await;
         let mut timed_out_sessions = Vec::new();
         
@@ -706,11 +807,11 @@ impl DeviceAgent {
         for session in active_sessions {
             if session.is_timed_out(current_epoch) {
                 // Mark session as timed out
-                self.update_session_status(session.session_id, aura_journal::SessionStatus::TimedOut).await?;
+                self.update_session_status(session.session_id.0, aura_journal::SessionStatus::TimedOut).await?;
                 timed_out_sessions.push(session.session_id);
                 
                 info!("Session {} timed out after {} epochs", 
-                      session.session_id, current_epoch - session.start_epoch);
+                      session.session_id, current_epoch - session.started_at);
             }
         }
         
@@ -733,19 +834,20 @@ impl DeviceAgent {
         
         for session in state.sessions.values() {
             match session.status {
-                aura_journal::SessionStatus::Pending | 
-                aura_journal::SessionStatus::Active | 
-                aura_journal::SessionStatus::Cooldown => {
+                aura_journal::SessionStatus::Active => {
                     stats.active_sessions += 1;
                 },
                 aura_journal::SessionStatus::Completed => {
                     stats.completed_sessions += 1;
                 },
-                aura_journal::SessionStatus::Aborted => {
+                aura_journal::SessionStatus::Failed => {
                     stats.failed_sessions += 1;
                 },
                 aura_journal::SessionStatus::TimedOut => {
                     stats.timed_out_sessions += 1;
+                },
+                aura_journal::SessionStatus::Expired => {
+                    stats.timed_out_sessions += 1; // Count expired as timed out
                 },
             }
             
@@ -780,8 +882,13 @@ impl DeviceAgent {
             Some(threshold), // Majority threshold
             ledger,
             self.transport.clone(),
-            aura_crypto::Effects::test(),
-            self.device_key.clone(),
+            self.effects.clone(),
+            // Get device signing key for protocol context
+            {
+                let device_key_manager = self.device_key_manager.read().await;
+                device_key_manager.get_raw_signing_key()
+                    .map_err(|e| crate::AgentError::CryptoError(format!("Failed to get device signing key: {:?}", e)))?
+            },
             Box::new(ProductionTimeSource::new()),
         );
         
@@ -821,8 +928,13 @@ impl DeviceAgent {
             Some(threshold),
             ledger,
             self.transport.clone(),
-            aura_crypto::Effects::test(),
-            self.device_key.clone(),
+            self.effects.clone(),
+            // Get device signing key for protocol context
+            {
+                let device_key_manager = self.device_key_manager.read().await;
+                device_key_manager.get_raw_signing_key()
+                    .map_err(|e| crate::AgentError::CryptoError(format!("Failed to get device signing key: {:?}", e)))?
+            },
             Box::new(ProductionTimeSource::new()),
         );
         
@@ -873,8 +985,8 @@ fn create_mock_ledger(config: &IdentityConfig) -> Result<AccountLedger> {
         device_name: "Mock Device".to_string(),
         device_type: aura_journal::DeviceType::Native,
         public_key: group_public_key,
-        added_at: current_timestamp(),
-        last_seen: current_timestamp(),
+        added_at: 0, // Will be set properly when effects are available
+        last_seen: 0, // Will be set properly when effects are available
         dkd_commitment_proofs: std::collections::BTreeMap::new(),
     };
     
@@ -890,11 +1002,9 @@ fn create_mock_ledger(config: &IdentityConfig) -> Result<AccountLedger> {
         .map_err(|e| crate::AgentError::LedgerError(e.to_string()))
 }
 
-fn current_timestamp() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+#[allow(dead_code)]
+fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> Result<u64> {
+    effects.now().map_err(|e| crate::AgentError::SystemTimeError(e.to_string()))
 }
 
 #[cfg(test)]
@@ -905,8 +1015,7 @@ mod tests {
     
     // Helper to create test key shares using FROST dealer
     fn setup_test_keyshare() -> (KeyShare, ed25519_dalek::VerifyingKey) {
-        use rand::thread_rng;
-        let mut rng = thread_rng();
+        let mut rng = aura_crypto::Effects::test().rng();
         
         // Generate 2-of-3 threshold keys
         let result = frost::keys::generate_with_dealer(
@@ -943,9 +1052,10 @@ mod tests {
         let (share1, pubkey) = setup_test_keyshare();
         
         // Create agent config
+        let effects = aura_crypto::Effects::test();
         let config = IdentityConfig {
-            device_id: DeviceId::new(),
-            account_id: aura_journal::AccountId::new(),
+            device_id: DeviceId::new_with_effects(&effects),
+            account_id: aura_journal::AccountId::new_with_effects(&effects),
             participant_id: ParticipantId::from_u16_unchecked(1),
             share_path: "/tmp/test_share".to_string(),
             threshold: 2,
@@ -958,8 +1068,8 @@ mod tests {
             device_name: "Test Device".to_string(),
             device_type: aura_journal::DeviceType::Native,
             public_key: pubkey,
-            added_at: current_timestamp(),
-            last_seen: current_timestamp(),
+            added_at: aura_crypto::Effects::test().now().unwrap_or(0),
+            last_seen: aura_crypto::Effects::test().now().unwrap_or(0),
             dkd_commitment_proofs: std::collections::BTreeMap::new(),
         };
         
@@ -975,12 +1085,13 @@ mod tests {
         
         let device_id = config.device_id;
         
-        // Create transport and device key for agent
+        // Create transport and device key manager for agent
         let transport = Arc::new(aura_transport::StubTransport::default());
-        let device_key = ed25519_dalek::SigningKey::from_bytes(&[0u8; 32]);
+        let mut device_key_manager = DeviceKeyManager::new(aura_crypto::Effects::test());
+        device_key_manager.generate_device_key(device_id.0).unwrap();
         
         // Create agent
-        let agent = DeviceAgent::new(config, share1, ledger, transport, device_key).await.unwrap();
+        let agent = DeviceAgent::new(config, share1, ledger, transport, device_key_manager, aura_crypto::Effects::test()).await.unwrap();
         
         // Test that agent was created successfully
         assert_eq!(agent.device_id(), device_id);

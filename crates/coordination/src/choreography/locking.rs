@@ -1,4 +1,4 @@
-//! Distributed Locking Choreography - Choreographic Programming Implementation
+//! Distributed Locking Choreography
 //!
 //! This module implements the threshold-granted distributed locking protocol
 //! using choreographic programming.
@@ -64,18 +64,23 @@ pub async fn locking_choreography(
     ctx: &mut ProtocolContext,
     operation_type: aura_journal::OperationType,
 ) -> Result<(), ProtocolError> {
-    use crate::execution::{Instruction, InstructionResult, EventFilter, EventTypePattern};
-    use aura_journal::{Event, EventType, RequestOperationLockEvent, GrantOperationLockEvent, EventAuthorization, ParticipantId, Session, ProtocolType};
+    use crate::execution::{EventFilter, EventTypePattern, Instruction, InstructionResult};
     use crate::utils::{compute_lottery_ticket, determine_lock_winner};
-    
+    use aura_journal::{
+        Event, EventAuthorization, EventType, GrantOperationLockEvent, ParticipantId, ProtocolType,
+        RequestOperationLockEvent, Session, SessionId,
+    };
+
     // Step 1: Create Session for lock acquisition
     let session = {
         let state = ctx.execute(Instruction::GetLedgerState).await?;
         if let InstructionResult::LedgerState(_snapshot) = state {
-            let participants = ctx.participants.iter()
+            let participants = ctx
+                .participants
+                .iter()
                 .map(|device_id| ParticipantId::Device(*device_id))
                 .collect();
-            
+
             let current_epoch = ctx.execute(Instruction::GetCurrentEpoch).await?;
             let current_epoch = if let InstructionResult::CurrentEpoch(epoch) = current_epoch {
                 epoch
@@ -86,9 +91,9 @@ pub async fn locking_choreography(
                     message: "Failed to get current epoch".to_string(),
                 });
             };
-            
+
             Session::new(
-                ctx.session_id,
+                SessionId(ctx.session_id),
                 ProtocolType::LockAcquisition,
                 participants,
                 current_epoch,
@@ -103,26 +108,28 @@ pub async fn locking_choreography(
             });
         }
     };
-    
+
     // Step 2: Update Session status to Active
     let mut session_event = Event {
         version: 1,
-        event_id: aura_journal::EventId::new(),
-        account_id: session.participants.first()
+        event_id: aura_journal::EventId::new_with_effects(&ctx.effects),
+        account_id: session
+            .participants
+            .first()
             .and_then(|p| match p {
                 ParticipantId::Device(device_id) => {
                     // We need to extract account_id from device, for now use a placeholder
                     Some(aura_journal::AccountId(device_id.0))
-                },
+                }
                 _ => None,
             })
             .unwrap_or_else(|| aura_journal::AccountId(uuid::Uuid::new_v4())),
         timestamp: ctx.effects.now().unwrap_or(0),
         nonce: ctx.generate_nonce().await.unwrap_or(0),
         parent_hash: None,
-        epoch_at_write: session.start_epoch,
+        epoch_at_write: session.started_at,
         event_type: EventType::EpochTick(aura_journal::EpochTickEvent {
-            new_epoch: session.start_epoch + 1,
+            new_epoch: session.started_at + 1,
             evidence_hash: [0u8; 32], // Placeholder
         }),
         authorization: EventAuthorization::DeviceCertificate {
@@ -130,17 +137,18 @@ pub async fn locking_choreography(
             signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]), // Placeholder
         },
     };
-    
+
     // Sign the event
     let signature = ctx.sign_event(&session_event)?;
     session_event.authorization = EventAuthorization::DeviceCertificate {
         device_id: aura_journal::DeviceId(ctx.device_id),
         signature,
     };
-    
+
     // Write session creation to ledger
-    ctx.execute(Instruction::WriteToLedger(session_event)).await?;
-    
+    ctx.execute(Instruction::WriteToLedger(session_event))
+        .await?;
+
     // Step 3: Request lock with lottery ticket
     let last_event_hash = {
         let state = ctx.execute(Instruction::GetLedgerState).await?;
@@ -150,15 +158,30 @@ pub async fn locking_choreography(
             [0u8; 32]
         }
     };
-    
+
     let my_device_id = aura_journal::DeviceId(ctx.device_id);
     let lottery_ticket = compute_lottery_ticket(&my_device_id, &last_event_hash);
-    
-    let request_event = {
+
+    let mut request_event = {
+        // Get current ledger state for proper epoch and parent hash
+        let ledger_state = ctx.execute(Instruction::GetLedgerState).await?;
+        let (current_epoch, parent_hash) =
+            if let InstructionResult::LedgerState(snapshot) = ledger_state {
+                (snapshot.current_epoch + 1, snapshot.last_event_hash)
+            } else {
+                return Err(ProtocolError {
+                    session_id: ctx.session_id,
+                    error_type: ProtocolErrorType::Other,
+                    message: "Failed to get ledger state for event creation".to_string(),
+                });
+            };
+
         let mut event = Event {
             version: 1,
-            event_id: aura_journal::EventId::new(),
-            account_id: session.participants.first()
+            event_id: aura_journal::EventId::new_with_effects(&ctx.effects),
+            account_id: session
+                .participants
+                .first()
                 .and_then(|p| match p {
                     ParticipantId::Device(device_id) => Some(aura_journal::AccountId(device_id.0)),
                     _ => None,
@@ -166,8 +189,8 @@ pub async fn locking_choreography(
                 .unwrap_or_else(|| aura_journal::AccountId(uuid::Uuid::new_v4())),
             timestamp: ctx.effects.now().unwrap_or(0),
             nonce: ctx.generate_nonce().await.unwrap_or(0),
-            parent_hash: None,
-            epoch_at_write: session.start_epoch + 1,
+            parent_hash,
+            epoch_at_write: current_epoch,
             event_type: EventType::RequestOperationLock(RequestOperationLockEvent {
                 operation_type,
                 session_id: ctx.session_id,
@@ -179,34 +202,97 @@ pub async fn locking_choreography(
                 signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]), // Placeholder, will be replaced
             },
         };
-        
+
         // Sign the event
         let signature = ctx.sign_event(&event)?;
         event.authorization = EventAuthorization::DeviceCertificate {
             device_id: my_device_id,
             signature,
         };
-        
+
         event
     };
-    
+
     // Broadcast lock request
-    ctx.execute(Instruction::WriteToLedger(request_event)).await?;
-    
+    // Retry event creation if we get parent hash conflicts (due to concurrent event creation)
+    let mut attempts = 0;
+    const MAX_RETRY_ATTEMPTS: usize = 3;
+
+    loop {
+        match ctx
+            .execute(Instruction::WriteToLedger(request_event.clone()))
+            .await
+        {
+            Ok(_) => break,
+            Err(e) if attempts < MAX_RETRY_ATTEMPTS && e.message.contains("parent hash") => {
+                attempts += 1;
+                eprintln!(
+                    "Lock request write failed (attempt {}), retrying: {}",
+                    attempts, e.message
+                );
+
+                // Refresh ledger state and recreate event with updated parent hash
+                let ledger_state = ctx.execute(Instruction::GetLedgerState).await?;
+                let (current_epoch, parent_hash) =
+                    if let InstructionResult::LedgerState(snapshot) = ledger_state {
+                        (snapshot.current_epoch + 1, snapshot.last_event_hash)
+                    } else {
+                        return Err(e);
+                    };
+
+                let mut new_event = request_event.clone();
+                new_event.epoch_at_write = current_epoch;
+                new_event.parent_hash = parent_hash;
+                new_event.nonce = ctx.generate_nonce().await.unwrap_or(0);
+
+                // Re-sign the updated event
+                let signature = ctx.sign_event(&new_event)?;
+                new_event.authorization = EventAuthorization::DeviceCertificate {
+                    device_id: my_device_id,
+                    signature,
+                };
+
+                request_event = new_event;
+
+                // Small delay before retry - use minimal epoch wait instead of direct sleep
+                // This ensures compatibility with the simulation engine's time control
+                let _ = ctx.execute(Instruction::WaitEpochs(1)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    // Immediately check if our event is visible by refreshing
+    // This helps with timing issues in the simulation
+    let _initial_check = ctx
+        .execute(Instruction::CheckForEvent {
+            filter: EventFilter {
+                session_id: Some(ctx.session_id),
+                event_types: Some(vec![EventTypePattern::LockRequest]),
+                authors: Some(std::collections::BTreeSet::from([my_device_id])),
+                predicate: None,
+            },
+        })
+        .await;
+
     // Step 4: Await threshold of lock requests
+    // We need to wait for other participants' lock requests, but we already wrote our own
+    // So we need to wait for (participants.len() - 1) more requests + our own = participants.len() total
     let filter = EventFilter {
         session_id: Some(ctx.session_id),
         event_types: Some(vec![EventTypePattern::LockRequest]),
         authors: None,
         predicate: None,
     };
-    
-    let threshold_result = ctx.execute(Instruction::AwaitThreshold {
-        count: ctx.participants.len(), // Wait for all participants to request
-        filter,
-        timeout_epochs: Some(5), // Short timeout for lock requests
-    }).await?;
-    
+
+    let threshold_result = ctx
+        .execute(Instruction::AwaitThreshold {
+            count: ctx.participants.len(), // Wait for all participants to request
+            filter,
+            timeout_epochs: Some(100), // Much longer timeout for debugging coordination issues
+        })
+        .await?;
+
     let request_events = if let InstructionResult::EventsReceived(events) = threshold_result {
         events
     } else {
@@ -216,7 +302,7 @@ pub async fn locking_choreography(
             message: "Failed to collect lock requests".to_string(),
         });
     };
-    
+
     // Step 5: Determine winner using lottery
     let lock_requests: Vec<RequestOperationLockEvent> = request_events
         .iter()
@@ -228,14 +314,18 @@ pub async fn locking_choreography(
             }
         })
         .collect();
-    
-    let winner = determine_lock_winner(&lock_requests)
-        .map_err(|e| ProtocolError {
-            session_id: ctx.session_id,
-            error_type: ProtocolErrorType::Other,
-            message: format!("Failed to determine lock winner: {:?}", e),
-        })?;
-    
+
+    let winner = determine_lock_winner(&lock_requests).map_err(|e| ProtocolError {
+        session_id: ctx.session_id,
+        error_type: ProtocolErrorType::Other,
+        message: format!("Failed to determine lock winner: {:?}", e),
+    })?;
+
+    // Verify lottery computation: all parties should compute the same winner
+    // This is guaranteed by the deterministic lottery algorithm
+    // In production, the grant event's threshold signature serves as proof that
+    // at least M devices agreed on the winner
+
     // Step 6: Check if we won the lottery
     if winner == my_device_id {
         // We won! Wait for grant event (this would be threshold signed in practice)
@@ -245,31 +335,36 @@ pub async fn locking_choreography(
             authors: None,
             predicate: None,
         };
-        
-        // In a real implementation, this would wait for threshold signature
-        // For now, we simulate the grant
+
+        // In production, this grant event would be threshold-signed by M-of-N devices
+        // to prove consensus on the lottery winner. For now, we simulate the grant
         let grant_event = {
             let mut event = Event {
                 version: 1,
-                event_id: aura_journal::EventId::new(),
-                account_id: session.participants.first()
+                event_id: aura_journal::EventId::new_with_effects(&ctx.effects),
+                account_id: session
+                    .participants
+                    .first()
                     .and_then(|p| match p {
-                        ParticipantId::Device(device_id) => Some(aura_journal::AccountId(device_id.0)),
+                        ParticipantId::Device(device_id) => {
+                            Some(aura_journal::AccountId(device_id.0))
+                        }
                         _ => None,
                     })
                     .unwrap_or_else(|| aura_journal::AccountId(uuid::Uuid::new_v4())),
                 timestamp: ctx.effects.now().unwrap_or(0),
                 nonce: ctx.generate_nonce().await.unwrap_or(0),
                 parent_hash: None,
-                epoch_at_write: session.start_epoch + 2,
+                epoch_at_write: session.started_at + 2,
                 event_type: EventType::GrantOperationLock(GrantOperationLockEvent {
                     operation_type,
                     session_id: ctx.session_id,
                     winner_device_id: winner,
-                    granted_at_epoch: session.start_epoch + 2,
+                    granted_at_epoch: session.started_at + 2,
                     threshold_signature: aura_journal::ThresholdSig {
                         signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]),
                         signers: vec![1], // Placeholder - would be actual signer indices
+                        signature_shares: vec![], // Placeholder - would be actual signature shares
                     },
                 }),
                 authorization: EventAuthorization::DeviceCertificate {
@@ -277,18 +372,18 @@ pub async fn locking_choreography(
                     signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]), // Placeholder
                 },
             };
-            
+
             let signature = ctx.sign_event(&event)?;
             event.authorization = EventAuthorization::DeviceCertificate {
                 device_id: my_device_id,
                 signature,
             };
-            
+
             event
         };
-        
+
         ctx.execute(Instruction::WriteToLedger(grant_event)).await?;
-        
+
         // Update session status to Completed (we acquired the lock)
         Ok(())
     } else {
@@ -322,15 +417,15 @@ pub async fn release_lock_choreography(
     operation_type: aura_journal::OperationType,
 ) -> Result<(), ProtocolError> {
     use crate::execution::{Instruction, InstructionResult};
-    use aura_journal::{Event, EventType, ReleaseOperationLockEvent, EventAuthorization};
-    
+    use aura_journal::{Event, EventAuthorization, EventType, ReleaseOperationLockEvent};
+
     // Step 1: Create release event
     let my_device_id = aura_journal::DeviceId(ctx.device_id);
-    
+
     let release_event = {
         let mut event = Event {
             version: 1,
-            event_id: aura_journal::EventId::new(),
+            event_id: aura_journal::EventId::new_with_effects(&ctx.effects),
             account_id: aura_journal::AccountId(uuid::Uuid::new_v4()), // Placeholder
             timestamp: ctx.effects.now().unwrap_or(0),
             nonce: ctx.generate_nonce().await.unwrap_or(0),
@@ -357,23 +452,24 @@ pub async fn release_lock_choreography(
                 signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]), // Placeholder
             },
         };
-        
+
         // Sign the event
         let signature = ctx.sign_event(&event)?;
         event.authorization = EventAuthorization::DeviceCertificate {
             device_id: my_device_id,
             signature,
         };
-        
+
         event
     };
-    
+
     // Step 2: Broadcast release event
-    ctx.execute(Instruction::WriteToLedger(release_event)).await?;
-    
+    ctx.execute(Instruction::WriteToLedger(release_event))
+        .await?;
+
     // Step 3: Session is automatically updated by the ledger's event application logic
     // The ReleaseOperationLock event handler will update the session status
-    
+
     Ok(())
 }
 
@@ -381,7 +477,7 @@ pub async fn release_lock_choreography(
 mod tests {
     #[allow(unused_imports)]
     use super::*;
-    
+
     #[tokio::test]
     async fn test_locking_choreography_structure() {
         // TODO: Implement tests

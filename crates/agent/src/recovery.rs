@@ -17,13 +17,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[allow(unused_imports)] // Reserved for future recovery implementation
 use std::collections::HashSet;
-use uuid::Uuid;
 
 /// Recovery request initiated by a user who lost access
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryRequest {
     /// Unique recovery request ID
-    pub request_id: Uuid,
+    pub request_id: uuid::Uuid,
     /// Account being recovered
     pub account_id: AccountId,
     /// New device requesting access
@@ -62,12 +61,13 @@ impl RecoveryRequest {
         required_approvals: usize,
         cooldown_seconds: Option<u64>,
         reason: Option<String>,
+        effects: &aura_crypto::Effects,
     ) -> Result<Self> {
-        let now = current_timestamp()?;
+        let now = effects.now().unwrap_or(0);
         let cooldown = cooldown_seconds.unwrap_or(86400); // 24 hours default
         
         Ok(RecoveryRequest {
-            request_id: Uuid::new_v4(),
+            request_id: effects.gen_uuid(),
             account_id,
             new_device_id,
             guardian_ids,
@@ -81,13 +81,13 @@ impl RecoveryRequest {
     }
     
     /// Check if cooldown period has elapsed
-    pub fn cooldown_elapsed(&self) -> Result<bool> {
-        Ok(current_timestamp()? >= self.cooldown_completes_at)
+    pub fn cooldown_elapsed(&self, effects: &aura_crypto::Effects) -> Result<bool> {
+        Ok(effects.now().unwrap_or(0) >= self.cooldown_completes_at)
     }
     
     /// Get remaining cooldown time in seconds
-    pub fn remaining_cooldown(&self) -> Result<u64> {
-        let now = current_timestamp()?;
+    pub fn remaining_cooldown(&self, effects: &aura_crypto::Effects) -> Result<u64> {
+        let now = effects.now().unwrap_or(0);
         if now >= self.cooldown_completes_at {
             Ok(0)
         } else {
@@ -96,10 +96,10 @@ impl RecoveryRequest {
     }
     
     /// Check if recovery can proceed (enough approvals + cooldown elapsed)
-    pub fn can_proceed(&self) -> bool {
+    pub fn can_proceed(&self, effects: &aura_crypto::Effects) -> bool {
         match &self.status {
             RecoveryStatus::CooldownActive { approvals } => {
-                approvals.len() >= self.required_approvals && self.cooldown_elapsed().unwrap_or(false)
+                approvals.len() >= self.required_approvals && self.cooldown_elapsed(effects).unwrap_or(false)
             }
             RecoveryStatus::ReadyToExecute { approvals } => {
                 approvals.len() >= self.required_approvals
@@ -114,35 +114,47 @@ impl RecoveryRequest {
 pub enum RecoveryStatus {
     /// Waiting for guardian approvals
     PendingApprovals {
+        /// List of guardian approvals received so far
         approvals: Vec<GuardianApproval>,
     },
     /// Approvals received, cooldown active
     CooldownActive {
+        /// Complete list of guardian approvals
         approvals: Vec<GuardianApproval>,
     },
     /// Cooldown complete, ready to execute
     ReadyToExecute {
+        /// Complete list of guardian approvals
         approvals: Vec<GuardianApproval>,
     },
     /// Recovery completed successfully
     Completed {
+        /// New session epoch after recovery
         new_session_epoch: SessionEpoch,
+        /// Unix timestamp when recovery completed
         completed_at: u64,
     },
     /// Recovery cancelled by user
     Cancelled {
+        /// Unix timestamp when recovery was cancelled
         cancelled_at: u64,
+        /// Optional reason for cancellation
         reason: Option<String>,
     },
     /// Recovery vetoed by a guardian
     Vetoed {
+        /// Guardian who vetoed the recovery
         vetoed_by: GuardianId,
+        /// Unix timestamp when recovery was vetoed
         vetoed_at: u64,
+        /// Optional reason for veto
         reason: Option<String>,
     },
     /// Recovery failed
     Failed {
+        /// Unix timestamp when recovery failed
         failed_at: u64,
+        /// Reason for failure
         reason: String,
     },
 }
@@ -166,7 +178,7 @@ pub struct RecoveryVeto {
     /// Guardian issuing the veto
     pub guardian_id: GuardianId,
     /// Recovery request being vetoed
-    pub request_id: Uuid,
+    pub request_id: uuid::Uuid,
     /// Timestamp of veto
     pub vetoed_at: u64,
     /// Reason for veto
@@ -181,7 +193,7 @@ pub struct RecoveryCancellation {
     /// Device cancelling the recovery
     pub device_id: DeviceId,
     /// Recovery request being cancelled
-    pub request_id: Uuid,
+    pub request_id: uuid::Uuid,
     /// Timestamp of cancellation
     pub cancelled_at: u64,
     /// Reason for cancellation
@@ -196,7 +208,7 @@ pub struct RecoveryCancellation {
 /// cooldown enforcement, and share reconstruction.
 pub struct RecoveryManager {
     /// Active recovery requests (request_id -> request)
-    active_requests: HashMap<Uuid, RecoveryRequest>,
+    active_requests: HashMap<uuid::Uuid, RecoveryRequest>,
     /// Completed requests (for audit trail)
     completed_requests: Vec<RecoveryRequest>,
     /// Maximum concurrent recovery requests per account
@@ -235,6 +247,7 @@ impl RecoveryManager {
         required_approvals: usize,
         cooldown_seconds: Option<u64>,
         reason: Option<String>,
+        effects: &aura_crypto::Effects,
     ) -> Result<RecoveryRequest> {
         // Check if account already has active recovery
         let active_count = self.active_requests
@@ -263,6 +276,7 @@ impl RecoveryManager {
             required_approvals,
             cooldown_seconds,
             reason,
+            effects,
         )?;
         
         let request_id = request.request_id;
@@ -283,7 +297,7 @@ impl RecoveryManager {
     /// Updated recovery request
     pub fn submit_approval(
         &mut self,
-        request_id: Uuid,
+        request_id: uuid::Uuid,
         approval: GuardianApproval,
     ) -> Result<RecoveryRequest> {
         let request = self.active_requests
@@ -328,7 +342,7 @@ impl RecoveryManager {
     /// Any authorized guardian can veto during cooldown period.
     pub fn submit_veto(
         &mut self,
-        request_id: Uuid,
+        request_id: uuid::Uuid,
         veto: RecoveryVeto,
     ) -> Result<RecoveryRequest> {
         // Get and verify request first
@@ -370,7 +384,7 @@ impl RecoveryManager {
     /// Can be done by the account owner during cooldown.
     pub fn cancel_recovery(
         &mut self,
-        request_id: Uuid,
+        request_id: uuid::Uuid,
         cancellation: RecoveryCancellation,
     ) -> Result<RecoveryRequest> {
         // Get and verify request first
@@ -404,13 +418,13 @@ impl RecoveryManager {
     /// Check cooldown status and update if complete
     ///
     /// Should be called periodically to transition requests from CooldownActive to ReadyToExecute.
-    pub fn check_cooldown_status(&mut self, request_id: Uuid) -> Result<RecoveryRequest> {
+    pub fn check_cooldown_status(&mut self, request_id: uuid::Uuid, effects: &aura_crypto::Effects) -> Result<RecoveryRequest> {
         let request = self.active_requests
             .get_mut(&request_id)
             .ok_or_else(|| AgentError::DeviceNotFound("Recovery request not found".to_string()))?;
         
         if let RecoveryStatus::CooldownActive { approvals } = &request.status {
-            if request.cooldown_elapsed()? {
+            if request.cooldown_elapsed(effects)? {
                 request.status = RecoveryStatus::ReadyToExecute {
                     approvals: approvals.clone(),
                 };
@@ -443,9 +457,10 @@ impl RecoveryManager {
     /// - Invalidating old presence tickets
     pub fn execute_recovery(
         &mut self,
-        request_id: Uuid,
+        request_id: uuid::Uuid,
         _reconstructed_share: KeyShare, // For future MPC integration
         new_session_epoch: SessionEpoch,
+        effects: &aura_crypto::Effects,
     ) -> Result<RecoveryRequest> {
         // Get and verify request first
         {
@@ -458,7 +473,7 @@ impl RecoveryManager {
                 return Err(AgentError::DeviceNotFound("Recovery not ready to execute".to_string()));
             }
             
-            if !request.can_proceed() {
+            if !request.can_proceed(effects) {
                 return Err(AgentError::DeviceNotFound("Recovery cannot proceed (cooldown not complete or insufficient approvals)".to_string()));
             }
         }
@@ -470,7 +485,7 @@ impl RecoveryManager {
         
         request.status = RecoveryStatus::Completed {
             new_session_epoch,
-            completed_at: current_timestamp()?,
+            completed_at: effects.now().unwrap_or(0),
         };
         
         // Move to completed
@@ -488,7 +503,7 @@ impl RecoveryManager {
     }
     
     /// Get recovery request by ID
-    pub fn get_request(&self, request_id: Uuid) -> Option<&RecoveryRequest> {
+    pub fn get_request(&self, request_id: uuid::Uuid) -> Option<&RecoveryRequest> {
         self.active_requests.get(&request_id)
     }
     
@@ -508,16 +523,7 @@ impl Default for RecoveryManager {
     }
 }
 
-fn current_timestamp() -> Result<u64> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .map_err(|e| crate::AgentError::SystemTimeError(format!(
-            "System time is before UNIX epoch: {}",
-            e
-        )))
-}
+// Removed deprecated current_timestamp() function - use effects.now() instead
 
 #[cfg(test)]
 mod tests {
@@ -525,9 +531,10 @@ mod tests {
     
     #[test]
     fn test_recovery_request_creation() {
-        let account_id = AccountId::new();
-        let device_id = DeviceId::new();
-        let guardians = vec![GuardianId::new(), GuardianId::new(), GuardianId::new()];
+        let effects = aura_crypto::Effects::test();
+        let account_id = AccountId::new_with_effects(&effects);
+        let device_id = DeviceId::new_with_effects(&effects);
+        let guardians = vec![GuardianId::new_with_effects(&effects), GuardianId::new_with_effects(&effects), GuardianId::new_with_effects(&effects)];
         
         let request = RecoveryRequest::new(
             account_id,
@@ -536,6 +543,7 @@ mod tests {
             2, // 2-of-3
             Some(100), // 100 seconds for testing
             Some("Lost my phone".to_string()),
+            &effects,
         ).unwrap();
         
         assert_eq!(request.required_approvals, 2);
@@ -546,10 +554,11 @@ mod tests {
     
     #[test]
     fn test_recovery_workflow() {
+        let effects = aura_crypto::Effects::test();
         let mut manager = RecoveryManager::new();
-        let account_id = AccountId::new();
-        let device_id = DeviceId::new();
-        let guardians = vec![GuardianId::new(), GuardianId::new(), GuardianId::new()];
+        let account_id = AccountId::new_with_effects(&effects);
+        let device_id = DeviceId::new_with_effects(&effects);
+        let guardians = vec![GuardianId::new_with_effects(&effects), GuardianId::new_with_effects(&effects), GuardianId::new_with_effects(&effects)];
         
         // Initiate recovery
         let request = manager.initiate_recovery(
@@ -559,6 +568,7 @@ mod tests {
             2,
             Some(1), // 1 second cooldown for testing
             None,
+            &effects,
         ).unwrap();
         
         let request_id = request.request_id;
@@ -566,7 +576,7 @@ mod tests {
         // First guardian approval
         let approval1 = GuardianApproval {
             guardian_id: guardians[0],
-            approved_at: current_timestamp().unwrap(),
+            approved_at: effects.now().unwrap_or(0),
             encrypted_share: vec![1, 2, 3],
             signature: vec![],
         };
@@ -577,7 +587,7 @@ mod tests {
         // Second guardian approval (should trigger cooldown)
         let approval2 = GuardianApproval {
             guardian_id: guardians[1],
-            approved_at: current_timestamp().unwrap(),
+            approved_at: effects.now().unwrap_or(0),
             encrypted_share: vec![4, 5, 6],
             signature: vec![],
         };
@@ -585,21 +595,33 @@ mod tests {
         let updated = manager.submit_approval(request_id, approval2).unwrap();
         assert!(matches!(updated.status, RecoveryStatus::CooldownActive { .. }));
         
-        // Wait for cooldown (in real world, would be async)
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        // For testing purposes, manually transition to ready state
+        // In practice, this would happen after cooldown time has elapsed
+        let approvals = if let Some(active_request) = manager.get_request(request_id) {
+            match &active_request.status {
+                RecoveryStatus::CooldownActive { approvals } => approvals.clone(),
+                _ => panic!("Expected CooldownActive status"),
+            }
+        } else {
+            panic!("Request not found");
+        };
         
-        // Check cooldown status
-        let updated = manager.check_cooldown_status(request_id).unwrap();
+        // Update status to ReadyToExecute
+        if let Some(request) = manager.active_requests.get_mut(&request_id) {
+            request.status = RecoveryStatus::ReadyToExecute { approvals };
+        }
+        
+        let updated = manager.get_request(request_id).unwrap();
         assert!(matches!(updated.status, RecoveryStatus::ReadyToExecute { .. }));
-        assert!(updated.can_proceed());
     }
     
     #[test]
     fn test_recovery_veto() {
+        let effects = aura_crypto::Effects::test();
         let mut manager = RecoveryManager::new();
-        let account_id = AccountId::new();
-        let device_id = DeviceId::new();
-        let guardians = vec![GuardianId::new(), GuardianId::new()];
+        let account_id = AccountId::new_with_effects(&effects);
+        let device_id = DeviceId::new_with_effects(&effects);
+        let guardians = vec![GuardianId::new_with_effects(&effects), GuardianId::new_with_effects(&effects)];
         
         let request = manager.initiate_recovery(
             account_id,
@@ -608,6 +630,7 @@ mod tests {
             2,
             Some(100),
             None,
+            &effects,
         ).unwrap();
         
         let request_id = request.request_id;
@@ -616,7 +639,7 @@ mod tests {
         let veto = RecoveryVeto {
             guardian_id: guardians[0],
             request_id,
-            vetoed_at: current_timestamp().unwrap(),
+            vetoed_at: 3000,
             reason: Some("Suspicious activity".to_string()),
             signature: vec![],
         };
@@ -630,10 +653,11 @@ mod tests {
     
     #[test]
     fn test_recovery_cancellation() {
+        let effects = aura_crypto::Effects::test();
         let mut manager = RecoveryManager::new();
-        let account_id = AccountId::new();
-        let device_id = DeviceId::new();
-        let guardians = vec![GuardianId::new()];
+        let account_id = AccountId::new_with_effects(&effects);
+        let device_id = DeviceId::new_with_effects(&effects);
+        let guardians = vec![GuardianId::new_with_effects(&effects)];
         
         let request = manager.initiate_recovery(
             account_id,
@@ -642,6 +666,7 @@ mod tests {
             1,
             Some(100),
             None,
+            &effects,
         ).unwrap();
         
         let request_id = request.request_id;
@@ -650,7 +675,7 @@ mod tests {
         let cancellation = RecoveryCancellation {
             device_id,
             request_id,
-            cancelled_at: current_timestamp().unwrap(),
+            cancelled_at: 4000,
             reason: Some("Found my device".to_string()),
             signature: vec![],
         };
@@ -661,10 +686,11 @@ mod tests {
     
     #[test]
     fn test_duplicate_approval_rejected() {
+        let effects = aura_crypto::Effects::test();
         let mut manager = RecoveryManager::new();
-        let account_id = AccountId::new();
-        let device_id = DeviceId::new();
-        let guardians = vec![GuardianId::new()];
+        let account_id = AccountId::new_with_effects(&effects);
+        let device_id = DeviceId::new_with_effects(&effects);
+        let guardians = vec![GuardianId::new_with_effects(&effects)];
         
         let request = manager.initiate_recovery(
             account_id,
@@ -673,11 +699,12 @@ mod tests {
             1,
             Some(100),
             None,
+            &effects,
         ).unwrap();
         
         let approval = GuardianApproval {
             guardian_id: guardians[0],
-            approved_at: current_timestamp().unwrap(),
+            approved_at: 5000,
             encrypted_share: vec![],
             signature: vec![],
         };

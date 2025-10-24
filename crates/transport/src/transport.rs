@@ -58,21 +58,17 @@ pub trait Transport: Send + Sync {
         my_ticket: &PresenceTicket,
         peer_ticket: &PresenceTicket,
     ) -> Result<Connection>;
-    
+
     /// Send a message to a peer
     ///
     /// The message is sent over the encrypted channel established during connect().
     async fn send(&self, conn: &Connection, message: &[u8]) -> Result<()>;
-    
+
     /// Receive a message from a peer with timeout
     ///
     /// Returns None if timeout is reached without receiving a message.
-    async fn receive(
-        &self,
-        conn: &Connection,
-        timeout: Duration,
-    ) -> Result<Option<Vec<u8>>>;
-    
+    async fn receive(&self, conn: &Connection, timeout: Duration) -> Result<Option<Vec<u8>>>;
+
     /// Broadcast a message to multiple peers
     ///
     /// Returns which peers successfully received the message and which failed.
@@ -83,12 +79,12 @@ pub trait Transport: Send + Sync {
         connections: &[Connection],
         message: &[u8],
     ) -> Result<BroadcastResult>;
-    
+
     /// Disconnect from a peer
     ///
     /// Closes the connection and releases resources.
     async fn disconnect(&self, conn: &Connection) -> Result<()>;
-    
+
     /// Check if a connection is still active
     ///
     /// Returns false if the connection has been closed or is no longer valid.
@@ -106,10 +102,12 @@ impl ConnectionBuilder {
             peer_id: peer_id.into(),
         }
     }
-    
+
     pub fn build(self) -> Connection {
+        // Use deterministic ID based on peer_id for testing consistency
+        let id = format!("conn_{}", self.peer_id);
         Connection {
-            id: uuid::Uuid::new_v4().to_string(),
+            id,
             peer_id: self.peer_id,
         }
     }
@@ -120,7 +118,7 @@ impl Connection {
     pub fn peer_id(&self) -> &str {
         &self.peer_id
     }
-    
+
     /// Get the connection ID
     pub fn id(&self) -> &str {
         &self.id
@@ -130,24 +128,23 @@ impl Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_connection_builder() {
         let conn = ConnectionBuilder::new("device123").build();
-        
+
         assert_eq!(conn.peer_id(), "device123");
         assert!(!conn.id().is_empty());
     }
-    
+
     #[test]
     fn test_broadcast_result() {
         let result = BroadcastResult {
             succeeded: vec!["dev1".to_string(), "dev2".to_string()],
             failed: vec!["dev3".to_string()],
         };
-        
+
         assert_eq!(result.succeeded.len(), 2);
         assert_eq!(result.failed.len(), 1);
     }
 }
-

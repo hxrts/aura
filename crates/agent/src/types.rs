@@ -3,20 +3,42 @@
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
+// Removed legacy current_timestamp import - using effects instead
 
 /// Context capsule for deterministic key derivation
+///
+/// Contains all context information needed for DKD operations including
+/// application identity, context labeling, and policy constraints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextCapsule {
+    /// Application identifier for context separation
     pub app_id: String,
+    /// Human-readable context label for this derivation
     pub context_label: String,
+    /// Optional policy constraint (content identifier)
     pub policy_hint: Option<String>, // CID
+    /// Optional transport configuration hint
     pub transport_hint: Option<String>,
+    /// Time-to-live in seconds (default 24h)
     pub ttl: Option<u64>,       // seconds (default 24h)
+    /// Unix timestamp when capsule was issued
     pub issued_at: u64,         // unix seconds
 }
 
 impl ContextCapsule {
     /// Create a simple context capsule for common use case
+    pub fn simple_with_effects(app_id: &str, context_label: &str, effects: &aura_crypto::Effects) -> crate::Result<Self> {
+        Ok(ContextCapsule {
+            app_id: app_id.to_string(),
+            context_label: context_label.to_string(),
+            policy_hint: None,
+            transport_hint: None,
+            ttl: Some(24 * 3600), // 24 hours
+            issued_at: effects.now().map_err(|e| crate::AgentError::CryptoError(format!("Failed to get timestamp: {:?}", e)))?,
+        })
+    }
+    
+    /// Create a simple context capsule for testing (legacy compatibility)
     pub fn simple(app_id: &str, context_label: &str) -> Self {
         ContextCapsule {
             app_id: app_id.to_string(),
@@ -24,7 +46,7 @@ impl ContextCapsule {
             policy_hint: None,
             transport_hint: None,
             ttl: Some(24 * 3600), // 24 hours
-            issued_at: current_timestamp(),
+            issued_at: 0, // Use epoch timestamp for testing
         }
     }
     
@@ -60,9 +82,12 @@ impl ContextCapsule {
 /// The seed_fingerprint is zeroized on drop.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DerivedIdentity {
+    /// Original context capsule used for derivation
     pub capsule: ContextCapsule,
+    /// Derived public key for this context
     #[serde(with = "verifying_key_serde")]
     pub pk_derived: VerifyingKey,
+    /// Fingerprint of the seed used for derivation (for audit/debug)
     pub seed_fingerprint: [u8; 32], // For audit/debug
 }
 
@@ -132,15 +157,21 @@ pub struct SessionCredential {
 }
 
 /// Configuration for DeviceAgent
+///
+/// Core identity configuration including device credentials and threshold parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdentityConfig {
+    /// Unique device identifier in the account
     pub device_id: aura_journal::DeviceId,
+    /// Account identifier this device belongs to
     pub account_id: aura_journal::AccountId,
+    /// Participant identifier for protocol coordination
     pub participant_id: aura_coordination::ParticipantId,
     /// Path to sealed key share (encrypted)
     pub share_path: String,
-    /// Threshold configuration
+    /// Threshold configuration (minimum signatures required)
     pub threshold: u16,
+    /// Total number of participants in threshold scheme
     pub total_participants: u16,
 }
 
@@ -215,14 +246,4 @@ impl Default for SessionStatistics {
     }
 }
 
-fn current_timestamp() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    // This is used in ContextCapsule::new() which returns Self, not Result
-    // So we use unwrap_or() with a sensible default for backward compatibility
-    // In production, this should be propagated as an error
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)  // Fallback to epoch if system time is broken
-}
 

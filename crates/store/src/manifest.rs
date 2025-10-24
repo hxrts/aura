@@ -23,7 +23,7 @@ pub struct ObjectManifest {
     
     /// Encryption key envelope
     pub key_envelope: KeyEnvelope,
-    /// Authorization token reference (Biscuit)
+    /// Authorization token reference (capability)
     pub auth_token_ref: Option<Cid>,
     
     /// Replication hint

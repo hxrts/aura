@@ -8,35 +8,35 @@ use thiserror::Error;
 pub enum CoordinationError {
     #[error("Invalid participant count: {0}")]
     InvalidParticipantCount(String),
-    
+
     #[error("Threshold too high: {threshold} > {total}")]
     InvalidThreshold { threshold: u16, total: u16 },
-    
+
     #[error("DKG round failed: {0}")]
     DkgFailed(String),
-    
+
     #[error("Signing round failed: {0}")]
     SigningFailed(String),
-    
+
     #[error("Resharing failed: {0}")]
     ResharingFailed(String),
-    
+
     #[error("Missing participant: {0}")]
     MissingParticipant(String),
-    
+
     #[error("Invalid signature")]
     InvalidSignature,
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(String),
-    
+
     #[error("Cryptographic error: {0}")]
     CryptoError(String),
-    
+
     #[error("Device mismatch: sealed for {expected:?}, attempted unseal by {provided:?}")]
     DeviceMismatch {
-        expected: crate::types::DeviceId,
-        provided: crate::types::DeviceId,
+        expected: aura_journal::DeviceId,
+        provided: aura_journal::DeviceId,
     },
 }
 

@@ -1,4 +1,4 @@
-The SBB + rendezvous design is a great fit for NAT hole-punching. The sealed envelopes are an ideal private channel to exchange ICE/endpoint candidates, ephemeral prekeys, and coordinated timing. You still need STUN/TURN fallbacks for hard NATs/enterprise networks, but the SBB can orchestrate direct UDP/TCP/QUIC/WebRTC hole-punch attempts while preserving unlinkability and transport-agnosticism.
+The SBB + rendezvous design is a good fit for NAT hole-punching. The sealed envelopes are an ideal private channel to exchange ICE/endpoint candidates, ephemeral prekeys, and coordinated timing. You still need STUN/TURN fallbacks for hard NATs/enterprise networks, but the SBB can orchestrate direct UDP/TCP/QUIC/WebRTC hole-punch attempts while preserving unlinkability and transport-agnosticism.
 
 Below is a compact, actionable design + practical steps, privacy implications, and Rust implementation recommendations so you can add hole-punching to your PoC quickly.
 
@@ -12,7 +12,7 @@ Below is a compact, actionable design + practical steps, privacy implications, a
   * ephemeral prekeys (X25519/XChaCha ephemeral static keys),
   * connection coordination metadata (selected candidate, timing/nonce, port hints),
   * channel-binding & handshake preimage fingerprints.
-* Once parties decide on a candidate pair, they attempt **simultaneous open / ICE connectivity checks / UDP hole punch** and then perform the PSK-bound authenticated handshake (Noise/TLS/QUIC).
+* Once parties decide on a candidate pair, they attempt simultaneous open / ICE connectivity checks / UDP hole punch and then perform the PSK-bound authenticated handshake (Noise/TLS/QUIC).
 * If direct punching fails, fall back to an encrypted relay (TURN) or to *contact-mediated relaying* via SBB nodes (store-and-forward encrypted packets) as a last resort.
 
 ---
@@ -74,7 +74,7 @@ Extend your `offer` / `answer` payloads with fields:
 
 * **STUN (recommended)**: Each device can optionally include STUN-derived `mapped` addresses in the Offer so the other party sees the external mapping. STUN is cheap and helps punching success rates.
 * **TURN (fallback)**: If both are behind symmetric NATs or restrictive firewalls, attempt a TURN relay (coturn) — but treat TURN entries as **sensitive** and include them in sealed envelopes only.
-* **Contact-mediated relay**: If you prefer to avoid centralized TURN, an SBB node (a contact) can act as an **opaque encrypted relay**: it forwards ciphertext frames between A and B. This leaks traffic volume to the relay but keeps payload confidential. Use this sparingly — performance is worse but privacy can be preserved (contents are end-to-end encrypted).
+* **Contact-mediated relay**: If you prefer to avoid centralized TURN, an SBB node (a contact) can act as an opaque encrypted relay: it forwards ciphertext frames between A and B. This leaks traffic volume to the relay but keeps payload confidential. Use this sparingly — performance is worse but privacy can be preserved (contents are end-to-end encrypted).
 
 ---
 

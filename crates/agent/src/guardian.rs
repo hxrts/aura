@@ -151,7 +151,10 @@ pub enum InvitationStatus {
     /// Waiting for guardian to accept
     Pending,
     /// Guardian accepted, waiting for inviter approval
-    Accepted { guardian_account_id: AccountId },
+    Accepted { 
+        /// Account ID of the accepting guardian
+        guardian_account_id: AccountId 
+    },
     /// Inviter approved, shares being distributed
     Approved,
     /// Invitation completed successfully
@@ -472,17 +475,7 @@ impl Default for GuardianManager {
     }
 }
 
-#[allow(dead_code)]
-fn current_timestamp() -> Result<u64> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .map_err(|e| crate::AgentError::SystemTimeError(format!(
-            "System time is before UNIX epoch: {}",
-            e
-        )))
-}
+// Removed deprecated current_timestamp() function - use effects.now() instead
 
 #[cfg(test)]
 mod tests {
@@ -490,7 +483,8 @@ mod tests {
     
     #[test]
     fn test_invitation_token_creation() {
-        let account_id = AccountId::new();
+        let effects = aura_crypto::Effects::test();
+        let account_id = AccountId::new_with_effects(&effects);
         let effects = aura_crypto::Effects::test();
         let token = InvitationToken::new(account_id, GuardianRole::Recovery, None, &effects).unwrap();
         
@@ -501,10 +495,10 @@ mod tests {
     
     #[test]
     fn test_guardian_invitation_flow() {
-        let mut manager = GuardianManager::new();
-        let inviter_id = AccountId::new();
-        let guardian_id = AccountId::new();
         let effects = aura_crypto::Effects::test();
+        let mut manager = GuardianManager::new();
+        let inviter_id = AccountId::new_with_effects(&effects);
+        let guardian_id = AccountId::new_with_effects(&effects);
         
         // Create invitation
         let invitation = manager
@@ -536,10 +530,10 @@ mod tests {
     
     #[test]
     fn test_invalid_verification_code() {
-        let mut manager = GuardianManager::new();
-        let inviter_id = AccountId::new();
-        let guardian_id = AccountId::new();
         let effects = aura_crypto::Effects::test();
+        let mut manager = GuardianManager::new();
+        let inviter_id = AccountId::new_with_effects(&effects);
+        let guardian_id = AccountId::new_with_effects(&effects);
         
         let invitation = manager
             .create_invitation(inviter_id, GuardianRole::Recovery, None, None, &effects)

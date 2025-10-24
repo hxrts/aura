@@ -39,17 +39,16 @@
 //! - **Session types**: Communication patterns type-checked
 //! - **Deadlock freedom**: Guaranteed by choreographic structure
 //!
-//! Reference: 
+//! Reference:
 //! - work/04_declarative_protocol_evolution.md - Phase 2
 //! - Choreographic Programming: https://arxiv.org/abs/1303.0039
 
 pub mod dkd;
-pub mod resharing;
 pub mod locking;
 pub mod recovery;
+pub mod resharing;
 
 pub use dkd::dkd_choreography;
-pub use resharing::resharing_choreography;
 pub use locking::locking_choreography;
-pub use recovery::{recovery_choreography, nudge_guardian};
-
+pub use recovery::{nudge_guardian, recovery_choreography};
+pub use resharing::resharing_choreography;

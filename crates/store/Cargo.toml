@@ -7,11 +7,15 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # Workspace crates
 aura-journal = { path = "../journal" }
 aura-transport = { path = "../transport" }
 aura-crypto = { path = "../crypto" }
+aura-cgka = { path = "../cgka" }
 
 # Storage
 redb = { workspace = true }

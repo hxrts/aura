@@ -1,7 +1,9 @@
 # 040 · Storage MVP Specification (Phase 1)
 
 Goal: deliver a minimal encrypted object store that pairs with the identity
-layer. We rely on an existing transport (iroh or HTTPS relay) and add just enough orchestration to meet Aura’s UX/security needs.
+layer. We rely on an existing transport (iroh or HTTPS relay) and add just enough orchestration to meet Aura's UX/security needs.
+
+This MVP establishes the foundation for future Tahoe-LAFS inspired enhancements including capability-based access control, encrypt-then-erasure-code patterns, and social storage networks built on the web-of-trust.
 
 ## 1. Core Concepts
 
@@ -22,22 +24,43 @@ struct ObjectManifest {
     size: u64,
     chunking: ChunkingParams,
     erasure: Option<ErasureMeta>, // Optional, default None in MVP
+                                  // Future: Tahoe-LAFS k-of-n erasure coding
 
     // Context
     context_id: Option<[u8; 32]>,
     app_metadata: Option<Vec<u8>>, // e.g., CBOR, recommended max 4 KiB
 
-    // Security
-    key_envelope: KeyEnvelope,     // HPKE-wrapped per device
-    auth_token_ref: Option<Cid>,   // Biscuit capability for delegated access
+    // Security & Access Control
+    key_envelope: KeyEnvelope,     // HPKE-wrapped per device (MVP)
+                                   // Future: Capability-based key distribution
+    access_control: AccessControl, // Replaces auth_token_ref for Keyhive integration
 
     // Lifecycle
-    replication_hint: ReplicationHint,
+    replication_hint: ReplicationHint, // Future: Social storage network hints
     version: u64,
     prev_manifest: Option<Cid>,
     issued_at_ms: u64,
     nonce: [u8; 32],
     sig: ThresholdSignature,
+}
+
+// MVP: Simple enum, extensible for future capability-based access
+enum AccessControl {
+    // MVP: Device-based access (current approach)
+    DeviceList { devices: Vec<DeviceId> },
+    
+    // Future: Capability-based access (Tahoe-LAFS inspired)
+    CapabilityRef { 
+        capability_id: CapabilityId,
+        access_type: AccessType, // Read, Write, Verify
+    },
+    
+    // Future: Threshold access (high-value content)
+    ThresholdAccess {
+        required_guardians: u32,
+        total_guardians: u32,
+        guardian_shares: Vec<GuardianShare>,
+    },
 }
 ```
 
@@ -51,6 +74,11 @@ struct ObjectManifest {
 /space/peer/<peer>        -> { cached_bytes, last_updated }
 /index/app/<app_id>/<hash>-> Set<Cid> (built from app_metadata)
 /gc/candidates            -> { cid, reason, ready_at }
+
+// Future: Capability-based access indexes
+/capabilities/<cap_id>    -> { access_type, delegations, revocations }
+/erasure/<cid>           -> { k, n, share_locations } (Tahoe-LAFS style)
+/social_storage/<peer>   -> { trust_level, storage_quota, reliability }
 ```
 
 ## 3. API Surface (Indexer)
@@ -62,7 +90,11 @@ pub struct PutOpts {
     pub repl_hint: ReplicationHint,   // Preferred peers (optional target list)
     pub context: Option<ContextDescriptor>,
     pub app_metadata: Option<Vec<u8>>, // Inline metadata blob
-    pub caps: Vec<WillowCap>,         // Biscuit tokens if needed
+    pub access_control: AccessControl, // Replaces caps for Keyhive integration
+    
+    // Future: Tahoe-LAFS inspired options
+    pub erasure_params: Option<ErasureParams>, // k-of-n coding parameters
+    pub threshold_policy: Option<ThresholdPolicy>, // Guardian approval requirements
 }
 
 pub async fn store_encrypted(
@@ -134,4 +166,34 @@ Pluggable structure is retained, but additional transports are future work.
 - Alternate transports (BitChat mesh, libp2p). Documented as future modules.
 - Automated garbage-collection of remote replicas (rely on proof-of-storage and manual policies).
 
-Once the MVP lands, we can iterate on optional modules without changing the base APIs captured here.***
+## 10. Future Enhancement Roadmap (Tahoe-LAFS Integration)
+
+The MVP architecture is designed to seamlessly evolve toward Tahoe-LAFS inspired capabilities:
+
+### Phase 2: Capability-Based Access Control
+- **Keyhive Integration**: Replace device-list access with convergent capabilities
+- **Delegation Chains**: Support read/write/verify capability types inspired by Tahoe-LAFS
+- **Revocation Cascades**: Leverage Keyhive's authority graph for complex revocation scenarios
+
+### Phase 3: Encrypt-then-Erasure-Code
+- **Privacy-First Erasure Coding**: Implement Tahoe's encrypt-before-encode pattern
+- **Meaningless Fragments**: Storage nodes see only encrypted erasure-coded shares
+- **Reed-Solomon Integration**: Add k-of-n reconstruction with configurable parameters
+
+### Phase 4: Social Storage Network
+- **Web-of-Trust Storage**: Extend SBB nodes to provide storage capacity
+- **Trust-Based Replication**: Use social graph for intelligent replica placement
+- **Capability-Driven Quotas**: Manage storage permissions through convergent capabilities
+
+### Phase 5: Threshold + Erasure Synergy
+- **Guardian-Encrypted Shares**: High-value content requires M-of-N guardian approval
+- **Hybrid Security Model**: Combine threshold cryptography with erasure coding
+- **Unified Authority**: Single Keyhive authority graph manages both access and encryption
+
+### Key Design Principles for Future Phases:
+1. **Backward Compatibility**: All enhancements preserve existing manifest structures
+2. **Incremental Adoption**: Features can be enabled per-object via `AccessControl` enum
+3. **Unified Architecture**: Keyhive provides consistent foundation for both authorization and encryption
+4. **Privacy by Design**: Following Tahoe-LAFS principle that privacy and fault tolerance reinforce each other
+
+Once the MVP lands, we can iterate on these enhancement modules without changing the base APIs captured here.

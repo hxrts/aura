@@ -23,6 +23,8 @@
 //!   - [`choreography::dkd`]: P2P deterministic key derivation
 //!   - [`choreography::resharing`]: Share redistribution protocol
 //!   - [`choreography::recovery`]: Guardian-based recovery
+
+#![allow(missing_docs)] // TODO: Add comprehensive documentation in future work
 //!   - [`choreography::locking`]: Distributed locking protocol
 //!
 //! **Execution Infrastructure:**
@@ -78,18 +80,18 @@ pub use error::{CoordinationError, Result};
 // ========== Main API Exports ==========
 
 // Choreographic protocols
-pub use choreography::{dkd, resharing, recovery, locking};
+pub use choreography::{dkd, locking, recovery, resharing};
 
 // Execution infrastructure
 pub use execution::{
-    ProtocolContext, TimeSource, SimulatedTimeSource, ProductionTimeSource, SimulationScheduler,
-    ProtocolResult, ProtocolError, ProtocolErrorType,
-    Instruction, InstructionResult, EventFilter, EventTypePattern, EventPredicate,
-    ProtocolConfig, ProtocolType, LedgerStateSnapshot,
+    EventFilter, EventPredicate, EventTypePattern, Instruction, InstructionResult,
+    LedgerStateSnapshot, ProductionTimeSource, ProtocolConfig, ProtocolContext, ProtocolError,
+    ProtocolErrorType, ProtocolResult, ProtocolType, TimeSource,
+    // SimulatedTimeSource, SimulationScheduler, // TODO: These types are not yet fully implemented
 };
 
 // Utilities
-pub use utils::{EventWatcher, EventSigner, determine_lock_winner, compute_lottery_ticket};
+pub use utils::{compute_lottery_ticket, determine_lock_winner, EventSigner, EventWatcher};
 
 // ========== Legacy Types ==========
 pub mod types;

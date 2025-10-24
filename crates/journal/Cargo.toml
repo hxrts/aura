@@ -7,7 +7,14 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
+
+# Internal crates
+aura-crypto = { path = "../crypto" }
+
 # CRDT
 automerge = { workspace = true }
 
@@ -30,6 +37,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

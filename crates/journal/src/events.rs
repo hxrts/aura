@@ -11,7 +11,7 @@
 // - Recovery Protocol
 // - Compaction Protocol
 // - Device/Guardian Management
-// - Presence & Policy
+// - Presence
 
 use crate::types::*;
 use ed25519_dalek::Signature;
@@ -23,16 +23,13 @@ use uuid::Uuid;
 pub struct EventId(pub Uuid);
 
 impl EventId {
-    pub fn new() -> Self {
-        EventId(Uuid::new_v4())
+    /// Create a new event ID using injected effects (for production/testing)
+    pub fn new_with_effects(effects: &aura_crypto::Effects) -> Self {
+        EventId(effects.gen_uuid())
     }
+    
 }
 
-impl Default for EventId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// Protocol version for events
 pub const EVENT_VERSION: u16 = 1;
@@ -66,27 +63,28 @@ impl Event {
         epoch_at_write: u64,
         event_type: EventType,
         authorization: EventAuthorization,
-    ) -> Self {
-        Event {
+        effects: &aura_crypto::Effects,
+    ) -> Result<Self, String> {
+        Ok(Event {
             version: EVENT_VERSION,
-            event_id: EventId::new(),
+            event_id: EventId(effects.gen_uuid()),
             account_id,
-            timestamp: crate::state::current_timestamp(),
+            timestamp: effects.now().map_err(|e| format!("Time error: {}", e))?,
             nonce,
             parent_hash,
             epoch_at_write,
             event_type,
             authorization,
-        }
+        })
     }
-    
+
     /// Compute hash of this event for causal chain
     pub fn hash(&self) -> crate::Result<[u8; 32]> {
         // Serialize event to canonical form and hash
         let serialized = crate::serialization::serialize_cbor(self)?;
         Ok(*blake3::hash(&serialized).as_bytes())
     }
-    
+
     /// Compute signable hash (excludes authorization for signing)
     ///
     /// This computes the hash of the event content that should be signed.
@@ -94,7 +92,7 @@ impl Event {
     pub fn signable_hash(&self) -> crate::Result<[u8; 32]> {
         // Create a struct with all fields except authorization
         use serde::Serialize;
-        
+
         #[derive(Serialize)]
         struct SignableEvent<'a> {
             version: u16,
@@ -106,7 +104,7 @@ impl Event {
             epoch_at_write: u64,
             event_type: &'a EventType,
         }
-        
+
         let signable = SignableEvent {
             version: self.version,
             event_id: self.event_id,
@@ -117,11 +115,11 @@ impl Event {
             epoch_at_write: self.epoch_at_write,
             event_type: &self.event_type,
         };
-        
+
         let serialized = crate::serialization::serialize_cbor(&signable)?;
         Ok(*blake3::hash(&serialized).as_bytes())
     }
-    
+
     /// Validate event version is supported
     pub fn validate_version(&self) -> Result<(), String> {
         if self.version > EVENT_VERSION {
@@ -132,7 +130,7 @@ impl Event {
         }
         Ok(())
     }
-    
+
     /// Validate causal ordering (parent hash matches last event)
     pub fn validate_parent(&self, expected_parent: Option<[u8; 32]>) -> Result<(), String> {
         if self.parent_hash != expected_parent {
@@ -167,14 +165,14 @@ pub enum EventAuthorization {
 mod signature_serde {
     use ed25519_dalek::Signature;
     use serde::{Deserialize, Deserializer, Serializer};
-    
+
     pub fn serialize<S>(sig: &Signature, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_bytes(&sig.to_bytes())
     }
-    
+
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Signature, D::Error>
     where
         D: Deserializer<'de>,
@@ -192,7 +190,7 @@ pub enum EventType {
     // ========== Epoch/Clock Management (080 Part 1: Logical Clock) ==========
     /// Advance logical epoch when ledger is idle
     EpochTick(EpochTickEvent),
-    
+
     // ========== Distributed Locking (080 Part 3: Distributed Locking) ==========
     /// Request to acquire distributed lock for critical operation
     RequestOperationLock(RequestOperationLockEvent),
@@ -200,7 +198,7 @@ pub enum EventType {
     GrantOperationLock(GrantOperationLockEvent),
     /// Release distributed lock after operation completes
     ReleaseOperationLock(ReleaseOperationLockEvent),
-    
+
     // ========== P2P DKD Protocol (080 Part 1: P2P DKD Integration) ==========
     /// Initiate new DKD session
     InitiateDkdSession(InitiateDkdSessionEvent),
@@ -216,7 +214,7 @@ pub enum EventType {
     HealthCheckRequest(HealthCheckRequestEvent),
     /// Health check response from participant
     HealthCheckResponse(HealthCheckResponseEvent),
-    
+
     // ========== P2P Resharing Protocol (080 Part 4: P2P Resharing) ==========
     /// Initiate resharing protocol
     InitiateResharing(InitiateResharingEvent),
@@ -230,7 +228,7 @@ pub enum EventType {
     AbortResharing(AbortResharingEvent),
     /// Rollback failed resharing to previous state
     ResharingRollback(ResharingRollbackEvent),
-    
+
     // ========== Recovery Protocol (080 Part 2: Recovery Protocol) ==========
     /// Initiate account recovery
     InitiateRecovery(InitiateRecoveryEvent),
@@ -244,7 +242,7 @@ pub enum EventType {
     AbortRecovery(AbortRecoveryEvent),
     /// Nudge guardian to respond to recovery request
     NudgeGuardian(NudgeGuardianEvent),
-    
+
     // ========== Compaction Protocol (080 Part 3: Ledger Compaction) ==========
     /// Propose ledger compaction with epoch range
     ProposeCompaction(ProposeCompactionEvent),
@@ -252,7 +250,7 @@ pub enum EventType {
     AcknowledgeCompaction(AcknowledgeCompactionEvent),
     /// Commit compaction (threshold-authorized)
     CommitCompaction(CommitCompactionEvent),
-    
+
     // ========== Device/Guardian Management ==========
     /// Add new device to account
     AddDevice(AddDeviceEvent),
@@ -262,12 +260,24 @@ pub enum EventType {
     AddGuardian(AddGuardianEvent),
     /// Remove guardian from account
     RemoveGuardian(RemoveGuardianEvent),
-    
-    // ========== Presence & Policy ==========
+
+    // ========== Presence ==========
     /// Cache presence ticket for offline verification
     PresenceTicketCache(PresenceTicketCacheEvent),
-    /// Update account policy
-    PolicyUpdate(PolicyUpdateEvent),
+    
+    // ========== Capabilities ==========
+    /// Delegate a capability
+    CapabilityDelegation(crate::capability::events::CapabilityDelegation),
+    /// Revoke a capability
+    CapabilityRevocation(crate::capability::events::CapabilityRevocation),
+    
+    // ========== CGKA (Continuous Group Key Agreement) ==========
+    /// BeeKEM CGKA operation
+    CgkaOperation(CgkaOperationEvent),
+    /// CGKA state synchronization
+    CgkaStateSync(CgkaStateSyncEvent),
+    /// CGKA epoch transition
+    CgkaEpochTransition(CgkaEpochTransitionEvent),
 }
 
 // ==================== Event Payload Structures ====================
@@ -337,7 +347,7 @@ pub struct RevealDkdPointEvent {
 pub struct FinalizeDkdSessionEvent {
     pub session_id: Uuid,
     pub seed_fingerprint: [u8; 32],
-    pub commitment_root: [u8; 32], // Merkle root of all commitments
+    pub commitment_root: [u8; 32],    // Merkle root of all commitments
     pub derived_identity_pk: Vec<u8>, // Public key derived from seed
 }
 
@@ -350,7 +360,10 @@ pub struct AbortDkdSessionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DkdAbortReason {
     Timeout,
-    ByzantineBehavior { device_id: DeviceId, details: String },
+    ByzantineBehavior {
+        device_id: DeviceId,
+        details: String,
+    },
     CollisionDetected,
 }
 
@@ -420,7 +433,9 @@ pub struct AbortResharingEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ResharingAbortReason {
     Timeout,
-    DeliveryFailure { missing_acks: Vec<(DeviceId, DeviceId)> },
+    DeliveryFailure {
+        missing_acks: Vec<(DeviceId, DeviceId)>,
+    },
     TestSignatureFailed,
 }
 
@@ -540,7 +555,7 @@ pub struct RemoveGuardianEvent {
     pub reason: String,
 }
 
-// ========== Presence & Policy ==========
+// ========== Presence ==========
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresenceTicketCacheEvent {
@@ -550,21 +565,108 @@ pub struct PresenceTicketCacheEvent {
     pub expires_at: u64,
 }
 
+// ========== CGKA Events ==========
+
+/// BeeKEM CGKA operation event
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PolicyUpdateEvent {
-    pub policy_cid: Cid,
-    pub version: u64,
+pub struct CgkaOperationEvent {
+    pub operation_id: uuid::Uuid,
+    pub group_id: String,
+    pub current_epoch: u64,
+    pub target_epoch: u64,
+    pub operation_type: CgkaOperationType,
+    pub roster_delta: CgkaRosterDelta,
+    pub tree_updates: Vec<CgkaTreeUpdate>,
+    pub issued_by: DeviceId,
+    pub issued_at: u64,
+    pub signature: Vec<u8>,
 }
 
-/// Get current unix timestamp in seconds
-pub fn current_timestamp() -> crate::Result<u64> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .map_err(|e| crate::LedgerError::SerializationFailed(format!(
-            "System time is before UNIX epoch: {}",
+/// Type of CGKA operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CgkaOperationType {
+    /// Add new members to the group
+    Add { members: Vec<String> },
+    /// Remove members from the group
+    Remove { members: Vec<String> },
+    /// Update tree without changing membership
+    Update,
+    /// Initialize new group
+    Init { initial_members: Vec<String> },
+}
+
+/// Changes to group roster
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CgkaRosterDelta {
+    pub added_members: Vec<String>,
+    pub removed_members: Vec<String>,
+    pub previous_size: u32,
+    pub new_size: u32,
+}
+
+/// Tree update operation for BeeKEM
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CgkaTreeUpdate {
+    pub position: u32,
+    pub update_type: CgkaTreeUpdateType,
+    pub path_updates: Vec<CgkaPathUpdate>,
+}
+
+/// Type of tree update
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CgkaTreeUpdateType {
+    /// Add new leaf node
+    AddLeaf {
+        member_id: String,
+        public_key: Vec<u8>,
+    },
+    /// Remove leaf node
+    RemoveLeaf {
+        member_id: String,
+    },
+    /// Update existing node
+    UpdateNode {
+        new_public_key: Vec<u8>,
+    },
+}
+
+/// Update to a node in the tree path
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CgkaPathUpdate {
+    pub position: u32,
+    pub public_key: Vec<u8>,
+    pub encrypted_secret: Vec<u8>,
+}
+
+/// CGKA state synchronization event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CgkaStateSyncEvent {
+    pub group_id: String,
+    pub epoch: u64,
+    pub roster_snapshot: Vec<String>,
+    pub tree_snapshot: Vec<u8>, // Serialized tree state
+    pub application_secrets: Vec<(u64, Vec<u8>)>, // (epoch, secret) pairs
+    pub sync_timestamp: u64,
+}
+
+/// CGKA epoch transition event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CgkaEpochTransitionEvent {
+    pub group_id: String,
+    pub previous_epoch: u64,
+    pub new_epoch: u64,
+    pub roster_delta: CgkaRosterDelta,
+    pub committed_operations: Vec<uuid::Uuid>,
+    pub transition_timestamp: u64,
+}
+
+/// Get current unix timestamp in seconds using injected effects
+pub fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> crate::Result<u64> {
+    effects.now().map_err(|e| {
+        crate::LedgerError::SerializationFailed(format!(
+            "Failed to get current timestamp: {}",
             e
-        )))
+        ))
+    })
 }
 

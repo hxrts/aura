@@ -1,9 +1,5 @@
 # Peer-to-Peer Threshold Protocols
 
-**Status:** Design Specification  
-**Version:** 1.0  
-**Last Updated:** October 21, 2025
-
 ## Overview
 
 This document specifies two critical peer-to-peer protocols for Aura:
@@ -11,7 +7,7 @@ This document specifies two critical peer-to-peer protocols for Aura:
 1. **P2P Deterministic Key Derivation (DKD)** - Threshold-aggregated context identity derivation
 2. **P2P Resharing Protocol** - Dynamic threshold adjustment and participant management
 
-Both protocols are **truly peer-to-peer** with no coordinator role. All participants are equal peers, and coordination happens via the CRDT ledger (Automerge).
+Both protocols are truly peer-to-peer with no coordinator role. All participants are equal peers, and coordination happens via the CRDT ledger (Automerge).
 
 ## Design Principles
 
@@ -57,21 +53,21 @@ The current DKD implementation allows single participants to derive context-spec
 ```
 ┌─────────────────────────────────────────────────────────┐
 │           CRDT Ledger (Automerge)                       │
-│                                                          │
-│  DkdSessions: Map<ContextId, DkdSessionState>          │
-│    ├─ context_capsule: ContextCapsule                  │
-│    ├─ participants: Set<ParticipantId>                 │
-│    ├─ threshold: usize                                 │
-│    │                                                     │
-│    ├─ Phase 1: Commitments                             │
-│    │   └─ commitments: Map<PID, Hash>                  │
-│    │                                                     │
-│    ├─ Phase 2: Reveals                                 │
-│    │   └─ revealed_points: Map<PID, Point>             │
-│    │                                                     │
-│    └─ Phase 3: Aggregation                             │
-│        ├─ aggregated_point: Option<Point>              │
-│        └─ derived_seed: Option<[u8; 32]>               │
+│                                                         │
+│  DkdSessions: Map<ContextId, DkdSessionState>           │
+│    ├─ context_capsule: ContextCapsule                   │
+│    ├─ participants: Set<ParticipantId>                  │
+│    ├─ threshold: usize                                  │
+│    │                                                    │
+│    ├─ Phase 1: Commitments                              │
+│    │   └─ commitments: Map<PID, Hash>                   │
+│    │                                                    │
+│    ├─ Phase 2: Reveals                                  │
+│    │   └─ revealed_points: Map<PID, Point>              │
+│    │                                                    │
+│    └─ Phase 3: Aggregation                              │
+│        ├─ aggregated_point: Option<Point>               │
+│        └─ derived_seed: Option<[u8; 32]>                │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -376,26 +372,26 @@ The current threshold configuration is static after DKG. We need a protocol for:
 ```
 ┌─────────────────────────────────────────────────────────┐
 │           CRDT Ledger (Automerge)                       │
-│                                                          │
-│  ResharingSessions: Map<Uuid, ResharingSessionState>   │
-│    ├─ old_config: (participants, threshold)            │
-│    ├─ new_config: (participants, threshold)            │
-│    ├─ group_public_key: VerifyingKey                   │
-│    │                                                     │
-│    ├─ Phase 1: Sub-share Distribution                  │
-│    │   ├─ sub_shares: Map<(Old,New), Encrypted>        │
-│    │   └─ distribution_complete: Set<OldPID>           │
-│    │                                                     │
-│    ├─ Phase 2: New Share Reconstruction                │
-│    │   └─ new_shares_ready: Set<NewPID>                │
-│    │                                                     │
-│    ├─ Phase 3: Verification                            │
-│    │   ├─ verification_signatures: Map<PID, Sig>       │
-│    │   └─ verification_complete: bool                  │
-│    │                                                     │
-│    └─ Phase 4: Commit                                  │
-│        ├─ completed: bool                              │
-│        └─ new_session_epoch: Option<u64>               │
+│                                                         │
+│  ResharingSessions: Map<Uuid, ResharingSessionState>    │
+│    ├─ old_config: (participants, threshold)             │
+│    ├─ new_config: (participants, threshold)             │
+│    ├─ group_public_key: VerifyingKey                    │
+│    │                                                    │
+│    ├─ Phase 1: Sub-share Distribution                   │
+│    │   ├─ sub_shares: Map<(Old,New), Encrypted>         │
+│    │   └─ distribution_complete: Set<OldPID>            │
+│    │                                                    │
+│    ├─ Phase 2: New Share Reconstruction                 │
+│    │   └─ new_shares_ready: Set<NewPID>                 │
+│    │                                                    │
+│    ├─ Phase 3: Verification                             │
+│    │   ├─ verification_signatures: Map<PID, Sig>        │
+│    │   └─ verification_complete: bool                   │
+│    │                                                    │
+│    └─ Phase 4: Commit                                   │
+│        ├─ completed: bool                               │
+│        └─ new_session_epoch: Option<u64>                │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -1254,8 +1250,4 @@ pub enum ResharingError {
     ProposalNotSigned,
 }
 ```
-
----
-
-**End of Specification**
 

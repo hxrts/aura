@@ -7,6 +7,9 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "aura"
 path = "src/main.rs"
@@ -17,7 +20,6 @@ aura-agent = { path = "../agent" }
 aura-coordination = { path = "../coordination" }
 aura-crypto = { path = "../crypto" }
 aura-journal = { path = "../journal" }
-aura-policy = { path = "../policy" }
 
 # CLI
 clap = { workspace = true }

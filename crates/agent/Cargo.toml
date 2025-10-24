@@ -7,13 +7,17 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # Workspace crates
 aura-coordination = { path = "../coordination" }
 aura-journal = { path = "../journal" }
-aura-policy = { path = "../policy" }
 aura-crypto = { path = "../crypto" }
 aura-transport = { path = "../transport" }
+aura-cgka = { path = "../cgka" }
+aura-store = { path = "../store" }
 
 # Cryptography
 frost-ed25519 = { workspace = true }
@@ -29,6 +33,7 @@ qrcode = { version = "0.13", optional = true }
 serde = { workspace = true }
 serde_cbor = { workspace = true }
 serde_json = { workspace = true }
+bincode = { workspace = true }
 
 # Async
 tokio = { workspace = true }

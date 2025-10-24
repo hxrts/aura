@@ -12,4 +12,3 @@ pub struct ReplicaProof {
     pub replica_tag: uuid::Uuid,
     pub signature: Vec<u8>,
 }
-

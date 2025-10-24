@@ -28,9 +28,17 @@ test-crate crate:
 check:
     cargo check --workspace --verbose
 
-# Run clippy linter
+# Run clippy linter with effects system enforcement
 clippy:
     cargo clippy --workspace --all-targets --verbose -- -D warnings
+
+# Strict clippy check enforcing effects system usage
+clippy-strict:
+    cargo clippy --workspace --all-targets --verbose -- -D warnings -D clippy::disallowed_methods -D clippy::disallowed_types
+
+# Test lint enforcement (should fail)
+lint-test:
+    cargo check test_lints.rs
 
 # Format code
 fmt:
@@ -97,9 +105,13 @@ smoke-test:
     
     echo "Phase 0 smoke tests passed!"
 
-# Run all checks (format, clippy, test)
-ci: fmt-check clippy test
-    @echo "All CI checks passed!"
+# Run all checks with effects enforcement (format, clippy-strict, test)
+ci: fmt-check clippy-strict test
+    @echo "All CI checks passed with effects enforcement!"
+
+# Run basic CI checks (legacy - use ci for effects enforcement)
+ci-basic: fmt-check clippy test
+    @echo "Basic CI checks passed!"
 
 # Generate documentation
 docs:
@@ -123,7 +135,7 @@ stats:
 install-hooks:
     @echo "Installing git hooks..."
     @echo "#!/usr/bin/env bash" > .git/hooks/pre-commit
-    @echo "just fmt-check && just clippy" >> .git/hooks/pre-commit
+    @echo "just fmt-check && just clippy-strict" >> .git/hooks/pre-commit
     @chmod +x .git/hooks/pre-commit
     @echo "Git hooks installed"
 

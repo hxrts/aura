@@ -115,7 +115,7 @@ This document outlines the iterative development plan for Aura, from the foundat
 ## Program Management Tips
 
 - **Scope PRs:** Keep pull requests focused on a single feature or phase to simplify review.
-- **Feature Flag:** Default all optional or experimental features to **off** until they are stable and have earned a place in a release.
+- **Feature Flag:** Default all optional or experimental features to off until they are stable and have earned a place in a release.
 - **Documentation Parity:** Ensure that any code change is reflected in the relevant specification documents (`docs/` and `docs2/`).
 - **Release Branches:** Use release branches to stabilize deliverables for each phase before moving on to the next.
 - **Test Everything:** Each new feature should be accompanied by a comprehensive suite of unit and integration tests.

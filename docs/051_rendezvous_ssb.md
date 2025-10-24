@@ -8,13 +8,13 @@
 
 ## 1) Motivation
 
-Aura accounts are **threshold identities** (account-level) with many devices underneath. After two accounts connect once, they should be able to:
+Aura accounts are threshold identities (account-level) with many devices underneath. After two accounts connect once, they should be able to:
 
 * go offline, change networks/devices/transports,
-* and still **find each other privately** and re-establish a channel,
-* **without** revealing their social graph or stable identifiers to any relays.
+* and still find each other privately and re-establish a channel,
+* *without* revealing their social graph or stable identifiers to any relays.
 
-We achieve this by flooding small, **sealed, fixed-size envelopes** through a **social bulletin board (SBB)** that’s hosted by your contacts (and optionally their contacts) rather than by a central relay. Only the intended counterparty can recognize and decrypt an envelope; everyone else stores/forwards it blindly with quotas.
+We achieve this by flooding small, sealed, fixed-size envelopes through a social bulletin board (SBB) that’s hosted by your contacts (and optionally their contacts) rather than by a central relay. Only the intended counterparty can recognize and decrypt an envelope; everyone else stores/forwards it blindly with quotas.
 
 ---
 
@@ -23,9 +23,9 @@ We achieve this by flooding small, **sealed, fixed-size envelopes** through a **
 **Goals**
 
 * Transport-agnostic rendezvous (QUIC, WebRTC, Tor, BLE…).
-* Privacy: no long-lived global IDs in discovery; pairwise unlinkability.
+* Privacy: no long-lived global IDs in discovery (approximately 1 day); pairwise unlinkability.
 * Offline/partition tolerance via store-and-forward.
-* **Core Integration**: Deeply integrated with Aura's threshold identity model and multi-device architecture.
+* Core Integration: Deeply integrated with Aura's threshold identity model and multi-device architecture.
 * Minimal infra: run by users/contacts (WoT-flood), not centralized servers.
 * Practical: path to a working multi-device PoC demonstrating Aura's unique value proposition.
 
@@ -575,7 +575,3 @@ impl RendezvousAgent {
 * Threshold Diffie-Hellman ceremonies
 * Attested resource delegation (Biscuit/Macaroon)
 * Formal verification of protocol properties
-
----
-
-If you want, I can spin up a starter repo layout (workspace crates: `sbb`, `rendezvous`, `crypto`, `transports-quic`, `transports-webrtc`, `cli-demo`) and stub the types and integration tests so your team can start filling in the details.

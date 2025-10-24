@@ -1,0 +1,179 @@
+name: CI - Effects System Enforcement
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  format:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy-effects-enforcement:
+    name: Clippy - Effects System Enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run clippy with effects enforcement
+        run: |
+          cargo clippy --workspace --all-targets --verbose -- \
+            -D warnings \
+            -D clippy::disallowed_methods \
+            -D clippy::disallowed_types \
+            -D clippy::unwrap_used \
+            -D clippy::expect_used
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run tests
+        run: cargo test --workspace --verbose
+
+  check-effects-violations:
+    name: Check for Effects System Violations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Check for direct time usage
+        run: |
+          echo "Checking for direct time usage violations..."
+          if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number; then
+            echo "❌ Found direct time usage! Use effects.now() instead."
+            exit 1
+          else
+            echo "✅ No direct time usage violations found"
+          fi
+      - name: Check for direct randomness usage
+        run: |
+          echo "Checking for direct randomness usage violations..."
+          if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number; then
+            echo "❌ Found direct randomness usage! Use effects.random_bytes() or effects.rng() instead."
+            exit 1
+          else
+            echo "✅ No direct randomness usage violations found"
+          fi
+      - name: Check for direct UUID usage
+        run: |
+          echo "Checking for direct UUID usage violations..."
+          if rg --type rust "Uuid::new_v4\(\)" crates/ --line-number; then
+            echo "❌ Found direct UUID usage! Use effects.gen_uuid() instead."
+            exit 1
+          else
+            echo "✅ No direct UUID usage violations found"
+          fi
+
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build workspace
+        run: cargo build --workspace --verbose
+
+  lint-test:
+    name: Verify Lint Enforcement Works
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Test lint enforcement (should fail)
+        run: |
+          echo "Testing that our lints catch violations..."
+          # This should fail due to linting violations
+          if cargo check --manifest-path=<(cat << 'EOF'
+          [package]
+          name = "lint-test"
+          version = "0.1.0"
+          edition = "2021"
+          
+          [lints]
+          workspace = true
+          
+          [dependencies]
+          uuid = "1.0"
+          rand = "0.8"
+          
+          [[bin]]
+          name = "test"
+          path = "test_lints.rs"
+          EOF
+          ); then
+            echo "❌ Lints should have failed but didn't!"
+            exit 1
+          else
+            echo "✅ Lints correctly caught violations"
+          fi

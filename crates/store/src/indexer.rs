@@ -53,6 +53,7 @@ impl Indexer {
         payload: &[u8],
         recipients: Recipients,
         opts: PutOpts,
+        effects: &aura_crypto::Effects,
     ) -> Result<Cid> {
         // Check quota
         let current_usage = self.get_quota_usage().await?;
@@ -82,8 +83,8 @@ impl Indexer {
             replication_hint: opts.replication_hint,
             version: 1,
             prev_manifest: None,
-            issued_at_ms: current_timestamp_ms(),
-            nonce: generate_nonce(),
+            issued_at_ms: current_timestamp_ms_with_effects(effects),
+            nonce: generate_nonce_with_effects(effects),
         };
         
         let manifest_cid = manifest.compute_cid()?;
@@ -263,16 +264,13 @@ impl Default for PutOpts {
     }
 }
 
-fn current_timestamp_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
+fn current_timestamp_ms_with_effects(effects: &aura_crypto::Effects) -> u64 {
+    effects.now().unwrap_or(0) * 1000
 }
 
-fn generate_nonce() -> [u8; 32] {
-    let mut nonce = [0u8; 32];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut nonce);
-    nonce
+
+fn generate_nonce_with_effects(effects: &aura_crypto::Effects) -> [u8; 32] {
+    effects.random_bytes::<32>()
 }
+
 

@@ -39,6 +39,7 @@ pub fn issue_credential(
     device_nonce: u64,
     device_attestation: Option<Vec<u8>>,
     ttl_seconds: Option<u64>,
+    effects: &aura_crypto::Effects,
 ) -> Result<SessionCredential> {
     debug!(
         "Issuing session credential for device {} at epoch {} (scope: {}, nonce: {})",
@@ -46,7 +47,7 @@ pub fn issue_credential(
     );
     
     let ttl = ttl_seconds.unwrap_or(identity.capsule.ttl.unwrap_or(24 * 3600));
-    let issued_at = current_timestamp()?;
+    let issued_at = effects.now().map_err(|e| crate::AgentError::CryptoError(format!("Failed to get timestamp: {:?}", e)))?;
     let expires_at = issued_at + ttl;
     
     // Generate handshake secret with challenge binding:
@@ -83,41 +84,14 @@ pub fn issue_credential(
     })
 }
 
-/// Issue a simple session credential (legacy, insecure)
-///
-/// **DEPRECATED**: Use `issue_credential` with proper challenge-response.
-///
-/// This function generates a random challenge internally, which is insecure
-/// for production use. It's provided for testing and backwards compatibility.
-#[deprecated(note = "Use issue_credential with server-provided challenge")]
-pub fn issue_simple_credential(
-    device_id: DeviceId,
-    session_epoch: SessionEpoch,
-    identity: &DerivedIdentity,
-    ttl_seconds: Option<u64>,
-    effects: &aura_crypto::Effects,
-) -> Result<SessionCredential> {
-    // Generate random challenge (insecure - should be server-provided)
-    let challenge = generate_nonce(effects);
-    
-    issue_credential(
-        device_id,
-        session_epoch,
-        identity,
-        &challenge,
-        "legacy:all", // Unrestricted scope (insecure)
-        0,            // No nonce tracking
-        None,         // No attestation
-        ttl_seconds,
-    )
-}
 
 /// Verify a session credential
 pub fn verify_credential(
     credential: &SessionCredential,
     current_epoch: SessionEpoch,
+    effects: &aura_crypto::Effects,
 ) -> Result<()> {
-    let current_time = current_timestamp()?;
+    let current_time = effects.now().map_err(|e| crate::AgentError::CryptoError(format!("Failed to get timestamp: {:?}", e)))?;
     
     // Check expiry
     if current_time > credential.expires_at {
@@ -153,17 +127,8 @@ pub fn credential_digest(credential: &SessionCredential) -> crate::Result<[u8; 3
     Ok(*blake3::hash(&serialized).as_bytes())
 }
 
-fn current_timestamp() -> crate::Result<u64> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .map_err(|e| crate::AgentError::SystemTimeError(format!(
-            "System time is before UNIX epoch: {}",
-            e
-        )))
-}
 
+#[allow(dead_code)]
 fn generate_nonce(effects: &aura_crypto::Effects) -> [u8; 32] {
     effects.random_bytes()
 }
@@ -177,9 +142,9 @@ mod tests {
     use rand::rngs::OsRng;
 
     #[test]
-    #[allow(deprecated)]
     fn test_presence_ticket_lifecycle() {
-        let device_id = DeviceId::new();
+        let effects = aura_crypto::Effects::test();
+        let device_id = DeviceId::new_with_effects(&effects);
         let session_epoch = SessionEpoch::initial();
         
         // Create mock identity
@@ -191,22 +156,33 @@ mod tests {
             seed_fingerprint: [42u8; 32],
         };
         
-        // Issue ticket (using legacy function for test)
-        #[allow(deprecated)]
+        // Issue ticket using proper function
         let effects = aura_crypto::Effects::test();
-        let credential = issue_simple_credential(device_id, session_epoch, &identity, Some(3600), &effects).unwrap();
+        let challenge = generate_nonce(&effects);
+        let credential = issue_credential(
+            device_id,
+            session_epoch,
+            &identity,
+            &challenge,
+            "test:scope",
+            1,
+            None,
+            Some(3600),
+            &effects,
+        ).unwrap();
         
         // Verify ticket
-        assert!(verify_credential(&credential, session_epoch).is_ok());
+        assert!(verify_credential(&credential, session_epoch, &effects).is_ok());
         
         // Verify ticket fails with wrong epoch
-        let wrong_epoch = session_epoch.increment();
-        assert!(verify_credential(&credential, wrong_epoch).is_err());
+        let wrong_epoch = session_epoch.next();
+        assert!(verify_credential(&credential, wrong_epoch, &effects).is_err());
     }
     
     #[test]
     fn test_credential_digest() {
-        let device_id = DeviceId::new();
+        let effects = aura_crypto::Effects::test();
+        let device_id = DeviceId::new_with_effects(&effects);
         let credential = SessionCredential {
             issued_by: device_id,
             expires_at: 1234567890,
@@ -233,7 +209,8 @@ mod tests {
     
     #[test]
     fn test_enhanced_ticket_with_challenge() {
-        let device_id = DeviceId::new();
+        let effects = aura_crypto::Effects::test();
+        let device_id = DeviceId::new_with_effects(&effects);
         let session_epoch = SessionEpoch::initial();
         let challenge = [42u8; 32];
         
@@ -247,6 +224,7 @@ mod tests {
         };
         
         // Issue ticket with specific operation scope
+        let effects = aura_crypto::Effects::test();
         let credential = issue_credential(
             device_id,
             session_epoch,
@@ -256,6 +234,7 @@ mod tests {
             1,            // nonce
             None,         // no attestation
             Some(3600),   // 1 hour
+            &effects,
         ).unwrap();
         
         // Verify ticket structure
@@ -265,7 +244,7 @@ mod tests {
         assert!(credential.device_attestation.is_none());
         
         // Verify ticket
-        assert!(verify_credential(&credential, session_epoch).is_ok());
+        assert!(verify_credential(&credential, session_epoch, &effects).is_ok());
     }
 }
 

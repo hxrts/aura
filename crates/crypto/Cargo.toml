@@ -7,9 +7,10 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-# Workspace crates
-aura-journal = { path = "../journal" }
 
 # Cryptography
 aes-gcm = { workspace = true }

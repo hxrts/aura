@@ -7,7 +7,7 @@
 //!
 //! Reference: work/04_declarative_protocol_evolution.md
 
-use aura_journal::{Event, DeviceId};
+use aura_journal::{DeviceId, Event};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -22,23 +22,19 @@ pub enum ProtocolResult {
         session_id: Uuid,
         derived_key: Vec<u8>,
     },
-    
+
     /// Resharing protocol completed
     ResharingComplete {
         session_id: Uuid,
         new_share: Vec<u8>,
     },
-    
+
     /// Lock acquired
-    LockAcquired {
-        session_id: Uuid,
-    },
-    
+    LockAcquired { session_id: Uuid },
+
     /// Lock released
-    LockReleased {
-        session_id: Uuid,
-    },
-    
+    LockReleased { session_id: Uuid },
+
     /// Recovery completed
     RecoveryComplete {
         recovery_id: Uuid,
@@ -80,7 +76,6 @@ impl From<aura_crypto::CryptoError> for ProtocolError {
     }
 }
 
-
 /// Type of protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProtocolType {
@@ -90,7 +85,6 @@ pub enum ProtocolType {
     Recovery,
     Compaction,
 }
-
 
 // ========== Choreographic Protocol Instructions ==========
 
@@ -106,44 +100,48 @@ pub enum ProtocolType {
 pub enum Instruction {
     /// Write an event to the ledger and wait for it to be integrated
     WriteToLedger(Event),
-    
+
     /// Wait for a single event that matches a filter
     AwaitEvent {
         filter: EventFilter,
         timeout_epochs: Option<u64>,
     },
-    
+
     /// Wait for a threshold number of events that match a filter
     AwaitThreshold {
         count: usize,
         filter: EventFilter,
         timeout_epochs: Option<u64>,
     },
-    
+
     /// Get the current state of the ledger
     GetLedgerState,
-    
+
     /// Get the current Lamport clock value
     GetCurrentEpoch,
-    
+
     /// Wait for a certain number of epochs to pass
     WaitEpochs(u64),
-    
+
     /// Run a sub-protocol and wait for its result
     RunSubProtocol {
         protocol_type: ProtocolType,
         config: ProtocolConfig,
     },
-    
+
     /// Check if an event exists without waiting
-    CheckForEvent {
-        filter: EventFilter,
-    },
-    
+    CheckForEvent { filter: EventFilter },
+
     /// Mark guardian shares for deletion
     MarkGuardianSharesForDeletion {
         session_id: uuid::Uuid,
         ttl_hours: u64,
+    },
+
+    /// Check for session collision and determine winner via lottery
+    CheckSessionCollision {
+        operation_type: aura_journal::OperationType,
+        context_id: Vec<u8>, // Unique identifier for the operation context
     },
 }
 
@@ -152,13 +150,13 @@ pub enum Instruction {
 pub struct EventFilter {
     /// Session ID to match (if any)
     pub session_id: Option<Uuid>,
-    
+
     /// Event types to match
     pub event_types: Option<Vec<EventTypePattern>>,
-    
+
     /// Author devices to match
     pub authors: Option<BTreeSet<DeviceId>>,
-    
+
     /// Custom predicate (cannot be cloned, so we use an enum of known predicates)
     pub predicate: Option<EventPredicate>,
 }
@@ -176,6 +174,7 @@ pub enum EventTypePattern {
     LockRelease,
     InitiateRecovery,
     CollectGuardianApproval,
+    SubmitRecoveryShare,
     CompleteRecovery,
     AbortRecovery,
     InitiateResharing,
@@ -189,10 +188,10 @@ pub enum EventTypePattern {
 pub enum EventPredicate {
     /// Author is in set of device IDs
     AuthorIn(BTreeSet<DeviceId>),
-    
+
     /// Epoch is greater than value
     EpochGreaterThan(u64),
-    
+
     /// Combination of predicates
     And(Box<EventPredicate>, Box<EventPredicate>),
     Or(Box<EventPredicate>, Box<EventPredicate>),
@@ -224,24 +223,30 @@ pub enum ProtocolConfig {
 pub enum InstructionResult {
     /// Event was written to ledger
     EventWritten,
-    
+
     /// Single event was received
     EventReceived(Event),
-    
+
     /// Multiple events were received (from AwaitThreshold)
     EventsReceived(Vec<Event>),
-    
+
     /// Ledger state snapshot
     LedgerState(LedgerStateSnapshot),
-    
+
     /// Current Lamport clock value
     CurrentEpoch(u64),
-    
+
     /// Epochs have passed
     EpochsElapsed,
-    
+
     /// Sub-protocol completed
     SubProtocolComplete(ProtocolResult),
+
+    /// Session collision check result
+    SessionStatus {
+        existing_sessions: Vec<aura_journal::Session>,
+        winner: Option<DeviceId>, // If collision exists, who won the lottery
+    },
 }
 
 /// Snapshot of ledger state for instruction results
@@ -252,5 +257,3 @@ pub struct LedgerStateSnapshot {
     pub last_event_hash: Option<[u8; 32]>,
     pub current_epoch: u64,
 }
-
-

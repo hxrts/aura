@@ -9,7 +9,7 @@
 use aura_journal::{AccountLedger, Event, EventType};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{Duration, interval};
+use tokio::time::{interval, Duration};
 // TODO: Add debug and warn logging once event watcher is fully implemented
 // use tracing::{debug, warn};
 
@@ -23,13 +23,13 @@ pub type EventCallback = Arc<dyn Fn(&Event) -> bool + Send + Sync>;
 pub struct EventWatcher {
     /// Ledger to watch
     ledger: Arc<RwLock<AccountLedger>>,
-    
+
     /// Last processed event index
     last_processed_index: usize,
-    
+
     /// Registered callbacks for specific event types
     callbacks: Vec<(EventFilter, EventCallback)>,
-    
+
     /// Polling interval
     poll_interval: Duration,
 }
@@ -64,46 +64,46 @@ impl EventWatcher {
             poll_interval: Duration::from_millis(100), // 10 Hz
         }
     }
-    
+
     /// Register a callback for specific events
     pub fn register(&mut self, filter: EventFilter, callback: EventCallback) {
         self.callbacks.push((filter, callback));
     }
-    
+
     /// Start watching for events
     ///
     /// This runs in a loop, polling the ledger and invoking callbacks.
     /// Returns when stopped.
     pub async fn watch(&mut self) {
         let mut interval = interval(self.poll_interval);
-        
+
         loop {
             interval.tick().await;
-            
+
             // Read new events
             let events = {
                 let ledger = self.ledger.read().await;
                 let event_log = ledger.event_log();
-                
+
                 if event_log.len() <= self.last_processed_index {
                     // No new events
                     continue;
                 }
-                
+
                 // Get new events
                 event_log[self.last_processed_index..].to_vec()
             };
-            
+
             // Process new events
             for event in &events {
                 self.process_event(event);
             }
-            
+
             // Update last processed index
             self.last_processed_index += events.len();
         }
     }
-    
+
     /// Process a single event through all callbacks
     fn process_event(&self, event: &Event) {
         for (filter, callback) in &self.callbacks {
@@ -116,7 +116,7 @@ impl EventWatcher {
             }
         }
     }
-    
+
     /// Check if event matches filter
     fn matches_filter(&self, event: &Event, filter: &EventFilter) -> bool {
         match filter {
@@ -125,18 +125,30 @@ impl EventWatcher {
             EventFilter::SessionId(session_id) => self.matches_session(event, session_id),
         }
     }
-    
+
     /// Check if event matches type filter
     fn matches_type(&self, event: &Event, type_filter: &EventTypeFilter) -> bool {
-        matches!((&event.event_type, type_filter),
-            (EventType::GrantOperationLock(_), EventTypeFilter::GrantOperationLock) |
-            (EventType::RecordDkdCommitment(_), EventTypeFilter::RecordDkdCommitment) |
-            (EventType::RevealDkdPoint(_), EventTypeFilter::RevealDkdPoint) |
-            (EventType::FinalizeDkdSession(_), EventTypeFilter::FinalizeDkdSession) |
-            (EventType::AbortDkdSession(_), EventTypeFilter::AbortDkdSession)
+        matches!(
+            (&event.event_type, type_filter),
+            (
+                EventType::GrantOperationLock(_),
+                EventTypeFilter::GrantOperationLock
+            ) | (
+                EventType::RecordDkdCommitment(_),
+                EventTypeFilter::RecordDkdCommitment
+            ) | (
+                EventType::RevealDkdPoint(_),
+                EventTypeFilter::RevealDkdPoint
+            ) | (
+                EventType::FinalizeDkdSession(_),
+                EventTypeFilter::FinalizeDkdSession
+            ) | (
+                EventType::AbortDkdSession(_),
+                EventTypeFilter::AbortDkdSession
+            )
         )
     }
-    
+
     /// Check if event matches session ID
     fn matches_session(&self, event: &Event, session_id: &uuid::Uuid) -> bool {
         match &event.event_type {
@@ -155,7 +167,7 @@ impl EventWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_event_filter_matching() {
         // Test that filter types are correctly defined
@@ -164,4 +176,3 @@ mod tests {
         let _session_filter = EventFilter::SessionId(uuid::Uuid::new_v4());
     }
 }
-

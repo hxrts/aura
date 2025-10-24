@@ -3,8 +3,8 @@
 // This module provides helpers for signing events with device keys.
 // All events must be signed before being appended to the ledger.
 
-use ed25519_dalek::{Signature, SigningKey, Signer};
 use aura_journal::{Event, LedgerError};
+use ed25519_dalek::{Signature, Signer, SigningKey};
 
 /// Event signer - holds device signing key
 pub struct EventSigner {
@@ -16,7 +16,7 @@ impl EventSigner {
     pub fn new(signing_key: SigningKey) -> Self {
         EventSigner { signing_key }
     }
-    
+
     /// Sign an event
     ///
     /// Computes the event hash and signs it with the device key
@@ -24,7 +24,7 @@ impl EventSigner {
         let event_hash = event.hash()?;
         Ok(self.signing_key.sign(&event_hash))
     }
-    
+
     /// Get the public key for this signer
     pub fn public_key(&self) -> ed25519_dalek::VerifyingKey {
         self.signing_key.verifying_key()
@@ -38,14 +38,14 @@ mod tests {
 
     #[test]
     fn test_event_signing() {
-        let _effects = aura_crypto::Effects::test();
+        let effects = aura_crypto::Effects::test();
         // Use deterministic key bytes instead of random
         let signing_key = SigningKey::from_bytes(&[1u8; 32]);
         let signer = EventSigner::new(signing_key);
-        
+
         // Create a dummy event
         let event = aura_journal::Event::new(
-            aura_journal::AccountId::new(),
+            aura_journal::AccountId::new_with_effects(&effects),
             0,
             None,
             0,
@@ -57,14 +57,15 @@ mod tests {
                 device_id: aura_journal::DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
                 signature: Signature::from_bytes(&[0u8; 64]),
             },
+            &effects,
         );
-        
+
         // Sign it
+        let event = event.unwrap();
         let signature = signer.sign_event(&event).unwrap();
-        
+
         // Verify signature
         let event_hash = event.hash().unwrap();
         assert!(signer.public_key().verify(&event_hash, &signature).is_ok());
     }
 }
-

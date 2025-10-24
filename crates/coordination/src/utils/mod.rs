@@ -6,9 +6,9 @@
 //! - Distributed lottery protocol for conflict resolution
 
 pub mod event_watcher;
-pub mod signing;
 pub mod lottery;
+pub mod signing;
 
 pub use event_watcher::*;
-pub use signing::*;
 pub use lottery::*;
+pub use signing::*;

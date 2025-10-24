@@ -118,11 +118,22 @@ aura test-dkd --app-id "my-app" --context "test-context" -f .aura/config_1.toml
 ```bash
 just build              # Build all crates
 just test               # Run all tests
-just check              # Run checks (format, clippy, test)
+just ci                 # Run CI checks with effects enforcement
+just clippy-strict      # Clippy with effects system enforcement
 just smoke-test         # Run Phase 0 smoke tests
 just docs               # Generate documentation
 just watch              # Watch and rebuild on changes
 ```
+
+### Effects System Enforcement
+
+Aura enforces deterministic testing through an **injected effects system**. This means:
+
+- ❌ `SystemTime::now()` → ✅ `effects.now()`
+- ❌ `Uuid::new_v4()` → ✅ `effects.gen_uuid()`  
+- ❌ `rand::random()` → ✅ `effects.random_bytes()`
+
+**Clippy will fail builds** that bypass the effects system. See [`docs/EFFECTS_ENFORCEMENT.md`](docs/EFFECTS_ENFORCEMENT.md) for details.
 
 ### Running Tests
 
