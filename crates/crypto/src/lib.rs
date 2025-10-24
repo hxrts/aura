@@ -35,6 +35,8 @@ pub mod effects;
 pub mod frost;
 /// HPKE encryption for guardian shares
 pub mod hpke_encryption;
+/// Separated key derivation for identity and permission keys
+pub mod key_derivation;
 /// Merkle tree implementation for commitment verification
 pub mod merkle;
 /// Key resharing and threshold share management
@@ -52,6 +54,7 @@ pub use dkd::*;
 pub use effects::*; // Export Effects, TimeSource, RandomSource, etc.
 pub use frost::*;
 pub use hpke_encryption::*;
+pub use key_derivation::*;
 pub use merkle::*;
 pub use resharing::*;
 pub use sealing::*;
@@ -90,6 +93,14 @@ pub enum CryptoError {
     /// System time access failed
     #[error("System time error: {0}")]
     SystemTimeError(String),
+
+    /// Invalid parameter provided
+    #[error("Invalid parameter: {0}")]
+    InvalidParameter(String),
+
+    /// Key derivation failed
+    #[error("Key derivation failed: {0}")]
+    KeyDerivationFailed(String),
 }
 
 /// Result type for cryptographic operations

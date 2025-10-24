@@ -7,17 +7,27 @@
 
 #![allow(missing_docs)] // TODO: Add comprehensive documentation in future work
 
+pub mod envelope;
 pub mod factory;
 pub mod presence;
+pub mod sbb_gossip;
+pub mod sbb_publisher;
+pub mod sbb_recognizer;
 pub mod stub;
-pub mod transport;  // Unified transport with session types and capabilities
+pub mod transport; // Unified transport with session types and capabilities
 pub mod types;
+pub mod unified_transport;
 
+pub use envelope::*;
 pub use factory::*;
 pub use presence::*;
+pub use sbb_gossip::*;
+pub use sbb_publisher::*;
+pub use sbb_recognizer::*;
 pub use stub::*;
-pub use transport::*;  // This now includes session types and capability transport
+pub use transport::*; // This now includes session types and capability transport
 pub use types::*;
+pub use unified_transport::*;
 
 use thiserror::Error;
 

@@ -36,6 +36,7 @@ thiserror = { workspace = true }
 rand = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 aura-test-utils = { path = "../test-utils" }

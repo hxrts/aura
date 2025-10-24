@@ -68,8 +68,12 @@ pub mod credential;
 pub mod error;
 /// Guardian management for account recovery and delegation
 pub mod guardian;
+/// Invitation management for establishing relationships
+pub mod invitation;
 /// Recovery protocols for restoring access to compromised accounts
 pub mod recovery;
+/// Multi-device relationship key management for SSB
+pub mod relationship_keys;
 
 // New capability-driven agent architecture
 /// Pure capability-driven agent with no external dependencies
@@ -81,6 +85,7 @@ pub use agent::*;
 pub use credential::*;
 pub use guardian::*;
 pub use recovery::*;
+pub use relationship_keys::*;
 pub use types::*;
 
 // Export new capability-driven agents

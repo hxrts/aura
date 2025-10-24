@@ -147,6 +147,11 @@ impl Simulation {
             next_nonce: 0,
             last_event_hash: None,
             updated_at: timestamp,
+            // SSB State fields added for Phase 1.4
+            sbb_envelopes: BTreeMap::new(),
+            sbb_neighbors: BTreeSet::new(),
+            relationship_keys: BTreeMap::new(),
+            relationship_counters: BTreeMap::new(),
         };
 
         // Create shared ledger
@@ -257,6 +262,11 @@ impl Simulation {
             next_nonce: 0,
             last_event_hash: None,
             updated_at: timestamp,
+            // SSB State fields added for Phase 1.4
+            sbb_envelopes: BTreeMap::new(),
+            sbb_neighbors: BTreeSet::new(),
+            relationship_keys: BTreeMap::new(),
+            relationship_counters: BTreeMap::new(),
         };
 
         let ledger = AccountLedger::new(initial_state).expect("Failed to create ledger");

@@ -44,6 +44,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

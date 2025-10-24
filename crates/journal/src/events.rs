@@ -27,9 +27,7 @@ impl EventId {
     pub fn new_with_effects(effects: &aura_crypto::Effects) -> Self {
         EventId(effects.gen_uuid())
     }
-    
 }
-
 
 /// Protocol version for events
 pub const EVENT_VERSION: u16 = 1;
@@ -264,13 +262,13 @@ pub enum EventType {
     // ========== Presence ==========
     /// Cache presence ticket for offline verification
     PresenceTicketCache(PresenceTicketCacheEvent),
-    
+
     // ========== Capabilities ==========
     /// Delegate a capability
     CapabilityDelegation(crate::capability::events::CapabilityDelegation),
     /// Revoke a capability
     CapabilityRevocation(crate::capability::events::CapabilityRevocation),
-    
+
     // ========== CGKA (Continuous Group Key Agreement) ==========
     /// BeeKEM CGKA operation
     CgkaOperation(CgkaOperationEvent),
@@ -278,6 +276,12 @@ pub enum EventType {
     CgkaStateSync(CgkaStateSyncEvent),
     /// CGKA epoch transition
     CgkaEpochTransition(CgkaEpochTransitionEvent),
+
+    // ========== SSB Counter Coordination ==========
+    /// Increment counter for unique envelope identifiers
+    IncrementCounter(IncrementCounterEvent),
+    /// Reserve counter range for batch operations
+    ReserveCounterRange(ReserveCounterRangeEvent),
 }
 
 // ==================== Event Payload Structures ====================
@@ -621,13 +625,9 @@ pub enum CgkaTreeUpdateType {
         public_key: Vec<u8>,
     },
     /// Remove leaf node
-    RemoveLeaf {
-        member_id: String,
-    },
+    RemoveLeaf { member_id: String },
     /// Update existing node
-    UpdateNode {
-        new_public_key: Vec<u8>,
-    },
+    UpdateNode { new_public_key: Vec<u8> },
 }
 
 /// Update to a node in the tree path
@@ -644,7 +644,7 @@ pub struct CgkaStateSyncEvent {
     pub group_id: String,
     pub epoch: u64,
     pub roster_snapshot: Vec<String>,
-    pub tree_snapshot: Vec<u8>, // Serialized tree state
+    pub tree_snapshot: Vec<u8>,                   // Serialized tree state
     pub application_secrets: Vec<(u64, Vec<u8>)>, // (epoch, secret) pairs
     pub sync_timestamp: u64,
 }
@@ -660,13 +660,76 @@ pub struct CgkaEpochTransitionEvent {
     pub transition_timestamp: u64,
 }
 
+// ========== SSB Counter Coordination ==========
+
+/// SSB counter increment event for unique envelope identifiers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncrementCounterEvent {
+    /// Relationship identifier for which counter is being incremented
+    pub relationship_id: RelationshipId,
+    /// Device requesting the counter increment
+    pub requesting_device: DeviceId,
+    /// Proposed new counter value
+    pub new_counter_value: u64,
+    /// Previous counter value for conflict detection
+    pub previous_counter_value: u64,
+    /// Epoch when increment was requested
+    pub requested_at_epoch: u64,
+    /// TTL for this counter reservation (epochs)
+    pub ttl_epochs: u64,
+}
+
+/// Reserve a range of counter values for batch operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReserveCounterRangeEvent {
+    /// Relationship identifier for which counters are being reserved
+    pub relationship_id: RelationshipId,
+    /// Device requesting the counter range
+    pub requesting_device: DeviceId,
+    /// Starting counter value for the range
+    pub start_counter: u64,
+    /// Number of counter values to reserve
+    pub range_size: u64,
+    /// Previous counter value for conflict detection
+    pub previous_counter_value: u64,
+    /// Epoch when range was requested
+    pub requested_at_epoch: u64,
+    /// TTL for this counter reservation (epochs)
+    pub ttl_epochs: u64,
+}
+
+/// Relationship identifier for SSB counter tracking
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct RelationshipId(pub [u8; 32]);
+
+impl RelationshipId {
+    /// Create a new relationship ID from two account IDs
+    pub fn from_accounts(account_a: crate::AccountId, account_b: crate::AccountId) -> Self {
+        // Deterministic relationship ID: lexicographically sort accounts
+        let (first, second) = if account_a.0 <= account_b.0 {
+            (account_a.0, account_b.0)
+        } else {
+            (account_b.0, account_a.0)
+        };
+
+        // Hash the sorted pair
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(first.as_bytes());
+        hasher.update(second.as_bytes());
+        hasher.update(b"relationship");
+
+        Self(*hasher.finalize().as_bytes())
+    }
+
+    /// Create from raw bytes
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
 /// Get current unix timestamp in seconds using injected effects
 pub fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> crate::Result<u64> {
     effects.now().map_err(|e| {
-        crate::LedgerError::SerializationFailed(format!(
-            "Failed to get current timestamp: {}",
-            e
-        ))
+        crate::LedgerError::SerializationFailed(format!("Failed to get current timestamp: {}", e))
     })
 }
-

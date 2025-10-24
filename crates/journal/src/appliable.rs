@@ -13,12 +13,20 @@ use tracing::debug;
 /// Trait for event payloads that can be applied to AccountState
 pub trait Appliable {
     /// Apply this event payload to the account state
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError>;
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError>;
 }
 
 /// Extension trait for EventType to apply via trait dispatch
 impl EventType {
-    pub fn apply_to_state(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    pub fn apply_to_state(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         match self {
             // ========== Epoch/Clock Management ==========
             EventType::EpochTick(e) => e.apply(state, effects),
@@ -66,15 +74,19 @@ impl EventType {
 
             // ========== Presence ==========
             EventType::PresenceTicketCache(e) => e.apply(state, effects),
-            
+
             // ========== Capabilities ==========
             EventType::CapabilityDelegation(e) => e.apply(state, effects),
             EventType::CapabilityRevocation(e) => e.apply(state, effects),
-            
+
             // ========== CGKA ==========
             EventType::CgkaOperation(e) => e.apply(state, effects),
             EventType::CgkaStateSync(e) => e.apply(state, effects),
             EventType::CgkaEpochTransition(e) => e.apply(state, effects),
+
+            // ========== Counter Coordination ==========
+            EventType::IncrementCounter(e) => e.apply(state, effects),
+            EventType::ReserveCounterRange(e) => e.apply(state, effects),
         }
     }
 }
@@ -82,14 +94,20 @@ impl EventType {
 // Helper macro for getting timestamp from effects
 macro_rules! now {
     ($effects:expr) => {
-        $effects.now().map_err(|e| LedgerError::InvalidEvent(format!("Failed to get timestamp: {:?}", e)))?
+        $effects
+            .now()
+            .map_err(|e| LedgerError::InvalidEvent(format!("Failed to get timestamp: {:?}", e)))?
     };
 }
 
 // ========== Epoch/Clock Management ==========
 
 impl Appliable for EpochTickEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Lamport clock already advanced in apply_event()
         // This event just ensures the ledger progresses even when idle
         Ok(())
@@ -99,7 +117,11 @@ impl Appliable for EpochTickEvent {
 // ========== Distributed Locking ==========
 
 impl Appliable for RequestOperationLockEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Lock requests are recorded but not yet granted
         // Update session status to Active if it exists
         if let Some(session) = state.sessions.get_mut(&self.session_id) {
@@ -113,7 +135,11 @@ impl Appliable for RequestOperationLockEvent {
 }
 
 impl Appliable for GrantOperationLockEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         let lock = OperationLock {
             operation_type: self.operation_type,
             session_id: SessionId(self.session_id),
@@ -140,8 +166,13 @@ impl Appliable for GrantOperationLockEvent {
 }
 
 impl Appliable for ReleaseOperationLockEvent {
-    fn apply(&self, state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
-        state.release_lock(self.session_id)
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
+        state
+            .release_lock(self.session_id)
             .map_err(LedgerError::InvalidEvent)?;
 
         // Note: Session status remains Completed - lock release doesn't change session status
@@ -154,7 +185,11 @@ impl Appliable for ReleaseOperationLockEvent {
 // ========== P2P DKD Protocol ==========
 
 impl Appliable for InitiateDkdSessionEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // DKD session state is tracked separately (will be in orchestration layer)
         // This event just records the initiation in the ledger
         Ok(())
@@ -162,7 +197,11 @@ impl Appliable for InitiateDkdSessionEvent {
 }
 
 impl Appliable for RecordDkdCommitmentEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Commitments are recorded for Byzantine detection
         // Actual verification happens in orchestration layer
         Ok(())
@@ -170,7 +209,11 @@ impl Appliable for RecordDkdCommitmentEvent {
 }
 
 impl Appliable for RevealDkdPointEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Points are revealed after all commitments collected
         // Verification happens in orchestration layer
         Ok(())
@@ -178,7 +221,11 @@ impl Appliable for RevealDkdPointEvent {
 }
 
 impl Appliable for FinalizeDkdSessionEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Store commitment root for post-compaction verification
         let root = DkdCommitmentRoot {
             session_id: SessionId(self.session_id),
@@ -196,7 +243,11 @@ impl Appliable for FinalizeDkdSessionEvent {
 }
 
 impl Appliable for AbortDkdSessionEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Session aborted, no state changes needed
         // Orchestration layer will clean up
         Ok(())
@@ -204,14 +255,22 @@ impl Appliable for AbortDkdSessionEvent {
 }
 
 impl Appliable for HealthCheckRequestEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Health check requests are tracked by orchestration layer
         Ok(())
     }
 }
 
 impl Appliable for HealthCheckResponseEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Update device last_seen timestamp
         if let Some(device) = state.devices.get_mut(&self.device_id) {
             device.last_seen = now!(effects);
@@ -223,14 +282,22 @@ impl Appliable for HealthCheckResponseEvent {
 // ========== P2P Resharing Protocol ==========
 
 impl Appliable for InitiateResharingEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Resharing session state is tracked separately
         Ok(())
     }
 }
 
 impl Appliable for DistributeSubShareEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Sub-shares are distributed via transport layer
         // This event just records the distribution
         Ok(())
@@ -238,14 +305,22 @@ impl Appliable for DistributeSubShareEvent {
 }
 
 impl Appliable for AcknowledgeSubShareEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Acknowledgements are tracked by orchestration layer
         Ok(())
     }
 }
 
 impl Appliable for FinalizeResharingEvent {
-    fn apply(&self, state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Update threshold configuration
         state.threshold = self.new_threshold;
 
@@ -257,14 +332,22 @@ impl Appliable for FinalizeResharingEvent {
 }
 
 impl Appliable for AbortResharingEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Resharing aborted, no state changes
         Ok(())
     }
 }
 
 impl Appliable for ResharingRollbackEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Rollback to previous state (orchestration layer handles this)
         Ok(())
     }
@@ -273,7 +356,11 @@ impl Appliable for ResharingRollbackEvent {
 // ========== Recovery Protocol ==========
 
 impl Appliable for InitiateRecoveryEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Start cooldown for recovery
         let cooldown = CooldownCounter {
             participant_id: ParticipantId::Device(self.new_device_id),
@@ -288,21 +375,33 @@ impl Appliable for InitiateRecoveryEvent {
 }
 
 impl Appliable for CollectGuardianApprovalEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Guardian approvals are tracked by orchestration layer
         Ok(())
     }
 }
 
 impl Appliable for SubmitRecoveryShareEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Recovery shares are collected by orchestration layer
         Ok(())
     }
 }
 
 impl Appliable for CompleteRecoveryEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Recovery complete, new device should be added via AddDevice event
         // TODO: Verify new device was added
         Ok(())
@@ -310,7 +409,11 @@ impl Appliable for CompleteRecoveryEvent {
 }
 
 impl Appliable for AbortRecoveryEvent {
-    fn apply(&self, state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Remove cooldown
         state.cooldowns.remove(&self.recovery_id);
         Ok(())
@@ -318,7 +421,11 @@ impl Appliable for AbortRecoveryEvent {
 }
 
 impl Appliable for NudgeGuardianEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Nudges are tracked by orchestration layer
         Ok(())
     }
@@ -327,21 +434,33 @@ impl Appliable for NudgeGuardianEvent {
 // ========== Compaction Protocol ==========
 
 impl Appliable for ProposeCompactionEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Compaction proposals are tracked by orchestration layer
         Ok(())
     }
 }
 
 impl Appliable for AcknowledgeCompactionEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Acknowledgements are tracked by orchestration layer
         Ok(())
     }
 }
 
 impl Appliable for CommitCompactionEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Compaction committed
         // Actual compaction is performed by ledger layer
         Ok(())
@@ -351,7 +470,11 @@ impl Appliable for CommitCompactionEvent {
 // ========== Device/Guardian Management ==========
 
 impl Appliable for AddDeviceEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         use ed25519_dalek::VerifyingKey;
 
         let public_key =
@@ -378,20 +501,28 @@ impl Appliable for AddDeviceEvent {
 }
 
 impl Appliable for RemoveDeviceEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         state.remove_device(self.device_id, effects)?;
         Ok(())
     }
 }
 
 impl Appliable for AddGuardianEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Extract device_id from contact_info or use a placeholder
         // In a real implementation, this would be extracted from the event
         use ed25519_dalek::VerifyingKey;
         #[allow(clippy::unwrap_used)] // Placeholder with known valid data
         let placeholder_key = VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
-        
+
         let guardian = GuardianMetadata {
             guardian_id: self.guardian_id,
             device_id: DeviceId::from_string_with_effects("guardian-device", effects), // TODO: get from event
@@ -407,7 +538,11 @@ impl Appliable for AddGuardianEvent {
 }
 
 impl Appliable for RemoveGuardianEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         state.remove_guardian(self.guardian_id, effects)?;
         Ok(())
     }
@@ -416,11 +551,15 @@ impl Appliable for RemoveGuardianEvent {
 // ========== Presence ==========
 
 impl Appliable for PresenceTicketCacheEvent {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         let ticket = PresenceTicketCache {
             device_id: self.device_id,
             session_epoch: SessionEpoch::initial(), // TODO: get from event
-            ticket: Vec::new(), // TODO: get from event
+            ticket: Vec::new(),                     // TODO: get from event
             issued_at: self.issued_at,
             expires_at: self.expires_at,
             ticket_digest: self.ticket_digest,
@@ -434,35 +573,53 @@ impl Appliable for PresenceTicketCacheEvent {
 // ========== Capabilities ==========
 
 impl Appliable for crate::capability::events::CapabilityDelegation {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Validate the delegation is authorized
         state.validate_capability_delegation(self, effects)?;
-        
+
         // Apply delegation to authority graph
-        if let Err(e) = state.authority_graph.apply_delegation(self.clone(), effects) {
+        if let Err(e) = state
+            .authority_graph
+            .apply_delegation(self.clone(), effects)
+        {
             return Err(LedgerError::CapabilityError(e.to_string()));
         }
-        
+
         // Update visibility index
-        state.visibility_index.update_authority_graph(state.authority_graph.clone(), effects);
-        
+        state
+            .visibility_index
+            .update_authority_graph(state.authority_graph.clone(), effects);
+
         Ok(())
     }
 }
 
 impl Appliable for crate::capability::events::CapabilityRevocation {
-    fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Validate the revocation is authorized
         state.validate_capability_revocation(self, effects)?;
-        
+
         // Apply revocation to authority graph
-        if let Err(e) = state.authority_graph.apply_revocation(self.clone(), effects) {
+        if let Err(e) = state
+            .authority_graph
+            .apply_revocation(self.clone(), effects)
+        {
             return Err(LedgerError::CapabilityError(e.to_string()));
         }
-        
+
         // Update visibility index and handle revocation cascade
-        state.visibility_index.update_authority_graph(state.authority_graph.clone(), effects);
-        
+        state
+            .visibility_index
+            .update_authority_graph(state.authority_graph.clone(), effects);
+
         Ok(())
     }
 }
@@ -470,40 +627,107 @@ impl Appliable for crate::capability::events::CapabilityRevocation {
 // ========== CGKA ==========
 
 impl Appliable for CgkaOperationEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // CGKA operations are primarily handled by the CGKA layer
         // Here we just record the operation in the ledger for audit/replay
-        
+
         // TODO: Add CGKA state tracking to AccountState if needed
         // For now, we just acknowledge the operation was processed
-        
-        debug!("Applied CGKA operation {} for group {} (epoch {} -> {})", 
-               self.operation_id, self.group_id, self.current_epoch, self.target_epoch);
-        
+
+        debug!(
+            "Applied CGKA operation {} for group {} (epoch {} -> {})",
+            self.operation_id, self.group_id, self.current_epoch, self.target_epoch
+        );
+
         Ok(())
     }
 }
 
 impl Appliable for CgkaStateSyncEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // State sync events help nodes catch up on CGKA state
         // The actual state is managed by the CGKA layer
-        
-        debug!("Applied CGKA state sync for group {} at epoch {} with {} members", 
-               self.group_id, self.epoch, self.roster_snapshot.len());
-        
+
+        debug!(
+            "Applied CGKA state sync for group {} at epoch {} with {} members",
+            self.group_id,
+            self.epoch,
+            self.roster_snapshot.len()
+        );
+
         Ok(())
     }
 }
 
 impl Appliable for CgkaEpochTransitionEvent {
-    fn apply(&self, _state: &mut AccountState, _effects: &aura_crypto::Effects) -> Result<(), LedgerError> {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
         // Epoch transitions mark major CGKA state changes
         // Record the transition for ordering and consistency
-        
-        debug!("Applied CGKA epoch transition for group {} (epoch {} -> {}) with {} operations", 
-               self.group_id, self.previous_epoch, self.new_epoch, self.committed_operations.len());
-        
+
+        debug!(
+            "Applied CGKA epoch transition for group {} (epoch {} -> {}) with {} operations",
+            self.group_id,
+            self.previous_epoch,
+            self.new_epoch,
+            self.committed_operations.len()
+        );
+
+        Ok(())
+    }
+}
+
+// ========== Counter Coordination ==========
+
+impl Appliable for crate::events::IncrementCounterEvent {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
+        // Update the counter value for this relationship
+        // The counter is used for envelope sequence numbers in SSB
+
+        // TODO: Add counter tracking to AccountState when implementing SSB state
+        // For now, we just acknowledge the counter was incremented
+
+        debug!(
+            "Incremented counter for relationship {:?}: {} -> {}",
+            self.relationship_id, self.previous_counter_value, self.new_counter_value
+        );
+
+        Ok(())
+    }
+}
+
+impl Appliable for crate::events::ReserveCounterRangeEvent {
+    fn apply(
+        &self,
+        _state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
+        // Reserve a range of counter values for batch operations
+        // This allows a device to publish multiple envelopes without coordination
+
+        // TODO: Add counter tracking to AccountState when implementing SSB state
+        // For now, we just acknowledge the range was reserved
+
+        debug!(
+            "Reserved counter range for relationship {:?}: {} values starting at {}",
+            self.relationship_id, self.range_size, self.start_counter
+        );
+
         Ok(())
     }
 }

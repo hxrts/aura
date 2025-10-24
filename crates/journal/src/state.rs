@@ -82,6 +82,25 @@ pub struct AccountState {
 
     /// Last updated timestamp
     pub updated_at: u64,
+
+    // ===== SSB (Social Bulletin Board) State =====
+    // Added for Phase 1.2: Unified Journal State Integration
+    /// SSB envelopes stored in the unified CRDT
+    /// Map: CID -> SealedEnvelope (stored as serialized bytes for now)
+    pub sbb_envelopes: BTreeMap<String, Vec<u8>>,
+
+    /// SSB neighbor peers for envelope flooding
+    /// Set of peer account IDs that we exchange envelopes with
+    pub sbb_neighbors: BTreeSet<AccountId>,
+
+    /// Relationship keys for pairwise communications
+    /// Map: RelationshipId (as hex string) -> Encrypted RelationshipKeys
+    pub relationship_keys: BTreeMap<String, Vec<u8>>,
+    
+    /// SSB relationship counter tracking
+    /// Map: RelationshipId -> (last_seen_counter, ttl_epoch)
+    /// Used for envelope uniqueness and replay protection
+    pub relationship_counters: BTreeMap<crate::events::RelationshipId, (u64, u64)>,
 }
 
 impl AccountState {
@@ -99,7 +118,8 @@ impl AccountState {
         // Initialize capability system with effects (use placeholder for construction)
         let effects = aura_crypto::Effects::for_test("account_state_new");
         let authority_graph = crate::capability::authority_graph::AuthorityGraph::new();
-        let visibility_index = crate::capability::visibility::VisibilityIndex::new(authority_graph.clone(), &effects);
+        let visibility_index =
+            crate::capability::visibility::VisibilityIndex::new(authority_graph.clone(), &effects);
 
         AccountState {
             account_id,
@@ -123,6 +143,12 @@ impl AccountState {
             next_nonce: 0,
             last_event_hash: None,
             updated_at: current_timestamp_with_effects(&effects),
+
+            // Initialize SSB state (Phase 1.2)
+            sbb_envelopes: BTreeMap::new(),
+            sbb_neighbors: BTreeSet::new(),
+            relationship_keys: BTreeMap::new(),
+            relationship_counters: BTreeMap::new(),
         }
     }
 
@@ -159,7 +185,11 @@ impl AccountState {
     }
 
     /// Add a device
-    pub fn add_device(&mut self, device: DeviceMetadata, effects: &aura_crypto::Effects) -> crate::Result<()> {
+    pub fn add_device(
+        &mut self,
+        device: DeviceMetadata,
+        effects: &aura_crypto::Effects,
+    ) -> crate::Result<()> {
         if self.removed_devices.contains(&device.device_id) {
             return Err(crate::LedgerError::InvalidEvent(
                 "Cannot re-add a removed device".to_string(),
@@ -172,7 +202,11 @@ impl AccountState {
     }
 
     /// Remove a device (tombstone)
-    pub fn remove_device(&mut self, device_id: DeviceId, effects: &aura_crypto::Effects) -> crate::Result<()> {
+    pub fn remove_device(
+        &mut self,
+        device_id: DeviceId,
+        effects: &aura_crypto::Effects,
+    ) -> crate::Result<()> {
         if !self.devices.contains_key(&device_id) {
             return Err(crate::LedgerError::DeviceNotFound(device_id.to_string()));
         }
@@ -185,7 +219,11 @@ impl AccountState {
     }
 
     /// Add a guardian
-    pub fn add_guardian(&mut self, guardian: GuardianMetadata, effects: &aura_crypto::Effects) -> crate::Result<()> {
+    pub fn add_guardian(
+        &mut self,
+        guardian: GuardianMetadata,
+        effects: &aura_crypto::Effects,
+    ) -> crate::Result<()> {
         if self.removed_guardians.contains(&guardian.guardian_id) {
             return Err(crate::LedgerError::InvalidEvent(
                 "Cannot re-add a removed guardian".to_string(),
@@ -198,7 +236,11 @@ impl AccountState {
     }
 
     /// Remove a guardian (tombstone)
-    pub fn remove_guardian(&mut self, guardian_id: GuardianId, effects: &aura_crypto::Effects) -> crate::Result<()> {
+    pub fn remove_guardian(
+        &mut self,
+        guardian_id: GuardianId,
+        effects: &aura_crypto::Effects,
+    ) -> crate::Result<()> {
         if !self.guardians.contains_key(&guardian_id) {
             return Err(crate::LedgerError::GuardianNotFound(format!(
                 "{:?}",
@@ -225,11 +267,14 @@ impl AccountState {
     }
 
     /// Cache a presence ticket
-    pub fn cache_presence_ticket(&mut self, ticket: PresenceTicketCache, effects: &aura_crypto::Effects) {
+    pub fn cache_presence_ticket(
+        &mut self,
+        ticket: PresenceTicketCache,
+        effects: &aura_crypto::Effects,
+    ) {
         self.presence_tickets.insert(ticket.device_id, ticket);
         self.updated_at = current_timestamp_with_effects(effects);
     }
-
 
     /// Start a cooldown
     pub fn start_cooldown(&mut self, cooldown: CooldownCounter, effects: &aura_crypto::Effects) {
@@ -285,7 +330,11 @@ impl AccountState {
     /// This ensures:
     /// - If event A causally precedes B, then lamport(A) < lamport(B)
     /// - All participants converge on the same total ordering
-    pub fn advance_lamport_clock(&mut self, received_timestamp: u64, effects: &aura_crypto::Effects) {
+    pub fn advance_lamport_clock(
+        &mut self,
+        received_timestamp: u64,
+        effects: &aura_crypto::Effects,
+    ) {
         // Lamport clock rule: max(local, received) + 1
         self.lamport_clock = self.lamport_clock.max(received_timestamp) + 1;
         self.updated_at = current_timestamp_with_effects(effects);
@@ -497,8 +546,6 @@ pub fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> u64 {
     effects.now().unwrap_or(0)
 }
 
-
-
 mod verifying_key_serde {
     use ed25519_dalek::VerifyingKey;
     use serde::{Deserialize, Deserializer, Serializer};
@@ -550,7 +597,7 @@ mod tests {
     #[test]
     fn test_account_state_device_lifecycle() {
         use ed25519_dalek::SigningKey;
-        
+
         let effects = aura_crypto::Effects::for_test("test_account_state_device_lifecycle");
         let account_id = AccountId::new_with_effects(&effects);
         let signing_key = SigningKey::from_bytes(&rand::random());
@@ -582,7 +629,7 @@ mod tests {
     #[test]
     fn test_session_epoch_bump() {
         use ed25519_dalek::SigningKey;
-        
+
         let effects = aura_crypto::Effects::for_test("test_session_epoch_bump");
         let account_id = AccountId::new_with_effects(&effects);
         let signing_key = SigningKey::from_bytes(&rand::random());
