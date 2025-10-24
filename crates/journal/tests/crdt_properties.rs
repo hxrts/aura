@@ -5,39 +5,11 @@
 //!
 //! Reference: work/pre_ssb_storage_tests.md - Category 2.2
 
-use aura_crypto::Effects;
 use aura_journal::state::AccountState;
 use aura_journal::types::*;
-use ed25519_dalek::SigningKey;
+use aura_test_utils::*;
 use proptest::prelude::*;
 use std::collections::BTreeMap;
-
-/// Helper to create test account state
-fn create_test_account(seed: u64) -> AccountState {
-    let effects = Effects::deterministic(seed, 1000);
-    let key_bytes = effects.random_bytes::<32>();
-    let signing_key = SigningKey::from_bytes(&key_bytes);
-    let group_public_key = signing_key.verifying_key();
-
-    let device_id = DeviceId::new_with_effects(&effects);
-    let device_metadata = DeviceMetadata {
-        device_id,
-        public_key: group_public_key,
-        added_at: 1000,
-        device_name: "Device A".to_string(),
-        device_type: DeviceType::Native,
-        last_seen: 1000,
-        dkd_commitment_proofs: BTreeMap::new(),
-    };
-
-    AccountState::new(
-        AccountId::new_with_effects(&effects),
-        group_public_key,
-        device_metadata,
-        2,
-        3,
-    )
-}
 
 /// Merge two account states (G-Set semantics)
 fn merge_states(mut state_a: AccountState, state_b: &AccountState) -> AccountState {
@@ -92,27 +64,18 @@ fn merge_states(mut state_a: AccountState, state_b: &AccountState) -> AccountSta
 
 /// Add a device to state (for property testing)
 fn add_device_to_state(state: &mut AccountState, seed: u64) {
-    let effects = Effects::deterministic(seed, 1000);
-    let device_id = DeviceId::new_with_effects(&effects);
-    let device_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
-
+    let effects = test_effects_deterministic(seed, 1000);
+    let device_metadata = test_device_with_name(&format!("Device {}", seed), &effects);
+    
     state.devices.insert(
-        device_id,
-        DeviceMetadata {
-            device_id,
-            public_key: device_key.verifying_key(),
-            added_at: 1000,
-            device_name: format!("Device {}", seed),
-            device_type: DeviceType::Native,
-            last_seen: 1000,
-            dkd_commitment_proofs: BTreeMap::new(),
-        },
+        device_metadata.device_id,
+        device_metadata,
     );
 }
 
 /// Modify state with random operations (for property testing)
 fn modify_state(state: &mut AccountState, seed: u64, ops: &[u8]) {
-    let effects = Effects::deterministic(seed, 1000);
+    let effects = test_effects_deterministic(seed, 1000);
 
     for (i, &op) in ops.iter().enumerate() {
         match op % 4 {
@@ -153,13 +116,13 @@ proptest! {
         ops_c in prop::collection::vec(any::<u8>(), 0..10),
     ) {
         // Create three states with different modifications
-        let mut state_a = create_test_account(seed_a);
+        let mut state_a = test_account_with_seed(seed_a);
         modify_state(&mut state_a, seed_a, &ops_a);
 
-        let mut state_b = create_test_account(seed_b);
+        let mut state_b = test_account_with_seed(seed_b);
         modify_state(&mut state_b, seed_b, &ops_b);
 
-        let mut state_c = create_test_account(seed_c);
+        let mut state_c = test_account_with_seed(seed_c);
         modify_state(&mut state_c, seed_c, &ops_c);
 
         // Compute (A ∪ B) ∪ C
@@ -187,7 +150,7 @@ proptest! {
         ops in prop::collection::vec(any::<u8>(), 0..20),
     ) {
         // Create a state with random modifications
-        let mut state = create_test_account(seed);
+        let mut state = test_account_with_seed(seed);
         modify_state(&mut state, seed, &ops);
 
         // Merge state with itself: A ∪ A
@@ -215,13 +178,13 @@ proptest! {
         ops_c in prop::collection::vec(any::<u8>(), 0..8),
     ) {
         // Create three devices with different modifications
-        let mut state_a = create_test_account(seed_a);
+        let mut state_a = test_account_with_seed(seed_a);
         modify_state(&mut state_a, seed_a, &ops_a);
 
-        let mut state_b = create_test_account(seed_b);
+        let mut state_b = test_account_with_seed(seed_b);
         modify_state(&mut state_b, seed_b, &ops_b);
 
-        let mut state_c = create_test_account(seed_c);
+        let mut state_c = test_account_with_seed(seed_c);
         modify_state(&mut state_c, seed_c, &ops_c);
 
         // Merge in different orders
@@ -261,15 +224,15 @@ proptest! {
         clock_b in 0u64..100,
         clock_c in 0u64..100,
     ) {
-        let mut state_a = create_test_account(1000);
+        let mut state_a = test_account_with_seed(1000);
         state_a.session_epoch = SessionEpoch(epoch_a);
         state_a.lamport_clock = clock_a;
 
-        let mut state_b = create_test_account(2000);
+        let mut state_b = test_account_with_seed(2000);
         state_b.session_epoch = SessionEpoch(epoch_b);
         state_b.lamport_clock = clock_b;
 
-        let mut state_c = create_test_account(3000);
+        let mut state_c = test_account_with_seed(3000);
         state_c.session_epoch = SessionEpoch(epoch_c);
         state_c.lamport_clock = clock_c;
 
@@ -292,8 +255,8 @@ proptest! {
         num_devices_b in 0usize..5,
         seed in any::<u64>(),
     ) {
-        let mut state_a = create_test_account(seed);
-        let mut state_b = create_test_account(seed + 1000);
+        let mut state_a = test_account_with_seed(seed);
+        let mut state_b = test_account_with_seed(seed + 1000);
 
         // Add devices to state A
         for i in 0..num_devices_a {

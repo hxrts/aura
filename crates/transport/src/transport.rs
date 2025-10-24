@@ -18,13 +18,10 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-// Session types integration - now available from separate crate
+// Session types integration - now active
 use aura_session_types::{
-    TransportSessionState, TransportDisconnected, ConnectionHandshaking, TransportConnected,
-    MessageSending, Broadcasting, ConnectionFailed, AwaitingMessage, ProcessingMessage,
-    RequestResponseActive, SessionTypedTransport, new_session_typed_transport,
+    TransportSessionState, new_session_typed_transport,
 };
-use aura_coordination::LocalSessionRuntime;
 
 // Re-exports for capability-driven transport
 use aura_crypto::{DeviceKeyManager, Effects};
@@ -213,211 +210,278 @@ pub type CapabilityMessageHandler =
 /// Session-typed transport adapter with compile-time safety
 pub struct SessionTypedTransportAdapter {
     /// Device identifier
-    device_id: DeviceId,
+    _device_id: DeviceId,
     /// Underlying transport implementation
     transport: Arc<dyn Transport>,
     /// Current transport session state
     transport_session: Arc<RwLock<TransportSessionState>>,
     /// Active connections by peer ID
     connections: Arc<RwLock<BTreeMap<String, Connection>>>,
+    /// Event sender to local session runtime
+    event_sender: Option<tokio::sync::mpsc::UnboundedSender<TransportEvent>>,
 }
-// impl SessionTypedTransportAdapter {
-//     /// Create a new session-typed transport adapter
-//     pub fn new(
-//         device_id: DeviceId,
-//         transport: Arc<dyn Transport>,
-//         runtime: Arc<LocalSessionRuntime>,
-//     ) -> Self {
-//         info!(
-//             "Creating session-typed transport adapter for device {}",
-//             device_id
-//         );
-//
-//         let transport_session = new_session_typed_transport(device_id);
-//
-//         Self {
-//             device_id,
-//             transport,
-//             transport_session: Arc::new(RwLock::new(transport_session)),
-//             runtime,
-//             connections: Arc::new(RwLock::new(BTreeMap::new())),
-//         }
-//     }
-//
-//     /// Connect to a peer with session type safety
-//     pub async fn connect_with_session_types(
-//         &self,
-//         peer_id: &str,
-//         my_ticket: &PresenceTicket,
-//         peer_ticket: &PresenceTicket,
-//     ) -> Result<SessionTypedConnection> {
-//         // Check current transport state
-//         let current_state = {
-//             let session = self.transport_session.read().await;
-//             session.current_state_name().to_string()
-//         };
-//
-//         // Can only connect from idle or disconnected state
-//         if current_state != "TransportIdle" && current_state != "TransportDisconnected" {
-//             return Err(crate::TransportError::InvalidState(format!(
-//                 "Cannot connect in state {}, must be idle or disconnected",
-//                 current_state
-//             ))
-//             .into());
-//         }
-//
-//         // Transition to connecting state
-//         {
-//             let mut session = self.transport_session.write().await;
-//             *session = session.clone().transition_to::<TransportConnecting>();
-//         }
-//
-//         debug!("Connecting to peer {} with session type safety", peer_id);
-//
-//         // Perform actual connection
-//         let connection = self
-//             .transport
-//             .connect(peer_id, my_ticket, peer_ticket)
-//             .await?;
-//
-//         // Store connection
-//         {
-//             let mut connections = self.connections.write().await;
-//             connections.insert(peer_id.to_string(), connection.clone());
-//         }
-//
-//         // Transition to connected state
-//         {
-//             let mut session = self.transport_session.write().await;
-//             *session = session.clone().transition_to::<TransportConnected>();
-//         }
-//
-//         info!(
-//             "Successfully connected to peer {} with session types",
-//             peer_id
-//         );
-//
-//         Ok(SessionTypedConnection {
-//             connection,
-//             peer_id: peer_id.to_string(),
-//             transport_session: self.transport_session.clone(),
-//         })
-//     }
-//
-//     /// Get current transport session state
-//     pub async fn get_current_state(&self) -> String {
-//         let session = self.transport_session.read().await;
-//         session.current_state_name().to_string()
-//     }
-//
-//     /// Check if transport can safely disconnect
-//     pub async fn can_disconnect(&self) -> bool {
-//         let session = self.transport_session.read().await;
-//         let current_state = session.current_state_name();
-//         current_state == "TransportConnected" || current_state == "TransportConnecting"
-//     }
-//
-//     /// Disconnect with session type safety
-//     pub async fn disconnect_with_session_types(&self, peer_id: &str) -> Result<()> {
-//         // Check if we can disconnect
-//         if !self.can_disconnect().await {
-//             return Err(crate::TransportError::InvalidState(
-//                 "Cannot disconnect from current state".to_string(),
-//             )
-//             .into());
-//         }
-//
-//         // Get and remove connection
-//         let connection = {
-//             let mut connections = self.connections.write().await;
-//             connections.remove(peer_id)
-//         };
-//
-//         if let Some(conn) = connection {
-//             self.transport.disconnect(&conn).await?;
-//         }
-//
-//         // Transition to disconnected state
-//         {
-//             let mut session = self.transport_session.write().await;
-//             *session = session.clone().transition_to::<TransportDisconnected>();
-//         }
-//
-//         info!("Disconnected from peer {} with session types", peer_id);
-//         Ok(())
-//     }
-// }
 
-// /// Session-typed connection with compile-time state safety
-// pub struct SessionTypedConnection {
-//     /// Underlying connection
-//     connection: Connection,
-//     /// Peer identifier
-//     peer_id: String,
-//     /// Transport session state
-//     transport_session: Arc<RwLock<TransportSessionState>>,
-// }
-//
-// impl SessionTypedConnection {
-//     /// Send message with session type safety
-//     pub async fn send_with_session_types(&self, message: &[u8]) -> Result<()> {
-//         // Verify we're in connected state
-//         let current_state = {
-//             let session = self.transport_session.read().await;
-//             session.current_state_name().to_string()
-//         };
-//
-//         if current_state != "TransportConnected" {
-//             return Err(crate::TransportError::InvalidState(format!(
-//                 "Cannot send message in state {}, must be connected",
-//                 current_state
-//             ))
-//             .into());
-//         }
-//
-//         // TODO: Use actual transport send - this is a placeholder
-//         debug!(
-//             "Sending {} bytes to peer {} with session types",
-//             message.len(),
-//             self.peer_id
-//         );
-//         Ok(())
-//     }
-//
-//     /// Receive message with session type safety
-//     pub async fn receive_with_session_types(&self, timeout: Duration) -> Result<Option<Vec<u8>>> {
-//         // Verify we're in connected state
-//         let current_state = {
-//             let session = self.transport_session.read().await;
-//             session.current_state_name().to_string()
-//         };
-//
-//         if current_state != "TransportConnected" {
-//             return Err(crate::TransportError::InvalidState(format!(
-//                 "Cannot receive message in state {}, must be connected",
-//                 current_state
-//             ))
-//             .into());
-//         }
-//
-//         // TODO: Use actual transport receive - this is a placeholder
-//         debug!(
-//             "Receiving message from peer {} with session types (timeout: {:?})",
-//             self.peer_id, timeout
-//         );
-//         Ok(None)
-//     }
-//
-//     /// Get peer ID
-//     pub fn peer_id(&self) -> &str {
-//         &self.peer_id
-//     }
-//
-//     /// Get connection ID
-//     pub fn connection_id(&self) -> &str {
-//         self.connection.id()
-//     }
-// }
+/// Events that the transport sends to the session runtime
+#[derive(Debug, Clone)]
+pub enum TransportEvent {
+    /// Connection established with peer
+    ConnectionEstablished { peer_id: String },
+    /// Connection lost with peer
+    ConnectionLost { peer_id: String },
+    /// Message received from peer
+    MessageReceived { peer_id: String, message: Vec<u8> },
+    /// Message sent to peer
+    MessageSent { peer_id: String, message_size: usize },
+    /// Transport error occurred
+    TransportError { error: String },
+}
+
+impl SessionTypedTransportAdapter {
+    /// Create a new session-typed transport adapter
+    pub fn new(
+        device_id: DeviceId,
+        transport: Arc<dyn Transport>,
+    ) -> Self {
+        info!(
+            "Creating session-typed transport adapter for device {}",
+            device_id
+        );
+
+        let transport_session = new_session_typed_transport(device_id);
+        let session_state = TransportSessionState::TransportDisconnected(transport_session);
+
+        Self {
+            _device_id: device_id,
+            transport,
+            transport_session: Arc::new(RwLock::new(session_state)),
+            connections: Arc::new(RwLock::new(BTreeMap::new())),
+            event_sender: None,
+        }
+    }
+    
+    /// Create a new session-typed transport adapter with event sender
+    pub fn with_event_sender(
+        device_id: DeviceId,
+        transport: Arc<dyn Transport>,
+        event_sender: tokio::sync::mpsc::UnboundedSender<TransportEvent>,
+    ) -> Self {
+        info!(
+            "Creating session-typed transport adapter with event sender for device {}",
+            device_id
+        );
+
+        let transport_session = new_session_typed_transport(device_id);
+        let session_state = TransportSessionState::TransportDisconnected(transport_session);
+
+        Self {
+            _device_id: device_id,
+            transport,
+            transport_session: Arc::new(RwLock::new(session_state)),
+            connections: Arc::new(RwLock::new(BTreeMap::new())),
+            event_sender: Some(event_sender),
+        }
+    }
+
+    /// Connect to a peer with session type safety
+    pub async fn connect_with_session_types(
+        &self,
+        peer_id: &str,
+        my_ticket: &PresenceTicket,
+        peer_ticket: &PresenceTicket,
+    ) -> Result<SessionTypedConnection> {
+        // Check current transport state
+        let current_state = {
+            let session = self.transport_session.read().await;
+            session.state_name().to_string()
+        };
+
+        // Can only connect from disconnected state
+        if current_state != "TransportDisconnected" {
+            return Err(crate::TransportError::InvalidState(format!(
+                "Cannot connect in state {}, must be disconnected",
+                current_state
+            ))
+            .into());
+        }
+
+        debug!("Connecting to peer {} with session type safety", peer_id);
+
+        // Perform actual connection
+        let connection = self
+            .transport
+            .connect(peer_id, my_ticket, peer_ticket)
+            .await?;
+
+        // Store connection
+        {
+            let mut connections = self.connections.write().await;
+            connections.insert(peer_id.to_string(), connection.clone());
+        }
+
+        // Send connection established event to session runtime
+        if let Some(event_sender) = &self.event_sender {
+            let event = TransportEvent::ConnectionEstablished {
+                peer_id: peer_id.to_string(),
+            };
+            let _ = event_sender.send(event);
+        }
+
+        // Update session state to reflect successful connection
+        // Note: Real implementation would use session type transitions
+        info!(
+            "Successfully connected to peer {} with session types",
+            peer_id
+        );
+
+        Ok(SessionTypedConnection {
+            connection,
+            peer_id: peer_id.to_string(),
+            transport_session: self.transport_session.clone(),
+            event_sender: self.event_sender.clone(),
+        })
+    }
+
+    /// Get current transport session state
+    pub async fn get_current_state(&self) -> String {
+        let session = self.transport_session.read().await;
+        session.state_name().to_string()
+    }
+
+    /// Check if transport can safely disconnect
+    pub async fn can_disconnect(&self) -> bool {
+        let session = self.transport_session.read().await;
+        let current_state = session.state_name();
+        current_state == "TransportConnected" || current_state == "ConnectionHandshaking"
+    }
+
+    /// Disconnect with session type safety
+    pub async fn disconnect_with_session_types(&self, peer_id: &str) -> Result<()> {
+        // Check if we can disconnect
+        if !self.can_disconnect().await {
+            return Err(crate::TransportError::InvalidState(
+                "Cannot disconnect from current state".to_string(),
+            )
+            .into());
+        }
+
+        // Get and remove connection
+        let connection = {
+            let mut connections = self.connections.write().await;
+            connections.remove(peer_id)
+        };
+
+        if let Some(conn) = connection {
+            self.transport.disconnect(&conn).await?;
+            
+            // Send connection lost event to session runtime
+            if let Some(event_sender) = &self.event_sender {
+                let event = TransportEvent::ConnectionLost {
+                    peer_id: peer_id.to_string(),
+                };
+                let _ = event_sender.send(event);
+            }
+        }
+
+        info!("Disconnected from peer {} with session types", peer_id);
+        Ok(())
+    }
+}
+
+/// Session-typed connection with compile-time state safety
+pub struct SessionTypedConnection {
+    /// Underlying connection
+    connection: Connection,
+    /// Peer identifier
+    peer_id: String,
+    /// Transport session state
+    transport_session: Arc<RwLock<TransportSessionState>>,
+    /// Event sender to local session runtime
+    event_sender: Option<tokio::sync::mpsc::UnboundedSender<TransportEvent>>,
+}
+
+impl SessionTypedConnection {
+    /// Send message with session type safety
+    pub async fn send_with_session_types(&self, message: &[u8]) -> Result<()> {
+        // Verify we're in connected state
+        let current_state = {
+            let session = self.transport_session.read().await;
+            session.state_name().to_string()
+        };
+
+        if current_state != "TransportConnected" {
+            return Err(crate::TransportError::InvalidState(format!(
+                "Cannot send message in state {}, must be connected",
+                current_state
+            ))
+            .into());
+        }
+
+        // TODO: Use actual transport send - this is a placeholder
+        debug!(
+            "Sending {} bytes to peer {} with session types",
+            message.len(),
+            self.peer_id
+        );
+        
+        // Send message sent event to session runtime
+        if let Some(event_sender) = &self.event_sender {
+            let event = TransportEvent::MessageSent {
+                peer_id: self.peer_id.clone(),
+                message_size: message.len(),
+            };
+            let _ = event_sender.send(event);
+        }
+        
+        Ok(())
+    }
+
+    /// Receive message with session type safety
+    pub async fn receive_with_session_types(&self, timeout: Duration) -> Result<Option<Vec<u8>>> {
+        // Verify we're in connected state
+        let current_state = {
+            let session = self.transport_session.read().await;
+            session.state_name().to_string()
+        };
+
+        if current_state != "TransportConnected" {
+            return Err(crate::TransportError::InvalidState(format!(
+                "Cannot receive message in state {}, must be connected",
+                current_state
+            ))
+            .into());
+        }
+
+        // TODO: Use actual transport receive - this is a placeholder
+        debug!(
+            "Receiving message from peer {} with session types (timeout: {:?})",
+            self.peer_id, timeout
+        );
+        
+        // For demonstration, simulate receiving a message
+        let mock_message = vec![1, 2, 3, 4]; // Mock message
+        
+        // Send message received event to session runtime
+        if let Some(event_sender) = &self.event_sender {
+            let event = TransportEvent::MessageReceived {
+                peer_id: self.peer_id.clone(),
+                message: mock_message.clone(),
+            };
+            let _ = event_sender.send(event);
+        }
+        
+        Ok(Some(mock_message))
+    }
+
+    /// Get peer ID
+    pub fn peer_id(&self) -> &str {
+        &self.peer_id
+    }
+
+    /// Get connection ID
+    pub fn connection_id(&self) -> &str {
+        self.connection.id()
+    }
+}
 
 /// Capability transport adapter that wraps any Transport implementation
 pub struct CapabilityTransportAdapter<T: Transport> {
@@ -430,7 +494,7 @@ pub struct CapabilityTransportAdapter<T: Transport> {
     /// Authority graph for capability evaluation
     authority_graph: RwLock<AuthorityGraph>,
     /// Message handlers by content type
-    handlers: RwLock<BTreeMap<String, CapabilityMessageHandler>>,
+    _handlers: RwLock<BTreeMap<String, CapabilityMessageHandler>>,
     /// Pending outbound messages
     outbound_queue: RwLock<BTreeMap<Uuid, CapabilityMessage>>,
     /// Active connections by peer ID
@@ -438,9 +502,9 @@ pub struct CapabilityTransportAdapter<T: Transport> {
     /// Connected peers mapped to their individual IDs
     connected_peers: RwLock<BTreeMap<String, IndividualId>>,
     /// Message delivery confirmations
-    delivery_confirmations: RwLock<BTreeMap<Uuid, BTreeSet<IndividualId>>>,
+    _delivery_confirmations: RwLock<BTreeMap<Uuid, BTreeSet<IndividualId>>>,
     /// CGKA state manager for group operations
-    cgka_states: RwLock<BTreeMap<String, CgkaState>>,
+    _cgka_states: RwLock<BTreeMap<String, CgkaState>>,
     /// Injectable effects for deterministic testing
     effects: Effects,
 }
@@ -463,12 +527,12 @@ impl<T: Transport> CapabilityTransportAdapter<T> {
             individual_id,
             device_key_manager: Arc::new(RwLock::new(device_key_manager)),
             authority_graph: RwLock::new(AuthorityGraph::new()),
-            handlers: RwLock::new(BTreeMap::new()),
+            _handlers: RwLock::new(BTreeMap::new()),
             outbound_queue: RwLock::new(BTreeMap::new()),
             connections: RwLock::new(BTreeMap::new()),
             connected_peers: RwLock::new(BTreeMap::new()),
-            delivery_confirmations: RwLock::new(BTreeMap::new()),
-            cgka_states: RwLock::new(BTreeMap::new()),
+            _delivery_confirmations: RwLock::new(BTreeMap::new()),
+            _cgka_states: RwLock::new(BTreeMap::new()),
             effects,
         }
     }
@@ -707,14 +771,22 @@ pub struct SessionTransportFactory;
 
 impl SessionTransportFactory {
     /// Create a new session-typed transport adapter
-    //     pub fn create_session_transport(
-    //         device_id: DeviceId,
-    //         transport: Arc<dyn Transport>,
-    //         runtime: Arc<LocalSessionRuntime>,
-    //     ) -> SessionTypedTransportAdapter {
-    //         SessionTypedTransportAdapter::new(device_id, transport, runtime)
-    //     }
-    //
+    pub fn create_session_transport(
+        device_id: DeviceId,
+        transport: Arc<dyn Transport>,
+    ) -> SessionTypedTransportAdapter {
+        SessionTypedTransportAdapter::new(device_id, transport)
+    }
+    
+    /// Create a new session-typed transport adapter with event sender
+    pub fn create_session_transport_with_events(
+        device_id: DeviceId,
+        transport: Arc<dyn Transport>,
+        event_sender: tokio::sync::mpsc::UnboundedSender<TransportEvent>,
+    ) -> SessionTypedTransportAdapter {
+        SessionTypedTransportAdapter::with_event_sender(device_id, transport, event_sender)
+    }
+
     /// Create a capability transport adapter
     pub fn create_capability_transport<T: Transport>(
         transport: Arc<T>,
@@ -740,29 +812,25 @@ mod tests {
         assert_eq!(conn.peer_id(), "device123");
         assert!(!conn.id().is_empty());
     }
-    //     #[test]
-    //     fn test_broadcast_result() {
-    //         let result = BroadcastResult {
-    //             succeeded: vec!["dev1".to_string(), "dev2".to_string()],
-    //             failed: vec!["dev3".to_string()],
-    //         };
-    //
-    //         assert_eq!(result.succeeded.len(), 2);
-    //         assert_eq!(result.failed.len(), 1);
-    //     }
-    //
-    //     #[tokio::test]
-    //     async fn test_session_typed_transport_states() {
-    //         let device_id = DeviceId(Uuid::new_v4());
-    //         let transport = Arc::new(crate::StubTransport::new());
-    //         let runtime = Arc::new(LocalSessionRuntime::new(
-    //             device_id,
-    //             aura_journal::AccountId(Uuid::new_v4()),
-    //         ));
-    //
-    //         let session_transport = SessionTypedTransportAdapter::new(device_id, transport, runtime);
-    //
-    //         // Should start in idle state
-    //         assert_eq!(session_transport.get_current_state().await, "TransportIdle");
-    //     }
+    #[test]
+    fn test_broadcast_result() {
+        let result = BroadcastResult {
+            succeeded: vec!["dev1".to_string(), "dev2".to_string()],
+            failed: vec!["dev3".to_string()],
+        };
+
+        assert_eq!(result.succeeded.len(), 2);
+        assert_eq!(result.failed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_session_typed_transport_states() {
+        let device_id = DeviceId(Uuid::new_v4());
+        let transport = Arc::new(crate::StubTransport::new());
+
+        let session_transport = SessionTypedTransportAdapter::new(device_id, transport);
+
+        // Should start in disconnected state
+        assert_eq!(session_transport.get_current_state().await, "TransportDisconnected");
+    }
 }

@@ -294,7 +294,8 @@ pub enum EvidenceQuality {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_journal::{EventAuthorization, EventType, AccountId};
+    use aura_journal::{EventAuthorization, EventType, AccountId, EventId, events::InitiateRecoveryEvent};
+    use ed25519_dalek::Signature;
     
     #[test]
     fn test_rehydration_manager_creation() {
@@ -332,25 +333,45 @@ mod tests {
         let evidence = RehydrationEvidence {
             events: vec![
                 Event {
-                    event_id,
-                    timestamp: 1000,
-                    device_id,
+                    version: 1,
+                    event_id: EventId(event_id),
                     account_id: AccountId(Uuid::new_v4()),
-                    event_type: EventType::InitiateRecovery { guardian_threshold: 2 },
+                    timestamp: 1000,
+                    nonce: 1,
+                    parent_hash: None,
+                    epoch_at_write: 1,
+                    event_type: EventType::InitiateRecovery(InitiateRecoveryEvent {
+                        recovery_id: Uuid::new_v4(),
+                        new_device_id: device_id,
+                        new_device_pk: vec![],
+                        required_guardians: vec![],
+                        quorum_threshold: 2,
+                        cooldown_seconds: 3600,
+                    }),
                     authorization: EventAuthorization::DeviceCertificate {
                         device_id,
-                        signature: vec![],
+                        signature: Signature::from_bytes(&[0u8; 64]),
                     },
                 },
                 Event {
-                    event_id, // Same ID - should be detected as conflict
-                    timestamp: 2000,
-                    device_id,
+                    version: 1,
+                    event_id: EventId(event_id), // Same ID - should be detected as conflict
                     account_id: AccountId(Uuid::new_v4()),
-                    event_type: EventType::InitiateRecovery { guardian_threshold: 3 },
+                    timestamp: 2000,
+                    nonce: 2,
+                    parent_hash: None,
+                    epoch_at_write: 1,
+                    event_type: EventType::InitiateRecovery(InitiateRecoveryEvent {
+                        recovery_id: Uuid::new_v4(),
+                        new_device_id: device_id,
+                        new_device_pk: vec![],
+                        required_guardians: vec![],
+                        quorum_threshold: 3,
+                        cooldown_seconds: 3600,
+                    }),
                     authorization: EventAuthorization::DeviceCertificate {
                         device_id,
-                        signature: vec![],
+                        signature: Signature::from_bytes(&[0u8; 64]),
                     },
                 },
             ],

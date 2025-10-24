@@ -835,7 +835,7 @@ mod tests {
         let frost = new_session_typed_frost(device_id, participant_id, 2, 3);
 
         assert_eq!(frost.state_name(), "FrostIdle");
-        assert!(frost.can_terminate());
+        assert!(!frost.can_terminate()); // Idle state is not final, so cannot terminate
     }
 
     #[test]
@@ -853,22 +853,40 @@ mod tests {
             started_at: 1000,
         };
 
-        let commitment_phase = frost.transition_with_witness(context);
+        let commitment_phase = <ChoreographicProtocol<FrostProtocolCore, FrostIdle> as WitnessedTransition<FrostIdle, FrostCommitmentPhase>>::transition_with_witness(frost, context);
         assert_eq!(commitment_phase.state_name(), "FrostCommitmentPhase");
 
         // Generate commitment
+        // Create a minimal signing commitment for testing by skipping the actual commitment step
+        // We'll use dummy data that doesn't go through the full FROST protocol
+        let signing_commitments = {
+            use frost::round1::{SigningCommitments, NonceCommitment};
+            // Create valid Ed25519 points by using a known valid public key
+            let valid_point = ed25519_dalek::VerifyingKey::from_bytes(&[
+                0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66
+            ]).unwrap();
+            let hiding = NonceCommitment::deserialize(valid_point.to_bytes()).unwrap();
+            let binding = NonceCommitment::deserialize(valid_point.to_bytes()).unwrap();
+            SigningCommitments::new(hiding, binding)
+        };
+        
         let commitment = SigningCommitment {
             identifier: participant_id,
-            commitment: frost::round1::SigningCommitments::default(),
+            commitment: signing_commitments,
         };
 
-        let awaiting = commitment_phase.transition_with_witness(commitment);
+        let awaiting = <ChoreographicProtocol<FrostProtocolCore, FrostCommitmentPhase> as WitnessedTransition<FrostCommitmentPhase, FrostAwaitingCommitments>>::transition_with_witness(commitment_phase, commitment);
         assert_eq!(awaiting.state_name(), "FrostAwaitingCommitments");
 
-        // Simulate threshold met
-        let events = vec![];
-        let witness = CommitmentThresholdMet::verify(events, 2).unwrap();
-        let signing_phase = awaiting.transition_with_witness(witness);
+        // Simulate threshold met - create a simple witness for testing  
+        let commitment_threshold_met = CommitmentThresholdMet {
+            count: 2,
+            threshold: 2,
+        };
+        let signing_phase = <ChoreographicProtocol<FrostProtocolCore, FrostAwaitingCommitments> as WitnessedTransition<FrostAwaitingCommitments, FrostSigningPhase>>::transition_with_witness(awaiting, commitment_threshold_met);
         assert_eq!(signing_phase.state_name(), "FrostSigningPhase");
     }
 
@@ -881,10 +899,44 @@ mod tests {
         assert!(witness.is_none());
 
         // Create some dummy events
-        let events_with_data = vec![
-            aura_journal::Event::default(),
-            aura_journal::Event::default(),
-        ];
+        let effects = aura_crypto::Effects::test();
+        let account_id = aura_journal::AccountId::new_with_effects(&effects);
+        let device_id = aura_journal::DeviceId::new_with_effects(&effects);
+        
+        // Create simple DeviceCertificate authorization for testing
+        let signature = ed25519_dalek::Signature::from_bytes(&[0u8; 64]);
+        let auth = aura_journal::EventAuthorization::DeviceCertificate {
+            device_id,
+            signature,
+        };
+        
+        let event1 = aura_journal::Event::new(
+            account_id,
+            1,
+            None,
+            0, // epoch_at_write
+            aura_journal::EventType::RecordDkdCommitment(aura_journal::RecordDkdCommitmentEvent {
+                session_id: effects.gen_uuid(),
+                device_id,
+                commitment: [0u8; 32],
+            }),
+            auth.clone(),
+            &effects,
+        ).unwrap();
+        let event2 = aura_journal::Event::new(
+            account_id,
+            2,
+            None,
+            0, // epoch_at_write
+            aura_journal::EventType::RecordDkdCommitment(aura_journal::RecordDkdCommitmentEvent {
+                session_id: effects.gen_uuid(),
+                device_id,
+                commitment: [1u8; 32],
+            }),
+            auth,
+            &effects,
+        ).unwrap();
+        let events_with_data = vec![event1, event2];
 
         // Should succeed with threshold of 2 and 2 events
         let witness = CommitmentThresholdMet::verify(events_with_data.clone(), 2);
@@ -903,7 +955,7 @@ mod tests {
         let session = rehydrate_frost_session(device_id, participant_id, 2, 3, false, false);
 
         assert_eq!(session.state_name(), "FrostIdle");
-        assert!(session.can_terminate());
+        assert!(!session.can_terminate()); // Idle state is not final, so cannot terminate
 
         let signing_session = rehydrate_frost_session(device_id, participant_id, 2, 3, true, false);
         assert_eq!(signing_session.state_name(), "FrostSigningPhase");

@@ -133,13 +133,13 @@ impl CapabilityAgent {
         let result = self
             .bootstrap_manager
             .bootstrap_account(config, effects)
-            .map_err(|e| AgentError::BootstrapError(e.to_string()))?;
+            .map_err(|e| AgentError::bootstrap_failed(e.to_string()))?;
 
         // Apply genesis delegations to authority graph
         for delegation in result.genesis_delegations {
             self.authority_graph
                 .apply_delegation(delegation, &self.effects)
-                .map_err(|e| AgentError::CapabilityError(e.to_string()))?;
+                .map_err(|e| AgentError::capability_system(e.to_string()))?;
         }
 
         // Register identity mappings
@@ -172,7 +172,7 @@ impl CapabilityAgent {
         if self.has_capability(scope) {
             Ok(())
         } else {
-            Err(AgentError::InsufficientCapability(format!(
+            Err(AgentError::insufficient_capability(format!(
                 "Required capability not found: {}:{}",
                 scope.namespace, scope.operation
             )))
@@ -216,7 +216,7 @@ impl CapabilityAgent {
         // Apply to authority graph
         self.authority_graph
             .apply_delegation(delegation.clone(), &self.effects)
-            .map_err(|e| AgentError::CapabilityError(e.to_string()))?;
+            .map_err(|e| AgentError::capability_system(e.to_string()))?;
 
         debug!(
             "Capability delegation created: {}",
@@ -249,7 +249,7 @@ impl CapabilityAgent {
         // Apply to authority graph
         self.authority_graph
             .apply_revocation(revocation.clone(), &self.effects)
-            .map_err(|e| AgentError::CapabilityError(e.to_string()))?;
+            .map_err(|e| AgentError::capability_system(e.to_string()))?;
 
         debug!("Capability revoked");
 
@@ -276,19 +276,19 @@ impl CapabilityAgent {
         let member_delegations = self
             .bootstrap_manager
             .create_mls_group(group_id, initial_members, &self.effects)
-            .map_err(|e| AgentError::BootstrapError(e.to_string()))?;
+            .map_err(|e| AgentError::bootstrap_failed(e.to_string()))?;
 
         // Apply delegations to authority graph
         for delegation in member_delegations {
             self.authority_graph
                 .apply_delegation(delegation, &self.effects)
-                .map_err(|e| AgentError::CapabilityError(e.to_string()))?;
+                .map_err(|e| AgentError::capability_system(e.to_string()))?;
         }
 
         // Initialize CGKA group
         self.cgka_manager
             .initialize_group(group_id.to_string(), &self.authority_graph)
-            .map_err(|e| AgentError::CgkaError(e.to_string()))?;
+            .map_err(|e| AgentError::cgka_failed(e.to_string()))?;
 
         info!("MLS group '{}' created successfully", group_id);
 
@@ -302,7 +302,7 @@ impl CapabilityAgent {
         let operations = self
             .cgka_manager
             .process_capability_changes(group_id, &self.authority_graph)
-            .map_err(|e| AgentError::CgkaError(e.to_string()))?;
+            .map_err(|e| AgentError::cgka_failed(e.to_string()))?;
 
         if !operations.is_empty() {
             info!(
@@ -314,7 +314,7 @@ impl CapabilityAgent {
             for operation in operations {
                 self.cgka_manager
                     .apply_operation(group_id, operation)
-                    .map_err(|e| AgentError::CgkaError(e.to_string()))?;
+                    .map_err(|e| AgentError::cgka_failed(e.to_string()))?;
             }
         }
 
@@ -336,7 +336,7 @@ impl CapabilityAgent {
         let app_secret = self
             .cgka_manager
             .get_application_secret(group_id)
-            .ok_or_else(|| AgentError::CgkaError("No application secret available".to_string()))?;
+            .ok_or_else(|| AgentError::cgka_failed("No application secret available"))?;
 
         // Add application secret to causal encryption
         self.causal_encryption
@@ -347,18 +347,18 @@ impl CapabilityAgent {
         let _causal_key = self
             .causal_encryption
             .derive_causal_key(context, epoch)
-            .map_err(|e| AgentError::CgkaError(e.to_string()))?;
+            .map_err(|e| AgentError::cgka_failed(e.to_string()))?;
 
         // Encrypt data
         let ciphertext = self
             .causal_encryption
             .encrypt(data, context)
-            .map_err(|e| AgentError::CgkaError(e.to_string()))?;
+            .map_err(|e| AgentError::cgka_failed(e.to_string()))?;
 
         debug!("Encrypted {} bytes for context '{}'", data.len(), context);
 
         // Return serialized ciphertext
-        serde_json::to_vec(&ciphertext).map_err(|e| AgentError::SerializationError(e.to_string()))
+        serde_json::to_vec(&ciphertext).map_err(|e| AgentError::serialization(e.to_string()))
     }
 
     /// Decrypt data using causal encryption
@@ -369,13 +369,13 @@ impl CapabilityAgent {
 
         // Deserialize ciphertext
         let ciphertext = serde_json::from_slice(ciphertext_bytes)
-            .map_err(|e| AgentError::SerializationError(e.to_string()))?;
+            .map_err(|e| AgentError::serialization(e.to_string()))?;
 
         // Decrypt data
         let plaintext = self
             .causal_encryption
             .decrypt(&ciphertext)
-            .map_err(|e| AgentError::CgkaError(e.to_string()))?;
+            .map_err(|e| AgentError::cgka_failed(e.to_string()))?;
 
         debug!("Decrypted {} bytes", plaintext.len());
 

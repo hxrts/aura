@@ -7,6 +7,7 @@
 // automatic revocation when the account configuration changes.
 
 use crate::{Result, TransportError};
+use aura_journal::serialization::{from_cbor_bytes, to_cbor_bytes};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -204,17 +205,16 @@ impl PresenceTicket {
 
     /// Serialize to bytes for transport
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_cbor::to_vec(self)
+        to_cbor_bytes(self)
             .map_err(|e| TransportError::Transport(format!("Serialization failed: {}", e)))
     }
 
     /// Deserialize from bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        serde_cbor::from_slice(bytes)
+        from_cbor_bytes(bytes)
             .map_err(|e| TransportError::Transport(format!("Deserialization failed: {}", e)))
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -246,7 +246,8 @@ mod tests {
         // Force expiry
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap().as_secs();
+            .unwrap()
+            .as_secs();
         ticket.expires_at = now - 100;
         assert!(ticket.is_expired().unwrap());
     }
@@ -331,7 +332,8 @@ mod tests {
         // Force expiry
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap().as_secs();
+            .unwrap()
+            .as_secs();
         ticket.expires_at = now - 100;
 
         let hash = ticket.compute_signable_hash();

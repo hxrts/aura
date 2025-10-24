@@ -23,7 +23,7 @@
 //!     
 //!     // Wait for threshold commitments (choreographic synchronization)
 //!     let peer_commitments = ctx.execute(Instruction::AwaitThreshold {
-//!         count: ctx.threshold.unwrap(),
+//!         count: ctx.threshold().unwrap(),
 //!         filter: commitment_filter(),
 //!         timeout_epochs: Some(100),
 //!     }).await?;

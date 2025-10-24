@@ -207,87 +207,25 @@ impl Choreography for DkdChoreography {
                 device_ids.push(device_id);
             }
 
-            // Execute based on participant count
-            match participants.len() {
-                2 => {
-                    let p0 = participants[0].clone();
-                    let p1 = participants[1].clone();
-                    let ids0 = device_ids.clone();
-                    let ids1 = device_ids.clone();
-                    let t = self.threshold;
+            // Execute DKD for all participants concurrently
+            // Use futures::future::join_all for dynamic participant counts
+            let threshold = self.threshold;
+            let futures: Vec<_> = participants
+                .iter()
+                .map(|participant| {
+                    let p = participant.clone();
+                    let ids = device_ids.clone();
+                    async move {
+                        p.initiate_dkd_with_session(session_id, ids, threshold)
+                            .await
+                    }
+                })
+                .collect();
 
-                    let (r0, r1) = tokio::join!(
-                        async move { p0.initiate_dkd_with_session(session_id, ids0, t).await },
-                        async move { p1.initiate_dkd_with_session(session_id, ids1, t).await }
-                    );
+            let results = futures::future::join_all(futures).await;
 
-                    Ok(vec![r0?, r1?])
-                }
-                3 => {
-                    let p0 = participants[0].clone();
-                    let p1 = participants[1].clone();
-                    let p2 = participants[2].clone();
-                    let ids0 = device_ids.clone();
-                    let ids1 = device_ids.clone();
-                    let ids2 = device_ids.clone();
-                    let t = self.threshold;
-
-                    let (r0, r1, r2) = tokio::join!(
-                        async move { p0.initiate_dkd_with_session(session_id, ids0, t).await },
-                        async move { p1.initiate_dkd_with_session(session_id, ids1, t).await },
-                        async move { p2.initiate_dkd_with_session(session_id, ids2, t).await }
-                    );
-
-                    Ok(vec![r0?, r1?, r2?])
-                }
-                4 => {
-                    let p0 = participants[0].clone();
-                    let p1 = participants[1].clone();
-                    let p2 = participants[2].clone();
-                    let p3 = participants[3].clone();
-                    let ids0 = device_ids.clone();
-                    let ids1 = device_ids.clone();
-                    let ids2 = device_ids.clone();
-                    let ids3 = device_ids.clone();
-                    let t = self.threshold;
-
-                    let (r0, r1, r2, r3) = tokio::join!(
-                        async move { p0.initiate_dkd_with_session(session_id, ids0, t).await },
-                        async move { p1.initiate_dkd_with_session(session_id, ids1, t).await },
-                        async move { p2.initiate_dkd_with_session(session_id, ids2, t).await },
-                        async move { p3.initiate_dkd_with_session(session_id, ids3, t).await }
-                    );
-
-                    Ok(vec![r0?, r1?, r2?, r3?])
-                }
-                5 => {
-                    let p0 = participants[0].clone();
-                    let p1 = participants[1].clone();
-                    let p2 = participants[2].clone();
-                    let p3 = participants[3].clone();
-                    let p4 = participants[4].clone();
-                    let ids0 = device_ids.clone();
-                    let ids1 = device_ids.clone();
-                    let ids2 = device_ids.clone();
-                    let ids3 = device_ids.clone();
-                    let ids4 = device_ids.clone();
-                    let t = self.threshold;
-
-                    let (r0, r1, r2, r3, r4) = tokio::join!(
-                        async move { p0.initiate_dkd_with_session(session_id, ids0, t).await },
-                        async move { p1.initiate_dkd_with_session(session_id, ids1, t).await },
-                        async move { p2.initiate_dkd_with_session(session_id, ids2, t).await },
-                        async move { p3.initiate_dkd_with_session(session_id, ids3, t).await },
-                        async move { p4.initiate_dkd_with_session(session_id, ids4, t).await }
-                    );
-
-                    Ok(vec![r0?, r1?, r2?, r3?, r4?])
-                }
-                n => Err(SimError::RuntimeError(format!(
-                    "Unsupported participant count: {}. Only 2-5 participants supported.",
-                    n
-                ))),
-            }
+            // Collect results, propagating any errors
+            results.into_iter().collect::<Result<Vec<_>>>()
         })
     }
 }
@@ -318,81 +256,38 @@ impl Choreography for ResharingChoreography {
             // Determine new participants (use current participants if none specified)
             let new_participants = self.new_participants.unwrap_or(device_ids.clone());
 
-            // Execute based on participant count
-            match participants.len() {
-                2 => {
-                    let p0 = participants[0].clone();
-                    let p1 = participants[1].clone();
-                    let old_ids0 = device_ids.clone();
-                    let old_ids1 = device_ids.clone();
-                    let new_ids0 = new_participants.clone();
-                    let new_ids1 = new_participants.clone();
-                    let old_t = self.old_threshold;
-                    let new_t = self.new_threshold;
+            // Execute resharing for all participants concurrently
+            let old_threshold = self.old_threshold;
+            let new_threshold = self.new_threshold;
 
-                    let (r0, r1) = tokio::join!(
-                        async move {
-                            p0.initiate_resharing_with_session(
-                                session_id, old_ids0, new_ids0, old_t, new_t,
-                            )
-                            .await
-                        },
-                        async move {
-                            p1.initiate_resharing_with_session(
-                                session_id, old_ids1, new_ids1, old_t, new_t,
-                            )
-                            .await
-                        }
-                    );
+            let futures: Vec<_> = participants
+                .iter()
+                .map(|participant| {
+                    let p = participant.clone();
+                    let old_ids = device_ids.clone();
+                    let new_ids = new_participants.clone();
+                    async move {
+                        p.initiate_resharing_with_session(
+                            session_id,
+                            old_ids,
+                            new_ids,
+                            old_threshold,
+                            new_threshold,
+                        )
+                        .await
+                    }
+                })
+                .collect();
 
-                    r0?;
-                    r1?;
-                    Ok(vec![(), ()])
-                }
-                3 => {
-                    let p0 = participants[0].clone();
-                    let p1 = participants[1].clone();
-                    let p2 = participants[2].clone();
-                    let old_ids0 = device_ids.clone();
-                    let old_ids1 = device_ids.clone();
-                    let old_ids2 = device_ids.clone();
-                    let new_ids0 = new_participants.clone();
-                    let new_ids1 = new_participants.clone();
-                    let new_ids2 = new_participants.clone();
-                    let old_t = self.old_threshold;
-                    let new_t = self.new_threshold;
+            let results = futures::future::join_all(futures).await;
 
-                    let (r0, r1, r2) = tokio::join!(
-                        async move {
-                            p0.initiate_resharing_with_session(
-                                session_id, old_ids0, new_ids0, old_t, new_t,
-                            )
-                            .await
-                        },
-                        async move {
-                            p1.initiate_resharing_with_session(
-                                session_id, old_ids1, new_ids1, old_t, new_t,
-                            )
-                            .await
-                        },
-                        async move {
-                            p2.initiate_resharing_with_session(
-                                session_id, old_ids2, new_ids2, old_t, new_t,
-                            )
-                            .await
-                        }
-                    );
-
-                    r0?;
-                    r1?;
-                    r2?;
-                    Ok(vec![(), (), ()])
-                }
-                n => Err(SimError::RuntimeError(format!(
-                    "Resharing for {} participants not yet implemented",
-                    n
-                ))),
+            // Check all results for errors
+            for result in results {
+                result?;
             }
+
+            // Return success indicators for each participant
+            Ok(vec![(); participants.len()])
         })
     }
 }

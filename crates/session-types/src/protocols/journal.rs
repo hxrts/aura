@@ -171,6 +171,33 @@ define_protocol! {
     }
 }
 
+// ========== Additional Union Methods ==========
+
+impl JournalProtocolState {
+    /// Get the account ID from any state
+    pub fn account_id(&self) -> aura_journal::AccountId {
+        match self {
+            JournalProtocolState::LedgerEmpty(p) => p.inner.account_id,
+            JournalProtocolState::EventWriting(p) => p.inner.account_id,
+            JournalProtocolState::EventValidating(p) => p.inner.account_id,
+            JournalProtocolState::EventApplying(p) => p.inner.account_id,
+            JournalProtocolState::EventsApplied(p) => p.inner.account_id,
+            JournalProtocolState::LedgerCompacting(p) => p.inner.account_id,
+            JournalProtocolState::LedgerOperationFailed(p) => p.inner.account_id,
+            JournalProtocolState::SessionCreating(p) => p.inner.account_id,
+            JournalProtocolState::SessionActive(p) => p.inner.account_id,
+            JournalProtocolState::SessionCompleting(p) => p.inner.account_id,
+            JournalProtocolState::SessionCompleted(p) => p.inner.account_id,
+            JournalProtocolState::SessionTerminated(p) => p.inner.account_id,
+            JournalProtocolState::OperationUnlocked(p) => p.inner.account_id,
+            JournalProtocolState::LockRequesting(p) => p.inner.account_id,
+            JournalProtocolState::JournalOperationLocked(p) => p.inner.account_id,
+            JournalProtocolState::LockReleasing(p) => p.inner.account_id,
+            JournalProtocolState::LockFailed(p) => p.inner.account_id,
+        }
+    }
+}
+
 // ========== Protocol Type Alias ==========
 
 /// Session-typed journal protocol wrapper

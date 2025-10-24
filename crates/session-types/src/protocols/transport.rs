@@ -601,7 +601,7 @@ mod tests {
         assert_eq!(validating.state_name(), "TicketValidating");
 
         let witness = TicketsValidated::verify((my_ticket, peer_ticket), 100).unwrap();
-        let connected = validating.transition_with_witness(witness);
+        let connected = <ChoreographicProtocol<TransportProtocolCore, TicketValidating> as WitnessedTransition<TicketValidating, TransportConnected>>::transition_with_witness(validating, witness);
         assert_eq!(connected.state_name(), "TransportConnected");
     }
 
@@ -625,7 +625,7 @@ mod tests {
 
         let delivery_witness =
             MessageDelivered::verify((message.message_id, message.peer_id), 1100).unwrap();
-        let back_to_connected = sending.transition_with_witness(delivery_witness);
+        let back_to_connected = <ChoreographicProtocol<TransportProtocolCore, MessageSending> as WitnessedTransition<MessageSending, TransportConnected>>::transition_with_witness(sending, delivery_witness);
         assert_eq!(back_to_connected.state_name(), "TransportConnected");
     }
 
@@ -653,7 +653,7 @@ mod tests {
         };
         let completion_witness =
             BroadcastCompleted::verify(result, (broadcast.broadcast_id, 2000)).unwrap();
-        let completed = broadcasting.transition_with_witness(completion_witness);
+        let completed = <ChoreographicProtocol<TransportProtocolCore, Broadcasting> as WitnessedTransition<Broadcasting, TransportConnected>>::transition_with_witness(broadcasting, completion_witness);
         assert_eq!(completed.state_name(), "TransportConnected");
     }
 

@@ -47,7 +47,7 @@ impl IntegratedAgent {
         // Create device key manager for transport authentication
         let mut device_key_manager = aura_crypto::DeviceKeyManager::new(effects.clone());
         device_key_manager.generate_device_key(device_id.0)
-            .map_err(|e| AgentError::CryptoError(format!("Failed to generate device key: {:?}", e)))?;
+            .map_err(|e| AgentError::crypto_operation(format!("Failed to generate device key: {:?}", e)))?;
         
         // Create transport layer  
         let base_transport = Arc::new(aura_transport::StubTransport::new());
@@ -56,7 +56,7 @@ impl IntegratedAgent {
         // Create storage layer
         let storage = CapabilityStorage::new(storage_root, individual_id, effects.clone())
             .await
-            .map_err(|e| AgentError::SerializationError(e.to_string()))?;
+            .map_err(|e| AgentError::serialization(e.to_string()))?;
         
         Ok(Self {
             capability_agent,
@@ -134,7 +134,7 @@ impl IntegratedAgent {
         // Send via transport
         self.transport.send_capability_delegation(delegation, recipients)
             .await
-            .map_err(|e| AgentError::SerializationError(e.to_string()))?;
+            .map_err(|e| AgentError::serialization(e.to_string()))?;
         
         // Sync authority graph across systems
         self.sync_authority_graph().await?;
@@ -160,7 +160,7 @@ impl IntegratedAgent {
         // Send via transport
         self.transport.send_capability_revocation(revocation, recipients)
             .await
-            .map_err(|e| AgentError::SerializationError(e.to_string()))?;
+            .map_err(|e| AgentError::serialization(e.to_string()))?;
         
         // Sync authority graph across systems
         self.sync_authority_graph().await?;
@@ -189,7 +189,7 @@ impl IntegratedAgent {
         // Store using capability storage
         self.storage.store(entry_id, data, content_type, required_scope, acl, attributes, &self.capability_agent.effects)
             .await
-            .map_err(|e| AgentError::SerializationError(e.to_string()))?;
+            .map_err(|e| AgentError::serialization(e.to_string()))?;
         
         info!("Data stored successfully");
         
@@ -202,7 +202,7 @@ impl IntegratedAgent {
         
         let data = self.storage.retrieve(entry_id, &self.capability_agent.effects)
             .await
-            .map_err(|e| AgentError::SerializationError(e.to_string()))?;
+            .map_err(|e| AgentError::serialization(e.to_string()))?;
         
         debug!("Retrieved {} bytes from entry '{}'", data.len(), entry_id);
         
@@ -230,7 +230,7 @@ impl IntegratedAgent {
         
         // Create notification data
         let notification_data = serde_json::to_vec(&format!("MLS group '{}' created", group_id))
-            .map_err(|e| AgentError::SerializationError(e.to_string()))?;
+            .map_err(|e| AgentError::serialization(e.to_string()))?;
         
         self.transport.send_data(
             notification_data,
@@ -238,7 +238,7 @@ impl IntegratedAgent {
             member_scope,
             Some(recipients),
         ).await
-            .map_err(|e| AgentError::SerializationError(e.to_string()))?;
+            .map_err(|e| AgentError::serialization(e.to_string()))?;
         
         // Sync systems
         self.sync_authority_graph().await?;
@@ -315,7 +315,7 @@ impl IntegratedAgent {
     pub async fn get_storage_stats(&self) -> Result<StorageStats, AgentError> {
         let entries = self.storage.list_entries()
             .await
-            .map_err(|e| AgentError::SerializationError(e.to_string()))?;
+            .map_err(|e| AgentError::serialization(e.to_string()))?;
         
         Ok(StorageStats {
             total_entries: entries.len(),

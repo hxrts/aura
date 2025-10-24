@@ -64,12 +64,12 @@ pub mod types;
 pub mod agent;
 /// Credential management and session tickets for agent authentication
 pub mod credential;
+/// Refined error handling with grouped error types
+pub mod error;
 /// Guardian management for account recovery and delegation
 pub mod guardian;
 /// Recovery protocols for restoring access to compromised accounts
 pub mod recovery;
-/// Session-typed agent implementation with protocol safety
-pub mod session_agent;
 
 // New capability-driven agent architecture
 /// Pure capability-driven agent with no external dependencies
@@ -87,107 +87,8 @@ pub use types::*;
 pub use capability_agent::{AgentConfig, CapabilityAgent};
 pub use integrated_agent::{IntegratedAgent, NetworkStats, StorageStats};
 
-// Export session-typed agents
-pub use session_agent::{SessionTypedDeviceAgent, DeviceAgentCompat};
-
-use thiserror::Error;
-
-/// Agent operation errors
-///
-/// Comprehensive error types covering all agent operations including
-/// protocol coordination, capability checking, and integration with
-/// transport and storage layers.
-#[derive(Error, Debug)]
-pub enum AgentError {
-    /// Error in protocol orchestration or coordination
-    #[error("Orchestrator error: {0}")]
-    OrchestratorError(String),
-
-    /// Error in ledger operations or state management
-    #[error("Ledger error: {0}")]
-    LedgerError(String),
-
-    /// Invalid context provided for operation
-    #[error("Invalid context: {0}")]
-    InvalidContext(String),
-
-    /// Invalid credential or signature
-    #[error("Invalid credential: {0}")]
-    InvalidCredential(String),
-
-    /// Deterministic Key Derivation protocol failure
-    #[error("DKD failed: {0}")]
-    DkdFailed(String),
-
-    /// Session epoch mismatch between participants
-    #[error("Session epoch mismatch: {0}")]
-    EpochMismatch(String),
-
-    /// Requested device not found in account
-    #[error("Device not found: {0}")]
-    DeviceNotFound(String),
-
-    /// Data serialization or deserialization failure
-    #[error("Serialization error: {0}")]
-    SerializationError(String),
-
-    /// Cryptographic operation failure
-    #[error("Cryptographic error: {0}")]
-    CryptoError(String),
-
-    /// Feature not yet implemented
-    #[error("Not implemented: {0}")]
-    NotImplemented(String),
-
-    /// System time access or manipulation error
-    #[error("System time error: {0}")]
-    SystemTimeError(String),
-
-    // Capability-specific errors
-    /// Operation requires capability not possessed by agent
-    #[error("Insufficient capability: {0}")]
-    InsufficientCapability(String),
-
-    /// General capability system error
-    #[error("Capability error: {0}")]
-    CapabilityError(String),
-
-    /// Account bootstrap or initialization failure
-    #[error("Bootstrap error: {0}")]
-    BootstrapError(String),
-
-    /// Continuous Group Key Agreement protocol error
-    #[error("CGKA error: {0}")]
-    CgkaError(String),
-
-    // Transport and storage errors
-    /// Network transport layer error
-    #[error("Transport error: {0}")]
-    TransportError(String),
-
-    /// Storage layer operation failure
-    #[error("Storage error: {0}")]
-    StorageError(String),
-
-    /// Network communication error
-    #[error("Network error: {0}")]
-    NetworkError(String),
-}
-
-/// Result type alias for agent operations
-///
-/// Provides a convenient Result<T> that defaults to AgentError for error cases.
-pub type Result<T> = std::result::Result<T, AgentError>;
-
-impl From<aura_crypto::CryptoError> for AgentError {
-    fn from(error: aura_crypto::CryptoError) -> Self {
-        AgentError::CryptoError(format!("Crypto error: {:?}", error))
-    }
-}
-
-// TODO: Re-enable when coordination is fixed
-// impl From<aura_coordination::ProtocolError> for AgentError {
-//     fn from(error: aura_coordination::ProtocolError) -> Self {
-//         AgentError::DkdFailed(format!("Protocol error: {:?}", error))
-//     }
-// }
+// Export error types (both new structured and old compatibility)
+pub use error::{
+    AgentError, CapabilityError, CryptoError, DataError, InfrastructureError, ProtocolError,
+    Result, SystemError,
+};

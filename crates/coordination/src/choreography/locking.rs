@@ -76,7 +76,7 @@ pub async fn locking_choreography(
         let state = ctx.execute(Instruction::GetLedgerState).await?;
         if let InstructionResult::LedgerState(_snapshot) = state {
             let participants = ctx
-                .participants
+                .participants()
                 .iter()
                 .map(|device_id| ParticipantId::Device(*device_id))
                 .collect();
@@ -86,23 +86,23 @@ pub async fn locking_choreography(
                 epoch
             } else {
                 return Err(ProtocolError {
-                    session_id: ctx.session_id,
+                    session_id: ctx.session_id(),
                     error_type: ProtocolErrorType::Other,
                     message: "Failed to get current epoch".to_string(),
                 });
             };
 
             Session::new(
-                SessionId(ctx.session_id),
+                SessionId(ctx.session_id()),
                 ProtocolType::LockAcquisition,
                 participants,
                 current_epoch,
                 10, // Lock acquisition should be fast - 10 epochs TTL
-                ctx.effects.now().unwrap_or(0),
+                ctx.effects().now().unwrap_or(0),
             )
         } else {
             return Err(ProtocolError {
-                session_id: ctx.session_id,
+                session_id: ctx.session_id(),
                 error_type: ProtocolErrorType::Other,
                 message: "Failed to get ledger state".to_string(),
             });
@@ -112,7 +112,7 @@ pub async fn locking_choreography(
     // Step 2: Update Session status to Active
     let mut session_event = Event {
         version: 1,
-        event_id: aura_journal::EventId::new_with_effects(&ctx.effects),
+        event_id: aura_journal::EventId::new_with_effects(ctx.effects()),
         account_id: session
             .participants
             .first()
@@ -124,7 +124,7 @@ pub async fn locking_choreography(
                 _ => None,
             })
             .unwrap_or_else(|| aura_journal::AccountId(uuid::Uuid::new_v4())),
-        timestamp: ctx.effects.now().unwrap_or(0),
+        timestamp: ctx.effects().now().unwrap_or(0),
         nonce: ctx.generate_nonce().await.unwrap_or(0),
         parent_hash: None,
         epoch_at_write: session.started_at,
@@ -133,7 +133,7 @@ pub async fn locking_choreography(
             evidence_hash: [0u8; 32], // Placeholder
         }),
         authorization: EventAuthorization::DeviceCertificate {
-            device_id: aura_journal::DeviceId(ctx.device_id),
+            device_id: aura_journal::DeviceId(ctx.device_id()),
             signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]), // Placeholder
         },
     };
@@ -141,7 +141,7 @@ pub async fn locking_choreography(
     // Sign the event
     let signature = ctx.sign_event(&session_event)?;
     session_event.authorization = EventAuthorization::DeviceCertificate {
-        device_id: aura_journal::DeviceId(ctx.device_id),
+        device_id: aura_journal::DeviceId(ctx.device_id()),
         signature,
     };
 
@@ -159,7 +159,7 @@ pub async fn locking_choreography(
         }
     };
 
-    let my_device_id = aura_journal::DeviceId(ctx.device_id);
+    let my_device_id = aura_journal::DeviceId(ctx.device_id());
     let lottery_ticket = compute_lottery_ticket(&my_device_id, &last_event_hash);
 
     let mut request_event = {
@@ -170,7 +170,7 @@ pub async fn locking_choreography(
                 (snapshot.current_epoch + 1, snapshot.last_event_hash)
             } else {
                 return Err(ProtocolError {
-                    session_id: ctx.session_id,
+                    session_id: ctx.session_id(),
                     error_type: ProtocolErrorType::Other,
                     message: "Failed to get ledger state for event creation".to_string(),
                 });
@@ -178,7 +178,7 @@ pub async fn locking_choreography(
 
         let mut event = Event {
             version: 1,
-            event_id: aura_journal::EventId::new_with_effects(&ctx.effects),
+            event_id: aura_journal::EventId::new_with_effects(ctx.effects()),
             account_id: session
                 .participants
                 .first()
@@ -187,13 +187,13 @@ pub async fn locking_choreography(
                     _ => None,
                 })
                 .unwrap_or_else(|| aura_journal::AccountId(uuid::Uuid::new_v4())),
-            timestamp: ctx.effects.now().unwrap_or(0),
+            timestamp: ctx.effects().now().unwrap_or(0),
             nonce: ctx.generate_nonce().await.unwrap_or(0),
             parent_hash,
             epoch_at_write: current_epoch,
             event_type: EventType::RequestOperationLock(RequestOperationLockEvent {
                 operation_type,
-                session_id: ctx.session_id,
+                session_id: ctx.session_id(),
                 device_id: my_device_id,
                 lottery_ticket,
             }),
@@ -267,7 +267,7 @@ pub async fn locking_choreography(
     let _initial_check = ctx
         .execute(Instruction::CheckForEvent {
             filter: EventFilter {
-                session_id: Some(ctx.session_id),
+                session_id: Some(ctx.session_id()),
                 event_types: Some(vec![EventTypePattern::LockRequest]),
                 authors: Some(std::collections::BTreeSet::from([my_device_id])),
                 predicate: None,
@@ -279,7 +279,7 @@ pub async fn locking_choreography(
     // We need to wait for other participants' lock requests, but we already wrote our own
     // So we need to wait for (participants.len() - 1) more requests + our own = participants.len() total
     let filter = EventFilter {
-        session_id: Some(ctx.session_id),
+        session_id: Some(ctx.session_id()),
         event_types: Some(vec![EventTypePattern::LockRequest]),
         authors: None,
         predicate: None,
@@ -287,7 +287,7 @@ pub async fn locking_choreography(
 
     let threshold_result = ctx
         .execute(Instruction::AwaitThreshold {
-            count: ctx.participants.len(), // Wait for all participants to request
+            count: ctx.participants().len(), // Wait for all participants to request
             filter,
             timeout_epochs: Some(100), // Much longer timeout for debugging coordination issues
         })
@@ -297,7 +297,7 @@ pub async fn locking_choreography(
         events
     } else {
         return Err(ProtocolError {
-            session_id: ctx.session_id,
+            session_id: ctx.session_id(),
             error_type: ProtocolErrorType::Timeout,
             message: "Failed to collect lock requests".to_string(),
         });
@@ -316,7 +316,7 @@ pub async fn locking_choreography(
         .collect();
 
     let winner = determine_lock_winner(&lock_requests).map_err(|e| ProtocolError {
-        session_id: ctx.session_id,
+        session_id: ctx.session_id(),
         error_type: ProtocolErrorType::Other,
         message: format!("Failed to determine lock winner: {:?}", e),
     })?;
@@ -330,7 +330,7 @@ pub async fn locking_choreography(
     if winner == my_device_id {
         // We won! Wait for grant event (this would be threshold signed in practice)
         let _grant_filter = EventFilter {
-            session_id: Some(ctx.session_id),
+            session_id: Some(ctx.session_id()),
             event_types: Some(vec![EventTypePattern::LockGrant]),
             authors: None,
             predicate: None,
@@ -341,7 +341,7 @@ pub async fn locking_choreography(
         let grant_event = {
             let mut event = Event {
                 version: 1,
-                event_id: aura_journal::EventId::new_with_effects(&ctx.effects),
+                event_id: aura_journal::EventId::new_with_effects(ctx.effects()),
                 account_id: session
                     .participants
                     .first()
@@ -352,13 +352,13 @@ pub async fn locking_choreography(
                         _ => None,
                     })
                     .unwrap_or_else(|| aura_journal::AccountId(uuid::Uuid::new_v4())),
-                timestamp: ctx.effects.now().unwrap_or(0),
+                timestamp: ctx.effects().now().unwrap_or(0),
                 nonce: ctx.generate_nonce().await.unwrap_or(0),
                 parent_hash: None,
                 epoch_at_write: session.started_at + 2,
                 event_type: EventType::GrantOperationLock(GrantOperationLockEvent {
                     operation_type,
-                    session_id: ctx.session_id,
+                    session_id: ctx.session_id(),
                     winner_device_id: winner,
                     granted_at_epoch: session.started_at + 2,
                     threshold_signature: aura_journal::ThresholdSig {
@@ -389,7 +389,7 @@ pub async fn locking_choreography(
     } else {
         // We lost the lottery
         Err(ProtocolError {
-            session_id: ctx.session_id,
+            session_id: ctx.session_id(),
             error_type: ProtocolErrorType::Other,
             message: format!("Lock denied - winner was {:?}", winner),
         })
@@ -420,14 +420,14 @@ pub async fn release_lock_choreography(
     use aura_journal::{Event, EventAuthorization, EventType, ReleaseOperationLockEvent};
 
     // Step 1: Create release event
-    let my_device_id = aura_journal::DeviceId(ctx.device_id);
+    let my_device_id = aura_journal::DeviceId(ctx.device_id());
 
     let release_event = {
         let mut event = Event {
             version: 1,
-            event_id: aura_journal::EventId::new_with_effects(&ctx.effects),
+            event_id: aura_journal::EventId::new_with_effects(ctx.effects()),
             account_id: aura_journal::AccountId(uuid::Uuid::new_v4()), // Placeholder
-            timestamp: ctx.effects.now().unwrap_or(0),
+            timestamp: ctx.effects().now().unwrap_or(0),
             nonce: ctx.generate_nonce().await.unwrap_or(0),
             parent_hash: None,
             epoch_at_write: {
@@ -436,7 +436,7 @@ pub async fn release_lock_choreography(
                     epoch
                 } else {
                     return Err(ProtocolError {
-                        session_id: ctx.session_id,
+                        session_id: ctx.session_id(),
                         error_type: ProtocolErrorType::Other,
                         message: "Failed to get current epoch".to_string(),
                     });
@@ -444,7 +444,7 @@ pub async fn release_lock_choreography(
             },
             event_type: EventType::ReleaseOperationLock(ReleaseOperationLockEvent {
                 operation_type,
-                session_id: ctx.session_id,
+                session_id: ctx.session_id(),
                 device_id: my_device_id,
             }),
             authorization: EventAuthorization::DeviceCertificate {

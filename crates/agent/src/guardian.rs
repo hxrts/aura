@@ -8,8 +8,9 @@
 // - Cooldown-based removal with veto capability
 
 use crate::{AgentError, Result};
-use aura_journal::{AccountId, GuardianId};
 use aura_coordination::KeyShare;
+use aura_journal::serialization::{from_cbor_bytes, to_cbor_bytes};
+use aura_journal::{AccountId, GuardianId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -54,19 +55,17 @@ impl InvitationToken {
         let now = effects.now().unwrap_or(0);
         let ttl = ttl_seconds.unwrap_or(24 * 3600); // 24 hours default
         let expires_at = now + ttl;
-        
+
         // Generate 6-digit verification code using effects
         let random_num = effects.random.gen_u64() as u32 % 1_000_000;
         let verification_code = format!("{:06}", random_num);
-        
+
         // Create deep link (aura:// custom scheme)
         let deep_link = format!(
             "aura://guardian/invite?token={}&account={}&code={}",
-            token_id,
-            inviter_account_id.0,
-            verification_code
+            token_id, inviter_account_id.0, verification_code
         );
-        
+
         Ok(InvitationToken {
             token_id,
             inviter_account_id,
@@ -77,46 +76,46 @@ impl InvitationToken {
             verification_code,
         })
     }
-    
+
     /// Check if token is still valid
     pub fn is_valid(&self, effects: &aura_crypto::Effects) -> Result<bool> {
         Ok(effects.now().unwrap_or(0) < self.expires_at)
     }
-    
+
     /// Generate QR code as SVG
     ///
     /// Requires the `qrcode` feature to be enabled.
     #[cfg(feature = "qrcode")]
     pub fn generate_qr_svg(&self) -> Result<String> {
         use qrcode::{render::svg, QrCode};
-        
+
         QrCode::new(&self.deep_link)
-            .map_err(|e| AgentError::DeviceNotFound(format!("QR generation failed: {}", e)))?
+            .map_err(|e| AgentError::device_not_found(format!("QR generation failed: {}", e)))?
             .render::<svg::Color>()
             .min_dimensions(256, 256)
             .dark_color(svg::Color("#000000"))
             .light_color(svg::Color("#FFFFFF"))
             .build()
-            .map_err(|_| AgentError::DeviceNotFound("QR rendering failed".to_string()))
+            .map_err(|_| AgentError::device_not_found("QR rendering failed"))
             .map(|svg| svg.to_string())
     }
-    
+
     /// Generate QR code as PNG bytes
     ///
     /// Requires the `qrcode` feature to be enabled.
     #[cfg(feature = "qrcode")]
     pub fn generate_qr_png(&self) -> Result<Vec<u8>> {
-        use qrcode::QrCode;
         use qrcode::render::png;
-        
+        use qrcode::QrCode;
+
         let code = QrCode::new(&self.deep_link)
-            .map_err(|e| AgentError::DeviceNotFound(format!("QR generation failed: {}", e)))?;
-        
+            .map_err(|e| AgentError::device_not_found(format!("QR generation failed: {}", e)))?;
+
         let image = code
             .render::<png::Renderer>()
             .min_dimensions(256, 256)
             .build();
-        
+
         Ok(image)
     }
 }
@@ -151,9 +150,9 @@ pub enum InvitationStatus {
     /// Waiting for guardian to accept
     Pending,
     /// Guardian accepted, waiting for inviter approval
-    Accepted { 
+    Accepted {
         /// Account ID of the accepting guardian
-        guardian_account_id: AccountId 
+        guardian_account_id: AccountId,
     },
     /// Inviter approved, shares being distributed
     Approved,
@@ -208,38 +207,40 @@ impl RecoverySharePackage {
         effects: &aura_crypto::Effects,
     ) -> Result<Self> {
         use hpke::{
-            aead::AesGcm256,
-            kdf::HkdfSha256,
-            kem::X25519HkdfSha256,
-            Deserializable, Kem, OpModeS, Serializable,
+            aead::AesGcm256, kdf::HkdfSha256, kem::X25519HkdfSha256, Deserializable, Kem, OpModeS,
+            Serializable,
         };
-        
+
         // Serialize the share
-        let plaintext = serde_cbor::to_vec(share)
-            .map_err(|e| AgentError::DeviceNotFound(format!("Share serialization failed: {}", e)))?;
-        
+        let plaintext = to_cbor_bytes(&share).map_err(|e| {
+            AgentError::device_not_found(format!("Share serialization failed: {}", e))
+        })?;
+
         // Additional associated data for authenticated encryption
         let info = format!("aura-guardian-share-v1:{}:{}", guardian_id.0, account_id.0);
         let aad = info.as_bytes();
-        
+
         // Parse guardian's public key
         let recipient_pk = <X25519HkdfSha256 as Kem>::PublicKey::from_bytes(guardian_public_key)
-            .map_err(|e| AgentError::DeviceNotFound(format!("Invalid guardian public key: {:?}", e)))?;
-        
+            .map_err(|e| {
+                AgentError::device_not_found(format!("Invalid guardian public key: {:?}", e))
+            })?;
+
         // Setup HPKE in base mode (sender)
-        let (encapsulated_key, mut sender_ctx) = hpke::setup_sender::<
-            AesGcm256,
-            HkdfSha256,
-            X25519HkdfSha256,
-            _,
-        >(&OpModeS::Base, &recipient_pk, info.as_bytes(), &mut effects.rng())
-            .map_err(|e| AgentError::DeviceNotFound(format!("HPKE setup failed: {:?}", e)))?;
-        
+        let (encapsulated_key, mut sender_ctx) =
+            hpke::setup_sender::<AesGcm256, HkdfSha256, X25519HkdfSha256, _>(
+                &OpModeS::Base,
+                &recipient_pk,
+                info.as_bytes(),
+                &mut effects.rng(),
+            )
+            .map_err(|e| AgentError::device_not_found(format!("HPKE setup failed: {:?}", e)))?;
+
         // Encrypt the share
         let ciphertext = sender_ctx
             .seal(&plaintext, aad)
-            .map_err(|e| AgentError::DeviceNotFound(format!("HPKE seal failed: {:?}", e)))?;
-        
+            .map_err(|e| AgentError::device_not_found(format!("HPKE seal failed: {:?}", e)))?;
+
         Ok(RecoverySharePackage {
             guardian_id,
             account_id,
@@ -250,7 +251,7 @@ impl RecoverySharePackage {
             created_at: effects.now().unwrap_or(0),
         })
     }
-    
+
     /// Decrypt a recovery share using guardian's private key
     ///
     /// # Arguments
@@ -262,39 +263,45 @@ impl RecoverySharePackage {
     /// The decrypted KeyShare, or error if decryption fails
     pub fn unseal_with_guardian_key(&self, guardian_private_key: &[u8]) -> Result<KeyShare> {
         use hpke::{
-            aead::AesGcm256,
-            kdf::HkdfSha256,
-            kem::X25519HkdfSha256,
-            Deserializable, Kem, OpModeR,
+            aead::AesGcm256, kdf::HkdfSha256, kem::X25519HkdfSha256, Deserializable, Kem, OpModeR,
         };
-        
+
         // Additional associated data (must match what was used for sealing)
-        let info = format!("aura-guardian-share-v1:{}:{}", self.guardian_id.0, self.account_id.0);
+        let info = format!(
+            "aura-guardian-share-v1:{}:{}",
+            self.guardian_id.0, self.account_id.0
+        );
         let aad = info.as_bytes();
-        
+
         // Parse keys
         let recipient_sk = <X25519HkdfSha256 as Kem>::PrivateKey::from_bytes(guardian_private_key)
-            .map_err(|e| AgentError::DeviceNotFound(format!("Invalid guardian private key: {:?}", e)))?;
-        
-        let encapsulated_key = <X25519HkdfSha256 as Kem>::EncappedKey::from_bytes(&self.ephemeral_public_key)
-            .map_err(|e| AgentError::DeviceNotFound(format!("Invalid encapsulated key: {:?}", e)))?;
-        
+            .map_err(|e| {
+                AgentError::device_not_found(format!("Invalid guardian private key: {:?}", e))
+            })?;
+
+        let encapsulated_key =
+            <X25519HkdfSha256 as Kem>::EncappedKey::from_bytes(&self.ephemeral_public_key)
+                .map_err(|e| {
+                    AgentError::device_not_found(format!("Invalid encapsulated key: {:?}", e))
+                })?;
+
         // Setup HPKE in base mode (receiver)
-        let mut receiver_ctx = hpke::setup_receiver::<
-            AesGcm256,
-            HkdfSha256,
-            X25519HkdfSha256,
-        >(&OpModeR::Base, &recipient_sk, &encapsulated_key, info.as_bytes())
-            .map_err(|e| AgentError::DeviceNotFound(format!("HPKE setup failed: {:?}", e)))?;
-        
+        let mut receiver_ctx = hpke::setup_receiver::<AesGcm256, HkdfSha256, X25519HkdfSha256>(
+            &OpModeR::Base,
+            &recipient_sk,
+            &encapsulated_key,
+            info.as_bytes(),
+        )
+        .map_err(|e| AgentError::device_not_found(format!("HPKE setup failed: {:?}", e)))?;
+
         // Decrypt the share
         let plaintext = receiver_ctx
             .open(&self.encrypted_share, aad)
-            .map_err(|e| AgentError::DeviceNotFound(format!("HPKE open failed: {:?}", e)))?;
-        
+            .map_err(|e| AgentError::device_not_found(format!("HPKE open failed: {:?}", e)))?;
+
         // Deserialize
-        serde_cbor::from_slice(&plaintext)
-            .map_err(|e| AgentError::DeviceNotFound(format!("Share deserialization failed: {}", e)))
+        from_cbor_bytes(&plaintext)
+            .map_err(|e| AgentError::device_not_found(format!("Share deserialization failed: {}", e)))
     }
 }
 
@@ -316,7 +323,7 @@ impl GuardianManager {
             used_tokens: HashMap::new(),
         }
     }
-    
+
     /// Create a guardian invitation
     ///
     /// # Arguments
@@ -338,18 +345,19 @@ impl GuardianManager {
         effects: &aura_crypto::Effects,
     ) -> Result<GuardianInvitationRequest> {
         let token = InvitationToken::new(inviter_account_id, role, ttl_seconds, effects)?;
-        
+
         let invitation = GuardianInvitationRequest {
             token: token.clone(),
             message,
             status: InvitationStatus::Pending,
         };
-        
-        self.pending_invitations.insert(token.token_id, invitation.clone());
-        
+
+        self.pending_invitations
+            .insert(token.token_id, invitation.clone());
+
         Ok(invitation)
     }
-    
+
     /// Accept a guardian invitation
     ///
     /// Called by the guardian when they scan the QR code or click the deep link.
@@ -372,31 +380,36 @@ impl GuardianManager {
     ) -> Result<GuardianInvitationRequest> {
         // Check if token was already used
         if self.used_tokens.contains_key(&token_id) {
-            return Err(AgentError::DeviceNotFound("Token already used".to_string()));
+            return Err(AgentError::device_not_found("Token already used"));
         }
-        
+
         // Get pending invitation
-        let invitation = self.pending_invitations
+        let invitation = self
+            .pending_invitations
             .get_mut(&token_id)
-            .ok_or_else(|| AgentError::DeviceNotFound("Invitation not found".to_string()))?;
-        
+            .ok_or_else(|| AgentError::device_not_found("Invitation not found"))?;
+
         // Verify token is still valid
         if !invitation.token.is_valid(effects)? {
             invitation.status = InvitationStatus::Expired;
-            return Err(AgentError::DeviceNotFound("Token expired".to_string()));
+            return Err(AgentError::device_not_found("Token expired"));
         }
-        
+
         // Verify code matches
         if invitation.token.verification_code != verification_code {
-            return Err(AgentError::DeviceNotFound("Invalid verification code".to_string()));
+            return Err(AgentError::device_not_found(
+                "Invalid verification code",
+            ));
         }
-        
+
         // Update status to accepted
-        invitation.status = InvitationStatus::Accepted { guardian_account_id };
-        
+        invitation.status = InvitationStatus::Accepted {
+            guardian_account_id,
+        };
+
         Ok(invitation.clone())
     }
-    
+
     /// Approve a guardian invitation
     ///
     /// Called by the inviter after the guardian accepts.
@@ -409,48 +422,55 @@ impl GuardianManager {
     ///
     /// Updated invitation with Approved status
     pub fn approve_invitation(&mut self, token_id: Uuid) -> Result<GuardianInvitationRequest> {
-        let invitation = self.pending_invitations
+        let invitation = self
+            .pending_invitations
             .get_mut(&token_id)
-            .ok_or_else(|| AgentError::DeviceNotFound("Invitation not found".to_string()))?;
-        
+            .ok_or_else(|| AgentError::device_not_found("Invitation not found"))?;
+
         // Can only approve if guardian accepted
         if !matches!(invitation.status, InvitationStatus::Accepted { .. }) {
-            return Err(AgentError::DeviceNotFound("Guardian has not accepted yet".to_string()));
+            return Err(AgentError::device_not_found(
+                "Guardian has not accepted yet",
+            ));
         }
-        
+
         // Update status
         invitation.status = InvitationStatus::Approved;
-        
+
         Ok(invitation.clone())
     }
-    
+
     /// Complete an invitation
     ///
     /// Called after shares are distributed successfully.
-    pub fn complete_invitation(&mut self, token_id: Uuid, effects: &aura_crypto::Effects) -> Result<()> {
-        let invitation = self.pending_invitations
+    pub fn complete_invitation(
+        &mut self,
+        token_id: Uuid,
+        effects: &aura_crypto::Effects,
+    ) -> Result<()> {
+        let invitation = self
+            .pending_invitations
             .get_mut(&token_id)
-            .ok_or_else(|| AgentError::DeviceNotFound("Invitation not found".to_string()))?;
-        
+            .ok_or_else(|| AgentError::device_not_found("Invitation not found"))?;
+
         invitation.status = InvitationStatus::Completed;
-        
+
         // Mark token as used
-        self.used_tokens.insert(token_id, effects.now().unwrap_or(0));
-        
+        self.used_tokens
+            .insert(token_id, effects.now().unwrap_or(0));
+
         // Clean up old tokens (keep last 1000)
         if self.used_tokens.len() > 1000 {
-            let mut tokens: Vec<_> = self.used_tokens.iter()
-                .map(|(id, ts)| (*id, *ts))
-                .collect();
+            let mut tokens: Vec<_> = self.used_tokens.iter().map(|(id, ts)| (*id, *ts)).collect();
             tokens.sort_by_key(|(_, timestamp)| *timestamp);
             if let Some((oldest_token, _)) = tokens.first() {
                 self.used_tokens.remove(oldest_token);
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Cancel an invitation
     pub fn cancel_invitation(&mut self, token_id: Uuid) -> Result<()> {
         if let Some(invitation) = self.pending_invitations.get_mut(&token_id) {
@@ -458,14 +478,13 @@ impl GuardianManager {
         }
         Ok(())
     }
-    
+
     /// Clean up expired invitations
     ///
     /// Should be called periodically to remove stale invitations.
     pub fn cleanup_expired(&mut self, effects: &aura_crypto::Effects) {
-        self.pending_invitations.retain(|_, invitation| {
-            invitation.token.is_valid(effects).unwrap_or(false)
-        });
+        self.pending_invitations
+            .retain(|_, invitation| invitation.token.is_valid(effects).unwrap_or(false));
     }
 }
 
@@ -480,70 +499,70 @@ impl Default for GuardianManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_invitation_token_creation() {
         let effects = aura_crypto::Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
         let effects = aura_crypto::Effects::test();
-        let token = InvitationToken::new(account_id, GuardianRole::Recovery, None, &effects).unwrap();
-        
+        let token =
+            InvitationToken::new(account_id, GuardianRole::Recovery, None, &effects).unwrap();
+
         assert!(token.is_valid(&effects).unwrap());
         assert_eq!(token.verification_code.len(), 6);
         assert!(token.deep_link.starts_with("aura://guardian/invite"));
     }
-    
+
     #[test]
     fn test_guardian_invitation_flow() {
         let effects = aura_crypto::Effects::test();
         let mut manager = GuardianManager::new();
         let inviter_id = AccountId::new_with_effects(&effects);
         let guardian_id = AccountId::new_with_effects(&effects);
-        
+
         // Create invitation
         let invitation = manager
             .create_invitation(inviter_id, GuardianRole::Recovery, None, None, &effects)
             .unwrap();
-        
+
         assert_eq!(invitation.status, InvitationStatus::Pending);
         let token_id = invitation.token.token_id;
         let code = invitation.token.verification_code.clone();
-        
+
         // Guardian accepts
         let accepted = manager
             .accept_invitation(token_id, &code, guardian_id, &effects)
             .unwrap();
-        
+
         assert!(matches!(accepted.status, InvitationStatus::Accepted { .. }));
-        
+
         // Inviter approves
         let approved = manager.approve_invitation(token_id).unwrap();
         assert_eq!(approved.status, InvitationStatus::Approved);
-        
+
         // Complete
         manager.complete_invitation(token_id, &effects).unwrap();
-        
+
         // Cannot reuse token
         let result = manager.accept_invitation(token_id, &code, guardian_id, &effects);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn test_invalid_verification_code() {
         let effects = aura_crypto::Effects::test();
         let mut manager = GuardianManager::new();
         let inviter_id = AccountId::new_with_effects(&effects);
         let guardian_id = AccountId::new_with_effects(&effects);
-        
+
         let invitation = manager
             .create_invitation(inviter_id, GuardianRole::Recovery, None, None, &effects)
             .unwrap();
-        
+
         let token_id = invitation.token.token_id;
-        
+
         // Wrong code should fail
         let result = manager.accept_invitation(token_id, "000000", guardian_id, &effects);
         assert!(result.is_err());
     }
 }
-

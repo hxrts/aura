@@ -5,7 +5,7 @@
 //!
 //! Reference: work/pre_ssb_storage_tests.md - Category 7.1
 
-use aura_crypto::Effects;
+use aura_test_utils::*;
 
 #[cfg(test)]
 mod tests {
@@ -15,7 +15,7 @@ mod tests {
     fn test_deterministic_time() {
         // Create Effects with fixed time (2025-01-01 00:00:00 UTC)
         let initial_time = 1735689600;
-        let effects = Effects::deterministic(42, initial_time);
+        let effects = test_effects_deterministic(42, initial_time);
 
         // Call effects.now() multiple times
         let time1 = effects.now().expect("Getting time should succeed");
@@ -65,7 +65,7 @@ mod tests {
     fn test_deterministic_randomness() {
         // Create Effects with seed 42
         let seed = 42;
-        let effects1 = Effects::deterministic(seed, 0);
+        let effects1 = test_effects_deterministic(seed, 0);
 
         // Generate random bytes twice from first instance
         let bytes1a: [u8; 32] = effects1.random_bytes();
@@ -78,7 +78,7 @@ mod tests {
         );
 
         // Create new Effects with same seed
-        let effects2 = Effects::deterministic(seed, 0);
+        let effects2 = test_effects_deterministic(seed, 0);
 
         // Generate random bytes from second instance
         let bytes2a: [u8; 32] = effects2.random_bytes();
@@ -95,7 +95,7 @@ mod tests {
         );
 
         // Create Effects with different seed
-        let effects3 = Effects::deterministic(999, 0);
+        let effects3 = test_effects_deterministic(999, 0);
         let bytes3: [u8; 32] = effects3.random_bytes();
 
         // Assert: Different seed produces different values
@@ -111,7 +111,7 @@ mod tests {
     fn test_deterministic_uuid_generation() {
         // Create Effects with seed
         let seed = 12345;
-        let effects1 = Effects::deterministic(seed, 0);
+        let effects1 = test_effects_deterministic(seed, 0);
 
         // Generate 10 UUIDs
         let uuids1: Vec<_> = (0..10).map(|_| effects1.gen_uuid()).collect();
@@ -127,7 +127,7 @@ mod tests {
         }
 
         // Recreate Effects with same seed
-        let effects2 = Effects::deterministic(seed, 0);
+        let effects2 = test_effects_deterministic(seed, 0);
 
         // Generate 10 UUIDs
         let uuids2: Vec<_> = (0..10).map(|_| effects2.gen_uuid()).collect();
@@ -142,7 +142,7 @@ mod tests {
         }
 
         // Create Effects with different seed
-        let effects3 = Effects::deterministic(67890, 0);
+        let effects3 = test_effects_deterministic(67890, 0);
         let uuid3 = effects3.gen_uuid();
 
         // Assert: Different seed produces different UUID
@@ -157,12 +157,12 @@ mod tests {
     #[test]
     fn test_effects_test_helper() {
         // Test the convenience test() constructor
-        let effects = Effects::test();
+        let effects = test_effects();
 
         // Should be deterministic (simulated)
         assert!(
             effects.is_simulated(),
-            "Effects::test() should be simulated"
+            "test_effects_test() should be simulated"
         );
 
         // Should have consistent behavior
@@ -172,11 +172,11 @@ mod tests {
 
         // Should produce deterministic randomness
         let random1: [u8; 16] = effects.random_bytes();
-        let effects_test2 = Effects::test();
+        let effects_test2 = test_effects();
         let random2: [u8; 16] = effects_test2.random_bytes();
         assert_eq!(
             random1, random2,
-            "Effects::test() should use same default seed"
+            "test_effects_test() should use same default seed"
         );
 
         println!("✓ test_effects_test_helper PASSED");
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn test_effects_production_is_not_simulated() {
         // Production effects should NOT be simulated
-        let effects = Effects::production();
+        let effects = test_effects_production();
 
         assert!(
             !effects.is_simulated(),
@@ -219,8 +219,8 @@ mod tests {
     #[test]
     fn test_effects_for_test_isolation() {
         // Create effects for two different test names
-        let effects_a = Effects::for_test("test_a");
-        let effects_b = Effects::for_test("test_b");
+        let effects_a = test_effects_named("test_a");
+        let effects_b = test_effects_named("test_b");
 
         // Generate random bytes from each
         let random_a: [u8; 32] = effects_a.random_bytes();
@@ -234,7 +234,7 @@ mod tests {
         );
 
         // Same test name should produce same randomness
-        let effects_a2 = Effects::for_test("test_a");
+        let effects_a2 = test_effects_named("test_a");
         let random_a2: [u8; 32] = effects_a2.random_bytes();
         assert_eq!(
             random_a, random_a2,
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn test_fill_random_buffer() {
-        let effects = Effects::deterministic(777, 0);
+        let effects = test_effects_deterministic(777, 0);
 
         // Fill a buffer with random bytes
         let mut buffer1 = vec![0u8; 64];
@@ -260,7 +260,7 @@ mod tests {
         );
 
         // Create new effects with same seed
-        let effects2 = Effects::deterministic(777, 0);
+        let effects2 = test_effects_deterministic(777, 0);
         let mut buffer2 = vec![0u8; 64];
         effects2.fill_random(&mut buffer2);
 
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_gen_session_id_deterministic() {
-        let effects = Effects::deterministic(888, 0);
+        let effects = test_effects_deterministic(888, 0);
 
         // Generate session IDs
         let session1 = effects.gen_session_id();
@@ -285,7 +285,7 @@ mod tests {
         assert_ne!(session1, session2, "Session IDs should be unique");
 
         // Recreate with same seed
-        let effects2 = Effects::deterministic(888, 0);
+        let effects2 = test_effects_deterministic(888, 0);
         let session1_replay = effects2.gen_session_id();
         let session2_replay = effects2.gen_session_id();
 

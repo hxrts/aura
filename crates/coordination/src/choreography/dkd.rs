@@ -43,20 +43,20 @@ impl<'a> SessionLifecycle for DkdProtocol<'a> {
         let ledger_context = self.ctx.fetch_ledger_context().await?;
         
         // Convert participants to session participants
-        let session_participants: Vec<JournalParticipantId> = self.ctx.participants
+        let session_participants: Vec<JournalParticipantId> = self.ctx.participants()
             .iter()
             .map(|&device_id| JournalParticipantId::Device(device_id))
             .collect();
 
         // Create DKD session
         Ok(Session::new(
-            aura_journal::SessionId(self.ctx.session_id),
+            aura_journal::SessionId(self.ctx.session_id()),
             ProtocolType::Dkd,
             session_participants,
             ledger_context.epoch,
             50, // TTL in epochs - DKD is relatively quick
-            self.ctx.effects.now().map_err(|e| ProtocolError {
-                session_id: self.ctx.session_id,
+            self.ctx.effects().now().map_err(|e| ProtocolError {
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::Other,
                 message: format!("Failed to get timestamp: {:?}", e),
             })?,
@@ -66,10 +66,10 @@ impl<'a> SessionLifecycle for DkdProtocol<'a> {
     async fn execute_protocol(&mut self, _session: &Session) -> Result<Vec<u8>, ProtocolError> {
         // Phase 0: Initiate Session
         let start_epoch = self.ctx.fetch_ledger_context().await?.epoch;
-        let session_id = self.ctx.session_id;
+        let session_id = self.ctx.session_id();
         let context_id = self.context_id.clone();
-        let threshold = self.ctx.threshold.unwrap() as u16;
-        let participants = self.ctx.participants.clone();
+        let threshold = self.ctx.threshold().unwrap() as u16;
+        let participants = self.ctx.participants().clone();
         
         EventBuilder::new(self.ctx)
             .with_type(EventType::InitiateDkdSession(InitiateDkdSessionEvent {
@@ -87,8 +87,8 @@ impl<'a> SessionLifecycle for DkdProtocol<'a> {
         // Phase 1: Commitment Phase
         let (our_commitment, mut dkd_participant) = self.generate_commitment();
 
-        let session_id = self.ctx.session_id;
-        let device_id = self.ctx.device_id;
+        let session_id = self.ctx.session_id();
+        let device_id = self.ctx.device_id();
         EventBuilder::new(self.ctx)
             .with_type(EventType::RecordDkdCommitment(RecordDkdCommitmentEvent {
                 session_id,
@@ -100,8 +100,8 @@ impl<'a> SessionLifecycle for DkdProtocol<'a> {
             .await?;
 
         // Wait for threshold commitments
-        let session_id = self.ctx.session_id;
-        let threshold = self.ctx.threshold.unwrap();
+        let session_id = self.ctx.session_id();
+        let threshold = self.ctx.threshold().unwrap();
         let peer_commitments = EventAwaiter::new(self.ctx)
             .for_session(session_id)
             .for_event_types(vec![EventTypePattern::DkdCommitment])
@@ -111,8 +111,8 @@ impl<'a> SessionLifecycle for DkdProtocol<'a> {
         // Phase 2: Reveal Phase
         let our_point = dkd_participant.revealed_point();
 
-        let session_id = self.ctx.session_id;
-        let device_id = self.ctx.device_id;
+        let session_id = self.ctx.session_id();
+        let device_id = self.ctx.device_id();
         EventBuilder::new(self.ctx)
             .with_type(EventType::RevealDkdPoint(RevealDkdPointEvent {
                 session_id,
@@ -135,7 +135,7 @@ impl<'a> SessionLifecycle for DkdProtocol<'a> {
             .collect();
 
         // Wait for reveals from all committed participants
-        let session_id = self.ctx.session_id;
+        let session_id = self.ctx.session_id();
         let peer_reveals = EventAwaiter::new(self.ctx)
             .for_session(session_id)
             .for_event_types(vec![EventTypePattern::DkdReveal])
@@ -175,7 +175,7 @@ impl<'a> SessionLifecycle for DkdProtocol<'a> {
             *hasher.finalize().as_bytes()
         };
 
-        let session_id = self.ctx.session_id;
+        let session_id = self.ctx.session_id();
         EventBuilder::new(self.ctx)
             .with_type(EventType::FinalizeDkdSession(FinalizeDkdSessionEvent {
                 session_id,
@@ -203,7 +203,7 @@ impl<'a> SessionLifecycle for DkdProtocol<'a> {
         match &finalize_event.event_type {
             EventType::FinalizeDkdSession(finalize) => Ok(finalize.derived_identity_pk.clone()),
             _ => Err(ProtocolError {
-                session_id: self.ctx.session_id,
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::InvalidState,
                 message: "Expected DKD finalize event".to_string(),
             }),
@@ -216,8 +216,10 @@ impl<'a> DkdProtocol<'a> {
     fn generate_commitment(&self) -> ([u8; 32], DkdParticipant) {
         // Mix session ID with device ID for unique but deterministic shares
         let mut share_bytes = [0u8; 16];
-        let session_bytes = self.ctx.session_id.as_bytes();
-        let device_bytes = self.ctx.device_id.as_bytes();
+        let session_id = self.ctx.session_id();
+        let session_bytes = session_id.as_bytes();
+        let device_id = self.ctx.device_id();
+        let device_bytes = device_id.as_bytes();
 
         // XOR session ID with device ID
         for i in 0..16 {
@@ -251,7 +253,7 @@ impl<'a> DkdProtocol<'a> {
 
             if commitment.is_none() {
                 return Err(ProtocolError {
-                    session_id: self.ctx.session_id,
+                    session_id: self.ctx.session_id(),
                     error_type: ProtocolErrorType::ByzantineBehavior,
                     message: format!("Reveal from {:?} without commitment", reveal_author.0),
                 });
@@ -265,7 +267,7 @@ impl<'a> DkdProtocol<'a> {
                 aura_journal::EventType::RecordDkdCommitment(event) => event.commitment,
                 _ => {
                     return Err(ProtocolError {
-                        session_id: self.ctx.session_id,
+                        session_id: self.ctx.session_id(),
                         error_type: ProtocolErrorType::ByzantineBehavior,
                         message: format!("Invalid commitment event type from {:?}", reveal_author.0),
                     });
@@ -276,7 +278,7 @@ impl<'a> DkdProtocol<'a> {
                 aura_journal::EventType::RevealDkdPoint(event) => &event.point,
                 _ => {
                     return Err(ProtocolError {
-                        session_id: self.ctx.session_id,
+                        session_id: self.ctx.session_id(),
                         error_type: ProtocolErrorType::ByzantineBehavior,
                         message: format!("Invalid reveal event type from {:?}", reveal_author.0),
                     });
@@ -287,7 +289,7 @@ impl<'a> DkdProtocol<'a> {
             let calculated_hash = *blake3::hash(reveal_point).as_bytes();
             if calculated_hash != commitment_hash {
                 return Err(ProtocolError {
-                    session_id: self.ctx.session_id,
+                    session_id: self.ctx.session_id(),
                     error_type: ProtocolErrorType::ByzantineBehavior,
                     message: format!(
                         "Reveal from {:?} does not match commitment: expected {:?}, got {:?}",
@@ -316,7 +318,7 @@ impl<'a> DkdProtocol<'a> {
                 if let aura_journal::EventAuthorization::DeviceCertificate { device_id, .. } =
                     &e.authorization
                 {
-                    if device_id.0 == self.ctx.device_id {
+                    if device_id.0 == self.ctx.device_id() {
                         return None;
                     }
                 }
@@ -340,7 +342,7 @@ impl<'a> DkdProtocol<'a> {
         revealed_points.sort();
 
         aggregate_dkd_points(&revealed_points).map_err(|e| ProtocolError {
-            session_id: self.ctx.session_id,
+            session_id: self.ctx.session_id(),
             error_type: ProtocolErrorType::Other,
             message: format!("Failed to aggregate points: {:?}", e),
         })
@@ -411,7 +413,7 @@ mod tests {
         );
 
         // Verify context is set up correctly
-        assert_eq!(ctx.session_id, session_id);
-        assert_eq!(ctx.threshold, Some(2));
+        assert_eq!(ctx.session_id(), session_id);
+        assert_eq!(ctx.threshold(), Some(2));
     }
 }

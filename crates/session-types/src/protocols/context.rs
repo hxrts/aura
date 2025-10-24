@@ -145,6 +145,21 @@ impl<S: SessionState> ChoreographicProtocol<ProtocolContextCore, S> {
     pub fn protocol_type(&self) -> ProtocolType {
         self.core().protocol_type
     }
+    
+    /// Get the protocol ID (alias for context_id for compatibility)
+    pub fn protocol_id(&self) -> Uuid {
+        self.context_id()
+    }
+    
+    /// Get the device ID
+    pub fn device_id(&self) -> aura_journal::DeviceId {
+        self.core().device_id
+    }
+    
+    /// Check if the protocol can terminate (final states only)
+    pub fn can_terminate(&self) -> bool {
+        S::IS_FINAL
+    }
 }
 
 // ========== Runtime Witnesses for Context Operations ==========
@@ -462,7 +477,7 @@ mod tests {
         let context_id = effects.gen_uuid();
         let session_id = effects.gen_uuid();
         let device_id = DeviceId::new_with_effects(&effects);
-        let protocol_type = ProtocolType::DkdSession;
+        let protocol_type = ProtocolType::Dkd;
         
         // Test basic state transitions
         let session_context = new_session_typed_context(context_id, session_id, device_id, protocol_type);
@@ -502,7 +517,7 @@ mod tests {
         let context_id = effects.gen_uuid();
         let session_id = effects.gen_uuid();
         let device_id = DeviceId::new_with_effects(&effects);
-        let protocol_type = ProtocolType::DkdSession;
+        let protocol_type = ProtocolType::Dkd;
         
         // Test rehydration without last instruction
         let state = rehydrate_context_session(context_id, session_id, device_id, protocol_type, None);
@@ -517,7 +532,7 @@ mod tests {
         let context_id = effects.gen_uuid();
         let session_id = effects.gen_uuid();
         let device_id = DeviceId::new_with_effects(&effects);
-        let protocol_type = ProtocolType::DkdSession;
+        let protocol_type = ProtocolType::Dkd;
         
         let session_context = new_session_typed_context(context_id, session_id, device_id, protocol_type);
         let executing_context = session_context.begin_execution();
@@ -529,8 +544,11 @@ mod tests {
             1,
             None,
             0,
-            aura_journal::EventType::SetEpoch(aura_journal::SetEpochEvent { new_epoch: 1 }),
-            aura_journal::EventAuthorization {
+            aura_journal::EventType::EpochTick(aura_journal::events::EpochTickEvent { 
+                new_epoch: 1,
+                evidence_hash: [0u8; 32],
+            }),
+            aura_journal::EventAuthorization::DeviceCertificate {
                 device_id,
                 signature: dummy_signature,
             },
@@ -556,7 +574,7 @@ mod tests {
         let context_id = effects.gen_uuid();
         let session_id = effects.gen_uuid();
         let device_id = DeviceId::new_with_effects(&effects);
-        let protocol_type = ProtocolType::DkdSession;
+        let protocol_type = ProtocolType::Dkd;
         
         let state = rehydrate_context_session(context_id, session_id, device_id, protocol_type, None);
         

@@ -1,6 +1,7 @@
 // Object manifest system with inline metadata
 
 use crate::{encryption::KeyEnvelope, Result, StorageError};
+use aura_journal::serialization::to_cbor_bytes;
 use aura_journal::Cid;
 use serde::{Deserialize, Serialize};
 
@@ -15,17 +16,17 @@ pub struct ObjectManifest {
     pub chunking: ChunkingParams,
     /// Erasure coding (None for MVP)
     pub erasure: Option<ErasureMeta>,
-    
+
     /// Context ID for derived identity
     pub context_id: Option<[u8; 32]>,
     /// Application metadata (max 4 KiB recommended)
     pub app_metadata: Option<Vec<u8>>,
-    
+
     /// Encryption key envelope
     pub key_envelope: KeyEnvelope,
     /// Authorization token reference (capability)
     pub auth_token_ref: Option<Cid>,
-    
+
     /// Replication hint
     pub replication_hint: ReplicationHint,
     /// Version number
@@ -41,7 +42,7 @@ pub struct ObjectManifest {
 impl ObjectManifest {
     /// Compute manifest CID
     pub fn compute_cid(&self) -> Result<Cid> {
-        let bytes = serde_cbor::to_vec(self)
+        let bytes = to_cbor_bytes(self)
             .map_err(|e| StorageError::Storage(format!("Failed to serialize manifest: {}", e)))?;
         Ok(Cid::from_bytes(&bytes))
     }
@@ -59,7 +60,7 @@ pub struct ChunkingParams {
 impl ChunkingParams {
     pub const DEFAULT_CHUNK_SIZE: u32 = 1 * 1024 * 1024; // 1 MiB
     pub const MAX_CHUNK_SIZE: u32 = 4 * 1024 * 1024; // 4 MiB
-    
+
     pub fn new(total_size: u64) -> Self {
         let chunk_size = Self::DEFAULT_CHUNK_SIZE;
         let num_chunks = ((total_size + chunk_size as u64 - 1) / chunk_size as u64) as u32;
@@ -144,9 +145,8 @@ mod tests {
             issued_at_ms: 0,
             nonce: [0u8; 32],
         };
-        
+
         let cid = manifest.compute_cid().unwrap();
         assert!(!cid.0.is_empty());
     }
 }
-

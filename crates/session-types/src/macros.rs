@@ -578,7 +578,6 @@ macro_rules! define_protocol {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     // Test define_session_states! macro
     mod test_states {
@@ -666,7 +665,7 @@ mod tests {
 
     // Test define_session_union! macro
     mod test_union {
-        use crate::core::{ChoreographicProtocol, SessionState};
+        use crate::core::{ChoreographicProtocol, SessionState, SessionProtocol};
         use uuid::Uuid;
 
         #[derive(Debug, Clone)]
@@ -679,6 +678,22 @@ mod tests {
             UnionState1,
             UnionState2,
             UnionState3 @ final,
+        }
+
+        #[derive(Debug)]
+        pub enum UnionTestError {
+            Failed,
+        }
+
+        impl_session_protocol! {
+            for UnionTestProtocol<Core = UnionTestCore, Error = UnionTestError> {
+                UnionState1 => (),
+                UnionState2 => String,
+                UnionState3 => Vec<u8>,
+            }
+
+            session_id: |core| core.session_id,
+            device_id: |core| core.device_id,
         }
 
         define_session_union! {
@@ -718,6 +733,7 @@ mod tests {
 
     // Test complete protocol definition macro
     mod test_complete_protocol {
+        use crate::core::{SessionState, SessionProtocol};
         use uuid::Uuid;
 
         #[derive(Debug, Clone)]

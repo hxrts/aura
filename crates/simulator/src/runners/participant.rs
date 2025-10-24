@@ -8,12 +8,12 @@ use crate::{
     Effect, EffectContext, EffectSink, Interceptors, Operation, ParticipantId, Result, SimError,
     SimulatedTransport, Tick,
 };
-use aura_coordination::{dkd::dkd_choreography, resharing::resharing_choreography};
-use aura_coordination::{ProtocolContext, ProtocolError};
+use aura_coordination::choreography::{dkd_choreography, resharing_choreography};
+use aura_coordination::execution::{ProtocolContext, ProtocolError};
 use aura_coordination::execution::{SimulatedTimeSource, SimulationScheduler};
+use aura_coordination::Transport;
 use aura_crypto::Effects;
 use aura_journal::{AccountLedger, DeviceId};
-use aura_coordination::Transport;
 use ed25519_dalek::SigningKey;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -332,7 +332,9 @@ impl SimulatedParticipant {
         })?;
 
         if let Some(device_id) = new_device_id {
-            ctx.new_device_id = Some(device_id);
+            ctx.set_new_device_id(device_id).map_err(|e| {
+                SimError::RuntimeError(format!("Failed to set new device ID: {:?}", e))
+            })?;
         }
 
         aura_coordination::choreography::recovery_choreography(
@@ -373,7 +375,9 @@ impl SimulatedParticipant {
         })?;
 
         if let Some(device_id) = new_device_id {
-            ctx.new_device_id = Some(device_id);
+            ctx.set_new_device_id(device_id).map_err(|e| {
+                SimError::RuntimeError(format!("Failed to set new device ID: {:?}", e))
+            })?;
         }
 
         aura_coordination::choreography::recovery_choreography(
@@ -585,7 +589,10 @@ mod tests {
             presence_tickets: BTreeMap::new(),
             cooldowns: BTreeMap::new(),
             authority_graph: aura_journal::capability::authority_graph::AuthorityGraph::new(),
-            visibility_index: aura_journal::capability::visibility::VisibilityIndex::new(aura_journal::capability::authority_graph::AuthorityGraph::new(), &effects),
+            visibility_index: aura_journal::capability::visibility::VisibilityIndex::new(
+                aura_journal::capability::authority_graph::AuthorityGraph::new(),
+                &effects,
+            ),
             threshold: 1,
             total_participants: 1,
             used_nonces: BTreeSet::new(),

@@ -3,8 +3,8 @@
 // Commands for permission management, capability delegation, and access control.
 // These commands handle "what you can do" concerns.
 
+use crate::commands::common;
 use crate::config::Config;
-use aura_agent::IntegratedAgent;
 use clap::Subcommand;
 use tracing::info;
 
@@ -86,14 +86,7 @@ pub enum AuthzCommand {
 }
 
 pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> anyhow::Result<()> {
-    let device_id = config.device_id;
-    let account_id = config.account_id;
-    let storage_root = config.data_dir.join("storage");
-    let effects = aura_crypto::Effects::test(); // Use test effects for CLI
-    
-    let agent = IntegratedAgent::new(device_id, account_id, storage_root, effects)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create agent: {}", e))?;
+    let agent = common::create_agent(config).await?;
     
     match command {
         AuthzCommand::List => {

@@ -54,7 +54,7 @@ impl<'a> EventBuilder<'a> {
     /// Build and sign the event
     pub async fn build_and_sign(self) -> Result<Event, ProtocolError> {
         let event_type = self.event_type.ok_or_else(|| ProtocolError {
-            session_id: self.ctx.session_id,
+            session_id: self.ctx.session_id(),
             error_type: ProtocolErrorType::Other,
             message: "Event type must be specified".to_string(),
         })?;
@@ -65,10 +65,10 @@ impl<'a> EventBuilder<'a> {
         // Build base event
         let mut event = Event {
             version: aura_journal::EVENT_VERSION,
-            event_id: EventId::new_with_effects(&self.ctx.effects),
+            event_id: EventId::new_with_effects(self.ctx.effects()),
             account_id: ledger_context.account_id,
-            timestamp: self.ctx.effects.now().map_err(|e| ProtocolError {
-                session_id: self.ctx.session_id,
+            timestamp: self.ctx.effects().now().map_err(|e| ProtocolError {
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::Other,
                 message: format!("Failed to get timestamp: {:?}", e),
             })?,
@@ -84,7 +84,7 @@ impl<'a> EventBuilder<'a> {
                 })
             } else {
                 EventAuthorization::DeviceCertificate {
-                    device_id: DeviceId(self.ctx.device_id),
+                    device_id: DeviceId(self.ctx.device_id()),
                     signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]),
                 }
             },
@@ -111,12 +111,12 @@ impl<'a> EventBuilder<'a> {
 
     /// Build, sign, and emit the event
     pub async fn build_sign_and_emit(mut self) -> Result<(), ProtocolError> {
-        let session_id = self.ctx.session_id;
+        let session_id = self.ctx.session_id();
         
         // Build and sign the event
         let event = {
             let event_type = self.event_type.take().ok_or_else(|| ProtocolError {
-                session_id: self.ctx.session_id,
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::Other,
                 message: "Event type must be specified".to_string(),
             })?;
@@ -127,10 +127,10 @@ impl<'a> EventBuilder<'a> {
             // Build base event
             let mut event = Event {
                 version: aura_journal::EVENT_VERSION,
-                event_id: EventId::new_with_effects(&self.ctx.effects),
+                event_id: EventId::new_with_effects(self.ctx.effects()),
                 account_id: ledger_context.account_id,
-                timestamp: self.ctx.effects.now().map_err(|e| ProtocolError {
-                    session_id: self.ctx.session_id,
+                timestamp: self.ctx.effects().now().map_err(|e| ProtocolError {
+                    session_id: self.ctx.session_id(),
                     error_type: ProtocolErrorType::Other,
                     message: format!("Failed to get timestamp: {:?}", e),
                 })?,
@@ -146,7 +146,7 @@ impl<'a> EventBuilder<'a> {
                     })
                 } else {
                     EventAuthorization::DeviceCertificate {
-                        device_id: DeviceId(self.ctx.device_id),
+                        device_id: DeviceId(self.ctx.device_id()),
                         signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]),
                     }
                 },
@@ -241,7 +241,7 @@ impl<'a> EventAwaiter<'a> {
         {
             InstructionResult::EventReceived(event) => Ok(event),
             _ => Err(ProtocolError {
-                session_id: self.ctx.session_id,
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::Timeout,
                 message: "Timeout waiting for event".to_string(),
             }),
@@ -272,7 +272,7 @@ impl<'a> EventAwaiter<'a> {
         {
             InstructionResult::EventsReceived(events) => Ok(events),
             _ => Err(ProtocolError {
-                session_id: self.ctx.session_id,
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::Timeout,
                 message: format!("Timeout waiting for {} events", count),
             }),
@@ -293,20 +293,21 @@ pub struct LedgerContext {
 /// Extension trait for ProtocolContext
 pub trait ProtocolContextExt {
     /// Fetch all commonly needed ledger values in one call
-    async fn fetch_ledger_context(&mut self) -> Result<LedgerContext, ProtocolError>;
+    fn fetch_ledger_context(&mut self) -> impl std::future::Future<Output = Result<LedgerContext, ProtocolError>> + Send;
     
     /// Generate a new nonce
-    async fn generate_nonce(&mut self) -> Result<u64, ProtocolError>;
+    fn generate_nonce(&mut self) -> impl std::future::Future<Output = Result<u64, ProtocolError>> + Send;
 }
 
 impl ProtocolContextExt for ProtocolContext {
-    async fn fetch_ledger_context(&mut self) -> Result<LedgerContext, ProtocolError> {
+    fn fetch_ledger_context(&mut self) -> impl std::future::Future<Output = Result<LedgerContext, ProtocolError>> + Send {
+        async move {
         // Get ledger state
         let ledger_state = match self.execute(Instruction::GetLedgerState).await? {
             InstructionResult::LedgerState(state) => state,
             _ => {
                 return Err(ProtocolError {
-                    session_id: self.session_id,
+                    session_id: self.session_id(),
                     error_type: ProtocolErrorType::InvalidState,
                     message: "Expected ledger state".to_string(),
                 })
@@ -318,7 +319,7 @@ impl ProtocolContextExt for ProtocolContext {
             InstructionResult::CurrentEpoch(e) => e,
             _ => {
                 return Err(ProtocolError {
-                    session_id: self.session_id,
+                    session_id: self.session_id(),
                     error_type: ProtocolErrorType::InvalidState,
                     message: "Expected current epoch".to_string(),
                 })
@@ -331,21 +332,24 @@ impl ProtocolContextExt for ProtocolContext {
             parent_hash: ledger_state.last_event_hash,
             epoch,
         })
+        }
     }
 
-    async fn generate_nonce(&mut self) -> Result<u64, ProtocolError> {
-        let ledger_state = match self.execute(Instruction::GetLedgerState).await? {
-            InstructionResult::LedgerState(state) => state,
-            _ => {
-                return Err(ProtocolError {
-                    session_id: self.session_id,
-                    error_type: ProtocolErrorType::InvalidState,
-                    message: "Expected ledger state".to_string(),
-                })
-            }
-        };
+    fn generate_nonce(&mut self) -> impl std::future::Future<Output = Result<u64, ProtocolError>> + Send {
+        async move {
+            let ledger_state = match self.execute(Instruction::GetLedgerState).await? {
+                InstructionResult::LedgerState(state) => state,
+                _ => {
+                    return Err(ProtocolError {
+                        session_id: self.session_id(),
+                        error_type: ProtocolErrorType::InvalidState,
+                        message: "Expected ledger state".to_string(),
+                    })
+                }
+            };
 
-        Ok(ledger_state.next_nonce)
+            Ok(ledger_state.next_nonce)
+        }
     }
 }
 
@@ -443,7 +447,7 @@ pub async fn run_session_protocol<P: SessionLifecycle + Send>(
             winner,
         } => {
             // If there are existing sessions and we didn't win the lottery, wait for winner
-            if !existing_sessions.is_empty() && winner != Some(DeviceId(ctx.device_id)) {
+            if !existing_sessions.is_empty() && winner != Some(DeviceId(ctx.device_id())) {
                 // Wait for the winning session to complete
                 if let Some(winning_session) = existing_sessions.first() {
                     return protocol.wait_for_completion(winning_session).await;
@@ -453,7 +457,7 @@ pub async fn run_session_protocol<P: SessionLifecycle + Send>(
         }
         _ => {
             return Err(ProtocolError {
-                session_id: ctx.session_id,
+                session_id: ctx.session_id(),
                 error_type: ProtocolErrorType::Other,
                 message: "Unexpected result from collision check".to_string(),
             })

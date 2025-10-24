@@ -97,7 +97,7 @@ impl InvitationMethod for QrCodeInvitation {
         use qrcode::{render::svg, QrCode};
         
         let svg_string = QrCode::new(&invitation_data.deep_link)
-            .map_err(|e| crate::AgentError::DeviceNotFound(format!("QR generation failed: {}", e)))?
+            .map_err(|e| crate::AgentError::device_not_found(format!("QR generation failed: {}", e)))?
             .render::<svg::Color>()
             .min_dimensions(self.min_size, self.min_size)
             .dark_color(svg::Color(&self.dark_color))

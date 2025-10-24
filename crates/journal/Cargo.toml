@@ -21,6 +21,7 @@ automerge = { workspace = true }
 # Cryptography
 ed25519-dalek = { workspace = true }
 blake3 = { workspace = true }
+frost-ed25519 = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -40,6 +41,7 @@ rand = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
+aura-test-utils = { path = "../test-utils" }
 tokio-test = "0.4"
 rand_chacha = { workspace = true }
 proptest = { workspace = true }

@@ -47,10 +47,10 @@ impl<'a> SessionLifecycle for ResharingProtocol<'a> {
     fn generate_context_id(&self) -> Vec<u8> {
         format!(
             "resharing:{}:{:?}",
-            self.new_threshold.unwrap_or(self.ctx.threshold.unwrap_or(2) as u16),
+            self.new_threshold.unwrap_or(self.ctx.threshold().unwrap_or(2) as u16),
             self.new_participants
                 .as_ref()
-                .unwrap_or(&self.ctx.participants)
+                .unwrap_or(self.ctx.participants())
         )
         .into_bytes()
     }
@@ -61,20 +61,20 @@ impl<'a> SessionLifecycle for ResharingProtocol<'a> {
         // Convert participants to session participants
         let session_participants: Vec<JournalParticipantId> = self
             .ctx
-            .participants
+            .participants()
             .iter()
             .map(|&device_id| JournalParticipantId::Device(device_id))
             .collect();
 
         // Create Resharing session
         Ok(Session::new(
-            aura_journal::SessionId(self.ctx.session_id),
+            aura_journal::SessionId(self.ctx.session_id()),
             ProtocolType::Resharing,
             session_participants,
             ledger_context.epoch,
             100, // TTL in epochs
-            self.ctx.effects.now().map_err(|e| ProtocolError {
-                session_id: self.ctx.session_id,
+            self.ctx.effects().now().map_err(|e| ProtocolError {
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::Other,
                 message: format!("Failed to get timestamp: {:?}", e),
             })?,
@@ -83,20 +83,20 @@ impl<'a> SessionLifecycle for ResharingProtocol<'a> {
 
     async fn execute_protocol(&mut self, _session: &Session) -> Result<Vec<u8>, ProtocolError> {
         // Get current participants and new configuration
-        let participants = self.ctx.participants.clone();
+        let participants = self.ctx.participants().clone();
         let new_participants = self
             .new_participants
             .clone()
             .unwrap_or_else(|| participants.clone());
         let new_threshold = self
             .new_threshold
-            .unwrap_or(self.ctx.threshold.unwrap_or(2) as u16);
+            .unwrap_or(self.ctx.threshold().unwrap_or(2) as u16);
 
         // Phase 1: Initiate Resharing (only coordinator)
-        if participants.first() == Some(&DeviceId(self.ctx.device_id)) {
+        if participants.first() == Some(&DeviceId(self.ctx.device_id())) {
             let start_epoch = self.ctx.fetch_ledger_context().await?.epoch;
-            let session_id = self.ctx.session_id;
-            let old_threshold = self.ctx.threshold.unwrap_or(2) as u16;
+            let session_id = self.ctx.session_id();
+            let old_threshold = self.ctx.threshold().unwrap_or(2) as u16;
 
             EventBuilder::new(self.ctx)
                 .with_type(EventType::InitiateResharing(InitiateResharingEvent {
@@ -114,7 +114,7 @@ impl<'a> SessionLifecycle for ResharingProtocol<'a> {
         }
 
         // Wait for initiation event
-        let session_id = self.ctx.session_id;
+        let session_id = self.ctx.session_id();
         let initiation_event = EventAwaiter::new(self.ctx)
             .for_session(session_id)
             .for_event_types(vec![EventTypePattern::InitiateResharing])
@@ -128,7 +128,7 @@ impl<'a> SessionLifecycle for ResharingProtocol<'a> {
             }
             _ => {
                 return Err(ProtocolError {
-                    session_id: self.ctx.session_id,
+                    session_id: self.ctx.session_id(),
                     error_type: ProtocolErrorType::UnexpectedEvent,
                     message: "Expected InitiateResharing event".to_string(),
                 });
@@ -136,32 +136,32 @@ impl<'a> SessionLifecycle for ResharingProtocol<'a> {
         };
 
         // Phase 2: Distribute Sub-shares
-        if participants.contains(&DeviceId(self.ctx.device_id)) {
+        if participants.contains(&DeviceId(self.ctx.device_id())) {
             self.distribute_sub_shares(&final_new_participants, final_new_threshold)
                 .await?;
         }
 
         // Phase 3: Collect Sub-shares (for new participants)
         let mut collected_sub_shares = BTreeMap::new();
-        if final_new_participants.contains(&DeviceId(self.ctx.device_id)) {
+        if final_new_participants.contains(&DeviceId(self.ctx.device_id())) {
             collected_sub_shares = self
                 .collect_sub_shares(&final_new_participants, final_new_threshold)
                 .await?;
         }
 
         // Phase 4: Reconstruct New Share
-        if final_new_participants.contains(&DeviceId(self.ctx.device_id)) {
+        if final_new_participants.contains(&DeviceId(self.ctx.device_id())) {
             self.reconstruct_share(&collected_sub_shares).await?;
         }
 
         // Phase 5: Verify via Test Signature (placeholder)
-        if final_new_participants.contains(&DeviceId(self.ctx.device_id)) {
+        if final_new_participants.contains(&DeviceId(self.ctx.device_id())) {
             self.verify_new_shares().await?;
         }
 
         // Phase 6: Finalize Resharing (only coordinator)
-        if participants.first() == Some(&DeviceId(self.ctx.device_id)) {
-            let session_id = self.ctx.session_id;
+        if participants.first() == Some(&DeviceId(self.ctx.device_id())) {
+            let session_id = self.ctx.session_id();
             EventBuilder::new(self.ctx)
                 .with_type(EventType::FinalizeResharing(FinalizeResharingEvent {
                     session_id,
@@ -175,7 +175,7 @@ impl<'a> SessionLifecycle for ResharingProtocol<'a> {
         }
 
         // Wait for finalization
-        let session_id = self.ctx.session_id;
+        let session_id = self.ctx.session_id();
         EventAwaiter::new(self.ctx)
             .for_session(session_id)
             .for_event_types(vec![EventTypePattern::FinalizeResharing])
@@ -222,10 +222,11 @@ impl<'a> ResharingProtocol<'a> {
         let key_share_scalar = curve25519_dalek::scalar::Scalar::from_bytes_mod_order(
             key_share_bytes.try_into().unwrap_or([0u8; 32]),
         );
+        let mut rng = self.ctx.create_rng();
         let polynomial = ShamirPolynomial::from_secret(
             key_share_scalar,
             new_threshold.into(),
-            &mut self.ctx.effects.rng(),
+            &mut rng,
         );
 
         // Distribute sub-shares to each new participant
@@ -238,15 +239,16 @@ impl<'a> ResharingProtocol<'a> {
             let recipient_public_key = self.ctx.get_device_public_key(new_participant).await?;
             let hpke_public_key = aura_crypto::HpkePublicKey::from_bytes(&recipient_public_key)?;
 
+            let mut encrypt_rng = self.ctx.create_rng();
             let ciphertext = aura_crypto::encrypt_base(
                 &sub_share,
                 &hpke_public_key,
-                &mut self.ctx.effects.rng(),
+                &mut encrypt_rng,
             )?;
             let encrypted_sub_share = ciphertext.to_bytes();
 
-            let session_id = self.ctx.session_id;
-            let device_id = self.ctx.device_id;
+            let session_id = self.ctx.session_id();
+            let device_id = self.ctx.device_id();
             EventBuilder::new(self.ctx)
                 .with_type(EventType::DistributeSubShare(DistributeSubShareEvent {
                     session_id,
@@ -272,7 +274,7 @@ impl<'a> ResharingProtocol<'a> {
 
         // Collect sub-shares from threshold old participants
         for _ in 0..new_threshold {
-            let session_id = self.ctx.session_id;
+            let session_id = self.ctx.session_id();
             let event = EventAwaiter::new(self.ctx)
                 .for_session(session_id)
                 .for_event_types(vec![EventTypePattern::DistributeSubShare])
@@ -280,7 +282,7 @@ impl<'a> ResharingProtocol<'a> {
                 .await?;
 
             if let EventType::DistributeSubShare(ref distribute) = event.event_type {
-                if distribute.to_device_id == DeviceId(self.ctx.device_id) {
+                if distribute.to_device_id == DeviceId(self.ctx.device_id()) {
                     // Decrypt the sub-share
                     let hpke_ciphertext =
                         aura_crypto::HpkeCiphertext::from_bytes(&distribute.encrypted_sub_share)?;
@@ -291,8 +293,8 @@ impl<'a> ResharingProtocol<'a> {
                     collected_sub_shares.insert(distribute.from_device_id, decrypted);
 
                     // Send acknowledgment
-                    let session_id = self.ctx.session_id;
-                    let device_id = self.ctx.device_id;
+                    let session_id = self.ctx.session_id();
+                    let device_id = self.ctx.device_id();
                     EventBuilder::new(self.ctx)
                         .with_type(EventType::AcknowledgeSubShare(AcknowledgeSubShareEvent {
                             session_id,
@@ -348,7 +350,7 @@ impl<'a> ResharingProtocol<'a> {
         let key_share = self.ctx.get_key_share().await?;
         if key_share.len() != 32 {
             return Err(ProtocolError {
-                session_id: self.ctx.session_id,
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::InvalidState,
                 message: "Invalid key share length after resharing".to_string(),
             });

@@ -92,6 +92,50 @@ define_protocol! {
     }
 }
 
+// ========== Additional Union Methods ==========
+
+impl CgkaSessionState {
+    /// Get the group ID from any state
+    pub fn group_id(&self) -> &str {
+        match self {
+            CgkaSessionState::CgkaGroupInitialized(p) => &p.inner.group_id,
+            CgkaSessionState::GroupMembershipChange(p) => &p.inner.group_id,
+            CgkaSessionState::EpochTransition(p) => &p.inner.group_id,
+            CgkaSessionState::GroupStable(p) => &p.inner.group_id,
+            CgkaSessionState::OperationPending(p) => &p.inner.group_id,
+            CgkaSessionState::OperationValidating(p) => &p.inner.group_id,
+            CgkaSessionState::OperationApplying(p) => &p.inner.group_id,
+            CgkaSessionState::TreeBuilding(p) => &p.inner.group_id,
+            CgkaSessionState::TreeUpdating(p) => &p.inner.group_id,
+            CgkaSessionState::TreeComplete(p) => &p.inner.group_id,
+            CgkaSessionState::GroupOperationFailed(p) => &p.inner.group_id,
+            CgkaSessionState::OperationApplied(p) => &p.inner.group_id,
+            CgkaSessionState::OperationFailed(p) => &p.inner.group_id,
+            CgkaSessionState::TreeFailed(p) => &p.inner.group_id,
+        }
+    }
+
+    /// Get the current epoch from any state
+    pub fn current_epoch(&self) -> Epoch {
+        match self {
+            CgkaSessionState::CgkaGroupInitialized(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::GroupMembershipChange(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::EpochTransition(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::GroupStable(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::OperationPending(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::OperationValidating(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::OperationApplying(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::TreeBuilding(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::TreeUpdating(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::TreeComplete(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::GroupOperationFailed(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::OperationApplied(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::OperationFailed(p) => p.inner.current_state.current_epoch,
+            CgkaSessionState::TreeFailed(p) => p.inner.current_state.current_epoch,
+        }
+    }
+}
+
 // ========== Protocol Type Aliases ==========
 
 /// Session-typed CGKA protocol wrapper
@@ -867,7 +911,7 @@ mod tests {
             tree_size: 1,
         };
 
-        let membership_session = session.transition_with_witness(init_witness);
+        let membership_session = <ChoreographicProtocol<CgkaProtocolCore, CgkaGroupInitialized> as WitnessedTransition<CgkaGroupInitialized, GroupMembershipChange>>::transition_with_witness(session, init_witness);
         assert_eq!(
             membership_session.state_name(),
             "GroupMembershipChange"
@@ -884,7 +928,7 @@ mod tests {
             roster_size: 2,
         };
 
-        let transition_session = membership_session.transition_with_witness(membership_witness);
+        let transition_session = <ChoreographicProtocol<CgkaProtocolCore, GroupMembershipChange> as WitnessedTransition<GroupMembershipChange, EpochTransition>>::transition_with_witness(membership_session, membership_witness);
         assert_eq!(transition_session.state_name(), "EpochTransition");
         let (epoch, size) = transition_session.current_epoch_info();
         assert_eq!(epoch, Epoch::initial());

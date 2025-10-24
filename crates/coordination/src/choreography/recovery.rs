@@ -65,13 +65,13 @@ impl<'a> SessionLifecycle for RecoveryProtocol<'a> {
 
         // Create Recovery session
         Ok(Session::new(
-            aura_journal::SessionId(self.ctx.session_id),
+            aura_journal::SessionId(self.ctx.session_id()),
             ProtocolType::Recovery,
             session_participants,
             ledger_context.epoch,
             200, // TTL in epochs - recovery has longer time limit due to cooldown
-            self.ctx.effects.now().map_err(|e| ProtocolError {
-                session_id: self.ctx.session_id,
+            self.ctx.effects().now().map_err(|e| ProtocolError {
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::Other,
                 message: format!("Failed to get timestamp: {:?}", e),
             })?,
@@ -79,8 +79,8 @@ impl<'a> SessionLifecycle for RecoveryProtocol<'a> {
     }
 
     async fn execute_protocol(&mut self, _session: &Session) -> Result<Vec<u8>, ProtocolError> {
-        let recovery_id = self.ctx.session_id;
-        let new_device_id = aura_journal::DeviceId(self.ctx.device_id);
+        let recovery_id = self.ctx.session_id();
+        let new_device_id = aura_journal::DeviceId(self.ctx.device_id());
         let _start_epoch = self.ctx.fetch_ledger_context().await?.epoch;
 
         // Phase 1: Initiate Recovery
@@ -137,7 +137,7 @@ impl<'a> SessionLifecycle for RecoveryProtocol<'a> {
                 Ok(vec![0u8; 32])
             },
             _ => Err(ProtocolError {
-                session_id: self.ctx.session_id,
+                session_id: self.ctx.session_id(),
                 error_type: ProtocolErrorType::InvalidState,
                 message: "Expected recovery complete event".to_string(),
             }),
@@ -175,7 +175,7 @@ impl<'a> RecoveryProtocol<'a> {
                 // Verify guardian is in approved list
                 if !self.guardian_ids.contains(&share.guardian_id) {
                     return Err(ProtocolError {
-                        session_id: self.ctx.session_id,
+                        session_id: self.ctx.session_id(),
                         error_type: ProtocolErrorType::UnexpectedEvent,
                         message: format!("Share from unexpected guardian: {:?}", share.guardian_id),
                     });
@@ -211,7 +211,7 @@ impl<'a> RecoveryProtocol<'a> {
                 InstructionResult::EventReceived(event) => {
                     if let EventType::AbortRecovery(_) = event.event_type {
                         return Err(ProtocolError {
-                            session_id: self.ctx.session_id,
+                            session_id: self.ctx.session_id(),
                             error_type: ProtocolErrorType::RecoveryVetoed,
                             message: "Recovery aborted by guardian veto".to_string(),
                         });
@@ -229,7 +229,7 @@ impl<'a> RecoveryProtocol<'a> {
                 InstructionResult::EpochsElapsed => continue,
                 _ => {
                     return Err(ProtocolError {
-                        session_id: self.ctx.session_id,
+                        session_id: self.ctx.session_id(),
                         error_type: ProtocolErrorType::InvalidState,
                         message: "Failed to wait epochs".to_string(),
                     })
@@ -260,7 +260,7 @@ impl<'a> RecoveryProtocol<'a> {
             let device_private_key = self.ctx.get_device_hpke_private_key().await?;
             
             // Decrypt with associated data for authenticity
-            let aad = format!("recovery:{}", self.ctx.session_id).into_bytes();
+            let aad = format!("recovery:{}", self.ctx.session_id()).into_bytes();
             let decrypted = decrypt_with_aad(&ciphertext, &device_private_key, &aad)?;
             
             // Parse as scalar point

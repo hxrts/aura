@@ -1,5 +1,6 @@
 // Core types for DeviceAgent
 
+use aura_journal::serialization::to_cbor_bytes;
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
@@ -20,24 +21,30 @@ pub struct ContextCapsule {
     /// Optional transport configuration hint
     pub transport_hint: Option<String>,
     /// Time-to-live in seconds (default 24h)
-    pub ttl: Option<u64>,       // seconds (default 24h)
+    pub ttl: Option<u64>, // seconds (default 24h)
     /// Unix timestamp when capsule was issued
-    pub issued_at: u64,         // unix seconds
+    pub issued_at: u64, // unix seconds
 }
 
 impl ContextCapsule {
     /// Create a simple context capsule for common use case
-    pub fn simple_with_effects(app_id: &str, context_label: &str, effects: &aura_crypto::Effects) -> crate::Result<Self> {
+    pub fn simple_with_effects(
+        app_id: &str,
+        context_label: &str,
+        effects: &aura_crypto::Effects,
+    ) -> crate::Result<Self> {
         Ok(ContextCapsule {
             app_id: app_id.to_string(),
             context_label: context_label.to_string(),
             policy_hint: None,
             transport_hint: None,
             ttl: Some(24 * 3600), // 24 hours
-            issued_at: effects.now().map_err(|e| crate::AgentError::CryptoError(format!("Failed to get timestamp: {:?}", e)))?,
+            issued_at: effects.now().map_err(|e| {
+                crate::AgentError::crypto_operation(format!("Failed to get timestamp: {:?}", e))
+            })?,
         })
     }
-    
+
     /// Create a simple context capsule for testing (legacy compatibility)
     /// NOTE: This method conflates authentication and authorization and should be
     /// replaced with separate identity and permission derivation methods
@@ -48,38 +55,39 @@ impl ContextCapsule {
             policy_hint: None,
             transport_hint: None,
             ttl: Some(24 * 3600), // 24 hours
-            issued_at: 0, // Use epoch timestamp for testing
+            issued_at: 0,         // Use epoch timestamp for testing
         }
     }
-    
+
     /// Compute context ID (BLAKE3 hash of canonical CBOR)
     pub fn context_id(&self) -> crate::Result<[u8; 32]> {
         // Serialize to canonical CBOR (sorted keys, omit None fields)
-        let cbor_bytes = serde_cbor::to_vec(self)
-            .map_err(|e| crate::AgentError::SerializationError(format!(
+        let cbor_bytes = to_cbor_bytes(self).map_err(|e| {
+            crate::AgentError::serialization(format!(
                 "ContextCapsule serialization failed: {}",
                 e
-            )))?;
+            ))
+        })?;
         Ok(blake3::hash(&cbor_bytes).into())
     }
-    
+
     /// Compute capsule MAC for tamper detection
     pub fn compute_mac(&self, seed_capsule: &[u8]) -> crate::Result<[u8; 32]> {
-        let cbor_bytes = serde_cbor::to_vec(self)
-            .map_err(|e| crate::AgentError::SerializationError(format!(
+        let cbor_bytes = to_cbor_bytes(self).map_err(|e| {
+            crate::AgentError::serialization(format!(
                 "ContextCapsule serialization failed: {}",
                 e
-            )))?;
-        let key: &[u8; 32] = seed_capsule.try_into()
-            .map_err(|_| crate::AgentError::CryptoError(
-                "seed_capsule must be 32 bytes".to_string()
-            ))?;
+            ))
+        })?;
+        let key: &[u8; 32] = seed_capsule.try_into().map_err(|_| {
+            crate::AgentError::crypto_operation("seed_capsule must be 32 bytes")
+        })?;
         Ok(blake3::keyed_hash(key, &cbor_bytes).into())
     }
 }
 
 /// Derived identity from DKD
-/// 
+///
 /// SECURITY: This type contains sensitive cryptographic material.
 /// The seed_fingerprint is zeroized on drop.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,21 +111,26 @@ impl Drop for DerivedIdentity {
 mod verifying_key_serde {
     use ed25519_dalek::VerifyingKey;
     use serde::{Deserialize, Deserializer, Serializer};
-    
+
     pub fn serialize<S>(key: &VerifyingKey, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_bytes(key.as_bytes())
     }
-    
+
     pub fn deserialize<'de, D>(deserializer: D) -> Result<VerifyingKey, D::Error>
     where
         D: Deserializer<'de>,
     {
         let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
-        VerifyingKey::from_bytes(bytes.as_slice().try_into().map_err(serde::de::Error::custom)?)
-            .map_err(serde::de::Error::custom)
+        VerifyingKey::from_bytes(
+            bytes
+                .as_slice()
+                .try_into()
+                .map_err(serde::de::Error::custom)?,
+        )
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -200,12 +213,15 @@ pub struct SessionContext {
 
 impl AuthenticationCredential {
     /// Verify the device signature in this authentication credential
-    pub fn verify_device_signature(&self, expected_device_id: &aura_journal::DeviceId) -> crate::Result<bool> {
+    pub fn verify_device_signature(
+        &self,
+        expected_device_id: &aura_journal::DeviceId,
+    ) -> crate::Result<bool> {
         // TODO: Implement signature verification
         // This should verify the device_signature against the challenge and nonce
         Ok(self.issued_by == *expected_device_id)
     }
-    
+
     /// Check if this credential is still fresh (nonce not replayed)
     pub fn is_fresh(&self, last_seen_nonce: u64) -> bool {
         self.nonce > last_seen_nonce
@@ -217,12 +233,12 @@ impl AuthorizationToken {
     pub fn authorizes_operation(&self, operation: &str) -> bool {
         self.permitted_operations.iter().any(|op| op == operation)
     }
-    
+
     /// Check if this token is still valid (not expired)
     pub fn is_valid(&self, current_time: u64) -> bool {
         current_time < self.expires_at
     }
-    
+
     /// Check if this token is valid for a specific device
     pub fn is_valid_for_device(&self, device_id: &aura_journal::DeviceId) -> bool {
         self.authorized_device == *device_id
@@ -238,7 +254,7 @@ impl SessionContext {
             session_owner: device_id,
         }
     }
-    
+
     /// Bump the session epoch (invalidates all credentials)
     pub fn bump_epoch(&mut self) {
         self.session_epoch += 1;
@@ -252,7 +268,7 @@ impl SessionContext {
 /// Session credentials provide both authentication (proves device identity)
 /// and authorization (grants specific permissions) in a single token:
 /// - Challenge-response binding prevents precomputation attacks
-/// - Operation-specific scoping limits token capabilities  
+/// - Operation-specific scoping limits token capabilities
 /// - Session epoch binding enables credential revocation
 /// - Nonce tracking prevents replay attacks
 /// - Device attestation provides hardware binding (TPM/SEP)
@@ -281,12 +297,13 @@ impl SessionCredential {
     pub fn is_valid(&self, current_time: u64) -> bool {
         current_time < self.expires_at
     }
-    
+
     /// Check if this credential authorizes a specific operation
     pub fn authorizes_operation(&self, operation: &str) -> bool {
-        self.operation_scope == operation || self.operation_scope.starts_with(&format!("{}:", operation))
+        self.operation_scope == operation
+            || self.operation_scope.starts_with(&format!("{}:", operation))
     }
-    
+
     /// Check if this credential is for the current session epoch
     pub fn is_current_epoch(&self, current_epoch: u64) -> bool {
         self.session_epoch == current_epoch
@@ -319,7 +336,7 @@ impl IdentityConfig {
         let config: IdentityConfig = toml::from_str(&contents)?;
         Ok(config)
     }
-    
+
     /// Save config to TOML file
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
         let contents = toml::to_string_pretty(self)?;
@@ -357,7 +374,7 @@ impl SessionStatistics {
             sessions_by_protocol: std::collections::BTreeMap::new(),
         }
     }
-    
+
     /// Calculate success rate (completed / total)
     pub fn success_rate(&self) -> f64 {
         if self.total_sessions == 0 {
@@ -366,7 +383,7 @@ impl SessionStatistics {
             self.completed_sessions as f64 / self.total_sessions as f64
         }
     }
-    
+
     /// Calculate failure rate (failed + timed_out) / total
     pub fn failure_rate(&self) -> f64 {
         if self.total_sessions == 0 {
@@ -382,5 +399,3 @@ impl Default for SessionStatistics {
         Self::new()
     }
 }
-
-

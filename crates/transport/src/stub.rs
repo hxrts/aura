@@ -325,7 +325,7 @@ mod tests {
 // Implementation of coordination's Transport trait for StubTransport
 // This allows coordination protocols to use the transport layer
 #[async_trait]
-impl aura_coordination::execution::context::Transport for StubTransport {
+impl aura_coordination::Transport for StubTransport {
     async fn send_message(&self, peer_id: &str, message: &[u8]) -> std::result::Result<(), String> {
         // Create a dummy ticket for the connection
         let dummy_ticket = PresenceTicket {

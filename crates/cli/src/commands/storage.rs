@@ -1,12 +1,12 @@
 // Capability-driven storage commands
 
+use crate::commands::common;
 use crate::config::Config;
-use aura_agent::IntegratedAgent;
 use aura_journal::{
-    capability::{identity::IndividualId, types::CapabilityScope},
+    capability::{identity::IndividualId},
 };
 use clap::Subcommand;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use tokio::fs;
 use tracing::info;
@@ -141,14 +141,14 @@ async fn store_data(
 ) -> anyhow::Result<()> {
     info!("Storing file {:?} as entry '{}'", file_path, entry_id);
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Read file data
     let data = fs::read(file_path).await
         .map_err(|e| anyhow::anyhow!("Failed to read file: {}", e))?;
     
     // Parse capability scope
-    let required_scope = parse_capability_scope(scope, resource)?;
+    let required_scope = common::parse_capability_scope(scope, resource)?;
     
     // Parse ACL if provided
     let acl_set = if let Some(acl_str) = acl {
@@ -164,9 +164,9 @@ async fn store_data(
     
     // Parse attributes if provided
     let attrs = if let Some(attr_str) = attributes {
-        parse_attributes(attr_str)?
+        common::parse_attributes(attr_str)?
     } else {
-        BTreeMap::new()
+        std::collections::BTreeMap::new()
     };
     
     // Store data
@@ -197,7 +197,7 @@ async fn store_data(
 async fn retrieve_data(config: &Config, entry_id: &str, output: Option<&PathBuf>) -> anyhow::Result<()> {
     info!("Retrieving entry '{}'", entry_id);
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Retrieve data
     let data = agent.retrieve(entry_id).await?;
@@ -223,7 +223,7 @@ async fn retrieve_data(config: &Config, entry_id: &str, output: Option<&PathBuf>
 async fn delete_data(config: &Config, entry_id: &str) -> anyhow::Result<()> {
     info!("Deleting entry '{}'", entry_id);
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Delete entry
     agent.storage.delete(entry_id, &agent.capability_agent.effects).await
@@ -238,7 +238,7 @@ async fn delete_data(config: &Config, entry_id: &str) -> anyhow::Result<()> {
 async fn list_entries(config: &Config) -> anyhow::Result<()> {
     info!("Listing accessible entries");
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // List entries
     let entries = agent.storage.list_entries().await
@@ -282,7 +282,7 @@ async fn list_entries(config: &Config) -> anyhow::Result<()> {
 async fn show_metadata(config: &Config, entry_id: &str) -> anyhow::Result<()> {
     info!("Showing metadata for entry '{}'", entry_id);
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Get metadata
     let metadata = agent.storage.get_metadata(entry_id).await
@@ -310,7 +310,7 @@ async fn show_metadata(config: &Config, entry_id: &str) -> anyhow::Result<()> {
 async fn show_stats(config: &Config) -> anyhow::Result<()> {
     info!("Showing storage statistics");
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Get storage stats
     let stats = agent.get_storage_stats().await?;
@@ -333,7 +333,7 @@ async fn show_stats(config: &Config) -> anyhow::Result<()> {
 async fn audit_storage(config: &Config, limit: usize) -> anyhow::Result<()> {
     info!("Auditing storage access (limit: {})", limit);
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Get access logs
     let logs = agent.storage.get_access_logs().await;
@@ -362,7 +362,7 @@ async fn audit_storage(config: &Config, limit: usize) -> anyhow::Result<()> {
 async fn cleanup_storage(config: &Config, retain_epochs: usize) -> anyhow::Result<()> {
     info!("Cleaning up storage (retain {} epochs)", retain_epochs);
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Run cleanup
     agent.cleanup().await;
@@ -373,44 +373,3 @@ async fn cleanup_storage(config: &Config, retain_epochs: usize) -> anyhow::Resul
     Ok(())
 }
 
-fn parse_capability_scope(scope_str: &str, resource: Option<&str>) -> anyhow::Result<CapabilityScope> {
-    let parts: Vec<&str> = scope_str.split(':').collect();
-    if parts.len() != 2 {
-        return Err(anyhow::anyhow!("Capability scope must be in format 'namespace:operation'"));
-    }
-    
-    let namespace = parts[0].to_string();
-    let operation = parts[1].to_string();
-    
-    let mut scope = CapabilityScope::simple(&namespace, &operation);
-    if let Some(res) = resource {
-        scope.resource = Some(res.to_string());
-    }
-    
-    Ok(scope)
-}
-
-fn parse_attributes(attr_str: &str) -> anyhow::Result<BTreeMap<String, String>> {
-    let mut attributes = BTreeMap::new();
-    
-    for pair in attr_str.split(',') {
-        let parts: Vec<&str> = pair.trim().split('=').collect();
-        if parts.len() != 2 {
-            return Err(anyhow::anyhow!("Attributes must be in format 'key=value,key2=value2'"));
-        }
-        attributes.insert(parts[0].to_string(), parts[1].to_string());
-    }
-    
-    Ok(attributes)
-}
-
-async fn create_agent(config: &Config) -> anyhow::Result<IntegratedAgent> {
-    let device_id = config.device_id;
-    let account_id = config.account_id;
-    let storage_root = config.data_dir.join("storage");
-    let effects = aura_crypto::Effects::test(); // Use test effects for CLI
-    
-    IntegratedAgent::new(device_id, account_id, storage_root, effects)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create agent: {}", e))
-}

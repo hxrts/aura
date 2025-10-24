@@ -15,6 +15,7 @@ use ed25519_dalek::{Signature, Verifier};
 ///
 /// This is the main interface for interacting with the ledger.
 /// It wraps AccountState and provides validation, event logging, and queries.
+#[derive(Debug)]
 pub struct AccountLedger {
     /// Current account state (derived from event log)
     state: AccountState,

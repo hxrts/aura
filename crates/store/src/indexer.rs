@@ -1,8 +1,9 @@
 // Storage indexer with quota and eviction
 
-use crate::encryption::{EncryptionContext, Recipients, wrap_key_for_recipients, unwrap_key};
+use crate::encryption::{unwrap_key, wrap_key_for_recipients, EncryptionContext, Recipients};
 use crate::manifest::{ChunkId, ObjectManifest, ReplicationHint};
 use crate::{Result, StorageError};
+use aura_journal::serialization::{from_cbor_bytes, to_cbor_bytes};
 use aura_journal::Cid;
 use redb::{Database, ReadableTable, TableDefinition};
 use std::path::Path;
@@ -24,29 +25,34 @@ impl Indexer {
     pub fn new<P: AsRef<Path>>(path: P, quota_limit: u64) -> Result<Self> {
         let db = Database::create(path)
             .map_err(|e| StorageError::Storage(format!("Failed to create database: {}", e)))?;
-        
+
         // Initialize tables
         {
-            let write_txn = db.begin_write()
-                .map_err(|e| StorageError::Storage(format!("Failed to begin transaction: {}", e)))?;
+            let write_txn = db.begin_write().map_err(|e| {
+                StorageError::Storage(format!("Failed to begin transaction: {}", e))
+            })?;
             {
-                let _ = write_txn.open_table(MANIFESTS_TABLE)
-                    .map_err(|e| StorageError::Storage(format!("Failed to open manifests table: {}", e)))?;
-                let _ = write_txn.open_table(CHUNKS_TABLE)
-                    .map_err(|e| StorageError::Storage(format!("Failed to open chunks table: {}", e)))?;
-                let _ = write_txn.open_table(QUOTA_TABLE)
-                    .map_err(|e| StorageError::Storage(format!("Failed to open quota table: {}", e)))?;
+                let _ = write_txn.open_table(MANIFESTS_TABLE).map_err(|e| {
+                    StorageError::Storage(format!("Failed to open manifests table: {}", e))
+                })?;
+                let _ = write_txn.open_table(CHUNKS_TABLE).map_err(|e| {
+                    StorageError::Storage(format!("Failed to open chunks table: {}", e))
+                })?;
+                let _ = write_txn.open_table(QUOTA_TABLE).map_err(|e| {
+                    StorageError::Storage(format!("Failed to open quota table: {}", e))
+                })?;
             }
-            write_txn.commit()
+            write_txn
+                .commit()
                 .map_err(|e| StorageError::Storage(format!("Failed to commit: {}", e)))?;
         }
-        
+
         Ok(Indexer {
             db: Arc::new(RwLock::new(db)),
             quota_limit,
         })
     }
-    
+
     /// Store encrypted data
     pub async fn store_encrypted(
         &self,
@@ -60,16 +66,16 @@ impl Indexer {
         if current_usage + payload.len() as u64 > self.quota_limit {
             return Err(StorageError::QuotaExceeded);
         }
-        
+
         // Generate encryption key
         let enc_ctx = EncryptionContext::new();
-        
+
         // Encrypt payload
         let ciphertext = enc_ctx.encrypt(payload)?;
-        
+
         // Wrap key for recipients
         let key_envelope = wrap_key_for_recipients(enc_ctx.key(), &recipients)?;
-        
+
         // Create manifest
         let manifest = ObjectManifest {
             root_cid: Cid::from_bytes(&ciphertext),
@@ -86,23 +92,24 @@ impl Indexer {
             issued_at_ms: current_timestamp_ms_with_effects(effects),
             nonce: generate_nonce_with_effects(effects),
         };
-        
+
         let manifest_cid = manifest.compute_cid()?;
-        
+
         // Store manifest and chunks
         self.store_manifest(&manifest_cid, &manifest).await?;
-        self.store_chunk(&ChunkId::new(&manifest_cid, 0), &ciphertext).await?;
-        
+        self.store_chunk(&ChunkId::new(&manifest_cid, 0), &ciphertext)
+            .await?;
+
         // Update quota
         self.update_quota(payload.len() as u64).await?;
-        
+
         Ok(manifest_cid)
     }
-    
+
     /// Fetch encrypted data
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `cid` - Content identifier
     /// * `device_id` - Current device ID for key unwrapping
     /// * `device_secret` - Device secret for key unwrapping
@@ -114,134 +121,156 @@ impl Indexer {
     ) -> Result<(Vec<u8>, ObjectManifest)> {
         // Load manifest
         let manifest = self.load_manifest(cid).await?;
-        
+
         // Load chunks (for MVP, single chunk)
         let chunk_id = ChunkId::new(cid, 0);
         let ciphertext = self.load_chunk(&chunk_id).await?;
-        
+
         // Unwrap key using device secret
         let key = unwrap_key(&manifest.key_envelope, device_id, device_secret)?;
         let enc_ctx = EncryptionContext::from_key(key);
         let plaintext = enc_ctx.decrypt(&ciphertext)?;
-        
+
         Ok((plaintext, manifest))
     }
-    
+
     /// Store manifest
     async fn store_manifest(&self, cid: &Cid, manifest: &ObjectManifest) -> Result<()> {
         let db = self.db.write().await;
-        let write_txn = db.begin_write()
+        let write_txn = db
+            .begin_write()
             .map_err(|e| StorageError::Storage(format!("Failed to begin transaction: {}", e)))?;
-        
+
         {
-            let mut table = write_txn.open_table(MANIFESTS_TABLE)
+            let mut table = write_txn
+                .open_table(MANIFESTS_TABLE)
                 .map_err(|e| StorageError::Storage(format!("Failed to open table: {}", e)))?;
-            
-            let manifest_bytes = serde_cbor::to_vec(manifest)
+
+            let manifest_bytes = to_cbor_bytes(manifest)
                 .map_err(|e| StorageError::Storage(format!("Failed to serialize: {}", e)))?;
-            
-            table.insert(cid.0.as_str(), manifest_bytes.as_slice())
+
+            table
+                .insert(cid.0.as_str(), manifest_bytes.as_slice())
                 .map_err(|e| StorageError::Storage(format!("Failed to insert: {}", e)))?;
         }
-        
-        write_txn.commit()
+
+        write_txn
+            .commit()
             .map_err(|e| StorageError::Storage(format!("Failed to commit: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     /// Load manifest
     async fn load_manifest(&self, cid: &Cid) -> Result<ObjectManifest> {
         let db = self.db.read().await;
-        let read_txn = db.begin_read()
+        let read_txn = db
+            .begin_read()
             .map_err(|e| StorageError::Storage(format!("Failed to begin transaction: {}", e)))?;
-        
-        let table = read_txn.open_table(MANIFESTS_TABLE)
+
+        let table = read_txn
+            .open_table(MANIFESTS_TABLE)
             .map_err(|e| StorageError::Storage(format!("Failed to open table: {}", e)))?;
-        
-        let value = table.get(cid.0.as_str())
+
+        let value = table
+            .get(cid.0.as_str())
             .map_err(|e| StorageError::Storage(format!("Failed to get: {}", e)))?
             .ok_or_else(|| StorageError::NotFound(cid.0.clone()))?;
-        
-        let manifest: ObjectManifest = serde_cbor::from_slice(value.value())
+
+        let manifest: ObjectManifest = from_cbor_bytes(value.value())
             .map_err(|e| StorageError::Storage(format!("Failed to deserialize: {}", e)))?;
-        
+
         Ok(manifest)
     }
-    
+
     /// Store chunk
     async fn store_chunk(&self, chunk_id: &ChunkId, data: &[u8]) -> Result<()> {
         let db = self.db.write().await;
-        let write_txn = db.begin_write()
+        let write_txn = db
+            .begin_write()
             .map_err(|e| StorageError::Storage(format!("Failed to begin transaction: {}", e)))?;
-        
+
         {
-            let mut table = write_txn.open_table(CHUNKS_TABLE)
+            let mut table = write_txn
+                .open_table(CHUNKS_TABLE)
                 .map_err(|e| StorageError::Storage(format!("Failed to open table: {}", e)))?;
-            
-            table.insert(chunk_id.0.as_str(), data)
+
+            table
+                .insert(chunk_id.0.as_str(), data)
                 .map_err(|e| StorageError::Storage(format!("Failed to insert: {}", e)))?;
         }
-        
-        write_txn.commit()
+
+        write_txn
+            .commit()
             .map_err(|e| StorageError::Storage(format!("Failed to commit: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     /// Load chunk
     async fn load_chunk(&self, chunk_id: &ChunkId) -> Result<Vec<u8>> {
         let db = self.db.read().await;
-        let read_txn = db.begin_read()
+        let read_txn = db
+            .begin_read()
             .map_err(|e| StorageError::Storage(format!("Failed to begin transaction: {}", e)))?;
-        
-        let table = read_txn.open_table(CHUNKS_TABLE)
+
+        let table = read_txn
+            .open_table(CHUNKS_TABLE)
             .map_err(|e| StorageError::Storage(format!("Failed to open table: {}", e)))?;
-        
-        let value = table.get(chunk_id.0.as_str())
+
+        let value = table
+            .get(chunk_id.0.as_str())
             .map_err(|e| StorageError::Storage(format!("Failed to get: {}", e)))?
             .ok_or_else(|| StorageError::NotFound(chunk_id.0.clone()))?;
-        
+
         Ok(value.value().to_vec())
     }
-    
+
     /// Get quota usage
     async fn get_quota_usage(&self) -> Result<u64> {
         let db = self.db.read().await;
-        let read_txn = db.begin_read()
+        let read_txn = db
+            .begin_read()
             .map_err(|e| StorageError::Storage(format!("Failed to begin transaction: {}", e)))?;
-        
-        let table = read_txn.open_table(QUOTA_TABLE)
+
+        let table = read_txn
+            .open_table(QUOTA_TABLE)
             .map_err(|e| StorageError::Storage(format!("Failed to open table: {}", e)))?;
-        
-        Ok(table.get("usage")
+
+        Ok(table
+            .get("usage")
             .map_err(|e| StorageError::Storage(format!("Failed to get: {}", e)))?
             .map(|v| v.value())
             .unwrap_or(0))
     }
-    
+
     /// Update quota
     async fn update_quota(&self, delta: u64) -> Result<()> {
         let db = self.db.write().await;
-        let write_txn = db.begin_write()
+        let write_txn = db
+            .begin_write()
             .map_err(|e| StorageError::Storage(format!("Failed to begin transaction: {}", e)))?;
-        
+
         {
-            let mut table = write_txn.open_table(QUOTA_TABLE)
+            let mut table = write_txn
+                .open_table(QUOTA_TABLE)
                 .map_err(|e| StorageError::Storage(format!("Failed to open table: {}", e)))?;
-            
-            let current = table.get("usage")
+
+            let current = table
+                .get("usage")
                 .map_err(|e| StorageError::Storage(format!("Failed to get: {}", e)))?
                 .map(|v| v.value())
                 .unwrap_or(0);
-            
-            table.insert("usage", current + delta)
+
+            table
+                .insert("usage", current + delta)
                 .map_err(|e| StorageError::Storage(format!("Failed to insert: {}", e)))?;
         }
-        
-        write_txn.commit()
+
+        write_txn
+            .commit()
             .map_err(|e| StorageError::Storage(format!("Failed to commit: {}", e)))?;
-        
+
         Ok(())
     }
 }
@@ -268,9 +297,6 @@ fn current_timestamp_ms_with_effects(effects: &aura_crypto::Effects) -> u64 {
     effects.now().unwrap_or(0) * 1000
 }
 
-
 fn generate_nonce_with_effects(effects: &aura_crypto::Effects) -> [u8; 32] {
     effects.random_bytes::<32>()
 }
-
-

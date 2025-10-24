@@ -50,6 +50,38 @@ pub struct ProtocolError {
     pub message: String,
 }
 
+impl ProtocolError {
+    /// Create a new protocol error with empty session ID
+    pub fn new(message: String) -> Self {
+        ProtocolError {
+            session_id: Uuid::nil(),
+            error_type: ProtocolErrorType::InvalidState,
+            message,
+        }
+    }
+    
+    /// Create a new protocol error with session ID
+    pub fn with_session(session_id: Uuid, error_type: ProtocolErrorType, message: String) -> Self {
+        ProtocolError {
+            session_id,
+            error_type,
+            message,
+        }
+    }
+}
+
+impl std::fmt::Display for ProtocolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Protocol error in session {}: {:?} - {}",
+            self.session_id, self.error_type, self.message
+        )
+    }
+}
+
+impl std::error::Error for ProtocolError {}
+
 #[derive(Debug, Clone)]
 pub enum ProtocolErrorType {
     Timeout,

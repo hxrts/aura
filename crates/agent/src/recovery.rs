@@ -256,14 +256,14 @@ impl RecoveryManager {
             .count();
         
         if active_count >= self.max_concurrent_per_account {
-            return Err(AgentError::DeviceNotFound(
-                "Account already has an active recovery request".to_string()
+            return Err(AgentError::device_not_found(
+                "Account already has an active recovery request"
             ));
         }
         
         // Validate parameters
         if guardian_ids.len() < required_approvals {
-            return Err(AgentError::InvalidContext(
+            return Err(AgentError::invalid_context(
                 format!("Not enough guardians: need {} approvals but only {} guardians", 
                     required_approvals, guardian_ids.len())
             ));
@@ -302,11 +302,11 @@ impl RecoveryManager {
     ) -> Result<RecoveryRequest> {
         let request = self.active_requests
             .get_mut(&request_id)
-            .ok_or_else(|| AgentError::DeviceNotFound("Recovery request not found".to_string()))?;
+            .ok_or_else(|| AgentError::device_not_found("Recovery request not found"))?;
         
         // Verify guardian is authorized
         if !request.guardian_ids.contains(&approval.guardian_id) {
-            return Err(AgentError::InvalidContext("Guardian not authorized for this recovery".to_string()));
+            return Err(AgentError::invalid_context("Guardian not authorized for this recovery"));
         }
         
         // Add approval based on current status
@@ -314,7 +314,7 @@ impl RecoveryManager {
             RecoveryStatus::PendingApprovals { approvals } => {
                 // Check for duplicate approval
                 if approvals.iter().any(|a| a.guardian_id == approval.guardian_id) {
-                    return Err(AgentError::DeviceNotFound("Guardian already approved".to_string()));
+                    return Err(AgentError::device_not_found("Guardian already approved"));
                 }
                 
                 approvals.push(approval.clone());
@@ -327,10 +327,10 @@ impl RecoveryManager {
                 }
             }
             RecoveryStatus::CooldownActive { .. } => {
-                return Err(AgentError::DeviceNotFound("Recovery already in cooldown".to_string()));
+                return Err(AgentError::device_not_found("Recovery already in cooldown"));
             }
             _ => {
-                return Err(AgentError::DeviceNotFound("Recovery not accepting approvals".to_string()));
+                return Err(AgentError::device_not_found("Recovery not accepting approvals"));
             }
         }
         
@@ -349,23 +349,23 @@ impl RecoveryManager {
         {
             let request = self.active_requests
                 .get(&request_id)
-                .ok_or_else(|| AgentError::DeviceNotFound("Recovery request not found".to_string()))?;
+                .ok_or_else(|| AgentError::device_not_found("Recovery request not found"))?;
             
             // Verify guardian is authorized
             if !request.guardian_ids.contains(&veto.guardian_id) {
-                return Err(AgentError::InvalidContext("Guardian not authorized for this recovery".to_string()));
+                return Err(AgentError::invalid_context("Guardian not authorized for this recovery"));
             }
             
             // Can only veto during cooldown or pending approvals
             if !matches!(request.status, RecoveryStatus::PendingApprovals { .. } | RecoveryStatus::CooldownActive { .. }) {
-                return Err(AgentError::DeviceNotFound("Recovery cannot be vetoed in current state".to_string()));
+                return Err(AgentError::device_not_found("Recovery cannot be vetoed in current state"));
             }
         }
         
         // Remove from active and update status
         let mut request = self.active_requests
             .remove(&request_id)
-            .ok_or_else(|| AgentError::DeviceNotFound("Recovery request not found".to_string()))?;
+            .ok_or_else(|| AgentError::device_not_found("Recovery request not found"))?;
         
         request.status = RecoveryStatus::Vetoed {
             vetoed_by: veto.guardian_id,
@@ -391,18 +391,18 @@ impl RecoveryManager {
         {
             let request = self.active_requests
                 .get(&request_id)
-                .ok_or_else(|| AgentError::DeviceNotFound("Recovery request not found".to_string()))?;
+                .ok_or_else(|| AgentError::device_not_found("Recovery request not found"))?;
             
             // Can only cancel during cooldown or pending approvals
             if !matches!(request.status, RecoveryStatus::PendingApprovals { .. } | RecoveryStatus::CooldownActive { .. }) {
-                return Err(AgentError::DeviceNotFound("Recovery cannot be cancelled in current state".to_string()));
+                return Err(AgentError::device_not_found("Recovery cannot be cancelled in current state"));
             }
         }
         
         // Remove from active and update status
         let mut request = self.active_requests
             .remove(&request_id)
-            .ok_or_else(|| AgentError::DeviceNotFound("Recovery request not found".to_string()))?;
+            .ok_or_else(|| AgentError::device_not_found("Recovery request not found"))?;
         
         request.status = RecoveryStatus::Cancelled {
             cancelled_at: cancellation.cancelled_at,
@@ -421,7 +421,7 @@ impl RecoveryManager {
     pub fn check_cooldown_status(&mut self, request_id: uuid::Uuid, effects: &aura_crypto::Effects) -> Result<RecoveryRequest> {
         let request = self.active_requests
             .get_mut(&request_id)
-            .ok_or_else(|| AgentError::DeviceNotFound("Recovery request not found".to_string()))?;
+            .ok_or_else(|| AgentError::device_not_found("Recovery request not found"))?;
         
         if let RecoveryStatus::CooldownActive { approvals } = &request.status {
             if request.cooldown_elapsed(effects)? {
@@ -466,22 +466,22 @@ impl RecoveryManager {
         {
             let request = self.active_requests
                 .get(&request_id)
-                .ok_or_else(|| AgentError::DeviceNotFound("Recovery request not found".to_string()))?;
+                .ok_or_else(|| AgentError::device_not_found("Recovery request not found"))?;
             
             // Verify ready to execute
             if !matches!(request.status, RecoveryStatus::ReadyToExecute { .. }) {
-                return Err(AgentError::DeviceNotFound("Recovery not ready to execute".to_string()));
+                return Err(AgentError::device_not_found("Recovery not ready to execute"));
             }
             
             if !request.can_proceed(effects) {
-                return Err(AgentError::DeviceNotFound("Recovery cannot proceed (cooldown not complete or insufficient approvals)".to_string()));
+                return Err(AgentError::device_not_found("Recovery cannot proceed (cooldown not complete or insufficient approvals)"));
             }
         }
         
         // Remove from active and update status
         let mut request = self.active_requests
             .remove(&request_id)
-            .ok_or_else(|| AgentError::DeviceNotFound("Recovery request not found".to_string()))?;
+            .ok_or_else(|| AgentError::device_not_found("Recovery request not found"))?;
         
         request.status = RecoveryStatus::Completed {
             new_session_epoch,

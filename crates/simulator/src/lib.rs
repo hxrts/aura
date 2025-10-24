@@ -47,10 +47,12 @@ pub mod builder;
 pub mod engine;
 pub mod network;
 pub mod runners;
+pub mod logging;
 
 pub use builder::*;
 pub use engine::*;
 pub use network::*;
+pub use logging::*;
 pub use runners::*;
 
 use thiserror::Error;

@@ -596,9 +596,6 @@ pub fn rehydrate_recovery_session(
 
     // Analyze events to determine current state
     let mut has_initiation = false;
-    let mut has_sufficient_approvals = false;
-    let mut has_cooldown_complete = false;
-    let mut has_sufficient_shares = false;
     let mut has_completion = false;
     let mut has_abort = false;
 
@@ -621,11 +618,11 @@ pub fn rehydrate_recovery_session(
     }
 
     // Determine state based on events
-    has_sufficient_approvals = core.collected_approvals.len() >= threshold as usize;
-    has_sufficient_shares = core.collected_shares.len() >= threshold as usize;
+    let has_sufficient_approvals = core.collected_approvals.len() >= threshold as usize;
+    let has_sufficient_shares = core.collected_shares.len() >= threshold as usize;
 
     // TODO: Check cooldown completion properly based on timestamps
-    has_cooldown_complete = has_sufficient_approvals; // Simplified for now
+    let has_cooldown_complete = has_sufficient_approvals; // Simplified for now
 
     if has_abort {
         RecoverySessionState::RecoveryAborted(ChoreographicProtocol::new(core))
@@ -677,7 +674,7 @@ mod tests {
             guardian_count: guardian_ids.len(),
         };
 
-        let collecting_recovery = recovery.transition_with_witness(initiation_witness);
+        let collecting_recovery = <ChoreographicProtocol<RecoveryProtocolCore, RecoveryInitialized> as WitnessedTransition<RecoveryInitialized, CollectingApprovals>>::transition_with_witness(recovery, initiation_witness);
         assert_eq!(collecting_recovery.state_name(), "CollectingApprovals");
         assert_eq!(collecting_recovery.current_approval_count(), 0);
 
@@ -689,7 +686,7 @@ mod tests {
             required_threshold: 2,
         };
 
-        let cooldown_recovery = collecting_recovery.transition_with_witness(approval_witness);
+        let cooldown_recovery = <ChoreographicProtocol<RecoveryProtocolCore, CollectingApprovals> as WitnessedTransition<CollectingApprovals, EnforcingCooldown>>::transition_with_witness(collecting_recovery, approval_witness);
         assert_eq!(cooldown_recovery.state_name(), "EnforcingCooldown");
         assert_eq!(cooldown_recovery.cooldown_hours(), 48);
     }

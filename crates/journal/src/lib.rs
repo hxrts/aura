@@ -19,6 +19,8 @@
 
 #![allow(missing_docs)] // TODO: Add comprehensive documentation in future work
 
+pub mod error;
+
 /// Event application logic and state transitions
 pub mod apply_event;
 /// Trait for applying events to AccountState
@@ -44,6 +46,7 @@ pub use types::*;
 pub use ledger::*;
 pub use serialization::*;
 pub use state::AccountState;
+pub use error::*;
 
 
 use thiserror::Error;

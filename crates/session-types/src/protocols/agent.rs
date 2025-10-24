@@ -710,7 +710,7 @@ mod tests {
             lock_holder: device_id,
         };
 
-        let locked_agent = locking_agent.transition_with_witness(witness);
+        let locked_agent = <ChoreographicProtocol<DeviceAgentCore, LockingInProgress> as WitnessedTransition<LockingInProgress, AgentOperationLocked>>::transition_with_witness(locking_agent, witness);
         assert_eq!(locked_agent.state_name(), "AgentOperationLocked");
         assert!(locked_agent.is_lock_valid());
 

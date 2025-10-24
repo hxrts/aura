@@ -5,45 +5,10 @@
 //!
 //! Reference: work/pre_ssb_storage_tests.md - Category 3.1
 
-use aura_crypto::Effects;
+use aura_test_utils::*;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use frost_ed25519 as frost;
 use std::collections::BTreeMap;
-
-/// Helper to generate FROST key shares for testing
-fn generate_key_shares(
-    threshold: u16,
-    total: u16,
-    effects: &Effects,
-) -> (
-    BTreeMap<frost::Identifier, frost::keys::KeyPackage>,
-    frost::keys::PublicKeyPackage,
-) {
-    let max_signers = total;
-    let min_signers = threshold;
-
-    let mut rng = effects.rng();
-
-    // Generate coefficients for secret sharing polynomial
-    let (shares, pubkey_package) = frost::keys::generate_with_dealer(
-        max_signers,
-        min_signers,
-        frost::keys::IdentifierList::Default,
-        &mut rng,
-    )
-    .unwrap();
-
-    // Convert SecretShare to KeyPackage
-    let key_packages: BTreeMap<_, _> = shares
-        .into_iter()
-        .map(|(id, secret_share)| {
-            let key_package = frost::keys::KeyPackage::try_from(secret_share).unwrap();
-            (id, key_package)
-        })
-        .collect();
-
-    (key_packages, pubkey_package)
-}
 
 #[cfg(test)]
 mod tests {
@@ -52,8 +17,8 @@ mod tests {
     #[test]
     fn test_frost_signature_aggregation_2of3() {
         // Generate 3 key shares (threshold = 2)
-        let effects = Effects::for_test("test_frost_signature_aggregation_2of3");
-        let (key_shares, pubkey_package) = generate_key_shares(2, 3, &effects);
+        let effects = test_effects_named("test_frost_signature_aggregation_2of3");
+        let (key_shares, pubkey_package) = test_frost_key_shares(2, 3, &effects);
 
         // Message to sign
         let message = b"SSB counter increment: session_epoch=5, counter=42";
@@ -119,8 +84,8 @@ mod tests {
     #[test]
     fn test_frost_signature_fails_with_insufficient_shares() {
         // Generate 3 key shares (threshold = 2)
-        let effects = Effects::for_test("test_frost_signature_fails_with_insufficient_shares");
-        let (key_shares, pubkey_package) = generate_key_shares(2, 3, &effects);
+        let effects = test_effects_named("test_frost_signature_fails_with_insufficient_shares");
+        let (key_shares, pubkey_package) = test_frost_key_shares(2, 3, &effects);
 
         // Message to sign
         let message = b"SSB counter increment attempt with insufficient shares";
@@ -178,8 +143,8 @@ mod tests {
     #[test]
     fn test_frost_signature_deterministic() {
         // Generate key shares
-        let effects = Effects::deterministic(42, 1000);
-        let (key_shares, pubkey_package) = generate_key_shares(2, 3, &effects);
+        let effects = test_effects_deterministic(42, 1000);
+        let (key_shares, pubkey_package) = test_frost_key_shares(2, 3, &effects);
 
         // Message to sign
         let message = b"Deterministic signature test message";
@@ -192,7 +157,7 @@ mod tests {
 
         for round in 0..2 {
             // Use deterministic effects for each round
-            let round_effects = Effects::deterministic(42 + round as u64, 1000);
+            let round_effects = test_effects_deterministic(42 + round as u64, 1000);
             let mut rng = round_effects.rng();
 
             // Round 1: Generate nonces and commitments
@@ -261,8 +226,8 @@ mod tests {
         ];
 
         for (threshold, total) in test_cases {
-            let effects = Effects::for_test(&format!("frost_{}of{}", threshold, total));
-            let (key_shares, pubkey_package) = generate_key_shares(threshold, total, &effects);
+            let effects = test_effects_named(&format!("frost_{}of{}", threshold, total));
+            let (key_shares, pubkey_package) = test_frost_key_shares(threshold, total, &effects);
 
             let message = format!("Test {}-of-{} threshold", threshold, total);
 
@@ -318,8 +283,8 @@ mod tests {
     #[test]
     fn test_frost_wrong_message_fails_verification() {
         // Generate key shares
-        let effects = Effects::for_test("test_frost_wrong_message");
-        let (key_shares, pubkey_package) = generate_key_shares(2, 3, &effects);
+        let effects = test_effects_named("test_frost_wrong_message");
+        let (key_shares, pubkey_package) = test_frost_key_shares(2, 3, &effects);
 
         // Original message
         let original_message = b"Original message to sign";

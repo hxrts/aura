@@ -1,7 +1,7 @@
 // Network and CGKA commands
 
+use crate::commands::common;
 use crate::config::Config;
-use aura_agent::IntegratedAgent;
 use aura_journal::{
     capability::{identity::IndividualId, types::CapabilityScope},
 };
@@ -160,7 +160,7 @@ pub async fn handle_network_command(command: NetworkCommand, config: &Config) ->
 async fn connect_peer(config: &Config, peer_id: &str, address: &str) -> anyhow::Result<()> {
     info!("Connecting to peer {} at {}", peer_id, address);
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     let peer = IndividualId::new(peer_id);
     
     // Connect to peer
@@ -176,7 +176,7 @@ async fn connect_peer(config: &Config, peer_id: &str, address: &str) -> anyhow::
 async fn disconnect_peer(config: &Config, peer_id: &str) -> anyhow::Result<()> {
     info!("Disconnecting from peer {}", peer_id);
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     let peer = IndividualId::new(peer_id);
     
     // Remove peer from transport
@@ -191,7 +191,7 @@ async fn disconnect_peer(config: &Config, peer_id: &str) -> anyhow::Result<()> {
 async fn list_peers(config: &Config) -> anyhow::Result<()> {
     info!("Listing connected peers");
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Get connected peers
     let peers = agent.transport.get_peers().await;
@@ -216,7 +216,7 @@ async fn list_peers(config: &Config) -> anyhow::Result<()> {
 async fn create_group(config: &Config, group_id: &str, members: &str) -> anyhow::Result<()> {
     info!("Creating network MLS group '{}' with members: {}", group_id, members);
     
-    let mut agent = create_agent(config).await?;
+    let mut agent = common::create_agent(config).await?;
     
     // Parse member list
     let member_ids: Vec<IndividualId> = members
@@ -245,7 +245,7 @@ async fn create_group(config: &Config, group_id: &str, members: &str) -> anyhow:
 async fn send_data(config: &Config, group_id: &str, data: &str, context: &str) -> anyhow::Result<()> {
     info!("Sending data to group '{}' with context '{}'", group_id, context);
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Get group members from capability graph
     let member_scope = CapabilityScope::with_resource("mls", "member", group_id);
@@ -280,13 +280,13 @@ async fn delegate_capability(
 ) -> anyhow::Result<()> {
     info!("Delegating capability {} to {} via network", scope, subject);
     
-    let mut agent = create_agent(config).await?;
+    let mut agent = common::create_agent(config).await?;
     
     // Parse parent capability scope
-    let parent_scope = parse_capability_scope(parent, None)?;
+    let parent_scope = common::parse_capability_scope(parent, None)?;
     
     // Parse new capability scope
-    let new_scope = parse_capability_scope(scope, resource)?;
+    let new_scope = common::parse_capability_scope(scope, resource)?;
     
     // Create target subject
     let target_subject = aura_journal::capability::types::Subject::new(subject);
@@ -335,7 +335,7 @@ async fn revoke_capability(
 ) -> anyhow::Result<()> {
     info!("Revoking capability {} via network: {}", capability_id, reason);
     
-    let mut agent = create_agent(config).await?;
+    let mut agent = common::create_agent(config).await?;
     
     // Parse capability ID
     let cap_id_bytes = hex::decode(capability_id)
@@ -379,7 +379,7 @@ async fn revoke_capability(
 async fn show_network_stats(config: &Config) -> anyhow::Result<()> {
     info!("Showing network statistics");
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Get network stats
     let network_stats = agent.get_network_stats().await;
@@ -401,7 +401,7 @@ async fn show_network_stats(config: &Config) -> anyhow::Result<()> {
 async fn show_groups(config: &Config) -> anyhow::Result<()> {
     info!("Showing CGKA groups");
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     // Get group memberships
     let groups = agent.capability_agent.list_groups();
@@ -438,7 +438,7 @@ async fn show_groups(config: &Config) -> anyhow::Result<()> {
 async fn process_capability_changes(config: &Config, group_id: &str) -> anyhow::Result<()> {
     info!("Processing capability changes for group '{}'", group_id);
     
-    let mut agent = create_agent(config).await?;
+    let mut agent = common::create_agent(config).await?;
     
     // Process capability changes
     agent.capability_agent.process_capability_changes(group_id)?;
@@ -452,7 +452,7 @@ async fn process_capability_changes(config: &Config, group_id: &str) -> anyhow::
 async fn show_pending_operations(config: &Config) -> anyhow::Result<()> {
     info!("Showing pending network operations");
     
-    let agent = create_agent(config).await?;
+    let agent = common::create_agent(config).await?;
     
     let pending_count = agent.transport.pending_messages_count().await;
     
@@ -467,30 +467,3 @@ async fn show_pending_operations(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_capability_scope(scope_str: &str, resource: Option<&str>) -> anyhow::Result<CapabilityScope> {
-    let parts: Vec<&str> = scope_str.split(':').collect();
-    if parts.len() != 2 {
-        return Err(anyhow::anyhow!("Capability scope must be in format 'namespace:operation'"));
-    }
-    
-    let namespace = parts[0].to_string();
-    let operation = parts[1].to_string();
-    
-    let mut scope = CapabilityScope::simple(&namespace, &operation);
-    if let Some(res) = resource {
-        scope.resource = Some(res.to_string());
-    }
-    
-    Ok(scope)
-}
-
-async fn create_agent(config: &Config) -> anyhow::Result<IntegratedAgent> {
-    let device_id = config.device_id;
-    let account_id = config.account_id;
-    let storage_root = config.data_dir.join("storage");
-    let effects = aura_crypto::Effects::test(); // Use test effects for CLI
-    
-    IntegratedAgent::new(device_id, account_id, storage_root, effects)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create agent: {}", e))
-}

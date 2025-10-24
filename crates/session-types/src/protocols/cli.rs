@@ -711,7 +711,7 @@ mod tests {
             initialized_at: 1000,
         };
         
-        let initializing = cli.transition_with_witness(init_context);
+        let initializing = <ChoreographicProtocol<CliProtocolCore, CliUninitialized> as WitnessedTransition<CliUninitialized, CliInitializing>>::transition_with_witness(cli, init_context);
         assert_eq!(initializing.state_name(), "CliInitializing");
         
         // Complete initialization
@@ -724,7 +724,7 @@ mod tests {
             completed_at: 2000,
         };
         
-        let account_loaded = initializing.transition_with_witness(witness);
+        let account_loaded = <ChoreographicProtocol<CliProtocolCore, CliInitializing> as WitnessedTransition<CliInitializing, CliAccountLoaded>>::transition_with_witness(initializing, witness);
         assert_eq!(account_loaded.state_name(), "CliAccountLoaded");
         assert!(account_loaded.can_terminate());
     }
@@ -743,7 +743,7 @@ mod tests {
             loaded_at: 1000,
         };
         
-        let account_loaded = cli.transition_with_witness(load_witness);
+        let account_loaded = <ChoreographicProtocol<CliProtocolCore, CliUninitialized> as WitnessedTransition<CliUninitialized, CliAccountLoaded>>::transition_with_witness(cli, load_witness);
         assert_eq!(account_loaded.state_name(), "CliAccountLoaded");
         
         // Start DKD command
@@ -754,7 +754,7 @@ mod tests {
             started_at: 2000,
         };
         
-        let dkd_in_progress = account_loaded.transition_with_witness(dkd_context);
+        let dkd_in_progress = <ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> as WitnessedTransition<CliAccountLoaded, CliDkdInProgress>>::transition_with_witness(account_loaded, dkd_context);
         assert_eq!(dkd_in_progress.state_name(), "CliDkdInProgress");
         
         // Complete DKD command
@@ -769,7 +769,7 @@ mod tests {
             completed_at: 3000,
         };
         
-        let completed = dkd_in_progress.transition_with_witness(completion_witness);
+        let completed = <ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> as WitnessedTransition<CliDkdInProgress, CliAccountLoaded>>::transition_with_witness(dkd_in_progress, completion_witness);
         assert_eq!(completed.state_name(), "CliAccountLoaded");
     }
     
@@ -797,7 +797,7 @@ mod tests {
             failed_at: 1000,
         };
         
-        let failed_cli = cli.transition_with_witness(failure_witness);
+        let failed_cli = <ChoreographicProtocol<CliProtocolCore, CliUninitialized> as WitnessedTransition<CliUninitialized, CliCommandFailed>>::transition_with_witness(cli, failure_witness);
         assert_eq!(failed_cli.state_name(), "CliCommandFailed");
         assert!(failed_cli.can_terminate());
     }

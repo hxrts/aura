@@ -5,21 +5,20 @@
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::sync::Arc;
 
-mod config;
 mod commands;
+mod config;
 
-use config::Config;
+use aura_coordination::{production::ConsoleLogSink, LogSink};
 use commands::{
-    auth::{AuthCommand, handle_auth_command},
-    authz::{AuthzCommand, handle_authz_command},
-    capability::{CapabilityCommand, handle_capability_command},
-    storage::{StorageCommand, handle_storage_command},
-    network::{NetworkCommand, handle_network_command},
+    authz::{handle_authz_command, AuthzCommand},
     init,
+    network::{handle_network_command, NetworkCommand},
     status,
-    dkd,
+    storage::{handle_storage_command, StorageCommand},
 };
+use config::Config;
 
 #[derive(Parser)]
 #[command(name = "aura")]
@@ -57,28 +56,9 @@ enum Commands {
     /// Show account status
     Status,
 
-    /// Test key derivation
-    TestDkd {
-        /// App ID
-        #[arg(short, long)]
-        app_id: String,
-
-        /// Context label
-        #[arg(short, long)]
-        context: String,
-    },
-
-    /// Authentication commands - identity verification (who you are)
-    #[command(subcommand)]
-    Auth(AuthCommand),
-
     /// Authorization commands - permission management (what you can do)
     #[command(subcommand)]
     Authz(AuthzCommand),
-
-    /// Legacy capability management commands (deprecated - use auth/authz instead)
-    #[command(subcommand)]
-    Capability(CapabilityCommand),
 
     /// Storage operations with capability protection
     #[command(subcommand)]
@@ -93,9 +73,12 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // Initialize tracing
+    // Initialize unified logging system
     let log_level = if cli.verbose { "debug" } else { "info" };
     tracing_subscriber::fmt().with_env_filter(log_level).init();
+
+    // Create console log sink for Aura logging
+    let _log_sink: Arc<dyn LogSink> = Arc::new(ConsoleLogSink::new());
 
     match cli.command {
         Commands::Init {
@@ -105,37 +88,22 @@ async fn main() -> anyhow::Result<()> {
         } => {
             init::run(participants, threshold, &output).await?;
         }
-        
+
         Commands::Status => {
             let _config = Config::load(&cli.config).await?;
             status::show_status(&cli.config.to_string_lossy()).await?;
         }
-        
-        Commands::TestDkd { app_id, context } => {
-            dkd::test_dkd(&cli.config.to_string_lossy(), &app_id, &context).await?;
-        }
-        
-        Commands::Auth(cmd) => {
-            let config = Config::load(&cli.config).await?;
-            handle_auth_command(cmd, &config).await?;
-        }
-        
+
         Commands::Authz(cmd) => {
             let config = Config::load(&cli.config).await?;
             handle_authz_command(cmd, &config).await?;
         }
-        
-        Commands::Capability(cmd) => {
-            eprintln!("Warning: 'capability' commands are deprecated. Use 'auth' for authentication or 'authz' for authorization.");
-            let config = Config::load(&cli.config).await?;
-            handle_capability_command(cmd, &config).await?;
-        }
-        
+
         Commands::Storage(cmd) => {
             let config = Config::load(&cli.config).await?;
             handle_storage_command(cmd, &config).await?;
         }
-        
+
         Commands::Network(cmd) => {
             let config = Config::load(&cli.config).await?;
             handle_network_command(cmd, &config).await?;

@@ -35,6 +35,7 @@ aes-gcm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_cbor = { workspace = true }
+bincode = "1.3"
 
 # Async
 tokio = { workspace = true }
@@ -48,6 +49,8 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
+hex = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

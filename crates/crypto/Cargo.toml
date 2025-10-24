@@ -38,5 +38,6 @@ uuid = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+aura-test-utils = { path = "../test-utils" }
 tokio-test = "0.4"
 proptest = { workspace = true }
