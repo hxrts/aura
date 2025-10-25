@@ -4,6 +4,8 @@ use aura_journal::serialization::to_cbor_bytes;
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
+use anyhow;
+use toml;
 // Removed legacy current_timestamp import - using effects instead
 
 /// Context capsule for deterministic key derivation
@@ -158,9 +160,8 @@ pub struct AuthenticationCredential {
     pub challenge: [u8; 32],
     /// Nonce for replay prevention (monotonic counter per device)
     pub nonce: u64,
-    /// Device attestation (placeholder for TPM/SEP quote)
-    /// In production, this should be a platform-specific attestation token
-    pub device_attestation: Option<Vec<u8>>,
+    /// Device attestation proving hardware authenticity and software integrity
+    pub device_attestation: Option<crate::secure_storage::DeviceAttestationStatement>,
     /// Device signature proving identity
     pub device_signature: Vec<u8>,
 }
@@ -321,8 +322,8 @@ pub struct IdentityConfig {
     pub account_id: aura_journal::AccountId,
     /// Participant identifier for protocol coordination
     pub participant_id: aura_coordination::ParticipantId,
-    /// Path to sealed key share (encrypted)
-    pub share_path: String,
+    /// Secure storage key identifier for encrypted key share
+    pub key_id: String,
     /// Threshold configuration (minimum signatures required)
     pub threshold: u16,
     /// Total number of participants in threshold scheme

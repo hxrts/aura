@@ -276,7 +276,7 @@ impl RuntimeWitness for EpochTransitionReady {
                             committed_operations: transition
                                 .committed_operations
                                 .into_iter()
-                                .map(|id| OperationId(id))
+                                .map(OperationId)
                                 .collect(),
                             roster_delta: RosterDelta {
                                 added_members: transition
@@ -867,11 +867,13 @@ pub fn rehydrate_cgka_session(
     }
 }
 
+#[allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_crypto::Effects;
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_cgka_session_creation() {
         let effects = Effects::test();
@@ -891,6 +893,7 @@ mod tests {
         assert_eq!(session.inner.current_state.roster.member_count(), 2);
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_cgka_state_transitions() {
         let effects = Effects::test();
@@ -935,6 +938,7 @@ mod tests {
         assert_eq!(size, 1);
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_cgka_rehydration() {
         let effects = Effects::test();
@@ -957,6 +961,7 @@ mod tests {
         // For now, we test the basic rehydration logic
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_cgka_witnesses() {
         let group_id = "test-group".to_string();

@@ -1,3 +1,4 @@
+#![allow(warnings, clippy::all)]
 //! Integration Tests: Capability Grant and Revoke
 //!
 //! Tests the full lifecycle of capability management including grant, use, and revocation.
@@ -284,7 +285,7 @@ mod tests {
         assert_eq!(verified_token.authenticated_device, device_b_id);
         assert_eq!(verified_token.granted_permissions.len(), 1);
 
-        println!("✓ test_grant_storage_capability_to_peer PASSED");
+        println!("[OK] test_grant_storage_capability_to_peer PASSED");
     }
 
     #[test]
@@ -355,7 +356,7 @@ mod tests {
             err
         );
 
-        println!("✓ test_revoke_capability_invalidates_token PASSED");
+        println!("[OK] test_revoke_capability_invalidates_token PASSED");
     }
 
     #[test]
@@ -434,6 +435,6 @@ mod tests {
             "Threshold enforcement works"
         );
 
-        println!("✓ test_capability_grant_requires_threshold_signature PASSED");
+        println!("[OK] test_capability_grant_requires_threshold_signature PASSED");
     }
 }

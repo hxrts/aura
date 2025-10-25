@@ -621,8 +621,9 @@ pub fn rehydrate_recovery_session(
     let has_sufficient_approvals = core.collected_approvals.len() >= threshold as usize;
     let has_sufficient_shares = core.collected_shares.len() >= threshold as usize;
 
-    // TODO: Check cooldown completion properly based on timestamps
-    let has_cooldown_complete = has_sufficient_approvals; // Simplified for now
+    // Check cooldown completion properly based on timestamps
+    let has_cooldown_complete =
+        check_cooldown_completion(&events, recovery_id, cooldown_hours.unwrap_or(24));
 
     if has_abort {
         RecoverySessionState::RecoveryAborted(ChoreographicProtocol::new(core))
@@ -641,11 +642,48 @@ pub fn rehydrate_recovery_session(
     }
 }
 
+/// Helper function to check cooldown completion using proper timestamp verification
+fn check_cooldown_completion(events: &[Event], recovery_id: Uuid, cooldown_duration: u64) -> bool {
+    // Find the recovery initiation event to get the start timestamp
+    let initiation_epoch = events.iter().find_map(|event| {
+        if let EventType::InitiateRecovery(init_event) = &event.event_type {
+            if init_event.recovery_id == recovery_id {
+                Some(event.epoch_at_write)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    match initiation_epoch {
+        Some(start_epoch) => {
+            // Filter events during cooldown period (potential vetoes)
+            let veto_events: Vec<Event> = events
+                .iter()
+                .filter(|event| {
+                    event.epoch_at_write >= start_epoch
+                        && event.epoch_at_write <= start_epoch + cooldown_duration
+                })
+                .cloned()
+                .collect();
+
+            // Use the CooldownCompleted witness to verify cooldown completion
+            CooldownCompleted::verify((recovery_id, start_epoch, veto_events), cooldown_duration)
+                .is_some()
+        }
+        None => false, // No initiation event found
+    }
+}
+
+#[allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_journal::{AccountId, EventAuthorization, EventId, InitiateRecoveryEvent};
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_recovery_state_transitions() {
         let recovery_id = Uuid::new_v4();
@@ -691,6 +729,7 @@ mod tests {
         assert_eq!(cooldown_recovery.cooldown_hours(), 48);
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_recovery_witness_verification() {
         let recovery_id = Uuid::new_v4();
@@ -726,6 +765,7 @@ mod tests {
         assert_eq!(witness.guardian_count, 1);
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_recovery_rehydration() {
         let recovery_id = Uuid::new_v4();

@@ -3,7 +3,7 @@
 //! Provides structured error types with rich context for distributed debugging,
 //! simulation testing, and production observability.
 
-use crate::{DeviceId, AccountId, ProtocolType, SessionEpoch, ParticipantId};
+use crate::{AccountId, DeviceId, ParticipantId, ProtocolType, SessionEpoch};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -32,21 +32,21 @@ pub enum AuraErrorKind {
         reason: AuthFailureReason,
         context: Option<String>,
     },
-    
+
     /// Authorization failures - permission check failures
     Authorization {
         required_capability: String, // CapabilityScope as string
         granted_capabilities: Vec<String>,
         operation: String,
     },
-    
+
     /// Network and transport issues
     Network {
         peer_id: Option<DeviceId>,
         operation: NetworkOperation,
         underlying: NetworkErrorKind,
     },
-    
+
     /// Data corruption or validation failures
     Corruption {
         data_type: String,
@@ -54,14 +54,14 @@ pub enum AuraErrorKind {
         actual_hash: Option<[u8; 32]>,
         context: String,
     },
-    
+
     /// Resource exhaustion
     Resource {
         resource_type: ResourceType,
         limit: u64,
         requested: u64,
     },
-    
+
     /// Session-type protocol violations
     ProtocolViolation {
         protocol: ProtocolType,
@@ -69,14 +69,14 @@ pub enum AuraErrorKind {
         actual_state: String,
         session_id: Uuid,
     },
-    
+
     /// Byzantine behavior detection
     Byzantine {
         accused_device: DeviceId,
         evidence: ByzantineEvidence,
         severity: ByzantineSeverity,
     },
-    
+
     /// Choreography execution failures
     Choreography {
         protocol: ProtocolType,
@@ -195,10 +195,7 @@ pub enum ByzantineEvidence {
         actual_commitment: [u8; 32],
     },
     /// Double-spending attempt
-    DoubleSpending {
-        first_nonce: u64,
-        second_nonce: u64,
-    },
+    DoubleSpending { first_nonce: u64, second_nonce: u64 },
     /// Equivocation (sending conflicting messages)
     Equivocation {
         message1_hash: [u8; 32],
@@ -230,7 +227,12 @@ pub enum ByzantineSeverity {
 
 impl AuraError {
     /// Create a new error with minimal context
-    pub fn new(kind: AuraErrorKind, operation: &str, device_id: DeviceId, account_id: AccountId) -> Self {
+    pub fn new(
+        kind: AuraErrorKind,
+        operation: &str,
+        device_id: DeviceId,
+        account_id: AccountId,
+    ) -> Self {
         Self {
             kind,
             context: ErrorContext {
@@ -242,40 +244,45 @@ impl AuraError {
                 session_epoch: None,
                 fields: BTreeMap::new(),
             },
-            trace_id: Uuid::new_v4(),
-            timestamp: 0, // Will be injected by Effects
+            trace_id: Uuid::from_bytes([0; 16]), // Deterministic default, should be set by caller
+            timestamp: 0,                        // Will be injected by Effects
             session_context: None,
         }
     }
-    
+
     /// Add protocol context to the error
     pub fn with_protocol_context(mut self, _protocol: ProtocolType, phase: &str) -> Self {
         self.context.protocol_phase = Some(phase.to_string());
         self
     }
-    
+
     /// Add session context to the error
     pub fn with_session_context(mut self, session_context: SessionContext) -> Self {
         self.session_context = Some(session_context);
         self
     }
-    
+
     /// Add a context field
     pub fn with_field(mut self, key: &str, value: &str) -> Self {
-        self.context.fields.insert(key.to_string(), value.to_string());
+        self.context
+            .fields
+            .insert(key.to_string(), value.to_string());
         self
     }
-    
+
     /// Check if this error indicates Byzantine behavior
     pub fn is_byzantine(&self) -> bool {
         matches!(self.kind, AuraErrorKind::Byzantine { .. })
     }
-    
+
     /// Check if this error is recoverable
     pub fn is_recoverable(&self) -> bool {
         match &self.kind {
             AuraErrorKind::Network { underlying, .. } => {
-                matches!(underlying, NetworkErrorKind::Timeout | NetworkErrorKind::NetworkUnreachable)
+                matches!(
+                    underlying,
+                    NetworkErrorKind::Timeout | NetworkErrorKind::NetworkUnreachable
+                )
             }
             AuraErrorKind::Resource { .. } => true,
             AuraErrorKind::Authorization { .. } => true, // Can refresh capabilities
@@ -292,10 +299,11 @@ impl AuraError {
 
 impl std::fmt::Display for AuraError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {}: {:?}", 
-               self.context.device_id.0,
-               self.context.operation,
-               self.kind)
+        write!(
+            f,
+            "[{}] {}: {:?}",
+            self.context.device_id.0, self.context.operation, self.kind
+        )
     }
 }
 
@@ -324,7 +332,7 @@ impl AuraError {
             account_id,
         )
     }
-    
+
     /// Create an authorization error
     pub fn authorization(
         device_id: DeviceId,
@@ -344,7 +352,7 @@ impl AuraError {
             account_id,
         )
     }
-    
+
     /// Create a network error
     pub fn network(
         device_id: DeviceId,
@@ -365,7 +373,7 @@ impl AuraError {
             account_id,
         )
     }
-    
+
     /// Create a Byzantine behavior error
     pub fn byzantine(
         device_id: DeviceId,
@@ -386,7 +394,7 @@ impl AuraError {
             account_id,
         )
     }
-    
+
     /// Create a protocol violation error
     pub fn protocol_violation(
         device_id: DeviceId,

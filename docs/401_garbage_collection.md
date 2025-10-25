@@ -1,9 +1,5 @@
 # Garbage Collection and State Compaction
 
-**Status:** Proposal  
-**Version:** 1.2  
-**Created:** October 24, 2025
-
 ## 1. Overview & Motivation
 
 Aura's architecture relies on a CRDT-based journal (`Journal`) that maintains a complete history of all operations. While this provides robustness and auditability, it also leads to unbounded state growth. Over time, the ledger can become bloated with:
@@ -55,6 +51,17 @@ Examples include:
 *   **Capability Revocation:** When a peer's capability to store data is revoked, they are signaled to prune the data they are no longer authorized to hold.
 *   **Future: Proxy Re-encryption Triggers:** Key rotation events could trigger proxy re-encryption transformations instead of immediate deletion, enabling gradual migration to new encryption.
 
+### 3.5. Snapshot Materialization Contract
+
+All peers must derive identical hashes for the same logical state. To guarantee this, snapshot generation follows a strict contract:
+
+*   **Canonical Ordering:** Entries are serialized in deterministic order (account metadata, capability sets, journals, storage manifests), using stable sort keys (e.g., UUID bytes ascending).
+*   **Encoding Schema:** Snapshots use a versioned, canonical encoding (e.g., `snapshot_v1` CBOR with sorted maps and domain-separated hashes). Future migrations bump the version while retaining backward compatibility.
+*   **Redaction Rules:** Ephemeral/cache fields are omitted uniformly; every client uses the shared allowlist so derived hashes do not diverge.
+*   **Conformance Vectors:** Each implementation ships golden test vectors (serialized blob + expected hash) to validate compatibility before joining production.
+
+The proposal assumes an implementation cannot emit a `ProposeSnapshot` unless it produces a blob that passes the conformance suite for the active schema version.
+
 ## 4. Proposed Architecture
 
 The state compaction system is a P2P choreographic protocol, similar to DKD or Resharing, coordinated via the `Journal` CRDT.
@@ -94,6 +101,12 @@ pub enum JournalEvent {
         proposal_id: Uuid,
         proposer_id: DeviceId,
         target_epoch: u64,
+        /// Digest of the admin roster used for threshold policy checks.
+        roster_digest: [u8; 32],
+        /// Digest of the latest committed journal state the proposer observed.
+        journal_head_digest: [u8; 32],
+        /// Snapshot schema version to keep multi-language clients aligned.
+        snapshot_version: u16,
         /// A hash of the complete, serialized account state at the target_epoch.
         state_hash: [u8; 32],
     },
@@ -102,6 +115,9 @@ pub enum JournalEvent {
     ApproveSnapshot {
         proposal_id: Uuid,
         voter_id: DeviceId,
+        roster_digest: [u8; 32],
+        /// The voter's view of the journal head; must match the proposal.
+        journal_head_digest: [u8; 32],
         /// The voter's signature over the proposal's fields.
         signature: Vec<u8>,
     },
@@ -110,10 +126,15 @@ pub enum JournalEvent {
     SnapshotCompleted {
         proposal_id: Uuid,
         target_epoch: u64,
+        roster_digest: [u8; 32],
+        journal_head_digest: [u8; 32],
+        snapshot_version: u16,
         state_hash: [u8; 32],
         /// The full, serialized state. Can be stored off-chain.
         /// For large states, this might just be a CID.
         state_payload_cid: Cid,
+        /// K-of-N availability attestations for the snapshot blob.
+        availability_proof: Vec<u8>,
         /// Threshold signature from the group, authorizing the snapshot.
         threshold_signature: Vec<u8>,
     },
@@ -139,8 +160,25 @@ pub enum JournalEvent {
 
     // Note: Events like `CapabilityRevoked` and `MemberRemoved` also act as
     // implicit GC signals for the affected peers.
+
+    // Future: Explicit RejectSnapshot events let peers abort stalled proposals.
 }
 ```
+
+### 4.2. Write Fencing & Snapshot Epoch Management
+
+`ProposeSnapshot` carries the proposer's last observed journal digest. Peers only approve if their local digest matches, which creates an implicit write barrier: any device that must append new events queues them into a **post-snapshot buffer** until the proposal is either committed or times out. If a writer observes divergent state during verification, it emits a `RejectSnapshot` (future extension) and republishes the buffered events so liveness is restored without silent data loss.
+
+Operators configure retry timers (e.g., abandon after 30s without quorum) and bounded buffer sizes so paused writers never stall indefinitely. Buffered events carry sequence numbers to ensure they are replayed in-order once the snapshot outcome is known.
+
+### 4.3. Threshold & Escalation Policy
+
+Snapshots require an `M-of-N` signature from the current admin roster (`M = 2f + 1` for a group that tolerates `f` Byzantine devices). Each proposal embeds the roster digest used for threshold verification. If quorum cannot be met within a configurable grace window, the group may:
+
+1.   Trigger an **escalation vote** to temporarily lower `M` (never below a simple majority), or
+2.   Issue a `MemberRemoved` / `CapabilityRevoked` for stale devices and re-run the proposal with the updated roster digest.
+
+Peers track retry cadence (`max_retries`, `retry_backoff`) to avoid livelock. Archival nodes are encouraged to stay online, but the protocol remains safe because compaction will halt instead of proceeding without quorum.
 
 ## 5. Detailed Protocol Flow
 
@@ -171,10 +209,10 @@ stateDiagram-v2
 
     note right of Verifying
         Other devices receive the proposal.
-        They pause their own ledgers, compute
-        their own hash of the state at the
-        `target_epoch`, and if it matches,
-        they vote to approve.
+        They fence new writes into a buffer,
+        compute their own hash of the state
+        at the `target_epoch`, and if it
+        matches, they vote to approve.
     end note
 
     note right of Committing
@@ -206,6 +244,17 @@ The GC system enables the safe pruning of several types of data.
 | **Orphaned Chunks** | (Advanced) Storage chunks not referenced by any `ObjectManifest` in the latest snapshot. | This requires a separate, slower "mark and sweep" process that scans all manifests. This should be considered a separate GC process from the main state compaction. |
 | **Future: Transformed Chunks** | (Phase 2+) Chunks encrypted with old keys after proxy re-encryption transformation is complete. | Proxy re-encryption enables gradual migration: old encrypted chunks can be deleted once transformation to new encryption is verified and replicated. |
 
+### 6.1. Snapshot Availability Guarantees
+
+`SnapshotCompleted` is only valid if the proposer can supply a storage availability proof:
+
+*   **Replication Targets:** Snapshots land in the storage mesh with a minimum replica count (`k >= 3`, spanning disjoint providers/regions). Archival nodes pin blobs locally.
+*   **Availability Proof:** The event includes aggregated signatures from storage custodians attesting that the CID is pinned and encrypted. Peers verify this proof before pruning.
+*   **Audit Jobs:** Background jobs periodically fetch and checksum stored snapshots; if a replica disappears, they republish the blob and emit an alert.
+*   **Access Control:** Snapshot payloads are wrapped with the account’s data encryption key (DEK) so only authorized devices can decrypt while retention providers store opaque ciphertext.
+
+If the availability check fails, devices refuse to prune and the proposal expires, ensuring newcomers can always fetch a valid snapshot.
+
 ## 7. Safety & New Peer Synchronization
 
 **The most important principle is that GC must not compromise the ability of a new peer to join and fully synchronize.**
@@ -231,6 +280,8 @@ This allows the group as a whole to retain its history while allowing individual
 ### Phase 1: Snapshot Protocol Foundation (3 weeks)
 
 *   **Events:** Implement the `ProposeSnapshot`, `ApproveSnapshot`, `SnapshotCompleted`, and `SbbRelationshipKeyRotated` events in the `Journal`.
+*   **Snapshot Schema:** Define the canonical serialization (`snapshot_version`), ordering rules, and publish cross-language conformance vectors.
+*   **Journal Digests:** Add deterministic journal head digests and make snapshot proposals validate against them.
 *   **Choreography:** Create the P2P protocol for proposing and agreeing on a snapshot.
 *   **State Hashing:** Implement a deterministic hashing function for the entire `AccountLedger` state.
 *   **Local Pruning Logic:** Implement the logic for a device to safely delete its local CRDT event log up to the snapshot's epoch.
@@ -238,13 +289,16 @@ This allows the group as a whole to retain its history while allowing individual
 ### Phase 2: Integration and Automation (2 weeks)
 
 *   **Watermarks:** Add the high-water and low-water mark configuration to trigger the state compaction protocol automatically.
+*   **Writer Fence:** Implement post-snapshot write buffers, timeout handling, and automatic replay once a proposal succeeds or aborts.
 *   **New Peer Sync:** Update the new device synchronization logic to use the snapshot-based flow.
 *   **Event-Driven GC for Ephemera:** Implement the GC logic for SBB envelopes and invalidated replicas, which listens for cryptographic trigger events (`SbbRelationshipKeyRotated`, `CapabilityRevoked`, etc.).
+*   **Availability Proofs:** Integrate storage mesh attestations and pruning guards so devices confirm snapshot blobs are pinned before deleting local history.
 
 ### Phase 3: Advanced GC (Future)
 
 *   **Orphaned Storage Chunks:** Design and implement the "mark and sweep" process for finding and deleting unreferenced storage chunks. This is a more complex process and should be tackled after the core state compaction is proven to be robust.
 *   **Proxy Re-encryption Integration:** Add GC support for proxy re-encryption transformations, enabling efficient key rotation without immediate chunk deletion.
+*   **Datalog-Powered GC:** Leverage the Datalog query engine (from the distributed DB design) to run complex garbage collection queries. For example, we could write rules to automatically identify orphaned storage chunks, expired capabilities that are no longer referenced, or other complex data relationships that are safe to prune.
 
 ## 9. Conclusion
 

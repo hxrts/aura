@@ -338,6 +338,7 @@ impl SessionTypedTransportAdapter {
             peer_id: peer_id.to_string(),
             transport_session: self.transport_session.clone(),
             event_sender: self.event_sender.clone(),
+            transport: self.transport.clone(),
         })
     }
 
@@ -397,6 +398,8 @@ pub struct SessionTypedConnection {
     transport_session: Arc<RwLock<TransportSessionState>>,
     /// Event sender to local session runtime
     event_sender: Option<tokio::sync::mpsc::UnboundedSender<TransportEvent>>,
+    /// Transport implementation for sending/receiving
+    transport: Arc<dyn Transport>,
 }
 
 impl SessionTypedConnection {
@@ -416,23 +419,35 @@ impl SessionTypedConnection {
             .into());
         }
 
-        // TODO: Use actual transport send - this is a placeholder
+        // Use actual transport send implementation
         debug!(
             "Sending {} bytes to peer {} with session types",
             message.len(),
             self.peer_id
         );
         
-        // Send message sent event to session runtime
-        if let Some(event_sender) = &self.event_sender {
-            let event = TransportEvent::MessageSent {
-                peer_id: self.peer_id.clone(),
-                message_size: message.len(),
-            };
-            let _ = event_sender.send(event);
+        // Use the actual transport implementation to send the message
+        let result = {
+            if message.is_empty() {
+                return Err(crate::TransportError::Transport("Cannot send empty message".to_string()).into());
+            }
+            
+            // Use the real transport send method
+            self.transport.send(&self.connection, message).await.map_err(|e| e.into())
+        };
+        
+        // Send message sent event to session runtime only on success
+        if result.is_ok() {
+            if let Some(event_sender) = &self.event_sender {
+                let event = TransportEvent::MessageSent {
+                    peer_id: self.peer_id.clone(),
+                    message_size: message.len(),
+                };
+                let _ = event_sender.send(event);
+            }
         }
         
-        Ok(())
+        result
     }
 
     /// Receive message with session type safety
@@ -451,25 +466,38 @@ impl SessionTypedConnection {
             .into());
         }
 
-        // TODO: Use actual transport receive - this is a placeholder
+        // Use actual transport receive implementation
         debug!(
             "Receiving message from peer {} with session types (timeout: {:?})",
             self.peer_id, timeout
         );
         
-        // For demonstration, simulate receiving a message
-        let mock_message = vec![1, 2, 3, 4]; // Mock message
+        // Use the actual transport implementation to receive the message
+        let result = self.transport.receive(&self.connection, timeout).await;
         
-        // Send message received event to session runtime
-        if let Some(event_sender) = &self.event_sender {
-            let event = TransportEvent::MessageReceived {
-                peer_id: self.peer_id.clone(),
-                message: mock_message.clone(),
-            };
-            let _ = event_sender.send(event);
+        match result {
+            Ok(Some(message)) => {
+                // Send message received event to session runtime
+                if let Some(event_sender) = &self.event_sender {
+                    let event = TransportEvent::MessageReceived {
+                        peer_id: self.peer_id.clone(),
+                        message: message.clone(),
+                    };
+                    let _ = event_sender.send(event);
+                }
+                Ok(Some(message))
+            }
+            Ok(None) => {
+                // Timeout reached, no message received
+                debug!("No message received from peer {} within timeout", self.peer_id);
+                Ok(None)
+            }
+            Err(e) => {
+                // Transport error during receive
+                warn!("Transport error receiving from peer {}: {}", self.peer_id, e);
+                Err(e.into())
+            }
         }
-        
-        Ok(Some(mock_message))
     }
 
     /// Get peer ID

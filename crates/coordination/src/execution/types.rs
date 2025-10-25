@@ -59,7 +59,7 @@ impl ProtocolError {
             message,
         }
     }
-    
+
     /// Create a new protocol error with session ID
     pub fn with_session(session_id: Uuid, error_type: ProtocolErrorType, message: String) -> Self {
         ProtocolError {
@@ -101,7 +101,7 @@ pub enum ProtocolErrorType {
 impl From<aura_crypto::CryptoError> for ProtocolError {
     fn from(err: aura_crypto::CryptoError) -> Self {
         ProtocolError {
-            session_id: uuid::Uuid::nil(), // Will be set by caller
+            session_id: Uuid::nil(), // Will be set by caller if needed
             error_type: ProtocolErrorType::CryptoError,
             message: format!("Crypto error: {:?}", err),
         }
@@ -288,4 +288,15 @@ pub struct LedgerStateSnapshot {
     pub next_nonce: u64,
     pub last_event_hash: Option<[u8; 32]>,
     pub current_epoch: u64,
+    pub relationship_counters:
+        std::collections::BTreeMap<aura_journal::events::RelationshipId, (u64, u64)>,
+}
+
+/// Generate a deterministic test UUID for non-production use
+fn generate_test_uuid() -> uuid::Uuid {
+    // Use UUID v4 with a fixed seed for deterministic tests
+    uuid::Uuid::from_bytes([
+        0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd,
+        0xef,
+    ])
 }

@@ -17,9 +17,10 @@
         pkgs = import nixpkgs {
           inherit system overlays;
         };
-        
+
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
+          targets = [ "wasm32-unknown-unknown" ];
         };
       in
       {
@@ -30,20 +31,27 @@
             cargo-watch
             cargo-edit
             cargo-audit
-            
+
+            # WASM tools
+            wasm-pack
+            wasm-bindgen-cli
+
             # Build tools
             pkg-config
             openssl
-            
+
             # Task runner
             just
-            
+
             # Development tools
             git
             jq
-            
+
             # Nix formatter
             nixpkgs-fmt
+
+            # Web server for testing WASM
+            python3
           ];
 
           shellHook = ''
@@ -59,7 +67,7 @@
             echo "  just test        Run all tests"
             echo "  just check       Run clippy and format check"
             echo ""
-            
+
             export RUST_BACKTRACE=1
             export RUST_LOG=info
           '';
@@ -67,4 +75,3 @@
       }
     );
 }
-

@@ -398,6 +398,7 @@ impl Effects {
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
 

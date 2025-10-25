@@ -6,7 +6,6 @@ use crate::capability::{
     types::CapabilityScope,
 };
 use crate::{AccountId, DeviceId, ThresholdSig};
-use ed25519_dalek::Signature;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tracing::{debug, info};
@@ -148,10 +147,8 @@ impl BootstrapManager {
         let mut device_ids = Vec::new();
         let mut device_metadatas = Vec::new();
 
-        // Generate placeholder group key (will be replaced by FROST)
-        let placeholder_key = ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).map_err(|e| {
-            crate::LedgerError::InvalidEvent(format!("Invalid placeholder key: {}", e))
-        })?;
+        // Generate FROST-derived group key for testing
+        let frost_group_key = generate_frost_test_group_key(effects)?;
 
         // Create device metadata for all participants
         for i in 0..participants {
@@ -160,10 +157,12 @@ impl BootstrapManager {
                 device_id,
                 device_name: format!("Device {}", i + 1),
                 device_type: crate::types::DeviceType::Native,
-                public_key: placeholder_key,
+                public_key: frost_group_key,
                 added_at: effects.now().unwrap_or(0),
                 last_seen: effects.now().unwrap_or(0),
                 dkd_commitment_proofs: BTreeMap::new(),
+                next_nonce: 1,
+                used_nonces: std::collections::BTreeSet::new(),
             };
             device_ids.push(device_id);
             device_metadatas.push(device);
@@ -172,7 +171,7 @@ impl BootstrapManager {
         // Create initial account state
         let mut account_state = crate::AccountState::new(
             account_id,
-            placeholder_key,
+            frost_group_key,
             device_metadatas[0].clone(),
             threshold,
             participants,
@@ -390,7 +389,8 @@ impl BootstrapManager {
         // In production, this would involve actual threshold signature ceremony
         // For now, create a placeholder signature
 
-        let dummy_signature = Signature::from_bytes(&[0u8; 64]);
+        let effects = aura_crypto::Effects::test();
+        let dummy_signature = generate_test_signature(&effects);
         let signers: Vec<u8> = (0..config.initial_devices.len() as u8).collect();
 
         // Create signature shares for each signer
@@ -448,10 +448,11 @@ impl BootstrapManager {
         let mls_scope = CapabilityScope::with_resource("mls", "member", group_id);
 
         // Create dummy threshold signature for MLS group creation
+        let test_signature = generate_test_signature(effects);
         let threshold_sig = ThresholdSig {
-            signature: Signature::from_bytes(&[0u8; 64]),
+            signature: test_signature,
             signers: vec![0],
-            signature_shares: vec![Signature::from_bytes(&[0u8; 64]).to_bytes().to_vec()],
+            signature_shares: vec![test_signature.to_bytes().to_vec()],
         };
 
         for individual_id in initial_members {
@@ -575,4 +576,32 @@ pub mod validation {
 
         Ok(())
     }
+}
+
+/// Generate a deterministic test signature for non-production use
+fn generate_test_signature(effects: &aura_crypto::Effects) -> ed25519_dalek::Signature {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    // Generate a deterministic test key from effects
+    let mut rng = effects.rng();
+    let key_material: [u8; 32] = rand::Rng::gen(&mut rng);
+    let signing_key = SigningKey::from_bytes(&key_material);
+
+    let message = b"test_message_for_bootstrap";
+    signing_key.sign(message)
+}
+
+/// Generate a FROST-derived group key for testing
+fn generate_frost_test_group_key(
+    effects: &aura_crypto::Effects,
+) -> crate::Result<ed25519_dalek::VerifyingKey> {
+    use ed25519_dalek::SigningKey;
+
+    // Generate a deterministic key from effects that simulates FROST group key generation
+    let mut rng = effects.rng();
+    let group_key_material: [u8; 32] = rand::Rng::gen(&mut rng);
+
+    // Create a signing key and extract the verifying key to simulate FROST output
+    let signing_key = SigningKey::from_bytes(&group_key_material);
+    Ok(signing_key.verifying_key())
 }

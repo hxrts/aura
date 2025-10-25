@@ -101,7 +101,7 @@ pub mod errors {
 pub mod success {
     /// Format a standard success message with checkmark
     pub fn operation_completed(operation: &str, details: &[(&str, &str)]) -> String {
-        let mut msg = format!("✓ {}", operation);
+        let mut msg = format!("[OK] {}", operation);
         for (key, value) in details {
             msg.push_str(&format!("\n  {}: {}", key, value));
         }

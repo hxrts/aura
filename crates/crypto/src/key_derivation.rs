@@ -16,13 +16,25 @@ use sha2::Sha256;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IdentityKeyContext {
     /// Device encryption keys for local data
-    DeviceEncryption { device_id: Vec<u8> },
+    DeviceEncryption {
+        /// Device identifier
+        device_id: Vec<u8>,
+    },
     /// Relationship keys between accounts (K_box, K_tag, K_psk)
-    RelationshipKeys { relationship_id: Vec<u8> },
+    RelationshipKeys {
+        /// Relationship identifier
+        relationship_id: Vec<u8>,
+    },
     /// Account root identity key
-    AccountRoot { account_id: Vec<u8> },
+    AccountRoot {
+        /// Account identifier
+        account_id: Vec<u8>,
+    },
     /// Guardian recovery keys
-    GuardianKeys { guardian_id: Vec<u8> },
+    GuardianKeys {
+        /// Guardian identifier
+        guardian_id: Vec<u8>,
+    },
 }
 
 /// Permission key context - derives independently from identity keys
@@ -32,15 +44,24 @@ pub enum IdentityKeyContext {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionKeyContext {
     /// Storage access keys for specific operations and resources
-    StorageAccess { operation: String, resource: String },
+    StorageAccess {
+        /// Storage operation type
+        operation: String,
+        /// Resource identifier
+        resource: String,
+    },
     /// Communication scope keys for message sending/receiving
     CommunicationScope {
+        /// Communication operation type
         operation: String,
+        /// Relationship identifier
         relationship: String,
     },
     /// Relay permission keys for forwarding and storage
     RelayPermission {
+        /// Relay operation type
         operation: String,
+        /// Required trust level
         trust_level: String,
     },
 }
@@ -229,6 +250,7 @@ pub fn derive_relationship_keys(
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
 

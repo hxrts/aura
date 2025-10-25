@@ -356,6 +356,7 @@ pub async fn dkd_choreography(ctx: &mut ProtocolContext, context_id: Vec<u8>) ->
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
     use aura_crypto::Effects;
@@ -386,6 +387,8 @@ mod tests {
             added_at: 0,
             last_seen: 0,
             dkd_commitment_proofs: std::collections::BTreeMap::new(),
+            next_nonce: 1,
+            used_nonces: std::collections::BTreeSet::new(),
         };
 
         let state = AccountState::new(

@@ -26,6 +26,7 @@ pub struct DkdProtocolCore {
 }
 
 impl DkdProtocolCore {
+    #[allow(clippy::disallowed_methods)]
     pub fn new(device_id: DeviceId, app_id: String, context: String) -> Self {
         Self {
             device_id,
@@ -166,6 +167,9 @@ impl ChoreographicProtocol<DkdProtocolCore, CommitmentPhase> {
             threshold,
             session_id: self.protocol_id(),
             expected_participants: None,
+            authorized_devices: std::collections::BTreeSet::new(), // TODO: populate from protocol state
+            max_time_skew: 300, // 5 minutes
+            session_deadline: None,
         };
 
         CollectedCommitments::verify(events.to_vec(), config)
@@ -301,11 +305,13 @@ pub struct DkdCompleted {
     pub session_id: Uuid,
 }
 
+#[allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_crypto::Effects;
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_dkd_state_transitions() {
         let effects = Effects::test();
@@ -332,6 +338,7 @@ mod tests {
         assert!(failed_protocol.can_terminate());
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_dkd_state_operations() {
         let effects = Effects::test();
@@ -353,6 +360,7 @@ mod tests {
         assert!(witness.is_none());
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_dkd_rehydration() {
         let effects = Effects::test();

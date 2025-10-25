@@ -302,6 +302,10 @@ pub struct RequestOperationLockEvent {
     pub session_id: Uuid,
     pub device_id: DeviceId,
     pub lottery_ticket: [u8; 32], // Hash(device_id || last_event_hash)
+    /// Optional: A delegated capability that a lottery winner could choose to act upon.
+    /// This allows for future protocol optimizations where the winner can execute an
+    /// action on behalf of the initiator, saving a network round-trip.
+    pub delegated_action: Option<crate::capability::events::CapabilityDelegation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

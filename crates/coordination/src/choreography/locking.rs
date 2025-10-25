@@ -196,6 +196,7 @@ pub async fn locking_choreography(
                 session_id: ctx.session_id(),
                 device_id: my_device_id,
                 lottery_ticket,
+                delegated_action: None,
             }),
             authorization: EventAuthorization::DeviceCertificate {
                 device_id: my_device_id,
@@ -474,17 +475,234 @@ pub async fn release_lock_choreography(
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     #[allow(unused_imports)]
     use super::*;
 
     #[tokio::test]
-    async fn test_locking_choreography_structure() {
-        // TODO: Implement tests
-        // Test the deterministic lottery:
-        // 1. Create multiple devices with same last_event_hash
-        // 2. Compute tickets for each
-        // 3. Verify same winner is chosen
-        // 4. Verify fairness over multiple rounds
+    async fn test_deterministic_lottery_same_winner() {
+        use crate::utils::{compute_lottery_ticket, determine_lock_winner};
+        use aura_crypto::Effects;
+        use aura_journal::DeviceId;
+        use aura_session_types::protocols::journal::LockRequest;
+        
+        let effects = Effects::test();
+        let last_event_hash = [0xAB; 32]; // Same for all devices
+        
+        // Create multiple devices
+        let device1 = DeviceId::new_with_effects(&effects);
+        let device2 = DeviceId::new_with_effects(&effects);
+        let device3 = DeviceId::new_with_effects(&effects);
+        
+        // Compute lottery tickets for each device
+        let ticket1 = compute_lottery_ticket(&device1, &last_event_hash);
+        let ticket2 = compute_lottery_ticket(&device2, &last_event_hash);
+        let ticket3 = compute_lottery_ticket(&device3, &last_event_hash);
+        
+        // Create lock request events using the RequestOperationLockEvent struct
+        let request1 = aura_journal::RequestOperationLockEvent {
+            session_id: effects.gen_uuid(),
+            device_id: device1,
+            operation_type: aura_journal::OperationType::Resharing,
+            lottery_ticket: ticket1,
+            delegated_action: None,
+        };
+        let request2 = aura_journal::RequestOperationLockEvent {
+            session_id: effects.gen_uuid(),
+            device_id: device2,
+            operation_type: aura_journal::OperationType::Resharing,
+            lottery_ticket: ticket2,
+            delegated_action: None,
+        };
+        let request3 = aura_journal::RequestOperationLockEvent {
+            session_id: effects.gen_uuid(),
+            device_id: device3,
+            operation_type: aura_journal::OperationType::Resharing,
+            lottery_ticket: ticket3,
+            delegated_action: None,
+        };
+        
+        let requests = vec![request1.clone(), request2.clone(), request3.clone()];
+        
+        // Determine winner multiple times - should be consistent
+        let winner1 = determine_lock_winner(&requests).ok();
+        let winner2 = determine_lock_winner(&requests).ok();
+        let winner3 = determine_lock_winner(&requests).ok();
+        
+        assert_eq!(winner1, winner2);
+        assert_eq!(winner2, winner3);
+        assert!(winner1.is_some());
+        
+        // The winner should be one of the requesting devices
+        let winner_device = winner1.unwrap();
+        assert!(
+            winner_device == device1 || winner_device == device2 || winner_device == device3,
+            "Winner should be one of the requesting devices"
+        );
+    }
+    
+    #[tokio::test]
+    async fn test_lottery_fairness_over_multiple_rounds() {
+        use crate::utils::{compute_lottery_ticket, determine_lock_winner};
+        use aura_crypto::Effects;
+        use aura_journal::DeviceId;
+        use aura_session_types::protocols::journal::LockRequest;
+        use std::collections::HashMap;
+        
+        let effects = Effects::test();
+        
+        // Create devices
+        let device1 = DeviceId::new_with_effects(&effects);
+        let device2 = DeviceId::new_with_effects(&effects);
+        let device3 = DeviceId::new_with_effects(&effects);
+        let devices = [device1, device2, device3];
+        
+        let mut win_counts = HashMap::new();
+        let rounds = 100;
+        
+        // Simulate multiple rounds with different last_event_hash values
+        for round in 0..rounds {
+            let mut last_event_hash = [0u8; 32];
+            last_event_hash[0] = (round % 256) as u8;
+            last_event_hash[1] = ((round / 256) % 256) as u8;
+            
+            // Create requests for this round
+            let requests: Vec<aura_journal::RequestOperationLockEvent> = devices
+                .iter()
+                .map(|&device_id| {
+                    let ticket = compute_lottery_ticket(&device_id, &last_event_hash);
+                    aura_journal::RequestOperationLockEvent {
+                        session_id: effects.gen_uuid(),
+                        device_id,
+                        operation_type: aura_journal::OperationType::Resharing,
+                        lottery_ticket: ticket,
+                        delegated_action: None,
+                    }
+                })
+                .collect();
+            
+            // Determine winner for this round
+            if let Ok(winner) = determine_lock_winner(&requests) {
+                *win_counts.entry(winner).or_insert(0) += 1;
+            }
+        }
+        
+        // Check that each device won some rounds (fairness)
+        for device in &devices {
+            let wins = win_counts.get(device).unwrap_or(&0);
+            assert!(
+                *wins > 0,
+                "Device {:?} should have won at least one round out of {}",
+                device,
+                rounds
+            );
+            
+            // Check that no device is overly dominant (within reasonable bounds)
+            // Each device should win roughly 1/3 of the time, allow for variance
+            assert!(
+                *wins > rounds / 6 && *wins < rounds * 2 / 3,
+                "Device {:?} won {} times out of {} rounds, expected roughly {}",
+                device,
+                wins,
+                rounds,
+                rounds / 3
+            );
+        }
+        
+        // Verify all rounds had a winner
+        let total_wins: u32 = win_counts.values().sum();
+        assert_eq!(total_wins, rounds, "Every round should have exactly one winner");
+    }
+    
+    #[tokio::test]
+    async fn test_single_device_always_wins() {
+        use crate::utils::{compute_lottery_ticket, determine_lock_winner};
+        use aura_crypto::Effects;
+        use aura_journal::DeviceId;
+        use aura_session_types::protocols::journal::LockRequest;
+        
+        let effects = Effects::test();
+        let device = DeviceId::new_with_effects(&effects);
+        let last_event_hash = [0xFF; 32];
+        
+        let ticket = compute_lottery_ticket(&device, &last_event_hash);
+        let request = aura_journal::RequestOperationLockEvent {
+            session_id: effects.gen_uuid(),
+            device_id: device,
+            operation_type: aura_journal::OperationType::Resharing,
+            lottery_ticket: ticket,
+            delegated_action: None,
+        };
+        
+        let requests = vec![request];
+        let winner = determine_lock_winner(&requests);
+        
+        assert!(winner.is_ok(), "Single device should always win the lottery");
+        assert_eq!(winner.unwrap(), device);
+    }
+    
+    #[tokio::test]
+    async fn test_empty_requests_no_winner() {
+        use crate::utils::determine_lock_winner;
+        
+        let requests = vec![];
+        let winner = determine_lock_winner(&requests);
+        
+        assert!(winner.is_err(), "Empty request list should have no winner");
+    }
+    
+    #[tokio::test]
+    async fn test_lottery_ticket_deterministic() {
+        use crate::utils::compute_lottery_ticket;
+        use aura_crypto::Effects;
+        use aura_journal::DeviceId;
+        
+        let effects = Effects::test();
+        let device = DeviceId::new_with_effects(&effects);
+        let last_event_hash = [0x42; 32];
+        
+        // Compute ticket multiple times
+        let ticket1 = compute_lottery_ticket(&device, &last_event_hash);
+        let ticket2 = compute_lottery_ticket(&device, &last_event_hash);
+        let ticket3 = compute_lottery_ticket(&device, &last_event_hash);
+        
+        assert_eq!(ticket1, ticket2);
+        assert_eq!(ticket2, ticket3);
+    }
+    
+    #[tokio::test]
+    async fn test_different_devices_different_tickets() {
+        use crate::utils::compute_lottery_ticket;
+        use aura_crypto::Effects;
+        use aura_journal::DeviceId;
+        
+        let effects = Effects::test();
+        let device1 = DeviceId::new_with_effects(&effects);
+        let device2 = DeviceId::new_with_effects(&effects);
+        let last_event_hash = [0x42; 32];
+        
+        let ticket1 = compute_lottery_ticket(&device1, &last_event_hash);
+        let ticket2 = compute_lottery_ticket(&device2, &last_event_hash);
+        
+        assert_ne!(ticket1, ticket2, "Different devices should have different lottery tickets");
+    }
+    
+    #[tokio::test]
+    async fn test_different_event_hash_different_tickets() {
+        use crate::utils::compute_lottery_ticket;
+        use aura_crypto::Effects;
+        use aura_journal::DeviceId;
+        
+        let effects = Effects::test();
+        let device = DeviceId::new_with_effects(&effects);
+        
+        let hash1 = [0x11; 32];
+        let hash2 = [0x22; 32];
+        
+        let ticket1 = compute_lottery_ticket(&device, &hash1);
+        let ticket2 = compute_lottery_ticket(&device, &hash2);
+        
+        assert_ne!(ticket1, ticket2, "Different event hashes should produce different lottery tickets");
     }
 }

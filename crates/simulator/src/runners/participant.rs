@@ -569,6 +569,8 @@ mod tests {
             added_at: effects.now().unwrap_or(0),
             last_seen: effects.now().unwrap_or(0),
             dkd_commitment_proofs: BTreeMap::new(),
+            next_nonce: 0,
+            used_nonces: BTreeSet::new(),
         };
 
         let mut devices = BTreeMap::new();
@@ -598,7 +600,11 @@ mod tests {
             used_nonces: BTreeSet::new(),
             next_nonce: 0,
             last_event_hash: None,
-            updated_at: 0,
+            updated_at: effects.now().unwrap_or(0),
+            sbb_envelopes: BTreeMap::new(),
+            sbb_neighbors: BTreeSet::new(),
+            relationship_keys: BTreeMap::new(),
+            relationship_counters: BTreeMap::new(),
         };
 
         let ledger = AccountLedger::new(initial_state).expect("Failed to create ledger");

@@ -350,6 +350,7 @@ impl RecoveryStrategy for ChoreographyRetryStrategy {
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
     use aura_journal::{AccountId, ErrorContext, NetworkOperation};

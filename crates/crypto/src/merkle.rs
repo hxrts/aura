@@ -137,6 +137,7 @@ pub fn verify_merkle_proof(
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
 

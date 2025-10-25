@@ -577,6 +577,7 @@ macro_rules! define_protocol {
 }
 
 #[cfg(test)]
+#[allow(clippy::assertions_on_constants, dead_code, clippy::disallowed_methods)]
 mod tests {
 
     // Test define_session_states! macro
@@ -665,7 +666,7 @@ mod tests {
 
     // Test define_session_union! macro
     mod test_union {
-        use crate::core::{ChoreographicProtocol, SessionState, SessionProtocol};
+        use crate::core::{ChoreographicProtocol, SessionProtocol, SessionState};
         use uuid::Uuid;
 
         #[derive(Debug, Clone)]
@@ -733,7 +734,7 @@ mod tests {
 
     // Test complete protocol definition macro
     mod test_complete_protocol {
-        use crate::core::{SessionState, SessionProtocol};
+        use crate::core::{SessionProtocol, SessionState};
         use uuid::Uuid;
 
         #[derive(Debug, Clone)]

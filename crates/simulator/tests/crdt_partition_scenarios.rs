@@ -26,6 +26,8 @@ fn create_test_account(effects: &Effects) -> AccountState {
         added_at: timestamp,
         last_seen: timestamp,
         dkd_commitment_proofs: BTreeMap::new(),
+        next_nonce: 0,
+        used_nonces: BTreeSet::new(),
     };
 
     let mut devices = BTreeMap::new();
@@ -56,6 +58,10 @@ fn create_test_account(effects: &Effects) -> AccountState {
         next_nonce: 0,
         last_event_hash: None,
         updated_at: timestamp,
+        sbb_envelopes: BTreeMap::new(),
+        sbb_neighbors: BTreeSet::new(),
+        relationship_keys: BTreeMap::new(),
+        relationship_counters: BTreeMap::new(),
     }
 }
 
@@ -117,11 +123,11 @@ async fn test_partition_heal_convergence() {
     // Partition 1: {A, B} make changes
     state_a.session_epoch = SessionEpoch(5);
     state_a.lamport_clock = 10;
-    state_a.used_nonces.insert([1u8; 32]);
+    state_a.used_nonces.insert(1u64);
 
     state_b.session_epoch = SessionEpoch(6);
     state_b.lamport_clock = 12;
-    state_b.used_nonces.insert([2u8; 32]);
+    state_b.used_nonces.insert(2u64);
 
     // Merge within partition 1
     state_a = merge_states(state_a.clone(), &state_b);
@@ -130,11 +136,11 @@ async fn test_partition_heal_convergence() {
     // Partition 2: {C, D} make different changes
     state_c.session_epoch = SessionEpoch(7);
     state_c.lamport_clock = 15;
-    state_c.used_nonces.insert([3u8; 32]);
+    state_c.used_nonces.insert(3u64);
 
     state_d.session_epoch = SessionEpoch(4);
     state_d.lamport_clock = 8;
-    state_d.used_nonces.insert([4u8; 32]);
+    state_d.used_nonces.insert(4u64);
 
     // Merge within partition 2
     state_c = merge_states(state_c.clone(), &state_d);
@@ -173,10 +179,10 @@ async fn test_partition_heal_convergence() {
     assert_eq!(final_c.used_nonces.len(), 4);
     assert_eq!(final_d.used_nonces.len(), 4);
 
-    assert!(final_a.used_nonces.contains(&[1u8; 32]));
-    assert!(final_a.used_nonces.contains(&[2u8; 32]));
-    assert!(final_a.used_nonces.contains(&[3u8; 32]));
-    assert!(final_a.used_nonces.contains(&[4u8; 32]));
+    assert!(final_a.used_nonces.contains(&1u64));
+    assert!(final_a.used_nonces.contains(&2u64));
+    assert!(final_a.used_nonces.contains(&3u64));
+    assert!(final_a.used_nonces.contains(&4u64));
 }
 
 /// Test: Byzantine merge rejection
@@ -258,7 +264,7 @@ async fn test_cascading_merge_propagation() {
     // Device A publishes a change
     state_a.session_epoch = SessionEpoch(42);
     state_a.lamport_clock = 100;
-    state_a.used_nonces.insert([0xAA; 32]);
+    state_a.used_nonces.insert(0xAA);
 
     // Propagation: A→B
     state_b = merge_states(state_b, &state_a);
@@ -268,7 +274,7 @@ async fn test_cascading_merge_propagation() {
         "B receives A's change"
     );
     assert_eq!(state_b.lamport_clock, 100);
-    assert!(state_b.used_nonces.contains(&[0xAA; 32]));
+    assert!(state_b.used_nonces.contains(&0xAA));
 
     // Propagation: B→C
     state_c = merge_states(state_c, &state_b);
@@ -278,7 +284,7 @@ async fn test_cascading_merge_propagation() {
         "C receives change via B"
     );
     assert_eq!(state_c.lamport_clock, 100);
-    assert!(state_c.used_nonces.contains(&[0xAA; 32]));
+    assert!(state_c.used_nonces.contains(&0xAA));
 
     // Propagation: C→D
     state_d = merge_states(state_d, &state_c);
@@ -288,7 +294,7 @@ async fn test_cascading_merge_propagation() {
         "D receives change via C"
     );
     assert_eq!(state_d.lamport_clock, 100);
-    assert!(state_d.used_nonces.contains(&[0xAA; 32]));
+    assert!(state_d.used_nonces.contains(&0xAA));
 
     // All devices have converged
     assert_eq!(state_a.session_epoch, state_d.session_epoch);

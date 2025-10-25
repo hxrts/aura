@@ -10,8 +10,7 @@ use aura_journal::{AccountLedger, Event, EventType};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
-// TODO: Add debug and warn logging once event watcher is fully implemented
-// use tracing::{debug, warn};
+use tracing::{debug, info, trace};
 
 /// Callback for event notifications
 pub type EventCallback = Arc<dyn Fn(&Event) -> bool + Send + Sync>;
@@ -35,7 +34,7 @@ pub struct EventWatcher {
 }
 
 /// Filter for event types
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum EventFilter {
     /// Match any event
     Any,
@@ -45,7 +44,7 @@ pub enum EventFilter {
     SessionId(uuid::Uuid),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum EventTypeFilter {
     GrantOperationLock,
     RecordDkdCommitment,
@@ -57,6 +56,7 @@ pub enum EventTypeFilter {
 impl EventWatcher {
     /// Create a new event watcher
     pub fn new(ledger: Arc<RwLock<AccountLedger>>) -> Self {
+        info!("Creating new event watcher with 100ms poll interval");
         EventWatcher {
             ledger,
             last_processed_index: 0,
@@ -67,6 +67,7 @@ impl EventWatcher {
 
     /// Register a callback for specific events
     pub fn register(&mut self, filter: EventFilter, callback: EventCallback) {
+        debug!("Registering event callback for filter: {:?}", filter);
         self.callbacks.push((filter, callback));
     }
 
@@ -75,10 +76,18 @@ impl EventWatcher {
     /// This runs in a loop, polling the ledger and invoking callbacks.
     /// Returns when stopped.
     pub async fn watch(&mut self) {
+        info!("Starting event watcher with {} registered callbacks", self.callbacks.len());
         let mut interval = interval(self.poll_interval);
+        let mut poll_count = 0;
 
         loop {
             interval.tick().await;
+            poll_count += 1;
+            
+            // Trace poll activity every 100 polls to avoid spam
+            if poll_count % 100 == 0 {
+                trace!("Event watcher poll #{}, last_processed_index: {}", poll_count, self.last_processed_index);
+            }
 
             // Read new events
             let events = {
@@ -90,40 +99,68 @@ impl EventWatcher {
                     continue;
                 }
 
+                debug!("Found {} new events to process (total events: {}, last processed: {})", 
+                       event_log.len() - self.last_processed_index,
+                       event_log.len(),
+                       self.last_processed_index);
+
                 // Get new events
                 event_log[self.last_processed_index..].to_vec()
             };
 
             // Process new events
-            for event in &events {
+            for (i, event) in events.iter().enumerate() {
+                debug!("Processing event {}/{}: {:?}", i + 1, events.len(), event.event_type);
                 self.process_event(event);
             }
 
             // Update last processed index
             self.last_processed_index += events.len();
+            
+            if !events.is_empty() {
+                info!("Processed {} events, updated last_processed_index to {}", 
+                      events.len(), self.last_processed_index);
+            }
         }
     }
 
     /// Process a single event through all callbacks
     fn process_event(&self, event: &Event) {
-        for (filter, callback) in &self.callbacks {
+        let mut matched_callbacks = 0;
+        
+        for (i, (filter, callback)) in self.callbacks.iter().enumerate() {
             if self.matches_filter(event, filter) {
+                debug!("Event matches filter #{}, invoking callback for event: {:?}", i, event.event_id);
+                matched_callbacks += 1;
+                
                 let should_continue = callback(event);
                 if !should_continue {
-                    // Callback returned false, stop processing this event
+                    debug!("Callback #{} returned false, stopping event processing", i);
                     break;
                 }
             }
+        }
+        
+        if matched_callbacks == 0 {
+            trace!("Event {:?} matched no registered callbacks", event.event_id);
+        } else {
+            debug!("Event {:?} matched {} callbacks", event.event_id, matched_callbacks);
         }
     }
 
     /// Check if event matches filter
     fn matches_filter(&self, event: &Event, filter: &EventFilter) -> bool {
-        match filter {
+        let matches = match filter {
             EventFilter::Any => true,
             EventFilter::Type(type_filter) => self.matches_type(event, type_filter),
             EventFilter::SessionId(session_id) => self.matches_session(event, session_id),
+        };
+        
+        if matches {
+            trace!("Event {:?} matches filter {:?}", event.event_id, filter);
         }
+        
+        matches
     }
 
     /// Check if event matches type filter
@@ -151,20 +188,36 @@ impl EventWatcher {
 
     /// Check if event matches session ID
     fn matches_session(&self, event: &Event, session_id: &uuid::Uuid) -> bool {
-        match &event.event_type {
-            EventType::InitiateDkdSession(e) => &e.session_id == session_id,
-            EventType::RecordDkdCommitment(e) => &e.session_id == session_id,
-            EventType::RevealDkdPoint(e) => &e.session_id == session_id,
-            EventType::FinalizeDkdSession(e) => &e.session_id == session_id,
-            EventType::AbortDkdSession(e) => &e.session_id == session_id,
-            EventType::GrantOperationLock(e) => &e.session_id == session_id,
-            EventType::ReleaseOperationLock(e) => &e.session_id == session_id,
-            _ => false,
+        let extracted_session_id = match &event.event_type {
+            EventType::InitiateDkdSession(e) => Some(&e.session_id),
+            EventType::RecordDkdCommitment(e) => Some(&e.session_id),
+            EventType::RevealDkdPoint(e) => Some(&e.session_id),
+            EventType::FinalizeDkdSession(e) => Some(&e.session_id),
+            EventType::AbortDkdSession(e) => Some(&e.session_id),
+            EventType::GrantOperationLock(e) => Some(&e.session_id),
+            EventType::ReleaseOperationLock(e) => Some(&e.session_id),
+            _ => None,
+        };
+        
+        match extracted_session_id {
+            Some(extracted_id) => {
+                let matches = extracted_id == session_id;
+                if !matches {
+                    trace!("Event session ID {:?} does not match target session ID {:?}", 
+                           extracted_id, session_id);
+                }
+                matches
+            }
+            None => {
+                trace!("Event {:?} does not contain a session ID", event.event_type);
+                false
+            }
         }
     }
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
 

@@ -311,6 +311,7 @@ impl Default for ConsoleLogSink {
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
     use aura_journal::ProtocolType;

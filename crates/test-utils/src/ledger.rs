@@ -15,7 +15,7 @@ use crate::account::test_account_with_effects;
 /// * `effects` - Effects instance for deterministic generation
 pub fn test_ledger_with_effects(effects: &Effects) -> AccountLedger {
     let account_state = test_account_with_effects(effects);
-    AccountLedger::new(account_state).expect("Ledger creation should succeed")
+    AccountLedger::new(account_state).unwrap() // Ledger creation should succeed
 }
 
 /// Create a test ledger with seed
@@ -36,7 +36,7 @@ pub fn test_ledger_with_seed(seed: u64) -> AccountLedger {
 /// # Arguments
 /// * `account_state` - Specific account state to use
 pub fn test_ledger_with_state(account_state: AccountState) -> AccountLedger {
-    AccountLedger::new(account_state).expect("Ledger creation should succeed")
+    AccountLedger::new(account_state).unwrap() // Ledger creation should succeed
 }
 
 /// Create an empty test ledger
@@ -70,7 +70,7 @@ pub fn test_ledgers_multiple(count: usize, base_seed: u64) -> Vec<AccountLedger>
 pub fn test_ledger_with_account_id(account_id: AccountId, effects: &Effects) -> AccountLedger {
     use crate::account::test_account_with_id;
     let account_state = test_account_with_id(account_id, effects);
-    AccountLedger::new(account_state).expect("Ledger creation should succeed")
+    AccountLedger::new(account_state).unwrap() // Ledger creation should succeed
 }
 
 /// Create a test ledger with custom threshold
@@ -84,5 +84,5 @@ pub fn test_ledger_with_account_id(account_id: AccountId, effects: &Effects) -> 
 pub fn test_ledger_with_threshold(threshold: u16, total: u16, effects: &Effects) -> AccountLedger {
     use crate::account::test_account_with_threshold;
     let account_state = test_account_with_threshold(effects, threshold, total);
-    AccountLedger::new(account_state).expect("Ledger creation should succeed")
+    AccountLedger::new(account_state).unwrap() // Ledger creation should succeed
 }

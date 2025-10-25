@@ -1,3 +1,4 @@
+#![allow(warnings, clippy::all)]
 //! Unit Tests: Capability Token Creation and Verification
 //!
 //! Tests basic capability token functionality that both SSB and Storage depend on.
@@ -175,7 +176,7 @@ mod tests {
             "Token signature should verify"
         );
 
-        println!("✓ test_capability_token_creation_with_device_auth PASSED");
+        println!("[OK] test_capability_token_creation_with_device_auth PASSED");
     }
 
     #[test]
@@ -231,7 +232,7 @@ mod tests {
             "Mixed permissions token should verify"
         );
 
-        println!("✓ test_capability_token_multiple_permission_scopes PASSED");
+        println!("[OK] test_capability_token_multiple_permission_scopes PASSED");
     }
 
     #[test]
@@ -290,7 +291,7 @@ mod tests {
             "Delegation chain token should verify"
         );
 
-        println!("✓ test_capability_token_delegation_chain PASSED");
+        println!("[OK] test_capability_token_delegation_chain PASSED");
     }
 
     #[test]
@@ -333,7 +334,7 @@ mod tests {
             "Token should be invalid after expiration"
         );
 
-        println!("✓ test_capability_token_expiration PASSED");
+        println!("[OK] test_capability_token_expiration PASSED");
     }
 
     #[test]
@@ -371,6 +372,6 @@ mod tests {
             "Verification with correct key should succeed"
         );
 
-        println!("✓ test_capability_token_signature_verification_fails_with_wrong_key PASSED");
+        println!("[OK] test_capability_token_signature_verification_fails_with_wrong_key PASSED");
     }
 }

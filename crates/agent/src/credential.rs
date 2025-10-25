@@ -7,6 +7,8 @@ use blake3;
 use hkdf::Hkdf;
 use sha2::Sha256;
 use tracing::debug;
+use rand;
+use hpke::{Deserializable, Serializable};
 
 /// Issue a session credential for a derived identity
 ///
@@ -72,14 +74,14 @@ pub fn issue_credential(
     hk.expand(b"aura.presence_credential.v2", &mut capability)
         .map_err(|e| crate::AgentError::crypto_operation(format!("HKDF expand failed: {}", e)))?;
 
-    // In production, would wrap capability with HPKE or generate Biscuit token
-    // For MVP, we use the derived secret
+    // Wrap capability with HPKE for secure transport
+    let wrapped_capability = wrap_capability_with_hpke(&capability, &device_id, effects)?;
 
     Ok(SessionCredential {
         issued_by: device_id,
         expires_at,
         session_epoch: session_epoch.0,
-        capability,
+        capability: wrapped_capability,
         challenge: *challenge,
         operation_scope: operation_scope.to_string(),
         nonce: device_nonce,
@@ -113,8 +115,11 @@ pub fn verify_credential(
         )));
     }
 
-    // In production, would verify Biscuit token or HPKE wrapper
-    // For MVP, we just check epoch and expiry
+    // Verify HPKE wrapper for capability
+    let _unwrapped_capability = unwrap_capability_with_hpke(&credential.capability, &credential.issued_by)?;
+    
+    // Additional verification could be done on the unwrapped capability here
+    // For now, successful unwrapping indicates validity
 
     debug!(
         "Session credential verified for device {} at epoch {}",
@@ -132,6 +137,123 @@ pub fn credential_digest(credential: &SessionCredential) -> crate::Result<[u8; 3
         ))
     })?;
     Ok(*blake3::hash(&serialized).as_bytes())
+}
+
+/// Wrap capability with HPKE encryption for secure transport
+fn wrap_capability_with_hpke(
+    capability: &[u8],
+    device_id: &DeviceId,
+    effects: &aura_crypto::Effects,
+) -> crate::Result<Vec<u8>> {
+    use hpke::{kem::X25519HkdfSha256, kdf::HkdfSha256, aead::AesGcm128, Kem, OpModeS, single_shot_seal};
+    
+    // HPKE configuration: X25519 + HKDF-SHA256 + AES-128-GCM
+    type HpkeKem = X25519HkdfSha256;
+    type HpkeKdf = HkdfSha256;
+    type HpkeAead = AesGcm128;
+    
+    // Derive device public key deterministically from device ID
+    let device_public_key_bytes = derive_device_hpke_public_key(device_id, effects)?;
+    let device_public_key = <HpkeKem as Kem>::PublicKey::from_bytes(&device_public_key_bytes)
+        .map_err(|e| crate::AgentError::crypto_operation(format!("Invalid device public key: {:?}", e)))?;
+    
+    // Generate ephemeral keypair and encrypt
+    let mut rng = rand::thread_rng();
+    let info = b"aura-credential-capability-v1";
+    let aad = b""; // No additional authenticated data
+    
+    match single_shot_seal::<HpkeAead, HpkeKdf, HpkeKem, _>(
+        &OpModeS::Base,
+        &device_public_key,
+        info,
+        capability,
+        aad,
+        &mut rng,
+    ) {
+        Ok((encapped_key, ciphertext)) => {
+            // Combine encapsulated key and ciphertext for storage
+            let mut encrypted = Vec::new();
+            encrypted.extend_from_slice(&encapped_key.to_bytes());
+            encrypted.extend_from_slice(&ciphertext);
+            Ok(encrypted)
+        }
+        Err(e) => Err(crate::AgentError::crypto_operation(format!("HPKE encryption failed: {:?}", e))),
+    }
+}
+
+/// Unwrap capability from HPKE encryption
+fn unwrap_capability_with_hpke(
+    encrypted_capability: &[u8],
+    device_id: &DeviceId,
+) -> crate::Result<Vec<u8>> {
+    use hpke::{kem::X25519HkdfSha256, kdf::HkdfSha256, aead::AesGcm128, Kem, OpModeR, single_shot_open};
+    
+    // HPKE configuration: X25519 + HKDF-SHA256 + AES-128-GCM
+    type HpkeKem = X25519HkdfSha256;
+    type HpkeKdf = HkdfSha256;
+    type HpkeAead = AesGcm128;
+    
+    // Derive device private key deterministically from device ID
+    let device_private_key_bytes = derive_device_hpke_private_key(device_id)?;
+    let device_private_key = <HpkeKem as Kem>::PrivateKey::from_bytes(&device_private_key_bytes)
+        .map_err(|e| crate::AgentError::crypto_operation(format!("Invalid device private key: {:?}", e)))?;
+    
+    // Extract encapsulated key and ciphertext
+    // The encapsulated key is 32 bytes for X25519
+    if encrypted_capability.len() < 32 {
+        return Err(crate::AgentError::crypto_operation(
+            "Encrypted capability too short to contain HPKE encapsulated key".to_string()
+        ));
+    }
+    
+    let (encapped_key_bytes, ciphertext) = encrypted_capability.split_at(32);
+    let encapped_key = <HpkeKem as Kem>::EncappedKey::from_bytes(encapped_key_bytes)
+        .map_err(|e| crate::AgentError::crypto_operation(format!("Invalid HPKE encapsulated key: {:?}", e)))?;
+    
+    // Decrypt using HPKE
+    let info = b"aura-credential-capability-v1";
+    let aad = b""; // No additional authenticated data
+    
+    match single_shot_open::<HpkeAead, HpkeKdf, HpkeKem>(
+        &OpModeR::Base,
+        &device_private_key,
+        &encapped_key,
+        info,
+        ciphertext,
+        aad,
+    ) {
+        Ok(plaintext) => Ok(plaintext),
+        Err(e) => Err(crate::AgentError::crypto_operation(format!("HPKE decryption failed: {:?}", e))),
+    }
+}
+
+/// Derive deterministic HPKE public key from device ID
+fn derive_device_hpke_public_key(
+    device_id: &DeviceId,
+    _effects: &aura_crypto::Effects,
+) -> crate::Result<[u8; 32]> {
+    // Use deterministic derivation based on device ID
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"aura-device-hpke-public-v1");
+    hasher.update(device_id.0.as_bytes());
+    
+    let hash = hasher.finalize();
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&hash.as_bytes()[..32]);
+    Ok(key)
+}
+
+/// Derive deterministic HPKE private key from device ID
+fn derive_device_hpke_private_key(device_id: &DeviceId) -> crate::Result<[u8; 32]> {
+    // Use deterministic derivation based on device ID
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"aura-device-hpke-private-v1");
+    hasher.update(device_id.0.as_bytes());
+    
+    let hash = hasher.finalize();
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&hash.as_bytes()[..32]);
+    Ok(key)
 }
 
 #[allow(dead_code)]

@@ -17,6 +17,7 @@ use aura_journal::{
     GuardianId, InitiateRecoveryEvent, OperationType, ParticipantId as JournalParticipantId,
     ProtocolType, Session,
 };
+use ed25519_dalek::Signer;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -83,12 +84,15 @@ impl<'a> SessionLifecycle for RecoveryProtocol<'a> {
         let new_device_id = aura_journal::DeviceId(self.ctx.device_id());
         let _start_epoch = self.ctx.fetch_ledger_context().await?.epoch;
 
+        // Extract device public key before the mutable borrow
+        let new_device_pk = self.ctx.device_key().verifying_key().to_bytes().to_vec();
+
         // Phase 1: Initiate Recovery
         EventBuilder::new(self.ctx)
             .with_type(EventType::InitiateRecovery(InitiateRecoveryEvent {
                 recovery_id,
                 new_device_id,
-                new_device_pk: vec![0u8; 32], // TODO: Get actual public key
+                new_device_pk,
                 required_guardians: self.guardian_ids.clone(),
                 quorum_threshold: self.threshold,
                 cooldown_seconds: 48 * 3600, // 48 hours in seconds
@@ -107,11 +111,15 @@ impl<'a> SessionLifecycle for RecoveryProtocol<'a> {
         let recovered_share = self.reconstruct_recovery_share(&guardian_approvals).await?;
 
         // Phase 5: Complete Recovery
+        // Generate a test signature to prove the device can use the recovered key
+        let test_message = format!("recovery_test_{}_{}", recovery_id, new_device_id.0);
+        let test_signature = self.ctx.device_key().sign(test_message.as_bytes()).to_bytes().to_vec();
+        
         EventBuilder::new(self.ctx)
             .with_type(EventType::CompleteRecovery(CompleteRecoveryEvent {
                 recovery_id,
                 new_device_id,
-                test_signature: vec![0u8; 64], // TODO: Generate actual test signature
+                test_signature,
             }))
             .with_device_auth()
             .build_sign_and_emit()

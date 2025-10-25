@@ -1,8 +1,8 @@
 // Chunking strategy for large objects
 
-use crate::manifest::{ChunkId, ChunkMetadata, ChunkingParams};
+use crate::chunk_store::{ChunkId, ChunkMetadata};
+use crate::manifest::{ChunkingParams, Cid};
 use crate::Result;
-use aura_journal::Cid;
 
 /// Split data into chunks
 pub fn chunk_data(data: &[u8], params: &ChunkingParams) -> Result<Vec<(ChunkId, Vec<u8>)>> {
@@ -10,7 +10,7 @@ pub fn chunk_data(data: &[u8], params: &ChunkingParams) -> Result<Vec<(ChunkId, 
     let mut chunks = Vec::new();
     
     // Temporary CID for chunk naming (would compute actual manifest CID first)
-    let temp_cid = Cid::from_bytes(data);
+    let temp_cid = blake3::hash(data).as_bytes().to_vec();
     
     for (i, chunk_data) in data.chunks(chunk_size).enumerate() {
         let chunk_id = ChunkId::new(&temp_cid, i as u32);
@@ -35,15 +35,17 @@ pub fn reassemble_chunks(chunks: &[(ChunkId, Vec<u8>)]) -> Result<Vec<u8>> {
 /// Compute chunk metadata
 pub fn compute_chunk_metadata(
     chunk_id: &ChunkId,
+    manifest_cid: &Cid,
+    chunk_index: u32,
     data: &[u8],
-    offset: u64,
+    stored_at: u64,
 ) -> ChunkMetadata {
-    let cid = Cid::from_bytes(data);
     ChunkMetadata {
         chunk_id: chunk_id.clone(),
+        manifest_cid: manifest_cid.clone(),
+        chunk_index,
         size: data.len() as u64,
-        cid,
-        offset,
+        stored_at,
     }
 }
 
@@ -54,7 +56,7 @@ mod tests {
     #[test]
     fn test_chunking_roundtrip() {
         let data = vec![0u8; 5 * 1024 * 1024]; // 5 MiB
-        let params = ChunkingParams::new(data.len() as u64);
+        let params = ChunkingParams::default_for_size(data.len() as u64);
         
         let chunks = chunk_data(&data, &params).unwrap();
         assert_eq!(chunks.len(), 5);

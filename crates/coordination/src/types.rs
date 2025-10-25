@@ -206,8 +206,9 @@ mod verifying_key_serde {
 ///
 /// For production use, the device secret should be:
 /// - iOS: Stored in Secure Enclave
-/// - Android: Stored in Keystore with StrongBox
-/// - Desktop: OS keychain (Keychain Access, Windows Credential Manager, Secret Service)
+/// - Android: Stored in Keystore with StrongBox (TODO)
+/// - macOS: Keychain Access with kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+/// - Linux: Secret Service API (gnome-keyring, kwallet)
 ///
 /// Current implementation uses in-memory secrets (INSECURE for production).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,10 +238,9 @@ impl SealedShare {
     ///
     /// WARNING: The device_secret MUST be stored in platform-specific secure storage:
     /// - iOS: Secure Enclave / Keychain (kSecAttrAccessibleWhenUnlockedThisDeviceOnly)
-    /// - Android: AndroidKeyStore with StrongBox
     /// - macOS: Keychain with kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-    /// - Windows: DPAPI or Windows Hello
     /// - Linux: Secret Service API (gnome-keyring, kwallet)
+    /// - Android: AndroidKeyStore with StrongBox (TODO)
     pub fn seal(
         share: &KeyShare,
         device_id: DeviceId,
@@ -311,6 +311,7 @@ impl SealedShare {
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod seal_tests {
     #[allow(unused_imports)]
     use super::*;

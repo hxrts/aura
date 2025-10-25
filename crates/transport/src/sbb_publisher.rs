@@ -1,6 +1,6 @@
 //! SSB Envelope Publishing
 //!
-//! Implements envelope publishing as specified in docs/051_rendezvous_ssb.md Section 4.2
+//! Implements envelope publishing as specified in docs/041_rendezvous.md Section 4.2
 //! "CRDT-based Publishing & Recognition".
 //!
 //! Publishing Flow:
@@ -83,45 +83,57 @@ impl SbbPublisher {
 
     /// Encrypt payload using K_box (XChaCha20-Poly1305)
     ///
-    /// Note: This is a placeholder implementation. In production, this would use
-    /// proper XChaCha20-Poly1305 AEAD encryption.
+    /// Uses XChaCha20-Poly1305 AEAD encryption for security and authentication.
     pub fn encrypt_payload(
         k_box: &[u8; 32],
         payload: &EnvelopePayload,
         nonce: &[u8; 24],
     ) -> Result<Vec<u8>> {
+        use chacha20poly1305::aead::{Aead, Nonce};
+        use chacha20poly1305::{AeadInPlace, KeyInit, XChaCha20Poly1305};
+
         // Serialize payload
         let serialized = bincode::serialize(payload)
             .map_err(|e| TransportError::Transport(format!("serialization failed: {}", e)))?;
 
-        // TODO: Replace with actual XChaCha20-Poly1305 encryption
-        // For now, just return serialized data (INSECURE - for structure only)
-        // Real implementation would use chacha20poly1305 crate
+        // Create cipher instance
+        let cipher = XChaCha20Poly1305::new_from_slice(k_box)
+            .map_err(|e| TransportError::Transport(format!("cipher creation failed: {}", e)))?;
 
-        // Placeholder: XOR with key for basic obfuscation in tests
-        let mut encrypted = serialized.clone();
-        for (i, byte) in encrypted.iter_mut().enumerate() {
-            *byte ^= k_box[i % 32];
-        }
+        // Convert nonce to correct type
+        let nonce_array = Nonce::<XChaCha20Poly1305>::from_slice(nonce);
 
-        Ok(encrypted)
+        // Encrypt the serialized payload
+        let ciphertext = cipher
+            .encrypt(nonce_array, serialized.as_ref())
+            .map_err(|e| TransportError::Transport(format!("encryption failed: {}", e)))?;
+
+        Ok(ciphertext)
     }
 
     /// Decrypt payload (inverse of encrypt_payload)
     pub fn decrypt_payload(
         k_box: &[u8; 32],
         ciphertext: &[u8],
-        _nonce: &[u8; 24],
+        nonce: &[u8; 24],
     ) -> Result<EnvelopePayload> {
-        // TODO: Replace with actual XChaCha20-Poly1305 decryption
+        use chacha20poly1305::aead::{Aead, Nonce};
+        use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
 
-        // Placeholder: XOR with key (inverse of encryption)
-        let mut decrypted = ciphertext.to_vec();
-        for (i, byte) in decrypted.iter_mut().enumerate() {
-            *byte ^= k_box[i % 32];
-        }
+        // Create cipher instance
+        let cipher = XChaCha20Poly1305::new_from_slice(k_box)
+            .map_err(|e| TransportError::Transport(format!("cipher creation failed: {}", e)))?;
 
-        bincode::deserialize(&decrypted)
+        // Convert nonce to correct type
+        let nonce_array = Nonce::<XChaCha20Poly1305>::from_slice(nonce);
+
+        // Decrypt the ciphertext
+        let plaintext = cipher
+            .decrypt(nonce_array, ciphertext)
+            .map_err(|e| TransportError::Transport(format!("decryption failed: {}", e)))?;
+
+        // Deserialize the decrypted payload
+        bincode::deserialize(&plaintext)
             .map_err(|e| TransportError::Transport(format!("deserialization failed: {}", e)))
     }
 

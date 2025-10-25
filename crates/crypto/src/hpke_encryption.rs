@@ -257,6 +257,7 @@ pub fn decrypt_with_aad(
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
     use crate::Effects;

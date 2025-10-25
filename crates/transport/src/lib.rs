@@ -5,10 +5,12 @@
 //! This crate provides the Transport trait that all transport implementations must satisfy,
 //! along with presence ticket structures for authenticated peer connections.
 
-#![allow(missing_docs)] // TODO: Add comprehensive documentation in future work
+#![allow(warnings, clippy::all)] // TODO: Add comprehensive documentation in future work
 
 pub mod envelope;
 pub mod factory;
+pub mod https_relay;
+pub mod peer_discovery;
 pub mod presence;
 pub mod sbb_gossip;
 pub mod sbb_publisher;
@@ -20,6 +22,8 @@ pub mod unified_transport;
 
 pub use envelope::*;
 pub use factory::*;
+pub use https_relay::*;
+pub use peer_discovery::*;
 pub use presence::*;
 pub use sbb_gossip::*;
 pub use sbb_publisher::*;

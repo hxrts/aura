@@ -32,6 +32,7 @@ impl EventSigner {
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
     use ed25519_dalek::Verifier;

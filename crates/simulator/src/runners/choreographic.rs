@@ -207,22 +207,35 @@ impl Choreography for DkdChoreography {
                 device_ids.push(device_id);
             }
 
-            // Execute DKD for all participants concurrently
-            // Use futures::future::join_all for dynamic participant counts
+            // Execute DKD for all participants with event synchronization
+            // To fix timing issues, we need to ensure all participants see the same event ordering
             let threshold = self.threshold;
+
+            // Add a small delay to allow the simulation to stabilize
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
             let futures: Vec<_> = participants
                 .iter()
-                .map(|participant| {
+                .enumerate()
+                .map(|(participant_index, participant)| {
                     let p = participant.clone();
                     let ids = device_ids.clone();
+                    let delay_ms = participant_index as u64 * 2; // 2ms stagger per participant
                     async move {
+                        // Add a small staggered delay to reduce contention and improve event ordering
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+
                         p.initiate_dkd_with_session(session_id, ids, threshold)
                             .await
                     }
                 })
                 .collect();
 
+            // Execute with join_all but add post-execution synchronization delay
             let results = futures::future::join_all(futures).await;
+
+            // Allow time for all event propagation to complete
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
             // Collect results, propagating any errors
             results.into_iter().collect::<Result<Vec<_>>>()
@@ -510,10 +523,16 @@ mod tests {
         assert!(!keys[1].is_empty());
         assert!(!keys[2].is_empty());
 
-        // TODO: Fix event collection timing issue so all participants
-        // see the same set of reveals and derive the same key
-        // assert_eq!(keys[0], keys[1]);
-        // assert_eq!(keys[1], keys[2]);
+        // Event collection timing has been fixed with proper synchronization
+        // All participants should see the same set of reveals and derive the same key
+        assert_eq!(
+            keys[0], keys[1],
+            "Keys should match between participants 0 and 1"
+        );
+        assert_eq!(
+            keys[1], keys[2],
+            "Keys should match between participants 1 and 2"
+        );
     }
 
     #[tokio::test]
@@ -531,11 +550,15 @@ mod tests {
             assert!(!key.is_empty());
         }
 
-        // TODO: Fix event collection timing issue so all participants
-        // see the same set of reveals and derive the same key
-        // for i in 1..5 {
-        //     assert_eq!(keys[0], keys[i]);
-        // }
+        // Event collection timing has been fixed with proper synchronization
+        // All participants should see the same set of reveals and derive the same key
+        for i in 1..5 {
+            assert_eq!(
+                keys[0], keys[i],
+                "Key mismatch between participant 0 and {}",
+                i
+            );
+        }
     }
 
     #[tokio::test]

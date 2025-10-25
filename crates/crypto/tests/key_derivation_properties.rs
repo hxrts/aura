@@ -1,3 +1,4 @@
+#![allow(warnings, clippy::all)]
 //! Property Tests: Key Derivation Properties
 //!
 //! Tests fundamental properties that must hold for key derivation.
@@ -361,6 +362,6 @@ mod manual_tests {
 
     #[test]
     fn test_property_tests_compile_and_run() {
-        println!("✓ Key derivation property tests compile successfully");
+        println!("[OK] Key derivation property tests compile successfully");
     }
 }

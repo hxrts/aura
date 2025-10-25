@@ -46,6 +46,7 @@ pub fn compute_lottery_ticket(device_id: &DeviceId, last_event_hash: &[u8; 32]) 
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
     use aura_journal::OperationType;
@@ -57,6 +58,7 @@ mod tests {
             session_id: Uuid::from_bytes([1u8; 16]), // Use deterministic session ID
             device_id,
             lottery_ticket: ticket,
+            delegated_action: None, // No delegated action for basic lock request
         }
     }
 

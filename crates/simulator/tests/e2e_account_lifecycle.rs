@@ -45,7 +45,7 @@ async fn test_complete_account_lifecycle() {
     }
 
     println!(
-        "✓ Initial DKD completed - {} participants derived keys",
+        "[OK] Initial DKD completed - {} participants derived keys",
         initial_keys.len()
     );
 
@@ -60,10 +60,10 @@ async fn test_complete_account_lifecycle() {
     match reshare_result {
         Ok(result) => {
             assert_eq!(result.len(), 4, "Should have 4 participants after reshare");
-            println!("✓ Resharing completed - threshold increased to 3-of-4");
+            println!("[OK] Resharing completed - threshold increased to 3-of-4");
         }
         Err(e) => {
-            println!("⚠ Resharing not yet fully implemented: {:?}", e);
+            println!("[WARNING] Resharing not yet fully implemented: {:?}", e);
             println!(
                 "  This is expected - FROST key resharing requires full sub-share distribution"
             );
@@ -92,7 +92,7 @@ async fn test_complete_account_lifecycle() {
         );
     }
 
-    println!("✓ Post-resharing DKD completed - all devices derived keys");
+    println!("[OK] Post-resharing DKD completed - all devices derived keys");
 
     // Phase 4: Verify key diversity
     println!("\n=== Phase 4: Verify key properties ===");
@@ -108,7 +108,7 @@ async fn test_complete_account_lifecycle() {
         "Keys should vary across different DKD sessions with different contexts"
     );
 
-    println!("✓ Key derivation produces context-dependent outputs");
+    println!("[OK] Key derivation produces context-dependent outputs");
     println!("\n=== Lifecycle Test Complete ===");
 }
 
@@ -139,7 +139,7 @@ async fn test_multi_session_dkd_consistency() {
         .expect("App-1 first DKD should succeed");
 
     assert_eq!(app1_keys_v1.len(), 5);
-    println!("✓ App-1 session 1 complete");
+    println!("[OK] App-1 session 1 complete");
 
     // Session 2: Derive keys for "app-2" context
     println!("\n--- Session 2: app-2 context ---");
@@ -150,7 +150,7 @@ async fn test_multi_session_dkd_consistency() {
         .expect("App-2 DKD should succeed");
 
     assert_eq!(app2_keys.len(), 5);
-    println!("✓ App-2 session complete");
+    println!("[OK] App-2 session complete");
 
     // Session 3: Derive keys for "app-1" context again
     println!("\n--- Session 3: app-1 context (repeat) ---");
@@ -161,7 +161,7 @@ async fn test_multi_session_dkd_consistency() {
         .expect("App-1 second DKD should succeed");
 
     assert_eq!(app1_keys_v2.len(), 5);
-    println!("✓ App-1 session 2 complete");
+    println!("[OK] App-1 session 2 complete");
 
     // Verify determinism: same context → same keys
     println!("\n--- Verifying determinism ---");
@@ -172,7 +172,7 @@ async fn test_multi_session_dkd_consistency() {
             i
         );
     }
-    println!("✓ Deterministic derivation verified (same context → same key)");
+    println!("[OK] Deterministic derivation verified (same context → same key)");
 
     // Verify context separation: different contexts → different keys
     println!("\n--- Verifying context separation ---");
@@ -187,7 +187,7 @@ async fn test_multi_session_dkd_consistency() {
         "Different contexts should produce different keys for at least some participants"
     );
     println!(
-        "✓ Context separation verified ({}/5 participants have different keys)",
+        "[OK] Context separation verified ({}/5 participants have different keys)",
         different_keys
     );
 
@@ -220,10 +220,10 @@ async fn test_threshold_boundary_conditions() {
     match result_1_1 {
         Ok(keys) => {
             assert_eq!(keys.len(), 1);
-            println!("✓ 1-of-1 threshold works (degenerate case)");
+            println!("[OK] 1-of-1 threshold works (degenerate case)");
         }
         Err(_) => {
-            println!("✓ 1-of-1 threshold rejected (expected for true threshold crypto)");
+            println!("[OK] 1-of-1 threshold rejected (expected for true threshold crypto)");
         }
     }
 
@@ -236,7 +236,7 @@ async fn test_threshold_boundary_conditions() {
         .expect("2-of-3 should work");
 
     assert_eq!(result_2_3.len(), 3);
-    println!("✓ 2-of-3 threshold works");
+    println!("[OK] 2-of-3 threshold works");
 
     // Test 3: Medium threshold (5-of-7)
     println!("\n--- Test 3: 5-of-7 threshold ---");
@@ -247,7 +247,7 @@ async fn test_threshold_boundary_conditions() {
         .expect("5-of-7 should work");
 
     assert_eq!(result_5_7.len(), 7);
-    println!("✓ 5-of-7 threshold works");
+    println!("[OK] 5-of-7 threshold works");
 
     // Test 4: High threshold (7-of-10)
     println!("\n--- Test 4: 7-of-10 threshold ---");
@@ -258,7 +258,7 @@ async fn test_threshold_boundary_conditions() {
         .expect("7-of-10 should work");
 
     assert_eq!(result_7_10.len(), 10);
-    println!("✓ 7-of-10 threshold works");
+    println!("[OK] 7-of-10 threshold works");
 
     println!("\n=== Boundary Conditions Test Complete ===");
 }
@@ -290,7 +290,7 @@ async fn test_latency_impact_on_protocols() {
 
     let no_latency_duration = start.elapsed();
     assert_eq!(result_no_latency.len(), 4);
-    println!("✓ No latency: completed in {:?}", no_latency_duration);
+    println!("[OK] No latency: completed in {:?}", no_latency_duration);
 
     // Test 2: Moderate latency (10-50ms)
     println!("\n--- Test 2: Moderate latency (10-50ms) ---");
@@ -305,7 +305,7 @@ async fn test_latency_impact_on_protocols() {
     let moderate_latency_duration = start.elapsed();
     assert_eq!(result_moderate.len(), 4);
     println!(
-        "✓ Moderate latency: completed in {:?}",
+        "[OK] Moderate latency: completed in {:?}",
         moderate_latency_duration
     );
 
@@ -321,7 +321,7 @@ async fn test_latency_impact_on_protocols() {
 
     let high_latency_duration = start.elapsed();
     assert_eq!(result_high.len(), 4);
-    println!("✓ High latency: completed in {:?}", high_latency_duration);
+    println!("[OK] High latency: completed in {:?}", high_latency_duration);
 
     // Verify latency impact
     println!("\n--- Latency impact analysis ---");
@@ -331,7 +331,7 @@ async fn test_latency_impact_on_protocols() {
 
     // Note: Due to simulation optimizations, high latency might not always
     // result in proportionally longer execution times
-    println!("✓ Protocol resilient to network latency");
+    println!("[OK] Protocol resilient to network latency");
 
     println!("\n=== Latency Impact Test Complete ===");
 }

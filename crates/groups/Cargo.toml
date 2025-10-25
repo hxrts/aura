@@ -16,6 +16,7 @@ workspace = true
 ed25519-dalek = { workspace = true }
 blake3 = { workspace = true }
 rand = { workspace = true }
+aes-gcm = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

@@ -166,7 +166,7 @@ async fn connect_peer(config: &Config, peer_id: &str, address: &str) -> anyhow::
     // Connect to peer
     agent.network_connect(peer.clone(), address).await?;
     
-    println!("✓ Connected to peer successfully");
+    println!("[OK] Connected to peer successfully");
     println!("  Peer ID: {}", peer_id);
     println!("  Address: {}", address);
     
@@ -182,7 +182,7 @@ async fn disconnect_peer(config: &Config, peer_id: &str) -> anyhow::Result<()> {
     // Remove peer from transport
     agent.transport.remove_peer(&peer).await;
     
-    println!("✓ Disconnected from peer");
+    println!("[OK] Disconnected from peer");
     println!("  Peer ID: {}", peer_id);
     
     Ok(())
@@ -232,7 +232,7 @@ async fn create_group(config: &Config, group_id: &str, members: &str) -> anyhow:
     // Create group with network propagation
     agent.network_create_group(group_id, member_ids.clone()).await?;
     
-    println!("✓ MLS group created and propagated to network");
+    println!("[OK] MLS group created and propagated to network");
     println!("  Group ID: {}", group_id);
     println!("  Members: {}", member_ids.len());
     for member in &member_ids {
@@ -260,7 +260,7 @@ async fn send_data(config: &Config, group_id: &str, data: &str, context: &str) -
     ).await
         .map_err(|e| anyhow::anyhow!("Failed to send data: {}", e))?;
     
-    println!("✓ Data sent to group");
+    println!("[OK] Data sent to group");
     println!("  Group ID: {}", group_id);
     println!("  Context: {}", context);
     println!("  Size: {} bytes", data_bytes.len());
@@ -312,7 +312,7 @@ async fn delegate_capability(
         recipients.clone(),
     ).await?;
     
-    println!("✓ Capability delegated via network");
+    println!("[OK] Capability delegated via network");
     println!("  Subject: {}", subject);
     println!("  Scope: {}:{}", new_scope.namespace, new_scope.operation);
     if let Some(resource) = &new_scope.resource {
@@ -364,7 +364,7 @@ async fn revoke_capability(
     // Revoke capability via network
     agent.network_revoke_capability(cap_id, reason.to_string(), recipients.clone()).await?;
     
-    println!("✓ Capability revoked via network");
+    println!("[OK] Capability revoked via network");
     println!("  Capability ID: {}", capability_id);
     println!("  Reason: {}", reason);
     if let Some(peers) = &recipients {
@@ -443,7 +443,7 @@ async fn process_capability_changes(config: &Config, group_id: &str) -> anyhow::
     // Process capability changes
     agent.capability_agent.process_capability_changes(group_id)?;
     
-    println!("✓ Capability changes processed for group '{}'", group_id);
+    println!("[OK] Capability changes processed for group '{}'", group_id);
     println!("  CGKA operations generated and applied");
     
     Ok(())

@@ -22,7 +22,7 @@ pub fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
     
     let device_id = DeviceId::new_with_effects(effects);
     let timestamp = current_timestamp_with_effects(effects)
-        .expect("Timestamp generation should succeed in tests");
+        .unwrap(); // Timestamp generation should succeed in tests
     
     DeviceMetadata {
         device_id,
@@ -32,6 +32,8 @@ pub fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
         added_at: timestamp,
         last_seen: timestamp,
         dkd_commitment_proofs: BTreeMap::new(),
+        next_nonce: 0,
+        used_nonces: std::collections::BTreeSet::new(),
     }
 }
 
@@ -50,7 +52,7 @@ pub fn test_device_with_id(id: u16, effects: &Effects) -> DeviceMetadata {
     
     let device_id = DeviceId(Uuid::from_u128(id as u128));
     let timestamp = current_timestamp_with_effects(effects)
-        .expect("Timestamp generation should succeed in tests");
+        .unwrap(); // Timestamp generation should succeed in tests
     
     DeviceMetadata {
         device_id,
@@ -60,6 +62,8 @@ pub fn test_device_with_id(id: u16, effects: &Effects) -> DeviceMetadata {
         added_at: timestamp,
         last_seen: timestamp,
         dkd_commitment_proofs: BTreeMap::new(),
+        next_nonce: 0,
+        used_nonces: std::collections::BTreeSet::new(),
     }
 }
 
@@ -77,7 +81,7 @@ pub fn test_device_with_name(name: &str, effects: &Effects) -> DeviceMetadata {
     
     let device_id = DeviceId::new_with_effects(effects);
     let timestamp = current_timestamp_with_effects(effects)
-        .expect("Timestamp generation should succeed in tests");
+        .unwrap(); // Timestamp generation should succeed in tests
     
     DeviceMetadata {
         device_id,
@@ -87,6 +91,8 @@ pub fn test_device_with_name(name: &str, effects: &Effects) -> DeviceMetadata {
         added_at: timestamp,
         last_seen: timestamp,
         dkd_commitment_proofs: BTreeMap::new(),
+        next_nonce: 0,
+        used_nonces: std::collections::BTreeSet::new(),
     }
 }
 
@@ -100,7 +106,7 @@ pub fn test_device_with_name(name: &str, effects: &Effects) -> DeviceMetadata {
 pub fn test_device_with_key(public_key: VerifyingKey, effects: &Effects) -> DeviceMetadata {
     let device_id = DeviceId::new_with_effects(effects);
     let timestamp = current_timestamp_with_effects(effects)
-        .expect("Timestamp generation should succeed in tests");
+        .unwrap(); // Timestamp generation should succeed in tests
     
     DeviceMetadata {
         device_id,
@@ -110,6 +116,8 @@ pub fn test_device_with_key(public_key: VerifyingKey, effects: &Effects) -> Devi
         added_at: timestamp,
         last_seen: timestamp,
         dkd_commitment_proofs: BTreeMap::new(),
+        next_nonce: 0,
+        used_nonces: std::collections::BTreeSet::new(),
     }
 }
 
@@ -127,7 +135,7 @@ pub fn test_device_with_type(device_type: DeviceType, effects: &Effects) -> Devi
     
     let device_id = DeviceId::new_with_effects(effects);
     let timestamp = current_timestamp_with_effects(effects)
-        .expect("Timestamp generation should succeed in tests");
+        .unwrap(); // Timestamp generation should succeed in tests
     
     DeviceMetadata {
         device_id,
@@ -137,6 +145,8 @@ pub fn test_device_with_type(device_type: DeviceType, effects: &Effects) -> Devi
         added_at: timestamp,
         last_seen: timestamp,
         dkd_commitment_proofs: BTreeMap::new(),
+        next_nonce: 0,
+        used_nonces: std::collections::BTreeSet::new(),
     }
 }
 

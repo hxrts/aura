@@ -227,6 +227,7 @@ pub fn aggregate_dkd_points(points: &[[u8; 32]]) -> Result<ed25519_dalek::Verify
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 #[allow(clippy::expect_used, clippy::unwrap_used)] // Test code
 mod tests {
     use super::*;

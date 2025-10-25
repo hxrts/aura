@@ -179,7 +179,7 @@ async fn store_data(
         attrs,
     ).await?;
     
-    println!("✓ Data stored successfully");
+    println!("[OK] Data stored successfully");
     println!("  Entry ID: {}", entry_id);
     println!("  Size: {} bytes", data.len());
     println!("  Content Type: {}", content_type);
@@ -207,7 +207,7 @@ async fn retrieve_data(config: &Config, entry_id: &str, output: Option<&PathBuf>
         fs::write(output_path, &data).await
             .map_err(|e| anyhow::anyhow!("Failed to write output file: {}", e))?;
         
-        println!("✓ Data retrieved and written to {:?}", output_path);
+        println!("[OK] Data retrieved and written to {:?}", output_path);
         println!("  Entry ID: {}", entry_id);
         println!("  Size: {} bytes", data.len());
     } else {
@@ -229,7 +229,7 @@ async fn delete_data(config: &Config, entry_id: &str) -> anyhow::Result<()> {
     agent.storage.delete(entry_id, &agent.capability_agent.effects).await
         .map_err(|e| anyhow::anyhow!("Failed to delete entry: {}", e))?;
     
-    println!("✓ Entry deleted successfully");
+    println!("[OK] Entry deleted successfully");
     println!("  Entry ID: {}", entry_id);
     
     Ok(())
@@ -367,7 +367,7 @@ async fn cleanup_storage(config: &Config, retain_epochs: usize) -> anyhow::Resul
     // Run cleanup
     agent.cleanup().await;
     
-    println!("✓ Storage cleanup complete");
+    println!("[OK] Storage cleanup complete");
     println!("  Retained {} epochs of encryption keys", retain_epochs);
     
     Ok(())

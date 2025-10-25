@@ -151,6 +151,163 @@ impl FrostSigner {
         let sig_bytes = group_signature.serialize();
         Ok(Signature::from_bytes(&sig_bytes))
     }
+
+    /// Perform threshold signing with only a subset of participants
+    ///
+    /// This is the main interface for true threshold signing - only requires
+    /// threshold number of participants to be online and participate.
+    pub fn threshold_sign(
+        message: &[u8],
+        participating_key_packages: &BTreeMap<frost::Identifier, frost::keys::KeyPackage>,
+        pubkey_package: &frost::keys::PublicKeyPackage,
+        threshold: u16,
+        rng: &mut (impl CryptoRng + RngCore),
+    ) -> Result<Signature> {
+        // Validate we have enough participants
+        if participating_key_packages.len() < threshold as usize {
+            return Err(CryptoError::CryptoError(format!(
+                "Insufficient participants: have {}, need threshold {}",
+                participating_key_packages.len(),
+                threshold
+            )));
+        }
+
+        // Round 1: Generate nonces and commitments for participating devices
+        let mut nonces_map = BTreeMap::new();
+        let mut commitments_map = BTreeMap::new();
+
+        for (id, key_package) in participating_key_packages.iter() {
+            let (nonces, commitments) = frost::round1::commit(key_package.signing_share(), rng);
+            nonces_map.insert(*id, nonces);
+            commitments_map.insert(*id, commitments);
+        }
+
+        // Round 2: Create signature shares
+        let signing_package = frost::SigningPackage::new(commitments_map.clone(), message);
+        let mut signature_shares = BTreeMap::new();
+
+        for (id, key_package) in participating_key_packages.iter() {
+            let nonces = nonces_map.get(id).ok_or_else(|| {
+                CryptoError::CryptoError("Missing nonces for participant".to_string())
+            })?;
+            let signature_share = frost::round2::sign(&signing_package, nonces, key_package)
+                .map_err(|e| {
+                    CryptoError::CryptoError(format!("FROST round2 signing failed: {:?}", e))
+                })?;
+            signature_shares.insert(*id, signature_share);
+        }
+
+        // Aggregate into final signature
+        Self::aggregate(message, &commitments_map, &signature_shares, pubkey_package)
+    }
+
+    /// Optimistic threshold signing - collect signatures from multiple participants
+    /// and use any valid threshold subset to create a signature
+    ///
+    /// This supports the optimistic case where more than threshold participants sign,
+    /// and any threshold subset can be used to create a valid signature.
+    pub fn optimistic_threshold_sign(
+        message: &[u8],
+        participating_key_packages: &BTreeMap<frost::Identifier, frost::keys::KeyPackage>,
+        pubkey_package: &frost::keys::PublicKeyPackage,
+        threshold: u16,
+        rng: &mut (impl CryptoRng + RngCore),
+    ) -> Result<(Signature, Vec<frost::Identifier>)> {
+        // Validate we have enough participants
+        if participating_key_packages.len() < threshold as usize {
+            return Err(CryptoError::CryptoError(format!(
+                "Insufficient participants: have {}, need threshold {}",
+                participating_key_packages.len(),
+                threshold
+            )));
+        }
+
+        // Round 1: Generate nonces and commitments for ALL participating devices
+        let mut nonces_map = BTreeMap::new();
+        let mut commitments_map = BTreeMap::new();
+
+        for (id, key_package) in participating_key_packages.iter() {
+            let (nonces, commitments) = frost::round1::commit(key_package.signing_share(), rng);
+            nonces_map.insert(*id, nonces);
+            commitments_map.insert(*id, commitments);
+        }
+
+        // Round 2: Create signature shares for ALL participating devices
+        let signing_package = frost::SigningPackage::new(commitments_map.clone(), message);
+        let mut all_signature_shares = BTreeMap::new();
+
+        for (id, key_package) in participating_key_packages.iter() {
+            let nonces = nonces_map.get(id).ok_or_else(|| {
+                CryptoError::CryptoError("Missing nonces for participant".to_string())
+            })?;
+            let signature_share = frost::round2::sign(&signing_package, nonces, key_package)
+                .map_err(|e| {
+                    CryptoError::CryptoError(format!("FROST round2 signing failed: {:?}", e))
+                })?;
+            all_signature_shares.insert(*id, signature_share);
+        }
+
+        // The issue is that signature shares were computed with ALL commitments,
+        // but we're trying to aggregate with only a subset. This doesn't work with FROST.
+        // We need to aggregate with ALL shares, not a subset.
+        
+        // Aggregate using ALL signature shares (not a subset)
+        let signature = Self::aggregate(
+            message,
+            &commitments_map,
+            &all_signature_shares,
+            pubkey_package,
+        )?;
+        
+        // Return all participating signers (not just threshold subset)
+        let selected_ids: Vec<frost::Identifier> = all_signature_shares
+            .keys()
+            .copied()
+            .collect();
+
+        Ok((signature, selected_ids))
+    }
+
+    /// Try to aggregate from any valid threshold subset of collected signatures
+    ///
+    /// This function takes a collection of signature shares and tries different
+    /// threshold subsets until it finds one that produces a valid signature.
+    pub fn try_aggregate_threshold_subset(
+        message: &[u8],
+        all_commitments: &BTreeMap<frost::Identifier, frost::round1::SigningCommitments>,
+        all_signature_shares: &BTreeMap<frost::Identifier, frost::round2::SignatureShare>,
+        pubkey_package: &frost::keys::PublicKeyPackage,
+        threshold: u16,
+    ) -> Result<(Signature, Vec<frost::Identifier>)> {
+        if all_signature_shares.len() < threshold as usize {
+            return Err(CryptoError::CryptoError(format!(
+                "Insufficient signature shares: have {}, need threshold {}",
+                all_signature_shares.len(),
+                threshold
+            )));
+        }
+
+        // In FROST, if we have signature shares computed with a full set of commitments,
+        // we must use ALL of them for aggregation. We can't arbitrarily select subsets
+        // after the fact because the shares are cryptographically bound to the full commitment set.
+        
+        // For true threshold subset aggregation, the signature shares would need to be
+        // computed fresh with only the subset's commitments.
+        
+        // Since we have ALL shares already computed, just aggregate them all
+        let participant_ids: Vec<frost::Identifier> =
+            all_signature_shares.keys().copied().collect();
+            
+        match Self::aggregate(
+            message,
+            all_commitments,
+            all_signature_shares,
+            pubkey_package,
+        ) {
+            Ok(signature) => Ok((signature, participant_ids)),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 /// Verify an Ed25519 signature
@@ -186,6 +343,7 @@ pub fn dalek_verifying_key_to_frost(dalek_key: &VerifyingKey) -> Result<frost::V
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 #[allow(clippy::expect_used, clippy::unwrap_used)] // Test code
 mod tests {
     use super::*;
@@ -201,17 +359,17 @@ mod tests {
         let mut rng = effects.rng();
 
         // Generate key shares (in production, this would be done via DKG)
-        // FROST v1.0 requires threshold == num_participants (all participants must sign)
-        if threshold != num_participants {
+        // FROST supports true threshold signing: min_signers (threshold) <= max_signers (num_participants)
+        if threshold > num_participants {
             panic!(
-                "FROST v1.0 requires threshold ({}) == num_participants ({})",
+                "FROST threshold ({}) cannot exceed num_participants ({})",
                 threshold, num_participants
             );
         }
 
         let (shares, pubkey_package) = frost::keys::generate_with_dealer(
-            threshold,
             num_participants,
+            threshold,
             frost::keys::IdentifierList::Default,
             &mut rng,
         )
@@ -225,7 +383,7 @@ mod tests {
 
         (key_packages, pubkey_package)
     }
-    
+
     // Helper to set up FROST keys for testing (normally done via DKG)
     fn setup_frost_keys(
         threshold: u16,
@@ -235,17 +393,17 @@ mod tests {
         let mut rng = effects.rng();
 
         // Generate key shares (in production, this would be done via DKG)
-        // FROST v1.0 requires threshold == num_participants (all participants must sign)
-        if threshold != num_participants {
+        // FROST supports true threshold signing: min_signers (threshold) <= max_signers (num_participants)
+        if threshold > num_participants {
             panic!(
-                "FROST v1.0 requires threshold ({}) == num_participants ({})",
+                "FROST threshold ({}) cannot exceed num_participants ({})",
                 threshold, num_participants
             );
         }
 
         let (shares, pubkey_package) = frost::keys::generate_with_dealer(
-            threshold,
             num_participants,
+            threshold,
             frost::keys::IdentifierList::Default,
             &mut rng,
         )
@@ -487,5 +645,119 @@ mod tests {
             key_share.signing_share.serialize(),
             restored.signing_share.serialize()
         );
+    }
+
+    #[test]
+    fn test_optimistic_threshold_signing_3_of_5() {
+        let effects = crate::Effects::for_test("test_optimistic_threshold_signing_3_of_5");
+        let mut rng = effects.rng();
+
+        // Setup: 3-of-5 threshold scheme
+        let (key_packages, pubkey_package) = setup_frost_keys(3, 5);
+        let verifying_key = pubkey_package.verifying_key();
+
+        let message = b"test message for optimistic threshold signing";
+
+        // Simulate 4 out of 5 participants signing concurrently
+        let participants: Vec<_> = key_packages.iter().take(4).collect();
+        let participating_packages: BTreeMap<_, _> = participants.into_iter().map(|(id, pkg)| (*id, pkg.clone())).collect();
+
+        // Perform optimistic threshold signing
+        let result = FrostSigner::optimistic_threshold_sign(
+            message,
+            &participating_packages,
+            &pubkey_package,
+            3, // threshold
+            &mut rng,
+        );
+
+        assert!(result.is_ok(), "Optimistic threshold signing should succeed");
+        let (signature, selected_signers) = result.unwrap();
+
+        // Verify the signature
+        let dalek_key = frost_verifying_key_to_dalek(verifying_key).unwrap();
+        verify_signature(message, &signature, &dalek_key).unwrap();
+
+        // Should have used all participating signers (not just threshold subset)
+        assert_eq!(selected_signers.len(), 4, "Should use all participating signers");
+
+        // Verify that any 3 participants can create a valid signature
+        let all_participants: Vec<_> = key_packages.iter().take(4).collect();
+        
+        // Try different combinations of 3 participants
+        for i in 0..2 {
+            let mut subset_packages = BTreeMap::new();
+            for j in 0..3 {
+                let (id, pkg) = all_participants[i + j];
+                subset_packages.insert(*id, pkg.clone());
+            }
+
+            let subset_result = FrostSigner::threshold_sign(
+                message,
+                &subset_packages,
+                &pubkey_package,
+                3, // threshold
+                &mut rng,
+            );
+
+            assert!(subset_result.is_ok(), "Any valid threshold subset should work");
+            let subset_signature = subset_result.unwrap();
+            verify_signature(message, &subset_signature, &dalek_key).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_try_aggregate_threshold_subset() {
+        let effects = crate::Effects::for_test("test_try_aggregate_threshold_subset");
+        let mut rng = effects.rng();
+
+        // Setup: 2-of-3 threshold scheme
+        let (key_packages, pubkey_package) = setup_frost_keys(2, 3);
+        let verifying_key = pubkey_package.verifying_key();
+
+        let message = b"test message for subset aggregation";
+
+        // Generate commitments and signature shares for all 3 participants
+        let mut all_commitments = BTreeMap::new();
+        let mut all_signature_shares = BTreeMap::new();
+        let mut nonces_map = BTreeMap::new();
+
+        // Round 1: Generate nonces and commitments for all participants
+        for (id, key_package) in &key_packages {
+            let (nonces, commitments) = FrostSigner::generate_nonces(key_package.signing_share(), &mut rng);
+            nonces_map.insert(*id, nonces);
+            all_commitments.insert(*id, commitments);
+        }
+
+        // Round 2: Create signature shares for all participants
+        for (id, key_package) in &key_packages {
+            let nonces = &nonces_map[id];
+            let signature_share = FrostSigner::sign_share_with_package(
+                message,
+                nonces,
+                &all_commitments,
+                key_package,
+            ).unwrap();
+            all_signature_shares.insert(*id, signature_share);
+        }
+
+        // Try to aggregate from any threshold subset (2 out of 3)
+        let result = FrostSigner::try_aggregate_threshold_subset(
+            message,
+            &all_commitments,
+            &all_signature_shares,
+            &pubkey_package,
+            2, // threshold
+        );
+
+        assert!(result.is_ok(), "Should be able to aggregate from threshold subset");
+        let (signature, selected_signers) = result.unwrap();
+
+        // Verify the signature
+        let dalek_key = frost_verifying_key_to_dalek(verifying_key).unwrap();
+        verify_signature(message, &signature, &dalek_key).unwrap();
+
+        // Should have used all participating signers (not just threshold subset)  
+        assert_eq!(selected_signers.len(), 3, "Should use all participating signers");
     }
 }

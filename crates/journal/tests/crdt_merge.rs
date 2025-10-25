@@ -1,3 +1,4 @@
+#![allow(warnings, clippy::all)]
 //! Unit Tests: CRDT Merge Correctness
 //!
 //! Tests that CRDT merge operations work correctly for the account ledger.
@@ -71,6 +72,7 @@ fn merge_states(mut state_a: AccountState, state_b: &AccountState) -> AccountSta
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn test_concurrent_event_merge_commutes() {
@@ -90,6 +92,8 @@ mod tests {
                 device_type: DeviceType::Native,
                 last_seen: 1001,
                 dkd_commitment_proofs: BTreeMap::new(),
+                next_nonce: 0,
+                used_nonces: BTreeSet::new(),
             },
         );
 
@@ -109,6 +113,8 @@ mod tests {
                 device_type: DeviceType::Native,
                 last_seen: 1002,
                 dkd_commitment_proofs: BTreeMap::new(),
+                next_nonce: 0,
+                used_nonces: BTreeSet::new(),
             },
         );
 
@@ -141,7 +147,7 @@ mod tests {
             "Merged state should contain device 3"
         );
 
-        println!("✓ test_concurrent_event_merge_commutes PASSED");
+        println!("[OK] test_concurrent_event_merge_commutes PASSED");
     }
 
     #[test]
@@ -162,6 +168,8 @@ mod tests {
                 device_type: DeviceType::Native,
                 last_seen: 1001,
                 dkd_commitment_proofs: BTreeMap::new(),
+                next_nonce: 0,
+                used_nonces: BTreeSet::new(),
             },
         );
 
@@ -199,7 +207,7 @@ mod tests {
             "Conflict resolution should be deterministic"
         );
 
-        println!("✓ test_device_add_remove_convergence PASSED");
+        println!("[OK] test_device_add_remove_convergence PASSED");
     }
 
     #[test]
@@ -236,7 +244,7 @@ mod tests {
             "Same epoch should remain unchanged"
         );
 
-        println!("✓ test_epoch_increment_convergence PASSED");
+        println!("[OK] test_epoch_increment_convergence PASSED");
     }
 
     #[test]
@@ -282,7 +290,7 @@ mod tests {
         let result2 = merged_state.validate_nonce(new_nonce);
         assert!(result2.is_ok(), "New nonce should be accepted after merge");
 
-        println!("✓ test_nonce_replay_prevention_after_merge PASSED");
+        println!("[OK] test_nonce_replay_prevention_after_merge PASSED");
     }
 
     #[test]
@@ -309,7 +317,7 @@ mod tests {
             "Lamport clock should converge to max"
         );
 
-        println!("✓ test_lamport_clock_convergence PASSED");
+        println!("[OK] test_lamport_clock_convergence PASSED");
     }
 
     #[test]
@@ -331,6 +339,8 @@ mod tests {
                 device_type: DeviceType::Native,
                 last_seen: 1001,
                 dkd_commitment_proofs: BTreeMap::new(),
+                next_nonce: 0,
+                used_nonces: BTreeSet::new(),
             },
         );
         state.validate_nonce(100).unwrap();
@@ -360,6 +370,6 @@ mod tests {
             "Idempotent merge should preserve lamport clock"
         );
 
-        println!("✓ test_merge_is_idempotent PASSED");
+        println!("[OK] test_merge_is_idempotent PASSED");
     }
 }

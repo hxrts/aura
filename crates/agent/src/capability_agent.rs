@@ -12,6 +12,7 @@ use aura_journal::{
     AccountId, DeviceId,
 };
 use serde::{Deserialize, Serialize};
+use serde_json;
 use tracing::{debug, info};
 
 /// Capability-driven agent with integrated group messaging and identity management

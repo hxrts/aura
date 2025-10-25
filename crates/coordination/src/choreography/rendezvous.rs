@@ -7,7 +7,7 @@
 //! 2. Device B recognizes Offer, selects transport, publishes Answer
 //! 3. Both devices perform PSK-bound handshake on selected transport
 //!
-//! Reference: docs/051_rendezvous_ssb.md Section 4.3
+//! Reference: docs/051_rendezvous.md Section 4.3
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -125,6 +125,14 @@ pub struct TransportOfferPayload {
     pub selected_transport: Option<u8>,
     pub required_permissions: Vec<String>,
     pub capability_proof: Option<Vec<u8>>,
+    pub storage_announcement: Option<StorageCapabilityAnnouncement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StorageCapabilityAnnouncement {
+    pub available_capacity_bytes: u64,
+    pub max_chunk_size: u32,
+    pub accepting_new_relationships: bool,
 }
 
 impl TransportOfferPayload {
@@ -137,6 +145,21 @@ impl TransportOfferPayload {
             selected_transport: None,
             required_permissions,
             capability_proof: None,
+            storage_announcement: None,
+        }
+    }
+
+    pub fn new_offer_with_storage(
+        transports: Vec<TransportDescriptor>,
+        required_permissions: Vec<String>,
+        storage_announcement: StorageCapabilityAnnouncement,
+    ) -> Self {
+        Self {
+            transports,
+            selected_transport: None,
+            required_permissions,
+            capability_proof: None,
+            storage_announcement: Some(storage_announcement),
         }
     }
 
@@ -146,6 +169,21 @@ impl TransportOfferPayload {
             selected_transport: Some(selected_index),
             required_permissions: vec![],
             capability_proof: None,
+            storage_announcement: None,
+        }
+    }
+
+    pub fn new_answer_with_storage(
+        original_transports: Vec<TransportDescriptor>,
+        selected_index: u8,
+        storage_announcement: StorageCapabilityAnnouncement,
+    ) -> Self {
+        Self {
+            transports: original_transports,
+            selected_transport: Some(selected_index),
+            required_permissions: vec![],
+            capability_proof: None,
+            storage_announcement: Some(storage_announcement),
         }
     }
 }
@@ -408,7 +446,7 @@ impl RendezvousProtocol {
         sig_hasher.update(payload_hash.as_bytes());
         sig_hasher.update(b"device-signature");
 
-        sig_hasher.finalize().as_bytes()[..64].to_vec()
+        sig_hasher.finalize().as_bytes()[..32].to_vec()
     }
 
     fn derive_session_key(material: &[u8]) -> [u8; 32] {
@@ -424,6 +462,7 @@ impl RendezvousProtocol {
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
 

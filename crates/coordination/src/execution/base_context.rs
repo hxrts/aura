@@ -109,6 +109,11 @@ impl BaseContext {
         }
     }
 
+    /// Get the device signing key
+    pub fn device_key(&self) -> &SigningKey {
+        &self.device_key
+    }
+
     /// Sign an event with this device's key
     pub fn sign_event(&self, event: &Event) -> Result<ed25519_dalek::Signature, ProtocolError> {
         use ed25519_dalek::Signer;

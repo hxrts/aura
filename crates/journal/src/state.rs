@@ -591,6 +591,8 @@ mod tests {
             added_at: current_timestamp_with_effects(effects),
             last_seen: current_timestamp_with_effects(effects),
             dkd_commitment_proofs: std::collections::BTreeMap::new(),
+            next_nonce: 0,
+            used_nonces: std::collections::BTreeSet::new(),
         }
     }
 

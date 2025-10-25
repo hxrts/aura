@@ -6,7 +6,10 @@
 use super::base_context::BaseContext;
 use super::time::WakeCondition;
 use super::types::*;
-use super::{EventFilter, EventPredicate, EventTypePattern, Instruction, InstructionResult, LedgerStateSnapshot};
+use super::{
+    EventFilter, EventPredicate, EventTypePattern, Instruction, InstructionResult,
+    LedgerStateSnapshot,
+};
 use aura_journal::{DeviceId, Event, EventType, GuardianId};
 use uuid::Uuid;
 
@@ -31,11 +34,7 @@ pub struct ResharingContext {
 }
 
 impl ResharingContext {
-    pub fn new(
-        base: BaseContext,
-        new_participants: Vec<DeviceId>,
-        new_threshold: usize,
-    ) -> Self {
+    pub fn new(base: BaseContext, new_participants: Vec<DeviceId>, new_threshold: usize) -> Self {
         ResharingContext {
             base,
             new_participants,
@@ -121,7 +120,7 @@ impl CompactionContext {
 pub trait ProtocolContextTrait {
     /// Get base context reference
     fn base(&self) -> &BaseContext;
-    
+
     /// Get mutable base context reference
     fn base_mut(&mut self) -> &mut BaseContext;
 
@@ -150,17 +149,22 @@ macro_rules! impl_base_delegation {
                 &mut self,
                 instruction: Instruction,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<InstructionResult, ProtocolError>> + Send + '_>,
+                Box<
+                    dyn std::future::Future<Output = Result<InstructionResult, ProtocolError>>
+                        + Send
+                        + '_,
+                >,
             > {
-                Box::pin(async move {
-                    execute_instruction(self.base_mut(), instruction).await
-                })
+                Box::pin(async move { execute_instruction(self.base_mut(), instruction).await })
             }
         }
 
         // Delegate common methods
         impl $context_type {
-            pub fn sign_event(&self, event: &Event) -> Result<ed25519_dalek::Signature, ProtocolError> {
+            pub fn sign_event(
+                &self,
+                event: &Event,
+            ) -> Result<ed25519_dalek::Signature, ProtocolError> {
                 self.base.sign_event(event)
             }
 
@@ -176,11 +180,16 @@ macro_rules! impl_base_delegation {
                 self.base.generate_nonce().await
             }
 
-            pub async fn get_device_public_key(&self, device_id: &DeviceId) -> Result<Vec<u8>, ProtocolError> {
+            pub async fn get_device_public_key(
+                &self,
+                device_id: &DeviceId,
+            ) -> Result<Vec<u8>, ProtocolError> {
                 self.base.get_device_public_key(device_id).await
             }
 
-            pub async fn get_device_hpke_private_key(&self) -> Result<aura_crypto::HpkePrivateKey, ProtocolError> {
+            pub async fn get_device_hpke_private_key(
+                &self,
+            ) -> Result<aura_crypto::HpkePrivateKey, ProtocolError> {
                 self.base.get_device_hpke_private_key().await
             }
         }
@@ -228,35 +237,41 @@ async fn execute_instruction(
 ) -> Result<InstructionResult, ProtocolError> {
     match instruction {
         Instruction::WriteToLedger(event) => write_to_ledger(base, event).await,
-        Instruction::AwaitEvent { filter, timeout_epochs } => {
-            await_event(base, filter, timeout_epochs).await
-        }
-        Instruction::AwaitThreshold { count, filter, timeout_epochs } => {
-            await_threshold(base, count, filter, timeout_epochs).await
-        }
+        Instruction::AwaitEvent {
+            filter,
+            timeout_epochs,
+        } => await_event(base, filter, timeout_epochs).await,
+        Instruction::AwaitThreshold {
+            count,
+            filter,
+            timeout_epochs,
+        } => await_threshold(base, count, filter, timeout_epochs).await,
         Instruction::GetLedgerState => get_ledger_state(base).await,
         Instruction::GetCurrentEpoch => get_current_epoch(base).await,
         Instruction::WaitEpochs(epochs) => wait_epochs(base, epochs).await,
         Instruction::CheckForEvent { filter } => check_for_event(base, filter).await,
-        Instruction::MarkGuardianSharesForDeletion { session_id, ttl_hours } => {
-            mark_guardian_shares_for_deletion(base, session_id, ttl_hours).await
-        }
-        Instruction::CheckSessionCollision { operation_type, context_id } => {
-            check_session_collision(base, operation_type, context_id).await
-        }
-        Instruction::RunSubProtocol { .. } => {
-            Err(ProtocolError {
-                session_id: base.session_id,
-                error_type: ProtocolErrorType::Other,
-                message: "Sub-protocol execution should be handled at a higher level".to_string(),
-            })
-        }
+        Instruction::MarkGuardianSharesForDeletion {
+            session_id,
+            ttl_hours,
+        } => mark_guardian_shares_for_deletion(base, session_id, ttl_hours).await,
+        Instruction::CheckSessionCollision {
+            operation_type,
+            context_id,
+        } => check_session_collision(base, operation_type, context_id).await,
+        Instruction::RunSubProtocol { .. } => Err(ProtocolError {
+            session_id: base.session_id,
+            error_type: ProtocolErrorType::Other,
+            message: "Sub-protocol execution should be handled at a higher level".to_string(),
+        }),
     }
 }
 
 // ========== Instruction Implementations ==========
 
-async fn write_to_ledger(base: &mut BaseContext, event: Event) -> Result<InstructionResult, ProtocolError> {
+async fn write_to_ledger(
+    base: &mut BaseContext,
+    event: Event,
+) -> Result<InstructionResult, ProtocolError> {
     // Write to ledger (may be shared in simulation for instant CRDT sync)
     let mut ledger = base.ledger.write().await;
 
@@ -421,6 +436,7 @@ async fn get_ledger_state(base: &BaseContext) -> Result<InstructionResult, Proto
         next_nonce: state.next_nonce,
         last_event_hash: state.last_event_hash,
         current_epoch: state.lamport_clock,
+        relationship_counters: state.relationship_counters.clone(),
     };
 
     Ok(InstructionResult::LedgerState(snapshot))
@@ -523,6 +539,7 @@ async fn check_session_collision(
                 session_id: session.session_id.0,
                 device_id: *device_id,
                 lottery_ticket,
+                delegated_action: None,
             });
         }
     }
@@ -535,6 +552,7 @@ async fn check_session_collision(
         session_id: base.session_id,
         device_id: my_device_id,
         lottery_ticket: my_ticket,
+        delegated_action: None,
     });
 
     // Determine winner if there's a collision
@@ -594,7 +612,11 @@ fn find_matching_event(base: &mut BaseContext, filter: &EventFilter) -> Option<E
 }
 
 /// Collect all matching events from pending events
-fn collect_matching_events(base: &mut BaseContext, filter: &EventFilter, collected: &mut Vec<Event>) {
+fn collect_matching_events(
+    base: &mut BaseContext,
+    filter: &EventFilter,
+    collected: &mut Vec<Event>,
+) {
     let mut i = 0;
     while i < base.pending_events.len() {
         if matches_filter(base, &base.pending_events[i], filter) {

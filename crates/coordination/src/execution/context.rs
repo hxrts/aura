@@ -181,6 +181,17 @@ impl ProtocolContext {
         }
     }
 
+    /// Get device signing key
+    pub fn device_key(&self) -> &SigningKey {
+        match self {
+            ProtocolContext::Dkd(ctx) => ctx.base().device_key(),
+            ProtocolContext::Resharing(ctx) => ctx.base().device_key(),
+            ProtocolContext::Recovery(ctx) => ctx.base().device_key(),
+            ProtocolContext::Locking(ctx) => ctx.base().device_key(),
+            ProtocolContext::Compaction(ctx) => ctx.base().device_key(),
+        }
+    }
+
     /// Get participants
     pub fn participants(&self) -> &Vec<DeviceId> {
         match self {

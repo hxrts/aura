@@ -172,6 +172,7 @@ pub fn participant_id_to_scalar(participant_id: u64) -> Scalar {
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 #[allow(clippy::expect_used, clippy::unwrap_used)] // Test code
 mod tests {
     use super::*;

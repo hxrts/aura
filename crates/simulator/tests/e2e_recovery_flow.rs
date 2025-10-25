@@ -34,7 +34,7 @@ async fn test_guardian_recovery_workflow() {
         .expect("Initial bootstrap DKD should succeed");
 
     assert_eq!(initial_keys.len(), 3);
-    println!("✓ Account bootstrapped with 3 devices");
+    println!("[OK] Account bootstrapped with 3 devices");
 
     // Phase 2: Run recovery protocol
     // Note: Recovery choreography handles guardian setup internally
@@ -62,7 +62,7 @@ async fn test_guardian_recovery_workflow() {
                 );
             }
 
-            println!("✓ Recovery protocol completed successfully");
+            println!("[OK] Recovery protocol completed successfully");
             println!(
                 "  - {} participants recovered shares",
                 recovered_shares.len()
@@ -70,7 +70,7 @@ async fn test_guardian_recovery_workflow() {
             println!("  - Cooldown period: {} hours", cooldown_hours);
         }
         Err(e) => {
-            println!("⚠ Recovery protocol error: {:?}", e);
+            println!("[WARNING] Recovery protocol error: {:?}", e);
             // Recovery may not be fully implemented yet - that's expected
         }
     }
@@ -85,7 +85,7 @@ async fn test_guardian_recovery_workflow() {
         .expect("Post-recovery DKD should succeed");
 
     assert_eq!(post_recovery_keys.len(), 3);
-    println!("✓ Post-recovery DKD successful - account fully functional");
+    println!("[OK] Post-recovery DKD successful - account fully functional");
 
     println!("\n=== Recovery Workflow Test Complete ===");
 }
@@ -124,10 +124,10 @@ async fn test_recovery_cooldown_variations() {
         match result {
             Ok(shares) => {
                 assert_eq!(shares.len(), 3);
-                println!("✓ Recovery with {} completed successfully", description);
+                println!("[OK] Recovery with {} completed successfully", description);
             }
             Err(e) => {
-                println!("⚠ Recovery with {} not yet supported: {:?}", description, e);
+                println!("[WARNING] Recovery with {} not yet supported: {:?}", description, e);
             }
         }
     }
@@ -166,18 +166,18 @@ async fn test_operation_locking_protocol() {
 
             let successful_locks = results.iter().filter(|r| r.is_ok()).count();
             println!(
-                "✓ DKD locking: {}/{} participants acquired lock",
+                "[OK] DKD locking: {}/{} participants acquired lock",
                 successful_locks,
                 results.len()
             );
 
             // At least one participant should successfully acquire the lock
             if successful_locks == 0 {
-                println!("⚠ No participants acquired lock - may not be fully implemented");
+                println!("[WARNING] No participants acquired lock - may not be fully implemented");
             }
         }
         Err(e) => {
-            println!("⚠ Locking protocol error: {:?}", e);
+            println!("[WARNING] Locking protocol error: {:?}", e);
         }
     }
 
@@ -195,13 +195,13 @@ async fn test_operation_locking_protocol() {
 
             let successful_locks = results.iter().filter(|r| r.is_ok()).count();
             println!(
-                "✓ Resharing locking: {}/{} participants acquired lock",
+                "[OK] Resharing locking: {}/{} participants acquired lock",
                 successful_locks,
                 results.len()
             );
         }
         Err(e) => {
-            println!("⚠ Locking protocol error: {:?}", e);
+            println!("[WARNING] Locking protocol error: {:?}", e);
         }
     }
 
@@ -219,13 +219,13 @@ async fn test_operation_locking_protocol() {
 
             let successful_locks = results.iter().filter(|r| r.is_ok()).count();
             println!(
-                "✓ Recovery locking: {}/{} participants acquired lock",
+                "[OK] Recovery locking: {}/{} participants acquired lock",
                 successful_locks,
                 results.len()
             );
         }
         Err(e) => {
-            println!("⚠ Locking protocol error: {:?}", e);
+            println!("[WARNING] Locking protocol error: {:?}", e);
         }
     }
 
@@ -258,7 +258,7 @@ async fn test_sequential_protocol_execution() {
         .expect("Step 1 DKD should succeed");
 
     assert_eq!(step1_keys.len(), 3);
-    println!("✓ Step 1 complete: {} keys derived", step1_keys.len());
+    println!("[OK] Step 1 complete: {} keys derived", step1_keys.len());
 
     // Step 2: Resharing
     println!("\n--- Step 2: Resharing to 3-of-4 ---");
@@ -270,10 +270,10 @@ async fn test_sequential_protocol_execution() {
     match step2_result {
         Ok(result) => {
             assert_eq!(result.len(), 4);
-            println!("✓ Step 2 complete: reshared to 4 devices");
+            println!("[OK] Step 2 complete: reshared to 4 devices");
         }
         Err(e) => {
-            println!("⚠ Step 2 resharing not fully implemented: {:?}", e);
+            println!("[WARNING] Step 2 resharing not fully implemented: {:?}", e);
             println!("  Skipping post-resharing steps");
             return;
         }
@@ -288,7 +288,7 @@ async fn test_sequential_protocol_execution() {
         .expect("Step 3 DKD should succeed");
 
     assert_eq!(step3_keys.len(), 4);
-    println!("✓ Step 3 complete: {} keys derived", step3_keys.len());
+    println!("[OK] Step 3 complete: {} keys derived", step3_keys.len());
 
     // Step 4: Recovery setup (may not be fully implemented)
     println!("\n--- Step 4: Recovery setup ---");
@@ -300,10 +300,10 @@ async fn test_sequential_protocol_execution() {
     match step4_result {
         Ok(shares) => {
             assert_eq!(shares.len(), 4);
-            println!("✓ Step 4 complete: recovery configured");
+            println!("[OK] Step 4 complete: recovery configured");
         }
         Err(e) => {
-            println!("⚠ Step 4 not yet implemented: {:?}", e);
+            println!("[WARNING] Step 4 not yet implemented: {:?}", e);
         }
     }
 
@@ -316,7 +316,7 @@ async fn test_sequential_protocol_execution() {
         .expect("Step 5 DKD should succeed");
 
     assert_eq!(step5_keys.len(), 4);
-    println!("✓ Step 5 complete: {} keys derived", step5_keys.len());
+    println!("[OK] Step 5 complete: {} keys derived", step5_keys.len());
 
     // Verify key diversity across steps
     println!("\n--- Verifying state consistency ---");
@@ -324,7 +324,7 @@ async fn test_sequential_protocol_execution() {
         step3_keys != step5_keys,
         "Different DKD contexts should produce different keys"
     );
-    println!("✓ State remains consistent across protocol boundaries");
+    println!("[OK] State remains consistent across protocol boundaries");
 
     println!("\n=== Sequential Execution Test Complete ===");
 }
@@ -356,10 +356,10 @@ async fn test_recovery_participant_failures() {
     match result_all {
         Ok(shares) => {
             assert_eq!(shares.len(), 5);
-            println!("✓ Recovery with all participants: success");
+            println!("[OK] Recovery with all participants: success");
         }
         Err(e) => {
-            println!("⚠ Full recovery not yet implemented: {:?}", e);
+            println!("[WARNING] Full recovery not yet implemented: {:?}", e);
         }
     }
 
@@ -373,10 +373,10 @@ async fn test_recovery_participant_failures() {
     match result_4of5 {
         Ok(shares) => {
             assert_eq!(shares.len(), 4);
-            println!("✓ Recovery with 4/5 participants: success");
+            println!("[OK] Recovery with 4/5 participants: success");
         }
         Err(e) => {
-            println!("⚠ Partial recovery handling: {:?}", e);
+            println!("[WARNING] Partial recovery handling: {:?}", e);
         }
     }
 
@@ -390,10 +390,10 @@ async fn test_recovery_participant_failures() {
     match result_3of5 {
         Ok(shares) => {
             assert_eq!(shares.len(), 3);
-            println!("✓ Recovery at threshold: success");
+            println!("[OK] Recovery at threshold: success");
         }
         Err(e) => {
-            println!("⚠ Threshold recovery handling: {:?}", e);
+            println!("[WARNING] Threshold recovery handling: {:?}", e);
         }
     }
 
@@ -407,10 +407,10 @@ async fn test_recovery_participant_failures() {
     // This should fail or produce error since we're below threshold
     match result_2of5 {
         Ok(_) => {
-            println!("⚠ Below-threshold recovery succeeded (unexpected)");
+            println!("[WARNING] Below-threshold recovery succeeded (unexpected)");
         }
         Err(e) => {
-            println!("✓ Below-threshold recovery correctly rejected: {:?}", e);
+            println!("[OK] Below-threshold recovery correctly rejected: {:?}", e);
         }
     }
 

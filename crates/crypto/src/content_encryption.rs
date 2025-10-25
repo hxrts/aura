@@ -126,9 +126,12 @@ pub fn wrap_key_for_recipients(
 ) -> Result<KeyEnvelope> {
     let wrapped_keys = match recipients {
         Recipients::Broadcast => {
-            // For broadcast, we need actual device secrets in production
-            // For now, create a placeholder - this should come from the ledger
-            vec![]
+            // For broadcast, we would need to get all active devices from the ledger
+            // This function now requires explicit device information instead of implicit broadcast
+            // Callers should use Recipients::Devices with all devices from ledger
+            return Err(CryptoError::InvalidParameter(
+                "Broadcast recipients require explicit device list from ledger".to_string()
+            ));
         }
         Recipients::Devices(devices) => devices
             .iter()
@@ -153,6 +156,42 @@ pub fn wrap_key_for_recipients(
     };
 
     Ok(KeyEnvelope { wrapped_keys })
+}
+
+/// Create recipients from device information retrieved from ledger
+///
+/// This helper function creates Recipients::Devices from device information
+/// that should be retrieved from the AccountLedger by the caller.
+pub fn create_recipients_from_devices(device_info: Vec<(crate::DeviceId, [u8; 32])>) -> Recipients {
+    let devices = device_info
+        .into_iter()
+        .map(|(device_id, device_secret)| RecipientDevice {
+            device_id,
+            device_secret,
+        })
+        .collect();
+    Recipients::Devices(devices)
+}
+
+/// Create recipients for all devices using a function to derive device secrets
+///
+/// The device_secret_fn should derive a device secret from a device ID,
+/// typically using deterministic key derivation from the device ID.
+pub fn create_recipients_for_devices(
+    device_ids: Vec<crate::DeviceId>,
+    device_secret_fn: impl Fn(&crate::DeviceId) -> [u8; 32],
+) -> Recipients {
+    let devices = device_ids
+        .into_iter()
+        .map(|device_id| {
+            let device_secret = device_secret_fn(&device_id);
+            RecipientDevice {
+                device_id,
+                device_secret,
+            }
+        })
+        .collect();
+    Recipients::Devices(devices)
 }
 
 /// Unwrap a content encryption key using device secret
@@ -180,6 +219,7 @@ pub fn unwrap_key(
 }
 
 #[cfg(test)]
+#[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
 

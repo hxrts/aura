@@ -434,6 +434,7 @@ where
 /// Operations only available in TransportConnected state
 impl ChoreographicProtocol<TransportProtocolCore, TransportConnected> {
     /// Send a message to a specific peer
+    #[allow(clippy::disallowed_methods)]
     pub async fn send_message(
         &self,
         peer_id: &str,
@@ -450,6 +451,7 @@ impl ChoreographicProtocol<TransportProtocolCore, TransportConnected> {
     }
 
     /// Initiate broadcast to multiple peers
+    #[allow(clippy::disallowed_methods)]
     pub async fn initiate_broadcast(
         &self,
         target_peers: Vec<String>,
@@ -523,7 +525,6 @@ impl ChoreographicProtocol<TransportProtocolCore, Broadcasting> {
 
 // ========== Additional Union Type Methods ==========
 
-
 // ========== Factory Functions ==========
 
 /// Create a new session-typed transport protocol in disconnected state
@@ -550,10 +551,12 @@ pub fn rehydrate_transport_session(
 
 // ========== Tests ==========
 
+#[allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_transport_session_creation() {
         let device_id = aura_journal::DeviceId::new_with_effects(&aura_crypto::Effects::for_test(
@@ -566,6 +569,7 @@ mod tests {
         assert!(!transport.is_final());
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_handshake_transitions() {
         let device_id = aura_journal::DeviceId::new_with_effects(&aura_crypto::Effects::for_test(
@@ -605,6 +609,7 @@ mod tests {
         assert_eq!(connected.state_name(), "TransportConnected");
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_message_sending() {
         let device_id = aura_journal::DeviceId::new_with_effects(&aura_crypto::Effects::for_test(
@@ -625,10 +630,15 @@ mod tests {
 
         let delivery_witness =
             MessageDelivered::verify((message.message_id, message.peer_id), 1100).unwrap();
-        let back_to_connected = <ChoreographicProtocol<TransportProtocolCore, MessageSending> as WitnessedTransition<MessageSending, TransportConnected>>::transition_with_witness(sending, delivery_witness);
+        let back_to_connected =
+            <ChoreographicProtocol<TransportProtocolCore, MessageSending> as WitnessedTransition<
+                MessageSending,
+                TransportConnected,
+            >>::transition_with_witness(sending, delivery_witness);
         assert_eq!(back_to_connected.state_name(), "TransportConnected");
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_broadcast_operation() {
         let device_id = aura_journal::DeviceId::new_with_effects(&aura_crypto::Effects::for_test(
@@ -653,10 +663,15 @@ mod tests {
         };
         let completion_witness =
             BroadcastCompleted::verify(result, (broadcast.broadcast_id, 2000)).unwrap();
-        let completed = <ChoreographicProtocol<TransportProtocolCore, Broadcasting> as WitnessedTransition<Broadcasting, TransportConnected>>::transition_with_witness(broadcasting, completion_witness);
+        let completed =
+            <ChoreographicProtocol<TransportProtocolCore, Broadcasting> as WitnessedTransition<
+                Broadcasting,
+                TransportConnected,
+            >>::transition_with_witness(broadcasting, completion_witness);
         assert_eq!(completed.state_name(), "TransportConnected");
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_session_state_union() {
         let device_id =

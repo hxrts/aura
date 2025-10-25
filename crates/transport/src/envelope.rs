@@ -1,6 +1,6 @@
 //! SSB Envelope structure with Merkle-like CID computation
 //!
-//! Implements the envelope specification from docs/051_rendezvous_ssb.md Section 5
+//! Implements the envelope specification from docs/041_rendezvous.md Section 5
 //! "Protocol & Data Formats" with fixed-size envelopes and deterministic CID computation.
 //!
 //! Key Features:

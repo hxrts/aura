@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[allow(unused_imports)] // Reserved for future recovery implementation
 use std::collections::HashSet;
+use uuid;
 
 /// Recovery request initiated by a user who lost access
 #[derive(Debug, Clone, Serialize, Deserialize)]

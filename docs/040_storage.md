@@ -1,7 +1,7 @@
 # 040 · Unified Storage Specification (Phase 1)
 
 **Status:** Updated for Keyhive, SBB Integration & Session Types
-**Version:** 3.1
+**Version:** 3.0
 **Created:** Original MVP + October 2025 Integration Update + Session Types Enhancement
 
 Goal: deliver a minimal encrypted object store that leverages Aura's Keyhive capability system for access control, device key derivation for encryption, and session types for compile-time protocol safety. The storage system focuses on the core store-and-retrieve functionality with type-safe choreographic protocols, separated authentication/authorization, capability-checked manifests, encrypted chunk upload/download, and static replica lists.
@@ -14,53 +14,55 @@ This Storage system integrates with three distinct but complementary Aura subsys
 
 ### **Journal/Ledger (`crates/journal/`)** - Account State Authority
 **Role**: Intra-account consistency and protocol coordination
-- ✅ **Already implemented** - handles account state with Automerge CRDTs
-- ✅ **Threshold signatures** for critical operations (manifest signing)
-- ✅ **Event sourcing** for account operations (device management, protocol sessions)
-- ✅ **Session coordination** for distributed protocols
-- ✅ **Capability authority graph** tracking and delegation chains
+- **IMPLEMENTED** - handles account state with Automerge CRDTs
+- **Threshold signatures** for critical operations (manifest signing)
+- **Event sourcing** for account operations (device management, protocol sessions)
+- **Session coordination** for distributed protocols
+- **Capability authority graph** tracking and delegation chains
 - **Storage MVP Integration**: Provides threshold signatures for manifests, capability verification, and protocol coordination
 
 ### **Store Crate (`crates/store/`)** - Local Storage Foundation
 **Role**: Encrypted content storage and retrieval infrastructure
-- ❌ **Currently skeleton** - target for MVP implementation
+- **SKELETON** - target for MVP implementation
 - **MVP Scope**: Chunking, content addressing, local indexing, quota management, capability-based access control
 - **Explicitly Does NOT Handle**: Distributed replication, peer discovery, transport coordination
 - **Storage Integration**: This specification extends the store crate with distributed capabilities
 
-### **SBB System (051_rendezvous_ssb.md)** - Peer Discovery & Communication
+### **SBB System (041_rendezvous.md)** - Peer Discovery & Communication
 **Role**: Inter-account rendezvous and social network coordination
 - **Separate system** from storage - handles peer discovery and envelope flooding for communication
 - **Storage Integration**: Provides peer discovery, trust bootstrapping, and relationship establishment for storage replica placement
 - **Clear Boundary**: SBB handles "finding peers", Storage handles "storing content with peers"
 
-### **Unified Architecture**
+### **Implementation Boundaries**
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        Agent Layer                          │
 │              (Unified API for applications)                 │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────────┐
-│              Unified Journal CRDT                           │
-│         (Single Source of Truth for All State)             │
-│                                                             │
-│ • Core account state (devices, guardians, capabilities)    │
-│ • Storage manifests and chunk metadata                     │
-│ • SBB envelopes and neighbor management                    │
-│ • Quota management and access control                      │
-│ • Relationship keys and communication state                │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-      ┌───────────────────┼───────────────────────────────────┐
-      │        Shared Infrastructure:                         │
-      │        • Keyhive Authority Graph (Authorization)      │
-      │        • Device Key Derivation (Encryption)           │
-      │        • Transport Layer (P2P Communication)          │
-      │        • Session Types (Protocol Safety)              │
-      └───────────────────┼───────────────────────────────────┘
-                          │
+└─────┬───────────────────────┬───────────────────────┬───────┘
+      │                       │                       │
+┌─────▼──────┐    ┌───────────▼────────┐    ┌────────▼────────┐
+│  Journal   │    │     Storage        │    │   SBB System    │
+│ (Account   │    │  (Content Store)   │    │ (Peer Discovery │
+│  State)    │    │                    │    │ & Communication)│
+│            │    │ • Manifests        │    │                 │
+│ • Threshold│    │ • Chunk storage    │    │ • Peer finding  │
+│   sigs     │    │ • Replication      │    │ • Envelope flood│
+│ • Capability     │ • Quotas           │    │ • Relationship  │
+│   authority│    │ • Access control   │    │   keys          │
+│ • Protocol │    │                    │    │                 │
+│   coord    │    │                    │    │                 │
+└─────┬──────┘    └───────────┬────────┘    └────────┬────────┘
+      │                       │                       │
+      │ ┌─────────────────────┼───────────────────────┼──────┐
+      │ │        Shared Infrastructure:                │      │
+      │ │        • Capability System (`crates/groups`) │      │
+      │ │        • Device Key Derivation (`crates/crypto`)   │
+      │ │        • Transport Layer (`crates/transport`)      │
+      │ │        • Session Types (`crates/coordination`)     │
+      └─┼────────────────────────────────────────────────────┼─┘
+        │                                                    │
    ┌────▼─────┐                                        ┌────▼─────┐
    │   Local  │                                        │ External │
    │ Storage  │                                        │ Network  │
@@ -68,7 +70,7 @@ This Storage system integrates with three distinct but complementary Aura subsys
    └──────────┘                                        └──────────┘
 ```
 
-**Key Architectural Principle**: The Storage system is **fully integrated into the unified Journal CRDT** managed by the Keyhive authority graph, sharing the same single source of truth with all other subsystems including SBB for complete state consistency.
+**Key Architectural Principle**: The Storage system builds upon the existing journal foundation and shares infrastructure with SBB, but handles fundamentally different concerns (content storage vs. peer communication).
 
 ## 1. Core Concepts
 
@@ -97,7 +99,6 @@ This Storage system integrates with three distinct but complementary Aura subsys
 - Social replica placement using SBB trust graphs
 - Trust-weighted quotas and social eviction policies
 - Dynamic peer discovery and relationship-based storage
-- Proxy re-encryption for capability delegation without key sharing
 
 ## 2. Data Structures
 
@@ -128,7 +129,6 @@ struct ObjectManifest {
     version: u64,
     prev_manifest: Option<Cid>,
     issued_at_ms: u64,
-    created_at_epoch: u64, // Hook for snapshot-based GC
     nonce: [u8; 32],
     sig: ThresholdSignature,
 }
@@ -174,9 +174,6 @@ struct KeyDerivationSpec {
     permission_context: Option<PermissionKeyContext>,  // For permission-scoped keys
     derivation_path: Vec<u8>,    // Additional context bytes
     key_version: u32,            // For independent rotation per subsystem
-    
-    // Future: Proxy re-encryption support (Phase 2+)
-    // proxy_reencryption_hint: Option<ProxyReencryptionHint>,
 }
 
 // Identity-based key derivation (authentication)
@@ -245,46 +242,35 @@ struct TrustWeightedHint {
 }
 ```
 
-### 2.2 Unified Journal State Layout
+### 2.2 Local Index Layout (MVP)
 
-All storage-related state is integrated into the main Journal CRDT managed by the Keyhive authority graph:
-
-```rust
-pub struct UnifiedAccountLedger {
-    // --- Core Identity/Journal State ---
-    pub devices: Map<DeviceId, DeviceInfo>,
-    pub guardians: Map<GuardianId, GuardianInfo>,
-    
-    // --- Keyhive Capability State ---
-    pub capabilities: Map<CapabilityId, Delegation>,
-    pub revocations: Map<CapabilityId, Revocation>,
-
-    // --- Storage State (now part of main ledger) ---
-    pub storage_manifests: Map<Cid, ObjectManifest>,
-    pub storage_quotas: Map<AccountId, Quota>,
-    pub chunk_metadata: Map<ChunkId, ChunkInfo>,
-    pub storage_refs: Map<Cid, ReferenceType>, // "pin:<device>" | "cache:<peer>"
-    
-    // Future: Proxy re-encryption state (Phase 2+)
-    // pub proxy_reencryption_keys: Map<(SourceKeyId, TargetKeyId), ProxyKey>,
-    // pub capability_transformations: Map<CapabilityId, ProxyTransformation>,
-
-    // --- SBB State (now part of main ledger) ---
-    pub sbb_envelopes: Map<Cid, SealedEnvelope>,
-    pub sbb_neighbors: Set<PeerId>,
-    pub relationship_keys: Map<RelationshipId, RelationshipKeys>,
-
-    // --- Local Cache Indexes (materialized views) ---
-    pub app_indexes: Map<AppId, Map<Hash, Set<Cid>>>, // Built from app_metadata
-    pub gc_candidates: Map<Cid, GcCandidate>, // { reason, ready_at }
-}
 ```
+// Core MVP storage with SBB integration
+/manifests/<cid>          -> Serialized ObjectManifest
+/chunks/<cid>/<chunk_id>  -> { state, size, last_access }
+/refs/<cid>               -> "pin:<device>" | "cache:<peer>"
+/space/account/<account>  -> { pinned_bytes, cached_bytes, limits }
+/space/peer/<peer>        -> { cached_bytes, last_updated }
+/index/app/<app_id>/<hash>-> Set<Cid> (built from app_metadata)
+/gc/candidates            -> { cid, reason, ready_at }
 
-**Benefits of Unified State:**
-- Single source of truth eliminates synchronization complexity
-- Capability revocation immediately affects both storage access and SBB permissions
-- Keyhive visibility index provides atomic access control across all subsystems
-- No cross-CRDT consistency issues or race conditions
+// Separated authentication and authorization state
+/device_authentication/<device_id> -> { device_cert, account_id, last_auth_time }
+/capability_tokens/<token_id>      -> { device_id, permissions, delegation_chain, signature }
+/identity_keys/<identity_context>  -> { derivation_spec, derived_keys, key_versions }
+/permission_keys/<permission_context> -> { derivation_spec, derived_keys, key_versions }
+/peer_trust/<peer_id>              -> { authentication_history, permission_grants, last_updated }
+
+// SBB integration state
+/sbb_relationships/<account_id>  -> { relationship_keys, last_communication }
+/sbb_neighbor_cache/<peer_id>    -> { capabilities, storage_capacity, relay_reliability }
+
+// Future: Advanced indexing (Phase 2+)
+// /replica_proofs/<cid>    -> { proof_challenges, verification_status }
+// /sbb_neighbors/<peer_id> -> { trust_level, storage_quota, reliability }
+// /social_storage/<peer>   -> { provided_quota, consumed_quota, trust_metrics }
+// /erasure/<cid>          -> { k, n, share_locations } (Tahoe-LAFS style)
+```
 
 ## 3. API Surface
 
@@ -337,27 +323,27 @@ Storage operations leverage session types for compile-time protocol safety with 
 
 ```rust
 // Session-typed storage protocol states
-StorageProtocol<Initializing> → StorageProtocol<ManifestSigning> → 
-StorageProtocol<ChunkEncryption> → StorageProtocol<ReplicaCoordination> → 
+StorageProtocol<Initializing> → StorageProtocol<ManifestSigning> →
+StorageProtocol<ChunkEncryption> → StorageProtocol<ReplicaCoordination> →
 StorageProtocol<PermissionVerification> → StorageProtocol<Completed>
 
 // Integration: crates/coordination/src/storage_choreography.rs
 impl StorageProtocol<ManifestSigning> {
     pub fn sign_with_threshold(
-        self, 
+        self,
         witness: ThresholdSignaturesMet  // Runtime witness
     ) -> StorageProtocol<ChunkEncryption>
 }
 
 // Replica coordination protocol
-ReplicaProtocol<PeerSelection> → ReplicaProtocol<CapabilityVerification> → 
-ReplicaProtocol<ChunkDistribution> → ReplicaProtocol<ConfirmationCollection> → 
+ReplicaProtocol<PeerSelection> → ReplicaProtocol<CapabilityVerification> →
+ReplicaProtocol<ChunkDistribution> → ReplicaProtocol<ConfirmationCollection> →
 ReplicaProtocol<Completed>
 
 // Integration: crates/coordination/src/replica_choreography.rs
 impl ReplicaProtocol<CapabilityVerification> {
     pub fn verify_storage_permissions(
-        self, 
+        self,
         witness: StoragePermissionsVerified  // Runtime witness
     ) -> ReplicaProtocol<ChunkDistribution>
 }
@@ -450,7 +436,7 @@ impl SessionTypedPermissionEnforcement {
         required_permissions: Vec<Permission>,
         capability_protocol: CapabilityProtocol<S>,
     ) -> Result<(bool, CapabilityProtocol<S::NextState>)>;
-    
+
     // Grant permissions to authenticated device with session type safety
     pub async fn grant_permissions<S: CapabilityGrantState>(
         &self,
@@ -511,7 +497,6 @@ pub struct BasicQuotaManager {
 - Coordinated deletion across social network
 - Proof-of-storage with manifest-stored digests (see corrected design below)
 - Automatic replica cleanup choreography
-- Proxy re-encryption for efficient key rotation without full re-encryption using [rust-umbral](https://github.com/nucypher/rust-umbral)
 
 ## 6.1. Corrected Proof-of-Storage Design (Future)
 
@@ -576,10 +561,10 @@ struct ProofOfStorageResponse {
 **Implementation Strategy: Extend Existing Store Crate**
 
 This specification should be implemented as an **extension of the existing `crates/store/` crate**, not as a replacement. The current store crate provides a solid foundation with:
-- ✅ **CapabilityStorage** with authority graph integration
-- ✅ **Proof-of-storage challenge system** (ready for future use)
-- ✅ **Basic quota tracking** and LRU eviction
-- ✅ **BLAKE3 content integrity** verification
+- **CapabilityStorage** with authority graph integration
+- **Proof-of-storage challenge system** (ready for future use)
+- **Basic quota tracking** and LRU eviction
+- **BLAKE3 content integrity** verification
 
 **Implementation Plan (Revised: 5 weeks total)**:
 
@@ -651,70 +636,7 @@ This specification should be implemented as an **extension of the existing `crat
 - Social accountability across both storage and communication
 - Unified audit trail for all peer interactions
 
-## 9. Architectural Decision: Unified State Model
-
-### 9.1 Planning for Garbage Collection
-
-To ensure that the storage system can be efficiently garbage collected in the future, even without a full GC system in Phase 1, the following design principles are included:
-
-1.  **Epoch-Tagged Manifests**: Every `ObjectManifest` includes a `created_at_epoch` field. This ties the manifest to the logical clock of the unified `Journal` CRDT. A future snapshot-based GC system can use this epoch to definitively prove that a manifest (and its associated data) existed before a snapshot, making it a candidate for pruning if it has been logically deleted.
-
-2.  **Centralized Reference Tracking**: The `UnifiedAccountLedger` is the single source of truth for which data is active. The `storage_manifests` map contains all active manifests. A future "mark and sweep" GC process can traverse this map to determine the complete set of referenced chunks. Any chunk not in this set is an orphan and can be collected.
-
-By embedding the epoch and relying on the centralized journal for reference tracking from the start, we provide the necessary hooks to build a safe and efficient garbage collector later without requiring significant architectural changes.
-
-### **Response to Feedback: True State Unification**
-
-The original design shared infrastructure (capabilities, transport, session types) but maintained separate CRDT documents:
-- Journal CRDT for account state
-- Storage indexes for content metadata  
-- SBB Document for communication state
-
-**Identified Problem**: This separation created synchronization complexity, potential inconsistencies during partitions, and cognitive overhead from reasoning about multiple interacting state machines.
-
-### **Unified Solution**
-
-All storage state is now integrated into the **main Journal CRDT** managed by the Keyhive authority graph:
-
-```rust
-pub struct UnifiedAccountLedger {
-    // --- Core Identity/Journal State ---
-    pub devices: Map<DeviceId, DeviceInfo>,
-    pub guardians: Map<GuardianId, GuardianInfo>,
-    
-    // --- Keyhive Capability State ---
-    pub capabilities: Map<CapabilityId, Delegation>,
-    pub revocations: Map<CapabilityId, Revocation>,
-
-    // --- Storage State (now part of main ledger) ---
-    pub storage_manifests: Map<Cid, ObjectManifest>,
-    pub storage_quotas: Map<AccountId, Quota>,
-    pub chunk_metadata: Map<ChunkId, ChunkInfo>,
-
-    // --- SBB State (also unified) ---
-    pub sbb_envelopes: Map<Cid, SealedEnvelope>,
-    pub sbb_neighbors: Set<PeerId>,
-    pub relationship_keys: Map<RelationshipId, RelationshipKeys>,
-}
-```
-
-### **Atomic Consistency Benefits**
-
-1. **Single Source of Truth**: Storage capability grants and SBB relay permissions live in the same authority graph
-2. **Immediate Revocation**: When capabilities are revoked, storage access and relay permissions are atomically consistent  
-3. **Unified Access Control**: Keyhive visibility index controls materialization across all subsystems
-4. **Simplified Implementation**: One state model instead of complex cross-CRDT synchronization
-
-### **Preserved Design Benefits**
-
-- Clean separation of concerns at the API level
-- Independent key rotation with coordinated capability management
-- Session-typed protocol safety across all operations
-- Choreographic programming model for distributed coordination
-
-This architectural change moves beyond infrastructure sharing to true state unification as recommended in the feedback.
-
-## 10. Future Enhancement Roadmap
+## 9. Future Enhancement Roadmap
 
 The unified architecture naturally evolves toward sophisticated distributed storage capabilities:
 
@@ -723,7 +645,6 @@ The unified architecture naturally evolves toward sophisticated distributed stor
 - **Trust-Based Replication**: Use social graph for intelligent replica placement across relationship boundaries
 - **Capability-Driven Social Quotas**: Manage storage permissions through convergent capabilities with social backing
 - **Relationship-Aware Caching**: Optimize cache placement using SBB relationship strength and interaction patterns
-- **Proxy Re-encryption Integration**: Enable capability delegation and key rotation without exposing plaintext to storage providers using [rust-umbral](https://github.com/nucypher/rust-umbral) threshold proxy re-encryption
 
 ### Phase 3: Encrypt-then-Erasure-Code (6 weeks)
 - **Privacy-First Erasure Coding**: Implement Tahoe's encrypt-before-encode pattern with capability-derived keys

@@ -1,7 +1,7 @@
 //! Multi-device relationship key management
 //!
 //! Implements pairwise relationship key establishment and distribution as specified in
-//! docs/051_rendezvous_ssb.md Section 3B "Pairwise Relationship".
+//! docs/051_rendezvous.md Section 3B "Pairwise Relationship".
 //!
 //! Key Concepts:
 //! - Link device selection via ledger consensus (lexicographically smallest)
@@ -13,8 +13,11 @@ use crate::error::AgentError;
 use aura_crypto::key_derivation::derive_relationship_keys;
 use aura_crypto::{CryptoError, Effects};
 use aura_journal::{AccountId, DeviceId};
+use bincode;
+use rand;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use hpke::{Deserializable, Serializable};
 
 /// Unique identifier for a pairwise relationship between two accounts
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -259,32 +262,105 @@ impl RelationshipKeyManager {
     fn encrypt_keys_for_device(
         &self,
         keys: &RelationshipKeys,
-        _device_public_key: &[u8],
+        device_public_key: &[u8],
     ) -> Result<Vec<u8>, AgentError> {
+        use hpke::{aead::AesGcm128, kdf::HkdfSha256, kem::X25519HkdfSha256, single_shot_seal, Kem, OpModeS};
+
         // Serialize keys
         let serialized = bincode::serialize(keys)
             .map_err(|e| AgentError::serialization(format!("key serialization failed: {}", e)))?;
 
-        // For now, use a simple encryption scheme
-        // In production, this would use proper HPKE
-        // TODO: Replace with actual HPKE encryption once available
+        // Use HPKE for proper encryption
+        // HPKE configuration: X25519 + HKDF-SHA256 + AES-128-GCM
+        type HpkeKem = X25519HkdfSha256;
+        type HpkeKdf = HkdfSha256;
+        type HpkeAead = AesGcm128;
 
-        // Placeholder: Just return the serialized data
-        // Real implementation will use aura_crypto HPKE when available
-        Ok(serialized)
+        // Convert public key to HPKE format
+        let recipient_pubkey = <HpkeKem as Kem>::PublicKey::from_bytes(device_public_key)
+            .map_err(|e| AgentError::crypto_operation(format!("Invalid HPKE public key: {:?}", e)))?;
+
+        // Generate ephemeral keypair and encrypt
+        let mut rng = rand::thread_rng();
+        let info = b"aura-relationship-key-encryption";
+        let aad = b""; // No additional authenticated data
+
+        match single_shot_seal::<HpkeAead, HpkeKdf, HpkeKem, _>(
+            &OpModeS::Base,
+            &recipient_pubkey,
+            info,
+            &serialized,
+            aad,
+            &mut rng,
+        ) {
+            Ok((encapped_key, ciphertext)) => {
+                // Combine encapsulated key and ciphertext for storage
+                let mut encrypted = Vec::new();
+                encrypted.extend_from_slice(&encapped_key.to_bytes());
+                encrypted.extend_from_slice(&ciphertext);
+                Ok(encrypted)
+            }
+            Err(e) => Err(AgentError::crypto_operation(format!(
+                "HPKE encryption failed: {:?}",
+                e
+            ))),
+        }
     }
 
     /// Decrypt relationship keys encrypted for this device
     pub fn decrypt_keys_for_device(
         &self,
         encrypted_keys: &[u8],
-        _device_secret_key: &[u8],
+        device_secret_key: &[u8],
     ) -> Result<RelationshipKeys, AgentError> {
-        // Placeholder decryption - would use HPKE in production
-        let keys: RelationshipKeys = bincode::deserialize(encrypted_keys)
-            .map_err(|e| AgentError::serialization(format!("key deserialization failed: {}", e)))?;
+        use hpke::{aead::AesGcm128, kdf::HkdfSha256, kem::X25519HkdfSha256, single_shot_open, Kem, OpModeR};
 
-        Ok(keys)
+        // Use HPKE for proper decryption
+        // HPKE configuration: X25519 + HKDF-SHA256 + AES-128-GCM
+        type HpkeKem = X25519HkdfSha256;
+        type HpkeKdf = HkdfSha256;
+        type HpkeAead = AesGcm128;
+
+        // Convert secret key to HPKE format
+        let recipient_privkey = <HpkeKem as Kem>::PrivateKey::from_bytes(device_secret_key)
+            .map_err(|e| AgentError::crypto_operation(format!("Invalid HPKE private key: {:?}", e)))?;
+
+        // Extract encapsulated key and ciphertext
+        // The encapsulated key is 32 bytes for X25519
+        if encrypted_keys.len() < 32 {
+            return Err(AgentError::crypto_operation(
+                "Encrypted data too short to contain HPKE encapsulated key".to_string(),
+            ));
+        }
+
+        let (encapped_key_bytes, ciphertext) = encrypted_keys.split_at(32);
+        let encapped_key = <HpkeKem as Kem>::EncappedKey::from_bytes(encapped_key_bytes)
+            .map_err(|e| AgentError::crypto_operation(format!("Invalid HPKE encapsulated key: {:?}", e)))?;
+
+        // Decrypt using HPKE
+        let info = b"aura-relationship-key-encryption";
+        let aad = b""; // No additional authenticated data
+
+        match single_shot_open::<HpkeAead, HpkeKdf, HpkeKem>(
+            &OpModeR::Base,
+            &recipient_privkey,
+            &encapped_key,
+            info,
+            ciphertext,
+            aad,
+        ) {
+            Ok(plaintext) => {
+                // Deserialize the decrypted keys
+                let keys: RelationshipKeys = bincode::deserialize(&plaintext).map_err(|e| {
+                    AgentError::serialization(format!("key deserialization failed: {}", e))
+                })?;
+                Ok(keys)
+            }
+            Err(e) => Err(AgentError::crypto_operation(format!(
+                "HPKE decryption failed: {:?}",
+                e
+            ))),
+        }
     }
 }
 

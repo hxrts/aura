@@ -1,7 +1,7 @@
 //! Unified capability system for Storage, Communication, and Relay permissions
 //!
 //! This module implements the clean capability model from docs/040_storage.md and
-//! docs/051_rendezvous_ssb.md with clear separation between authentication (who you are)
+//! docs/041_rendezvous.md with clear separation between authentication (who you are)
 //! and authorization (what you can do).
 
 use super::CapabilityId;
@@ -169,6 +169,16 @@ impl CapabilityToken {
         self
     }
 
+    /// Get capability ID (hash of token)
+    pub fn capability_id(&self) -> CapabilityId {
+        use blake3::Hasher;
+        let mut hasher = Hasher::new();
+        hasher.update(self.authenticated_device.0.as_bytes());
+        hasher.update(&self.issued_at.to_le_bytes());
+        hasher.update(&self.signature);
+        CapabilityId(hasher.finalize().into())
+    }
+
     /// Verify capability token signature
     pub fn verify(&self, verifying_key: &VerifyingKey) -> Result<(), String> {
         // Serialize permissions
@@ -267,6 +277,7 @@ pub mod verification {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods, clippy::clone_on_copy, clippy::len_zero)]
 mod tests {
     use super::*;
     use uuid::Uuid;

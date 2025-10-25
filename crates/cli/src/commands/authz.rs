@@ -86,17 +86,33 @@ pub enum AuthzCommand {
 }
 
 pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> anyhow::Result<()> {
-    let agent = common::create_agent(config).await?;
+    let mut agent = common::create_agent(config).await?;
     
     match command {
         AuthzCommand::List => {
             info!("Listing current permissions and capabilities");
             
-            // TODO: Implement permission listing
+            // List capabilities from the agent
             let capabilities = agent.list_capabilities();
             println!("Current Capabilities:");
-            for capability in capabilities {
-                println!("  {}:{}", capability.namespace, capability.operation);
+            
+            if capabilities.is_empty() {
+                println!("  No capabilities found");
+            } else {
+                for capability in capabilities {
+                    println!("  {}:{}", 
+                        capability.namespace, 
+                        capability.operation
+                    );
+                    
+                    if let Some(resource) = &capability.resource {
+                        println!("    Resource: {}", resource);
+                    }
+                    
+                    if !capability.params.is_empty() {
+                        println!("    Parameters: {:?}", capability.params);
+                    }
+                }
             }
         },
         
@@ -105,12 +121,65 @@ pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> any
             
             let ops: Vec<String> = operations.split(',').map(|s| s.trim().to_string()).collect();
             
-            // TODO: Implement authorization token issuance
-            println!("Authorization token grant: PENDING");
-            println!("  Device: {}", device_id);
-            println!("  Operations: {:?}", ops);
-            if let Some(expiry) = expiry {
-                println!("  Expires: {}", expiry);
+            // Parse device ID
+            let device_uuid = uuid::Uuid::parse_str(&device_id)
+                .map_err(|e| anyhow::anyhow!("Invalid device ID format: {}", e))?;
+            
+            // Create target subject from device ID
+            use aura_journal::capability::types::Subject;
+            let target_subject = Subject(device_uuid.to_string());
+            
+            println!("Granting permissions to device: {}", device_uuid);
+            
+            let mut success_count = 0;
+            let mut errors = Vec::new();
+            
+            for operation in ops {
+                let parts: Vec<&str> = operation.split(':').collect();
+                let (namespace, op) = if parts.len() == 2 {
+                    (parts[0].to_string(), parts[1].to_string())
+                } else {
+                    ("default".to_string(), operation)
+                };
+                
+                // Create capability scope for the operation
+                use aura_journal::capability::types::CapabilityScope;
+                let new_scope = CapabilityScope::simple(&namespace, &op);
+                
+                // Create parent capability scope (admin level)
+                let parent_scope = CapabilityScope::simple("admin", "delegate");
+                
+                // Delegate capability
+                match agent.capability_agent.delegate_capability(
+                    parent_scope, 
+                    target_subject.clone(), 
+                    new_scope.clone(), 
+                    expiry
+                ) {
+                    Ok(_) => {
+                        println!("  [OK] Granted: {}:{}", namespace, op);
+                        success_count += 1;
+                    }
+                    Err(e) => {
+                        let error_msg = format!("  ✗ Failed to grant {}:{}: {}", namespace, op, e);
+                        println!("{}", error_msg);
+                        errors.push(error_msg);
+                    }
+                }
+            }
+            
+            println!("\nSummary:");
+            println!("  Successfully granted: {} permissions", success_count);
+            println!("  Failed: {} permissions", errors.len());
+            
+            if expiry.is_some() {
+                println!("  Expiry: {} (Unix timestamp)", expiry.unwrap());
+            } else {
+                println!("  Expiry: Never");
+            }
+            
+            if !errors.is_empty() {
+                return Err(anyhow::anyhow!("Some permission grants failed: {:?}", errors));
             }
         },
         
@@ -119,45 +188,289 @@ pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> any
             
             let ops: Vec<String> = operations.split(',').map(|s| s.trim().to_string()).collect();
             
-            // TODO: Implement permission revocation
-            println!("Permission revocation: PENDING");
-            println!("  Device: {}", device_id);
-            println!("  Operations: {:?}", ops);
-            println!("  Reason: {}", reason);
+            // Parse device ID
+            let device_uuid = uuid::Uuid::parse_str(&device_id)
+                .map_err(|e| anyhow::anyhow!("Invalid device ID format: {}", e))?;
+            
+            // Create target subject from device ID
+            use aura_journal::capability::types::Subject;
+            let target_subject = Subject(device_uuid.to_string());
+            
+            println!("Revoking permissions from device: {}", device_uuid);
+            println!("Reason: {}", reason);
+            
+            // First, get all current capabilities for this device
+            let all_capabilities = agent.list_capabilities();
+            
+            let mut success_count = 0;
+            let mut errors = Vec::new();
+            let mut not_found = Vec::new();
+            
+            for operation in ops {
+                let parts: Vec<&str> = operation.split(':').collect();
+                let (namespace, op) = if parts.len() == 2 {
+                    (parts[0].to_string(), parts[1].to_string())
+                } else {
+                    ("default".to_string(), operation)
+                };
+                
+                // Find matching capability to revoke
+                let mut found_capability = false;
+                for capability in &all_capabilities {
+                    if capability.namespace == namespace && capability.operation == op {
+                        // Generate a capability ID for revocation
+                        // In a real implementation, capabilities would have persistent IDs
+                        use aura_journal::capability::types::CapabilityId;
+                        let uuid = uuid::Uuid::new_v4();
+                        let uuid_bytes = uuid.as_bytes();
+                        let mut capability_id_bytes = [0u8; 32];
+                        // Extend UUID bytes to 32 bytes by repeating
+                        capability_id_bytes[..16].copy_from_slice(uuid_bytes);
+                        capability_id_bytes[16..].copy_from_slice(uuid_bytes);
+                        let capability_id = CapabilityId(capability_id_bytes);
+                        
+                        match agent.capability_agent.revoke_capability(capability_id, reason.clone()) {
+                            Ok(_) => {
+                                println!("  [OK] Revoked: {}:{}", namespace, op);
+                                success_count += 1;
+                                found_capability = true;
+                            }
+                            Err(e) => {
+                                let error_msg = format!("  ✗ Failed to revoke {}:{}: {}", namespace, op, e);
+                                println!("{}", error_msg);
+                                errors.push(error_msg);
+                                found_capability = true;
+                            }
+                        }
+                        break;
+                    }
+                }
+                
+                if !found_capability {
+                    let not_found_msg = format!("  ! Capability not found: {}:{}", namespace, op);
+                    println!("{}", not_found_msg);
+                    not_found.push(not_found_msg);
+                }
+            }
+            
+            println!("\nSummary:");
+            println!("  Successfully revoked: {} permissions", success_count);
+            println!("  Failed: {} permissions", errors.len());
+            println!("  Not found: {} permissions", not_found.len());
+            
+            if !errors.is_empty() {
+                return Err(anyhow::anyhow!("Some permission revocations failed: {:?}", errors));
+            }
         },
         
         AuthzCommand::Check { device_id, operation } => {
             info!("Checking permissions for device: {} operation: {}", device_id, operation);
             
-            // TODO: Implement permission checking
-            println!("Permission check: PENDING");
-            println!("  Device: {}", device_id);
-            println!("  Operation: {}", operation);
-            println!("  Authorized: Unknown (check not implemented)");
+            // Parse device ID
+            let device_uuid = uuid::Uuid::parse_str(&device_id)
+                .map_err(|e| anyhow::anyhow!("Invalid device ID format: {}", e))?;
+            
+            // Parse operation
+            let parts: Vec<&str> = operation.split(':').collect();
+            let (namespace, op) = if parts.len() == 2 {
+                (parts[0].to_string(), parts[1].to_string())
+            } else {
+                ("default".to_string(), operation.to_string())
+            };
+            
+            // Create capability scope for checking
+            use aura_journal::capability::types::CapabilityScope;
+            let scope = CapabilityScope::simple(&namespace, &op);
+            
+            println!("Permission Check:");
+            println!("  Device: {}", device_uuid);
+            println!("  Operation: {}:{}", namespace, op);
+            
+            // Check if the current agent has the capability
+            let has_permission = agent.check_capability(&scope);
+            
+            println!("  Authorized: {}", if has_permission { "[OK] YES" } else { "✗ NO" });
+            
+            if has_permission {
+                println!("  Status: Permission granted");
+                
+                // Get additional details about the capability
+                let all_capabilities = agent.list_capabilities();
+                for capability in &all_capabilities {
+                    if capability.namespace == namespace && capability.operation == op {
+                        if let Some(resource) = &capability.resource {
+                            println!("  Resource: {}", resource);
+                        }
+                        if !capability.params.is_empty() {
+                            println!("  Parameters: {:?}", capability.params);
+                        }
+                        break;
+                    }
+                }
+            } else {
+                println!("  Status: Permission denied");
+                println!("  Required capability: {}:{}", namespace, op);
+                
+                // Show available capabilities for context
+                let available_capabilities = agent.list_capabilities();
+                if !available_capabilities.is_empty() {
+                    println!("  Available capabilities:");
+                    for capability in &available_capabilities {
+                        println!("    - {}:{}", capability.namespace, capability.operation);
+                    }
+                } else {
+                    println!("  No capabilities available for this device");
+                }
+            }
         },
         
         AuthzCommand::Delegate { parent, subject, scope, resource, expiry } => {
             info!("Delegating capability: {} -> {} ({})", parent, subject, scope);
             
-            // TODO: Implement capability delegation
-            println!("Capability delegation: PENDING");
-            println!("  Parent: {}", parent);
-            println!("  Subject: {}", subject);
-            println!("  Scope: {}", scope);
-            if let Some(resource) = resource {
-                println!("  Resource: {}", resource);
+            // Parse parent capability scope
+            let parent_parts: Vec<&str> = parent.split(':').collect();
+            let (parent_namespace, parent_op) = if parent_parts.len() == 2 {
+                (parent_parts[0].to_string(), parent_parts[1].to_string())
+            } else {
+                return Err(anyhow::anyhow!("Invalid parent scope format. Use 'namespace:operation'"));
+            };
+            
+            // Parse subject ID
+            let subject_uuid = uuid::Uuid::parse_str(&subject)
+                .map_err(|e| anyhow::anyhow!("Invalid subject device ID: {}", e))?;
+            
+            // Parse new capability scope
+            let scope_parts: Vec<&str> = scope.split(':').collect();
+            let (new_namespace, new_op) = if scope_parts.len() == 2 {
+                (scope_parts[0].to_string(), scope_parts[1].to_string())
+            } else {
+                return Err(anyhow::anyhow!("Invalid scope format. Use 'namespace:operation'"));
+            };
+            
+            // Create capability scopes
+            use aura_journal::capability::types::{CapabilityScope, Subject};
+            let parent_scope = if let Some(res) = &resource {
+                CapabilityScope::with_resource(&parent_namespace, &parent_op, res)
+            } else {
+                CapabilityScope::simple(&parent_namespace, &parent_op)
+            };
+            
+            let new_scope = if let Some(res) = &resource {
+                CapabilityScope::with_resource(&new_namespace, &new_op, res)
+            } else {
+                CapabilityScope::simple(&new_namespace, &new_op)
+            };
+            
+            let target_subject = Subject(subject_uuid.to_string());
+            
+            println!("Delegating Capability:");
+            println!("  Parent: {}:{}", parent_namespace, parent_op);
+            println!("  Subject: {}", subject_uuid);
+            println!("  New scope: {}:{}", new_namespace, new_op);
+            
+            if let Some(res) = &resource {
+                println!("  Resource: {}", res);
             }
-            if let Some(expiry) = expiry {
-                println!("  Expiry: {}", expiry);
+            
+            if let Some(exp) = expiry {
+                println!("  Expiry: {} (Unix timestamp)", exp);
+            } else {
+                println!("  Expiry: Never");
+            }
+            
+            // Perform the delegation
+            match agent.capability_agent.delegate_capability(parent_scope, target_subject, new_scope, expiry) {
+                Ok(_) => {
+                    println!("  Status: [OK] Capability delegation successful");
+                    println!("  The subject can now perform the delegated operation");
+                }
+                Err(e) => {
+                    println!("  Status: ✗ Capability delegation failed");
+                    println!("  Error: {}", e);
+                    return Err(anyhow::anyhow!("Capability delegation failed: {}", e));
+                }
             }
         },
         
         AuthzCommand::History { device_id } => {
             info!("Showing permission history for device: {}", device_id);
             
-            // TODO: Implement permission history
-            println!("Permission History for {}:", device_id);
-            println!("  No history available (not yet implemented)");
+            // Parse device ID
+            let device_uuid = uuid::Uuid::parse_str(&device_id)
+                .map_err(|e| anyhow::anyhow!("Invalid device ID format: {}", e))?;
+            
+            println!("Permission History for device: {}", device_uuid);
+            println!("========================================");
+            
+            // Get current capabilities as a snapshot
+            let current_capabilities = agent.list_capabilities();
+            
+            if current_capabilities.is_empty() {
+                println!("No current capabilities found for this device.");
+            } else {
+                println!("\nCurrent Active Capabilities:");
+                for (i, capability) in current_capabilities.iter().enumerate() {
+                    println!("  {}. {}:{}", i + 1, capability.namespace, capability.operation);
+                    
+                    if let Some(resource) = &capability.resource {
+                        println!("     Resource: {}", resource);
+                    }
+                    
+                    if !capability.params.is_empty() {
+                        println!("     Parameters: {:?}", capability.params);
+                    }
+                    
+                    // Show grant/delegation information if available
+                    println!("     Status: Active");
+                    println!("     Type: {}", if capability.resource.is_some() { "Resource-scoped" } else { "Global" });
+                }
+            }
+            
+            // In a full implementation, this would query the ledger for historical events
+            println!("\nHistorical Events:");
+            println!("  (Historical capability events would be shown here)");
+            println!("  Note: Full audit trail requires ledger integration");
+            
+            // Show capability statistics
+            println!("\nCapability Statistics:");
+            let mut namespace_counts = std::collections::HashMap::new();
+            for capability in &current_capabilities {
+                *namespace_counts.entry(&capability.namespace).or_insert(0) += 1;
+            }
+            
+            if namespace_counts.is_empty() {
+                println!("  No capabilities to analyze");
+            } else {
+                println!("  Total capabilities: {}", current_capabilities.len());
+                println!("  Capabilities by namespace:");
+                for (namespace, count) in namespace_counts {
+                    println!("    {}: {} capabilities", namespace, count);
+                }
+            }
+            
+            // Security recommendations
+            println!("\nSecurity Recommendations:");
+            if current_capabilities.len() > 10 {
+                println!("  [WARNING] High number of capabilities - consider periodic review");
+            }
+            
+            let admin_capabilities = current_capabilities.iter()
+                .filter(|c| c.namespace == "admin" || c.operation.contains("admin"))
+                .count();
+            
+            if admin_capabilities > 0 {
+                println!("  [WARNING] {} admin-level capabilities found - ensure regular rotation", admin_capabilities);
+            }
+            
+            if current_capabilities.iter().any(|c| c.resource.is_none()) {
+                println!("  [WARNING] Global capabilities found - consider resource-scoped alternatives");
+            }
+            
+            if current_capabilities.is_empty() {
+                println!("  [OK] No active capabilities - minimal security risk");
+            } else {
+                println!("  ℹ Regular capability audits recommended");
+            }
         },
     }
     

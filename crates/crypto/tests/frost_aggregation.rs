@@ -1,3 +1,4 @@
+#![allow(warnings, clippy::all)]
 //! Unit Tests: FROST Signature Aggregation
 //!
 //! Tests FROST threshold signatures for multi-device coordination.
@@ -78,7 +79,7 @@ mod tests {
             "2-of-3 threshold signature should verify"
         );
 
-        println!("✓ test_frost_signature_aggregation_2of3 PASSED");
+        println!("[OK] test_frost_signature_aggregation_2of3 PASSED");
     }
 
     #[test]
@@ -137,7 +138,7 @@ mod tests {
             error_msg
         );
 
-        println!("✓ test_frost_signature_fails_with_insufficient_shares PASSED");
+        println!("[OK] test_frost_signature_fails_with_insufficient_shares PASSED");
     }
 
     #[test]
@@ -213,7 +214,7 @@ mod tests {
             );
         }
 
-        println!("✓ test_frost_signature_deterministic PASSED");
+        println!("[OK] test_frost_signature_deterministic PASSED");
     }
 
     #[test]
@@ -277,7 +278,7 @@ mod tests {
             );
         }
 
-        println!("✓ test_frost_threshold_variations PASSED");
+        println!("[OK] test_frost_threshold_variations PASSED");
     }
 
     #[test]
@@ -338,6 +339,6 @@ mod tests {
             "Signature should NOT verify with wrong message"
         );
 
-        println!("✓ test_frost_wrong_message_fails_verification PASSED");
+        println!("[OK] test_frost_wrong_message_fails_verification PASSED");
     }
 }

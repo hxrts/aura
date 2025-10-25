@@ -1,3 +1,4 @@
+#![allow(warnings, clippy::all)]
 //! Property Tests: Capability Token Invariants
 //!
 //! Tests fundamental properties that must hold for ALL capability tokens.
@@ -380,6 +381,6 @@ mod manual_tests {
     fn test_property_tests_compile_and_run() {
         // This test ensures the proptest macros compile correctly
         // The actual property tests run via the proptest! macro above
-        println!("✓ Property tests compile successfully");
+        println!("[OK] Property tests compile successfully");
     }
 }

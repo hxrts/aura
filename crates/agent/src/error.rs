@@ -240,12 +240,31 @@ impl AgentError {
     pub fn not_implemented(msg: impl Into<String>) -> Self {
         AgentError::System(SystemError::NotImplemented(msg.into()))
     }
+    
+    /// Create a coordination error
+    pub fn coordination(msg: impl Into<String>) -> Self {
+        AgentError::Protocol(ProtocolError::Orchestrator(msg.into()))
+    }
 }
 
 // Compatibility conversions from existing crypto errors
 impl From<aura_crypto::CryptoError> for AgentError {
     fn from(error: aura_crypto::CryptoError) -> Self {
         AgentError::Crypto(CryptoError::OperationFailed(format!("Crypto error: {:?}", error)))
+    }
+}
+
+// Compatibility conversion from ledger errors
+impl From<aura_journal::LedgerError> for AgentError {
+    fn from(error: aura_journal::LedgerError) -> Self {
+        AgentError::Data(DataError::Ledger(format!("Ledger error: {:?}", error)))
+    }
+}
+
+// Compatibility conversion from String errors
+impl From<String> for AgentError {
+    fn from(error: String) -> Self {
+        AgentError::Data(DataError::Ledger(error))
     }
 }
 

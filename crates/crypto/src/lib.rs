@@ -18,10 +18,9 @@
 //!
 //! Key shares MUST be stored in platform-specific secure storage:
 //! - iOS: Secure Enclave / Keychain
-//! - Android: AndroidKeyStore with StrongBox
 //! - macOS: Keychain
-//! - Windows: DPAPI or Windows Hello
 //! - Linux: Secret Service API
+//! - Android: AndroidKeyStore with StrongBox (TODO)
 
 /// AES-GCM encryption for content and chunk encryption
 pub mod content_encryption;
@@ -37,12 +36,18 @@ pub mod frost;
 pub mod hpke_encryption;
 /// Separated key derivation for identity and permission keys
 pub mod key_derivation;
+/// Coordinated key rotation for independent subsystems
+pub mod key_rotation;
 /// Merkle tree implementation for commitment verification
 pub mod merkle;
 /// Key resharing and threshold share management
 pub mod resharing;
 /// Sealing and encryption of sensitive data
 pub mod sealing;
+/// Test helper utilities (test-only)
+#[cfg(test)]
+#[allow(warnings, clippy::all)]
+pub mod test_helpers;
 /// Time utilities with proper error handling
 pub mod time;
 /// Shared types (DeviceId, AccountId, etc.)
@@ -55,6 +60,7 @@ pub use effects::*; // Export Effects, TimeSource, RandomSource, etc.
 pub use frost::*;
 pub use hpke_encryption::*;
 pub use key_derivation::*;
+pub use key_rotation::*;
 pub use merkle::*;
 pub use resharing::*;
 pub use sealing::*;

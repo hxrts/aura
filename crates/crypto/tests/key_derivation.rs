@@ -1,3 +1,4 @@
+#![allow(warnings, clippy::all)]
 //! Unit Tests: Separated Key Derivation
 //!
 //! Tests key derivation with separated identity and permission contexts.
@@ -6,7 +7,7 @@
 //!
 //! Reference: work/pre_ssb_storage_tests.md - Category 4.1
 //! Reference: docs/040_storage_mvp.md - Separated Key Derivation
-//! Reference: docs/051_rendezvous_ssb.md - Relationship Keys
+//! Reference: docs/051_rendezvous.md - Relationship Keys
 
 use aura_crypto::dkd::{derive_keys, hash_to_scalar, participant_dkd_phase, point_to_seed};
 use blake3;
@@ -182,7 +183,7 @@ mod tests {
         assert_ne!(key_1a, psk_key, "BoxKey and PskKey should be different");
         assert_ne!(tag_key, psk_key, "TagKey and PskKey should be different");
 
-        println!("✓ test_identity_context_key_derivation PASSED");
+        println!("[OK] test_identity_context_key_derivation PASSED");
     }
 
     #[test]
@@ -232,7 +233,7 @@ mod tests {
             "Different resources should produce different keys"
         );
 
-        println!("✓ test_permission_context_key_derivation PASSED");
+        println!("[OK] test_permission_context_key_derivation PASSED");
     }
 
     #[test]
@@ -307,7 +308,7 @@ mod tests {
             "Identity key should remain unchanged when permission key rotates"
         );
 
-        println!("✓ test_separated_key_rotation PASSED");
+        println!("[OK] test_separated_key_rotation PASSED");
     }
 
     #[test]
@@ -336,7 +337,7 @@ mod tests {
         assert_eq!(k_tag, k_tag_2, "K_tag should be deterministic");
         assert_eq!(k_psk, k_psk_2, "K_psk should be deterministic");
 
-        println!("✓ test_ssb_relationship_keys_derive_independently PASSED");
+        println!("[OK] test_ssb_relationship_keys_derive_independently PASSED");
     }
 
     #[test]
@@ -365,6 +366,6 @@ mod tests {
             "Relationship and guardian contexts must produce different keys"
         );
 
-        println!("✓ test_guardian_keys_separate_from_relationship_keys PASSED");
+        println!("[OK] test_guardian_keys_separate_from_relationship_keys PASSED");
     }
 }

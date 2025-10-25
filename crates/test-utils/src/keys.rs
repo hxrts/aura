@@ -68,14 +68,14 @@ pub fn test_frost_key_shares(
         threshold,
         frost::keys::IdentifierList::Default,
         &mut rng,
-    ).expect("Key generation should succeed");
+    ).unwrap(); // Key generation should succeed
     
     // Convert SecretShares to KeyPackages and then to BTreeMap
     let key_packages: BTreeMap<frost::Identifier, frost::keys::KeyPackage> = shares
         .into_iter()
         .map(|(id, secret_share)| {
             let key_package = frost::keys::KeyPackage::try_from(secret_share)
-                .expect("KeyPackage creation should succeed");
+                .unwrap(); // KeyPackage creation should succeed
             (id, key_package)
         })
         .collect();
@@ -103,14 +103,14 @@ pub fn test_frost_key_shares_default(
         threshold,
         frost::keys::IdentifierList::Default,
         &mut rng,
-    ).expect("Key generation should succeed");
+    ).unwrap(); // Key generation should succeed
     
     // Convert SecretShares to KeyPackages - this matches existing pattern
     let key_packages: BTreeMap<frost::Identifier, frost::keys::KeyPackage> = shares
         .into_iter()
         .map(|(id, secret_share)| {
             let key_package = frost::keys::KeyPackage::try_from(secret_share)
-                .expect("KeyPackage creation should succeed");
+                .unwrap(); // KeyPackage creation should succeed
             (id, key_package)
         })
         .collect();
@@ -137,7 +137,7 @@ pub fn test_frost_single_key_package(
     let key_package = key_packages
         .values()
         .next()
-        .expect("Should have at least one key package")
+        .unwrap() // Should have at least one key package
         .clone();
     
     (key_package, pubkey_package)

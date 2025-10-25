@@ -67,8 +67,8 @@ pub enum LedgerError {
     InvalidEvent(String),
 
     /// Invalid threshold signature
-    #[error("Invalid signature")]
-    InvalidSignature,
+    #[error("Invalid signature: {0}")]
+    InvalidSignature(String),
 
     /// Threshold signature requirement not met
     #[error("Threshold not met: {current} < {required}")]
@@ -115,6 +115,50 @@ pub enum LedgerError {
     /// Automerge CRDT operation failed
     #[error("Automerge error: {0}")]
     AutomergeError(String),
+
+    /// Weak cryptographic key
+    #[error("Weak key: {0}")]
+    WeakKey(String),
+
+    /// Compromised cryptographic key
+    #[error("Compromised key: {0}")]
+    CompromisedKey(String),
+
+    /// Key mismatch error
+    #[error("Key mismatch: {0}")]
+    KeyMismatch(String),
+
+    /// Guardian revoked
+    #[error("Guardian revoked: {0}")]
+    GuardianRevoked(String),
+
+    /// Guardian expired
+    #[error("Guardian expired: {0}")]
+    GuardianExpired(String),
+
+    /// Guardian suspended
+    #[error("Guardian suspended: {0}")]
+    GuardianSuspended(String),
+
+    /// Guardian inactive
+    #[error("Guardian inactive: {0}")]
+    GuardianInactive(String),
+
+    /// Invalid public key
+    #[error("Invalid public key: {0}")]
+    InvalidPublicKey(String),
+
+    /// Key rotation required
+    #[error("Key rotation required: {0}")]
+    KeyRotationRequired(String),
+
+    /// Timestamp error
+    #[error("Timestamp error: {0}")]
+    TimestampError(String),
+
+    /// Insufficient signers
+    #[error("Insufficient signers: {0}")]
+    InsufficientSigners(String),
 }
 
 /// Result type for ledger operations

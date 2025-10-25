@@ -20,6 +20,7 @@ pub struct DeviceAgentCore {
 }
 
 impl DeviceAgentCore {
+    #[allow(clippy::disallowed_methods)]
     pub fn new(device_id: DeviceId) -> Self {
         Self {
             device_id,
@@ -212,6 +213,7 @@ impl RuntimeWitness for AgentLockAcquired {
     type Evidence = (SessionId, SessionOutcome);
     type Config = aura_journal::OperationType;
 
+    #[allow(clippy::disallowed_methods)]
     fn verify(
         evidence: (SessionId, SessionOutcome),
         config: aura_journal::OperationType,
@@ -615,11 +617,13 @@ impl AgentSessionState {
     }
 }
 
+#[allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_journal::DeviceId;
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_agent_state_transitions() {
         let device_id = DeviceId(Uuid::new_v4());
@@ -653,6 +657,7 @@ mod tests {
         assert!(idle_agent.is_completely_idle());
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_agent_witness_verification() {
         let session_id = SessionId(Uuid::new_v4());
@@ -674,6 +679,7 @@ mod tests {
         assert!(witness.is_none());
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_agent_rehydration() {
         let device_id = DeviceId(Uuid::new_v4());
@@ -691,6 +697,7 @@ mod tests {
         assert!(!state.can_terminate());
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_operation_lock_flow() {
         let device_id = DeviceId(Uuid::new_v4());
@@ -710,7 +717,11 @@ mod tests {
             lock_holder: device_id,
         };
 
-        let locked_agent = <ChoreographicProtocol<DeviceAgentCore, LockingInProgress> as WitnessedTransition<LockingInProgress, AgentOperationLocked>>::transition_with_witness(locking_agent, witness);
+        let locked_agent =
+            <ChoreographicProtocol<DeviceAgentCore, LockingInProgress> as WitnessedTransition<
+                LockingInProgress,
+                AgentOperationLocked,
+            >>::transition_with_witness(locking_agent, witness);
         assert_eq!(locked_agent.state_name(), "AgentOperationLocked");
         assert!(locked_agent.is_lock_valid());
 

@@ -1,3 +1,4 @@
+#![allow(warnings, clippy::all)]
 //! Property Tests: CRDT Convergence
 //!
 //! Tests fundamental CRDT properties that must hold for ledger merges.
@@ -292,6 +293,6 @@ mod manual_tests {
 
     #[test]
     fn test_property_tests_compile_and_run() {
-        println!("✓ CRDT property tests compile successfully");
+        println!("[OK] CRDT property tests compile successfully");
     }
 }

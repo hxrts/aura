@@ -8,33 +8,33 @@
 | Component | Status | Location | Notes |
 |-----------|--------|----------|-------|
 | **Core Runtime Components** |
-| Instruction Set | ✅ IMPLEMENTED | `crates/coordination/src/execution/types.rs` | Complete with all documented instructions + extensions |
-| ProtocolContext | ✅ IMPLEMENTED | `crates/coordination/src/execution/context.rs` | Full instruction interpreter with error handling |
-| TimeSource (Production) | ✅ IMPLEMENTED | `crates/coordination/src/execution/time.rs` | ProductionTimeSource with tokio::Notify |
-| TimeSource (Simulation) | ✅ IMPLEMENTED | `crates/coordination/src/execution/time.rs` | Deterministic with SimulationScheduler |
-| Event Watching | ✅ IMPLEMENTED | Integrated in ProtocolContext | Event filtering and threshold collection |
+| Instruction Set | [VERIFIED] IMPLEMENTED | `crates/coordination/src/execution/types.rs` | Complete with all documented instructions + extensions |
+| ProtocolContext | [VERIFIED] IMPLEMENTED | `crates/coordination/src/execution/context.rs` | Full instruction interpreter with error handling |
+| TimeSource (Production) | [VERIFIED] IMPLEMENTED | `crates/coordination/src/execution/time.rs` | ProductionTimeSource with tokio::Notify |
+| TimeSource (Simulation) | [VERIFIED] IMPLEMENTED | `crates/coordination/src/execution/time.rs` | Deterministic with SimulationScheduler |
+| Event Watching | [VERIFIED] IMPLEMENTED | Integrated in ProtocolContext | Event filtering and threshold collection |
 | **Protocol Choreographies** |
-| DKD | ✅ IMPLEMENTED | `crates/coordination/src/choreography/dkd.rs` | Complete 4-phase choreography |
-| Resharing | ✅ IMPLEMENTED | `crates/coordination/src/choreography/resharing.rs` | Complete with HPKE encryption |
-| Recovery | ✅ IMPLEMENTED | `crates/coordination/src/choreography/recovery.rs` | Complete with share reconstruction via Lagrange interpolation |
-| Locking | ✅ IMPLEMENTED | `crates/coordination/src/choreography/locking.rs` | Complete with deterministic lottery verification |
+| DKD | [VERIFIED] IMPLEMENTED | `crates/coordination/src/choreography/dkd.rs` | Complete 4-phase choreography |
+| Resharing | [VERIFIED] IMPLEMENTED | `crates/coordination/src/choreography/resharing.rs` | Complete with HPKE encryption |
+| Recovery | [VERIFIED] IMPLEMENTED | `crates/coordination/src/choreography/recovery.rs` | Complete with share reconstruction via Lagrange interpolation |
+| Locking | [VERIFIED] IMPLEMENTED | `crates/coordination/src/choreography/locking.rs` | Complete with deterministic lottery verification |
 | **Simulation Integration** |
-| Simulation Engine | ✅ IMPLEMENTED | `crates/simulator/` | Deterministic with effect injection |
-| ProtocolExecutor | ✅ IMPLEMENTED | `crates/simulator/src/runners/protocol.rs` | Tokio integration with tick advancement |
-| Network Simulation | ✅ IMPLEMENTED | `crates/simulator/src/network/` | Latency, partitions, byzantine testing |
-| Choreographic Tests | ✅ IMPLEMENTED | `crates/simulator/tests/` | Multi-party protocol testing |
+| Simulation Engine | [VERIFIED] IMPLEMENTED | `crates/simulator/` | Deterministic with effect injection |
+| ProtocolExecutor | [VERIFIED] IMPLEMENTED | `crates/simulator/src/runners/protocol.rs` | Tokio integration with tick advancement |
+| Network Simulation | [VERIFIED] IMPLEMENTED | `crates/simulator/src/network/` | Latency, partitions, byzantine testing |
+| Choreographic Tests | [VERIFIED] IMPLEMENTED | `crates/simulator/tests/` | Multi-party protocol testing |
 | **API Surface** |
-| DeviceAgent API | ✅ IMPLEMENTED | `crates/agent/src/agent.rs` | High-level choreographic integration |
+| DeviceAgent API | [VERIFIED] IMPLEMENTED | `crates/agent/src/agent.rs` | High-level choreographic integration |
 | Simulation API | 🚧 PARTIAL | `crates/simulator/` | Good coverage, some convenience methods missing |
 | **Integration Components** |
-| Event Signing | ✅ IMPLEMENTED | Throughout | Device certificate + FROST when required |
+| Event Signing | [VERIFIED] IMPLEMENTED | Throughout | Device certificate + FROST when required |
 | Transport Abstraction | 🚧 PARTIAL | `crates/transport/` | Stub implementation, production transport pending |
-| Ledger Integration | ✅ IMPLEMENTED | `crates/journal/` | CRDT events with threshold signatures |
+| Ledger Integration | [VERIFIED] IMPLEMENTED | `crates/journal/` | CRDT events with threshold signatures |
 
 **Legend:**
-- ✅ **IMPLEMENTED**: Fully working as documented
+- [VERIFIED] **IMPLEMENTED**: Fully working as documented
 - 🚧 **PARTIAL**: Exists but incomplete
-- ❌ **NOT_IMPLEMENTED**: Missing or stub only
+- [NOT IMPLEMENTED] **NOT_IMPLEMENTED**: Missing or stub only
 - 📝 **NEEDS_UPDATE**: Implemented but documentation outdated
 
 This document explains how Aura’s Phase 2 “choreographic” runtime stitches together

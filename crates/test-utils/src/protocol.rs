@@ -4,11 +4,11 @@
 //! This addresses the complex protocol setup patterns found in test files.
 
 use aura_crypto::Effects;
-use uuid::Uuid;
 use std::collections::BTreeMap;
+use uuid::Uuid;
 
 /// Create test protocol configuration
-/// 
+///
 /// Basic protocol setup for testing.
 pub fn test_protocol_config() -> TestProtocolConfig {
     TestProtocolConfig {
@@ -20,29 +20,32 @@ pub fn test_protocol_config() -> TestProtocolConfig {
 
 /// Basic protocol configuration for testing
 pub struct TestProtocolConfig {
+    /// Session identifier
     pub session_id: Uuid,
+    /// Threshold for protocol operations
     pub threshold: Option<u16>,
+    /// Timeout in milliseconds
     pub timeout_ms: u64,
 }
 
 /// Create deterministic test session ID
-/// 
+///
 /// For tests that need predictable session IDs.
 pub fn test_session_id() -> Uuid {
     Uuid::from_bytes([1u8; 16])
 }
 
 /// Create deterministic test device ID
-/// 
+///
 /// For tests that need predictable device IDs.
 pub fn test_device_id() -> Uuid {
     Uuid::from_bytes([2u8; 16])
 }
 
 /// Create multiple test device IDs
-/// 
+///
 /// Creates sequential device IDs for multi-device tests.
-/// 
+///
 /// # Arguments
 /// * `count` - Number of device IDs to create
 pub fn test_device_ids(count: usize) -> Vec<Uuid> {
@@ -56,9 +59,9 @@ pub fn test_device_ids(count: usize) -> Vec<Uuid> {
 }
 
 /// Create test participants list
-/// 
+///
 /// Standard pattern for creating participant lists in protocol tests.
-/// 
+///
 /// # Arguments
 /// * `count` - Number of participants
 pub fn test_participants(count: usize) -> Vec<TestParticipant> {
@@ -74,14 +77,16 @@ pub fn test_participants(count: usize) -> Vec<TestParticipant> {
 
 /// Test participant structure
 pub struct TestParticipant {
+    /// Device identifier
     pub device_id: Uuid,
+    /// Participant name
     pub name: String,
 }
 
 /// Create test context parameters
-/// 
+///
 /// This consolidates the parameter setup patterns found in protocol tests.
-/// 
+///
 /// # Arguments
 /// * `effects` - Effects instance for deterministic generation
 pub fn test_context_params(effects: &Effects) -> TestContextParams {
@@ -97,16 +102,22 @@ pub fn test_context_params(effects: &Effects) -> TestContextParams {
 
 /// Test context parameters structure
 pub struct TestContextParams {
+    /// Session identifier
     pub session_id: Uuid,
+    /// Device identifier
     pub device_id: Uuid,
+    /// List of participant identifiers
     pub participants: Vec<Uuid>,
+    /// Threshold for operations
     pub threshold: Option<u16>,
+    /// Effects instance for deterministic generation
     pub effects: Effects,
+    /// Additional metadata
     pub metadata: BTreeMap<String, String>,
 }
 
 /// Create test context metadata
-/// 
+///
 /// Standard metadata for protocol contexts.
 pub fn test_context_metadata() -> BTreeMap<String, String> {
     let mut metadata = BTreeMap::new();
@@ -116,14 +127,14 @@ pub fn test_context_metadata() -> BTreeMap<String, String> {
 }
 
 /// Create test DKD context ID
-/// 
+///
 /// For DKD protocol tests that need a context identifier.
 pub fn test_dkd_context_id() -> Vec<u8> {
     vec![1, 2, 3, 4, 5, 6, 7, 8]
 }
 
 /// Create test operation type
-/// 
+///
 /// For protocol tests that need operation identifiers.
 pub fn test_operation_type() -> String {
     "test_operation".to_string()

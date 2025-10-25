@@ -1,3 +1,4 @@
+#![allow(warnings, clippy::all)]
 //! Unit Tests: Injected Effects
 //!
 //! Tests that the Effects system provides deterministic time and randomness for testing.
@@ -58,7 +59,7 @@ mod tests {
             "Time should jump to specified timestamp"
         );
 
-        println!("✓ test_deterministic_time PASSED");
+        println!("[OK] test_deterministic_time PASSED");
     }
 
     #[test]
@@ -104,7 +105,7 @@ mod tests {
             "Different seed should produce different random values"
         );
 
-        println!("✓ test_deterministic_randomness PASSED");
+        println!("[OK] test_deterministic_randomness PASSED");
     }
 
     #[test]
@@ -151,7 +152,7 @@ mod tests {
             "Different seed should produce different UUID"
         );
 
-        println!("✓ test_deterministic_uuid_generation PASSED");
+        println!("[OK] test_deterministic_uuid_generation PASSED");
     }
 
     #[test]
@@ -179,7 +180,7 @@ mod tests {
             "test_effects_test() should use same default seed"
         );
 
-        println!("✓ test_effects_test_helper PASSED");
+        println!("[OK] test_effects_test_helper PASSED");
     }
 
     #[test]
@@ -213,7 +214,7 @@ mod tests {
             );
         }
 
-        println!("✓ test_effects_production_is_not_simulated PASSED");
+        println!("[OK] test_effects_production_is_not_simulated PASSED");
     }
 
     #[test]
@@ -241,7 +242,7 @@ mod tests {
             "Same test name should produce same random sequence"
         );
 
-        println!("✓ test_effects_for_test_isolation PASSED");
+        println!("[OK] test_effects_for_test_isolation PASSED");
     }
 
     #[test]
@@ -270,7 +271,7 @@ mod tests {
             "Same seed should produce same random buffer"
         );
 
-        println!("✓ test_fill_random_buffer PASSED");
+        println!("[OK] test_fill_random_buffer PASSED");
     }
 
     #[test]
@@ -299,6 +300,6 @@ mod tests {
             "Session ID sequence should be deterministic"
         );
 
-        println!("✓ test_gen_session_id_deterministic PASSED");
+        println!("[OK] test_gen_session_id_deterministic PASSED");
     }
 }

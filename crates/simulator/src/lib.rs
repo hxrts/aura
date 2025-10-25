@@ -43,16 +43,18 @@
 //! assert!(alice_ledger.dkd_session_completed());
 //! ```
 
+pub mod adversary;
 pub mod builder;
 pub mod engine;
+pub mod logging;
 pub mod network;
 pub mod runners;
-pub mod logging;
 
+pub use adversary::*;
 pub use builder::*;
 pub use engine::*;
-pub use network::*;
 pub use logging::*;
+pub use network::*;
 pub use runners::*;
 
 use thiserror::Error;

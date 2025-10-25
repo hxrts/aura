@@ -6,8 +6,8 @@
 use crate::core::{ChoreographicProtocol, SessionProtocol, SessionState, WitnessedTransition};
 use crate::witnesses::RuntimeWitness;
 use aura_journal::{AccountId, DeviceId};
-use uuid::Uuid;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 // ========== CLI Protocol Core ==========
 
@@ -84,7 +84,7 @@ define_protocol! {
 
 // ========== Protocol Type Alias ==========
 
-/// Session-typed CLI protocol wrapper  
+/// Session-typed CLI protocol wrapper
 pub type SessionTypedCli<S> = ChoreographicProtocol<CliProtocolCore, S>;
 
 // ========== CLI Command Context Information ==========
@@ -101,11 +101,11 @@ pub struct CliCommandContext {
 impl RuntimeWitness for CliCommandContext {
     type Evidence = (String, Vec<String>); // (command_name, args)
     type Config = (Uuid, u64); // (session_id, timestamp)
-    
+
     fn verify(evidence: (String, Vec<String>), config: (Uuid, u64)) -> Option<Self> {
         let (command_name, args) = evidence;
         let (session_id, timestamp) = config;
-        
+
         Some(CliCommandContext {
             session_id,
             command_name,
@@ -113,7 +113,7 @@ impl RuntimeWitness for CliCommandContext {
             started_at: timestamp,
         })
     }
-    
+
     fn description(&self) -> &'static str {
         "CLI command context created"
     }
@@ -140,16 +140,16 @@ pub struct AccountInitContext {
 impl RuntimeWitness for AccountInitContext {
     type Evidence = (u16, u16, PathBuf); // (participants, threshold, output_dir)
     type Config = (Uuid, u64); // (session_id, timestamp)
-    
+
     fn verify(evidence: (u16, u16, PathBuf), config: (Uuid, u64)) -> Option<Self> {
         let (participants, threshold, output_dir) = evidence;
         let (session_id, timestamp) = config;
-        
+
         // Validate initialization parameters
         if participants < 2 || threshold > participants {
             return None;
         }
-        
+
         Some(AccountInitContext {
             session_id,
             participants,
@@ -158,7 +158,7 @@ impl RuntimeWitness for AccountInitContext {
             initialized_at: timestamp,
         })
     }
-    
+
     fn description(&self) -> &'static str {
         "Account initialization context created"
     }
@@ -189,11 +189,11 @@ pub struct AccountInitialized {
 impl RuntimeWitness for AccountInitialized {
     type Evidence = (AccountId, DeviceId, PathBuf);
     type Config = (Uuid, u64); // (session_id, timestamp)
-    
+
     fn verify(evidence: (AccountId, DeviceId, PathBuf), config: (Uuid, u64)) -> Option<Self> {
         let (account_id, device_id, config_path) = evidence;
         let (session_id, timestamp) = config;
-        
+
         // Verify that config file exists and is valid
         if config_path.exists() {
             Some(AccountInitialized {
@@ -207,7 +207,7 @@ impl RuntimeWitness for AccountInitialized {
             None
         }
     }
-    
+
     fn description(&self) -> &'static str {
         "Account initialization completed successfully"
     }
@@ -226,11 +226,11 @@ pub struct AccountConfigLoaded {
 impl RuntimeWitness for AccountConfigLoaded {
     type Evidence = (AccountId, DeviceId, PathBuf);
     type Config = (Uuid, u64); // (session_id, timestamp)
-    
+
     fn verify(evidence: (AccountId, DeviceId, PathBuf), config: (Uuid, u64)) -> Option<Self> {
         let (account_id, device_id, config_path) = evidence;
         let (session_id, timestamp) = config;
-        
+
         // Verify that config file exists and contains valid data
         if config_path.exists() {
             Some(AccountConfigLoaded {
@@ -244,7 +244,7 @@ impl RuntimeWitness for AccountConfigLoaded {
             None
         }
     }
-    
+
     fn description(&self) -> &'static str {
         "Account configuration loaded successfully"
     }
@@ -262,11 +262,11 @@ pub struct CommandCompleted {
 impl RuntimeWitness for CommandCompleted {
     type Evidence = (String, CommandResult);
     type Config = (Uuid, u64); // (session_id, timestamp)
-    
+
     fn verify(evidence: (String, CommandResult), config: (Uuid, u64)) -> Option<Self> {
         let (command_name, result) = evidence;
         let (session_id, timestamp) = config;
-        
+
         if result.success {
             Some(CommandCompleted {
                 session_id,
@@ -278,7 +278,7 @@ impl RuntimeWitness for CommandCompleted {
             None
         }
     }
-    
+
     fn description(&self) -> &'static str {
         "CLI command completed successfully"
     }
@@ -296,11 +296,11 @@ pub struct CommandFailed {
 impl RuntimeWitness for CommandFailed {
     type Evidence = (String, String); // (command_name, error_message)
     type Config = (Uuid, u64); // (session_id, timestamp)
-    
+
     fn verify(evidence: (String, String), config: (Uuid, u64)) -> Option<Self> {
         let (command_name, error) = evidence;
         let (session_id, timestamp) = config;
-        
+
         Some(CommandFailed {
             session_id,
             command_name,
@@ -308,7 +308,7 @@ impl RuntimeWitness for CommandFailed {
             failed_at: timestamp,
         })
     }
-    
+
     fn description(&self) -> &'static str {
         "CLI command failed"
     }
@@ -317,17 +317,14 @@ impl RuntimeWitness for CommandFailed {
 // ========== State Transitions ==========
 
 /// Transition from CliUninitialized to CliInitializing (when starting init command)
-impl WitnessedTransition<CliUninitialized, CliInitializing> 
-    for ChoreographicProtocol<CliProtocolCore, CliUninitialized> 
+impl WitnessedTransition<CliUninitialized, CliInitializing>
+    for ChoreographicProtocol<CliProtocolCore, CliUninitialized>
 {
     type Witness = AccountInitContext;
     type Target = ChoreographicProtocol<CliProtocolCore, CliInitializing>;
-    
+
     /// Begin account initialization
-    fn transition_with_witness(
-        mut self, 
-        context: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, context: Self::Witness) -> Self::Target {
         self.inner.session_id = context.session_id;
         self.inner.current_command = Some("init".to_string());
         self.transition_to()
@@ -335,17 +332,14 @@ impl WitnessedTransition<CliUninitialized, CliInitializing>
 }
 
 /// Transition from CliInitializing to CliAccountLoaded (requires AccountInitialized witness)
-impl WitnessedTransition<CliInitializing, CliAccountLoaded> 
-    for ChoreographicProtocol<CliProtocolCore, CliInitializing> 
+impl WitnessedTransition<CliInitializing, CliAccountLoaded>
+    for ChoreographicProtocol<CliProtocolCore, CliInitializing>
 {
     type Witness = AccountInitialized;
     type Target = ChoreographicProtocol<CliProtocolCore, CliAccountLoaded>;
-    
+
     /// Complete account initialization
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         self.inner.account_id = Some(witness.account_id);
         self.inner.device_id = Some(witness.device_id);
         self.inner.config_path = Some(witness.config_path);
@@ -355,17 +349,14 @@ impl WitnessedTransition<CliInitializing, CliAccountLoaded>
 }
 
 /// Transition from CliUninitialized to CliAccountLoaded (when loading existing account)
-impl WitnessedTransition<CliUninitialized, CliAccountLoaded> 
-    for ChoreographicProtocol<CliProtocolCore, CliUninitialized> 
+impl WitnessedTransition<CliUninitialized, CliAccountLoaded>
+    for ChoreographicProtocol<CliProtocolCore, CliUninitialized>
 {
     type Witness = AccountConfigLoaded;
     type Target = ChoreographicProtocol<CliProtocolCore, CliAccountLoaded>;
-    
+
     /// Load existing account configuration
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         self.inner.account_id = Some(witness.account_id);
         self.inner.device_id = Some(witness.device_id);
         self.inner.config_path = Some(witness.config_path);
@@ -374,34 +365,28 @@ impl WitnessedTransition<CliUninitialized, CliAccountLoaded>
 }
 
 /// Transition from CliAccountLoaded to CliDkdInProgress (when starting DKD command)
-impl WitnessedTransition<CliAccountLoaded, CliDkdInProgress> 
-    for ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> 
+impl WitnessedTransition<CliAccountLoaded, CliDkdInProgress>
+    for ChoreographicProtocol<CliProtocolCore, CliAccountLoaded>
 {
     type Witness = CliCommandContext;
     type Target = ChoreographicProtocol<CliProtocolCore, CliDkdInProgress>;
-    
+
     /// Begin DKD operation
-    fn transition_with_witness(
-        mut self, 
-        context: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, context: Self::Witness) -> Self::Target {
         self.inner.current_command = Some(context.command_name);
         self.transition_to()
     }
 }
 
 /// Transition from CliDkdInProgress back to CliAccountLoaded (requires CommandCompleted witness)
-impl WitnessedTransition<CliDkdInProgress, CliAccountLoaded> 
-    for ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> 
+impl WitnessedTransition<CliDkdInProgress, CliAccountLoaded>
+    for ChoreographicProtocol<CliProtocolCore, CliDkdInProgress>
 {
     type Witness = CommandCompleted;
     type Target = ChoreographicProtocol<CliProtocolCore, CliAccountLoaded>;
-    
+
     /// Complete DKD operation
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         self.inner.last_result = Some(witness.result);
         self.inner.current_command = None;
         self.transition_to()
@@ -409,34 +394,28 @@ impl WitnessedTransition<CliDkdInProgress, CliAccountLoaded>
 }
 
 /// Transition from CliAccountLoaded to CliRecoveryInProgress (when starting recovery command)
-impl WitnessedTransition<CliAccountLoaded, CliRecoveryInProgress> 
-    for ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> 
+impl WitnessedTransition<CliAccountLoaded, CliRecoveryInProgress>
+    for ChoreographicProtocol<CliProtocolCore, CliAccountLoaded>
 {
     type Witness = CliCommandContext;
     type Target = ChoreographicProtocol<CliProtocolCore, CliRecoveryInProgress>;
-    
+
     /// Begin recovery operation
-    fn transition_with_witness(
-        mut self, 
-        context: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, context: Self::Witness) -> Self::Target {
         self.inner.current_command = Some(context.command_name);
         self.transition_to()
     }
 }
 
 /// Transition from CliRecoveryInProgress back to CliAccountLoaded (requires CommandCompleted witness)
-impl WitnessedTransition<CliRecoveryInProgress, CliAccountLoaded> 
-    for ChoreographicProtocol<CliProtocolCore, CliRecoveryInProgress> 
+impl WitnessedTransition<CliRecoveryInProgress, CliAccountLoaded>
+    for ChoreographicProtocol<CliProtocolCore, CliRecoveryInProgress>
 {
     type Witness = CommandCompleted;
     type Target = ChoreographicProtocol<CliProtocolCore, CliAccountLoaded>;
-    
+
     /// Complete recovery operation
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         self.inner.last_result = Some(witness.result);
         self.inner.current_command = None;
         self.transition_to()
@@ -444,17 +423,14 @@ impl WitnessedTransition<CliRecoveryInProgress, CliAccountLoaded>
 }
 
 /// Transition to CliCommandFailed from CliUninitialized state
-impl WitnessedTransition<CliUninitialized, CliCommandFailed> 
-    for ChoreographicProtocol<CliProtocolCore, CliUninitialized> 
+impl WitnessedTransition<CliUninitialized, CliCommandFailed>
+    for ChoreographicProtocol<CliProtocolCore, CliUninitialized>
 {
     type Witness = CommandFailed;
     type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
-    
+
     /// Handle command failure
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         self.inner.current_command = Some(witness.command_name);
         self.inner.last_result = Some(CommandResult {
             success: false,
@@ -466,17 +442,14 @@ impl WitnessedTransition<CliUninitialized, CliCommandFailed>
 }
 
 /// Transition to CliCommandFailed from CliInitializing state
-impl WitnessedTransition<CliInitializing, CliCommandFailed> 
-    for ChoreographicProtocol<CliProtocolCore, CliInitializing> 
+impl WitnessedTransition<CliInitializing, CliCommandFailed>
+    for ChoreographicProtocol<CliProtocolCore, CliInitializing>
 {
     type Witness = CommandFailed;
     type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
-    
+
     /// Handle command failure
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         self.inner.current_command = Some(witness.command_name);
         self.inner.last_result = Some(CommandResult {
             success: false,
@@ -488,17 +461,14 @@ impl WitnessedTransition<CliInitializing, CliCommandFailed>
 }
 
 /// Transition to CliCommandFailed from CliAccountLoaded state
-impl WitnessedTransition<CliAccountLoaded, CliCommandFailed> 
-    for ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> 
+impl WitnessedTransition<CliAccountLoaded, CliCommandFailed>
+    for ChoreographicProtocol<CliProtocolCore, CliAccountLoaded>
 {
     type Witness = CommandFailed;
     type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
-    
+
     /// Handle command failure
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         self.inner.current_command = Some(witness.command_name);
         self.inner.last_result = Some(CommandResult {
             success: false,
@@ -510,17 +480,14 @@ impl WitnessedTransition<CliAccountLoaded, CliCommandFailed>
 }
 
 /// Transition to CliCommandFailed from CliDkdInProgress state
-impl WitnessedTransition<CliDkdInProgress, CliCommandFailed> 
-    for ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> 
+impl WitnessedTransition<CliDkdInProgress, CliCommandFailed>
+    for ChoreographicProtocol<CliProtocolCore, CliDkdInProgress>
 {
     type Witness = CommandFailed;
     type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
-    
+
     /// Handle command failure
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         self.inner.current_command = Some(witness.command_name);
         self.inner.last_result = Some(CommandResult {
             success: false,
@@ -532,17 +499,14 @@ impl WitnessedTransition<CliDkdInProgress, CliCommandFailed>
 }
 
 /// Transition to CliCommandFailed from CliRecoveryInProgress state
-impl WitnessedTransition<CliRecoveryInProgress, CliCommandFailed> 
-    for ChoreographicProtocol<CliProtocolCore, CliRecoveryInProgress> 
+impl WitnessedTransition<CliRecoveryInProgress, CliCommandFailed>
+    for ChoreographicProtocol<CliProtocolCore, CliRecoveryInProgress>
 {
     type Witness = CommandFailed;
     type Target = ChoreographicProtocol<CliProtocolCore, CliCommandFailed>;
-    
+
     /// Handle command failure
-    fn transition_with_witness(
-        mut self, 
-        witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(mut self, witness: Self::Witness) -> Self::Target {
         self.inner.current_command = Some(witness.command_name);
         self.inner.last_result = Some(CommandResult {
             success: false,
@@ -558,16 +522,25 @@ impl WitnessedTransition<CliRecoveryInProgress, CliCommandFailed>
 /// Operations only available in CliUninitialized state
 impl ChoreographicProtocol<CliProtocolCore, CliUninitialized> {
     /// Initialize a new account
-    pub async fn init_account(&self, participants: u16, threshold: u16, output_dir: PathBuf) -> Result<AccountInitContext, CliSessionError> {
+    pub async fn init_account(
+        &self,
+        participants: u16,
+        threshold: u16,
+        output_dir: PathBuf,
+    ) -> Result<AccountInitContext, CliSessionError> {
         // Validate initialization parameters
         if participants < 2 {
-            return Err(CliSessionError::ConfigurationError("Minimum 2 participants required".to_string()));
+            return Err(CliSessionError::ConfigurationError(
+                "Minimum 2 participants required".to_string(),
+            ));
         }
-        
+
         if threshold > participants {
-            return Err(CliSessionError::ConfigurationError("Threshold cannot exceed participant count".to_string()));
+            return Err(CliSessionError::ConfigurationError(
+                "Threshold cannot exceed participant count".to_string(),
+            ));
         }
-        
+
         Ok(AccountInitContext {
             session_id: self.inner.session_id,
             participants,
@@ -576,25 +549,34 @@ impl ChoreographicProtocol<CliProtocolCore, CliUninitialized> {
             initialized_at: 0, // Would use actual timestamp
         })
     }
-    
+
     /// Load existing account configuration
-    pub async fn load_account(&self, config_path: PathBuf) -> Result<AccountConfigLoaded, CliSessionError> {
+    pub async fn load_account(
+        &self,
+        config_path: PathBuf,
+    ) -> Result<AccountConfigLoaded, CliSessionError> {
         // Verify config file exists
         if !config_path.exists() {
-            return Err(CliSessionError::FileSystemError(format!("Config file not found: {}", config_path.display())));
+            return Err(CliSessionError::FileSystemError(format!(
+                "Config file not found: {}",
+                config_path.display()
+            )));
         }
-        
+
         // In real implementation, would actually load and parse the config
         // For now, create placeholder values
         let effects = aura_crypto::Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
         let device_id = DeviceId::new_with_effects(&effects);
-        
+
         let witness = AccountConfigLoaded::verify(
             (account_id, device_id, config_path.clone()),
-            (self.inner.session_id, 0)
-        ).ok_or_else(|| CliSessionError::ConfigurationError("Failed to verify account config".to_string()))?;
-        
+            (self.inner.session_id, 0),
+        )
+        .ok_or_else(|| {
+            CliSessionError::ConfigurationError("Failed to verify account config".to_string())
+        })?;
+
         Ok(witness)
     }
 }
@@ -603,25 +585,37 @@ impl ChoreographicProtocol<CliProtocolCore, CliUninitialized> {
 impl ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> {
     /// Show account status
     pub async fn show_status(&self) -> Result<CommandResult, CliSessionError> {
-        let account_id = self.inner.account_id.as_ref()
+        let account_id = self
+            .inner
+            .account_id
+            .as_ref()
             .ok_or_else(|| CliSessionError::SessionError("No account loaded".to_string()))?;
-        
-        let device_id = self.inner.device_id.as_ref()
+
+        let device_id = self
+            .inner
+            .device_id
+            .as_ref()
             .ok_or_else(|| CliSessionError::SessionError("No device loaded".to_string()))?;
-        
+
         Ok(CommandResult {
             success: true,
             message: format!("Account: {}, Device: {}", account_id.0, device_id.0),
             data: None,
         })
     }
-    
+
     /// Execute DKD operation
-    pub async fn execute_dkd(&self, app_id: String, context: String) -> Result<CliCommandContext, CliSessionError> {
+    pub async fn execute_dkd(
+        &self,
+        app_id: String,
+        context: String,
+    ) -> Result<CliCommandContext, CliSessionError> {
         if self.inner.account_id.is_none() {
-            return Err(CliSessionError::AccountNotInitialized("Cannot execute DKD without account".to_string()));
+            return Err(CliSessionError::AccountNotInitialized(
+                "Cannot execute DKD without account".to_string(),
+            ));
         }
-        
+
         Ok(CliCommandContext {
             session_id: self.inner.session_id,
             command_name: "dkd".to_string(),
@@ -629,7 +623,7 @@ impl ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> {
             started_at: 0, // Would use actual timestamp
         })
     }
-    
+
     /// Check if account is properly loaded
     pub fn is_account_loaded(&self) -> bool {
         self.inner.account_id.is_some() && self.inner.device_id.is_some()
@@ -641,14 +635,20 @@ impl ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> {
     /// Complete DKD operation
     pub async fn complete_dkd(&self) -> Result<CommandCompleted, CliSessionError> {
         let witness = CommandCompleted::verify(
-            ("dkd".to_string(), CommandResult {
-                success: true,
-                message: "DKD operation completed successfully".to_string(),
-                data: None,
-            }),
-            (self.inner.session_id, 0)
-        ).ok_or_else(|| CliSessionError::CommandExecutionError("Failed to complete DKD operation".to_string()))?;
-        
+            (
+                "dkd".to_string(),
+                CommandResult {
+                    success: true,
+                    message: "DKD operation completed successfully".to_string(),
+                    data: None,
+                },
+            ),
+            (self.inner.session_id, 0),
+        )
+        .ok_or_else(|| {
+            CliSessionError::CommandExecutionError("Failed to complete DKD operation".to_string())
+        })?;
+
         Ok(witness)
     }
 }
@@ -656,6 +656,7 @@ impl ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> {
 // ========== Factory Functions ==========
 
 /// Create a new session-typed CLI protocol in uninitialized state
+#[allow(clippy::disallowed_methods)]
 pub fn new_session_typed_cli() -> ChoreographicProtocol<CliProtocolCore, CliUninitialized> {
     let session_id = Uuid::new_v4();
     let core = CliProtocolCore::new(session_id);
@@ -663,13 +664,14 @@ pub fn new_session_typed_cli() -> ChoreographicProtocol<CliProtocolCore, CliUnin
 }
 
 /// Rehydrate CLI session from previous state
+#[allow(clippy::disallowed_methods)]
 pub fn rehydrate_cli_session(
     has_config: bool,
-    in_progress_command: Option<String>
+    in_progress_command: Option<String>,
 ) -> CliSessionState {
     let session_id = Uuid::new_v4();
     let core = CliProtocolCore::new(session_id);
-    
+
     if let Some(command) = in_progress_command {
         match command.as_str() {
             "dkd" => CliSessionState::CliDkdInProgress(ChoreographicProtocol::new(core)),
@@ -685,23 +687,26 @@ pub fn rehydrate_cli_session(
 
 // ========== Tests ==========
 
+#[allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    
+
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_cli_session_creation() {
         let cli = new_session_typed_cli();
-        
+
         assert_eq!(cli.state_name(), "CliUninitialized");
         assert!(cli.can_terminate());
     }
-    
+
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_account_initialization_flow() {
         let cli = new_session_typed_cli();
-        
+
         // Start initialization
         let init_context = AccountInitContext {
             session_id: cli.inner.session_id,
@@ -710,10 +715,14 @@ mod tests {
             output_dir: PathBuf::from("/tmp/test"),
             initialized_at: 1000,
         };
-        
-        let initializing = <ChoreographicProtocol<CliProtocolCore, CliUninitialized> as WitnessedTransition<CliUninitialized, CliInitializing>>::transition_with_witness(cli, init_context);
+
+        let initializing =
+            <ChoreographicProtocol<CliProtocolCore, CliUninitialized> as WitnessedTransition<
+                CliUninitialized,
+                CliInitializing,
+            >>::transition_with_witness(cli, init_context);
         assert_eq!(initializing.state_name(), "CliInitializing");
-        
+
         // Complete initialization
         let effects = aura_crypto::Effects::test();
         let witness = AccountInitialized {
@@ -723,16 +732,21 @@ mod tests {
             config_path: PathBuf::from("/tmp/test/config.toml"),
             completed_at: 2000,
         };
-        
-        let account_loaded = <ChoreographicProtocol<CliProtocolCore, CliInitializing> as WitnessedTransition<CliInitializing, CliAccountLoaded>>::transition_with_witness(initializing, witness);
+
+        let account_loaded =
+            <ChoreographicProtocol<CliProtocolCore, CliInitializing> as WitnessedTransition<
+                CliInitializing,
+                CliAccountLoaded,
+            >>::transition_with_witness(initializing, witness);
         assert_eq!(account_loaded.state_name(), "CliAccountLoaded");
         assert!(account_loaded.can_terminate());
     }
-    
+
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_command_execution_flow() {
         let cli = new_session_typed_cli();
-        
+
         // Load account first
         let effects = aura_crypto::Effects::test();
         let load_witness = AccountConfigLoaded {
@@ -742,10 +756,14 @@ mod tests {
             config_path: PathBuf::from("/tmp/config.toml"),
             loaded_at: 1000,
         };
-        
-        let account_loaded = <ChoreographicProtocol<CliProtocolCore, CliUninitialized> as WitnessedTransition<CliUninitialized, CliAccountLoaded>>::transition_with_witness(cli, load_witness);
+
+        let account_loaded =
+            <ChoreographicProtocol<CliProtocolCore, CliUninitialized> as WitnessedTransition<
+                CliUninitialized,
+                CliAccountLoaded,
+            >>::transition_with_witness(cli, load_witness);
         assert_eq!(account_loaded.state_name(), "CliAccountLoaded");
-        
+
         // Start DKD command
         let dkd_context = CliCommandContext {
             session_id: account_loaded.inner.session_id,
@@ -753,10 +771,14 @@ mod tests {
             args: vec!["test_app".to_string(), "test_context".to_string()],
             started_at: 2000,
         };
-        
-        let dkd_in_progress = <ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> as WitnessedTransition<CliAccountLoaded, CliDkdInProgress>>::transition_with_witness(account_loaded, dkd_context);
+
+        let dkd_in_progress =
+            <ChoreographicProtocol<CliProtocolCore, CliAccountLoaded> as WitnessedTransition<
+                CliAccountLoaded,
+                CliDkdInProgress,
+            >>::transition_with_witness(account_loaded, dkd_context);
         assert_eq!(dkd_in_progress.state_name(), "CliDkdInProgress");
-        
+
         // Complete DKD command
         let completion_witness = CommandCompleted {
             session_id: dkd_in_progress.inner.session_id,
@@ -768,27 +790,33 @@ mod tests {
             },
             completed_at: 3000,
         };
-        
-        let completed = <ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> as WitnessedTransition<CliDkdInProgress, CliAccountLoaded>>::transition_with_witness(dkd_in_progress, completion_witness);
+
+        let completed =
+            <ChoreographicProtocol<CliProtocolCore, CliDkdInProgress> as WitnessedTransition<
+                CliDkdInProgress,
+                CliAccountLoaded,
+            >>::transition_with_witness(dkd_in_progress, completion_witness);
         assert_eq!(completed.state_name(), "CliAccountLoaded");
     }
-    
+
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_session_state_union() {
         let session = rehydrate_cli_session(false, None);
         assert_eq!(session.state_name(), "CliUninitialized");
-        
+
         let session_with_config = rehydrate_cli_session(true, None);
         assert_eq!(session_with_config.state_name(), "CliAccountLoaded");
-        
+
         let session_with_dkd = rehydrate_cli_session(true, Some("dkd".to_string()));
         assert_eq!(session_with_dkd.state_name(), "CliDkdInProgress");
     }
-    
+
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_command_failure_handling() {
         let cli = new_session_typed_cli();
-        
+
         // Test failure from any state
         let failure_witness = CommandFailed {
             session_id: cli.inner.session_id,
@@ -796,8 +824,12 @@ mod tests {
             error: "Initialization failed".to_string(),
             failed_at: 1000,
         };
-        
-        let failed_cli = <ChoreographicProtocol<CliProtocolCore, CliUninitialized> as WitnessedTransition<CliUninitialized, CliCommandFailed>>::transition_with_witness(cli, failure_witness);
+
+        let failed_cli =
+            <ChoreographicProtocol<CliProtocolCore, CliUninitialized> as WitnessedTransition<
+                CliUninitialized,
+                CliCommandFailed,
+            >>::transition_with_witness(cli, failure_witness);
         assert_eq!(failed_cli.state_name(), "CliCommandFailed");
         assert!(failed_cli.can_terminate());
     }

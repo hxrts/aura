@@ -15,16 +15,25 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instruction {
-    WriteToLedger(aura_journal::Event),
-    AwaitEvent { event_type: String, timeout: u64 },
-    AwaitThreshold { threshold: u16, timeout: u64 },
-    RunSubProtocol { protocol_type: String, parameters: BTreeMap<String, String> },
+    WriteToLedger(Box<aura_journal::Event>),
+    AwaitEvent {
+        event_type: String,
+        timeout: u64,
+    },
+    AwaitThreshold {
+        threshold: u16,
+        timeout: u64,
+    },
+    RunSubProtocol {
+        protocol_type: String,
+        parameters: BTreeMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum InstructionResult {
     EventWritten { event_id: Uuid },
-    EventReceived { event: aura_journal::Event },
+    EventReceived { event: Box<aura_journal::Event> },
     ThresholdMet { count: u16 },
     SubProtocolComplete { result: String },
     Error { message: String },
@@ -50,7 +59,12 @@ pub struct ProtocolContextCore {
 }
 
 impl ProtocolContextCore {
-    pub fn new(context_id: Uuid, session_id: Uuid, device_id: DeviceId, protocol_type: ProtocolType) -> Self {
+    pub fn new(
+        context_id: Uuid,
+        session_id: Uuid,
+        device_id: DeviceId,
+        protocol_type: ProtocolType,
+    ) -> Self {
         Self {
             context_id,
             session_id,
@@ -59,22 +73,24 @@ impl ProtocolContextCore {
         }
     }
 
-    pub async fn execute(&mut self, instruction: Instruction) -> Result<InstructionResult, ProtocolError> {
+    #[allow(clippy::disallowed_methods)]
+    pub async fn execute(
+        &mut self,
+        instruction: Instruction,
+    ) -> Result<InstructionResult, ProtocolError> {
         // Placeholder implementation - this will be properly implemented
         // when the session types are integrated with the actual execution runtime
         match instruction {
-            Instruction::WriteToLedger(_event) => {
-                Ok(InstructionResult::EventWritten { event_id: Uuid::new_v4() })
-            },
-            Instruction::AwaitEvent { .. } => {
-                Ok(InstructionResult::Error { message: "Not implemented".to_string() })
-            },
-            Instruction::AwaitThreshold { .. } => {
-                Ok(InstructionResult::ThresholdMet { count: 1 })
-            },
-            Instruction::RunSubProtocol { .. } => {
-                Ok(InstructionResult::SubProtocolComplete { result: "Success".to_string() })
-            }
+            Instruction::WriteToLedger(_event) => Ok(InstructionResult::EventWritten {
+                event_id: Uuid::new_v4(),
+            }),
+            Instruction::AwaitEvent { .. } => Ok(InstructionResult::Error {
+                message: "Not implemented".to_string(),
+            }),
+            Instruction::AwaitThreshold { .. } => Ok(InstructionResult::ThresholdMet { count: 1 }),
+            Instruction::RunSubProtocol { .. } => Ok(InstructionResult::SubProtocolComplete {
+                result: "Success".to_string(),
+            }),
         }
     }
 }
@@ -145,17 +161,17 @@ impl<S: SessionState> ChoreographicProtocol<ProtocolContextCore, S> {
     pub fn protocol_type(&self) -> ProtocolType {
         self.core().protocol_type
     }
-    
+
     /// Get the protocol ID (alias for context_id for compatibility)
     pub fn protocol_id(&self) -> Uuid {
         self.context_id()
     }
-    
+
     /// Get the device ID
     pub fn device_id(&self) -> aura_journal::DeviceId {
         self.core().device_id
     }
-    
+
     /// Check if the protocol can terminate (final states only)
     pub fn can_terminate(&self) -> bool {
         S::IS_FINAL
@@ -175,7 +191,7 @@ pub struct ThresholdEventsMet {
 impl RuntimeWitness for ThresholdEventsMet {
     type Evidence = (Vec<Event>, usize);
     type Config = ();
-    
+
     fn verify(evidence: (Vec<Event>, usize), _config: ()) -> Option<Self> {
         let (events, required_count) = evidence;
         if events.len() >= required_count {
@@ -188,7 +204,7 @@ impl RuntimeWitness for ThresholdEventsMet {
             None
         }
     }
-    
+
     fn description(&self) -> &'static str {
         "Threshold events collected"
     }
@@ -204,7 +220,7 @@ pub struct LedgerWriteComplete {
 impl RuntimeWitness for LedgerWriteComplete {
     type Evidence = InstructionResult;
     type Config = ();
-    
+
     fn verify(evidence: InstructionResult, _config: ()) -> Option<Self> {
         match evidence {
             InstructionResult::EventWritten { .. } => Some(LedgerWriteComplete {
@@ -214,7 +230,7 @@ impl RuntimeWitness for LedgerWriteComplete {
             _ => None,
         }
     }
-    
+
     fn description(&self) -> &'static str {
         "Ledger write completed"
     }
@@ -230,7 +246,7 @@ pub struct SubProtocolComplete {
 impl RuntimeWitness for SubProtocolComplete {
     type Evidence = InstructionResult;
     type Config = ();
-    
+
     fn verify(evidence: InstructionResult, _config: ()) -> Option<Self> {
         match evidence {
             InstructionResult::SubProtocolComplete { result } => Some(SubProtocolComplete {
@@ -240,7 +256,7 @@ impl RuntimeWitness for SubProtocolComplete {
             _ => None,
         }
     }
-    
+
     fn description(&self) -> &'static str {
         "Sub-protocol completed"
     }
@@ -251,7 +267,9 @@ impl RuntimeWitness for SubProtocolComplete {
 /// Transition from ContextInitialized to ExecutingInstructions (no witness needed)
 impl ChoreographicProtocol<ProtocolContextCore, ContextInitialized> {
     /// Begin executing instructions
-    pub fn begin_execution(self) -> ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
+    pub fn begin_execution(
+        self,
+    ) -> ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
         ChoreographicProtocol::transition_to(self)
     }
 }
@@ -262,35 +280,36 @@ impl ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
     pub fn await_condition(self) -> ChoreographicProtocol<ProtocolContextCore, AwaitingCondition> {
         ChoreographicProtocol::transition_to(self)
     }
-    
+
     /// Transition to writing to ledger state
     pub fn write_to_ledger(self) -> ChoreographicProtocol<ProtocolContextCore, WritingToLedger> {
         ChoreographicProtocol::transition_to(self)
     }
-    
+
     /// Transition to executing sub-protocol state
-    pub fn execute_sub_protocol(self) -> ChoreographicProtocol<ProtocolContextCore, ExecutingSubProtocol> {
+    pub fn execute_sub_protocol(
+        self,
+    ) -> ChoreographicProtocol<ProtocolContextCore, ExecutingSubProtocol> {
         ChoreographicProtocol::transition_to(self)
     }
-    
+
     /// Complete execution successfully
-    pub fn complete_execution(self) -> ChoreographicProtocol<ProtocolContextCore, ExecutionComplete> {
+    pub fn complete_execution(
+        self,
+    ) -> ChoreographicProtocol<ProtocolContextCore, ExecutionComplete> {
         ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from AwaitingCondition back to ExecutingInstructions (requires ThresholdEventsMet witness for threshold operations)
-impl WitnessedTransition<AwaitingCondition, ExecutingInstructions> 
-    for ChoreographicProtocol<ProtocolContextCore, AwaitingCondition> 
+impl WitnessedTransition<AwaitingCondition, ExecutingInstructions>
+    for ChoreographicProtocol<ProtocolContextCore, AwaitingCondition>
 {
     type Witness = ThresholdEventsMet;
     type Target = ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions>;
-    
+
     /// Resume execution after threshold condition is met
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(self, _witness: Self::Witness) -> Self::Target {
         ChoreographicProtocol::transition_to(self)
     }
 }
@@ -298,7 +317,9 @@ impl WitnessedTransition<AwaitingCondition, ExecutingInstructions>
 /// Simple transition from AwaitingCondition to ExecutingInstructions (for non-threshold operations)
 impl ChoreographicProtocol<ProtocolContextCore, AwaitingCondition> {
     /// Resume execution after simple condition is met
-    pub fn resume_execution(self) -> ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
+    pub fn resume_execution(
+        self,
+    ) -> ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
         ChoreographicProtocol::transition_to(self)
     }
 }
@@ -309,28 +330,22 @@ impl WitnessedTransition<WritingToLedger, ExecutingInstructions>
 {
     type Witness = LedgerWriteComplete;
     type Target = ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions>;
-    
+
     /// Resume execution after ledger write is complete
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(self, _witness: Self::Witness) -> Self::Target {
         ChoreographicProtocol::transition_to(self)
     }
 }
 
 /// Transition from ExecutingSubProtocol back to ExecutingInstructions (requires SubProtocolComplete witness)
-impl WitnessedTransition<ExecutingSubProtocol, ExecutingInstructions> 
-    for ChoreographicProtocol<ProtocolContextCore, ExecutingSubProtocol> 
+impl WitnessedTransition<ExecutingSubProtocol, ExecutingInstructions>
+    for ChoreographicProtocol<ProtocolContextCore, ExecutingSubProtocol>
 {
     type Witness = SubProtocolComplete;
     type Target = ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions>;
-    
+
     /// Resume execution after sub-protocol completes
-    fn transition_with_witness(
-        self, 
-        _witness: Self::Witness
-    ) -> Self::Target {
+    fn transition_with_witness(self, _witness: Self::Witness) -> Self::Target {
         ChoreographicProtocol::transition_to(self)
     }
 }
@@ -348,17 +363,21 @@ impl<S: SessionState> ChoreographicProtocol<ProtocolContextCore, S> {
 /// Operations only available in ExecutingInstructions state
 impl ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
     /// Execute an instruction that doesn't require state transition tracking
-    pub async fn execute_simple_instruction(&mut self, instruction: Instruction) -> Result<InstructionResult, ContextSessionError> {
+    pub async fn execute_simple_instruction(
+        &mut self,
+        instruction: Instruction,
+    ) -> Result<InstructionResult, ContextSessionError> {
         self.inner.execute(instruction).await.map_err(Into::into)
     }
-    
+
     /// Check if the next instruction requires a state transition
     pub fn requires_state_transition(&self, instruction: &Instruction) -> bool {
-        matches!(instruction, 
-            Instruction::WriteToLedger(_) |
-            Instruction::AwaitEvent { .. } |
-            Instruction::AwaitThreshold { .. } |
-            Instruction::RunSubProtocol { .. }
+        matches!(
+            instruction,
+            Instruction::WriteToLedger(_)
+                | Instruction::AwaitEvent { .. }
+                | Instruction::AwaitThreshold { .. }
+                | Instruction::RunSubProtocol { .. }
         )
     }
 }
@@ -367,8 +386,8 @@ impl ChoreographicProtocol<ProtocolContextCore, ExecutingInstructions> {
 impl ChoreographicProtocol<ProtocolContextCore, AwaitingCondition> {
     /// Check if threshold condition has been met
     pub async fn check_threshold_condition(
-        &mut self, 
-        required_count: usize
+        &mut self,
+        required_count: usize,
     ) -> Option<ThresholdEventsMet> {
         // This would check the context's pending events
         // For now, return a placeholder
@@ -381,13 +400,16 @@ impl ChoreographicProtocol<ProtocolContextCore, AwaitingCondition> {
 impl ChoreographicProtocol<ProtocolContextCore, WritingToLedger> {
     /// Execute the ledger write and check completion
     pub async fn execute_ledger_write(
-        &mut self, 
-        event: aura_journal::Event
+        &mut self,
+        event: aura_journal::Event,
     ) -> Result<LedgerWriteComplete, ContextSessionError> {
-        let result = self.inner.execute(Instruction::WriteToLedger(event)).await?;
-        LedgerWriteComplete::verify(result, ()).ok_or(
-            ContextSessionError::ExecutionFailed("Ledger write failed".to_string())
-        )
+        let result = self
+            .inner
+            .execute(Instruction::WriteToLedger(Box::new(event)))
+            .await?;
+        LedgerWriteComplete::verify(result, ()).ok_or(ContextSessionError::ExecutionFailed(
+            "Ledger write failed".to_string(),
+        ))
     }
 }
 
@@ -395,9 +417,9 @@ impl ChoreographicProtocol<ProtocolContextCore, WritingToLedger> {
 impl ChoreographicProtocol<ProtocolContextCore, ExecutingSubProtocol> {
     /// Execute sub-protocol and check completion
     pub async fn execute_sub_protocol_instruction(
-        &mut self, 
+        &mut self,
         protocol_type: ProtocolType,
-        context_id: Uuid
+        context_id: Uuid,
     ) -> Result<SubProtocolComplete, ContextSessionError> {
         let mut params = BTreeMap::new();
         params.insert("protocol_type".to_string(), format!("{:?}", protocol_type));
@@ -407,9 +429,9 @@ impl ChoreographicProtocol<ProtocolContextCore, ExecutingSubProtocol> {
             parameters: params,
         };
         let result = self.inner.execute(instruction).await?;
-        SubProtocolComplete::verify(result, ()).ok_or(
-            ContextSessionError::ExecutionFailed("Sub-protocol execution failed".to_string())
-        )
+        SubProtocolComplete::verify(result, ()).ok_or(ContextSessionError::ExecutionFailed(
+            "Sub-protocol execution failed".to_string(),
+        ))
     }
 }
 
@@ -447,30 +469,32 @@ pub fn rehydrate_context_session(
     session_id: Uuid,
     device_id: DeviceId,
     protocol_type: ProtocolType,
-    last_instruction: Option<&Instruction>
+    last_instruction: Option<&Instruction>,
 ) -> ContextSessionState {
     let core = ProtocolContextCore::new(context_id, session_id, device_id, protocol_type);
-    
+
     match last_instruction {
-        Some(Instruction::WriteToLedger(_)) => ContextSessionState::WritingToLedger(
-            ChoreographicProtocol::new(core)
-        ),
+        Some(Instruction::WriteToLedger(_)) => {
+            ContextSessionState::WritingToLedger(ChoreographicProtocol::new(core))
+        }
         Some(Instruction::AwaitEvent { .. }) | Some(Instruction::AwaitThreshold { .. }) => {
             ContextSessionState::AwaitingCondition(ChoreographicProtocol::new(core))
-        },
-        Some(Instruction::RunSubProtocol { .. }) => ContextSessionState::ExecutingSubProtocol(
-            ChoreographicProtocol::new(core)
-        ),
+        }
+        Some(Instruction::RunSubProtocol { .. }) => {
+            ContextSessionState::ExecutingSubProtocol(ChoreographicProtocol::new(core))
+        }
         _ => ContextSessionState::ExecutingInstructions(ChoreographicProtocol::new(core)),
     }
 }
 
+#[allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_crypto::Effects;
     use aura_journal::DeviceId;
-    
+
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_context_state_transitions() {
         let effects = Effects::test();
@@ -478,39 +502,42 @@ mod tests {
         let session_id = effects.gen_uuid();
         let device_id = DeviceId::new_with_effects(&effects);
         let protocol_type = ProtocolType::Dkd;
-        
+
         // Test basic state transitions
-        let session_context = new_session_typed_context(context_id, session_id, device_id, protocol_type);
-        
+        let session_context =
+            new_session_typed_context(context_id, session_id, device_id, protocol_type);
+
         // Should start in ContextInitialized state
         assert_eq!(session_context.state_name(), "ContextInitialized");
         assert!(!session_context.can_terminate());
         assert!(!session_context.is_final());
-        
+
         // Transition to ExecutingInstructions
         let executing_context = session_context.begin_execution();
         assert_eq!(executing_context.state_name(), "ExecutingInstructions");
-        
+
         // Can fail from any state
         let failed_context = executing_context.fail_execution();
         assert_eq!(failed_context.state_name(), "ExecutionFailed");
         assert!(failed_context.can_terminate());
         assert!(failed_context.is_final());
     }
-    
+
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_context_witness_verification() {
         // Test ThresholdEventsMet witness
         let events = vec![];
         let witness = ThresholdEventsMet::verify((events, 2), ());
         assert!(witness.is_none()); // Not enough events
-        
+
         // Test with sufficient events
         let events = vec![];
         let witness = ThresholdEventsMet::verify((events, 0), ());
         assert!(witness.is_some());
     }
-    
+
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_context_rehydration() {
         let effects = Effects::test();
@@ -518,14 +545,16 @@ mod tests {
         let session_id = effects.gen_uuid();
         let device_id = DeviceId::new_with_effects(&effects);
         let protocol_type = ProtocolType::Dkd;
-        
+
         // Test rehydration without last instruction
-        let state = rehydrate_context_session(context_id, session_id, device_id, protocol_type, None);
+        let state =
+            rehydrate_context_session(context_id, session_id, device_id, protocol_type, None);
         assert_eq!(state.state_name(), "ExecutingInstructions");
         assert!(!state.can_terminate());
         assert!(!state.is_final());
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_context_specific_operations() {
         let effects = Effects::test();
@@ -533,10 +562,11 @@ mod tests {
         let session_id = effects.gen_uuid();
         let device_id = DeviceId::new_with_effects(&effects);
         let protocol_type = ProtocolType::Dkd;
-        
-        let session_context = new_session_typed_context(context_id, session_id, device_id, protocol_type);
+
+        let session_context =
+            new_session_typed_context(context_id, session_id, device_id, protocol_type);
         let executing_context = session_context.begin_execution();
-        
+
         // Create a test event for instruction testing
         let dummy_signature = ed25519_dalek::Signature::from_bytes(&[0u8; 64]);
         let test_event = aura_journal::Event::new(
@@ -544,7 +574,7 @@ mod tests {
             1,
             None,
             0,
-            aura_journal::EventType::EpochTick(aura_journal::events::EpochTickEvent { 
+            aura_journal::EventType::EpochTick(aura_journal::events::EpochTickEvent {
                 new_epoch: 1,
                 evidence_hash: [0u8; 32],
             }),
@@ -553,21 +583,23 @@ mod tests {
                 signature: dummy_signature,
             },
             &effects,
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         // Test instruction type checking
-        let write_instruction = Instruction::WriteToLedger(test_event);
+        let write_instruction = Instruction::WriteToLedger(Box::new(test_event));
         assert!(executing_context.requires_state_transition(&write_instruction));
-        
+
         // Transition to different states
         let awaiting_context = executing_context.await_condition();
         assert_eq!(awaiting_context.state_name(), "AwaitingCondition");
-        
+
         // Resume execution
         let resumed_context = awaiting_context.resume_execution();
         assert_eq!(resumed_context.state_name(), "ExecutingInstructions");
     }
 
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn test_union_type_functionality() {
         let effects = Effects::test();
@@ -575,14 +607,15 @@ mod tests {
         let session_id = effects.gen_uuid();
         let device_id = DeviceId::new_with_effects(&effects);
         let protocol_type = ProtocolType::Dkd;
-        
-        let state = rehydrate_context_session(context_id, session_id, device_id, protocol_type, None);
-        
+
+        let state =
+            rehydrate_context_session(context_id, session_id, device_id, protocol_type, None);
+
         // Test union type methods
         assert_eq!(state.state_name(), "ExecutingInstructions");
         assert!(!state.can_terminate());
         assert!(!state.is_final());
-        
+
         // Test protocol_id and device_id delegation
         assert_eq!(state.protocol_id(), context_id);
         assert_eq!(state.device_id(), device_id);

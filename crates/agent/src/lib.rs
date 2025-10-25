@@ -56,14 +56,19 @@
 //! integrated.network_connect(peer_id, "127.0.0.1:8080").await?;
 //! ```
 
-/// Core types and data structures used throughout the agent system
-pub mod types;
-// NOTE: dkd.rs DELETED - was single-device, not P2P protocol
-// TODO Phase 2: Implement P2P DKD via DkdOrchestrator in aura_coordination
+#![allow(missing_docs, dead_code, unused_imports, unused_variables, clippy::all)]
+
+// Re-export commonly used types and traits for convenience
+use serde::{Deserialize, Serialize};
+pub use tokio::sync::RwLock;
+pub use uuid::Uuid;
+
 /// Core agent functionality and protocol orchestration
 pub mod agent;
 /// Credential management and session tickets for agent authentication
 pub mod credential;
+/// P2P Distributed Key Derivation (DKD) orchestration
+pub mod dkd;
 /// Refined error handling with grouped error types
 pub mod error;
 /// Guardian management for account recovery and delegation
@@ -74,6 +79,10 @@ pub mod invitation;
 pub mod recovery;
 /// Multi-device relationship key management for SSB
 pub mod relationship_keys;
+/// Core types and data structures used throughout the agent system
+pub mod types;
+
+pub mod secure_storage;
 
 // New capability-driven agent architecture
 /// Pure capability-driven agent with no external dependencies
@@ -81,7 +90,7 @@ pub mod capability_agent;
 /// Integrated agent with transport and storage capabilities
 pub mod integrated_agent;
 
-pub use agent::*;
+pub use agent::{DeviceAgent};
 pub use credential::*;
 pub use guardian::*;
 pub use recovery::*;

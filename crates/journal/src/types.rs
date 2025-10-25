@@ -40,6 +40,12 @@ pub struct DeviceMetadata {
     /// Merkle proofs for DKD commitments (session_id -> proof)
     /// Required for post-compaction recovery verification
     pub dkd_commitment_proofs: std::collections::BTreeMap<Uuid, MerkleProof>,
+    /// Next nonce for this device (monotonic counter)
+    /// Used for device-specific replay protection
+    pub next_nonce: u64,
+    /// Recently used nonces for replay protection (bounded set)
+    /// Maintains a sliding window of recent nonces to prevent replay attacks
+    pub used_nonces: std::collections::BTreeSet<u64>,
 }
 
 mod verifying_key_serde {

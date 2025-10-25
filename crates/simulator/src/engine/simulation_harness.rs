@@ -117,6 +117,8 @@ impl Simulation {
                 added_at: timestamp,
                 last_seen: timestamp,
                 dkd_commitment_proofs: BTreeMap::new(),
+                next_nonce: 0,
+                used_nonces: BTreeSet::new(),
             };
 
             devices.insert(device_id, device_metadata);
@@ -234,6 +236,8 @@ impl Simulation {
             added_at: timestamp,
             last_seen: timestamp,
             dkd_commitment_proofs: BTreeMap::new(),
+            next_nonce: 0,
+            used_nonces: BTreeSet::new(),
         };
 
         let mut devices = BTreeMap::new();

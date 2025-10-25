@@ -1,6 +1,6 @@
 //! SSB Envelope Recognition
 //!
-//! Implements envelope recognition as specified in docs/051_rendezvous_ssb.md Section 4.2
+//! Implements envelope recognition as specified in docs/041_rendezvous.md Section 4.2
 //! "CRDT-based Publishing & Recognition".
 //!
 //! Recognition Flow:

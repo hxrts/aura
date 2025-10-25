@@ -45,9 +45,9 @@ rand::rngs::ThreadRng
 ```rust
 fn create_session(effects: &aura_crypto::Effects) -> Session {
     Session {
-        id: effects.gen_uuid(),           // ✅ Deterministic UUID
-        created_at: effects.now().unwrap_or(0), // ✅ Controlled time
-        nonce: effects.random_bytes::<32>(), // ✅ Seeded randomness
+        id: effects.gen_uuid(),           // [VERIFIED] Deterministic UUID
+        created_at: effects.now().unwrap_or(0), // [VERIFIED] Controlled time
+        nonce: effects.random_bytes::<32>(), // [VERIFIED] Seeded randomness
     }
 }
 
@@ -63,12 +63,12 @@ fn test_session_creation() {
 ```rust
 fn create_session_bad() -> Session {
     Session {
-        id: Uuid::new_v4(),              // ❌ Lint error!
-        created_at: SystemTime::now()   // ❌ Lint error!
+        id: Uuid::new_v4(),              // [NOT IMPLEMENTED] Lint error!
+        created_at: SystemTime::now()   // [NOT IMPLEMENTED] Lint error!
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs(),
-        nonce: rand::random(),           // ❌ Lint error!
+        nonce: rand::random(),           // [NOT IMPLEMENTED] Lint error!
     }
 }
 ```
@@ -81,7 +81,7 @@ Some code legitimately needs direct access to system resources. These cases are 
 ```rust
 impl TimeSource for SystemTimeSource {
     fn current_timestamp(&self) -> Result<u64> {
-        #[allow(clippy::disallowed_methods)] // ✅ Acceptable in effects implementation
+        #[allow(clippy::disallowed_methods)] // [VERIFIED] Acceptable in effects implementation
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -96,7 +96,7 @@ impl Default for OperationId {
     fn default() -> Self {
         // Note: Default implementation uses non-deterministic UUID
         // Prefer using new_with_effects() for deterministic behavior
-        #[allow(clippy::disallowed_methods)] // ✅ Documented exception
+        #[allow(clippy::disallowed_methods)] // [VERIFIED] Documented exception
         Self(Uuid::new_v4())
     }
 }
