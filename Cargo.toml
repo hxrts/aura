@@ -1,12 +1,13 @@
 # Top-level workspace for Aura - threshold identity and encrypted storage platform
 [workspace]
 resolver = "2"
-exclude = ["console", "ext/*"]  # Console is a separate WASM project, ext/* are external dependencies
+exclude = ["ext/*"]  # ext/* are external dependencies
 # Note: ext/quint/evaluator still shows profile warnings due to path dependency in quint-api
 members = [
     "crates/agent",
     "crates/groups",
     "crates/coordination",
+    "crates/protocol-core",
     "crates/crypto",
     "crates/journal",
     "crates/store",
@@ -24,10 +25,10 @@ members = [
     # "crates/live-client",
     # "crates/analysis-client",
     # "crates/wasm-core", # Temporarily disabled - needs error API migration
-    "crates/session-types",
     "crates/quint-api",
+    "crates/session-types",
     "crates/aura-types",
-    # "console",              # Temporarily disabled - needs error API migration
+    # "crates/console",       # Temporarily disabled - needs error API migration
 ]
 
 
