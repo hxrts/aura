@@ -5,24 +5,16 @@
 
 use super::base_context::BaseContext;
 use super::time::WakeCondition;
-use super::types::*;
 use super::{
     EventFilter, EventPredicate, EventTypePattern, Instruction, InstructionResult,
-    LedgerStateSnapshot,
+    LedgerStateSnapshot, ProtocolError, ProtocolErrorType,
 };
-use aura_journal::{DeviceId, Event, EventType, GuardianId};
+use aura_types::{DeviceId, GuardianId};
+use aura_journal::{Event, EventType};
 use uuid::Uuid;
 
 /// Context for DKD protocol - uses only base fields
-pub struct DkdContext {
-    base: BaseContext,
-}
-
-impl DkdContext {
-    pub fn new(base: BaseContext) -> Self {
-        DkdContext { base }
-    }
-}
+pub type DkdContext = BaseContext;
 
 /// Context for Resharing protocol
 pub struct ResharingContext {
@@ -95,26 +87,10 @@ impl RecoveryContext {
 }
 
 /// Context for Locking protocol - uses only base fields
-pub struct LockingContext {
-    base: BaseContext,
-}
-
-impl LockingContext {
-    pub fn new(base: BaseContext) -> Self {
-        LockingContext { base }
-    }
-}
+pub type LockingContext = BaseContext;
 
 /// Context for Compaction protocol - uses only base fields
-pub struct CompactionContext {
-    base: BaseContext,
-}
-
-impl CompactionContext {
-    pub fn new(base: BaseContext) -> Self {
-        CompactionContext { base }
-    }
-}
+pub type CompactionContext = BaseContext;
 
 /// Trait to provide common protocol context functionality
 pub trait ProtocolContextTrait {
@@ -196,11 +172,32 @@ macro_rules! impl_base_delegation {
     };
 }
 
-impl_base_delegation!(DkdContext);
 impl_base_delegation!(ResharingContext);
 impl_base_delegation!(RecoveryContext);
-impl_base_delegation!(LockingContext);
-impl_base_delegation!(CompactionContext);
+
+// Implement ProtocolContextTrait for BaseContext to support type alias pattern
+impl ProtocolContextTrait for BaseContext {
+    fn base(&self) -> &BaseContext {
+        self
+    }
+    
+    fn base_mut(&mut self) -> &mut BaseContext {
+        self
+    }
+    
+    fn execute(
+        &mut self,
+        instruction: Instruction,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<InstructionResult, ProtocolError>>
+                + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async move { execute_instruction(self, instruction).await })
+    }
+}
 
 // Additional methods specific to recovery
 impl RecoveryContext {
@@ -216,19 +213,6 @@ impl RecoveryContext {
     }
 }
 
-// Additional methods specific to DKD
-impl DkdContext {
-    pub async fn get_dkd_commitment_root(&self) -> Result<[u8; 32], ProtocolError> {
-        self.base.get_dkd_commitment_root().await
-    }
-
-    pub fn set_context_capsule(
-        &mut self,
-        capsule: std::collections::BTreeMap<String, String>,
-    ) -> Result<(), ProtocolError> {
-        self.base.set_context_capsule(capsule)
-    }
-}
 
 /// Common instruction execution logic
 async fn execute_instruction(
@@ -272,6 +256,9 @@ async fn write_to_ledger(
     base: &mut BaseContext,
     event: Event,
 ) -> Result<InstructionResult, ProtocolError> {
+    // Store a copy of the event for protocol result collection
+    base._collected_events.push(event.clone());
+    
     // Write to ledger (may be shared in simulation for instant CRDT sync)
     let mut ledger = base.ledger.write().await;
 
@@ -545,7 +532,7 @@ async fn check_session_collision(
     }
 
     // Add our own request to the lottery
-    let my_device_id = aura_journal::DeviceId(base.device_id);
+    let my_device_id = DeviceId(base.device_id);
     let my_ticket = compute_lottery_ticket(&my_device_id, &last_event_hash);
     collision_requests.push(RequestOperationLockEvent {
         operation_type,

@@ -1,7 +1,7 @@
 // BeeKEM CGKA events for journal integration
 
 use crate::types::*;
-use aura_journal::DeviceId;
+use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -62,11 +62,11 @@ impl KeyhiveCgkaOperation {
             signature: Vec::new(), // To be filled by signing process
         }
     }
-    
+
     /// Compute hash for signing/verification
     pub fn hash(&self) -> crate::Result<[u8; 32]> {
         let bytes = serde_json::to_vec(self)
-            .map_err(|e| crate::CgkaError::SerializationError(e.to_string()))?;
+            .map_err(|e| crate::AuraError::serialization_failed(e.to_string()))?;
         Ok(*blake3::hash(&bytes).as_bytes())
     }
 }
@@ -102,7 +102,7 @@ impl RosterDelta {
             new_size: 0,
         }
     }
-    
+
     pub fn add_members(members: Vec<MemberId>, previous_size: u32) -> Self {
         let new_size = previous_size + members.len() as u32;
         Self {
@@ -112,7 +112,7 @@ impl RosterDelta {
             new_size,
         }
     }
-    
+
     pub fn remove_members(members: Vec<MemberId>, previous_size: u32) -> Self {
         let new_size = previous_size - members.len() as u32;
         Self {
@@ -141,13 +141,9 @@ pub enum TreeUpdateType {
         key_package: KeyPackage,
     },
     /// Remove leaf node
-    RemoveLeaf {
-        member_id: MemberId,
-    },
+    RemoveLeaf { member_id: MemberId },
     /// Update existing node
-    UpdateNode {
-        new_public_key: PublicKey,
-    },
+    UpdateNode { new_public_key: PublicKey },
 }
 
 /// Update to a node in the tree path
@@ -179,4 +175,3 @@ pub struct CgkaEpochTransitionEvent {
     pub committed_operations: Vec<OperationId>,
     pub transition_timestamp: u64,
 }
-

@@ -5,7 +5,8 @@
 
 use crate::device::test_device_with_effects;
 use aura_crypto::Effects;
-use aura_journal::{AccountId, AccountState};
+use aura_journal::AccountState;
+use aura_types::{AccountId, AccountIdExt};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
 /// Create a test account with given effects

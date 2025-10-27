@@ -1,0 +1,52 @@
+# Choreographic Safety Invariant Testing
+
+[metadata]
+name = "choreographic_safety"
+description = "Verify choreographic protocols maintain safety invariants"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["choreography", "safety", "protocol", "invariant"]
+
+[setup]
+participants = 3
+threshold = 2
+seed = 333
+
+[network]
+latency_range = [10, 50]
+drop_rate = 0.05
+
+[[phases]]
+name = "protocol_execution"
+description = "Execute choreographic protocol"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "multi_round_protocol", participants = ["alice", "bob", "charlie"], threshold = 2 }
+]
+
+[[phases]]
+name = "safety_verification"
+description = "Verify no deadlocks or safety violations"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "no_deadlock", expected = true },
+    { type = "verify_property", property = "protocol_completed", expected = true },
+    { type = "verify_property", property = "all_messages_delivered", expected = true }
+]
+
+[[properties]]
+name = "no_deadlock"
+property_type = "safety"
+
+[[properties]]
+name = "protocol_completed"
+property_type = "liveness"
+
+[[properties]]
+name = "all_messages_delivered"
+property_type = "safety"
+
+[[properties]]
+name = "choreographic_projection_valid"
+property_type = "safety"
+

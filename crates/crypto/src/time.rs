@@ -21,7 +21,6 @@ pub fn current_timestamp_with_effects(effects: &crate::Effects) -> Result<u64> {
     effects.now()
 }
 
-
 #[cfg(test)]
 #[allow(warnings, clippy::all)]
 mod tests {

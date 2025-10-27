@@ -4,7 +4,7 @@
 //! that works identically in both simulation and production environments.
 //!
 //! Key principles:
-//! - Zero polling: All waiting is event-driven with specific wake conditions
+//! - No polling: All waiting is event-driven with specific wake conditions
 //! - Deterministic simulation: Time advancement is controlled by simulation engine
 //! - Clean architecture: Single execution model for all environments
 

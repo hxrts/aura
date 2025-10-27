@@ -1,15 +1,26 @@
 // Account status display
+//
+// NOTE: Temporarily simplified - agent dependencies disabled
 
+use crate::commands::common;
 use crate::config::Config;
-use aura_agent::IdentityConfig;
+// Temporarily disabled - requires agent crate
+// use aura_agent::IdentityConfig;
 
+/// Display the current account status from the configuration file
+///
+/// # Arguments
+/// * `config_path` - Path to the account configuration file
 pub async fn show_status(config_path: &str) -> anyhow::Result<()> {
-    // Load config
-    let config = match Config::load(config_path).await {
+    // Load config using centralized error handling
+    let config_path_buf = std::path::PathBuf::from(config_path);
+    let config = match Config::load(&config_path_buf).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Error loading config from {}: {}", config_path, e);
-            eprintln!("Run 'aura init' first to create an account");
+            eprintln!(
+                "{}",
+                common::errors::config_load_failed(&config_path_buf, &e)
+            );
             return Ok(());
         }
     };
@@ -31,45 +42,49 @@ pub async fn show_status(config_path: &str) -> anyhow::Result<()> {
         println!("Ledger loaded:  OK");
     }
 
+    // Temporarily disabled - requires agent crate
     // Check key share in secure storage
-    println!("\n--- Key Share ---");
-    
+    // println!("\n--- Key Share ---");
+    //
     // Try to load identity config to get key_id
-    let identity_config_path = config.data_dir.join("identity").join("config.toml");
-    if identity_config_path.exists() {
-        match IdentityConfig::load(&identity_config_path.to_string_lossy()) {
-            Ok(identity_config) => {
-                use aura_agent::secure_storage::{SecureStorage, PlatformSecureStorage};
-                
-                match PlatformSecureStorage::new() {
-                    Ok(secure_storage) => {
-                        match secure_storage.load_key_share(&identity_config.key_id) {
-                            Ok(_) => {
-                                println!("Key ID:         {}", identity_config.key_id);
-                                println!("Storage:        Secure platform storage");
-                                println!("Share loaded:   OK");
-                            }
-                            Err(_) => {
-                                println!("Key ID:         {}", identity_config.key_id);
-                                println!("Storage:        Secure platform storage");
-                                println!("Share loaded:   FAILED (not found in secure storage)");
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("Storage:        ERROR: {}", e);
-                    }
-                }
-            }
-            Err(_) => {
-                println!("Key ID:         Unknown (config not found)");
-                println!("Storage:        Unable to check");
-            }
-        }
-    } else {
-        println!("Key ID:         Unknown (identity config not found)");
-        println!("Storage:        Unable to check");
-    }
+    // let identity_config_path = config.data_dir.join("identity").join("config.toml");
+    // if identity_config_path.exists() {
+    //     match IdentityConfig::load(&identity_config_path.to_string_lossy()) {
+    //         Ok(identity_config) => {
+    //             use aura_agent::secure_storage::{PlatformSecureStorage, SecureStorage};
+    //
+    //             match PlatformSecureStorage::new() {
+    //                 Ok(secure_storage) => {
+    //                     match secure_storage.load_key_share(&identity_config.key_id) {
+    //                         Ok(_) => {
+    //                             println!("Key ID:         {}", identity_config.key_id);
+    //                             println!("Storage:        Secure platform storage");
+    //                             println!("Share loaded:   OK");
+    //                         }
+    //                         Err(_) => {
+    //                             println!("Key ID:         {}", identity_config.key_id);
+    //                             println!("Storage:        Secure platform storage");
+    //                             println!("Share loaded:   FAILED (not found in secure storage)");
+    //                         }
+    //                     }
+    //                 }
+    //                 Err(e) => {
+    //                     println!("Storage:        ERROR: {}", e);
+    //                 }
+    //             }
+    //         }
+    //         Err(_) => {
+    //             println!("Key ID:         Unknown (config not found)");
+    //             println!("Storage:        Unable to check");
+    //         }
+    //     }
+    // } else {
+    //     println!("Key ID:         Unknown (identity config not found)");
+    //     println!("Storage:        Unable to check");
+    // }
+
+    println!("\n--- Key Share ---");
+    println!("Status:         Disabled (requires agent crate)");
 
     println!("\n═══════════════════════════════════════════════\n");
 

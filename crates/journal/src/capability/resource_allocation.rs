@@ -8,7 +8,7 @@
 //!          work/ssb_storage.md Phase 6.4
 
 use super::unified::CapabilityToken;
-use crate::DeviceId;
+use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -564,7 +564,7 @@ impl std::error::Error for ResourceError {}
 mod tests {
     use super::*;
     use crate::capability::unified::{Permission, StorageOperation};
-    use crate::DeviceId;
+    use aura_types::DeviceId;
     use uuid::Uuid;
 
     fn test_capability() -> CapabilityToken {

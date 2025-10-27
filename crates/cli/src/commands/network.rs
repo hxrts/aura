@@ -2,9 +2,8 @@
 
 use crate::commands::common;
 use crate::config::Config;
-use aura_journal::{
-    capability::{identity::IndividualId, types::CapabilityScope},
-};
+use anyhow::Context;
+use aura_journal::capability::{identity::IndividualId, types::CapabilityScope};
 use clap::Subcommand;
 use std::collections::BTreeSet;
 use tracing::info;
@@ -15,257 +14,282 @@ pub enum NetworkCommand {
     Connect {
         /// Peer individual ID
         peer_id: String,
-        
+
         /// Peer address
         address: String,
     },
-    
+
     /// Disconnect from peer
     Disconnect {
         /// Peer individual ID
         peer_id: String,
     },
-    
+
     /// List connected peers
     Peers,
-    
+
     /// Create MLS group with network propagation
     CreateGroup {
         /// Group identifier
         group_id: String,
-        
+
         /// Initial members (comma-separated individual IDs)
         #[arg(long)]
         members: String,
     },
-    
+
     /// Send data to group members
     SendData {
         /// Target group ID
         group_id: String,
-        
+
         /// Data to send
         data: String,
-        
+
         /// Context for the data
         #[arg(long, default_value = "message")]
         context: String,
     },
-    
+
     /// Delegate capability to peer via network
     DelegateCapability {
         /// Parent capability scope (namespace:operation)
         #[arg(long)]
         parent: String,
-        
+
         /// Target subject ID
         #[arg(long)]
         subject: String,
-        
+
         /// New capability scope (namespace:operation)
         #[arg(long)]
         scope: String,
-        
+
         /// Optional resource constraint
         #[arg(long)]
         resource: Option<String>,
-        
+
         /// Target peers (comma-separated, optional for broadcast)
         #[arg(long)]
         peers: Option<String>,
-        
+
         /// Expiry timestamp (Unix seconds)
         #[arg(long)]
         expiry: Option<u64>,
     },
-    
+
     /// Revoke capability via network
     RevokeCapability {
         /// Capability ID to revoke
         capability_id: String,
-        
+
         /// Reason for revocation
         #[arg(long)]
         reason: String,
-        
+
         /// Target peers (comma-separated, optional for broadcast)
         #[arg(long)]
         peers: Option<String>,
     },
-    
+
     /// Show network statistics
     Stats,
-    
+
     /// Show CGKA group status
     Groups,
-    
+
     /// Process capability changes for group
     ProcessChanges {
         /// Group ID to process
         group_id: String,
     },
-    
+
     /// Show pending network operations
     Pending,
 }
 
-pub async fn handle_network_command(command: NetworkCommand, config: &Config) -> anyhow::Result<()> {
+pub async fn handle_network_command(
+    command: NetworkCommand,
+    config: &Config,
+) -> anyhow::Result<()> {
     match command {
         NetworkCommand::Connect { peer_id, address } => {
             connect_peer(config, &peer_id, &address).await
         }
-        
-        NetworkCommand::Disconnect { peer_id } => {
-            disconnect_peer(config, &peer_id).await
-        }
-        
-        NetworkCommand::Peers => {
-            list_peers(config).await
-        }
-        
+
+        NetworkCommand::Disconnect { peer_id } => disconnect_peer(config, &peer_id).await,
+
+        NetworkCommand::Peers => list_peers(config).await,
+
         NetworkCommand::CreateGroup { group_id, members } => {
             create_group(config, &group_id, &members).await
         }
-        
-        NetworkCommand::SendData { group_id, data, context } => {
-            send_data(config, &group_id, &data, &context).await
+
+        NetworkCommand::SendData {
+            group_id,
+            data,
+            context,
+        } => send_data(config, &group_id, &data, &context).await,
+
+        NetworkCommand::DelegateCapability {
+            parent,
+            subject,
+            scope,
+            resource,
+            peers,
+            expiry,
+        } => {
+            delegate_capability(
+                config,
+                &parent,
+                &subject,
+                &scope,
+                resource.as_deref(),
+                peers.as_deref(),
+                expiry,
+            )
+            .await
         }
-        
-        NetworkCommand::DelegateCapability { parent, subject, scope, resource, peers, expiry } => {
-            delegate_capability(config, &parent, &subject, &scope, resource.as_deref(), peers.as_deref(), expiry).await
-        }
-        
-        NetworkCommand::RevokeCapability { capability_id, reason, peers } => {
-            revoke_capability(config, &capability_id, &reason, peers.as_deref()).await
-        }
-        
-        NetworkCommand::Stats => {
-            show_network_stats(config).await
-        }
-        
-        NetworkCommand::Groups => {
-            show_groups(config).await
-        }
-        
+
+        NetworkCommand::RevokeCapability {
+            capability_id,
+            reason,
+            peers,
+        } => revoke_capability(config, &capability_id, &reason, peers.as_deref()).await,
+
+        NetworkCommand::Stats => show_network_stats(config).await,
+
+        NetworkCommand::Groups => show_groups(config).await,
+
         NetworkCommand::ProcessChanges { group_id } => {
             process_capability_changes(config, &group_id).await
         }
-        
-        NetworkCommand::Pending => {
-            show_pending_operations(config).await
-        }
+
+        NetworkCommand::Pending => show_pending_operations(config).await,
     }
 }
 
 async fn connect_peer(config: &Config, peer_id: &str, address: &str) -> anyhow::Result<()> {
     info!("Connecting to peer {} at {}", peer_id, address);
-    
+
     let agent = common::create_agent(config).await?;
     let peer = IndividualId::new(peer_id);
-    
+
     // Connect to peer
     agent.network_connect(peer.clone(), address).await?;
-    
+
     println!("[OK] Connected to peer successfully");
     println!("  Peer ID: {}", peer_id);
     println!("  Address: {}", address);
-    
+
     Ok(())
 }
 
 async fn disconnect_peer(config: &Config, peer_id: &str) -> anyhow::Result<()> {
     info!("Disconnecting from peer {}", peer_id);
-    
+
     let agent = common::create_agent(config).await?;
     let peer = IndividualId::new(peer_id);
-    
+
     // Remove peer from transport
     agent.transport.remove_peer(&peer).await;
-    
+
     println!("[OK] Disconnected from peer");
     println!("  Peer ID: {}", peer_id);
-    
+
     Ok(())
 }
 
 async fn list_peers(config: &Config) -> anyhow::Result<()> {
     info!("Listing connected peers");
-    
+
     let agent = common::create_agent(config).await?;
-    
+
     // Get connected peers
     let peers = agent.transport.get_peers().await;
-    
+
     if peers.is_empty() {
         println!("No connected peers");
         return Ok(());
     }
-    
+
     println!("Connected Peers:");
     println!("================");
-    
+
     for peer in &peers {
         println!("• {}", peer.0);
     }
-    
+
     println!("Total: {} peers", peers.len());
-    
+
     Ok(())
 }
 
 async fn create_group(config: &Config, group_id: &str, members: &str) -> anyhow::Result<()> {
-    info!("Creating network MLS group '{}' with members: {}", group_id, members);
-    
+    info!(
+        "Creating network MLS group '{}' with members: {}",
+        group_id, members
+    );
+
     let mut agent = common::create_agent(config).await?;
-    
+
     // Parse member list
-    let member_ids: Vec<IndividualId> = members
-        .split(',')
-        .map(|s| s.trim())
-        .map(|s| IndividualId::new(s))
-        .collect();
-    
+    let member_ids = common::parse_peer_list(&members);
+
     if member_ids.is_empty() {
         return Err(anyhow::anyhow!("At least one member must be specified"));
     }
-    
+
     // Create group with network propagation
-    agent.network_create_group(group_id, member_ids.clone()).await?;
-    
+    agent
+        .network_create_group(group_id, member_ids.clone())
+        .await?;
+
     println!("[OK] MLS group created and propagated to network");
     println!("  Group ID: {}", group_id);
     println!("  Members: {}", member_ids.len());
     for member in &member_ids {
         println!("    - {}", member.0);
     }
-    
+
     Ok(())
 }
 
-async fn send_data(config: &Config, group_id: &str, data: &str, context: &str) -> anyhow::Result<()> {
-    info!("Sending data to group '{}' with context '{}'", group_id, context);
-    
+async fn send_data(
+    config: &Config,
+    group_id: &str,
+    data: &str,
+    context: &str,
+) -> anyhow::Result<()> {
+    info!(
+        "Sending data to group '{}' with context '{}'",
+        group_id, context
+    );
+
     let agent = common::create_agent(config).await?;
-    
+
     // Get group members from capability graph
     let member_scope = CapabilityScope::with_resource("mls", "member", group_id);
-    
+
     // Send data to group
     let data_bytes = data.as_bytes().to_vec();
-    let message_id = agent.transport.send_data(
-        data_bytes.clone(),
-        format!("{}:{}", context, group_id),
-        member_scope,
-        None, // Send to all group members
-    ).await
-        .map_err(|e| anyhow::anyhow!("Failed to send data: {}", e))?;
-    
+    let message_id = agent
+        .transport
+        .send_data(
+            data_bytes.clone(),
+            format!("{}:{}", context, group_id),
+            member_scope,
+            None, // Send to all group members
+        )
+        .await
+        .context("Failed to send data to group")?;
+
     println!("[OK] Data sent to group");
     println!("  Group ID: {}", group_id);
     println!("  Context: {}", context);
     println!("  Size: {} bytes", data_bytes.len());
     println!("  Message ID: {}", message_id);
-    
+
     Ok(())
 }
 
@@ -279,39 +303,38 @@ async fn delegate_capability(
     expiry: Option<u64>,
 ) -> anyhow::Result<()> {
     info!("Delegating capability {} to {} via network", scope, subject);
-    
+
     let mut agent = common::create_agent(config).await?;
-    
+
     // Parse parent capability scope
     let parent_scope = common::parse_capability_scope(parent, None)?;
-    
+
     // Parse new capability scope
     let new_scope = common::parse_capability_scope(scope, resource)?;
-    
+
     // Create target subject
     let target_subject = aura_journal::capability::types::Subject::new(subject);
-    
+
     // Parse target peers if provided
     let recipients = if let Some(peer_str) = peers {
-        let peer_ids: BTreeSet<IndividualId> = peer_str
-            .split(',')
-            .map(|s| s.trim())
-            .map(|s| IndividualId::new(s))
-            .collect();
+        let peer_ids: BTreeSet<IndividualId> =
+            common::parse_peer_list(peer_str).into_iter().collect();
         Some(peer_ids)
     } else {
         None
     };
-    
+
     // Delegate capability via network
-    agent.network_delegate_capability(
-        parent_scope,
-        target_subject,
-        new_scope.clone(),
-        expiry,
-        recipients.clone(),
-    ).await?;
-    
+    agent
+        .network_delegate_capability(
+            parent_scope,
+            target_subject,
+            new_scope.clone(),
+            expiry,
+            recipients.clone(),
+        )
+        .await?;
+
     println!("[OK] Capability delegated via network");
     println!("  Subject: {}", subject);
     println!("  Scope: {}:{}", new_scope.namespace, new_scope.operation);
@@ -323,7 +346,7 @@ async fn delegate_capability(
     } else {
         println!("  Broadcast to all peers");
     }
-    
+
     Ok(())
 }
 
@@ -333,37 +356,40 @@ async fn revoke_capability(
     reason: &str,
     peers: Option<&str>,
 ) -> anyhow::Result<()> {
-    info!("Revoking capability {} via network: {}", capability_id, reason);
-    
+    info!(
+        "Revoking capability {} via network: {}",
+        capability_id, reason
+    );
+
     let mut agent = common::create_agent(config).await?;
-    
+
     // Parse capability ID
-    let cap_id_bytes = hex::decode(capability_id)
-        .map_err(|_| anyhow::anyhow!("Invalid capability ID hex format"))?;
-    
+    let cap_id_bytes = hex::decode(capability_id).context("Invalid capability ID hex format")?;
+
     if cap_id_bytes.len() != 32 {
-        return Err(anyhow::anyhow!("Capability ID must be 32 bytes (64 hex characters)"));
+        return Err(anyhow::anyhow!(
+            "Capability ID must be 32 bytes (64 hex characters)"
+        ));
     }
-    
+
     let mut cap_id_array = [0u8; 32];
     cap_id_array.copy_from_slice(&cap_id_bytes);
     let cap_id = aura_journal::capability::types::CapabilityId(cap_id_array);
-    
+
     // Parse target peers if provided
     let recipients = if let Some(peer_str) = peers {
-        let peer_ids: BTreeSet<IndividualId> = peer_str
-            .split(',')
-            .map(|s| s.trim())
-            .map(|s| IndividualId::new(s))
-            .collect();
+        let peer_ids: BTreeSet<IndividualId> =
+            common::parse_peer_list(peer_str).into_iter().collect();
         Some(peer_ids)
     } else {
         None
     };
-    
+
     // Revoke capability via network
-    agent.network_revoke_capability(cap_id, reason.to_string(), recipients.clone()).await?;
-    
+    agent
+        .network_revoke_capability(cap_id, reason.to_string(), recipients.clone())
+        .await?;
+
     println!("[OK] Capability revoked via network");
     println!("  Capability ID: {}", capability_id);
     println!("  Reason: {}", reason);
@@ -372,98 +398,99 @@ async fn revoke_capability(
     } else {
         println!("  Broadcast to all peers");
     }
-    
+
     Ok(())
 }
 
 async fn show_network_stats(config: &Config) -> anyhow::Result<()> {
     info!("Showing network statistics");
-    
+
     let agent = common::create_agent(config).await?;
-    
+
     // Get network stats
     let network_stats = agent.get_network_stats().await;
     let storage_stats = agent.get_storage_stats().await?;
-    
+
     println!("Network Statistics:");
     println!("==================");
     println!("Connected Peers: {}", network_stats.connected_peers);
     println!("Pending Messages: {}", network_stats.pending_messages);
-    
+
     println!("\nStorage Statistics:");
     println!("==================");
     println!("Total Entries: {}", storage_stats.total_entries);
     println!("Accessible Entries: {}", storage_stats.accessible_entries);
-    
+
     Ok(())
 }
 
 async fn show_groups(config: &Config) -> anyhow::Result<()> {
     info!("Showing CGKA groups");
-    
+
     let agent = common::create_agent(config).await?;
-    
+
     // Get group memberships
     let groups = agent.capability_agent.list_groups();
-    
+
     if groups.is_empty() {
         println!("No group memberships found");
         return Ok(());
     }
-    
+
     println!("CGKA Groups:");
     println!("============");
-    
+
     for group_id in &groups {
         println!("• {}", group_id);
-        
+
         // Get group epoch if available
         if let Some(epoch) = agent.capability_agent.cgka_manager.get_epoch(group_id) {
             println!("  Epoch: {}", epoch.value());
         }
-        
+
         // Get roster if available
         if let Some(roster) = agent.capability_agent.cgka_manager.get_roster(group_id) {
             println!("  Members: {}", roster.member_count());
         }
-        
+
         println!();
     }
-    
+
     println!("Total: {} groups", groups.len());
-    
+
     Ok(())
 }
 
 async fn process_capability_changes(config: &Config, group_id: &str) -> anyhow::Result<()> {
     info!("Processing capability changes for group '{}'", group_id);
-    
+
     let mut agent = common::create_agent(config).await?;
-    
+
     // Process capability changes
-    agent.capability_agent.process_capability_changes(group_id)?;
-    
+    agent
+        .capability_agent
+        .process_capability_changes(group_id)?;
+
     println!("[OK] Capability changes processed for group '{}'", group_id);
     println!("  CGKA operations generated and applied");
-    
+
     Ok(())
 }
 
 async fn show_pending_operations(config: &Config) -> anyhow::Result<()> {
     info!("Showing pending network operations");
-    
+
     let agent = common::create_agent(config).await?;
-    
+
     let pending_count = agent.transport.pending_messages_count().await;
-    
+
     println!("Pending Network Operations:");
     println!("==========================");
     println!("Pending Messages: {}", pending_count);
-    
+
     if pending_count > 0 {
         println!("\nUse 'aura network stats' for more detailed information");
     }
-    
+
     Ok(())
 }
-

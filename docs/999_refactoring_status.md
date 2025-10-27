@@ -31,7 +31,6 @@ The following files have been modified but the migration is incomplete, causing 
 ### CLI Layer
 - `crates/cli/src/commands/auth.rs`
 - `crates/cli/src/commands/authz.rs`
-- `crates/cli/src/commands/capability.rs`
 - `crates/cli/src/commands/network.rs`
 - `crates/cli/src/commands/storage.rs`
 - `crates/cli/src/commands/mod.rs`

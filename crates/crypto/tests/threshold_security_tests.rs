@@ -61,8 +61,13 @@ fn test_frost_unforgeability_insufficient_shares() {
         .collect();
 
     // Attempt threshold signing with insufficient participants
-    let result =
-        FrostSigner::threshold_sign(message, &participating_packages, &pubkey_package, 3, &mut rng);
+    let result = FrostSigner::threshold_sign(
+        message,
+        &participating_packages,
+        &pubkey_package,
+        3,
+        &mut rng,
+    );
 
     // Should fail due to insufficient participants
     assert!(
@@ -201,8 +206,9 @@ fn test_frost_different_thresholds() {
 
     // Test 2-of-2
     let (key_packages_2, pubkey_package_2) = setup_frost_keys(2, 2);
-    let sig_2 = FrostSigner::threshold_sign(message, &key_packages_2, &pubkey_package_2, 2, &mut rng)
-        .expect("2-of-2 signing should succeed");
+    let sig_2 =
+        FrostSigner::threshold_sign(message, &key_packages_2, &pubkey_package_2, 2, &mut rng)
+            .expect("2-of-2 signing should succeed");
 
     let vk_2 = frost_verifying_key_to_dalek(pubkey_package_2.verifying_key()).unwrap();
     assert!(
@@ -212,8 +218,9 @@ fn test_frost_different_thresholds() {
 
     // Test 3-of-3
     let (key_packages_3, pubkey_package_3) = setup_frost_keys(3, 3);
-    let sig_3 = FrostSigner::threshold_sign(message, &key_packages_3, &pubkey_package_3, 3, &mut rng)
-        .expect("3-of-3 signing should succeed");
+    let sig_3 =
+        FrostSigner::threshold_sign(message, &key_packages_3, &pubkey_package_3, 3, &mut rng)
+            .expect("3-of-3 signing should succeed");
 
     let vk_3 = frost_verifying_key_to_dalek(pubkey_package_3.verifying_key()).unwrap();
     assert!(
@@ -223,8 +230,9 @@ fn test_frost_different_thresholds() {
 
     // Test 5-of-5
     let (key_packages_5, pubkey_package_5) = setup_frost_keys(5, 5);
-    let sig_5 = FrostSigner::threshold_sign(message, &key_packages_5, &pubkey_package_5, 5, &mut rng)
-        .expect("5-of-5 signing should succeed");
+    let sig_5 =
+        FrostSigner::threshold_sign(message, &key_packages_5, &pubkey_package_5, 5, &mut rng)
+            .expect("5-of-5 signing should succeed");
 
     let vk_5 = frost_verifying_key_to_dalek(pubkey_package_5.verifying_key()).unwrap();
     assert!(

@@ -12,10 +12,12 @@ workspace = true
 
 [dependencies]
 # Workspace crates
+aura-errors = { path = "../aura-errors" }
 aura-crypto = { path = "../crypto" }
 aura-journal = { path = "../journal" }
 aura-groups = { path = "../groups" }
-aura-session-types = { path = "../session-types" }
+aura-types = { path = "../aura-types" }
+session_types = { path = "../session-types" }
 aura-coordination = { path = "../coordination" }
 
 # Networking

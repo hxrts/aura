@@ -1,0 +1,65 @@
+# Byzantine Coordinator Attack Scenario
+
+[metadata]
+name = "byzantine_coordinator_attack"
+description = "Coordinator sends conflicting messages to different participants"
+version = "1.0.0"
+author = "Aura Security Team"
+tags = ["byzantine", "adversarial", "coordinator", "security"]
+
+[setup]
+participants = 5
+threshold = 3
+seed = 888
+
+[network]
+latency_range = [75, 125]
+drop_rate = 0.02
+
+[byzantine]
+count = 1
+participants = ["alice"]
+default_strategies = ["conflicting_messages"]
+
+[[phases]]
+name = "protocol_initiation"
+description = "Start FROST protocol with byzantine coordinator"
+timeout_seconds = 5
+actions = [
+    { type = "inject_byzantine", participant = "alice", behavior = "conflicting_messages" },
+    { type = "run_choreography", choreography = "frost_signing", participants = ["alice", "bob", "charlie", "dave", "eve"], threshold = 3 }
+]
+
+[[phases]]
+name = "detection_phase"
+description = "Honest participants detect byzantine behavior"
+timeout_seconds = 5
+actions = [
+    { type = "wait_ticks", ticks = 100 }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify protocol aborted or recovered"
+timeout_seconds = 3
+actions = [
+    { type = "verify_property", property = "byzantine_detected", expected = true },
+    { type = "verify_property", property = "protocol_aborted_safely", expected = true }
+]
+
+[[properties]]
+name = "byzantine_detected"
+property_type = "safety"
+
+[[properties]]
+name = "protocol_aborted_safely"
+property_type = "safety"
+
+[[properties]]
+name = "honest_participants_consistent"
+property_type = "safety"
+
+[[properties]]
+name = "no_invalid_signature"
+property_type = "safety"
+

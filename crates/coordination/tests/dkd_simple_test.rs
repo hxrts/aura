@@ -3,11 +3,11 @@
 //! This test verifies the core DKD choreography function works correctly
 //! by directly testing the coordination layer implementation.
 
-use aura_coordination::choreography::dkd::dkd_choreography;
-use aura_coordination::execution::{ProtocolContext, StubTransport, SessionLifecycle};
 use aura_coordination::execution::time::ProductionTimeSource;
+use aura_coordination::execution::{ProtocolContext, StubTransport};
 use aura_crypto::Effects;
-use aura_journal::{AccountId, AccountLedger, AccountState, DeviceId, DeviceMetadata, DeviceType};
+use aura_types::{AccountId, DeviceId};
+use aura_journal::{AccountLedger, AccountState, DeviceMetadata, DeviceType};
 use ed25519_dalek::SigningKey;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -19,7 +19,7 @@ fn create_test_account_state(effects: &Effects) -> AccountState {
     let key_bytes = effects.random_bytes::<32>();
     let signing_key = SigningKey::from_bytes(&key_bytes);
     let group_public_key = signing_key.verifying_key();
-    
+
     let device_metadata = DeviceMetadata {
         device_id: DeviceId(Uuid::new_v4()),
         device_name: "Test Device".to_string(),
@@ -31,7 +31,7 @@ fn create_test_account_state(effects: &Effects) -> AccountState {
         next_nonce: 1,
         used_nonces: std::collections::BTreeSet::new(),
     };
-    
+
     AccountState::new(account_id, group_public_key, device_metadata, 2, 3)
 }
 
@@ -55,7 +55,7 @@ async fn test_dkd_choreography_execution() {
     // Create test ledger with initial state
     let initial_state = create_test_account_state(&effects);
     let ledger = Arc::new(RwLock::new(
-        AccountLedger::new(initial_state).expect("Failed to create test ledger")
+        AccountLedger::new(initial_state).expect("Failed to create test ledger"),
     ));
 
     // Create stub transport
@@ -84,30 +84,30 @@ async fn test_dkd_choreography_execution() {
 
     // Test DKD choreography with a simple context
     let context_id = b"test-app-context".to_vec();
-    
+
     // Test DKD protocol structure and initialization (not full execution)
-    use aura_coordination::choreography::dkd::DkdProtocol;
+    use aura_coordination::protocols::dkd::DkdProtocol;
     println!("Creating DkdProtocol...");
     let protocol = DkdProtocol::new(&mut ctx, context_id.clone());
     println!("DkdProtocol created successfully");
-    
+
     // Test that the protocol can be initialized correctly
     println!("[OK] DKD protocol structure validation passed");
     println!("  Session ID: {}", session_id);
     println!("  Device ID: {}", device_id);
     println!("  Participants: {}", participants.len());
     println!("  Context ID: {}", hex::encode(&context_id));
-    
+
     // Verify context configuration
     assert_eq!(ctx.session_id(), session_id);
     assert_eq!(ctx.device_id(), device_id);
     assert_eq!(ctx.threshold(), Some(2));
     assert_eq!(ctx.participants().len(), 3);
-    
+
     println!("=== Test PASSED: DKD Protocol Structure Validated ===");
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn test_dkd_deterministic_setup() {
     println!("\n=== DKD Deterministic Setup Test ===");
 
@@ -118,14 +118,14 @@ async fn test_dkd_deterministic_setup() {
 
     for i in 0..3 {
         println!("  Run {}: Creating context...", i + 1);
-        
+
         let effects = Effects::deterministic(99999, 0); // Same seed
         let initial_state = create_test_account_state(&effects);
         let ledger = Arc::new(RwLock::new(
-            AccountLedger::new(initial_state).expect("Failed to create test ledger")
+            AccountLedger::new(initial_state).expect("Failed to create test ledger"),
         ));
         let transport = Arc::new(StubTransport::default());
-        
+
         let device_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
         let time_source = Box::new(ProductionTimeSource::new());
 
@@ -145,7 +145,7 @@ async fn test_dkd_deterministic_setup() {
         assert_eq!(ctx.session_id(), session_id);
         assert_eq!(ctx.device_id(), device_id);
         assert_eq!(ctx.threshold(), Some(1));
-        
+
         println!("  Run {}: Context created consistently", i + 1);
     }
 
@@ -169,15 +169,19 @@ async fn test_dkd_different_contexts() {
     ];
 
     for (i, context_id) in contexts.iter().enumerate() {
-        println!("  Testing context {}: {:?}", i + 1, String::from_utf8_lossy(context_id));
-        
+        println!(
+            "  Testing context {}: {:?}",
+            i + 1,
+            String::from_utf8_lossy(context_id)
+        );
+
         let effects = Effects::deterministic(77777, 0); // Same seed for all
         let initial_state = create_test_account_state(&effects);
         let ledger = Arc::new(RwLock::new(
-            AccountLedger::new(initial_state).expect("Failed to create test ledger")
+            AccountLedger::new(initial_state).expect("Failed to create test ledger"),
         ));
         let transport = Arc::new(StubTransport::default());
-        
+
         let device_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
         let time_source = Box::new(ProductionTimeSource::new());
 
@@ -194,12 +198,15 @@ async fn test_dkd_different_contexts() {
         );
 
         // Test that protocol can be created for each context
-        use aura_coordination::choreography::dkd::DkdProtocol;
+        use aura_coordination::protocols::dkd::DkdProtocol;
         let _protocol = DkdProtocol::new(&mut ctx, context_id.clone());
-        
+
         println!("  Context {}: Protocol created successfully", i + 1);
     }
 
-    println!("[OK] All {} contexts can create DKD protocols", contexts.len());
+    println!(
+        "[OK] All {} contexts can create DKD protocols",
+        contexts.len()
+    );
     println!("=== Different Contexts Test PASSED ===");
 }

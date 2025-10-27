@@ -1,0 +1,56 @@
+# Transport Gossip Bounds Invariant Testing
+
+[metadata]
+name = "transport_gossip_bounds"
+description = "Verify gossip protocol maintains bounded message propagation"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["transport", "gossip", "bounds", "invariant"]
+
+[setup]
+participants = 6
+threshold = 4
+seed = 555
+
+[network]
+latency_range = [10, 50]
+drop_rate = 0.02
+
+[[phases]]
+name = "gossip_initialization"
+description = "Initialize gossip network"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "gossip_setup", participants = ["p1", "p2", "p3", "p4", "p5", "p6"] }
+]
+
+[[phases]]
+name = "message_propagation"
+description = "Propagate message through gossip"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "gossip_broadcast", participants = ["p1"] },
+    { type = "wait_ticks", ticks = 100 }
+]
+
+[[phases]]
+name = "bounds_verification"
+description = "Verify propagation bounded"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "message_fanout_bounded", expected = true },
+    { type = "verify_property", property = "all_nodes_reached", expected = true }
+]
+
+[[properties]]
+name = "message_fanout_bounded"
+property_type = "safety"
+
+[[properties]]
+name = "all_nodes_reached"
+property_type = "liveness"
+
+[[properties]]
+name = "no_message_loops"
+property_type = "safety"
+

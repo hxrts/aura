@@ -1,12 +1,15 @@
 // Core types for threshold signing operations
 
-use crate::{CoordinationError, Result};
+use crate::Result;
+use aura_errors::AuraError;
 use ed25519_dalek::VerifyingKey;
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::num::NonZeroU16;
-use uuid::Uuid;
+
+// Import shared types from aura-types
+pub use aura_types::SessionId;
 
 /// Unique identifier for a participant in the threshold signing protocol
 ///
@@ -40,11 +43,9 @@ impl TryFrom<u16> for ParticipantId {
     type Error = crate::CoordinationError;
 
     fn try_from(id: u16) -> std::result::Result<Self, Self::Error> {
-        NonZeroU16::new(id).map(ParticipantId).ok_or_else(|| {
-            crate::CoordinationError::InvalidParticipantCount(
-                "Participant ID must be non-zero".to_string(),
-            )
-        })
+        NonZeroU16::new(id)
+            .map(ParticipantId)
+            .ok_or_else(|| AuraError::coordination_failed("Participant ID must be non-zero"))
     }
 }
 
@@ -66,7 +67,7 @@ impl IdentifierMapping {
 
         for &participant_id in participants {
             let frost_id = frost::Identifier::try_from(participant_id.0.get()).map_err(|_| {
-                crate::CoordinationError::InvalidParticipantCount(format!(
+                AuraError::coordination_failed(format!(
                     "ParticipantId {} cannot be converted to frost::Identifier",
                     participant_id.0.get()
                 ))
@@ -266,7 +267,7 @@ impl SealedShare {
             Some(associated_data.as_bytes()),
             effects,
         )
-        .map_err(|e| CoordinationError::CryptoError(e.to_string()))?;
+        .map_err(|e| AuraError::crypto_operation_failed(e.to_string()))?;
 
         Ok(SealedShare {
             device_id, // Real device_id, not placeholder
@@ -298,15 +299,15 @@ impl SealedShare {
     pub fn unseal(&self, device_id: DeviceId, device_secret: &[u8; 32]) -> Result<KeyShare> {
         // Verify device ID matches (before even attempting decryption)
         if self.device_id != device_id {
-            return Err(CoordinationError::DeviceMismatch {
-                expected: self.device_id,
-                provided: device_id,
-            });
+            return Err(AuraError::device_not_found(format!(
+                "Device mismatch: sealed for {:?}, attempted unseal by {:?}",
+                self.device_id, device_id
+            )));
         }
 
         self.sealed_data
             .unseal_value(device_secret)
-            .map_err(|e| CoordinationError::CryptoError(e.to_string()))
+            .map_err(|e| AuraError::crypto_operation_failed(e.to_string()))
     }
 }
 
@@ -315,6 +316,7 @@ impl SealedShare {
 mod seal_tests {
     #[allow(unused_imports)]
     use super::*;
+    use aura_types::DeviceIdExt;
 
     // Note: These tests verify encryption/decryption roundtrip, not FROST functionality.
     // Full DKG tests are in dkg.rs module.
@@ -462,15 +464,18 @@ mod seal_tests {
         // Verify sealed for device A
         assert_eq!(sealed_for_a.device_id, device_a);
 
-        // Attempt to unseal on device B should fail with DeviceMismatch
+        // Attempt to unseal on device B should fail with device mismatch
         let result = sealed_for_a.unseal(device_b, &device_secret);
         assert!(result.is_err());
         match result {
-            Err(CoordinationError::DeviceMismatch { expected, provided }) => {
-                assert_eq!(expected, device_a);
-                assert_eq!(provided, device_b);
+            Err(e) => {
+                assert!(
+                    e.to_string().contains("Device mismatch"),
+                    "Expected device mismatch error, got: {:?}",
+                    e
+                );
             }
-            _ => panic!("Expected DeviceMismatch error, got {:?}", result),
+            _ => panic!("Expected error, got success"),
         }
 
         // Unseal on correct device should succeed
@@ -482,23 +487,10 @@ mod seal_tests {
 }
 
 /// Session for coordinating a multi-round MPC protocol
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct SessionId(pub Uuid);
-
-impl SessionId {
-    pub fn new() -> Self {
-        SessionId(Uuid::new_v4())
-    }
-}
-
-impl Default for SessionId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// SessionId is now imported from aura-types
 
 /// Configuration for threshold signing setup
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThresholdConfig {
     /// Minimum number of participants required (M in M-of-N)
     pub threshold: u16,
@@ -509,10 +501,10 @@ pub struct ThresholdConfig {
 impl ThresholdConfig {
     pub fn new(threshold: u16, total_participants: u16) -> crate::Result<Self> {
         if threshold == 0 || threshold > total_participants {
-            return Err(crate::CoordinationError::InvalidThreshold {
-                threshold,
-                total: total_participants,
-            });
+            return Err(AuraError::coordination_failed(format!(
+                "Invalid threshold: {} must be between 1 and {}",
+                threshold, total_participants
+            )));
         }
         Ok(ThresholdConfig {
             threshold,
@@ -530,7 +522,7 @@ impl ThresholdConfig {
 }
 
 /// Threshold signature produced by M-of-N participants
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThresholdSignature {
     #[serde(with = "signature_serde")]
     pub signature: ed25519_dalek::Signature,

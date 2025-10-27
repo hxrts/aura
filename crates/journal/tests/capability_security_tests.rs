@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+#![allow(clippy::disallowed_methods, clippy::clone_on_copy)]
 // Capability Authorization Security Tests
 //
 // Tests security properties of the capability system:
@@ -10,14 +10,9 @@
 // - Capability forgery: Cannot forge capabilities without proper signatures
 
 use aura_crypto::Effects;
-use aura_journal::capability::{
-    CapabilityId, CapabilityScope, Subject, CapabilityManager, CapabilityGrant, CapabilityToken, 
-    Permission, StorageOperation, CommunicationOperation, DeviceAuthentication
-};
-use aura_journal::{DeviceId, AccountLedger, AccountState, DeviceMetadata, DeviceType};
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey, Signature};
-use std::collections::{BTreeMap, BTreeSet};
-use uuid::Uuid;
+use aura_journal::capability::{CapabilityGrant, CapabilityManager, Permission, StorageOperation};
+use aura_types::{DeviceId, DeviceIdExt};
+use ed25519_dalek::SigningKey;
 
 /// Test that only authorized devices can access resources
 #[test]
@@ -42,13 +37,16 @@ fn test_authorization_enforcement() {
     // Owner grants storage capability to authorized device
     let grant = CapabilityGrant {
         device_id: authorized,
-        permissions: vec![Permission::Storage {
-            operation: StorageOperation::Read,
-            resource: resource_id.clone(),
-        }, Permission::Storage {
-            operation: StorageOperation::Write,
-            resource: resource_id.clone(),
-        }],
+        permissions: vec![
+            Permission::Storage {
+                operation: StorageOperation::Read,
+                resource: resource_id.clone(),
+            },
+            Permission::Storage {
+                operation: StorageOperation::Write,
+                resource: resource_id.clone(),
+            },
+        ],
         issued_at: aura_crypto::time::current_timestamp_with_effects(&effects).unwrap_or(1000),
         expires_at: None,
         delegation_chain: vec![],
@@ -62,21 +60,49 @@ fn test_authorization_enforcement() {
 
     // Authorized device can access
     assert!(
-        manager.verify_storage(&authorized, StorageOperation::Read, &resource_id, current_time).is_ok(),
+        manager
+            .verify_storage(
+                &authorized,
+                StorageOperation::Read,
+                &resource_id,
+                current_time
+            )
+            .is_ok(),
         "Authorized device should have read permission"
     );
     assert!(
-        manager.verify_storage(&authorized, StorageOperation::Write, &resource_id, current_time).is_ok(),
+        manager
+            .verify_storage(
+                &authorized,
+                StorageOperation::Write,
+                &resource_id,
+                current_time
+            )
+            .is_ok(),
         "Authorized device should have write permission"
     );
 
     // Unauthorized device cannot access
     assert!(
-        manager.verify_storage(&unauthorized, StorageOperation::Read, &resource_id, current_time).is_err(),
+        manager
+            .verify_storage(
+                &unauthorized,
+                StorageOperation::Read,
+                &resource_id,
+                current_time
+            )
+            .is_err(),
         "Unauthorized device should not have read permission"
     );
     assert!(
-        manager.verify_storage(&unauthorized, StorageOperation::Write, &resource_id, current_time).is_err(),
+        manager
+            .verify_storage(
+                &unauthorized,
+                StorageOperation::Write,
+                &resource_id,
+                current_time
+            )
+            .is_err(),
         "Unauthorized device should not have write permission"
     );
 }
@@ -120,18 +146,32 @@ fn test_capability_delegation() {
 
     // Verify delegate1 has the granted capability
     assert!(
-        manager.verify_storage(&delegate1, StorageOperation::Read, &resource_id, current_time).is_ok(),
+        manager
+            .verify_storage(
+                &delegate1,
+                StorageOperation::Read,
+                &resource_id,
+                current_time
+            )
+            .is_ok(),
         "Delegate1 should have read permission"
     );
 
     // Verify delegate2 does not have capability (no delegation occurred)
     assert!(
-        manager.verify_storage(&delegate2, StorageOperation::Read, &resource_id, current_time).is_err(),
+        manager
+            .verify_storage(
+                &delegate2,
+                StorageOperation::Read,
+                &resource_id,
+                current_time
+            )
+            .is_err(),
         "Delegate2 should not have read permission without delegation"
     );
 }
 
-/// Test capability expiration enforcement  
+/// Test capability expiration enforcement
 #[test]
 fn test_capability_expiration() {
     let effects = Effects::for_test("capability_expiration");
@@ -164,13 +204,27 @@ fn test_capability_expiration() {
 
     // Should work before expiration
     assert!(
-        manager.verify_storage(&device, StorageOperation::Read, &resource_id, current_time + 50).is_ok(),
+        manager
+            .verify_storage(
+                &device,
+                StorageOperation::Read,
+                &resource_id,
+                current_time + 50
+            )
+            .is_ok(),
         "Capability should work before expiration"
     );
 
     // Should fail after expiration
     assert!(
-        manager.verify_storage(&device, StorageOperation::Read, &resource_id, current_time + 200).is_err(),
+        manager
+            .verify_storage(
+                &device,
+                StorageOperation::Read,
+                &resource_id,
+                current_time + 200
+            )
+            .is_err(),
         "Capability should fail after expiration"
     );
 }
@@ -208,7 +262,9 @@ fn test_capability_revocation() {
 
     // Should work initially
     assert!(
-        manager.verify_storage(&device, StorageOperation::Read, &resource_id, current_time).is_ok(),
+        manager
+            .verify_storage(&device, StorageOperation::Read, &resource_id, current_time)
+            .is_ok(),
         "Capability should work initially"
     );
 
@@ -221,7 +277,9 @@ fn test_capability_revocation() {
 
     // Should fail after revocation
     assert!(
-        manager.verify_storage(&device, StorageOperation::Read, &resource_id, current_time).is_err(),
+        manager
+            .verify_storage(&device, StorageOperation::Read, &resource_id, current_time)
+            .is_err(),
         "Capability should fail after revocation"
     );
 }
@@ -232,4 +290,3 @@ fn test_capability_revocation() {
 // - Capability forgery detection
 // - Multi-permission capabilities
 // These require understanding the delegation_capability() method and the full capability token API.
-

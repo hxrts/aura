@@ -111,12 +111,12 @@ pub fn derive_keys(seed: &[u8], _context: &[u8]) -> Result<DerivedKeys> {
     // Derive signing key
     let mut signing_key = [0u8; 32];
     hk.expand(b"aura.dkd.signing_key.v1", &mut signing_key)
-        .map_err(|e| CryptoError::InvalidKey(format!("HKDF signing key failed: {}", e)))?;
+        .map_err(|e| CryptoError::crypto_operation_failed(format!("HKDF signing key failed: {}", e)))?;
 
     // Derive encryption key
     let mut encryption_key = [0u8; 32];
     hk.expand(b"aura.dkd.encryption_key.v1", &mut encryption_key)
-        .map_err(|e| CryptoError::InvalidKey(format!("HKDF encryption key failed: {}", e)))?;
+        .map_err(|e| CryptoError::crypto_operation_failed(format!("HKDF encryption key failed: {}", e)))?;
 
     // Compute seed fingerprint for audit
     let seed_fingerprint = *blake3::hash(seed).as_bytes();
@@ -191,7 +191,8 @@ impl DkdParticipant {
         // Return compressed point bytes (owned, not borrowed)
         // Safe: we just set self.point above if it was None
         #[allow(clippy::expect_used)] // Safe: we just set self.point above
-        let point = self.point
+        let point = self
+            .point
             .expect("Point should be set by revealed_point method");
         point.compress().to_bytes()
     }
@@ -207,10 +208,10 @@ pub fn aggregate_dkd_points(points: &[[u8; 32]]) -> Result<ed25519_dalek::Verify
         .iter()
         .map(|bytes| {
             let compressed = curve25519_dalek::edwards::CompressedEdwardsY::from_slice(bytes)
-                .map_err(|_| CryptoError::InvalidKey("Invalid point slice length".to_string()))?;
+                .map_err(|_| CryptoError::crypto_operation_failed("Invalid point slice length".to_string()))?;
             compressed
                 .decompress()
-                .ok_or_else(|| CryptoError::InvalidKey("Failed to decompress point".to_string()))
+                .ok_or_else(|| CryptoError::crypto_operation_failed("Failed to decompress point".to_string()))
         })
         .collect();
 
@@ -223,7 +224,7 @@ pub fn aggregate_dkd_points(points: &[[u8; 32]]) -> Result<ed25519_dalek::Verify
     // Convert to Ed25519 public key
     let compressed = cleared.compress();
     ed25519_dalek::VerifyingKey::from_bytes(&compressed.to_bytes())
-        .map_err(|e| CryptoError::InvalidKey(format!("Failed to create verifying key: {}", e)))
+        .map_err(|e| CryptoError::crypto_operation_failed(format!("Failed to create verifying key: {}", e)))
 }
 
 #[cfg(test)]

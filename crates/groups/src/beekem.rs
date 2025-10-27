@@ -4,8 +4,9 @@ use crate::events::*;
 use crate::roster::RosterBuilder;
 use crate::state::CgkaState;
 use crate::types::*;
-use crate::{CgkaError, Result};
+use crate::{AuraError, Result};
 use aura_journal::capability::authority_graph::AuthorityGraph;
+use aura_types::{DeviceId, DeviceIdExt};
 // Remove unused import - timestamps now use effects system
 use std::collections::BTreeMap;
 use tracing::{debug, info};
@@ -49,8 +50,8 @@ impl BeeKemManager {
             roster_builder.extract_mls_members(authority_graph, &group_id, &self.effects)?;
 
         if initial_members.is_empty() {
-            return Err(CgkaError::InvalidOperation(
-                "Cannot initialize group with no members".to_string(),
+            return Err(AuraError::coordination_failed(
+                "Cannot initialize group with no members",
             ));
         }
 
@@ -75,13 +76,15 @@ impl BeeKemManager {
         group_id: &str,
         authority_graph: &AuthorityGraph,
     ) -> Result<Vec<KeyhiveCgkaOperation>> {
-        let group_state = self
-            .groups
-            .get(group_id)
-            .ok_or_else(|| CgkaError::InvalidOperation(format!("Group {} not found", group_id)))?;
+        let group_state = self.groups.get(group_id).ok_or_else(|| {
+            AuraError::coordination_failed(format!("Group {} not found", group_id))
+        })?;
 
         let roster_builder = self.roster_builders.get_mut(group_id).ok_or_else(|| {
-            CgkaError::InvalidOperation(format!("Roster builder for group {} not found", group_id))
+            AuraError::coordination_failed(format!(
+                "Roster builder for group {} not found",
+                group_id
+            ))
         })?;
 
         // Check if roster needs update
@@ -96,7 +99,9 @@ impl BeeKemManager {
         let (_new_roster, roster_delta) = roster_builder
             .build_update(authority_graph, &group_state.roster, &self.effects)?
             .ok_or_else(|| {
-                CgkaError::InvalidOperation("Expected roster update but none available".to_string())
+                AuraError::coordination_failed(
+                    "Expected roster update but none available".to_string(),
+                )
             })?;
 
         // Generate CGKA operation based on roster changes
@@ -148,7 +153,7 @@ impl BeeKemManager {
             operation_type,
             roster_delta.clone(),
             tree_updates,
-            aura_journal::DeviceId::from_string_with_effects("placeholder", &self.effects), // TODO: Get actual device ID
+            DeviceId::from_string_with_effects("placeholder", &self.effects), // TODO: Get actual device ID
             &self.effects,
         );
 
@@ -226,10 +231,9 @@ impl BeeKemManager {
         group_id: &str,
         operation: KeyhiveCgkaOperation,
     ) -> Result<()> {
-        let group_state = self
-            .groups
-            .get_mut(group_id)
-            .ok_or_else(|| CgkaError::InvalidOperation(format!("Group {} not found", group_id)))?;
+        let group_state = self.groups.get_mut(group_id).ok_or_else(|| {
+            AuraError::coordination_failed(format!("Group {} not found", group_id))
+        })?;
 
         info!(
             "Applying CGKA operation {:?} to group {}",
@@ -276,17 +280,17 @@ impl BeeKemManager {
         group_id: &str,
         operation: &KeyhiveCgkaOperation,
     ) -> Result<()> {
-        let group_state = self
-            .groups
-            .get(group_id)
-            .ok_or_else(|| CgkaError::InvalidOperation(format!("Group {} not found", group_id)))?;
+        let group_state = self.groups.get(group_id).ok_or_else(|| {
+            AuraError::coordination_failed(format!("Group {} not found", group_id))
+        })?;
 
         // Basic validation - would be more comprehensive in production
         if operation.current_epoch != group_state.current_epoch {
-            return Err(CgkaError::EpochMismatch {
-                expected: group_state.current_epoch.value(),
-                actual: operation.current_epoch.value(),
-            });
+            return Err(AuraError::epoch_mismatch(format!(
+                "Epoch mismatch: expected {}, actual {}",
+                group_state.current_epoch.value(),
+                operation.current_epoch.value()
+            )));
         }
 
         Ok(())

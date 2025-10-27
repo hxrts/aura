@@ -1,0 +1,35 @@
+# Byzantine Tolerance Mixin - Add byzantine participants to scenarios
+
+[metadata]
+name = "byzantine_tolerance_mixin"
+description = "Add byzantine behavior to test fault tolerance"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["mixin", "byzantine", "tolerance"]
+
+[setup]
+participants = 4
+threshold = 3
+seed = 2222
+
+[network]
+latency_range = [10, 50]
+drop_rate = 0.01
+
+[byzantine]
+count = 1
+participants = ["p4"]
+default_strategies = ["silent", "random_messages"]
+
+[[phases]]
+name = "inject_byzantine"
+description = "Activate byzantine behavior"
+timeout_seconds = 1
+actions = [
+    { type = "inject_byzantine", participant = "p4", behavior = "silent" }
+]
+
+[[properties]]
+name = "tolerates_f_byzantine"
+property_type = "safety"
+

@@ -11,7 +11,8 @@
 // - Associativity: Grouping of operations doesn't matter
 // - Monotonicity: State only grows, never shrinks (for grow-only CRDTs)
 
-use aura_journal::{DeviceId, EventData, Journal, JournalEvent};
+use aura_types::{DeviceId};
+use aura_journal::{EventData, Journal, JournalEvent};
 use proptest::prelude::*;
 use std::collections::HashSet;
 use uuid::Uuid;

@@ -5,8 +5,8 @@
 //! and authorization (what you can do).
 
 use super::CapabilityId;
-use crate::DeviceId;
 use aura_crypto::Effects;
+use aura_types::DeviceId;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 

@@ -1,0 +1,57 @@
+# Counter Coordination Invariant Testing
+
+[metadata]
+name = "counter_coordination"
+description = "Verify distributed counter maintains consistency"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["counter", "coordination", "consistency", "invariant"]
+
+[setup]
+participants = 3
+threshold = 2
+seed = 666
+
+[network]
+latency_range = [10, 30]
+drop_rate = 0.0
+
+[[phases]]
+name = "counter_initialization"
+description = "Initialize distributed counter"
+timeout_seconds = 1
+actions = [
+    { type = "run_choreography", choreography = "counter_init", participants = ["alice", "bob", "charlie"] }
+]
+
+[[phases]]
+name = "concurrent_increments"
+description = "Apply concurrent counter increments"
+timeout_seconds = 3
+actions = [
+    { type = "run_choreography", choreography = "counter_increment", participants = ["alice"] },
+    { type = "run_choreography", choreography = "counter_increment", participants = ["bob"] },
+    { type = "run_choreography", choreography = "counter_increment", participants = ["charlie"] }
+]
+
+[[phases]]
+name = "convergence_check"
+description = "Verify counter converges to correct value"
+timeout_seconds = 2
+actions = [
+    { type = "wait_ticks", ticks = 50 },
+    { type = "verify_property", property = "counter_value_correct", expected = true }
+]
+
+[[properties]]
+name = "counter_value_correct"
+property_type = "safety"
+
+[[properties]]
+name = "counter_monotonic"
+property_type = "safety"
+
+[[properties]]
+name = "increments_not_lost"
+property_type = "safety"
+

@@ -8,18 +8,18 @@
 
 pub mod base_context;
 pub mod context;
-pub mod protocol_contexts;
 pub mod helpers;
+pub mod protocol_contexts;
 pub mod time;
 pub mod types;
 
 // Re-export common types
 pub use base_context::{BaseContext, Transport};
 pub use context::{ProtocolContext, StubTransport};
-pub use protocol_contexts::{
-    DkdContext, ResharingContext, RecoveryContext, LockingContext, CompactionContext,
-    ProtocolContextTrait
-};
 pub use helpers::*;
+pub use protocol_contexts::{
+    CompactionContext, DkdContext, LockingContext, ProtocolContextTrait, RecoveryContext,
+    ResharingContext,
+};
 pub use time::*;
 pub use types::*;

@@ -1,7 +1,7 @@
 // Causal encryption layer with predecessor key management
 
 use crate::types::*;
-use crate::{CgkaError, Result};
+use crate::{AuraError, Result};
 use std::collections::BTreeMap;
 use tracing::{debug, trace};
 
@@ -99,7 +99,7 @@ impl CausalEncryption {
     /// Derive causal key for specific context
     pub fn derive_causal_key(&mut self, context: &str, epoch: Epoch) -> Result<CausalKey> {
         let app_secret = self.app_secrets.get(&epoch).ok_or_else(|| {
-            CgkaError::InvalidOperation(format!(
+            AuraError::coordination_failed(format!(
                 "No application secret for epoch {}",
                 epoch.value()
             ))
@@ -149,7 +149,7 @@ impl CausalEncryption {
     /// Encrypt data with causal encryption
     pub fn encrypt(&self, data: &[u8], context: &str) -> Result<CausalCiphertext> {
         let causal_key = self.get_causal_key(context).ok_or_else(|| {
-            CgkaError::InvalidOperation(format!("No causal key for context '{}'", context))
+            AuraError::coordination_failed(format!("No causal key for context '{}'", context))
         })?;
 
         trace!(
@@ -173,7 +173,7 @@ impl CausalEncryption {
     /// Decrypt causal ciphertext
     pub fn decrypt(&self, ciphertext: &CausalCiphertext) -> Result<Vec<u8>> {
         let causal_key = self.get_causal_key(&ciphertext.context).ok_or_else(|| {
-            CgkaError::InvalidOperation(format!(
+            AuraError::coordination_failed(format!(
                 "No causal key for context '{}'",
                 ciphertext.context
             ))
@@ -199,7 +199,7 @@ impl CausalEncryption {
             current = pred.predecessor.as_ref();
         }
 
-        Err(CgkaError::CryptographicError(
+        Err(AuraError::encryption_failed(
             "Failed to decrypt with any key in causal chain".to_string(),
         ))
     }
@@ -211,14 +211,14 @@ impl CausalEncryption {
 
         // Ensure key is the correct length for AES-256
         if key.len() != 32 {
-            return Err(CgkaError::CryptographicError(
+            return Err(AuraError::encryption_failed(
                 "Key must be exactly 32 bytes for AES-256-GCM".to_string(),
             ));
         }
 
         // Create cipher instance
         let cipher = Aes256Gcm::new_from_slice(key)
-            .map_err(|e| CgkaError::CryptographicError(format!("Cipher creation failed: {}", e)))?;
+            .map_err(|e| AuraError::encryption_failed(format!("Cipher creation failed: {}", e)))?;
 
         // Generate deterministic nonce from data and key
         // NOTE: For production, nonces should come from injected Effects for proper randomness
@@ -240,7 +240,7 @@ impl CausalEncryption {
         };
 
         let ciphertext = cipher.encrypt(&nonce, payload).map_err(|e| {
-            CgkaError::CryptographicError(format!("AES-GCM encryption failed: {}", e))
+            AuraError::encryption_failed(format!("AES-GCM encryption failed: {}", e))
         })?;
 
         // Combine nonce and ciphertext for storage
@@ -258,7 +258,7 @@ impl CausalEncryption {
 
         // Ensure key is the correct length for AES-256
         if key.len() != 32 {
-            return Err(CgkaError::CryptographicError(
+            return Err(AuraError::encryption_failed(
                 "Key must be exactly 32 bytes for AES-256-GCM".to_string(),
             ));
         }
@@ -266,7 +266,7 @@ impl CausalEncryption {
         // Check minimum length (nonce + at least some ciphertext)
         if ciphertext.len() < 12 {
             // 12 bytes for AES-GCM nonce
-            return Err(CgkaError::CryptographicError(
+            return Err(AuraError::encryption_failed(
                 "Ciphertext too short to contain nonce".to_string(),
             ));
         }
@@ -274,7 +274,7 @@ impl CausalEncryption {
         // Extract nonce and ciphertext
         let (nonce_bytes, encrypted_data) = ciphertext.split_at(12);
         if nonce_bytes.len() != 12 {
-            return Err(CgkaError::CryptographicError(
+            return Err(AuraError::encryption_failed(
                 "Invalid nonce length: expected 12 bytes".to_string(),
             ));
         }
@@ -284,7 +284,7 @@ impl CausalEncryption {
 
         // Create cipher instance
         let cipher = Aes256Gcm::new_from_slice(key)
-            .map_err(|e| CgkaError::CryptographicError(format!("Cipher creation failed: {}", e)))?;
+            .map_err(|e| AuraError::encryption_failed(format!("Cipher creation failed: {}", e)))?;
 
         // Decrypt the data
         let payload = Payload {
@@ -293,7 +293,7 @@ impl CausalEncryption {
         };
 
         let plaintext = cipher.decrypt(&nonce, payload).map_err(|e| {
-            CgkaError::CryptographicError(format!("AES-GCM decryption failed: {}", e))
+            AuraError::encryption_failed(format!("AES-GCM decryption failed: {}", e))
         })?;
 
         Ok(plaintext)

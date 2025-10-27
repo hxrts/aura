@@ -35,6 +35,7 @@
             # WASM tools
             wasm-pack
             wasm-bindgen-cli
+            trunk
 
             # Build tools
             pkg-config
@@ -47,26 +48,35 @@
             git
             jq
 
+            # Formal verification and protocol modeling
+            quint
+            nodejs_20
+            jre  # Java Runtime Environment for ANTLR4TS
+
             # Nix formatter
             nixpkgs-fmt
-
-            # Web server for testing WASM
-            python3
           ];
 
           shellHook = ''
-            echo "Aura Development Environment"
-            echo "============================"
-            echo ""
-            echo "Rust version: $(rustc --version)"
-            echo "Cargo version: $(cargo --version)"
-            echo ""
-            echo "Available commands:"
-            echo "  just --list      Show all available tasks"
-            echo "  just build       Build all crates"
-            echo "  just test        Run all tests"
-            echo "  just check       Run clippy and format check"
-            echo ""
+            if [ -z "$AURA_SUPPRESS_NIX_WELCOME" ]; then
+              echo "Aura Development Environment"
+              echo "============================"
+              echo ""
+              echo "Rust version: $(rustc --version)"
+              echo "Cargo version: $(cargo --version)"
+              echo "Quint version: $(quint --version 2>/dev/null || echo 'available')"
+              echo "Node.js version: $(node --version)"
+              echo ""
+              echo "Available commands:"
+              echo "  just --list      Show all available tasks"
+              echo "  just build       Build all crates"
+              echo "  just test        Run all tests"
+              echo "  just check       Run clippy and format check"
+              echo "  just quint-parse Parse Quint files to JSON"
+              echo "  trunk serve      Serve console with hot reload (in console/)"
+              echo "  quint --help     Formal verification with Quint"
+              echo ""
+            fi
 
             export RUST_BACKTRACE=1
             export RUST_LOG=info

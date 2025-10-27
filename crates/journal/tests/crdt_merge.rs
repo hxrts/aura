@@ -6,8 +6,7 @@
 //!
 //! Reference: work/pre_ssb_storage_tests.md - Category 2.1
 
-use aura_journal::state::AccountState;
-use aura_journal::types::*;
+use aura_journal::{types::*, AccountState};
 use aura_test_utils::*;
 use std::collections::BTreeMap;
 

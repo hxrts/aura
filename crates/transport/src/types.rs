@@ -2,9 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Chunk identifier
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ChunkId(pub String);
+// Import shared types from aura-types
+pub use aura_types::ChunkId;
 
 /// Replica proof for proof-of-storage
 #[derive(Debug, Clone, Serialize, Deserialize)]

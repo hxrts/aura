@@ -1,0 +1,31 @@
+# Network Stress Mixin - Can be composed with other scenarios
+
+[metadata]
+name = "network_stress_mixin"
+description = "Add network stress conditions to any scenario"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["mixin", "network", "stress"]
+
+[setup]
+participants = 3
+threshold = 2
+seed = 1111
+
+[network]
+latency_range = [200, 500]
+drop_rate = 0.15
+
+[[phases]]
+name = "apply_stress"
+description = "Apply network stress conditions"
+timeout_seconds = 1
+actions = [
+    { type = "apply_network_condition", condition = "high_latency", participants = ["p1", "p2", "p3"], duration_ticks = 500 },
+    { type = "apply_network_condition", condition = "packet_loss", participants = ["p1", "p2", "p3"], duration_ticks = 500 }
+]
+
+[[properties]]
+name = "protocol_resilient_under_stress"
+property_type = "safety"
+

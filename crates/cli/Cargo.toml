@@ -19,7 +19,11 @@ path = "src/main.rs"
 aura-agent = { path = "../agent" }
 aura-coordination = { path = "../coordination" }
 aura-crypto = { path = "../crypto" }
+aura-errors = { path = "../aura-errors" }
 aura-journal = { path = "../journal" }
+aura-simulator = { path = "../simulator" }
+aura-types = { path = "../aura-types" }
+session_types = { path = "../session-types" }
 
 # CLI
 clap = { workspace = true }
@@ -33,10 +37,15 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 hex = { workspace = true }
 rand = { workspace = true }
 uuid = { workspace = true }
 ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
+dirs = "5.0"
 
+[features]
+default = []
+dev-console = ["aura-agent/dev-console"]

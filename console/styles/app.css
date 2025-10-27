@@ -1,0 +1,312 @@
+/* Mobile-first App styles */
+
+/* App container - mobile first */
+.app-container {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background-color: var(--bg-primary);
+}
+
+/* Header - mobile first */
+.header {
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-light);
+    padding: var(--space-3) var(--space-4);
+    box-shadow: var(--shadow-sm);
+    flex-shrink: 0;
+}
+
+.header-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.logo-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.logo {
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+}
+
+.status-connected {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--color-success);
+}
+
+.status-disconnected {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--color-error);
+}
+
+.status-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background-color: currentColor;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Mode switcher - mobile first (vertical on mobile) */
+.mode-switcher {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    background-color: var(--bg-tertiary);
+    padding: var(--space-1);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+}
+
+.mode-button {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition-base);
+    text-align: center;
+    width: 100%;
+}
+
+.mode-button:hover {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.mode-button-active {
+    background-color: var(--bg-primary);
+    color: var(--text-accent);
+    box-shadow: var(--shadow-sm);
+    position: relative;
+}
+
+.mode-button-active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 60%;
+    background-color: var(--color-primary);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* Main content - mobile first (single column) */
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: var(--space-3);
+}
+
+.mode-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.mode-content h2 {
+    color: var(--text-primary);
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    margin: 0 0 var(--space-2) 0;
+}
+
+.mode-content p {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    margin: 0 0 var(--space-4) 0;
+}
+
+/* Simulation layout - mobile first (single column stack) */
+.simulation-layout {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    overflow: hidden;
+}
+
+.simulation-sidebar {
+    flex-shrink: 0;
+    overflow-y: auto;
+    background-color: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+}
+
+.simulation-main {
+    flex: 1;
+    overflow-y: auto;
+    background-color: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+}
+
+.simulation-repl {
+    flex-shrink: 0;
+    height: 200px;
+    overflow: hidden;
+    background-color: var(--bg-secondary);
+    border-radius: var(--radius-md);
+}
+
+/* Tablet and up (768px+) - horizontal mode switcher */
+@media (min-width: 768px) {
+    .header {
+        padding: var(--space-4) var(--space-6);
+    }
+
+    .header-content {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .logo {
+        font-size: var(--font-size-xl);
+    }
+
+    .logo-section {
+        gap: var(--space-6);
+    }
+
+    .connection-status {
+        font-size: var(--font-size-sm);
+    }
+
+    .status-indicator {
+        width: 8px;
+        height: 8px;
+    }
+
+    .mode-switcher {
+        flex-direction: row;
+        width: auto;
+    }
+
+    .mode-button {
+        width: auto;
+        padding: var(--space-2) var(--space-4);
+    }
+
+    .mode-button-active::after {
+        left: 50%;
+        top: auto;
+        bottom: -2px;
+        transform: translateX(-50%);
+        width: 20px;
+        height: 2px;
+    }
+
+    .main-content {
+        padding: var(--space-4);
+    }
+
+    .mode-content h2 {
+        font-size: var(--font-size-xl);
+    }
+
+    .mode-content p {
+        font-size: var(--font-size-base);
+    }
+
+    .simulation-layout {
+        gap: var(--space-4);
+    }
+
+    .simulation-sidebar {
+        padding: var(--space-4);
+    }
+
+    .simulation-main {
+        padding: var(--space-4);
+    }
+
+    .simulation-repl {
+        height: 250px;
+    }
+}
+
+/* Desktop (1024px+) - 3-column layout for simulation */
+@media (min-width: 1024px) {
+    .header-content {
+        max-width: 1400px;
+        margin: 0 auto;
+        width: 100%;
+    }
+
+    .main-content {
+        padding: var(--space-6);
+    }
+
+    .simulation-layout {
+        flex-direction: row;
+        gap: var(--space-6);
+    }
+
+    .simulation-sidebar {
+        width: 300px;
+        flex-shrink: 0;
+    }
+
+    .simulation-main {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .simulation-repl {
+        width: 400px;
+        height: auto;
+        flex-shrink: 0;
+    }
+}
+
+/* Large desktop (1440px+) - wider columns */
+@media (min-width: 1440px) {
+    .simulation-sidebar {
+        width: 350px;
+    }
+
+    .simulation-repl {
+        width: 450px;
+    }
+}

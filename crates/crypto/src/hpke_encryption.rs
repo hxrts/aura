@@ -40,7 +40,7 @@ impl HpkePublicKey {
     /// Deserialize public key from bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let inner = <KemAlg as Kem>::PublicKey::from_bytes(bytes)
-            .map_err(|e| CryptoError::InvalidKey(format!("Invalid HPKE public key: {:?}", e)))?;
+            .map_err(|e| CryptoError::crypto_operation_failed(format!("Invalid HPKE public key: {:?}", e)))?;
         Ok(HpkePublicKey { inner })
     }
 }
@@ -61,7 +61,7 @@ impl HpkePrivateKey {
     /// Deserialize private key from bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let inner = <KemAlg as Kem>::PrivateKey::from_bytes(bytes)
-            .map_err(|e| CryptoError::InvalidKey(format!("Invalid HPKE private key: {:?}", e)))?;
+            .map_err(|e| CryptoError::crypto_operation_failed(format!("Invalid HPKE private key: {:?}", e)))?;
         Ok(HpkePrivateKey { inner })
     }
 }
@@ -108,7 +108,7 @@ impl HpkeCiphertext {
     /// Deserialize from bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         if bytes.len() < 4 {
-            return Err(CryptoError::DecryptionFailed(
+            return Err(CryptoError::decryption_failed(
                 "Ciphertext too short".to_string(),
             ));
         }
@@ -116,7 +116,7 @@ impl HpkeCiphertext {
         let encapped_len = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
 
         if bytes.len() < 4 + encapped_len {
-            return Err(CryptoError::DecryptionFailed(
+            return Err(CryptoError::decryption_failed(
                 "Invalid encapped key length".to_string(),
             ));
         }
@@ -148,12 +148,12 @@ pub fn encrypt_base<R: RngCore + CryptoRng>(
         b"aura.hpke.base.v1", // info string
         rng,
     )
-    .map_err(|e| CryptoError::EncryptionFailed(format!("HPKE setup failed: {:?}", e)))?;
+    .map_err(|e| CryptoError::encryption_failed(format!("HPKE setup failed: {:?}", e)))?;
 
     // Encrypt the plaintext
     let ciphertext = encryption_context
         .seal(plaintext, b"") // no associated data in base mode
-        .map_err(|e| CryptoError::EncryptionFailed(format!("HPKE encryption failed: {:?}", e)))?;
+        .map_err(|e| CryptoError::encryption_failed(format!("HPKE encryption failed: {:?}", e)))?;
 
     Ok(HpkeCiphertext {
         encapped_key: encapped_key.to_bytes().to_vec(),
@@ -169,7 +169,7 @@ pub fn encrypt_base<R: RngCore + CryptoRng>(
 pub fn decrypt_base(ciphertext: &HpkeCiphertext, recipient_sk: &HpkePrivateKey) -> Result<Vec<u8>> {
     // Deserialize encapped key
     let encapped_key = <KemAlg as Kem>::EncappedKey::from_bytes(&ciphertext.encapped_key)
-        .map_err(|e| CryptoError::DecryptionFailed(format!("Invalid encapped key: {:?}", e)))?;
+        .map_err(|e| CryptoError::decryption_failed(format!("Invalid encapped key: {:?}", e)))?;
 
     // Setup receiver in base mode
     let mut decryption_context = hpke::setup_receiver::<AeadAlg, KdfAlg, KemAlg>(
@@ -178,12 +178,12 @@ pub fn decrypt_base(ciphertext: &HpkeCiphertext, recipient_sk: &HpkePrivateKey) 
         &encapped_key,
         b"aura.hpke.base.v1", // info string (must match sender)
     )
-    .map_err(|e| CryptoError::DecryptionFailed(format!("HPKE setup failed: {:?}", e)))?;
+    .map_err(|e| CryptoError::decryption_failed(format!("HPKE setup failed: {:?}", e)))?;
 
     // Decrypt the ciphertext
     let plaintext = decryption_context
         .open(&ciphertext.ciphertext, b"") // no associated data in base mode
-        .map_err(|e| CryptoError::DecryptionFailed(format!("HPKE decryption failed: {:?}", e)))?;
+        .map_err(|e| CryptoError::decryption_failed(format!("HPKE decryption failed: {:?}", e)))?;
 
     Ok(plaintext)
 }
@@ -207,12 +207,12 @@ pub fn encrypt_with_aad<R: RngCore + CryptoRng>(
         b"aura.hpke.aad.v1", // info string
         rng,
     )
-    .map_err(|e| CryptoError::EncryptionFailed(format!("HPKE setup failed: {:?}", e)))?;
+    .map_err(|e| CryptoError::encryption_failed(format!("HPKE setup failed: {:?}", e)))?;
 
     // Encrypt with associated data (AAD)
     let ciphertext = encryption_context
         .seal(plaintext, associated_data)
-        .map_err(|e| CryptoError::EncryptionFailed(format!("HPKE encryption failed: {:?}", e)))?;
+        .map_err(|e| CryptoError::encryption_failed(format!("HPKE encryption failed: {:?}", e)))?;
 
     Ok(HpkeCiphertext {
         encapped_key: encapped_key.to_bytes().to_vec(),
@@ -232,7 +232,7 @@ pub fn decrypt_with_aad(
 ) -> Result<Vec<u8>> {
     // Deserialize encapped key
     let encapped_key = <KemAlg as Kem>::EncappedKey::from_bytes(&ciphertext.encapped_key)
-        .map_err(|e| CryptoError::DecryptionFailed(format!("Invalid encapped key: {:?}", e)))?;
+        .map_err(|e| CryptoError::decryption_failed(format!("Invalid encapped key: {:?}", e)))?;
 
     // Setup receiver
     let mut decryption_context = hpke::setup_receiver::<AeadAlg, KdfAlg, KemAlg>(
@@ -241,13 +241,13 @@ pub fn decrypt_with_aad(
         &encapped_key,
         b"aura.hpke.aad.v1", // info string (must match sender)
     )
-    .map_err(|e| CryptoError::DecryptionFailed(format!("HPKE setup failed: {:?}", e)))?;
+    .map_err(|e| CryptoError::decryption_failed(format!("HPKE setup failed: {:?}", e)))?;
 
     // Decrypt with AAD validation
     let plaintext = decryption_context
         .open(&ciphertext.ciphertext, associated_data)
         .map_err(|e| {
-            CryptoError::DecryptionFailed(format!(
+            CryptoError::decryption_failed(format!(
                 "HPKE decryption failed (AAD mismatch?): {:?}",
                 e
             ))

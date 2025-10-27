@@ -4,7 +4,7 @@
 //! latency, partitions, and message delivery control.
 
 pub mod fabric;
-pub mod transport;
+// pub mod transport;  // Temporarily disabled due to aura-transport compilation issues
 
 pub use fabric::*;
-pub use transport::*;
+// pub use transport::*;

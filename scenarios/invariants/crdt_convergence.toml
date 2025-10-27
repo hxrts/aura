@@ -1,0 +1,57 @@
+# CRDT Convergence Invariant Testing
+
+[metadata]
+name = "crdt_convergence"
+description = "Verify Automerge CRDT converges across network partitions"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["crdt", "convergence", "automerge", "invariant"]
+
+[setup]
+participants = 4
+threshold = 3
+seed = 222
+
+[network]
+latency_range = [20, 100]
+drop_rate = 0.1
+
+[[phases]]
+name = "initial_state"
+description = "Initialize CRDT state across participants"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "crdt_initialization", participants = ["p1", "p2", "p3", "p4"] }
+]
+
+[[phases]]
+name = "concurrent_updates"
+description = "Apply concurrent updates on different partitions"
+timeout_seconds = 3
+actions = [
+    { type = "apply_network_condition", condition = "partition", participants = ["p1", "p2"], duration_ticks = 100 },
+    { type = "run_choreography", choreography = "crdt_update", participants = ["p1", "p2"] },
+    { type = "run_choreography", choreography = "crdt_update", participants = ["p3", "p4"] }
+]
+
+[[phases]]
+name = "partition_heal"
+description = "Heal network partition and verify convergence"
+timeout_seconds = 3
+actions = [
+    { type = "wait_ticks", ticks = 200 },
+    { type = "verify_property", property = "crdt_converged", expected = true }
+]
+
+[[properties]]
+name = "crdt_converged"
+property_type = "safety"
+
+[[properties]]
+name = "causal_consistency"
+property_type = "safety"
+
+[[properties]]
+name = "eventual_convergence"
+property_type = "liveness"
+

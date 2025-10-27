@@ -5,13 +5,14 @@
 
 use crate::{
     Effect, EffectSink, Interceptors, ParticipantId, Result, SideEffectRuntime, SimError,
-    SimulatedNetwork, SimulatedParticipant, Tick,
+    SimulatedNetwork, 
+    // SimulatedParticipant,  // Temporarily disabled
+    Tick,
 };
 use aura_coordination::execution::SimulationScheduler;
 use aura_crypto::Effects;
-use aura_journal::{
-    AccountId, AccountLedger, AccountState, DeviceId, DeviceMetadata, DeviceType, SessionEpoch,
-};
+use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
+use aura_journal::{AccountLedger, AccountState, DeviceMetadata, DeviceType, SessionEpoch};
 use ed25519_dalek::SigningKey;
 use indexmap::IndexMap;
 use std::collections::{BTreeMap, BTreeSet};

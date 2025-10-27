@@ -1,0 +1,92 @@
+# Full Account Lifecycle Integration Scenario
+
+[metadata]
+name = "full_account_lifecycle"
+description = "Complete integration test covering account creation through recovery"
+version = "1.0.0"
+author = "Aura Integration Team"
+tags = ["integration", "lifecycle", "end-to-end", "recovery"]
+
+[setup]
+participants = 5
+threshold = 3
+seed = 777
+
+[network]
+latency_range = [100, 200]
+drop_rate = 0.02
+
+[[phases]]
+name = "account_creation"
+description = "Create threshold account"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "account_creation", participants = ["alice_phone", "alice_laptop", "bob", "charlie", "dave"], threshold = 3 }
+]
+
+[[phases]]
+name = "guardian_setup"
+description = "Configure guardians for recovery"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "guardian_configuration", participants = ["alice_phone", "bob", "charlie", "dave"], threshold = 3 }
+]
+
+[[phases]]
+name = "key_derivation"
+description = "Derive application-specific keys"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "p2p_dkd", participants = ["alice_phone", "alice_laptop"], threshold = 2, app_id = "messaging_app", context = "chat_encryption" }
+]
+
+[[phases]]
+name = "session_operations"
+description = "Execute session operations"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "session_establishment", participants = ["alice_phone", "alice_laptop", "bob"], threshold = 2 },
+    { type = "run_choreography", choreography = "session_operation", participants = ["alice_phone", "bob"] }
+]
+
+[[phases]]
+name = "device_loss_simulation"
+description = "Simulate device loss"
+timeout_seconds = 3
+actions = [
+    { type = "apply_network_condition", condition = "partition", participants = ["alice_phone"], duration_ticks = 1000 }
+]
+
+[[phases]]
+name = "recovery_initiation"
+description = "Initiate guardian recovery"
+timeout_seconds = 10
+actions = [
+    { type = "run_choreography", choreography = "guardian_recovery", participants = ["alice_laptop", "bob", "charlie", "dave"], threshold = 2 }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify account recovered successfully"
+timeout_seconds = 3
+actions = [
+    { type = "verify_property", property = "account_accessible", expected = true },
+    { type = "verify_property", property = "keys_restored", expected = true }
+]
+
+[[properties]]
+name = "account_accessible"
+property_type = "liveness"
+
+[[properties]]
+name = "keys_restored"
+property_type = "safety"
+
+[[properties]]
+name = "guardians_configured"
+property_type = "safety"
+
+[[properties]]
+name = "recovery_successful"
+property_type = "liveness"
+

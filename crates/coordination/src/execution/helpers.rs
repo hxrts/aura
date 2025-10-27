@@ -10,7 +10,8 @@ use super::{
     EventFilter, EventTypePattern, Instruction, InstructionResult, ProtocolContext, ProtocolError,
     ProtocolErrorType,
 };
-use aura_journal::{DeviceId, Event, EventAuthorization, EventId, EventType, Session};
+use aura_journal::{Event, EventAuthorization, EventId, EventType, Session};
+use aura_types::{AccountId, DeviceId};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
@@ -92,7 +93,7 @@ impl<'a> EventBuilder<'a> {
 
         // Sign the event
         let signature = self.ctx.sign_event(&event)?;
-        
+
         // Update authorization with actual signature
         match &mut event.authorization {
             EventAuthorization::DeviceCertificate { signature: sig, .. } => {
@@ -110,9 +111,9 @@ impl<'a> EventBuilder<'a> {
     }
 
     /// Build, sign, and emit the event
-    pub async fn build_sign_and_emit(mut self) -> Result<(), ProtocolError> {
+    pub async fn build_sign_and_emit(mut self) -> Result<Event, ProtocolError> {
         let session_id = self.ctx.session_id();
-        
+
         // Build and sign the event
         let event = {
             let event_type = self.event_type.take().ok_or_else(|| ProtocolError {
@@ -154,7 +155,7 @@ impl<'a> EventBuilder<'a> {
 
             // Sign the event
             let signature = self.ctx.sign_event(&event)?;
-            
+
             // Update authorization with actual signature
             match &mut event.authorization {
                 EventAuthorization::DeviceCertificate { signature: sig, .. } => {
@@ -170,10 +171,14 @@ impl<'a> EventBuilder<'a> {
 
             event
         };
-        
+
         // Write the event to the ledger
-        match self.ctx.execute(Instruction::WriteToLedger(event)).await? {
-            InstructionResult::EventWritten => Ok(()),
+        match self
+            .ctx
+            .execute(Instruction::WriteToLedger(event.clone()))
+            .await?
+        {
+            InstructionResult::EventWritten => Ok(event),
             _ => Err(ProtocolError {
                 session_id,
                 error_type: ProtocolErrorType::InvalidState,
@@ -284,7 +289,7 @@ impl<'a> EventAwaiter<'a> {
 
 /// Ledger context containing commonly needed values
 pub struct LedgerContext {
-    pub account_id: aura_journal::AccountId,
+    pub account_id: AccountId,
     pub nonce: u64,
     pub parent_hash: Option<[u8; 32]>,
     pub epoch: u64,
@@ -293,49 +298,57 @@ pub struct LedgerContext {
 /// Extension trait for ProtocolContext
 pub trait ProtocolContextExt {
     /// Fetch all commonly needed ledger values in one call
-    fn fetch_ledger_context(&mut self) -> impl std::future::Future<Output = Result<LedgerContext, ProtocolError>> + Send;
-    
+    fn fetch_ledger_context(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<LedgerContext, ProtocolError>> + Send;
+
     /// Generate a new nonce
-    fn generate_nonce(&mut self) -> impl std::future::Future<Output = Result<u64, ProtocolError>> + Send;
+    fn generate_nonce(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<u64, ProtocolError>> + Send;
 }
 
 impl ProtocolContextExt for ProtocolContext {
-    fn fetch_ledger_context(&mut self) -> impl std::future::Future<Output = Result<LedgerContext, ProtocolError>> + Send {
+    fn fetch_ledger_context(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<LedgerContext, ProtocolError>> + Send {
         async move {
-        // Get ledger state
-        let ledger_state = match self.execute(Instruction::GetLedgerState).await? {
-            InstructionResult::LedgerState(state) => state,
-            _ => {
-                return Err(ProtocolError {
-                    session_id: self.session_id(),
-                    error_type: ProtocolErrorType::InvalidState,
-                    message: "Expected ledger state".to_string(),
-                })
-            }
-        };
+            // Get ledger state
+            let ledger_state = match self.execute(Instruction::GetLedgerState).await? {
+                InstructionResult::LedgerState(state) => state,
+                _ => {
+                    return Err(ProtocolError {
+                        session_id: self.session_id(),
+                        error_type: ProtocolErrorType::InvalidState,
+                        message: "Expected ledger state".to_string(),
+                    })
+                }
+            };
 
-        // Get current epoch
-        let epoch = match self.execute(Instruction::GetCurrentEpoch).await? {
-            InstructionResult::CurrentEpoch(e) => e,
-            _ => {
-                return Err(ProtocolError {
-                    session_id: self.session_id(),
-                    error_type: ProtocolErrorType::InvalidState,
-                    message: "Expected current epoch".to_string(),
-                })
-            }
-        };
+            // Get current epoch
+            let epoch = match self.execute(Instruction::GetCurrentEpoch).await? {
+                InstructionResult::CurrentEpoch(e) => e,
+                _ => {
+                    return Err(ProtocolError {
+                        session_id: self.session_id(),
+                        error_type: ProtocolErrorType::InvalidState,
+                        message: "Expected current epoch".to_string(),
+                    })
+                }
+            };
 
-        Ok(LedgerContext {
-            account_id: ledger_state.account_id,
-            nonce: ledger_state.next_nonce,
-            parent_hash: ledger_state.last_event_hash,
-            epoch,
-        })
+            Ok(LedgerContext {
+                account_id: ledger_state.account_id,
+                nonce: ledger_state.next_nonce,
+                parent_hash: ledger_state.last_event_hash,
+                epoch,
+            })
         }
     }
 
-    fn generate_nonce(&mut self) -> impl std::future::Future<Output = Result<u64, ProtocolError>> + Send {
+    fn generate_nonce(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<u64, ProtocolError>> + Send {
         async move {
             let ledger_state = match self.execute(Instruction::GetLedgerState).await? {
                 InstructionResult::LedgerState(state) => state,
@@ -402,7 +415,7 @@ pub trait SessionLifecycle: Sized {
     ) -> Result<(), ProtocolError> {
         Ok(()) // Default implementation does nothing
     }
-    
+
     /// Execute the full protocol lifecycle (default implementation)
     async fn execute(&mut self) -> Result<Self::Result, ProtocolError>
     where
@@ -411,7 +424,7 @@ pub trait SessionLifecycle: Sized {
         // Check for session collision
         let _context_id = self.generate_context_id();
         let session = self.create_session().await?;
-        
+
         // Execute protocol with error handling
         match self.execute_protocol(&session).await {
             Ok(result) => {
@@ -433,7 +446,7 @@ pub async fn run_session_protocol<P: SessionLifecycle + Send>(
 ) -> Result<P::Result, ProtocolError> {
     // Step 1: Check for session collision
     let context_id = protocol.generate_context_id();
-    
+
     let collision_check = ctx
         .execute(Instruction::CheckSessionCollision {
             operation_type: protocol.operation_type(),

@@ -11,6 +11,9 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+# Workspace crates
+aura-errors = { path = "../aura-errors" }
+aura-types = { path = "../aura-types" }
 
 # Cryptography
 aes-gcm = { workspace = true }

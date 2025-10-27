@@ -1,0 +1,56 @@
+# Key Derivation Invariant Testing
+
+[metadata]
+name = "key_derivation_determinism"
+description = "Verify deterministic key derivation produces consistent results"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["dkd", "key-derivation", "determinism", "invariant"]
+
+[setup]
+participants = 3
+threshold = 2
+seed = 789
+
+[network]
+latency_range = [10, 30]
+drop_rate = 0.0
+
+[[phases]]
+name = "first_derivation"
+description = "First key derivation with context"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "p2p_dkd", participants = ["alice", "bob"], threshold = 2, app_id = "test_app", context = "auth_context_1" },
+    { type = "create_checkpoint", label = "after_first_derivation" }
+]
+
+[[phases]]
+name = "second_derivation"
+description = "Repeat derivation with same context"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "p2p_dkd", participants = ["alice", "bob"], threshold = 2, app_id = "test_app", context = "auth_context_1" }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify determinism"
+timeout_seconds = 1
+actions = [
+    { type = "verify_property", property = "derivation_deterministic", expected = true },
+    { type = "verify_property", property = "keys_match_across_derivations", expected = true }
+]
+
+[[properties]]
+name = "derivation_deterministic"
+property_type = "safety"
+
+[[properties]]
+name = "keys_match_across_derivations"
+property_type = "safety"
+
+[[properties]]
+name = "context_isolation"
+property_type = "safety"
+

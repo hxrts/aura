@@ -1,15 +1,18 @@
-//! Secure sealing (encryption) for sensitive data at rest
+//! Secure sealing for data at rest
 //!
 //! Provides generic AEAD encryption using AES-256-GCM with proper key derivation.
 //! Used for protecting key shares and other sensitive material stored locally.
 
 use crate::{CryptoError, Effects, Result};
-use aes_gcm::{Aes256Gcm, Key, aead::{Aead, KeyInit}};
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Key,
+};
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-/// Sealed (encrypted) data container
+/// Sealed data container
 ///
 /// Generic container for any data that needs to be encrypted at rest.
 /// Uses AES-256-GCM with BLAKE3-based key derivation.
@@ -33,7 +36,7 @@ pub struct SealedData {
 }
 
 impl SealedData {
-    /// Seal (encrypt) a serializable value with a device-specific secret
+    /// Seal a serializable value with a device-specific secret
     ///
     /// # Arguments
     ///
@@ -58,8 +61,9 @@ impl SealedData {
         effects: &Effects,
     ) -> Result<Self> {
         // Serialize the value
-        let plaintext = bincode::serialize(value)
-            .map_err(|e| CryptoError::SerializationError(format!("Failed to serialize: {}", e)))?;
+        let plaintext = bincode::serialize(value).map_err(|e| {
+            CryptoError::serialization_failed(format!("Failed to serialize: {}", e))
+        })?;
 
         // Generate random nonce for AES-GCM
         let nonce: [u8; 12] = effects.random_bytes();
@@ -72,8 +76,16 @@ impl SealedData {
         // Encrypt with associated data authentication
         let aad = associated_data.unwrap_or(&[]);
         let ciphertext = cipher
-            .encrypt(gcm_nonce, aes_gcm::aead::Payload { msg: &plaintext, aad })
-            .map_err(|e| CryptoError::EncryptionFailed(format!("AES-GCM encryption failed: {}", e)))?;
+            .encrypt(
+                gcm_nonce,
+                aes_gcm::aead::Payload {
+                    msg: &plaintext,
+                    aad,
+                },
+            )
+            .map_err(|e| {
+                CryptoError::encryption_failed(format!("AES-GCM encryption failed: {}", e))
+            })?;
 
         Ok(SealedData {
             ciphertext,
@@ -83,7 +95,7 @@ impl SealedData {
         })
     }
 
-    /// Unseal (decrypt) data and deserialize back to original type
+    /// Unseal data and deserialize back to original type
     ///
     /// # Arguments
     ///
@@ -109,35 +121,43 @@ impl SealedData {
 
         // Decrypt the ciphertext
         let plaintext = cipher
-            .decrypt(gcm_nonce, aes_gcm::aead::Payload { msg: &self.ciphertext, aad })
-            .map_err(|e| CryptoError::DecryptionFailed(format!("AES-GCM decryption failed: {}", e)))?;
+            .decrypt(
+                gcm_nonce,
+                aes_gcm::aead::Payload {
+                    msg: &self.ciphertext,
+                    aad,
+                },
+            )
+            .map_err(|e| {
+                CryptoError::decryption_failed(format!("AES-GCM decryption failed: {}", e))
+            })?;
 
         // Deserialize the decrypted data
         bincode::deserialize(&plaintext)
-            .map_err(|e| CryptoError::DecryptionFailed(format!("Failed to deserialize: {}", e)))
+            .map_err(|e| CryptoError::decryption_failed(format!("Failed to deserialize: {}", e)))
     }
 }
 
 /// Derive AES-256 key from device secret and context using BLAKE3
-/// 
+///
 /// Uses BLAKE3 key derivation function with domain separation.
 /// The context string prevents key reuse across different applications.
 fn derive_key(device_secret: &[u8; 32], context: &str) -> Result<Key<Aes256Gcm>> {
     let mut hasher = Hasher::new();
-    
+
     // Domain separation prefix
     hasher.update(b"aura-sealing-v1:");
-    
+
     // Include device secret
     hasher.update(device_secret);
-    
+
     // Include context for key separation
     hasher.update(b":");
     hasher.update(context.as_bytes());
-    
+
     // Extract 32 bytes for AES-256 key
     let derived_key: [u8; 32] = hasher.finalize().into();
-    
+
     Ok(derived_key.into())
 }
 
@@ -214,7 +234,10 @@ mod tests {
         // Wrong key should fail decryption
         let result: Result<Vec<u8>> = sealed.unseal_value(&wrong_secret);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), CryptoError::DecryptionFailed(_)));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("decryption failed"));
     }
 
     #[test]
@@ -240,9 +263,12 @@ mod tests {
         // Tampering with AAD should fail
         let mut tampered_sealed = sealed.clone();
         tampered_sealed.associated_data = Some(b"tampered-metadata".to_vec());
-        
+
         let result: Result<Vec<u8>> = tampered_sealed.unseal_value(&device_secret);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), CryptoError::DecryptionFailed(_)));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("decryption failed"));
     }
 }

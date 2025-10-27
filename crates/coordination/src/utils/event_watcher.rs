@@ -76,17 +76,24 @@ impl EventWatcher {
     /// This runs in a loop, polling the ledger and invoking callbacks.
     /// Returns when stopped.
     pub async fn watch(&mut self) {
-        info!("Starting event watcher with {} registered callbacks", self.callbacks.len());
+        info!(
+            "Starting event watcher with {} registered callbacks",
+            self.callbacks.len()
+        );
         let mut interval = interval(self.poll_interval);
         let mut poll_count = 0;
 
         loop {
             interval.tick().await;
             poll_count += 1;
-            
+
             // Trace poll activity every 100 polls to avoid spam
             if poll_count % 100 == 0 {
-                trace!("Event watcher poll #{}, last_processed_index: {}", poll_count, self.last_processed_index);
+                trace!(
+                    "Event watcher poll #{}, last_processed_index: {}",
+                    poll_count,
+                    self.last_processed_index
+                );
             }
 
             // Read new events
@@ -99,10 +106,12 @@ impl EventWatcher {
                     continue;
                 }
 
-                debug!("Found {} new events to process (total events: {}, last processed: {})", 
-                       event_log.len() - self.last_processed_index,
-                       event_log.len(),
-                       self.last_processed_index);
+                debug!(
+                    "Found {} new events to process (total events: {}, last processed: {})",
+                    event_log.len() - self.last_processed_index,
+                    event_log.len(),
+                    self.last_processed_index
+                );
 
                 // Get new events
                 event_log[self.last_processed_index..].to_vec()
@@ -110,16 +119,24 @@ impl EventWatcher {
 
             // Process new events
             for (i, event) in events.iter().enumerate() {
-                debug!("Processing event {}/{}: {:?}", i + 1, events.len(), event.event_type);
+                debug!(
+                    "Processing event {}/{}: {:?}",
+                    i + 1,
+                    events.len(),
+                    event.event_type
+                );
                 self.process_event(event);
             }
 
             // Update last processed index
             self.last_processed_index += events.len();
-            
+
             if !events.is_empty() {
-                info!("Processed {} events, updated last_processed_index to {}", 
-                      events.len(), self.last_processed_index);
+                info!(
+                    "Processed {} events, updated last_processed_index to {}",
+                    events.len(),
+                    self.last_processed_index
+                );
             }
         }
     }
@@ -127,12 +144,15 @@ impl EventWatcher {
     /// Process a single event through all callbacks
     fn process_event(&self, event: &Event) {
         let mut matched_callbacks = 0;
-        
+
         for (i, (filter, callback)) in self.callbacks.iter().enumerate() {
             if self.matches_filter(event, filter) {
-                debug!("Event matches filter #{}, invoking callback for event: {:?}", i, event.event_id);
+                debug!(
+                    "Event matches filter #{}, invoking callback for event: {:?}",
+                    i, event.event_id
+                );
                 matched_callbacks += 1;
-                
+
                 let should_continue = callback(event);
                 if !should_continue {
                     debug!("Callback #{} returned false, stopping event processing", i);
@@ -140,11 +160,14 @@ impl EventWatcher {
                 }
             }
         }
-        
+
         if matched_callbacks == 0 {
             trace!("Event {:?} matched no registered callbacks", event.event_id);
         } else {
-            debug!("Event {:?} matched {} callbacks", event.event_id, matched_callbacks);
+            debug!(
+                "Event {:?} matched {} callbacks",
+                event.event_id, matched_callbacks
+            );
         }
     }
 
@@ -155,11 +178,11 @@ impl EventWatcher {
             EventFilter::Type(type_filter) => self.matches_type(event, type_filter),
             EventFilter::SessionId(session_id) => self.matches_session(event, session_id),
         };
-        
+
         if matches {
             trace!("Event {:?} matches filter {:?}", event.event_id, filter);
         }
-        
+
         matches
     }
 
@@ -198,13 +221,16 @@ impl EventWatcher {
             EventType::ReleaseOperationLock(e) => Some(&e.session_id),
             _ => None,
         };
-        
+
         match extracted_session_id {
             Some(extracted_id) => {
                 let matches = extracted_id == session_id;
                 if !matches {
-                    trace!("Event session ID {:?} does not match target session ID {:?}", 
-                           extracted_id, session_id);
+                    trace!(
+                        "Event session ID {:?} does not match target session ID {:?}",
+                        extracted_id,
+                        session_id
+                    );
                 }
                 matches
             }

@@ -1,0 +1,50 @@
+# Threshold Protocol Template - Base template for threshold protocols
+
+[metadata]
+name = "threshold_protocol_template"
+description = "Template for threshold protocol scenarios"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["template", "threshold", "protocol"]
+
+[setup]
+participants = 3
+threshold = 2
+seed = 3333
+
+[network]
+latency_range = [10, 30]
+drop_rate = 0.0
+
+[[phases]]
+name = "setup"
+description = "Setup phase - override in derived scenarios"
+timeout_seconds = 2
+actions = [
+    { type = "wait_ticks", ticks = 10 }
+]
+
+[[phases]]
+name = "execution"
+description = "Execution phase - override in derived scenarios"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "template_protocol", participants = ["p1", "p2", "p3"], threshold = 2 }
+]
+
+[[phases]]
+name = "verification"
+description = "Verification phase"
+timeout_seconds = 1
+actions = [
+    { type = "verify_property", property = "protocol_completed", expected = true }
+]
+
+[[properties]]
+name = "protocol_completed"
+property_type = "liveness"
+
+[[properties]]
+name = "threshold_maintained"
+property_type = "safety"
+

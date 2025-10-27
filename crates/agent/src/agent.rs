@@ -1,1591 +1,887 @@
-// DeviceAgent - high-level API for applications
+//! Unified Agent Implementation
+//!
+//! This module provides a generic Agent implementation.
+//!
+//! The unified agent uses session types for compile-time state safety and
+//! generic transport/storage abstractions for testability.
 
-use crate::{
-    ContextCapsule, DerivedIdentity, IdentityConfig, SessionCredential, SessionStatistics, Result, AgentError,
-};
-use aura_journal::{AccountLedger, AccountState, DeviceId, DeviceMetadata, SessionEpoch};
-use aura_coordination::{KeyShare, ProductionTimeSource, LocalSessionRuntime};
-use aura_crypto::{DeviceKeyManager, Effects};
-use std::sync::Arc;
-use std::collections::BTreeMap;
-use tokio::sync::RwLock;
-use tracing::{debug, warn, info};
-use frost_ed25519 as frost;
-use uuid;
-use rand;
-use bincode;
-use ed25519_dalek::Signer;
+use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt, GuardianId};
+use uuid::Uuid;
 
-/// DeviceAgent provides the high-level API for identity and key derivation
-/// 
-/// This is the main interface that applications use to:
-/// - Derive app-specific identities
-/// - Issue presence tickets
-/// - Manage account state via CRDT
-/// - Coordinate threshold operations via session-typed protocols
-pub struct DeviceAgent {
-    config: IdentityConfig,
-    key_share: Arc<RwLock<KeyShare>>,
-    ledger: Arc<RwLock<AccountLedger>>,
-    transport: Arc<dyn aura_coordination::Transport>,
-    device_key_manager: Arc<RwLock<DeviceKeyManager>>,
-    /// Local session runtime for protocol coordination
-    session_runtime: Arc<LocalSessionRuntime>,
-    effects: Effects,
+#[derive(Debug, Clone)]
+pub struct Effects;
+
+impl Effects {
+    pub fn test() -> Self {
+        Self
+    }
 }
 
-impl DeviceAgent {
-    /// Create a new DeviceAgent
-    pub async fn new(
-        config: IdentityConfig,
+impl aura_types::EffectsLike for Effects {
+    fn gen_uuid(&self) -> Uuid {
+        Uuid::new_v4()
+    }
+}
+use session_types::{SessionProtocol, SessionState};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+// Temporary placeholder until coordination crate is fixed
+#[derive(Debug, Clone)]
+pub struct KeyShare {
+    pub device_id: DeviceId,
+    pub share_data: Vec<u8>,
+}
+
+impl Default for KeyShare {
+    fn default() -> Self {
+        Self {
+            device_id: DeviceId::new_with_effects(&Effects::test()),
+            share_data: vec![0u8; 32],
+        }
+    }
+}
+// use aura_journal::AccountLedger;  // Temporarily disabled
+// Minimal stub for AccountLedger
+#[derive(Debug, Clone)]
+pub struct AccountLedger;
+
+impl AccountLedger {
+    pub fn new(_account_state: AccountState) -> crate::Result<Self> {
+        Ok(Self)
+    }
+}
+
+// Minimal stub for AccountState
+#[derive(Debug, Clone)]
+pub struct AccountState;
+
+impl AccountState {
+    pub fn new(
+        _account_id: AccountId,
+        _verifying_key: ed25519_dalek::VerifyingKey,
+        _device_metadata: DeviceMetadata,
+        _threshold: u16,
+        _share_count: u16,
+    ) -> Self {
+        Self
+    }
+}
+
+// Minimal stub for DeviceMetadata
+#[derive(Debug, Clone)]
+pub struct DeviceMetadata {
+    pub device_id: DeviceId,
+    pub device_name: String,
+    pub device_type: DeviceType,
+    pub public_key: ed25519_dalek::VerifyingKey,
+    pub added_at: u64,
+    pub last_seen: u64,
+    pub dkd_commitment_proofs: std::collections::HashMap<String, String>,
+    pub next_nonce: u64,
+    pub used_nonces: std::collections::HashSet<u64>,
+}
+
+// Minimal stub for DeviceType
+#[derive(Debug, Clone)]
+pub enum DeviceType {
+    Native,
+    Web,
+    Mobile,
+}
+
+use crate::traits::{
+    Agent, CoordinatingAgent, GroupAgent, IdentityAgent, NetworkAgent, StorageAgent,
+};
+use crate::{AgentError, DerivedIdentity, Result};
+use async_trait::async_trait;
+
+/// Transport abstraction for agent communication
+#[async_trait]
+pub trait Transport: Send + Sync + 'static {
+    /// Get the device ID for this transport
+    fn device_id(&self) -> DeviceId;
+
+    /// Send a message to a peer
+    async fn send_message(&self, peer_id: DeviceId, message: &[u8]) -> Result<()>;
+
+    /// Receive messages (non-blocking)
+    async fn receive_messages(&self) -> Result<Vec<(DeviceId, Vec<u8>)>>;
+
+    /// Connect to a peer
+    async fn connect(&self, peer_id: DeviceId) -> Result<()>;
+
+    /// Disconnect from a peer
+    async fn disconnect(&self, peer_id: DeviceId) -> Result<()>;
+
+    /// Get list of connected peers
+    async fn connected_peers(&self) -> Result<Vec<DeviceId>>;
+
+    /// Check if connected to a specific peer
+    async fn is_connected(&self, peer_id: DeviceId) -> Result<bool>;
+}
+
+/// Storage abstraction for agent persistence
+#[async_trait]
+pub trait Storage: Send + Sync + 'static {
+    /// Get the account ID for this storage
+    fn account_id(&self) -> AccountId;
+
+    /// Store data with a given key
+    async fn store(&self, key: &str, data: &[u8]) -> Result<()>;
+
+    /// Retrieve data by key
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>>;
+
+    /// Delete data by key
+    async fn delete(&self, key: &str) -> Result<()>;
+
+    /// List all keys
+    async fn list_keys(&self) -> Result<Vec<String>>;
+
+    /// Check if a key exists
+    async fn exists(&self, key: &str) -> Result<bool>;
+
+    /// Get storage statistics
+    async fn stats(&self) -> Result<StorageStats>;
+}
+
+/// Storage statistics
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StorageStats {
+    pub total_keys: u64,
+    pub total_size_bytes: u64,
+    pub available_space_bytes: Option<u64>,
+}
+
+/// The core data and dependencies that persist across all agent states
+pub struct AgentCore<T: Transport, S: Storage> {
+    /// Unique identifier for this device
+    pub device_id: DeviceId,
+    /// Account identifier this agent belongs to
+    pub account_id: AccountId,
+    /// Threshold key share for cryptographic operations
+    pub key_share: Arc<RwLock<KeyShare>>,
+    /// CRDT-based account ledger for state management
+    pub ledger: Arc<RwLock<AccountLedger>>,
+    /// Transport layer for network communication
+    pub transport: Arc<T>,
+    /// Storage layer for persistence
+    pub storage: Arc<S>,
+    /// Session runtime for choreographic protocols
+    // session_runtime: Arc<session_types::LocalSessionRuntime>,  // Disabled until session_types is fixed
+    /// Injectable effects for deterministic testing
+    pub effects: Effects,
+}
+
+impl<T: Transport, S: Storage> AgentCore<T, S> {
+    /// Create a new agent core with the provided dependencies
+    pub fn new(
+        device_id: DeviceId,
+        account_id: AccountId,
         key_share: KeyShare,
         ledger: AccountLedger,
-        transport: Arc<dyn aura_coordination::Transport>,
-        device_key_manager: DeviceKeyManager,
+        transport: Arc<T>,
+        storage: Arc<S>,
+        // session_runtime: Arc<session_types::LocalSessionRuntime>,  // Disabled until session_types is fixed
         effects: Effects,
-    ) -> Result<Self> {
-        info!("Initializing DeviceAgent for device {}", config.device_id);
-        
-        // Create local session runtime
-        let session_runtime = Arc::new(LocalSessionRuntime::new(
-            config.device_id,
-            config.account_id,
-            effects.clone(),
-        ));
-        
-        // Start the session runtime in the background
-        let runtime_clone = session_runtime.clone();
-        tokio::spawn(async move {
-            if let Err(e) = runtime_clone.run().await {
-                tracing::error!("Session runtime error: {:?}", e);
-            }
-        });
-        
-        Ok(DeviceAgent {
-            config,
+    ) -> Self {
+        Self {
+            device_id,
+            account_id,
             key_share: Arc::new(RwLock::new(key_share)),
             ledger: Arc::new(RwLock::new(ledger)),
             transport,
-            device_key_manager: Arc::new(RwLock::new(device_key_manager)),
-            session_runtime,
+            storage,
             effects,
-        })
+        }
     }
-    
-    /// Connect to an existing account
-    pub async fn connect(config: &IdentityConfig) -> Result<Self> {
-        info!("Connecting DeviceAgent for device {}", config.device_id);
-        
-        // Load sealed key share from secure storage
-        let key_share = load_sealed_share(&config.key_id)?;
-        
-        // Load ledger state
-        // For MVP, we create a mock ledger - in production would sync from peers
-        let ledger = create_mock_ledger(config)?;
-        
-        // Create stub transport for MVP
-        let transport = Arc::new(aura_transport::StubTransport::default()) as Arc<dyn aura_coordination::Transport>;
-        
-        // Create device key manager and generate device key
-        let mut device_key_manager = DeviceKeyManager::new(Effects::production());
-        device_key_manager.generate_device_key(config.device_id.0)
-            .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to generate device key: {:?}", e)))?;
-        
-        Self::new(config.clone(), key_share, ledger, transport, device_key_manager, Effects::production()).await
+
+    /// Get the device ID (available in all states)
+    pub fn device_id(&self) -> DeviceId {
+        self.device_id
     }
-    
-    /// Derive a simple identity for an app context
-    /// 
-    /// This is the one-line helper that most applications will use.
-    pub async fn derive_simple_identity(
+
+    /// Get the account ID (available in all states)
+    pub fn account_id(&self) -> AccountId {
+        self.account_id
+    }
+}
+
+/// Agent session states (manual implementation)
+#[derive(Debug, Clone)]
+pub struct Uninitialized;
+
+#[derive(Debug, Clone)]
+pub struct Idle;
+
+#[derive(Debug, Clone)]
+pub struct Coordinating;
+
+#[derive(Debug, Clone)]
+pub struct Failed;
+
+impl SessionState for Uninitialized {
+    const NAME: &'static str = "Uninitialized";
+    const IS_FINAL: bool = false;
+    const CAN_TERMINATE: bool = false;
+}
+
+impl SessionState for Idle {
+    const NAME: &'static str = "Idle";
+    const IS_FINAL: bool = false;
+    const CAN_TERMINATE: bool = true;
+}
+
+impl SessionState for Coordinating {
+    const NAME: &'static str = "Coordinating";
+    const IS_FINAL: bool = false;
+    const CAN_TERMINATE: bool = false;
+}
+
+impl SessionState for Failed {
+    const NAME: &'static str = "Failed";
+    const IS_FINAL: bool = true;
+    const CAN_TERMINATE: bool = true;
+}
+
+/// Session-typed agent protocol
+/// Generic over Transport, Storage, and State
+pub struct AgentProtocol<T: Transport, S: Storage, State: SessionState> {
+    pub inner: AgentCore<T, S>,
+    _state: std::marker::PhantomData<State>,
+}
+
+impl<T: Transport, S: Storage, State: SessionState> AgentProtocol<T, S, State> {
+    /// Create a new agent protocol instance
+    pub fn new(core: AgentCore<T, S>) -> Self {
+        Self {
+            inner: core,
+            _state: std::marker::PhantomData,
+        }
+    }
+
+    /// Transition to a new state (type-safe state transitions)
+    pub fn transition_to<NewState: SessionState>(self) -> AgentProtocol<T, S, NewState> {
+        AgentProtocol {
+            inner: self.inner,
+            _state: std::marker::PhantomData,
+        }
+    }
+
+    /// Get the device ID (available in all states)
+    pub fn device_id(&self) -> DeviceId {
+        self.inner.device_id()
+    }
+
+    /// Get the account ID (available in all states)
+    pub fn account_id(&self) -> AccountId {
+        self.inner.account_id()
+    }
+}
+
+/// Type alias for the concrete unified agent
+pub type UnifiedAgent<T, S> = AgentProtocol<T, S, Uninitialized>;
+
+/// Configuration for bootstrapping a new agent
+#[derive(Debug, Clone)]
+pub struct BootstrapConfig {
+    /// Initial threshold for key shares
+    pub threshold: u16,
+    /// Total number of shares
+    pub share_count: u16,
+    /// Additional configuration parameters
+    pub parameters: std::collections::HashMap<String, String>,
+}
+
+/// Status of a running protocol
+#[derive(Debug, Clone)]
+pub enum ProtocolStatus {
+    /// Protocol is still running
+    InProgress,
+    /// Protocol completed successfully
+    Completed,
+    /// Protocol failed with error
+    Failed(String),
+}
+
+/// Witness that a protocol has completed successfully
+#[derive(Debug)]
+pub struct ProtocolCompleted {
+    pub protocol_id: uuid::Uuid,
+    pub result: serde_json::Value,
+}
+
+// Implementation for Uninitialized state
+impl<T: Transport, S: Storage> AgentProtocol<T, S, Uninitialized> {
+    /// Create a new uninitialized agent
+    pub fn new_uninitialized(core: AgentCore<T, S>) -> Self {
+        Self::new(core)
+    }
+
+    /// Bootstrap the agent with initial configuration
+    ///
+    /// This consumes the uninitialized agent and returns an idle agent
+    pub async fn bootstrap(self, config: BootstrapConfig) -> Result<AgentProtocol<T, S, Idle>> {
+        // TODO: Implement bootstrap logic
+        // - Initialize key shares
+        // - Set up ledger
+        // - Configure session runtime
+
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            account_id = %self.inner.account_id,
+            "Bootstrapping agent with config: {:?}", config
+        );
+
+        // For now, just transition to idle state
+        // Real implementation would perform actual bootstrap operations
+        Ok(self.transition_to())
+    }
+}
+
+// Implementation for Idle state - this is the main operational state
+impl<T: Transport, S: Storage> AgentProtocol<T, S, Idle> {
+    /// Derive a new identity for a specific context
+    pub async fn derive_identity(
         &self,
         app_id: &str,
-        context_label: &str,
-    ) -> Result<(DerivedIdentity, SessionCredential)> {
-        debug!("Deriving simple identity for app={}, context={}", app_id, context_label);
-        
-        // Start DKD session using session runtime
-        let session_id = self.session_runtime
-            .start_dkd_session(app_id.to_string(), context_label.to_string())
-            .await
-            .map_err(|e| crate::AgentError::dkd_failed(format!("Failed to start DKD session: {}", e)))?;
-        
-        info!("Started DKD session {} for identity derivation", session_id);
-        
-        // For MVP, create a placeholder derived identity
-        // In production, this would coordinate with the session runtime to complete the DKD protocol
-        let capsule = ContextCapsule::simple_with_effects(app_id, context_label, &self.effects)?;
-        
-        // Generate placeholder derived key
-        let signing_key = ed25519_dalek::SigningKey::from_bytes(&self.effects.random_bytes());
-        let pk_derived = signing_key.verifying_key();
-        let seed_fingerprint = self.effects.random_bytes();
-        
-        let derived_identity = DerivedIdentity {
-            capsule,
-            pk_derived,
-            seed_fingerprint,
-        };
-        
-        // Issue session credential
-        let session_credential = {
-            use crate::credential::issue_credential;
-            use aura_journal::SessionEpoch;
-            
-            let challenge: [u8; 32] = self.effects.random_bytes();
-            let device_nonce = self.get_next_device_nonce().await?;
-            let session_epoch = SessionEpoch(0); // Default epoch for MVP
-            
-            // Create device attestation for session credential
-            let device_attestation_bytes = match crate::secure_storage::DeviceAttestation::new() {
-                Ok(attestation) => {
-                    match attestation.create_attestation(&challenge) {
-                        Ok(statement) => {
-                            // Serialize attestation statement for credential
-                            match bincode::serialize(&statement) {
-                                Ok(bytes) => Some(bytes),
-                                Err(e) => {
-                                    warn!("Failed to serialize device attestation: {}", e);
-                                    None
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to create device attestation for session: {}", e);
-                            None
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to initialize device attestation for session: {}", e);
-                    None
-                }
-            };
-            
-            issue_credential(
-                self.config.device_id,
-                session_epoch,
-                &derived_identity,
-                &challenge,
-                "dkd:derive", // Operation scope
-                device_nonce,
-                device_attestation_bytes,
-                None, // Use default TTL
-                &self.effects,
-            )?
-        };
-        
-        // Terminate the DKD session
-        self.session_runtime
-            .terminate_session(session_id)
-            .await
-            .map_err(|e| crate::AgentError::dkd_failed(format!("Failed to terminate DKD session: {}", e)))?;
-        
-        info!("DKD protocol completed successfully via session runtime");
-        Ok((derived_identity, session_credential))
-    }
-    
-    /// Derive a context-specific identity with custom capsule using P2P DKD
-    pub async fn derive_context_identity(
-        &self,
-        capsule: &ContextCapsule,
-        with_binding_proof: bool,
-    ) -> Result<DerivedIdentity> {
-        debug!("Deriving context identity for app={}", capsule.app_id);
-        
-        // Get current account state to determine participants
-        let participants = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            state.devices.keys().cloned().collect::<Vec<_>>()
-        };
-        
-        if participants.is_empty() {
-            return Err(crate::AgentError::invalid_context(
-                "No participants found in account state"
-            ));
-        }
-        
-        // For threshold DKD, use majority threshold
-        let threshold = (participants.len() / 2) + 1;
-        
-        self.derive_context_identity_threshold(capsule, participants, threshold, with_binding_proof).await
-    }
-    
-    /// Derive context-specific identity with custom threshold and participants
-    pub async fn derive_context_identity_threshold(
-        &self,
-        capsule: &ContextCapsule,
-        participants: Vec<aura_journal::DeviceId>,
-        threshold: usize,
-        with_binding_proof: bool,
-    ) -> Result<DerivedIdentity> {
-        debug!(
-            "Deriving threshold context identity for app={}, participants={}, threshold={}",
-            capsule.app_id, participants.len(), threshold
+        context: &str,
+    ) -> Result<crate::DerivedIdentity> {
+        // TODO: Implement identity derivation using DKD
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            app_id = app_id,
+            context = context,
+            "Deriving identity"
         );
-        
-        // Create context bytes for key derivation
-        let context_bytes = {
-            let mut bytes = Vec::new();
-            bytes.extend_from_slice(capsule.app_id.as_bytes());
-            bytes.push(0); // Separator
-            bytes.extend_from_slice(capsule.context_label.as_bytes());
-            bytes
-        };
-        
-        // Use session runtime for clean protocol execution (no leaky abstractions)
-        let dkd_result = self.session_runtime
-            .start_dkd_with_context(
-                capsule.app_id.clone(),
-                capsule.context_label.clone(),
-                participants,
-                threshold,
-                context_bytes,
-                with_binding_proof,
-            )
-            .await
-            .map_err(|e| crate::AgentError::dkd_failed(format!("DKD session failed: {:?}", e)))?;
-        
-        // Convert derived key bytes to VerifyingKey
-        let pk_derived = if dkd_result.derived_key_bytes.len() >= 32 {
-            let mut key_array = [0u8; 32];
-            key_array.copy_from_slice(&dkd_result.derived_key_bytes[..32]);
-            ed25519_dalek::VerifyingKey::from_bytes(&key_array)
-                .map_err(|e| crate::AgentError::dkd_failed(format!("Invalid derived key: {:?}", e)))?
-        } else {
-            return Err(crate::AgentError::dkd_failed("Derived key too short"));
-        };
-        
-        // Create seed fingerprint from derived key bytes
-        let seed_fingerprint = {
-            let mut fingerprint = [0u8; 32];
-            if dkd_result.derived_key_bytes.len() >= 32 {
-                fingerprint.copy_from_slice(&dkd_result.derived_key_bytes[..32]);
-            }
-            fingerprint
-        };
-        
-        // Construct derived identity
-        let derived_identity = DerivedIdentity {
-            capsule: capsule.clone(),
-            pk_derived,
-            seed_fingerprint,
-        };
-        
-        debug!("Successfully derived identity for app={}, session={}", 
-               capsule.app_id, dkd_result.session_id);
-        
-        Ok(derived_identity)
+
+        // Placeholder implementation
+        Err(crate::error::AuraError::not_implemented("derive_identity"))
     }
-    
-    /// Issue authentication credential - proves device identity
-    pub async fn issue_authentication_credential(&self, identity: &DerivedIdentity) -> Result<crate::types::AuthenticationCredential> {
-        debug!("Issuing authentication credential for derived identity");
-        
-        // Generate challenge for credential binding
-        let challenge: [u8; 32] = self.effects.random_bytes();
-        
-        // Get next nonce for replay prevention
-        let device_nonce = self.get_next_device_nonce().await?;
-        
-        // Create device signature for authentication
-        let signature_payload = [
-            &challenge[..],
-            &device_nonce.to_le_bytes()[..],
-            identity.capsule.context_id()?.as_slice(),
-        ].concat();
-        
-        // Sign the payload using device key
-        let device_signature = {
-            let device_key_manager = self.device_key_manager.read().await;
-            device_key_manager.sign_message(&signature_payload)
-                .map_err(|e| AgentError::crypto_operation(format!("Failed to sign authentication credential: {:?}", e)))?
-        };
-        
-        // Create device attestation for hardware-backed authentication
-        let device_attestation = match crate::secure_storage::DeviceAttestation::new() {
-            Ok(attestation) => {
-                match attestation.create_attestation(&challenge) {
-                    Ok(statement) => Some(statement),
-                    Err(e) => {
-                        warn!("Failed to create device attestation: {}, proceeding without attestation", e);
-                        None
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("Failed to initialize device attestation: {}, proceeding without attestation", e);
-                None
-            }
-        };
-        
-        Ok(crate::types::AuthenticationCredential {
-            issued_by: self.config.device_id,
-            challenge,
-            nonce: device_nonce,
-            device_attestation,
-            device_signature,
-        })
-    }
-    
-    /// Issue authorization token - grants specific permissions
-    pub async fn issue_authorization_token(&self, device_id: aura_journal::DeviceId, operations: Vec<String>) -> Result<crate::types::AuthorizationToken> {
-        debug!("Issuing authorization token for device {} with operations: {:?}", device_id, operations);
-        
-        // Get current session epoch from ledger
-        let ledger = self.ledger.read().await;
-        let _session_epoch = ledger.state().session_epoch;
-        drop(ledger);
-        
-        // Calculate expiration (24 hours default)
-        let expires_at = self.effects.now()? + (24 * 3600);
-        
-        // Create capability proof using threshold signature
-        // The proof includes session epoch, device ID, operations, and expiration time
-        let capability_proof = self.create_capability_proof(
-            _session_epoch.0,
-            device_id,
-            &operations,
-            expires_at,
-        ).await?;
-        
-        Ok(crate::types::AuthorizationToken {
-            permitted_operations: operations,
-            expires_at,
-            capability_proof,
-            authorized_device: device_id,
-        })
-    }
-    
-    /// Verify authentication credential - check device identity
-    pub async fn verify_authentication(&self, credential: &crate::types::AuthenticationCredential) -> Result<()> {
-        debug!("Verifying authentication credential for device {}", credential.issued_by);
-        
-        // Verify device signature
-        if !credential.verify_device_signature(&credential.issued_by)? {
-            return Err(crate::AgentError::invalid_credential("Invalid device signature"));
-        }
-        
-        // Check nonce freshness
-        let last_nonce = self.get_last_device_nonce(&credential.issued_by).await?;
-        if !credential.is_fresh(last_nonce) {
-            return Err(crate::AgentError::invalid_credential("Stale nonce - potential replay attack"));
-        }
-        
-        // Verify device attestation if present
-        if let Some(attestation_statement) = &credential.device_attestation {
-            debug!("Verifying device attestation for device {}", credential.issued_by);
-            
-            // Create device attestation instance to get verification key
-            match crate::secure_storage::DeviceAttestation::new() {
-                Ok(attestation) => {
-                    let public_key = attestation.public_key();
-                    
-                    match crate::secure_storage::DeviceAttestation::verify_attestation(
-                        attestation_statement,
-                        &public_key
-                    ) {
-                        Ok(true) => {
-                            debug!("Device attestation verified successfully");
-                            
-                            // Check platform security state
-                            if !attestation_statement.secure_boot_verified {
-                                warn!("Device attestation shows secure boot not verified");
-                            }
-                            if !attestation_statement.app_integrity_verified {
-                                warn!("Device attestation shows app integrity not verified");
-                            }
-                            if attestation_statement.device_rooted_jailbroken {
-                                return Err(crate::AgentError::invalid_credential(
-                                    "Device is rooted/jailbroken - attestation failed"
-                                ));
-                            }
-                        }
-                        Ok(false) => {
-                            return Err(crate::AgentError::invalid_credential(
-                                "Device attestation signature verification failed"
-                            ));
-                        }
-                        Err(e) => {
-                            return Err(crate::AgentError::invalid_credential(
-                                &format!("Device attestation verification error: {}", e)
-                            ));
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to initialize device attestation for verification: {}", e);
-                    // In production, this might be a hard failure depending on security policy
-                }
-            }
-        } else {
-            debug!("No device attestation present in credential");
-            // In production, you might want to enforce attestation for certain operations
-        }
-        
-        Ok(())
-    }
-    
-    /// Check authorization token - verify permissions
-    pub async fn check_authorization(&self, token: &crate::types::AuthorizationToken, operation: &str) -> Result<bool> {
-        debug!("Checking authorization for device {} operation {}", token.authorized_device, operation);
-        
-        // Check if token is still valid
-        let current_time = self.effects.now()?;
-        if !token.is_valid(current_time) {
-            return Ok(false);
-        }
-        
-        // Check if token authorizes the requested operation
-        Ok(token.authorizes_operation(operation))
-    }
-    
-    /// Get next device nonce for replay prevention
-    async fn get_next_device_nonce(&self) -> Result<u64> {
-        let ledger = self.ledger.write().await;
-        let device_metadata = ledger.state().devices.get(&self.config.device_id)
-            .ok_or_else(|| crate::AgentError::device_not_found(format!("Device {} not found in ledger", self.config.device_id)))?;
-        
-        // Calculate next nonce without modifying state directly
-        // TODO: In production, this should create and append a DeviceNonceUpdate event
-        let next_nonce = device_metadata.next_nonce + 1;
-        
-        Ok(next_nonce)
-    }
-    
-    /// Sign an event hash using device key
-    async fn sign_event_hash(&self, hash: &[u8; 32]) -> Result<ed25519_dalek::Signature> {
-        let device_key_manager = self.device_key_manager.read().await;
-        let signing_key = device_key_manager.get_raw_signing_key()
-            .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to get device signing key: {:?}", e)))?;
-        Ok(signing_key.sign(hash))
-    }
-    
-    /// Get last seen nonce for a device (for replay protection)
-    async fn get_last_device_nonce(&self, device_id: &aura_journal::DeviceId) -> Result<u64> {
-        let ledger = self.ledger.read().await;
-        let device_metadata = ledger.state().devices.get(device_id)
-            .ok_or_else(|| crate::AgentError::device_not_found(format!("Device {} not found in ledger", device_id)))?;
-        
-        // Return the highest used nonce, or 0 if none have been used
-        Ok(device_metadata.used_nonces.iter().max().copied().unwrap_or(0))
-    }
-    
-    /// Sync account state from peers
-    pub async fn sync_account_state(&self) -> Result<()> {
-        info!("Syncing account state for device {}", self.config.device_id);
-        
-        // For MVP, this is a no-op
-        // In production, would:
-        // 1. Connect to peer devices
-        // 2. Exchange Automerge changes
-        // 3. Merge CRDT state
-        // 4. Apply any new events
-        
-        Ok(())
-    }
-    
-    /// Get current account state
-    pub async fn account_state(&self) -> AccountState {
-        self.ledger.read().await.state().clone()
-    }
-    
-    /// Add a new device to the account via resharing
-    pub async fn add_device(&self, new_device_id: DeviceId) -> Result<()> {
-        info!("Adding device {} to account", new_device_id);
-        
-        // Get current participants
-        let current_participants = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            state.devices.keys().cloned().collect::<Vec<_>>()
-        };
-        
-        let current_threshold = (current_participants.len() / 2) + 1;
-        let mut new_participants = current_participants.clone();
-        new_participants.push(new_device_id);
-        
-        self.reshare_with_config(new_participants, current_threshold).await
-    }
-    
-    /// Remove a device from the account via resharing
-    pub async fn remove_device(&self, device_to_remove: DeviceId) -> Result<()> {
-        info!("Removing device {} from account", device_to_remove);
-        
-        // Get current participants
-        let current_participants = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            state.devices.keys().cloned().collect::<Vec<_>>()
-        };
-        
-        let mut new_participants = current_participants.clone();
-        new_participants.retain(|&id| id != device_to_remove);
-        
-        if new_participants.is_empty() {
-            return Err(crate::AgentError::invalid_context(
-                "Cannot remove all devices from account"
-            ));
-        }
-        
-        let new_threshold = (new_participants.len() / 2) + 1;
-        
-        self.reshare_with_config(new_participants, new_threshold).await
-    }
-    
-    /// Adjust the threshold requirement
-    pub async fn adjust_threshold(&self, new_threshold: usize) -> Result<()> {
-        info!("Adjusting threshold to {}", new_threshold);
-        
-        // Get current participants
-        let current_participants = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            state.devices.keys().cloned().collect::<Vec<_>>()
-        };
-        
-        if new_threshold > current_participants.len() {
-            return Err(crate::AgentError::invalid_context(
-                format!("Threshold {} cannot exceed participant count {}", 
-                        new_threshold, current_participants.len())
-            ));
-        }
-        
-        if new_threshold == 0 {
-            return Err(crate::AgentError::invalid_context(
-                "Threshold must be at least 1"
-            ));
-        }
-        
-        self.reshare_with_config(current_participants, new_threshold).await
-    }
-    
-    /// Execute resharing with specific configuration
-    async fn reshare_with_config(
-        &self,
-        new_participants: Vec<DeviceId>,
-        new_threshold: usize,
-    ) -> Result<()> {
-        debug!(
-            "Executing resharing: participants={}, threshold={}",
-            new_participants.len(), new_threshold
+
+    /// Store data with capability-based access control
+    pub async fn store_data(&self, data: &[u8], capabilities: Vec<String>) -> Result<String> {
+        // TODO: Implement capability-protected storage
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            data_len = data.len(),
+            capabilities = ?capabilities,
+            "Storing data"
         );
-        
-        // Create protocol context for resharing choreography
-        let session_id = self.effects.gen_uuid();
-        let ledger = self.ledger.clone();
-        let _key_share = self.key_share.read().await.clone();
-        
-        let current_participants = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            state.devices.keys().cloned().collect::<Vec<_>>()
-        };
-        
-        let current_threshold = (current_participants.len() / 2) + 1;
-        
-        let mut protocol_ctx = aura_coordination::ProtocolContext::new_resharing(
-            session_id,
-            self.config.device_id.0, // Extract Uuid from DeviceId
-            current_participants,
-            Some(current_threshold),
-            ledger,
-            self.transport.clone(),
-            self.effects.clone(),
-            // Get device signing key for protocol context
-            {
-                let device_key_manager = self.device_key_manager.read().await;
-                device_key_manager.get_raw_signing_key()
-                    .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to get device signing key: {:?}", e)))?
-            },
-            Box::new(ProductionTimeSource::new()),
-            new_participants.clone(),
-            new_threshold,
-        );
-        
-        // Execute resharing choreography
-        let _result = aura_coordination::choreography::resharing_choreography(&mut protocol_ctx, Some(new_threshold as u16), Some(new_participants)).await
-            .map_err(|e| crate::AgentError::dkd_failed(format!("Resharing choreography failed: {:?}", e)))?;
-        
-        info!("Resharing completed successfully");
-        Ok(())
+
+        // Placeholder implementation
+        Err(crate::error::AuraError::not_implemented("store_data"))
     }
-    
-    /// Initiate account recovery (user-side)
+
+    /// Retrieve data with capability verification
+    pub async fn retrieve_data(&self, data_id: &str) -> Result<Vec<u8>> {
+        // TODO: Implement capability-protected retrieval
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            data_id = data_id,
+            "Retrieving data"
+        );
+
+        // Placeholder implementation
+        Err(crate::error::AuraError::not_implemented("retrieve_data"))
+    }
+
+    /// Initiate a recovery protocol
+    ///
+    /// This consumes the idle agent and returns a coordinating agent
     pub async fn initiate_recovery(
-        &self,
-        _guardians: Vec<aura_journal::GuardianId>,
-        required_threshold: usize,
-        cooldown_hours: u64,
-    ) -> Result<uuid::Uuid> {
-        info!(
-            "Initiating recovery with threshold {}, cooldown {}h via session runtime",
-            required_threshold, cooldown_hours
+        self,
+        recovery_params: serde_json::Value,
+    ) -> Result<AgentProtocol<T, S, Coordinating>> {
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            "Initiating recovery protocol"
         );
-        
-        // Start recovery session using session runtime
-        let session_id = self.session_runtime
-            .start_recovery_session(required_threshold, cooldown_hours * 3600)
-            .await
-            .map_err(|e| crate::AgentError::dkd_failed(format!("Failed to start recovery session: {}", e)))?;
-        
-        info!("Recovery initiated successfully via session runtime, session_id: {}", session_id);
-        Ok(session_id)
+
+        // TODO: Start recovery session in session runtime
+        // let session_id = self.inner.session_runtime.start_recovery_session(recovery_params).await?;
+
+        // Transition to coordinating state
+        Ok(self.transition_to())
     }
-    
-    /// Approve recovery request (guardian-side)
-    pub async fn approve_recovery(&self, request_id: uuid::Uuid) -> Result<()> {
-        info!("Approving recovery request {}", request_id);
-        
-        // This would typically be called by a guardian device
-        // The guardian would have the guardian_id and guardian key material
-        
-        // Create protocol context
-        let ledger = self.ledger.clone();
-        let _key_share = self.key_share.read().await.clone();
-        
-        let current_participants = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            state.devices.keys().cloned().collect::<Vec<_>>()
-        };
-        
-        let current_threshold = (current_participants.len() / 2) + 1;
-        
-        // Get actual guardian list and threshold from account state
-        let (guardian_list, guardian_threshold) = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            let guardians: Vec<aura_journal::GuardianId> = state.guardians.keys().cloned().collect();
-            let threshold = if guardians.is_empty() {
-                // Fallback: use device threshold if no guardians configured
-                state.threshold as u16
-            } else {
-                // Use majority threshold for guardians
-                ((guardians.len() / 2) + 1) as u16
-            };
-            
-            // If no guardians configured, use current device as emergency guardian
-            if guardians.is_empty() {
-                (vec![aura_journal::GuardianId(self.config.device_id.0)], 1u16)
-            } else {
-                (guardians, threshold)
-            }
-        };
-        
-        let mut protocol_ctx = aura_coordination::ProtocolContext::new_recovery(
-            request_id,
-            self.config.device_id.0, // Extract Uuid from DeviceId
-            current_participants,
-            Some(current_threshold),
-            ledger,
-            self.transport.clone(),
-            self.effects.clone(),
-            // Get device signing key for protocol context
-            {
-                let device_key_manager = self.device_key_manager.read().await;
-                device_key_manager.get_raw_signing_key()
-                    .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to get device signing key: {:?}", e)))?
-            },
-            Box::new(ProductionTimeSource::new()),
-            guardian_list.clone(),
-            guardian_threshold as usize,
-            24, // Default cooldown hours
+
+    /// Initiate a resharing protocol
+    ///
+    /// This consumes the idle agent and returns a coordinating agent
+    pub async fn initiate_resharing(
+        self,
+        new_threshold: u16,
+        new_participants: Vec<DeviceId>,
+    ) -> Result<AgentProtocol<T, S, Coordinating>> {
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            new_threshold = new_threshold,
+            new_participants = ?new_participants,
+            "Initiating resharing protocol"
         );
-        
-        // Set guardian context
-        protocol_ctx.set_guardian_id(aura_journal::GuardianId(self.config.device_id.0))
-            .map_err(|e| crate::AgentError::dkd_failed(format!("Failed to set guardian ID: {:?}", e)))?; // Simplified: device_id as guardian_id
-        
-        // Execute recovery choreography with actual guardian configuration
-        let _result = aura_coordination::choreography::recovery_choreography(&mut protocol_ctx, guardian_list, guardian_threshold).await
-            .map_err(|e| crate::AgentError::dkd_failed(format!("Recovery approval failed: {:?}", e)))?;
-        
-        info!("Recovery approval completed");
-        Ok(())
+
+        // TODO: Start resharing session in session runtime
+
+        // Transition to coordinating state
+        Ok(self.transition_to())
     }
-    
-    /// Nudge an unresponsive guardian
-    pub async fn nudge_guardian(
-        &self,
-        request_id: uuid::Uuid,
-        guardian_id: aura_journal::GuardianId,
-    ) -> Result<()> {
-        info!("Nudging guardian {:?} for recovery {}", guardian_id, request_id);
-        
-        let ledger = self.ledger.clone();
-        let _key_share = self.key_share.read().await.clone();
-        
-        let current_participants = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            state.devices.keys().cloned().collect::<Vec<_>>()
-        };
-        
-        let current_threshold = (current_participants.len() / 2) + 1;
-        
-        let mut protocol_ctx = aura_coordination::ProtocolContext::new(
-            request_id,
-            self.config.device_id.0, // Extract Uuid from DeviceId
-            current_participants,
-            Some(current_threshold),
-            ledger,
-            self.transport.clone(),
-            self.effects.clone(),
-            // Get device signing key for protocol context
-            {
-                let device_key_manager = self.device_key_manager.read().await;
-                device_key_manager.get_raw_signing_key()
-                    .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to get device signing key: {:?}", e)))?
-            },
-            Box::new(ProductionTimeSource::new()),
-        );
-        
-        // Execute nudge
-        let recovery_session_id = uuid::Uuid::new_v4(); // Generate recovery session ID
-        aura_coordination::choreography::nudge_guardian(&mut protocol_ctx, guardian_id, recovery_session_id).await
-            .map_err(|e| crate::AgentError::dkd_failed(format!("Guardian nudge failed: {:?}", e)))?;
-        
-        info!("Guardian nudge sent");
-        Ok(())
-    }
-    
-    /// Generate binding proof for derived identity
-    /// 
-    /// Creates a cryptographic proof that binds the derived identity to this specific device.
-    /// The proof demonstrates that:
-    /// 1. The device possesses the private key corresponding to its device ID
-    /// 2. The derived key was generated by this device for the specified context
-    /// 3. The binding cannot be forged without access to the device's private key
-    #[allow(dead_code)]
-    async fn generate_binding_proof(
-        &self,
-        capsule: &ContextCapsule,
-        derived_key: &[u8],
-    ) -> Result<Vec<u8>> {
-        debug!("Generating binding proof for app={}, derived_key={}", 
-               capsule.app_id, hex::encode(&derived_key[..8]));
-        
-        // Create binding proof message that includes:
-        // - Device ID (to identify the signing device)
-        // - App ID and context (to scope the binding)
-        // - Derived key (what we're binding to the device)
-        // - Timestamp (to prevent replay attacks)
-        let timestamp = self.effects.now()
-            .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to get timestamp: {:?}", e)))?;
-        
-        let proof_content = bincode::serialize(&(
-            &self.config.device_id,
-            &capsule.app_id,
-            &capsule.context_label,
-            derived_key,
-            timestamp,
-        )).map_err(|e| crate::AgentError::crypto_operation(format!("Failed to serialize proof content: {:?}", e)))?;
-        
-        // Sign the proof content with device key to create binding proof
-        let device_key_manager = self.device_key_manager.read().await;
-        let signature = device_key_manager.sign_message(&proof_content)
-            .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to sign binding proof: {:?}", e)))?;
-        
-        // Create the complete binding proof structure
-        let binding_proof = bincode::serialize(&(
-            &self.config.device_id,
-            timestamp,
-            signature,
-        )).map_err(|e| crate::AgentError::crypto_operation(format!("Failed to serialize binding proof: {:?}", e)))?;
-        
-        debug!("Generated binding proof of {} bytes", binding_proof.len());
-        Ok(binding_proof)
-    }
-    
-    /// Get current session epoch  
-    pub async fn get_current_epoch(&self) -> u64 {
-        self.ledger.read().await.lamport_clock()
-    }
-    
-    /// Check for session timeouts
-    pub async fn check_session_timeouts(&self) -> Result<Vec<uuid::Uuid>> {
-        let current_time = self.effects.now()?;
-        let current_epoch = {
-            let ledger = self.ledger.read().await;
-            ledger.lamport_clock()
-        };
-        
-        // Get all active session status information
-        let session_statuses = self.session_runtime.get_session_status().await;
-        let mut timed_out_sessions = Vec::new();
-        
-        for session_info in &session_statuses {
-            // Check if session is active and potentially timed out
-            if session_info.status == aura_journal::SessionStatus::Active {
-                // Session timeout logic based on protocol type
-                let is_timed_out = match session_info.protocol_type {
-                    aura_coordination::SessionProtocolType::DKD => {
-                        // DKD sessions timeout after 5 minutes
-                        current_time > 300 // 5 minutes in seconds
-                    }
-                    aura_coordination::SessionProtocolType::Recovery => {
-                        // Recovery sessions have longer timeout (48 hours for cooldown)
-                        current_epoch > 48 * 60 // 48 hours in epoch units
-                    }
-                    aura_coordination::SessionProtocolType::Resharing => {
-                        // Resharing sessions timeout after 10 minutes
-                        current_time > 600 // 10 minutes in seconds
-                    }
-                    aura_coordination::SessionProtocolType::Locking => {
-                        // Locking sessions timeout after 2 minutes
-                        current_time > 120 // 2 minutes in seconds
-                    }
-                    aura_coordination::SessionProtocolType::Agent => {
-                        // Agent sessions don't typically timeout
-                        false
-                    }
-                };
-                
-                if is_timed_out {
-                    timed_out_sessions.push(session_info.session_id);
-                    tracing::warn!(
-                        "Session {} of type {:?} has timed out", 
-                        session_info.session_id, 
-                        session_info.protocol_type
-                    );
-                }
-            }
-        }
-        
-        // Terminate timed-out sessions
-        for session_id in &timed_out_sessions {
-            let _result = self.session_runtime.send_command(
-                aura_coordination::SessionCommand::TerminateSession { 
-                    session_id: *session_id 
-                }
-            ).await;
-        }
-        
+}
+
+// Implementation for Coordinating state - restricted API while protocol runs
+impl<T: Transport, S: Storage> AgentProtocol<T, S, Coordinating> {
+    /// Check the status of the currently running protocol
+    pub async fn check_protocol_status(&self) -> Result<ProtocolStatus> {
+        // TODO: Query session runtime for protocol status
         tracing::debug!(
-            "Checked {} active sessions, found {} timed out", 
-            session_statuses.len(), 
-            timed_out_sessions.len()
+            device_id = %self.inner.device_id,
+            "Checking protocol status"
         );
-        
-        Ok(timed_out_sessions)
+
+        // Placeholder implementation
+        Ok(ProtocolStatus::InProgress)
     }
-    
-    /// Emit a tick event to advance logical time
-    pub async fn maybe_emit_tick(&self) -> Result<()> {
-        let current_time = self.effects.now()?;
-        let should_emit_tick = {
-            let ledger = self.ledger.read().await;
-            let last_tick_time = ledger.last_event_hash()
-                .map(|_| current_time.saturating_sub(60)) // Assume last event was within 60s
-                .unwrap_or(0);
-            
-            // Emit tick if:
-            // 1. More than 30 seconds since last tick
-            // 2. We have active sessions that might need time advancement
-            current_time > last_tick_time + 30
-        };
-        
-        if should_emit_tick {
-            let session_statuses = self.session_runtime.get_session_status().await;
-            let has_active_sessions = session_statuses.iter()
-                .any(|s| s.status == aura_journal::SessionStatus::Active);
-            
-            if has_active_sessions {
-                let (next_epoch, event_hash) = {
-                    let mut ledger = self.ledger.write().await;
-                    let next_epoch = ledger.next_lamport_timestamp(&self.effects);
-                    let state_hash = ledger.compute_state_hash()?;
-                    (next_epoch, state_hash)
-                };
-                
-                // Create EpochTick event
-                let tick_event = aura_journal::Event::new(
-                    self.config.account_id,
-                    self.get_next_device_nonce().await?,
-                    Some(event_hash),
-                    next_epoch,
-                    aura_journal::EventType::EpochTick(aura_journal::EpochTickEvent {
-                        new_epoch: next_epoch,
-                        evidence_hash: event_hash,
-                    }),
-                    aura_journal::EventAuthorization::DeviceCertificate {
-                        device_id: self.config.device_id,
-                        signature: self.sign_event_hash(&event_hash).await?,
-                    },
-                    &self.effects,
-                )?;
-                
-                // Apply tick event to ledger
-                {
-                    let mut ledger = self.ledger.write().await;
-                    ledger.append_event(tick_event, &self.effects)?;
-                }
-                
-                tracing::debug!(
-                    "Emitted epoch tick: advanced to epoch {}", 
-                    next_epoch
-                );
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Get device ID
-    pub fn device_id(&self) -> DeviceId {
-        self.config.device_id
-    }
-    
-    /// Get ledger for protocol contexts
-    pub(crate) fn ledger(&self) -> Arc<RwLock<AccountLedger>> {
-        self.ledger.clone()
-    }
-    
-    /// Get transport for protocol contexts
-    pub(crate) fn transport(&self) -> Arc<dyn aura_coordination::Transport> {
-        self.transport.clone()
-    }
-    
-    /// Get effects for protocol contexts
-    pub(crate) fn effects(&self) -> &Effects {
-        &self.effects
-    }
-    
-    /// Get device key manager for protocol contexts
-    pub(crate) fn device_key_manager(&self) -> Arc<RwLock<DeviceKeyManager>> {
-        self.device_key_manager.clone()
-    }
-    
-    /// Get session epoch
-    pub async fn session_epoch(&self) -> SessionEpoch {
-        self.ledger.read().await.state().session_epoch
-    }
-    
-    // ========== Session Management ==========
-    
-    /// Create a new session
-    pub async fn create_session(
-        &self,
-        protocol_type: aura_journal::ProtocolType,
-        participants: Vec<aura_journal::ParticipantId>,
-        ttl_in_epochs: u64,
-    ) -> Result<uuid::Uuid> {
-        let session_id = self.effects.gen_uuid();
-        let current_epoch = self.get_current_epoch().await;
-        let timestamp = self.effects.now().map_err(|e| crate::AgentError::system_time(e.to_string()))?;
-        
-        let session = aura_journal::Session::new(
-            aura_journal::SessionId(session_id),
-            protocol_type,
-            participants,
-            current_epoch,
-            ttl_in_epochs,
-            timestamp,
+
+    /// Complete the coordination and return to idle state
+    ///
+    /// Requires a witness proving the protocol completed successfully
+    pub fn finish_coordination(self, witness: ProtocolCompleted) -> AgentProtocol<T, S, Idle> {
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            protocol_id = %witness.protocol_id,
+            "Finishing coordination with witness"
         );
-        
-        // Add session to ledger
-        let mut ledger = self.ledger.write().await;
-        ledger.add_session(session, &self.effects);
-        
-        info!("Created session {} for protocol {:?}", session_id, protocol_type);
-        Ok(session_id)
+
+        // TODO: Verify witness and clean up protocol state
+
+        // Transition back to idle state
+        self.transition_to()
     }
-    
-    /// Get session by ID
-    pub async fn get_session(&self, session_id: &uuid::Uuid) -> Option<aura_journal::Session> {
-        self.ledger.read().await.get_session(session_id).cloned()
-    }
-    
-    /// Get all active sessions
-    pub async fn active_sessions(&self) -> Vec<aura_journal::Session> {
-        self.ledger.read().await.active_sessions().into_iter().cloned().collect()
-    }
-    
-    /// Get sessions by protocol type
-    pub async fn sessions_by_protocol(&self, protocol_type: aura_journal::ProtocolType) -> Vec<aura_journal::Session> {
-        self.ledger.read().await.sessions_by_protocol(protocol_type).into_iter().cloned().collect()
-    }
-    
-    /// Check if any session of given protocol type is active
-    pub async fn has_active_session_of_type(&self, protocol_type: aura_journal::ProtocolType) -> bool {
-        self.ledger.read().await.has_active_session_of_type(protocol_type)
-    }
-    
-    /// Update session status
-    pub async fn update_session_status(&self, session_id: uuid::Uuid, status: aura_journal::SessionStatus) -> Result<()> {
-        let mut ledger = self.ledger.write().await;
-        ledger.update_session_status(session_id, status, &self.effects)
-            .map_err(|e| crate::AgentError::ledger(e.to_string()))?;
-        
-        debug!("Updated session {} status to {:?}", session_id, status);
-        Ok(())
-    }
-    
-    /// Complete a session with success outcome
-    pub async fn complete_session(&self, session_id: uuid::Uuid) -> Result<()> {
-        let mut ledger = self.ledger.write().await;
-        ledger.complete_session(session_id, aura_journal::SessionOutcome::Success, &self.effects)
-            .map_err(|e| crate::AgentError::ledger(e.to_string()))?;
-        
-        info!("Completed session {} successfully", session_id);
-        Ok(())
-    }
-    
-    /// Abort a session with failure
-    pub async fn abort_session(&self, session_id: uuid::Uuid, reason: String, blamed_party: Option<aura_journal::ParticipantId>) -> Result<()> {
-        let mut ledger = self.ledger.write().await;
-        ledger.abort_session(session_id, reason.clone(), blamed_party, &self.effects)
-            .map_err(|e| crate::AgentError::ledger(e.to_string()))?;
-        
-        info!("Aborted session {} with reason: {}", session_id, reason);
-        Ok(())
-    }
-    
-    /// Clean up expired sessions
-    pub async fn cleanup_expired_sessions(&self) -> Result<()> {
-        let mut ledger = self.ledger.write().await;
-        ledger.cleanup_expired_sessions(&self.effects);
-        
-        debug!("Cleaned up expired sessions");
-        Ok(())
-    }
-    
-    /// Start a new protocol session with automatic participant selection
-    pub async fn start_protocol_session(&self, protocol_type: aura_journal::ProtocolType) -> Result<uuid::Uuid> {
-        // Check if this protocol type is already active
-        if self.has_active_session_of_type(protocol_type).await {
-            return Err(crate::AgentError::invalid_context(
-                format!("Protocol {:?} already has an active session", protocol_type)
-            ));
-        }
-        
-        // Get participants based on protocol type
-        let participants: Vec<aura_journal::ParticipantId> = match protocol_type {
-            aura_journal::ProtocolType::Dkd | 
-            aura_journal::ProtocolType::Resharing | 
-            aura_journal::ProtocolType::LockAcquisition => {
-                // These protocols involve all active devices
-                let ledger = self.ledger.read().await;
-                let state = ledger.state();
-                state.devices.keys()
-                    .map(|device_id| aura_journal::ParticipantId::Device(*device_id))
-                    .collect()
-            },
-            aura_journal::ProtocolType::Recovery => {
-                // Recovery involves guardians
-                let ledger = self.ledger.read().await;
-                let state = ledger.state();
-                state.guardians.keys()
-                    .map(|guardian_id| aura_journal::ParticipantId::Guardian(*guardian_id))
-                    .collect()
-            },
-            aura_journal::ProtocolType::Locking => {
-                // Compaction involves all devices
-                let ledger = self.ledger.read().await;
-                let state = ledger.state();
-                state.devices.keys()
-                    .map(|device_id| aura_journal::ParticipantId::Device(*device_id))
-                    .collect()
-            },
-        };
-        
-        if participants.is_empty() {
-            return Err(crate::AgentError::invalid_context(
-                format!("No participants available for protocol {:?}", protocol_type)
-            ));
-        }
-        
-        // Set appropriate TTL based on protocol type
-        let ttl_in_epochs = match protocol_type {
-            aura_journal::ProtocolType::Dkd => 50,               // DKD should be fast
-            aura_journal::ProtocolType::Resharing => 100,        // Resharing can take time
-            aura_journal::ProtocolType::Recovery => 1000, // Recovery has cooldowns
-            aura_journal::ProtocolType::Locking => 10,          // Locking should be fast
-            aura_journal::ProtocolType::LockAcquisition => 100,   // Lock acquisition can take time
-        };
-        
-        self.create_session(protocol_type, participants, ttl_in_epochs).await
-    }
-    
-    /// Monitor all active sessions and handle timeouts
-    pub async fn monitor_sessions(&self) -> Result<Vec<aura_journal::SessionId>> {
-        let current_epoch = self.get_current_epoch().await;
-        let mut timed_out_sessions = Vec::new();
-        
-        // Get all active sessions
-        let active_sessions = self.active_sessions().await;
-        
-        for session in active_sessions {
-            if session.is_timed_out(current_epoch) {
-                // Mark session as timed out
-                self.update_session_status(session.session_id.0, aura_journal::SessionStatus::TimedOut).await?;
-                timed_out_sessions.push(session.session_id);
-                
-                info!("Session {} timed out after {} epochs", 
-                      session.session_id, current_epoch - session.started_at);
-            }
-        }
-        
-        Ok(timed_out_sessions)
-    }
-    
-    /// Get session statistics from both ledger and session runtime
-    pub async fn session_statistics(&self) -> SessionStatistics {
-        // Get statistics from session runtime
-        let runtime_sessions = self.session_runtime.get_session_status().await;
-        
-        // Get statistics from ledger
-        let ledger = self.ledger.read().await;
-        let state = ledger.state();
-        
-        let mut stats = SessionStatistics {
-            total_sessions: state.sessions.len() + runtime_sessions.len(),
-            active_sessions: 0,
-            completed_sessions: 0,
-            failed_sessions: 0,
-            timed_out_sessions: 0,
-            sessions_by_protocol: std::collections::BTreeMap::new(),
-        };
-        
-        // Count ledger sessions
-        for session in state.sessions.values() {
-            match session.status {
-                aura_journal::SessionStatus::Active => {
-                    stats.active_sessions += 1;
-                },
-                aura_journal::SessionStatus::Completed => {
-                    stats.completed_sessions += 1;
-                },
-                aura_journal::SessionStatus::Failed => {
-                    stats.failed_sessions += 1;
-                },
-                aura_journal::SessionStatus::TimedOut => {
-                    stats.timed_out_sessions += 1;
-                },
-                aura_journal::SessionStatus::Expired => {
-                    stats.timed_out_sessions += 1; // Count expired as timed out
-                },
-            }
-            
-            *stats.sessions_by_protocol.entry(session.protocol_type).or_insert(0) += 1;
-        }
-        
-        // Count runtime sessions
-        for session in runtime_sessions {
-            if session.is_final {
-                stats.completed_sessions += 1;
-            } else {
-                stats.active_sessions += 1;
-            }
-            
-            // Map runtime protocol types to journal protocol types
-            let journal_protocol = match session.protocol_type {
-                aura_coordination::SessionProtocolType::DKD => aura_journal::ProtocolType::Dkd,
-                aura_coordination::SessionProtocolType::Recovery => aura_journal::ProtocolType::Recovery,
-                aura_coordination::SessionProtocolType::Resharing => aura_journal::ProtocolType::Resharing,
-                aura_coordination::SessionProtocolType::Locking => aura_journal::ProtocolType::Locking,
-                aura_coordination::SessionProtocolType::Agent => aura_journal::ProtocolType::LockAcquisition,
-            };
-            
-            *stats.sessions_by_protocol.entry(journal_protocol).or_insert(0) += 1;
-        }
-        
-        stats
-    }
-    
-    /// Get session runtime for advanced operations
-    pub fn session_runtime(&self) -> &LocalSessionRuntime {
-        &self.session_runtime
-    }
-    
-    /// Request a distributed lock for a critical operation
-    /// 
-    /// This creates a Session and executes the locking choreography
-    pub async fn request_operation_lock(&self, operation_type: aura_journal::OperationType) -> Result<uuid::Uuid> {
-        info!("Requesting operation lock for {:?}", operation_type);
-        
-        // Create session for lock acquisition
-        let session_id = self.start_protocol_session(aura_journal::ProtocolType::LockAcquisition).await?;
-        
-        // Create protocol context for locking choreography
-        let ledger = self.ledger.clone();
-        let participants = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            state.devices.keys().cloned().collect::<Vec<_>>()
-        };
-        
-        let threshold = (participants.len() / 2) + 1;
-        let mut protocol_ctx = aura_coordination::ProtocolContext::new_locking(
-            session_id,
-            self.config.device_id.0,
-            participants,
-            Some(threshold), // Majority threshold
-            ledger,
-            self.transport.clone(),
-            self.effects.clone(),
-            // Get device signing key for protocol context
-            {
-                let device_key_manager = self.device_key_manager.read().await;
-                device_key_manager.get_raw_signing_key()
-                    .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to get device signing key: {:?}", e)))?
-            },
-            Box::new(ProductionTimeSource::new()),
+
+    /// Cancel the running protocol and return to idle state
+    pub async fn cancel_coordination(self) -> Result<AgentProtocol<T, S, Idle>> {
+        tracing::warn!(
+            device_id = %self.inner.device_id,
+            "Cancelling coordination protocol"
         );
-        
-        // Execute locking choreography
-        match aura_coordination::choreography::locking::locking_choreography(&mut protocol_ctx, operation_type).await {
-            Ok(()) => {
-                // We won the lock!
-                self.complete_session(session_id).await?;
-                info!("Successfully acquired operation lock for {:?}", operation_type);
-                Ok(session_id)
-            },
-            Err(e) => {
-                // We lost the lottery or failed
-                self.abort_session(session_id, e.message.clone(), None).await?;
-                Err(crate::AgentError::dkd_failed(format!("Failed to acquire lock: {:?}", e)))
-            }
-        }
-    }
-    
-    /// Release a previously acquired distributed lock
-    pub async fn release_operation_lock(&self, session_id: uuid::Uuid, operation_type: aura_journal::OperationType) -> Result<()> {
-        info!("Releasing operation lock for {:?}", operation_type);
-        
-        // Create protocol context for lock release
-        let ledger = self.ledger.clone();
-        let participants = {
-            let ledger = self.ledger.read().await;
-            let state = ledger.state();
-            state.devices.keys().cloned().collect::<Vec<_>>()
-        };
-        
-        let threshold = (participants.len() / 2) + 1;
-        let mut protocol_ctx = aura_coordination::ProtocolContext::new_locking(
-            session_id,
-            self.config.device_id.0,
-            participants,
-            Some(threshold),
-            ledger,
-            self.transport.clone(),
-            self.effects.clone(),
-            // Get device signing key for protocol context
-            {
-                let device_key_manager = self.device_key_manager.read().await;
-                device_key_manager.get_raw_signing_key()
-                    .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to get device signing key: {:?}", e)))?
-            },
-            Box::new(ProductionTimeSource::new()),
-        );
-        
-        // Execute lock release choreography
-        aura_coordination::choreography::locking::release_lock_choreography(&mut protocol_ctx, operation_type).await
-            .map_err(|e| crate::AgentError::dkd_failed(format!("Failed to release lock: {:?}", e)))?;
-        
-        info!("Successfully released operation lock for {:?}", operation_type);
-        Ok(())
-    }
-    
-    /// Check if any operation lock is currently active
-    pub async fn is_operation_locked(&self, operation_type: aura_journal::OperationType) -> bool {
-        let ledger = self.ledger.read().await;
-        ledger.is_operation_locked(operation_type)
-    }
-    
-    /// Get the currently active operation lock
-    pub async fn active_operation_lock(&self) -> Option<aura_journal::OperationLock> {
-        let ledger = self.ledger.read().await;
-        ledger.active_operation_lock().cloned()
-    }
-    
-    /// Create capability proof using threshold signature
-    /// 
-    /// This creates a cryptographic proof that authorizes specific operations for a device.
-    /// The proof includes session epoch to tie authorization to current session state.
-    async fn create_capability_proof(
-        &self,
-        session_epoch: u64,
-        device_id: aura_journal::DeviceId,
-        operations: &[String],
-        expires_at: u64,
-    ) -> Result<Vec<u8>> {
-        use aura_crypto::FrostSigner;
-        
-        // Create authorization data to sign
-        let auth_data = format!(
-            "AUTH:{}:{}:{}:{}",
-            session_epoch,
-            device_id.0,
-            operations.join(","),
-            expires_at
-        );
-        let message = auth_data.as_bytes();
-        
-        // Get our key share for FROST signing
-        let key_share = self.key_share.read().await;
-        let key_package = &key_share.share;
-        
-        // Generate nonces for FROST round 1
-        let mut rng = self.effects.rng();
-        // Get threshold and participating devices for this capability
-        let threshold = 2; // 2-of-N threshold for capability operations
-        let participating_devices = self.get_online_threshold_participants().await?;
-        
-        if participating_devices.len() >= threshold {
-            // Attempt real FROST threshold signing
-            match self.attempt_frost_threshold_signing(message, participating_devices, threshold, &mut rng).await {
-                Ok(signature_bytes) => {
-                    debug!("Successfully created FROST threshold signature");
-                    Ok(signature_bytes)
-                }
-                Err(e) => {
-                    warn!("FROST threshold signing failed: {:?}, falling back to device signature", e);
-                    // Fallback to device signature
-                    let device_key_manager = self.device_key_manager.read().await;
-                    Ok(device_key_manager.sign_message(message)?)
-                }
-            }
-        } else {
-            warn!("Insufficient online participants ({} < {}), using device signature", 
-                  participating_devices.len(), threshold);
-            // Fallback to device signature when insufficient participants
-            let device_key_manager = self.device_key_manager.read().await;
-            Ok(device_key_manager.sign_message(message)?)
-        }
-    }
 
-    /// Attempt FROST threshold signing with participating devices
-    async fn attempt_frost_threshold_signing(
-        &self,
-        message: &[u8],
-        participating_devices: Vec<DeviceId>,
-        threshold: usize,
-        rng: &mut aura_crypto::EffectsRng,
-    ) -> Result<Vec<u8>> {
-        use aura_crypto::frost::FrostSigner;
-        use frost_ed25519 as frost;
-        use std::collections::BTreeMap;
+        // TODO: Cancel protocol in session runtime
 
-        debug!("Attempting FROST threshold signing with {} participants", participating_devices.len());
-
-        // For now, generate test FROST key packages for the participating devices
-        // In production, these would be retrieved from secure storage and coordinated via transport
-        let (key_packages, pubkey_package) = self.generate_frost_key_packages_for_devices(
-            &participating_devices, 
-            threshold as u16, 
-            rng
-        ).await?;
-
-        // Use FROST optimistic threshold signing
-        let (signature, _participating_ids) = FrostSigner::optimistic_threshold_sign(
-            message,
-            &key_packages,
-            &pubkey_package,
-            threshold as u16,
-            rng,
-        ).map_err(|e| AgentError::crypto_operation(format!("FROST signing failed: {:?}", e)))?;
-
-        debug!("FROST threshold signature generated successfully");
-        Ok(signature.to_bytes().to_vec())
-    }
-
-    /// Generate FROST key packages for participating devices
-    async fn generate_frost_key_packages_for_devices(
-        &self,
-        participating_devices: &[DeviceId],
-        threshold: u16,
-        rng: &mut aura_crypto::EffectsRng,
-    ) -> Result<(BTreeMap<frost::Identifier, frost::keys::KeyPackage>, frost::keys::PublicKeyPackage)> {
-        use frost_ed25519 as frost;
-
-        let max_signers = participating_devices.len().min(5) as u16;
-        let min_signers = threshold;
-
-        // Generate FROST key packages (this would be done during account setup in production)
-        let (shares, pubkey_package) = frost::keys::generate_with_dealer(
-            max_signers,
-            min_signers,
-            frost::keys::IdentifierList::Default,
-            rng,
-        ).map_err(|e| AgentError::crypto_operation(format!("FROST key generation failed: {:?}", e)))?;
-
-        // Convert shares to key packages
-        let mut key_packages = BTreeMap::new();
-        for (identifier, secret_share) in shares {
-            let key_package = frost::keys::KeyPackage::try_from(secret_share)
-                .map_err(|e| AgentError::crypto_operation(format!("Failed to create KeyPackage: {:?}", e)))?;
-            key_packages.insert(identifier, key_package);
-        }
-
-        debug!("Generated {} FROST key packages for threshold signing", key_packages.len());
-        Ok((key_packages, pubkey_package))
-    }
-
-    /// Get list of online devices that can participate in threshold signing
-    async fn get_online_threshold_participants(&self) -> Result<Vec<DeviceId>> {
-        // TODO: In production, this would:
-        // 1. Query the transport layer for presence information
-        // 2. Check which devices have valid threshold key shares
-        // 3. Return only devices that are currently online and reachable
-        
-        // For MVP, return a mock list representing typical 3-of-5 scenario
-        Ok(vec![
-            DeviceId(uuid::Uuid::new_v4()),
-            DeviceId(uuid::Uuid::new_v4()),
-            DeviceId(uuid::Uuid::new_v4()),
-            DeviceId(uuid::Uuid::new_v4()),
-        ])
+        // Transition back to idle state
+        Ok(self.transition_to())
     }
 }
 
-/// Load sealed key share from storage
-/// 
-/// Uses platform-specific secure storage to load encrypted threshold key shares.
-fn load_sealed_share(key_id: &str) -> Result<KeyShare> {
-    use crate::secure_storage::{SecureStorage, PlatformSecureStorage};
-    
-    let storage = PlatformSecureStorage::new()
-        .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to initialize secure storage: {:?}", e)))?;
-    
-    storage.load_key_share(key_id)
-        .map_err(|e| crate::AgentError::crypto_operation(format!("Failed to load key share: {:?}", e)))
+// Implementation for Failed state
+impl<T: Transport, S: Storage> AgentProtocol<T, S, Failed> {
+    /// Get the error that caused the failure
+    pub fn get_failure_reason(&self) -> String {
+        // TODO: Store and retrieve actual failure reason
+        "Agent failed".to_string()
+    }
+
+    /// Attempt to recover from failure
+    ///
+    /// This may succeed and return to Uninitialized state for re-bootstrap
+    pub async fn attempt_recovery(self) -> Result<AgentProtocol<T, S, Uninitialized>> {
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            "Attempting recovery from failed state"
+        );
+
+        // TODO: Implement recovery logic
+
+        // If recovery succeeds, return to uninitialized for re-bootstrap
+        Ok(self.transition_to())
+    }
 }
 
-/// Create mock ledger for testing
-/// 
-/// In production, would load from persistent storage and sync with peers.
-fn create_mock_ledger(config: &IdentityConfig) -> Result<AccountLedger> {
-    use ed25519_dalek::SigningKey;
-    
-    let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
-    let group_public_key = signing_key.verifying_key();
-    
-    let device = DeviceMetadata {
-        device_id: config.device_id,
-        device_name: "Mock Device".to_string(),
-        device_type: aura_journal::DeviceType::Native,
-        public_key: group_public_key,
-        added_at: 0, // Will be set properly when effects are available
-        last_seen: 0, // Will be set properly when effects are available
-        dkd_commitment_proofs: std::collections::BTreeMap::new(),
-        next_nonce: 0,
-        used_nonces: std::collections::BTreeSet::new(),
-    };
-    
-    let state = AccountState::new(
-        config.account_id,
-        group_public_key,
-        device,
-        config.threshold,
-        config.total_participants,
-    );
-    
-    AccountLedger::new(state)
-        .map_err(|e| crate::AgentError::ledger(e.to_string()))
+// Implement Agent trait for Idle state
+#[async_trait]
+impl<T: Transport, S: Storage> Agent for AgentProtocol<T, S, Idle> {
+    async fn derive_identity(&self, app_id: &str, context: &str) -> Result<DerivedIdentity> {
+        self.derive_identity(app_id, context).await
+    }
+
+    async fn store_data(&self, data: &[u8], capabilities: Vec<String>) -> Result<String> {
+        self.store_data(data, capabilities).await
+    }
+
+    async fn retrieve_data(&self, data_id: &str) -> Result<Vec<u8>> {
+        self.retrieve_data(data_id).await
+    }
+
+    fn device_id(&self) -> DeviceId {
+        self.inner.device_id()
+    }
+
+    fn account_id(&self) -> AccountId {
+        self.inner.account_id()
+    }
 }
 
-#[allow(dead_code)]
-fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> Result<u64> {
-    effects.now().map_err(|e| crate::AgentError::system_time(e.to_string()))
+// Implement CoordinatingAgent trait for Idle state
+#[async_trait]
+impl<T: Transport, S: Storage> CoordinatingAgent for AgentProtocol<T, S, Idle> {
+    async fn initiate_recovery(&mut self, recovery_params: serde_json::Value) -> Result<()> {
+        // Note: This is a simplified version that doesn't consume self
+        // In practice, you might want to track state differently
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            "Initiating recovery protocol (trait implementation)"
+        );
+        // TODO: Implement without consuming self
+        Err(crate::error::AuraError::not_implemented(
+            "initiate_recovery via trait",
+        ))
+    }
+
+    async fn initiate_resharing(
+        &mut self,
+        new_threshold: u16,
+        new_participants: Vec<DeviceId>,
+    ) -> Result<()> {
+        tracing::info!(
+            device_id = %self.inner.device_id,
+            new_threshold = new_threshold,
+            "Initiating resharing protocol (trait implementation)"
+        );
+        // TODO: Implement without consuming self
+        Err(crate::error::AuraError::not_implemented(
+            "initiate_resharing via trait",
+        ))
+    }
+
+    async fn check_protocol_status(&self) -> Result<ProtocolStatus> {
+        // This doesn't make sense for Idle state as there's no running protocol
+        Ok(ProtocolStatus::Completed)
+    }
+}
+
+// Implement Agent trait for Coordinating state (limited functionality)
+#[async_trait]
+impl<T: Transport, S: Storage> Agent for AgentProtocol<T, S, Coordinating> {
+    async fn derive_identity(&self, _app_id: &str, _context: &str) -> Result<DerivedIdentity> {
+        // Identity derivation might be allowed during coordination
+        Err(crate::error::AuraError::agent_invalid_state(
+            "Cannot derive identity while coordinating",
+        ))
+    }
+
+    async fn store_data(&self, _data: &[u8], _capabilities: Vec<String>) -> Result<String> {
+        // Storage operations might be restricted during coordination
+        Err(crate::error::AuraError::agent_invalid_state(
+            "Cannot store data while coordinating",
+        ))
+    }
+
+    async fn retrieve_data(&self, _data_id: &str) -> Result<Vec<u8>> {
+        // Retrieval might be allowed during coordination
+        Err(crate::error::AuraError::agent_invalid_state(
+            "Cannot retrieve data while coordinating",
+        ))
+    }
+
+    fn device_id(&self) -> DeviceId {
+        self.inner.device_id()
+    }
+
+    fn account_id(&self) -> AccountId {
+        self.inner.account_id()
+    }
+}
+
+// Implement CoordinatingAgent trait for Coordinating state
+#[async_trait]
+impl<T: Transport, S: Storage> CoordinatingAgent for AgentProtocol<T, S, Coordinating> {
+    async fn initiate_recovery(&mut self, _recovery_params: serde_json::Value) -> Result<()> {
+        Err(crate::error::AuraError::agent_invalid_state(
+            "Cannot initiate recovery while already coordinating",
+        ))
+    }
+
+    async fn initiate_resharing(
+        &mut self,
+        _new_threshold: u16,
+        _new_participants: Vec<DeviceId>,
+    ) -> Result<()> {
+        Err(crate::error::AuraError::agent_invalid_state(
+            "Cannot initiate resharing while already coordinating",
+        ))
+    }
+
+    async fn check_protocol_status(&self) -> Result<ProtocolStatus> {
+        self.check_protocol_status().await
+    }
+}
+
+/// Factory for creating unified agents with different configurations
+pub struct AgentFactory;
+
+impl AgentFactory {
+    /// Create a production agent with real transport and storage
+    pub async fn create_production<T: Transport, S: Storage>(
+        device_id: DeviceId,
+        account_id: AccountId,
+        transport: Arc<T>,
+        storage: Arc<S>,
+    ) -> Result<UnifiedAgent<T, S>> {
+        // TODO: Initialize real key share and ledger from storage
+        let key_share = KeyShare::default();
+        // Create placeholder account state for now
+        use ed25519_dalek::VerifyingKey;
+        let dummy_key_bytes = [0u8; 32];
+        let verifying_key = VerifyingKey::from_bytes(&dummy_key_bytes).unwrap(); // TODO: use actual key
+        let device_metadata = DeviceMetadata {
+            device_id,
+            device_name: "test-device".to_string(),
+            device_type: DeviceType::Native,
+            public_key: verifying_key,
+            added_at: 0,
+            last_seen: 0,
+            dkd_commitment_proofs: Default::default(),
+            next_nonce: 0,
+            used_nonces: Default::default(),
+        };
+        let threshold = 2;
+        let share_count = 3;
+        let account_state = AccountState::new(
+            account_id,
+            verifying_key,
+            device_metadata,
+            threshold,
+            share_count,
+        );
+        let ledger = AccountLedger::new(account_state)?;
+        // let session_runtime = Arc::new(session_types::LocalSessionRuntime::new());  // Disabled until session_types is fixed
+        let effects = Effects::test();
+
+        let core = AgentCore::new(
+            device_id, account_id, key_share, ledger, transport, storage, effects,
+        );
+
+        Ok(UnifiedAgent::new_uninitialized(core))
+    }
+
+    /// Create a test agent with mock transport and storage
+    #[cfg(test)]
+    pub async fn create_test(
+        device_id: DeviceId,
+        account_id: AccountId,
+    ) -> Result<UnifiedAgent<impl Transport, impl Storage>> {
+        // Use the mock implementations for testing
+        let transport = Arc::new(tests::MockTransport::new(device_id));
+        let storage = Arc::new(tests::MockStorage::new(account_id));
+
+        Self::create_production(device_id, account_id, transport, storage).await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_coordination::{KeyShare, ParticipantId};
-    use frost_ed25519 as frost;
-    
-    // Helper to create test key shares using FROST dealer
-    fn setup_test_keyshare() -> (KeyShare, ed25519_dalek::VerifyingKey) {
-        let mut rng = aura_crypto::Effects::test().rng();
-        
-        // Generate 2-of-3 threshold keys
-        let result = frost::keys::generate_with_dealer(
-            2u16, // threshold
-            3u16, // total participants
-            frost::keys::IdentifierList::Default,
-            &mut rng,
-        );
-        
-        let (shares, pubkey_package) = result.expect("FROST key generation should work");
-        
-        // Get first participant's share
-        let (_id, secret_share) = shares.into_iter().next().unwrap();
-        let key_package = frost::keys::KeyPackage::try_from(secret_share).unwrap();
-        
-        let key_share = KeyShare {
-            participant_id: ParticipantId::from_u16_unchecked(1),
-            share: key_package,
-            threshold: 2,
-            total_participants: 3,
-        };
-        
-        // Convert FROST verifying key to dalek
-        let frost_vk = pubkey_package.verifying_key();
-        let dalek_vk = ed25519_dalek::VerifyingKey::from_bytes(&frost_vk.serialize()).unwrap();
-        
-        (key_share, dalek_vk)
+    use uuid::Uuid;
+
+    // Import mock implementations from tests/mocks.rs
+    // Note: In integration tests, use: use aura_agent::test_utils::mocks::{MockTransport, MockStorage};
+    // For unit tests in this module, we need to re-export or define minimal mocks here.
+    // Since Rust doesn't allow importing from tests/ in src/ files, we keep minimal inline mocks
+    // for the create_test factory method, but the detailed mock tests are in tests/mocks.rs
+
+    #[derive(Debug)]
+    pub struct MockTransport {
+        device_id: DeviceId,
+    }
+
+    impl MockTransport {
+        pub fn new(device_id: DeviceId) -> Self {
+            Self { device_id }
+        }
+    }
+
+    #[async_trait]
+    impl Transport for MockTransport {
+        fn device_id(&self) -> DeviceId {
+            self.device_id
+        }
+
+        async fn send_message(&self, _peer_id: DeviceId, _message: &[u8]) -> Result<()> {
+            Ok(())
+        }
+
+        async fn receive_messages(&self) -> Result<Vec<(DeviceId, Vec<u8>)>> {
+            Ok(Vec::new())
+        }
+
+        async fn connect(&self, _peer_id: DeviceId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn disconnect(&self, _peer_id: DeviceId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn connected_peers(&self) -> Result<Vec<DeviceId>> {
+            Ok(Vec::new())
+        }
+
+        async fn is_connected(&self, _peer_id: DeviceId) -> Result<bool> {
+            Ok(false)
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct MockStorage {
+        account_id: AccountId,
+    }
+
+    impl MockStorage {
+        pub fn new(account_id: AccountId) -> Self {
+            Self { account_id }
+        }
+    }
+
+    #[async_trait]
+    impl Storage for MockStorage {
+        fn account_id(&self) -> AccountId {
+            self.account_id
+        }
+
+        async fn store(&self, _key: &str, _data: &[u8]) -> Result<()> {
+            Ok(())
+        }
+
+        async fn retrieve(&self, _key: &str) -> Result<Option<Vec<u8>>> {
+            Ok(None)
+        }
+
+        async fn delete(&self, _key: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn list_keys(&self) -> Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+
+        async fn exists(&self, _key: &str) -> Result<bool> {
+            Ok(false)
+        }
+
+        async fn stats(&self) -> Result<StorageStats> {
+            Ok(StorageStats {
+                total_keys: 0,
+                total_size_bytes: 0,
+                available_space_bytes: Some(1_000_000_000),
+            })
+        }
     }
 
     #[tokio::test]
-    #[ignore] // Temporarily disabled due to FROST key generation issues
-    async fn test_device_agent_derive_identity() {
-        // Create test key share
-        let (share1, pubkey) = setup_test_keyshare();
-        
-        // Create agent config
-        let effects = aura_crypto::Effects::test();
-        let config = IdentityConfig {
-            device_id: DeviceId::new_with_effects(&effects),
-            account_id: aura_journal::AccountId::new_with_effects(&effects),
-            participant_id: ParticipantId::from_u16_unchecked(1),
-            share_path: "/tmp/test_share".to_string(),
-            threshold: 2,
-            total_participants: 3,
-        };
-        
-        // Create device metadata
-        let device = DeviceMetadata {
-            device_id: config.device_id,
-            device_name: "Test Device".to_string(),
-            device_type: aura_journal::DeviceType::Native,
-            public_key: pubkey,
-            added_at: aura_crypto::Effects::test().now().unwrap_or(0),
-            last_seen: aura_crypto::Effects::test().now().unwrap_or(0),
-            dkd_commitment_proofs: std::collections::BTreeMap::new(),
+    async fn test_agent_state_transitions() {
+        // Create mock dependencies
+        let device_id = DeviceId(Uuid::new_v4());
+        let account_id = AccountId::new(Uuid::new_v4());
+        let transport = Arc::new(MockTransport::new(device_id));
+        let storage = Arc::new(MockStorage::new(account_id));
+
+        // Create minimal test dependencies
+        let key_share = KeyShare::default();
+        use ed25519_dalek::VerifyingKey;
+        let dummy_key_bytes = [0u8; 32];
+        let verifying_key = VerifyingKey::from_bytes(&dummy_key_bytes).unwrap();
+        let device_metadata = DeviceMetadata {
+            device_id,
+            device_name: "test-device".to_string(),
+            device_type: DeviceType::Native,
+            public_key: verifying_key,
+            added_at: 0,
+            last_seen: 0,
+            dkd_commitment_proofs: Default::default(),
             next_nonce: 0,
-            used_nonces: std::collections::BTreeSet::new(),
+            used_nonces: Default::default(),
         };
-        
-        // Create initial state and ledger
-        let state = AccountState::new(
-            config.account_id,
-            pubkey,
-            device,
-            config.threshold,
-            config.total_participants,
+        let threshold = 2;
+        let share_count = 3;
+        let account_state = AccountState::new(
+            account_id,
+            verifying_key,
+            device_metadata,
+            threshold,
+            share_count,
         );
-        let ledger = AccountLedger::new(state).unwrap();
-        
-        let device_id = config.device_id;
-        
-        // Create transport and device key manager for agent
-        let transport = Arc::new(aura_transport::StubTransport::default()) as Arc<dyn aura_coordination::Transport>;
-        let mut device_key_manager = DeviceKeyManager::new(aura_crypto::Effects::test());
-        device_key_manager.generate_device_key(device_id.0).unwrap();
-        
-        // Create agent
-        let agent = DeviceAgent::new(config, share1, ledger, transport, device_key_manager, aura_crypto::Effects::test()).await.unwrap();
-        
-        // Test that agent was created successfully
-        assert_eq!(agent.device_id(), device_id);
-        assert_eq!(agent.session_epoch().await, SessionEpoch(1));
-        
-        // Note: derive_simple_identity is not yet implemented (requires P2P DKD)
-        // This test just verifies basic agent initialization
+        let ledger = AccountLedger::new(account_state).unwrap();
+        let effects = Effects::test();
+
+        // Create agent core
+        let core = AgentCore::new(
+            device_id, account_id, key_share, ledger, transport, storage, effects,
+        );
+
+        // 1. Start with uninitialized agent
+        let uninit_agent = UnifiedAgent::new_uninitialized(core);
+
+        // Verify we can access common methods
+        assert_eq!(uninit_agent.device_id(), device_id);
+        assert_eq!(uninit_agent.account_id(), account_id);
+
+        // 2. Bootstrap to idle state
+        let bootstrap_config = BootstrapConfig {
+            threshold: 2,
+            share_count: 3,
+            parameters: std::collections::HashMap::new(),
+        };
+
+        let idle_agent = uninit_agent.bootstrap(bootstrap_config).await.unwrap();
+
+        // 3. Try to initiate recovery (transitions to coordinating)
+        let coordinating_agent = idle_agent
+            .initiate_recovery(serde_json::json!({}))
+            .await
+            .unwrap();
+
+        // 4. Check protocol status
+        let status = coordinating_agent.check_protocol_status().await.unwrap();
+        assert!(matches!(status, ProtocolStatus::InProgress));
+
+        // 5. Finish coordination (back to idle)
+        let witness = ProtocolCompleted {
+            protocol_id: Uuid::new_v4(),
+            result: serde_json::json!({"success": true}),
+        };
+
+        let _idle_agent_again = coordinating_agent.finish_coordination(witness);
+
+        // This test demonstrates the compile-time safety:
+        // - Can't call store_data() on uninitialized agent (won't compile)
+        // - Can't call initiate_recovery() on coordinating agent (won't compile)
+        // - Must follow the state transition protocol
+    }
+
+    #[tokio::test]
+    async fn test_agent_factory() {
+        let device_id = DeviceId(Uuid::new_v4());
+        let account_id = AccountId::new(Uuid::new_v4());
+
+        // Test factory creation
+        let uninit_agent = AgentFactory::create_test(device_id, account_id)
+            .await
+            .unwrap();
+
+        // Verify IDs are correct
+        assert_eq!(uninit_agent.device_id(), device_id);
+        assert_eq!(uninit_agent.account_id(), account_id);
+
+        // Bootstrap agent
+        let config = BootstrapConfig {
+            threshold: 1,
+            share_count: 1,
+            parameters: Default::default(),
+        };
+        let idle_agent = uninit_agent.bootstrap(config).await.unwrap();
+
+        // Verify agent is operational
+        assert_eq!(idle_agent.device_id(), device_id);
+        assert_eq!(idle_agent.account_id(), account_id);
     }
 }
-

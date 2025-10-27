@@ -1,0 +1,71 @@
+# Threshold Key Generation Scenario
+
+[metadata]
+name = "threshold_key_generation_2_of_3"
+description = "Basic threshold key generation with 2-of-3 participants"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["frost", "threshold", "key-generation", "core"]
+
+[setup]
+participants = 3
+threshold = 2
+seed = 123
+
+[network]
+latency_range = [5, 15]
+drop_rate = 0.0
+
+[[phases]]
+name = "setup"
+description = "Initialize participants and network"
+timeout_seconds = 1
+actions = [
+    { type = "wait_ticks", ticks = 10 }
+]
+
+[[phases]]
+name = "commitment"
+description = "Participants generate and exchange commitments"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "frost_commitment", participants = ["alice", "bob", "charlie"], threshold = 2 }
+]
+
+[[phases]]
+name = "signing_key_generation"
+description = "Generate threshold signing key shares"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "frost_key_generation", participants = ["alice", "bob", "charlie"], threshold = 2 }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify key generation completed successfully"
+timeout_seconds = 1
+actions = [
+    { type = "verify_property", property = "threshold_shares_generated", expected = true },
+    { type = "verify_property", property = "all_participants_have_shares", expected = true }
+]
+
+[[properties]]
+name = "threshold_shares_generated"
+property_type = "safety"
+
+[[properties]]
+name = "secret_sharing_valid"
+property_type = "safety"
+
+[[properties]]
+name = "no_secret_leakage"
+property_type = "safety"
+
+[[properties]]
+name = "protocol_completes"
+property_type = "liveness"
+
+[[properties]]
+name = "all_participants_have_shares"
+property_type = "safety"
+

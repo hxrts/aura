@@ -1,0 +1,212 @@
+//! Session-related types and status enums
+//!
+//! This module provides types for managing protocol sessions, their lifecycle,
+//! and participant management across distributed protocols.
+
+// Session identifiers will be imported when needed
+use crate::{DeviceId, GuardianId};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use uuid::Uuid;
+
+/// Unified participant identifier that can represent different types of participants
+///
+/// This enum allows protocols to work with different kinds of participants
+/// (devices and guardians) in a type-safe manner.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ParticipantId {
+    /// A device participant (from aura-crypto DeviceId)
+    Device(DeviceId),
+    /// A guardian participant (from aura-crypto GuardianId)
+    Guardian(GuardianId),
+}
+
+impl ParticipantId {
+    /// Get the underlying UUID regardless of participant type
+    pub fn uuid(&self) -> Uuid {
+        match self {
+            ParticipantId::Device(device_id) => device_id.0,
+            ParticipantId::Guardian(guardian_id) => guardian_id.0,
+        }
+    }
+
+    /// Check if this is a device participant
+    pub fn is_device(&self) -> bool {
+        matches!(self, ParticipantId::Device(_))
+    }
+
+    /// Check if this is a guardian participant
+    pub fn is_guardian(&self) -> bool {
+        matches!(self, ParticipantId::Guardian(_))
+    }
+
+    /// Get device ID if this is a device participant
+    pub fn as_device(&self) -> Option<&DeviceId> {
+        match self {
+            ParticipantId::Device(device_id) => Some(device_id),
+            ParticipantId::Guardian(_) => None,
+        }
+    }
+
+    /// Get guardian ID if this is a guardian participant
+    pub fn as_guardian(&self) -> Option<&GuardianId> {
+        match self {
+            ParticipantId::Device(_) => None,
+            ParticipantId::Guardian(guardian_id) => Some(guardian_id),
+        }
+    }
+}
+
+impl fmt::Display for ParticipantId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParticipantId::Device(device_id) => write!(f, "device-{}", device_id.0),
+            ParticipantId::Guardian(guardian_id) => write!(f, "guardian-{}", guardian_id.0),
+        }
+    }
+}
+
+/// Session epoch for versioning and ordering
+///
+/// Provides versioning for sessions and ensures proper ordering of operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct SessionEpoch(pub u64);
+
+impl SessionEpoch {
+    /// Create a new session epoch
+    pub fn new(epoch: u64) -> Self {
+        Self(epoch)
+    }
+
+    /// Get the epoch value
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+
+    /// Get the next epoch
+    pub fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// Get the initial epoch (0)
+    pub fn initial() -> Self {
+        Self(0)
+    }
+}
+
+impl fmt::Display for SessionEpoch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "epoch-{}", self.0)
+    }
+}
+
+impl From<u64> for SessionEpoch {
+    fn from(epoch: u64) -> Self {
+        Self(epoch)
+    }
+}
+
+impl From<SessionEpoch> for u64 {
+    fn from(epoch: SessionEpoch) -> Self {
+        epoch.0
+    }
+}
+
+/// General-purpose epoch for versioning and coordination
+///
+/// Used by various subsystems for versioning and coordination.
+/// Note: This consolidates the `Epoch` type from the groups crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Epoch(pub u64);
+
+impl Epoch {
+    /// Create a new epoch
+    pub fn new(epoch: u64) -> Self {
+        Self(epoch)
+    }
+
+    /// Get the epoch value
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+
+    /// Get the next epoch
+    pub fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// Get the initial epoch (0)
+    pub fn initial() -> Self {
+        Self(0)
+    }
+}
+
+impl fmt::Display for Epoch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "epoch-{}", self.0)
+    }
+}
+
+impl From<u64> for Epoch {
+    fn from(epoch: u64) -> Self {
+        Self(epoch)
+    }
+}
+
+impl From<Epoch> for u64 {
+    fn from(epoch: Epoch) -> Self {
+        epoch.0
+    }
+}
+
+/// Session status enumeration
+///
+/// Represents the current state of a protocol session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SessionStatus {
+    /// Session is currently active and executing
+    Active,
+    /// Session completed successfully
+    Completed,
+    /// Session failed with an error
+    Failed,
+    /// Session expired due to timeout
+    Expired,
+    /// Session timed out during execution
+    TimedOut,
+}
+
+impl fmt::Display for SessionStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SessionStatus::Active => write!(f, "active"),
+            SessionStatus::Completed => write!(f, "completed"),
+            SessionStatus::Failed => write!(f, "failed"),
+            SessionStatus::Expired => write!(f, "expired"),
+            SessionStatus::TimedOut => write!(f, "timed-out"),
+        }
+    }
+}
+
+/// Session outcome enumeration
+///
+/// Represents the final result of a protocol session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SessionOutcome {
+    /// Session completed successfully
+    Success,
+    /// Session failed
+    Failed,
+    /// Session was aborted
+    Aborted,
+}
+
+impl fmt::Display for SessionOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SessionOutcome::Success => write!(f, "success"),
+            SessionOutcome::Failed => write!(f, "failed"),
+            SessionOutcome::Aborted => write!(f, "aborted"),
+        }
+    }
+}

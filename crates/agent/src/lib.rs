@@ -1,59 +1,69 @@
-//! Aura Agent: Capability-driven identity and session management
+//! Aura Agent: Unified capability-driven identity and session management
 //!
-//! This crate provides capability-based agents for the Aura platform:
-//! - Pure capability-driven authorization (no legacy policies)
-//! - Group messaging with BeeKEM for secure communication
-//! - Causal encryption for forward secrecy
-//! - Network transport and storage integration
-//! - Distributed protocol coordination
+//! This crate provides a unified agent implementation with session types for
+//! compile-time state safety and generic transport/storage abstractions.
 //!
-//! # Agent Architecture
+//! ## Architecture Overview
 //!
-//! ## [`CapabilityAgent`]: Core capability-driven functionality
-//! - Pure capability-based authorization and group messaging
-//! - No external dependencies (transport, storage)
-//! - Ideal for testing, embedded systems, library integration
-//! - Methods: `check_capability()`, `create_group()`, `encrypt()`, `decrypt()`
+//! The unified agent replaces the previous multiple agent types with a single,
+//! session-typed, generic implementation that provides:
 //!
-//! ## [`IntegratedAgent`]: Full system integration
-//! - All CapabilityAgent features plus transport and storage
-//! - Network-aware capability delegation and revocation
-//! - Encrypted data storage with capability-based access control
-//! - Methods: `bootstrap()`, `network_connect()`, `store()`, `retrieve()`
+//! - **Session Types** - Compile-time state safety preventing invalid operations
+//! - **Generic Abstractions** - Transport and Storage traits for maximum testability
+//! - **State-Gated API** - Only valid operations available for each state
+//! - **Witness-Based Transitions** - Cryptographic proofs for state changes
 //!
+//! ## Agent States and Transitions
 //!
-//! # Method Naming Conventions
+//! The unified agent has four main states:
+//! - **Uninitialized** - Agent created but not bootstrapped
+//! - **Idle** - Ready to perform operations
+//! - **Coordinating** - Running long-term protocols (limited API)
+//! - **Failed** - Error state (can attempt recovery)
 //!
-//! - **Core operations**: `check_capability()`, `require_capability()`
-//! - **Group operations**: `create_group()`, `list_groups()`
-//! - **Data operations**: `encrypt()`, `decrypt()`, `store()`, `retrieve()`
-//! - **Network operations**: `network_` prefix for distributed operations
+//! ## Usage Examples
 //!
-//! # Example Usage
+//! ### Basic Agent Usage with Compile-Time Safety
 //!
 //! ```rust,ignore
-//! use aura_agent::{CapabilityAgent, IntegratedAgent};
-//! use aura_journal::{DeviceId, AccountId, CapabilityScope};
+//! use aura_agent::{AgentFactory, BootstrapConfig, Agent};
+//! use aura_types::{AccountId, DeviceId, DeviceIdExt, GuardianId};
+//! use uuid::Uuid;
 //!
-//! // Core capability agent
-//! let device_id = DeviceId::new();
-//! let account_id = AccountId::new();
-//! let mut agent = CapabilityAgent::new(device_id, account_id);
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let device_id = DeviceId::new_with_effects(&aura_crypto::Effects::test());
+//!     let account_id = AccountId::new(Uuid::new_v4());
 //!
-//! // Bootstrap new account
-//! agent.bootstrap_account(vec![device_id], 2)?;
+//!     // 1. Create uninitialized agent (compile-time enforced)
+//!     let uninit_agent = AgentFactory::create_test(device_id, account_id).await?;
 //!
-//! // Check capabilities
-//! let scope = CapabilityScope::simple("mls", "admin");
-//! if agent.check_capability(&scope) {
-//!     // Create group with new naming
-//!     agent.create_group("team-chat", vec![])?;
+//!     // 2. This WON'T compile - can't store data before bootstrap:
+//!     // uninit_agent.store_data(b"data", vec!["read".to_string()]).await?;
+//!
+//!     // 3. Must bootstrap first (consumes uninitialized agent)
+//!     let bootstrap_config = BootstrapConfig {
+//!         threshold: 2,
+//!         share_count: 3,
+//!         parameters: Default::default(),
+//!     };
+//!     let idle_agent = uninit_agent.bootstrap(bootstrap_config).await?;
+//!
+//!     // 4. Now operations are allowed (compile-time safe)
+//!     let identity = idle_agent.derive_identity("my-app", "user-context").await?;
+//!     let data_id = idle_agent.store_data(b"secret data", vec!["read".to_string()]).await?;
+//!
+//!     // 5. Start long-running protocol (consumes idle agent)
+//!     let coordinating_agent = idle_agent.initiate_recovery(serde_json::json!({})).await?;
+//!
+//!     // 6. This WON'T compile - can't start another protocol while coordinating:
+//!     // coordinating_agent.initiate_resharing(3, vec![device_id]).await?;
+//!
+//!     // 7. Can only check status or cancel while coordinating
+//!     let status = coordinating_agent.check_protocol_status().await?;
+//!
+//!     Ok(())
 //! }
-//!
-//! // Full integrated agent
-//! let integrated = IntegratedAgent::new(device_id, account_id, storage_path).await?;
-//! integrated.bootstrap(initial_devices, threshold).await?;
-//! integrated.network_connect(peer_id, "127.0.0.1:8080").await?;
 //! ```
 
 #![allow(missing_docs, dead_code, unused_imports, unused_variables, clippy::all)]
@@ -63,46 +73,60 @@ use serde::{Deserialize, Serialize};
 pub use tokio::sync::RwLock;
 pub use uuid::Uuid;
 
-/// Core agent functionality and protocol orchestration
+// ========== Agent Implementation ==========
+/// Agent implementation with session types
 pub mod agent;
-/// Credential management and session tickets for agent authentication
-pub mod credential;
-/// P2P Distributed Key Derivation (DKD) orchestration
-pub mod dkd;
-/// Refined error handling with grouped error types
+
+/// Agent trait definitions
+pub mod traits;
+
+/// Infrastructure implementations of Transport and Storage
+pub mod infrastructure;
+
+/// Structured error hierarchy
 pub mod error;
-/// Guardian management for account recovery and delegation
-pub mod guardian;
-/// Invitation management for establishing relationships
-pub mod invitation;
-/// Recovery protocols for restoring access to compromised accounts
-pub mod recovery;
-/// Multi-device relationship key management for SSB
-pub mod relationship_keys;
-/// Core types and data structures used throughout the agent system
-pub mod types;
 
-pub mod secure_storage;
+// ========== Essential Types ==========
+/// Derived identity result from DKD protocol
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DerivedIdentity {
+    pub app_id: String,
+    pub context: String,
+    pub identity_key: Vec<u8>, // Placeholder - should be actual key type
+    pub proof: Vec<u8>,        // Placeholder - should be actual proof type
+}
 
-// New capability-driven agent architecture
-/// Pure capability-driven agent with no external dependencies
-pub mod capability_agent;
-/// Integrated agent with transport and storage capabilities
-pub mod integrated_agent;
+// ========== Re-exports for Convenience ==========
 
-pub use agent::{DeviceAgent};
-pub use credential::*;
-pub use guardian::*;
-pub use recovery::*;
-pub use relationship_keys::*;
-pub use types::*;
+// Agent types (main interface)
+pub use agent::{
+    // Agent-specific types
+    AgentCore,
+    AgentFactory,
+    AgentProtocol,
+    BootstrapConfig,
+    Coordinating,
+    Failed,
+    Idle,
+    KeyShare,
+    ProtocolCompleted,
+    ProtocolStatus,
+    Storage,
+    StorageStats,
+    Transport,
+    // Type aliases for convenience
+    UnifiedAgent,
+    // Session states
+    Uninitialized,
+};
 
-// Export new capability-driven agents
-pub use capability_agent::{AgentConfig, CapabilityAgent};
-pub use integrated_agent::{IntegratedAgent, NetworkStats, StorageStats};
+// Infrastructure implementations
+pub use infrastructure::{ProductionFactory, ProductionStorage, ProductionTransport};
 
-// Export error types (both new structured and old compatibility)
+// Agent traits
+pub use traits::{Agent, CoordinatingAgent, GroupAgent, IdentityAgent, NetworkAgent, StorageAgent};
+
+// Error types
 pub use error::{
-    AgentError, CapabilityError, CryptoError, DataError, InfrastructureError, ProtocolError,
-    Result, SystemError,
+    AgentError, CapabilityError, DataError, InfrastructureError, ProtocolError, Result,
 };

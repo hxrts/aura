@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 /// FROST key share for a participant
 ///
 /// Contains the secret share and associated metadata needed for threshold signing
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FrostKeyShare {
     /// Participant identifier
     pub identifier: frost::Identifier,
@@ -35,14 +35,17 @@ impl FrostKeyShare {
         share_bytes: [u8; 32],
         verifying_key_bytes: [u8; 32],
     ) -> Result<Self> {
-        let identifier = frost::Identifier::deserialize(&identifier_bytes)
-            .map_err(|e| CryptoError::InvalidKey(format!("Invalid identifier: {:?}", e)))?;
+        let identifier = frost::Identifier::deserialize(&identifier_bytes).map_err(|e| {
+            CryptoError::crypto_operation_failed(format!("Invalid identifier: {:?}", e))
+        })?;
 
-        let signing_share = frost::keys::SigningShare::deserialize(share_bytes)
-            .map_err(|e| CryptoError::InvalidKey(format!("Invalid signing share: {:?}", e)))?;
+        let signing_share = frost::keys::SigningShare::deserialize(share_bytes).map_err(|e| {
+            CryptoError::crypto_operation_failed(format!("Invalid signing share: {:?}", e))
+        })?;
 
-        let verifying_key = frost::VerifyingKey::deserialize(verifying_key_bytes)
-            .map_err(|e| CryptoError::InvalidKey(format!("Invalid verifying key: {:?}", e)))?;
+        let verifying_key = frost::VerifyingKey::deserialize(verifying_key_bytes).map_err(|e| {
+            CryptoError::crypto_operation_failed(format!("Invalid verifying key: {:?}", e))
+        })?;
 
         Ok(FrostKeyShare {
             identifier,
@@ -102,17 +105,16 @@ impl FrostSigner {
     /// Create signature share (Round 2)
     ///
     /// After collecting commitments from all participants, each creates their signature share
-    #[allow(unused_variables)]
     pub fn sign_share(
-        message: &[u8],
-        signing_nonces: &frost::round1::SigningNonces,
-        signing_commitments: &BTreeMap<frost::Identifier, frost::round1::SigningCommitments>,
-        key_share: &FrostKeyShare,
+        _message: &[u8],
+        _signing_nonces: &frost::round1::SigningNonces,
+        _signing_commitments: &BTreeMap<frost::Identifier, frost::round1::SigningCommitments>,
+        _key_share: &FrostKeyShare,
     ) -> Result<frost::round2::SignatureShare> {
-        // Note: This is a simplified interface. In production, you would need the full KeyPackage.
-        // For testing, use sign_share_with_package() directly.
-        Err(CryptoError::CryptoError(
-            "Use sign_share_with_package() for FROST signing with KeyPackage".to_string(),
+        // For production usage, a proper KeyPackage would be reconstructed from stored data
+        // For now, delegate to the package-based implementation which is the real implementation
+        Err(CryptoError::crypto_operation_failed(
+            "Use sign_share_with_package() for FROST signing - KeyPackage construction requires additional context".to_string(),
         ))
     }
 
@@ -130,7 +132,7 @@ impl FrostSigner {
 
         // Generate signature share
         frost::round2::sign(&signing_package, signing_nonces, key_package)
-            .map_err(|e| CryptoError::CryptoError(format!("FROST signing failed: {:?}", e)))
+            .map_err(|e| CryptoError::frost_sign_failed(format!("FROST signing failed: {:?}", e)))
     }
 
     /// Aggregate signature shares into final signature (performed by any participant)
@@ -145,7 +147,9 @@ impl FrostSigner {
 
         // Aggregate signature shares
         let group_signature = frost::aggregate(&signing_package, signature_shares, pubkey_package)
-            .map_err(|e| CryptoError::CryptoError(format!("FROST aggregation failed: {:?}", e)))?;
+            .map_err(|e| {
+                CryptoError::crypto_operation_failed(format!("FROST aggregation failed: {:?}", e))
+            })?;
 
         // Convert FROST signature to ed25519-dalek Signature
         let sig_bytes = group_signature.serialize();
@@ -165,7 +169,7 @@ impl FrostSigner {
     ) -> Result<Signature> {
         // Validate we have enough participants
         if participating_key_packages.len() < threshold as usize {
-            return Err(CryptoError::CryptoError(format!(
+            return Err(CryptoError::crypto_operation_failed(format!(
                 "Insufficient participants: have {}, need threshold {}",
                 participating_key_packages.len(),
                 threshold
@@ -188,11 +192,14 @@ impl FrostSigner {
 
         for (id, key_package) in participating_key_packages.iter() {
             let nonces = nonces_map.get(id).ok_or_else(|| {
-                CryptoError::CryptoError("Missing nonces for participant".to_string())
+                CryptoError::crypto_operation_failed("Missing nonces for participant".to_string())
             })?;
             let signature_share = frost::round2::sign(&signing_package, nonces, key_package)
                 .map_err(|e| {
-                    CryptoError::CryptoError(format!("FROST round2 signing failed: {:?}", e))
+                    CryptoError::crypto_operation_failed(format!(
+                        "FROST round2 signing failed: {:?}",
+                        e
+                    ))
                 })?;
             signature_shares.insert(*id, signature_share);
         }
@@ -215,7 +222,7 @@ impl FrostSigner {
     ) -> Result<(Signature, Vec<frost::Identifier>)> {
         // Validate we have enough participants
         if participating_key_packages.len() < threshold as usize {
-            return Err(CryptoError::CryptoError(format!(
+            return Err(CryptoError::crypto_operation_failed(format!(
                 "Insufficient participants: have {}, need threshold {}",
                 participating_key_packages.len(),
                 threshold
@@ -238,11 +245,14 @@ impl FrostSigner {
 
         for (id, key_package) in participating_key_packages.iter() {
             let nonces = nonces_map.get(id).ok_or_else(|| {
-                CryptoError::CryptoError("Missing nonces for participant".to_string())
+                CryptoError::crypto_operation_failed("Missing nonces for participant".to_string())
             })?;
             let signature_share = frost::round2::sign(&signing_package, nonces, key_package)
                 .map_err(|e| {
-                    CryptoError::CryptoError(format!("FROST round2 signing failed: {:?}", e))
+                    CryptoError::crypto_operation_failed(format!(
+                        "FROST round2 signing failed: {:?}",
+                        e
+                    ))
                 })?;
             all_signature_shares.insert(*id, signature_share);
         }
@@ -250,7 +260,7 @@ impl FrostSigner {
         // The issue is that signature shares were computed with ALL commitments,
         // but we're trying to aggregate with only a subset. This doesn't work with FROST.
         // We need to aggregate with ALL shares, not a subset.
-        
+
         // Aggregate using ALL signature shares (not a subset)
         let signature = Self::aggregate(
             message,
@@ -258,12 +268,9 @@ impl FrostSigner {
             &all_signature_shares,
             pubkey_package,
         )?;
-        
+
         // Return all participating signers (not just threshold subset)
-        let selected_ids: Vec<frost::Identifier> = all_signature_shares
-            .keys()
-            .copied()
-            .collect();
+        let selected_ids: Vec<frost::Identifier> = all_signature_shares.keys().copied().collect();
 
         Ok((signature, selected_ids))
     }
@@ -280,7 +287,7 @@ impl FrostSigner {
         threshold: u16,
     ) -> Result<(Signature, Vec<frost::Identifier>)> {
         if all_signature_shares.len() < threshold as usize {
-            return Err(CryptoError::CryptoError(format!(
+            return Err(CryptoError::crypto_operation_failed(format!(
                 "Insufficient signature shares: have {}, need threshold {}",
                 all_signature_shares.len(),
                 threshold
@@ -290,14 +297,14 @@ impl FrostSigner {
         // In FROST, if we have signature shares computed with a full set of commitments,
         // we must use ALL of them for aggregation. We can't arbitrarily select subsets
         // after the fact because the shares are cryptographically bound to the full commitment set.
-        
+
         // For true threshold subset aggregation, the signature shares would need to be
         // computed fresh with only the subset's commitments.
-        
+
         // Since we have ALL shares already computed, just aggregate them all
         let participant_ids: Vec<frost::Identifier> =
             all_signature_shares.keys().copied().collect();
-            
+
         match Self::aggregate(
             message,
             all_commitments,
@@ -323,7 +330,7 @@ pub fn verify_signature(
 ) -> Result<()> {
     public_key
         .verify(message, signature)
-        .map_err(|_| CryptoError::InvalidSignature)?;
+        .map_err(|_| CryptoError::invalid_signature("Signature verification failed"))?;
 
     Ok(())
 }
@@ -331,15 +338,17 @@ pub fn verify_signature(
 /// Convert FROST VerifyingKey to ed25519-dalek VerifyingKey
 pub fn frost_verifying_key_to_dalek(frost_key: &frost::VerifyingKey) -> Result<VerifyingKey> {
     let bytes = frost_key.serialize();
-    VerifyingKey::from_bytes(&bytes)
-        .map_err(|e| CryptoError::InvalidKey(format!("Invalid verifying key: {:?}", e)))
+    VerifyingKey::from_bytes(&bytes).map_err(|e| {
+        CryptoError::crypto_operation_failed(format!("Invalid verifying key: {:?}", e))
+    })
 }
 
 /// Convert ed25519-dalek VerifyingKey to FROST VerifyingKey
 pub fn dalek_verifying_key_to_frost(dalek_key: &VerifyingKey) -> Result<frost::VerifyingKey> {
     let bytes = dalek_key.to_bytes();
-    frost::VerifyingKey::deserialize(bytes)
-        .map_err(|e| CryptoError::InvalidKey(format!("Invalid verifying key: {:?}", e)))
+    frost::VerifyingKey::deserialize(bytes).map_err(|e| {
+        CryptoError::crypto_operation_failed(format!("Invalid verifying key: {:?}", e))
+    })
 }
 
 #[cfg(test)]
@@ -660,7 +669,10 @@ mod tests {
 
         // Simulate 4 out of 5 participants signing concurrently
         let participants: Vec<_> = key_packages.iter().take(4).collect();
-        let participating_packages: BTreeMap<_, _> = participants.into_iter().map(|(id, pkg)| (*id, pkg.clone())).collect();
+        let participating_packages: BTreeMap<_, _> = participants
+            .into_iter()
+            .map(|(id, pkg)| (*id, pkg.clone()))
+            .collect();
 
         // Perform optimistic threshold signing
         let result = FrostSigner::optimistic_threshold_sign(
@@ -671,7 +683,10 @@ mod tests {
             &mut rng,
         );
 
-        assert!(result.is_ok(), "Optimistic threshold signing should succeed");
+        assert!(
+            result.is_ok(),
+            "Optimistic threshold signing should succeed"
+        );
         let (signature, selected_signers) = result.unwrap();
 
         // Verify the signature
@@ -679,11 +694,15 @@ mod tests {
         verify_signature(message, &signature, &dalek_key).unwrap();
 
         // Should have used all participating signers (not just threshold subset)
-        assert_eq!(selected_signers.len(), 4, "Should use all participating signers");
+        assert_eq!(
+            selected_signers.len(),
+            4,
+            "Should use all participating signers"
+        );
 
         // Verify that any 3 participants can create a valid signature
         let all_participants: Vec<_> = key_packages.iter().take(4).collect();
-        
+
         // Try different combinations of 3 participants
         for i in 0..2 {
             let mut subset_packages = BTreeMap::new();
@@ -700,7 +719,10 @@ mod tests {
                 &mut rng,
             );
 
-            assert!(subset_result.is_ok(), "Any valid threshold subset should work");
+            assert!(
+                subset_result.is_ok(),
+                "Any valid threshold subset should work"
+            );
             let subset_signature = subset_result.unwrap();
             verify_signature(message, &subset_signature, &dalek_key).unwrap();
         }
@@ -724,7 +746,8 @@ mod tests {
 
         // Round 1: Generate nonces and commitments for all participants
         for (id, key_package) in &key_packages {
-            let (nonces, commitments) = FrostSigner::generate_nonces(key_package.signing_share(), &mut rng);
+            let (nonces, commitments) =
+                FrostSigner::generate_nonces(key_package.signing_share(), &mut rng);
             nonces_map.insert(*id, nonces);
             all_commitments.insert(*id, commitments);
         }
@@ -737,7 +760,8 @@ mod tests {
                 nonces,
                 &all_commitments,
                 key_package,
-            ).unwrap();
+            )
+            .unwrap();
             all_signature_shares.insert(*id, signature_share);
         }
 
@@ -750,14 +774,21 @@ mod tests {
             2, // threshold
         );
 
-        assert!(result.is_ok(), "Should be able to aggregate from threshold subset");
+        assert!(
+            result.is_ok(),
+            "Should be able to aggregate from threshold subset"
+        );
         let (signature, selected_signers) = result.unwrap();
 
         // Verify the signature
         let dalek_key = frost_verifying_key_to_dalek(verifying_key).unwrap();
         verify_signature(message, &signature, &dalek_key).unwrap();
 
-        // Should have used all participating signers (not just threshold subset)  
-        assert_eq!(selected_signers.len(), 3, "Should use all participating signers");
+        // Should have used all participating signers (not just threshold subset)
+        assert_eq!(
+            selected_signers.len(),
+            3,
+            "Should use all participating signers"
+        );
     }
 }

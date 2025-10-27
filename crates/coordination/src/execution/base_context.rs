@@ -6,7 +6,8 @@
 use super::time::TimeSource;
 use super::types::*;
 use aura_crypto::Effects;
-use aura_journal::{AccountLedger, Event, DeviceId};
+use aura_journal::{AccountLedger, Event};
+use aura_types::{DeviceId, GuardianId};
 use ed25519_dalek::SigningKey;
 use rand::Rng;
 use std::collections::VecDeque;
@@ -14,18 +15,21 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+#[cfg(feature = "dev-console")]
+use crate::instrumentation::InstrumentationHooks;
+
 /// Transport abstraction for protocol execution
-/// 
+///
 /// This trait defines the minimal interface that coordination protocols
 /// need from the transport layer. Transport implementations provide this.
 #[async_trait::async_trait]
 pub trait Transport: Send + Sync {
     /// Send a message to a peer
     async fn send_message(&self, peer_id: &str, message: &[u8]) -> Result<(), String>;
-    
+
     /// Broadcast a message to all known peers
     async fn broadcast_message(&self, message: &[u8]) -> Result<(), String>;
-    
+
     /// Check if a peer is reachable
     async fn is_peer_reachable(&self, peer_id: &str) -> bool;
 }
@@ -70,6 +74,10 @@ pub struct BaseContext {
 
     /// Device secret key for HPKE decryption
     pub device_secret: aura_crypto::HpkePrivateKey,
+
+    /// Optional instrumentation hooks for dev console integration
+    #[cfg(feature = "dev-console")]
+    pub(crate) instrumentation: Option<InstrumentationHooks>,
 }
 
 impl BaseContext {
@@ -106,6 +114,8 @@ impl BaseContext {
             _collected_events: Vec::new(),
             last_read_event_index: 0,
             device_secret: device_keypair.private_key,
+            #[cfg(feature = "dev-console")]
+            instrumentation: None,
         }
     }
 
@@ -127,22 +137,34 @@ impl BaseContext {
         Ok(self.device_key.sign(&event_hash))
     }
 
-    /// Get key share (placeholder implementation)
+    /// Get key share (requires crypto service integration)
     pub async fn get_key_share(&self) -> Result<Vec<u8>, ProtocolError> {
-        // Placeholder: return dummy key share
-        Ok(vec![0u8; 32])
+        Err(ProtocolError {
+            session_id: self.session_id,
+            error_type: ProtocolErrorType::Other,
+            message: "Key share access not implemented - requires CryptoService integration"
+                .to_string(),
+        })
     }
 
-    /// Set key share (placeholder implementation)
+    /// Set key share (requires crypto service integration)
     pub async fn set_key_share(&mut self, _share: Vec<u8>) -> Result<(), ProtocolError> {
-        // Placeholder: would store the new share
-        Ok(())
+        Err(ProtocolError {
+            session_id: self.session_id,
+            error_type: ProtocolErrorType::Other,
+            message: "Key share storage not implemented - requires SecureStorage integration"
+                .to_string(),
+        })
     }
 
-    /// Get guardian share (placeholder implementation)
+    /// Get guardian share (requires crypto service integration)
     pub async fn get_guardian_share(&self) -> Result<Vec<u8>, ProtocolError> {
-        // Placeholder: return dummy guardian share
-        Ok(vec![0u8; 32])
+        Err(ProtocolError {
+            session_id: self.session_id,
+            error_type: ProtocolErrorType::Other,
+            message: "Guardian share access not implemented - requires CryptoService integration"
+                .to_string(),
+        })
     }
 
     /// Generate nonce (placeholder implementation)
@@ -176,19 +198,30 @@ impl BaseContext {
         Ok(unique_nonce)
     }
 
-    /// Get Merkle proof (placeholder implementation)
+    /// Get Merkle proof (requires journal integration)
     pub async fn get_merkle_proof(&self) -> Result<Vec<u8>, ProtocolError> {
-        // Placeholder: return dummy proof
-        Ok(vec![0u8; 32])
+        // TODO: Implement actual Merkle proof generation from ledger state
+        Err(ProtocolError {
+            session_id: self.session_id,
+            error_type: ProtocolErrorType::Other,
+            message: "Merkle proof generation not implemented - requires journal integration"
+                .to_string(),
+        })
     }
 
-    /// Get guardian Merkle proof (placeholder implementation)
+    /// Get guardian Merkle proof (requires journal integration)
     pub async fn get_guardian_merkle_proof(
         &self,
-        _guardian_id: aura_journal::GuardianId,
+        _guardian_id: GuardianId,
     ) -> Result<Vec<u8>, ProtocolError> {
-        // Placeholder: return dummy proof
-        Ok(vec![0u8; 32])
+        // TODO: Implement actual guardian Merkle proof generation from ledger state
+        Err(ProtocolError {
+            session_id: self.session_id,
+            error_type: ProtocolErrorType::Other,
+            message:
+                "Guardian Merkle proof generation not implemented - requires journal integration"
+                    .to_string(),
+        })
     }
 
     /// Get DKD commitment root (placeholder implementation)
@@ -248,5 +281,157 @@ impl BaseContext {
         // Placeholder: would store capsule for DKD
         // Using generic map to avoid circular dependency
         Ok(())
+    }
+
+    /// Enable instrumentation with provided hooks
+    #[cfg(feature = "dev-console")]
+    pub fn enable_instrumentation(&mut self, hooks: InstrumentationHooks) {
+        self.instrumentation = Some(hooks);
+    }
+
+    /// Disable instrumentation
+    #[cfg(feature = "dev-console")]
+    pub fn disable_instrumentation(&mut self) {
+        self.instrumentation = None;
+    }
+
+    /// Check if instrumentation is enabled
+    #[cfg(feature = "dev-console")]
+    pub fn is_instrumentation_enabled(&self) -> bool {
+        self.instrumentation.is_some()
+    }
+
+    /// Get instrumentation hooks if available
+    #[cfg(feature = "dev-console")]
+    pub fn instrumentation(&self) -> Option<&InstrumentationHooks> {
+        self.instrumentation.as_ref()
+    }
+
+    /// Instrumentation hook for protocol start
+    pub fn instrument_protocol_start(&self, protocol_name: &str) {
+        #[cfg(feature = "dev-console")]
+        if let Some(hooks) = &self.instrumentation {
+            hooks.on_protocol_start(self.session_id, DeviceId(self.device_id), protocol_name);
+        }
+        #[cfg(not(feature = "dev-console"))]
+        let _ = protocol_name;
+    }
+
+    /// Instrumentation hook for phase transitions
+    pub fn instrument_phase_transition(
+        &self,
+        protocol_name: &str,
+        from_phase: &str,
+        to_phase: &str,
+    ) {
+        #[cfg(feature = "dev-console")]
+        if let Some(hooks) = &self.instrumentation {
+            hooks.on_phase_transition(
+                self.session_id,
+                DeviceId(self.device_id),
+                protocol_name,
+                from_phase,
+                to_phase,
+            );
+        }
+        #[cfg(not(feature = "dev-console"))]
+        {
+            let _ = (protocol_name, from_phase, to_phase);
+        }
+    }
+
+    /// Instrumentation hook for event emission
+    pub fn instrument_event_emit(&self, event_type: &str, event_size: usize) {
+        #[cfg(feature = "dev-console")]
+        if let Some(hooks) = &self.instrumentation {
+            hooks.on_event_emit(
+                self.session_id,
+                DeviceId(self.device_id),
+                event_type,
+                event_size,
+            );
+        }
+        #[cfg(not(feature = "dev-console"))]
+        {
+            let _ = (event_type, event_size);
+        }
+    }
+
+    /// Instrumentation hook for event awaiting start
+    pub fn instrument_event_await_start(&self, event_pattern: &str, threshold: Option<usize>) {
+        #[cfg(feature = "dev-console")]
+        if let Some(hooks) = &self.instrumentation {
+            hooks.on_event_await_start(
+                self.session_id,
+                DeviceId(self.device_id),
+                event_pattern,
+                threshold,
+            );
+        }
+        #[cfg(not(feature = "dev-console"))]
+        {
+            let _ = (event_pattern, threshold);
+        }
+    }
+
+    /// Instrumentation hook for event awaiting completion
+    pub fn instrument_event_await_complete(
+        &self,
+        event_pattern: &str,
+        received_count: usize,
+        success: bool,
+    ) {
+        #[cfg(feature = "dev-console")]
+        if let Some(hooks) = &self.instrumentation {
+            hooks.on_event_await_complete(
+                self.session_id,
+                DeviceId(self.device_id),
+                event_pattern,
+                received_count,
+                success,
+            );
+        }
+        #[cfg(not(feature = "dev-console"))]
+        {
+            let _ = (event_pattern, received_count, success);
+        }
+    }
+
+    /// Instrumentation hook for protocol completion
+    pub fn instrument_protocol_complete(
+        &self,
+        _protocol_name: &str,
+        _success: bool,
+        _result_summary: Option<serde_json::Value>,
+    ) {
+        #[cfg(feature = "dev-console")]
+        if let Some(hooks) = &self.instrumentation {
+            hooks.on_protocol_complete(
+                self.session_id,
+                DeviceId(self.device_id),
+                _protocol_name,
+                _success,
+                _result_summary,
+            );
+        }
+    }
+
+    /// Instrumentation hook for protocol errors
+    pub fn instrument_protocol_error(
+        &self,
+        _protocol_name: &str,
+        _error_type: &str,
+        _error_message: &str,
+    ) {
+        #[cfg(feature = "dev-console")]
+        if let Some(hooks) = &self.instrumentation {
+            hooks.on_protocol_error(
+                self.session_id,
+                DeviceId(self.device_id),
+                _protocol_name,
+                _error_type,
+                _error_message,
+            );
+        }
     }
 }

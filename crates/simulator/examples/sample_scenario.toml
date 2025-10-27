@@ -1,0 +1,182 @@
+# Unified Scenario Format - Complete Example
+# This demonstrates the unified TOML format that replaces multiple
+# inconsistent scenario formats across the codebase.
+
+[metadata]
+name = "comprehensive_protocol_test"
+description = "Complete test demonstrating all choreography actions and debugging features"
+version = "1.0"
+author = "Unified Test Framework"
+tags = ["dkd", "resharing", "byzantine", "network", "comprehensive"]
+
+# Setup configuration
+[setup]
+participants = 4
+threshold = 3
+seed = 42
+
+# Optional: Specific participant configurations
+[setup.participant_configs]
+alice = { device_id = "device_alice", account_id = "shared_account" }
+bob = { device_id = "device_bob", account_id = "shared_account" }
+charlie = { device_id = "device_charlie", account_id = "shared_account", is_byzantine = true }
+dave = { device_id = "device_dave", account_id = "shared_account" }
+
+# Network configuration
+[network]
+latency_range = [10, 100]  # Milliseconds
+drop_rate = 0.02           # 2% message drop rate
+partitions = [["alice", "bob"], ["charlie", "dave"]]  # Initial partitions
+
+# Byzantine configuration
+[byzantine]
+count = 1
+participants = ["charlie"]
+default_strategies = ["drop_messages"]
+
+# Phase 1: Initial DKD execution
+[[phases]]
+name = "initial_dkd"
+description = "Execute DKD protocol with all participants"
+timeout_seconds = 30
+
+  # Action 1: Create initial checkpoint
+  [[phases.actions]]
+  type = "create_checkpoint"
+  label = "before_dkd"
+
+  # Action 2: Run DKD choreography
+  [[phases.actions]]
+  type = "run_choreography"
+  choreography = "dkd"
+  participants = ["alice", "bob", "charlie", "dave"]
+  threshold = 3
+  app_id = "unified_test_v1"
+  context = "comprehensive_test"
+
+  # Action 3: Verify basic property
+  [[phases.actions]]
+  type = "verify_property"
+  property = "threshold_security"
+  expected = true
+
+  # Action 4: Create checkpoint after DKD
+  [[phases.actions]]
+  type = "create_checkpoint"
+  label = "after_dkd"
+
+# Phase 2: Network conditions testing
+[[phases]]
+name = "network_stress_test"
+description = "Test protocol behavior under adverse network conditions"
+
+  # Action 1: Apply network partition
+  [[phases.actions]]
+  type = "apply_network_condition"
+  condition = "partition"
+  participants = ["alice", "bob"]
+  duration_ticks = 15
+
+  # Action 2: Inject message delays
+  [[phases.actions]]
+  type = "apply_network_condition"
+  condition = "delay"
+  participants = ["charlie", "dave"]
+  delay_ms = 2000
+
+  # Action 3: Wait for network effects
+  [[phases.actions]]
+  type = "wait_ticks"
+  ticks = 20
+
+  # Action 4: Verify system stability
+  [[phases.actions]]
+  type = "verify_property"
+  property = "network_resilience"
+  expected = true
+
+# Phase 3: Byzantine behavior injection
+[[phases]]
+name = "byzantine_testing"
+description = "Test Byzantine fault tolerance"
+
+  # Action 1: Inject Byzantine behavior
+  [[phases.actions]]
+  type = "inject_byzantine"
+  participant = "charlie"
+  behavior = "drop_messages"
+
+  # Action 2: Additional Byzantine behavior
+  [[phases.actions]]
+  type = "inject_byzantine"
+  participant = "dave"
+  behavior = "delay_messages"
+  delay_ms = 3000
+
+  # Action 3: Run resharing under Byzantine conditions
+  [[phases.actions]]
+  type = "run_choreography"
+  choreography = "resharing"
+  participants = ["alice", "bob", "charlie", "dave"]
+  old_threshold = 3
+  new_threshold = 2
+
+  # Action 4: Verify Byzantine tolerance
+  [[phases.actions]]
+  type = "verify_property"
+  property = "byzantine_tolerance"
+  expected = true
+
+# Phase 4: Recovery testing
+[[phases]]
+name = "recovery_testing"
+description = "Test guardian-based recovery mechanisms"
+
+  # Action 1: Execute recovery choreography
+  [[phases.actions]]
+  type = "run_choreography"
+  choreography = "recovery"
+  participants = ["alice", "bob"]
+  guardian_threshold = 2
+  cooldown_hours = 1
+
+  # Action 2: Wait for recovery completion
+  [[phases.actions]]
+  type = "wait_ticks"
+  ticks = 25
+
+  # Action 3: Final verification
+  [[phases.actions]]
+  type = "verify_property"
+  property = "recovery_success"
+  expected = true
+
+  # Action 4: Final checkpoint
+  [[phases.actions]]
+  type = "create_checkpoint"
+  label = "scenario_complete"
+
+# Property definitions
+[[properties]]
+name = "threshold_security"
+property_type = "byzantine_tolerance"
+check_in_phases = ["initial_dkd", "network_stress_test"]
+
+[[properties]]
+name = "network_resilience"
+property_type = "connectivity_under_partition"
+check_in_phases = ["network_stress_test"]
+
+[[properties]]
+name = "byzantine_tolerance"
+property_type = "safety_under_byzantine"
+parameters = { max_byzantine_ratio = 0.33 }
+check_in_phases = ["byzantine_testing"]
+
+[[properties]]
+name = "recovery_success"
+property_type = "guardian_recovery_validation"
+check_in_phases = ["recovery_testing"]
+
+# Expected final outcome
+expected_outcome = "success"

@@ -97,7 +97,7 @@ impl LagrangeInterpolation {
     /// Reference: 080 spec Part 4, Phase 2
     pub fn interpolate_at_zero(shares: &[SharePoint]) -> Result<Scalar> {
         if shares.is_empty() {
-            return Err(CryptoError::InvalidKey(
+            return Err(CryptoError::crypto_operation_failed(
                 "Cannot interpolate with zero shares".to_string(),
             ));
         }
@@ -136,7 +136,7 @@ impl LagrangeInterpolation {
     /// Reference: 080 spec Part 4, Phase 2 (general case)
     pub fn interpolate_at(shares: &[SharePoint], target_x: Scalar) -> Result<Scalar> {
         if shares.is_empty() {
-            return Err(CryptoError::InvalidKey(
+            return Err(CryptoError::crypto_operation_failed(
                 "Cannot interpolate with zero shares".to_string(),
             ));
         }

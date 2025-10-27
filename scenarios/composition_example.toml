@@ -1,0 +1,58 @@
+# Composition Example - Shows how to compose scenarios
+
+[metadata]
+name = "composition_example"
+description = "Example of composing multiple scenario phases"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["example", "composition"]
+
+[setup]
+participants = 4
+threshold = 3
+seed = 4444
+
+[network]
+latency_range = [20, 80]
+drop_rate = 0.03
+
+[[phases]]
+name = "phase1_frost"
+description = "FROST key generation"
+timeout_seconds = 3
+actions = [
+    { type = "run_choreography", choreography = "frost_key_generation", participants = ["alice", "bob", "charlie", "dave"], threshold = 3 }
+]
+
+[[phases]]
+name = "phase2_dkd"
+description = "Derive application keys"
+timeout_seconds = 3
+actions = [
+    { type = "run_choreography", choreography = "p2p_dkd", participants = ["alice", "bob"], threshold = 2, app_id = "composed_app", context = "example_context" }
+]
+
+[[phases]]
+name = "phase3_session"
+description = "Establish session"
+timeout_seconds = 3
+actions = [
+    { type = "run_choreography", choreography = "session_establishment", participants = ["alice", "bob", "charlie"], threshold = 2 }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify composed protocol"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "all_phases_completed", expected = true }
+]
+
+[[properties]]
+name = "all_phases_completed"
+property_type = "liveness"
+
+[[properties]]
+name = "composition_consistent"
+property_type = "safety"
+

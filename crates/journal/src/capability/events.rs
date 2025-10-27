@@ -1,6 +1,7 @@
 // Capability events for CRDT integration
 
-use crate::{capability::types::{CapabilityId, CapabilityScope, Subject}, DeviceId};
+use crate::capability::types::{CapabilityId, CapabilityScope, Subject};
+use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 
 /// Capability delegation event with deterministic IDs
@@ -37,7 +38,7 @@ impl CapabilityDelegation {
     ) -> Self {
         let capability_id = CapabilityId::from_chain(parent_id.as_ref(), &subject_id, &scope);
         let issued_at = effects.now().unwrap_or(0);
-        
+
         Self {
             capability_id,
             parent_id,
@@ -49,7 +50,7 @@ impl CapabilityDelegation {
             issued_by,
         }
     }
-    
+
     /// Check if this delegation is expired
     pub fn is_expired(&self, effects: &aura_crypto::Effects) -> bool {
         if let Some(expiry) = self.expiry {
@@ -58,7 +59,7 @@ impl CapabilityDelegation {
             false
         }
     }
-    
+
     /// Compute canonical hash for this delegation
     pub fn hash(&self) -> crate::capability::Result<[u8; 32]> {
         let bytes = serde_json::to_vec(self)
@@ -99,7 +100,7 @@ impl CapabilityRevocation {
             issued_by,
         }
     }
-    
+
     /// Compute canonical hash for this revocation
     pub fn hash(&self) -> crate::capability::Result<[u8; 32]> {
         let bytes = serde_json::to_vec(self)
@@ -107,5 +108,3 @@ impl CapabilityRevocation {
         Ok(blake3::hash(&bytes).into())
     }
 }
-
-

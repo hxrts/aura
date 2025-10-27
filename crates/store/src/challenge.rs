@@ -4,8 +4,9 @@
 //! providers actually possess the data they claim to store. It uses cryptographic
 //! challenges combined with device signatures to verify data integrity and availability.
 
-use crate::{Result, StorageError};
-use aura_journal::{Cid, DeviceId, SessionEpoch};
+use crate::{Result, StorageError, StoreErrorBuilder};
+use aura_types::{DeviceId, DeviceIdExt};
+use aura_journal::{Cid, SessionEpoch};
 use blake3;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -23,9 +24,7 @@ impl ReplicaTag {
     pub fn new_with_effects(effects: &aura_crypto::Effects) -> Self {
         ReplicaTag(effects.gen_uuid())
     }
-    
 }
-
 
 /// Proof-of-storage challenge
 ///
@@ -43,7 +42,11 @@ pub struct Challenge {
 
 impl Challenge {
     /// Create a new challenge using injected effects (for production/testing)
-    pub fn new_with_effects(chunk_cid: Cid, challenger_id: DeviceId, effects: &aura_crypto::Effects) -> Self {
+    pub fn new_with_effects(
+        chunk_cid: Cid,
+        challenger_id: DeviceId,
+        effects: &aura_crypto::Effects,
+    ) -> Self {
         let nonce = effects.random_bytes::<32>();
 
         Challenge {
@@ -52,7 +55,6 @@ impl Challenge {
             challenger_id,
         }
     }
-    
 }
 
 /// Proof-of-storage response
@@ -158,7 +160,7 @@ pub fn verify_proof(
 ) -> Result<bool> {
     // Check epoch
     if response.session_epoch != current_epoch.0 {
-        return Err(StorageError::Storage(format!(
+        return Err(StoreErrorBuilder::invalid_protocol_state(format!(
             "Stale epoch: {} != {}",
             response.session_epoch, current_epoch.0
         )));
@@ -180,7 +182,7 @@ pub fn verify_proof(
     // Verify signature
     verifying_key
         .verify(&response.proof_hash, &response.signature)
-        .map_err(|_| StorageError::Storage("Invalid signature".to_string()))?;
+        .map_err(|_| StoreErrorBuilder::integrity_check_failed("Invalid signature"))?;
 
     Ok(true)
 }
@@ -217,7 +219,7 @@ mod tests {
         let challenge = Challenge::new_with_effects(
             Cid("test_chunk".to_string()),
             DeviceId::new_with_effects(&effects),
-            &effects
+            &effects,
         );
         let session_epoch = SessionEpoch::initial();
 
@@ -255,7 +257,7 @@ mod tests {
         let challenge = Challenge::new_with_effects(
             Cid("test_chunk".to_string()),
             DeviceId::new_with_effects(&effects),
-            &effects
+            &effects,
         );
         let session_epoch = SessionEpoch::initial();
 

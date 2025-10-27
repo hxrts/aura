@@ -4,8 +4,15 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// Re-export shared types from crypto
-pub use aura_crypto::{AccountId, DeviceId, GuardianId, MerkleProof};
+// Re-export shared types from crypto and aura-types
+use aura_crypto::MerkleProof;
+use aura_types::{DeviceId, GuardianId};
+
+// Re-export consolidated types from aura-types
+pub use aura_types::{
+    Cid as AuraTypesCid, EventNonce, OperationType, ParticipantId, ProtocolType, SessionId,
+    SessionOutcome, SessionStatus,
+};
 
 /// Content Identifier for storage operations
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -16,7 +23,7 @@ impl Cid {
     pub fn from_bytes(data: &[u8]) -> Self {
         Cid(hex::encode(blake3::hash(data).as_bytes()))
     }
-    
+
     /// Create a CID from a string
     pub fn from_string(s: &str) -> Self {
         Cid(s.to_string())
@@ -138,103 +145,23 @@ impl std::fmt::Display for SessionEpoch {
     }
 }
 
-/// Participant identifier (device ID or guardian ID)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum ParticipantId {
-    Device(DeviceId),
-    Guardian(GuardianId),
+// ParticipantId is now imported from aura-types
+
+// SessionId is now imported from aura-types
+// Extensions for journal-specific functionality
+pub trait SessionIdExt {
+    fn new_with_effects(effects: &aura_crypto::Effects) -> Self;
 }
 
-impl std::fmt::Display for ParticipantId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParticipantId::Device(id) => write!(f, "device:{}", id),
-            ParticipantId::Guardian(id) => write!(f, "guardian:{}", id),
-        }
+impl SessionIdExt for SessionId {
+    fn new_with_effects(effects: &aura_crypto::Effects) -> Self {
+        SessionId::from_uuid(effects.gen_uuid())
     }
 }
 
-impl From<DeviceId> for ParticipantId {
-    fn from(id: DeviceId) -> Self {
-        ParticipantId::Device(id)
-    }
-}
+// OperationType is now imported from aura-types
 
-impl From<GuardianId> for ParticipantId {
-    fn from(id: GuardianId) -> Self {
-        ParticipantId::Guardian(id)
-    }
-}
-
-/// Session identifier
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct SessionId(pub Uuid);
-
-impl SessionId {
-    pub fn new_with_effects(effects: &aura_crypto::Effects) -> Self {
-        SessionId(effects.gen_uuid())
-    }
-}
-
-
-impl std::fmt::Display for SessionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// Operation type for protocol classification
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum OperationType {
-    Dkd,        // Key derivation
-    Resharing,  // Key resharing
-    Recovery,   // Guardian recovery
-    Locking,    // Distributed locking
-}
-
-impl std::fmt::Display for OperationType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OperationType::Dkd => write!(f, "dkd"),
-            OperationType::Resharing => write!(f, "resharing"),
-            OperationType::Recovery => write!(f, "recovery"),
-            OperationType::Locking => write!(f, "locking"),
-        }
-    }
-}
-
-/// Protocol type for session classification
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum ProtocolType {
-    Dkd,            // Key derivation
-    Resharing,      // Key resharing
-    Recovery,       // Guardian recovery
-    Locking,        // Distributed locking
-    LockAcquisition, // Lock acquisition
-}
-
-impl From<OperationType> for ProtocolType {
-    fn from(op: OperationType) -> Self {
-        match op {
-            OperationType::Dkd => ProtocolType::Dkd,
-            OperationType::Resharing => ProtocolType::Resharing,
-            OperationType::Recovery => ProtocolType::Recovery,
-            OperationType::Locking => ProtocolType::Locking,
-        }
-    }
-}
-
-impl std::fmt::Display for ProtocolType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProtocolType::Dkd => write!(f, "dkd"),
-            ProtocolType::Resharing => write!(f, "resharing"),
-            ProtocolType::Recovery => write!(f, "recovery"),
-            ProtocolType::Locking => write!(f, "locking"),
-            ProtocolType::LockAcquisition => write!(f, "lock_acquisition"),
-        }
-    }
-}
+// ProtocolType is now imported from aura-types
 
 /// Threshold signature with participant tracking
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,21 +198,7 @@ mod signature_serde {
     }
 }
 
-/// Event nonce for replay protection
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct EventNonce(pub u64);
-
-impl EventNonce {
-    pub fn new(value: u64) -> Self {
-        EventNonce(value)
-    }
-}
-
-impl std::fmt::Display for EventNonce {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+// EventNonce is now imported from aura-types
 
 /// Operation lock for distributed coordination
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -392,7 +305,10 @@ impl Session {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.status,
-            SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Expired | SessionStatus::TimedOut
+            SessionStatus::Completed
+                | SessionStatus::Failed
+                | SessionStatus::Expired
+                | SessionStatus::TimedOut
         )
     }
 
@@ -405,23 +321,9 @@ impl Session {
     }
 }
 
-/// Session status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SessionStatus {
-    Active,
-    Completed,
-    Failed,
-    Expired,
-    TimedOut,
-}
+// SessionStatus is now imported from aura-types
 
-/// Session outcome
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SessionOutcome {
-    Success,
-    Failed,
-    Aborted,
-}
+// SessionOutcome is now imported from aura-types
 
 /// Signature share for threshold signatures
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -449,4 +351,43 @@ pub struct PresenceTicketCache {
     pub expires_at: u64,
     pub issued_at: u64,
     pub ticket_digest: [u8; 32],
+}
+
+/// Evidence of Byzantine behavior for logging and analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ByzantineEvidence {
+    /// Resource exhaustion attack detected
+    ResourceExhaustion {
+        /// Number of excessive requests
+        request_count: u64,
+        /// Time window of the attack
+        window_ms: u64,
+    },
+    /// Invalid protocol behavior
+    InvalidBehavior {
+        /// Description of the invalid behavior
+        description: String,
+        /// Raw evidence data
+        evidence: Vec<u8>,
+    },
+    /// Protocol deviation detected
+    ProtocolDeviation {
+        /// Expected protocol step
+        expected: String,
+        /// Actual behavior observed
+        actual: String,
+    },
+}
+
+/// Severity level for Byzantine behavior
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ByzantineSeverity {
+    /// Low impact, monitoring only
+    Low,
+    /// Medium impact, affects local operations
+    Medium,
+    /// High impact, affects protocol security
+    High,
+    /// Critical impact, system compromise
+    Critical,
 }

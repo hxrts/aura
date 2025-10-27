@@ -11,7 +11,7 @@ impl MemberId {
     pub fn new(id: &str) -> Self {
         Self(id.to_string())
     }
-    
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -25,11 +25,11 @@ impl Epoch {
     pub fn initial() -> Self {
         Self(0)
     }
-    
+
     pub fn next(&self) -> Self {
         Self(self.0 + 1)
     }
-    
+
     pub fn value(&self) -> u64 {
         self.0
     }
@@ -43,19 +43,19 @@ impl TreePosition {
     pub fn leaf(index: u32) -> Self {
         Self(2 * index)
     }
-    
+
     pub fn parent(&self) -> Self {
         Self(self.0 / 2)
     }
-    
+
     pub fn left_child(&self) -> Self {
         Self(2 * self.0)
     }
-    
+
     pub fn right_child(&self) -> Self {
         Self(2 * self.0 + 1)
     }
-    
+
     pub fn is_leaf(&self) -> bool {
         self.0 % 2 == 0
     }
@@ -69,7 +69,7 @@ impl PublicKey {
     pub fn new(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
-    
+
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -83,7 +83,7 @@ impl PrivateKey {
     pub fn new(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
-    
+
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -133,31 +133,30 @@ impl Roster {
             size: 0,
         }
     }
-    
+
     pub fn add_member(&mut self, member_id: MemberId) -> TreePosition {
         let position = TreePosition::leaf(self.size);
         self.members.insert(member_id, position);
         self.size += 1;
         position
     }
-    
+
     pub fn remove_member(&mut self, member_id: &MemberId) -> Option<TreePosition> {
         self.members.remove(member_id)
     }
-    
+
     pub fn get_position(&self, member_id: &MemberId) -> Option<TreePosition> {
         self.members.get(member_id).copied()
     }
-    
+
     pub fn is_member(&self, member_id: &MemberId) -> bool {
         self.members.contains_key(member_id)
     }
-    
+
     pub fn member_count(&self) -> usize {
         self.members.len()
     }
 }
-
 
 /// BeeKEM tree node containing cryptographic material
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,8 +176,12 @@ impl TreeNode {
             unmerged_leaves: Vec::new(),
         }
     }
-    
-    pub fn with_keypair(position: TreePosition, public_key: PublicKey, private_key: PrivateKey) -> Self {
+
+    pub fn with_keypair(
+        position: TreePosition,
+        public_key: PublicKey,
+        private_key: PrivateKey,
+    ) -> Self {
         Self {
             position,
             public_key: Some(public_key),

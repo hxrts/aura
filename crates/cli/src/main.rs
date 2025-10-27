@@ -3,22 +3,28 @@
 //! Command-line interface for the Aura threshold identity platform.
 //! Provides tools for account management, key derivation, and protocol testing.
 
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use std::sync::Arc;
+// Temporarily disabled - not needed without coordination
+// use std::sync::Arc;
 
 mod commands;
 mod config;
 
-use aura_coordination::{production::ConsoleLogSink, LogSink};
+// Temporarily disabled - requires coordination crate
+// use aura_coordination::{production::ConsoleLogSink, LogSink};
 use commands::{
-    authz::{handle_authz_command, AuthzCommand},
+    // Temporarily disabled - requires agent crate
+    // authz::{handle_authz_command, AuthzCommand},
+    common,
     init,
-    network::{handle_network_command, NetworkCommand},
+    // network::{handle_network_command, NetworkCommand},
+    // node::{handle_node_command, NodeCommand},
+    scenarios::{handle_scenarios_command, ScenariosArgs},
     status,
-    storage::{handle_storage_command, StorageCommand},
+    // storage::{handle_storage_command, StorageCommand},
 };
-use config::Config;
 
 #[derive(Parser)]
 #[command(name = "aura")]
@@ -56,29 +62,36 @@ enum Commands {
     /// Show account status
     Status,
 
-    /// Authorization commands - permission management (what you can do)
-    #[command(subcommand)]
-    Authz(AuthzCommand),
-
-    /// Storage operations with capability protection
-    #[command(subcommand)]
-    Storage(StorageCommand),
-
-    /// Network and CGKA operations
-    #[command(subcommand)]
-    Network(NetworkCommand),
+    /// Scenario management and execution
+    Scenarios(ScenariosArgs),
+    // Temporarily disabled - requires agent crate
+    // /// Start an Aura node with optional dev console
+    // Node(NodeCommand),
+    //
+    // /// Authorization commands - permission management (what you can do)
+    // #[command(subcommand)]
+    // Authz(AuthzCommand),
+    //
+    // /// Storage operations with capability protection
+    // #[command(subcommand)]
+    // Storage(StorageCommand),
+    //
+    // /// Network and CGKA operations
+    // #[command(subcommand)]
+    // Network(NetworkCommand),
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Initialize unified logging system
     let log_level = if cli.verbose { "debug" } else { "info" };
     tracing_subscriber::fmt().with_env_filter(log_level).init();
 
+    // Temporarily disabled - requires coordination crate
     // Create console log sink for Aura logging
-    let _log_sink: Arc<dyn LogSink> = Arc::new(ConsoleLogSink::new());
+    // let _log_sink: Arc<dyn LogSink> = Arc::new(ConsoleLogSink::new());
 
     match cli.command {
         Commands::Init {
@@ -90,24 +103,32 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Commands::Status => {
-            let _config = Config::load(&cli.config).await?;
+            let _config = common::load_config(&cli.config).await?;
             status::show_status(&cli.config.to_string_lossy()).await?;
         }
 
-        Commands::Authz(cmd) => {
-            let config = Config::load(&cli.config).await?;
-            handle_authz_command(cmd, &config).await?;
-        }
-
-        Commands::Storage(cmd) => {
-            let config = Config::load(&cli.config).await?;
-            handle_storage_command(cmd, &config).await?;
-        }
-
-        Commands::Network(cmd) => {
-            let config = Config::load(&cli.config).await?;
-            handle_network_command(cmd, &config).await?;
-        }
+        Commands::Scenarios(args) => {
+            handle_scenarios_command(args)?;
+        } // Temporarily disabled - requires agent crate
+          // Commands::Node(cmd) => {
+          //     let config = common::load_config(&cli.config).await?;
+          //     handle_node_command(cmd, &config).await?;
+          // }
+          //
+          // Commands::Authz(cmd) => {
+          //     let config = common::load_config(&cli.config).await?;
+          //     handle_authz_command(cmd, &config).await?;
+          // }
+          //
+          // Commands::Storage(cmd) => {
+          //     let config = common::load_config(&cli.config).await?;
+          //     handle_storage_command(cmd, &config).await?;
+          // }
+          //
+          // Commands::Network(cmd) => {
+          //     let config = common::load_config(&cli.config).await?;
+          //     handle_network_command(cmd, &config).await?;
+          // }
     }
 
     Ok(())

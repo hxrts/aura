@@ -28,8 +28,10 @@
 //! ```
 
 pub mod account;
+pub mod assertions;
 pub mod device;
 pub mod effects;
+pub mod fixtures;
 pub mod keys;
 pub mod ledger;
 pub mod protocol;
@@ -37,8 +39,10 @@ pub mod transport;
 
 // Re-export commonly used items
 pub use account::*;
+pub use assertions::*;
 pub use device::*;
 pub use effects::*;
+pub use fixtures::*;
 pub use keys::*;
 pub use ledger::*;
 pub use protocol::*;
@@ -46,7 +50,8 @@ pub use transport::*;
 
 // Re-export commonly used external types for convenience
 pub use aura_crypto::Effects;
-pub use aura_journal::{AccountId, AccountState, DeviceId, DeviceMetadata, DeviceType};
+pub use aura_journal::{AccountState, DeviceMetadata, DeviceType};
+pub use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 pub use std::collections::BTreeMap;
 pub use uuid::Uuid;

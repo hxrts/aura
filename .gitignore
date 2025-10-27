@@ -1,8 +1,18 @@
 # Rust
 /target/
+target/
 **/*.rs.bk
 *.pdb
 Cargo.lock
+
+# WASM artifacts
+pkg/
+dist/
+*.wasm
+*_bg.wasm.d.ts
+
+# Stylance generated CSS modules
+console/styles/*.rs
 
 # IDE
 .vscode/
@@ -20,6 +30,7 @@ AGENTS.md
 .aura-test/
 *.sealed
 *.dat
+outcomes/
 
 # Nix
 result
@@ -31,6 +42,10 @@ result-*
 # Environment
 .env
 .env.local
+
+# Temporary files
+*.tmp
+*.temp
 
 # Working
 work/

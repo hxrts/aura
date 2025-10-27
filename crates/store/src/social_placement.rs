@@ -7,7 +7,9 @@
 
 use crate::{
     manifest::PeerId,
-    social_storage::{StoragePeer, StorageRequirements},
+    social_storage::{
+        StorageCapabilityAnnouncement, StorageMetrics, StoragePeer, StorageRequirements,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -395,6 +397,7 @@ impl AccountabilityTracker {
 mod tests {
     use super::*;
     use crate::social_storage::TrustLevel;
+    use aura_types::{AccountIdExt, DeviceIdExt};
 
     #[test]
     fn test_trust_score_initialization() {
@@ -446,6 +449,10 @@ mod tests {
         let peer2 = vec![2];
         let peer3 = vec![3];
 
+        let device1 = aura_types::DeviceId::new_with_effects(&aura_crypto::Effects::test());
+        let device2 = aura_types::DeviceId::new_with_effects(&aura_crypto::Effects::test());
+        let device3 = aura_types::DeviceId::new_with_effects(&aura_crypto::Effects::test());
+
         placement.add_peer(peer1.clone(), 1000);
         placement.add_peer(peer2.clone(), 1000);
         placement.add_peer(peer3.clone(), 1000);
@@ -467,42 +474,42 @@ mod tests {
         let peers = vec![
             StoragePeer {
                 peer_id: peer1.clone(),
-                device_id: peer1.clone(),
-                account_id: vec![100],
-                announcement: crate::StorageCapabilityAnnouncement::new(
+                device_id: device1,
+                account_id: aura_types::AccountId::new_with_effects(&aura_crypto::Effects::test()),
+                announcement: StorageCapabilityAnnouncement::new(
                     1_000_000_000,
                     TrustLevel::High,
                     4 * 1024 * 1024,
                 ),
                 relationship_established_at: 1000,
                 trust_score: 0.9,
-                storage_metrics: crate::StorageMetrics::new(),
+                storage_metrics: StorageMetrics::new(),
             },
             StoragePeer {
                 peer_id: peer2.clone(),
-                device_id: peer2.clone(),
-                account_id: vec![100],
-                announcement: crate::StorageCapabilityAnnouncement::new(
+                device_id: device2,
+                account_id: aura_types::AccountId::new_with_effects(&aura_crypto::Effects::test()),
+                announcement: StorageCapabilityAnnouncement::new(
                     1_000_000_000,
                     TrustLevel::High,
                     4 * 1024 * 1024,
                 ),
                 relationship_established_at: 1000,
                 trust_score: 0.8,
-                storage_metrics: crate::StorageMetrics::new(),
+                storage_metrics: StorageMetrics::new(),
             },
             StoragePeer {
                 peer_id: peer3.clone(),
-                device_id: peer3.clone(),
-                account_id: vec![100],
-                announcement: crate::StorageCapabilityAnnouncement::new(
+                device_id: device3,
+                account_id: aura_types::AccountId::new_with_effects(&aura_crypto::Effects::test()),
+                announcement: StorageCapabilityAnnouncement::new(
                     1_000_000_000,
                     TrustLevel::High,
                     4 * 1024 * 1024,
                 ),
                 relationship_established_at: 1000,
                 trust_score: 0.7,
-                storage_metrics: crate::StorageMetrics::new(),
+                storage_metrics: StorageMetrics::new(),
             },
         ];
 

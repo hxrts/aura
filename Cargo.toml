@@ -1,20 +1,35 @@
 # Top-level workspace for Aura - threshold identity and encrypted storage platform
 [workspace]
 resolver = "2"
+exclude = ["console", "ext/*"]  # Console is a separate WASM project, ext/* are external dependencies
+# Note: ext/quint/evaluator still shows profile warnings due to path dependency in quint-api
 members = [
     "crates/agent",
     "crates/groups",
     "crates/coordination",
     "crates/crypto",
     "crates/journal",
-    "crates/session-types",
     "crates/store",
     "crates/transport",
     "crates/test-utils",
     "crates/cli",
     "crates/simulator",
-    "crates/db-test",
+    "crates/aura-errors",
+    "crates/aura-interfaces",
+    # "crates/db-test",       # Temporarily disabled - needs error API migration
+    "crates/console-types",
+    # Temporarily disabled - depend on legacy simulator APIs
+    # "crates/sim-server",
+    # "crates/sim-client",
+    # "crates/live-client",
+    # "crates/analysis-client",
+    # "crates/wasm-core", # Temporarily disabled - needs error API migration
+    "crates/session-types",
+    "crates/quint-api",
+    "crates/aura-types",
+    # "console",              # Temporarily disabled - needs error API migration
 ]
+
 
 [workspace.package]
 version = "0.1.0"
@@ -77,6 +92,9 @@ indexmap = "2.0"
 proptest = "1.4"
 dirs = "5.0"
 
+# WASM Core
+wasm_core = { path = "crates/wasm-core" }
+
 # Authorization & CGKA (placeholder until Keyhive is available)
 # keyhive_core = { git = "https://github.com/inkandswitch/keyhive", rev = "main" }
 
@@ -85,9 +103,20 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+# Enable debug info for better error messages in production
+debug = true
 
 [profile.dev]
 opt-level = 0
+debug = true
+
+# WASM-optimized profile for size (used by console and client crates)
+[profile.wasm]
+inherits = "release"
+opt-level = "s"  # Optimize for size
+lto = true
+codegen-units = 1
+strip = false  # Keep debug info for WASM stack traces
 debug = true
 
 # Lint configuration to enforce effects system usage

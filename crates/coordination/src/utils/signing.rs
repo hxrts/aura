@@ -35,6 +35,7 @@ impl EventSigner {
 #[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
+    use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
     use ed25519_dalek::Verifier;
 
     #[test]
@@ -46,7 +47,7 @@ mod tests {
 
         // Create a dummy event
         let event = aura_journal::Event::new(
-            aura_journal::AccountId::new_with_effects(&effects),
+            AccountId::new_with_effects(&effects),
             0,
             None,
             0,
@@ -55,7 +56,7 @@ mod tests {
                 evidence_hash: [0u8; 32],
             }),
             aura_journal::EventAuthorization::DeviceCertificate {
-                device_id: aura_journal::DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
+                device_id: DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
                 signature: Signature::from_bytes(&[0u8; 64]),
             },
             &effects,

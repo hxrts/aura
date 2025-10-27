@@ -5,8 +5,9 @@
 //!
 //! Reference: docs/040_storage.md Section 8
 
-use crate::chunk_store::{ChunkId, EncryptedChunk};
 use crate::manifest::{PeerId, ReplicaFallbackPolicy, StaticReplicationHint};
+use crate::storage::chunk_store::{ChunkId, EncryptedChunk};
+use aura_journal::capability::CapabilityScope;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -391,9 +392,15 @@ mod tests {
     }
 
     fn create_test_hint(num_peers: usize, target_replicas: u32) -> StaticReplicationHint {
-        let peers = (0..num_peers).map(|i| vec![i as u8; 32]).collect();
+        let peers: Vec<Vec<u8>> = (0..num_peers).map(|i| vec![i as u8; 32]).collect();
 
-        StaticReplicationHint::new(peers, target_replicas)
+        StaticReplicationHint {
+            desired_replicas: target_replicas,
+            peer_preferences: Some(peers.clone()),
+            target_peers: peers,
+            target_replicas,
+            fallback_policy: ReplicaFallbackPolicy::LocalOnly,
+        }
     }
 
     #[test]
@@ -476,8 +483,9 @@ mod tests {
         let chunk_id = chunk.chunk_id.clone();
 
         let hint = StaticReplicationHint {
+            desired_replicas: 0,
+            peer_preferences: None,
             target_peers: vec![],
-            required_capability: crate::manifest::CapabilityScope::Storage,
             target_replicas: 0,
             fallback_policy: ReplicaFallbackPolicy::LocalOnly,
         };
@@ -548,8 +556,9 @@ mod tests {
         let chunk_id = chunk.chunk_id.clone();
 
         let hint = StaticReplicationHint {
+            desired_replicas: 2,
+            peer_preferences: None,
             target_peers: vec![],
-            required_capability: crate::manifest::CapabilityScope::Storage,
             target_replicas: 2,
             fallback_policy: ReplicaFallbackPolicy::LocalOnly,
         };

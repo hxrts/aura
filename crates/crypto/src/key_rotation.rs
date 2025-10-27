@@ -5,7 +5,6 @@
 //! and vice versa. Supports coordinated revocation that rotates all keys atomically.
 //!
 //! Reference: docs/040_storage.md Section 2.1 "KeyDerivationSpec"
-//!          work/ssb_storage.md Phase 4.4
 
 use crate::key_derivation::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyContext};
 use serde::{Deserialize, Serialize};

@@ -15,7 +15,7 @@ This document provides a comprehensive analysis of what is required to compile t
 ### Tier 1: Fully WASM-Compatible (No Changes Required)
 
 #### `aura-session-types`
-**Status:** ✅ Ready for WASM compilation
+**Status:** [OK] Ready for WASM compilation
 
 - Pure Rust logic implementing session type infrastructure
 - No platform-specific dependencies
@@ -25,7 +25,7 @@ This document provides a comprehensive analysis of what is required to compile t
 **Action Required:** None
 
 #### `aura-groups`
-**Status:** ✅ Ready for WASM compilation
+**Status:** [OK] Ready for WASM compilation
 
 - Pure cryptographic protocol (BeeKEM/MLS group messaging)
 - Only depends on crypto primitives (all WASM-compatible)
@@ -35,7 +35,7 @@ This document provides a comprehensive analysis of what is required to compile t
 **Action Required:** None
 
 #### `aura-test-utils`
-**Status:** ✅ Can be excluded from WASM builds
+**Status:** [OK] Can be excluded from WASM builds
 
 - Testing utilities only
 - Not needed in production WASM builds
@@ -48,7 +48,7 @@ This document provides a comprehensive analysis of what is required to compile t
 ### Tier 2: WASM-Compatible with Feature Flags
 
 #### `aura-crypto`
-**Status:** ⚠️ Needs feature flag configuration (95% compatible)
+**Status:** [WARN] Needs feature flag configuration (95% compatible)
 
 **Current Issues:**
 1. Random number generation uses OS entropy:
@@ -120,7 +120,7 @@ This document provides a comprehensive analysis of what is required to compile t
 **Estimated Effort:** 1-2 days
 
 #### `aura-journal`
-**Status:** ⚠️ Mostly compatible, depends on aura-crypto
+**Status:** [WARN] Mostly compatible, depends on aura-crypto
 
 **Current Issues:**
 - Depends on `aura-crypto` (needs fixes above)
@@ -128,9 +128,9 @@ This document provides a comprehensive analysis of what is required to compile t
 - No direct platform dependencies
 
 **Dependencies:**
-- `automerge` 0.5: ✅ Has WASM builds available
-- `serde`, `serde_json`, `serde_cbor`: ✅ All WASM-compatible
-- `uuid`: ⚠️ Needs `getrandom` with "js" feature (already in workspace)
+- `automerge` 0.5: [OK] Has WASM builds available
+- `serde`, `serde_json`, `serde_cbor`: [OK] All WASM-compatible
+- `uuid`: [WARN] Needs `getrandom` with "js" feature (already in workspace)
 
 **Action Required:**
 1. Ensure `getrandom` feature "js" is enabled for WASM target
@@ -140,7 +140,7 @@ This document provides a comprehensive analysis of what is required to compile t
 **Estimated Effort:** 1 day testing
 
 #### `aura-coordination`
-**Status:** ⚠️ Needs Tokio abstraction (80% compatible)
+**Status:** [WARN] Needs Tokio abstraction (80% compatible)
 
 **Current Issues:**
 1. Uses `tokio::spawn` for task spawning:
@@ -200,7 +200,7 @@ This document provides a comprehensive analysis of what is required to compile t
 ### Tier 3: NOT WASM-Compatible (Architectural Changes Required)
 
 #### `aura-agent`
-**Status:** ❌ Requires major refactoring
+**Status:** [ERROR] Requires major refactoring
 
 **Blockers:**
 
@@ -291,7 +291,7 @@ This document provides a comprehensive analysis of what is required to compile t
 **Estimated Effort:** 3-4 weeks
 
 #### `aura-transport`
-**Status:** ❌ Requires transport abstraction redesign
+**Status:** [ERROR] Requires transport abstraction redesign
 
 **Blockers:**
 
@@ -388,7 +388,7 @@ This document provides a comprehensive analysis of what is required to compile t
 **Estimated Effort:** 3-4 weeks
 
 #### `aura-store`
-**Status:** ❌ Requires storage backend abstraction
+**Status:** [ERROR] Requires storage backend abstraction
 
 **Blockers:**
 
@@ -464,7 +464,7 @@ This document provides a comprehensive analysis of what is required to compile t
 **Estimated Effort:** 3-4 weeks
 
 #### `aura-cli`
-**Status:** ❌ Desktop-only, should not be compiled for WASM
+**Status:** [ERROR] Desktop-only, should not be compiled for WASM
 
 **Rationale:**
 - Command-line interface is inherently desktop-specific
@@ -481,7 +481,7 @@ This document provides a comprehensive analysis of what is required to compile t
 **Estimated Effort:** N/A (exclude from WASM)
 
 #### `aura-simulator`
-**Status:** ❌ Testing framework, developer-only
+**Status:** [ERROR] Testing framework, developer-only
 
 **Rationale:**
 - Integration testing framework
@@ -497,49 +497,49 @@ This document provides a comprehensive analysis of what is required to compile t
 
 ## 2. Dependency Analysis: WASM Compatibility Matrix
 
-### Cryptography (✅ Fully WASM-Compatible)
+### Cryptography ([OK] Fully WASM-Compatible)
 
 | Crate | Version | WASM Status | Notes |
 |-------|---------|-------------|-------|
-| `frost-core` | 1.0 | ✅ Compatible | Pure Rust, no syscalls |
-| `frost-ed25519` | 1.0 | ✅ Compatible | Depends on frost-core |
-| `ed25519-dalek` | 2.1 | ✅ Compatible | WASM support confirmed |
-| `curve25519-dalek` | 4.1 | ✅ Compatible | Elliptic curve math |
-| `blake3` | 1.5 | ✅ Compatible | Optional SIMD (disabled for WASM) |
-| `aes-gcm` | 0.10 | ✅ Compatible | Pure crypto |
-| `hpke` | 0.12 | ✅ Compatible | Depends on compatible crates |
-| `chacha20poly1305` | 0.10 | ✅ Compatible | Pure crypto |
-| `sha2` | 0.10 | ✅ Compatible | Pure hash functions |
-| `hkdf` | 0.12 | ✅ Compatible | Pure KDF |
-| `zeroize` | 1.7 | ✅ Compatible | Memory zeroing |
+| `frost-core` | 1.0 | [OK] Compatible | Pure Rust, no syscalls |
+| `frost-ed25519` | 1.0 | [OK] Compatible | Depends on frost-core |
+| `ed25519-dalek` | 2.1 | [OK] Compatible | WASM support confirmed |
+| `curve25519-dalek` | 4.1 | [OK] Compatible | Elliptic curve math |
+| `blake3` | 1.5 | [OK] Compatible | Optional SIMD (disabled for WASM) |
+| `aes-gcm` | 0.10 | [OK] Compatible | Pure crypto |
+| `hpke` | 0.12 | [OK] Compatible | Depends on compatible crates |
+| `chacha20poly1305` | 0.10 | [OK] Compatible | Pure crypto |
+| `sha2` | 0.10 | [OK] Compatible | Pure hash functions |
+| `hkdf` | 0.12 | [OK] Compatible | Pure KDF |
+| `zeroize` | 1.7 | [OK] Compatible | Memory zeroing |
 
-### Serialization (✅ Fully WASM-Compatible)
-
-| Crate | Version | WASM Status | Notes |
-|-------|---------|-------------|-------|
-| `serde` | 1.0 | ✅ Compatible | Full WASM support |
-| `serde_json` | 1.0 | ✅ Compatible | JSON (de)serialization |
-| `serde_cbor` | 0.11 | ✅ Compatible | CBOR format |
-| `bincode` | 1.3 | ✅ Compatible | Binary serialization |
-| `toml` | 0.8 | ✅ Compatible | Pure Rust parser |
-
-### Data Structures (⚠️ Mostly Compatible)
+### Serialization ([OK] Fully WASM-Compatible)
 
 | Crate | Version | WASM Status | Notes |
 |-------|---------|-------------|-------|
-| `automerge` | 0.5 | ⚠️ Partial | Has WASM builds, needs testing |
-| `uuid` | 1.6 | ⚠️ Conditional | Needs `getrandom` with "js" feature |
-| `time` | 0.3 | ⚠️ Conditional | Needs WASM feature flags |
-| `indexmap` | 2.0 | ✅ Compatible | Pure Rust hashmap |
+| `serde` | 1.0 | [OK] Compatible | Full WASM support |
+| `serde_json` | 1.0 | [OK] Compatible | JSON (de)serialization |
+| `serde_cbor` | 0.11 | [OK] Compatible | CBOR format |
+| `bincode` | 1.3 | [OK] Compatible | Binary serialization |
+| `toml` | 0.8 | [OK] Compatible | Pure Rust parser |
 
-### Async Runtime (❌ Major Issues)
+### Data Structures ([WARN] Mostly Compatible)
 
 | Crate | Version | WASM Status | Notes |
 |-------|---------|-------------|-------|
-| `tokio` | 1.35 | ❌ Not Compatible | OS-based async runtime |
-| `futures` | 0.3 | ✅ Compatible | Async traits work |
-| `async-trait` | 0.1 | ✅ Compatible | Proc macros work |
-| `wasm-bindgen-futures` | 0.4 | ✅ WASM-specific | Required for browser async |
+| `automerge` | 0.5 | [WARN] Partial | Has WASM builds, needs testing |
+| `uuid` | 1.6 | [WARN] Conditional | Needs `getrandom` with "js" feature |
+| `time` | 0.3 | [WARN] Conditional | Needs WASM feature flags |
+| `indexmap` | 2.0 | [OK] Compatible | Pure Rust hashmap |
+
+### Async Runtime ([ERROR] Major Issues)
+
+| Crate | Version | WASM Status | Notes |
+|-------|---------|-------------|-------|
+| `tokio` | 1.35 | [ERROR] Not Compatible | OS-based async runtime |
+| `futures` | 0.3 | [OK] Compatible | Async traits work |
+| `async-trait` | 0.1 | [OK] Compatible | Proc macros work |
+| `wasm-bindgen-futures` | 0.4 | [OK] WASM-specific | Required for browser async |
 
 **Tokio Issues:**
 - `tokio::spawn` requires OS thread pool (not available in browser)
@@ -549,29 +549,29 @@ This document provides a comprehensive analysis of what is required to compile t
 
 **Solution:** Feature-gate Tokio, use `wasm-bindgen-futures` for WASM
 
-### Networking (❌ Not WASM-Compatible)
+### Networking ([ERROR] Not WASM-Compatible)
 
 | Crate | Version | WASM Status | Notes |
 |-------|---------|-------------|-------|
-| `reqwest` | 0.11 | ❌ Not Compatible | System HTTP client |
-| `axum` | 0.7 | ❌ Not Compatible | Web framework for Tokio |
-| `snow` | 0.9 | ⚠️ Partial | Noise protocol, needs WASM RNG |
+| `reqwest` | 0.11 | [ERROR] Not Compatible | System HTTP client |
+| `axum` | 0.7 | [ERROR] Not Compatible | Web framework for Tokio |
+| `snow` | 0.9 | [WARN] Partial | Noise protocol, needs WASM RNG |
 
 **Alternatives for WASM:**
 - `web-sys::fetch` for HTTP requests
 - `web-sys::WebSocket` for WebSocket connections
 - `gloo-net` for high-level networking abstractions
 
-### Platform-Specific (❌ Complete Blockers)
+### Platform-Specific ([ERROR] Complete Blockers)
 
 | Crate | Version | WASM Status | Notes |
 |-------|---------|-------------|-------|
-| `security-framework` | 2.9 | ❌ macOS/iOS only | Apple keychain APIs |
-| `core-foundation` | 0.9 | ❌ macOS/iOS only | Apple system frameworks |
-| `windows` | 0.52 | ❌ Windows only | Win32 APIs |
-| `keyutils` | 0.1 | ❌ Linux only | Linux kernel keyring |
-| `redb` | 2.0 | ❌ Not Compatible | File-based database |
-| `dirs` | 5.0 | ❌ Not Compatible | Platform paths |
+| `security-framework` | 2.9 | [ERROR] macOS/iOS only | Apple keychain APIs |
+| `core-foundation` | 0.9 | [ERROR] macOS/iOS only | Apple system frameworks |
+| `windows` | 0.52 | [ERROR] Windows only | Win32 APIs |
+| `keyutils` | 0.1 | [ERROR] Linux only | Linux kernel keyring |
+| `redb` | 2.0 | [ERROR] Not Compatible | File-based database |
+| `dirs` | 5.0 | [ERROR] Not Compatible | Platform paths |
 
 **Alternatives for WASM:**
 - IndexedDB for persistent storage (via `rexie` or `web-sys`)
@@ -579,17 +579,17 @@ This document provides a comprehensive analysis of what is required to compile t
 - WebCrypto API for key management
 - No direct keychain equivalent (use encrypted IndexedDB)
 
-### Utilities (⚠️ Mixed Compatibility)
+### Utilities ([WARN] Mixed Compatibility)
 
 | Crate | Version | WASM Status | Notes |
 |-------|---------|-------------|-------|
-| `rand` | 0.8 | ⚠️ Conditional | Needs `getrandom` with "js" |
-| `getrandom` | 0.2 | ⚠️ Conditional | **Must** use `features = ["js"]` |
-| `rand_chacha` | 0.3 | ✅ Compatible | Pure PRNG |
-| `hex` | 0.4 | ✅ Compatible | String encoding |
-| `tracing` | 0.1 | ✅ Compatible | Logging facade |
-| `tracing-subscriber` | 0.3 | ❌ Not Compatible | Needs environment vars |
-| `tracing-wasm` | 0.2 | ✅ WASM-specific | Browser console logging |
+| `rand` | 0.8 | [WARN] Conditional | Needs `getrandom` with "js" |
+| `getrandom` | 0.2 | [WARN] Conditional | **Must** use `features = ["js"]` |
+| `rand_chacha` | 0.3 | [OK] Compatible | Pure PRNG |
+| `hex` | 0.4 | [OK] Compatible | String encoding |
+| `tracing` | 0.1 | [OK] Compatible | Logging facade |
+| `tracing-subscriber` | 0.3 | [ERROR] Not Compatible | Needs environment vars |
+| `tracing-wasm` | 0.2 | [OK] WASM-specific | Browser console logging |
 
 ---
 
@@ -1107,35 +1107,35 @@ With parallel development of Phases 2 and 3: **12-16 weeks (3-4 months)**
 ## 9. Success Criteria
 
 ### Phase 1 Success
-- ✅ Core cryptographic protocols compile to WASM
-- ✅ Can run FROST threshold signatures in browser
-- ✅ Can run DKD protocol in browser
-- ✅ Effects system works with browser APIs
+- [OK] Core cryptographic protocols compile to WASM
+- [OK] Can run FROST threshold signatures in browser
+- [OK] Can run DKD protocol in browser
+- [OK] Effects system works with browser APIs
 
 ### Phase 2 Success
-- ✅ Can store encrypted data in IndexedDB
-- ✅ Can retrieve and decrypt stored data
-- ✅ Storage quota management works
-- ✅ Migration from native storage possible
+- [OK] Can store encrypted data in IndexedDB
+- [OK] Can retrieve and decrypt stored data
+- [OK] Storage quota management works
+- [OK] Migration from native storage possible
 
 ### Phase 3 Success
-- ✅ Can send/receive messages via WebSocket
-- ✅ Can communicate with relay servers
-- ✅ Network state properly managed
-- ✅ Reconnection logic works
+- [OK] Can send/receive messages via WebSocket
+- [OK] Can communicate with relay servers
+- [OK] Network state properly managed
+- [OK] Reconnection logic works
 
 ### Phase 4 Success
-- ✅ JavaScript API exported and functional
-- ✅ TypeScript definitions generated
-- ✅ Example application works in browser
-- ✅ Integration tests pass in headless browser
+- [OK] JavaScript API exported and functional
+- [OK] TypeScript definitions generated
+- [OK] Example application works in browser
+- [OK] Integration tests pass in headless browser
 
 ### Phase 5 Success
-- ✅ Production web UI deployed
-- ✅ Can initialize accounts from browser
-- ✅ Can perform all core operations
-- ✅ Performance acceptable for users
-- ✅ Documentation complete
+- [OK] Production web UI deployed
+- [OK] Can initialize accounts from browser
+- [OK] Can perform all core operations
+- [OK] Performance acceptable for users
+- [OK] Documentation complete
 
 ---
 

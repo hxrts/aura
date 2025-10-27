@@ -9,8 +9,8 @@ use super::{
     CapabilityError, CapabilityId, CapabilityToken, CommunicationOperation, Permission,
     RelayOperation, Result, StorageOperation,
 };
-use crate::DeviceId;
 use aura_crypto::Effects;
+use aura_types::DeviceId;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use std::collections::{BTreeMap, BTreeSet};
 

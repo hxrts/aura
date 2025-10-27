@@ -3,10 +3,11 @@
 //! Provides structured logging that captures all events during simulation
 //! for replay, debugging, and Byzantine behavior analysis.
 
-use aura_coordination::{AuraSpan, LogLevel, LogSink, LogValue, SpanOutcome};
-use aura_journal::{ByzantineEvidence, DeviceId, ProtocolType};
+use aura_coordination::tracing::{AuraSpan, LogLevel, LogSink, LogValue, SpanOutcome};
+use aura_types::{DeviceId};
+use aura_journal::{ByzantineEvidence, ProtocolType};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
@@ -201,7 +202,7 @@ impl SimulationLogSink {
             total_spans: spans.len(),
             events_by_level: BTreeMap::new(),
             events_by_device: BTreeMap::new(),
-            events_by_protocol: BTreeMap::new(),
+            events_by_protocol: HashMap::new(),
             byzantine_detections: 0,
             error_count: 0,
         };
@@ -297,8 +298,8 @@ impl SimulationLogSink {
         
         if max_rate > 100 { // More than 100 events per tick is suspicious
             Some(ByzantineEvidence::ResourceExhaustion {
-                resource: aura_journal::ResourceType::ConcurrentSessions,
-                rate: max_rate as u64,
+                request_count: max_rate as u64,
+                window_ms: 1000, // 1 second window
             })
         } else {
             None
@@ -413,7 +414,7 @@ pub struct SimulationStatistics {
     /// Events by device
     pub events_by_device: BTreeMap<DeviceId, usize>,
     /// Events by protocol
-    pub events_by_protocol: BTreeMap<ProtocolType, usize>,
+    pub events_by_protocol: HashMap<ProtocolType, usize>,
     /// Number of Byzantine behavior detections
     pub byzantine_detections: usize,
     /// Total error count

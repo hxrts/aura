@@ -21,33 +21,35 @@
 
 pub mod error;
 
-/// Event application logic and state transitions
-pub mod apply_event;
-/// Trait for applying events to AccountState
-pub mod appliable;
-/// Account bootstrap with capability-based authorization
-pub mod bootstrap;
 /// Capability-based authorization system
 pub mod capability;
-/// CRDT-based event definitions
-pub mod events;
-/// Main account ledger implementation
-pub mod ledger;
+/// Core ledger state machine implementation
+/// - AccountState: The CRDT state structure
+/// - AccountLedger: High-level validation and event log wrapper
+/// - Event application: State transition logic and dispatch
+pub mod core;
+/// Protocol definitions and bootstrap
+/// - Event types: All protocol event definitions
+/// - Bootstrap: Account initialization and genesis ceremony
+pub mod protocols;
 /// Serialization utilities for CRDT events
 pub mod serialization;
-/// Account state management
-pub mod state;
 /// Type definitions for journal system
 pub mod types;
 
-pub use events::*;
-pub use types::*;
-// Re-export the state current_timestamp to avoid ambiguity
-pub use ledger::*;
-pub use serialization::*;
-pub use state::AccountState;
-pub use error::*;
+// Session types disabled for now - placeholders for future implementation
+// pub mod session_types;
 
+// Re-export from protocols (events and bootstrap)
+pub use protocols::*;
+// Re-export from types
+pub use types::*;
+// Re-export from error
+pub use error::*;
+// Re-export from core (state and ledger)
+pub use core::{AccountLedger, AccountState, Appliable};
+// Re-export from serialization
+pub use serialization::*;
 
 use thiserror::Error;
 
@@ -72,11 +74,11 @@ pub enum LedgerError {
 
     /// Threshold signature requirement not met
     #[error("Threshold not met: {current} < {required}")]
-    ThresholdNotMet { 
+    ThresholdNotMet {
         /// Current number of signatures
-        current: usize, 
+        current: usize,
         /// Required number of signatures
-        required: usize 
+        required: usize,
     },
 
     /// Device not found in account
@@ -89,11 +91,11 @@ pub enum LedgerError {
 
     /// Session epoch is stale
     #[error("Stale epoch: {provided} < {current}")]
-    StaleEpoch { 
+    StaleEpoch {
         /// Provided epoch number
-        provided: u64, 
+        provided: u64,
         /// Current epoch number
-        current: u64 
+        current: u64,
     },
 
     /// CRDT operation failed

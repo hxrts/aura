@@ -1,0 +1,3 @@
+# Stylance configuration
+output_dir = "styles"
+class_name_pattern = "[local]"

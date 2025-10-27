@@ -1,0 +1,169 @@
+//! Leptos integration for reactive WebSocket clients
+
+#[cfg(feature = "leptos")]
+use leptos::prelude::*;
+use crate::error::{WasmError, WasmResult};
+use crate::websocket::{ClientMode, DefaultHandler, MessageEnvelope, UnifiedWebSocketClient};
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+/// Connection states for reactive UI
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ConnectionState {
+    Disconnected,
+    Connecting,
+    Connected,
+    Reconnecting,
+    Error(String),
+}
+
+/// Reactive WebSocket client for Leptos applications
+#[cfg(feature = "leptos")]
+#[allow(dead_code)]
+pub struct ReactiveWebSocketClient {
+    client: Rc<RefCell<UnifiedWebSocketClient>>,
+    connection_state: WriteSignal<ConnectionState>,
+    messages: WriteSignal<VecDeque<MessageEnvelope>>,
+    responses: WriteSignal<VecDeque<serde_json::Value>>,
+    auto_reconnect: bool,
+    reconnect_attempts: u32,
+    max_reconnect_attempts: u32,
+}
+
+#[cfg(feature = "leptos")]
+impl ReactiveWebSocketClient {
+    /// Create a new reactive WebSocket client
+    pub fn new(
+        mode: &str,
+        url: String,
+        connection_state: WriteSignal<ConnectionState>,
+        messages: WriteSignal<VecDeque<MessageEnvelope>>,
+        responses: WriteSignal<VecDeque<serde_json::Value>>,
+    ) -> WasmResult<Self> {
+        let client_mode = match mode {
+            "simulation" => ClientMode::Simulation,
+            "live" => ClientMode::LiveNetwork, 
+            "analysis" => ClientMode::Analysis,
+            _ => ClientMode::Simulation,
+        };
+        let client = UnifiedWebSocketClient::new(client_mode, url);
+        
+        Ok(Self {
+            client: Rc::new(RefCell::new(client)),
+            connection_state,
+            messages,
+            responses,
+            auto_reconnect: true,
+            reconnect_attempts: 0,
+            max_reconnect_attempts: 5,
+        })
+    }
+
+    /// Connect with event handlers set up
+    pub fn connect(&mut self) -> WasmResult<()> {
+        self.connection_state.set(ConnectionState::Connecting);
+        
+        let handler = Rc::new(RefCell::new(DefaultHandler::new(ClientMode::Simulation)));
+        let mut client = self.client.borrow_mut();
+        client.connect(handler)?;
+        self.connection_state.set(ConnectionState::Connected);
+        
+        Ok(())
+    }
+
+
+    /// Send a message
+    pub fn send_message(&self, envelope: &MessageEnvelope) -> WasmResult<()> {
+        let json = envelope.to_json()?;
+        self.client.borrow().send(&json)
+    }
+
+    /// Send a typed message
+    pub fn send_typed<T: Serialize>(&self, message_type: &str, payload: &T) -> WasmResult<()> {
+        let payload_json = serde_json::to_value(payload)
+            .map_err(WasmError::from)?;
+        let envelope = MessageEnvelope::new(message_type, payload_json);
+        self.send_message(&envelope)
+    }
+
+    /// Disconnect
+    pub fn disconnect(&mut self) -> WasmResult<()> {
+        self.client.borrow_mut().close()?;
+        self.connection_state.set(ConnectionState::Disconnected);
+        Ok(())
+    }
+
+    /// Check if connected
+    pub fn is_connected(&self) -> bool {
+        self.client.borrow().is_connected_status()
+    }
+}
+
+/// Hook for using reactive WebSocket in Leptos components
+#[cfg(feature = "leptos")]
+pub fn use_reactive_websocket(
+    mode: &str,
+    url: String,
+) -> (
+    ReadSignal<ConnectionState>,
+    ReadSignal<VecDeque<MessageEnvelope>>,
+    ReadSignal<VecDeque<serde_json::Value>>,
+    impl Fn(&MessageEnvelope) + Clone,
+    impl Fn() + Clone,
+    impl Fn() + Clone,
+) {
+    let (connection_state, set_connection_state) = signal(ConnectionState::Disconnected);
+    let (messages, set_messages) = signal(VecDeque::new());
+    let (responses, set_responses) = signal(VecDeque::new());
+
+    let client = Rc::new(RefCell::new(
+        ReactiveWebSocketClient::new(mode, url, set_connection_state, set_messages, set_responses)
+            .expect("Failed to create WebSocket client")
+    ));
+
+    // Connect function
+    let connect = {
+        let client = client.clone();
+        move || {
+            let _ = client.borrow_mut().connect();
+        }
+    };
+
+    // Disconnect function
+    let disconnect = {
+        let client = client.clone();
+        move || {
+            let _ = client.borrow_mut().disconnect();
+        }
+    };
+
+    // Send message function
+    let send_message = {
+        let client = client.clone();
+        move |envelope: &MessageEnvelope| {
+            let _ = client.borrow().send_message(envelope);
+        }
+    };
+
+    // Auto-connect on mount
+    Effect::new({
+        let connect = connect.clone();
+        move |_| {
+            connect();
+        }
+    });
+
+    (
+        connection_state.into(),
+        messages.into(),
+        responses.into(),
+        send_message,
+        connect,
+        disconnect,
+    )
+}
+
+#[cfg(not(feature = "leptos"))]
+pub struct ConnectionState;

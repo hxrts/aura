@@ -7,11 +7,12 @@
 // - Timestamp validation: Reject messages with stale timestamps
 // - Session epoch enforcement: Old session credentials are rejected
 
-use aura_journal::{AccountId, DeviceId, Event, EventId, EventType, EpochTickEvent, EventAuthorization, AccountLedger, DeviceMetadata, DeviceType};
 use aura_crypto::Effects;
-use ed25519_dalek::{SigningKey, Signature, VerifyingKey};
+use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
+use aura_journal::{AccountLedger, DeviceMetadata, DeviceType, EpochTickEvent, Event, EventAuthorization, EventId, EventType};
+use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use rand::Rng;
-use std::collections::{HashSet, BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use uuid::Uuid;
 
 /// Test that replayed events are rejected (duplicate event IDs)
@@ -20,7 +21,7 @@ fn test_replay_protection_event_id() {
     let effects = Effects::for_test("replay_protection");
     let account_id = AccountId::new_with_effects(&effects);
     let device_id = DeviceId::new_with_effects(&effects);
-    
+
     // Create minimal state for testing
     let device_metadata = create_test_device_metadata(device_id, &effects);
     let group_public_key = ed25519_dalek::VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
@@ -41,10 +42,14 @@ fn test_replay_protection_event_id() {
 
     // Attempt to replay the exact same event
     let result = ledger.append_event(event.clone(), &effects);
-    
+
     // Verify the replayed event was rejected
     assert!(result.is_err(), "Replayed event should be rejected");
-    assert_eq!(ledger.event_log().len(), 1, "Event log should still have only one event");
+    assert_eq!(
+        ledger.event_log().len(),
+        1,
+        "Event log should still have only one event"
+    );
 }
 
 /// Test that events with duplicate nonces are rejected
@@ -53,7 +58,7 @@ fn test_nonce_enforcement() {
     let effects = Effects::for_test("nonce_enforcement");
     let account_id = AccountId::new_with_effects(&effects);
     let device_id = DeviceId::new_with_effects(&effects);
-    
+
     // Create minimal state for testing
     let device_metadata = create_test_device_metadata(device_id, &effects);
     let group_public_key = ed25519_dalek::VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
@@ -81,7 +86,11 @@ fn test_nonce_enforcement() {
 
     // Verify replay was rejected
     assert!(result.is_err(), "Replayed nonce should be rejected");
-    assert_eq!(ledger.event_log().len(), 2, "Event log should still have only two events");
+    assert_eq!(
+        ledger.event_log().len(),
+        2,
+        "Event log should still have only two events"
+    );
 }
 
 /// Test that events with different timestamps are accepted (CRDT property)
@@ -90,7 +99,7 @@ fn test_timestamp_tolerance() {
     let effects = Effects::for_test("timestamp_tolerance");
     let account_id = AccountId::new_with_effects(&effects);
     let device_id = DeviceId::new_with_effects(&effects);
-    
+
     // Create minimal state for testing
     let device_metadata = create_test_device_metadata(device_id, &effects);
     let group_public_key = ed25519_dalek::VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
@@ -124,7 +133,7 @@ fn test_timestamp_tolerance() {
 #[test]
 fn test_frost_nonce_uniqueness() {
     let effects = Effects::for_test("frost_nonce_uniqueness");
-    
+
     // Test that FROST nonce generation produces unique values
     // We'll just verify uniqueness of generated nonce strings since actual FROST integration requires full setup
     let mut nonce_representations = Vec::new();
@@ -134,7 +143,7 @@ fn test_frost_nonce_uniqueness() {
         let nonce_data = format!("nonce_{}_{}_{}", i, rng.gen::<u64>(), rng.gen::<u64>());
         nonce_representations.push(nonce_data);
     }
-    
+
     // Verify all nonce representations are unique
     let unique_nonces: HashSet<_> = nonce_representations.iter().collect();
     assert_eq!(
@@ -150,7 +159,7 @@ fn test_session_epoch_enforcement() {
     let effects = Effects::for_test("session_epoch_enforcement");
     let account_id = AccountId::new_with_effects(&effects);
     let device_id = DeviceId::new_with_effects(&effects);
-    
+
     // Simulate session credential system with epochs
     #[derive(Debug, Clone, PartialEq)]
     struct SessionCredential {
@@ -214,14 +223,13 @@ fn test_session_epoch_enforcement() {
     );
 }
 
-
 // Helper functions
 
 fn create_test_device_metadata(device_id: DeviceId, effects: &Effects) -> DeviceMetadata {
     let signing_key = SigningKey::from_bytes(&[1u8; 32]);
     let public_key = signing_key.verifying_key();
     let current_time = aura_crypto::time::current_timestamp_with_effects(effects).unwrap_or(1000);
-    
+
     DeviceMetadata {
         device_id,
         device_name: "Test Device".to_string(),

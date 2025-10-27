@@ -428,12 +428,13 @@ impl Default for RelationshipGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_types::{AccountIdExt, DeviceIdExt};
 
     fn test_peer(id: u8, capacity: u64, trust_level: TrustLevel, trust_score: f64) -> StoragePeer {
         StoragePeer {
             peer_id: vec![id],
-            device_id: vec![id],
-            account_id: vec![id],
+            device_id: aura_types::DeviceId::new_with_effects(&aura_crypto::Effects::test()),
+            account_id: aura_types::AccountId::new_with_effects(&aura_crypto::Effects::test()),
             announcement: StorageCapabilityAnnouncement::new(
                 capacity,
                 trust_level,

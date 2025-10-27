@@ -1,0 +1,77 @@
+# Replay Attack Scenario
+
+[metadata]
+name = "replay_attack"
+description = "Attempt to replay old session credentials after epoch increment"
+version = "1.0.0"
+author = "Aura Security Team"
+tags = ["replay", "adversarial", "session", "security"]
+
+[setup]
+participants = 4
+threshold = 3
+seed = 999
+
+[network]
+latency_range = [50, 150]
+drop_rate = 0.01
+
+[byzantine]
+count = 1
+participants = ["mallory"]
+default_strategies = ["replay_old_messages"]
+
+[[phases]]
+name = "epoch1_setup"
+description = "Establish session epoch 1"
+timeout_seconds = 3
+actions = [
+    { type = "run_choreography", choreography = "session_establishment", participants = ["alice", "bob", "charlie", "mallory"], threshold = 3 }
+]
+
+[[phases]]
+name = "capture_credentials"
+description = "Adversary captures epoch 1 credentials"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "session_operation", participants = ["alice", "bob"] },
+    { type = "create_checkpoint", label = "credentials_captured" }
+]
+
+[[phases]]
+name = "epoch_increment"
+description = "Increment to epoch 2"
+timeout_seconds = 3
+actions = [
+    { type = "run_choreography", choreography = "epoch_increment", participants = ["alice", "bob", "charlie"], threshold = 3 }
+]
+
+[[phases]]
+name = "replay_attempt"
+description = "Adversary attempts to replay old credentials"
+timeout_seconds = 3
+actions = [
+    { type = "inject_byzantine", participant = "mallory", behavior = "replay_old_credentials" }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify replay rejected"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "replay_rejected", expected = true },
+    { type = "verify_property", property = "epoch2_uncompromised", expected = true }
+]
+
+[[properties]]
+name = "replay_rejected"
+property_type = "safety"
+
+[[properties]]
+name = "epoch2_uncompromised"
+property_type = "safety"
+
+[[properties]]
+name = "old_credentials_invalid"
+property_type = "safety"
+

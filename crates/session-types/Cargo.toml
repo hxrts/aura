@@ -1,41 +1,30 @@
-# Session Types for Choreographic Protocol Safety
 [package]
-name = "aura-session-types"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
+name = "session_types"
+version = "0.1.0"
+edition = "2021"
 
 [lints]
 workspace = true
 
 [dependencies]
-# Workspace crates - minimal dependencies to avoid cycles
-aura-crypto = { path = "../crypto" }
-aura-journal = { path = "../journal" }
-aura-groups = { path = "../groups" }
+# Essential external dependencies only - no internal crate dependencies to keep it minimal
 
-# Cryptography
-blake3 = { workspace = true }
-frost-ed25519 = { workspace = true }
-ed25519-dalek = { workspace = true }
-
-# Serialization
+# Core dependencies for session types and unified type system
+aura-errors = { path = "../aura-errors" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-bincode = { workspace = true }
-
-# Async
-tokio = { workspace = true }
-futures = { workspace = true }
-
-# Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
-sha2 = { workspace = true }
-hex = { workspace = true }
+tracing = "0.1"
+time = { workspace = true }
+
+# WASM compatibility
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[features]
+default = []
+wasm = ["wasm-bindgen", "js-sys"]
 
 [dev-dependencies]
 tokio-test = "0.4"

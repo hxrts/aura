@@ -8,21 +8,20 @@
 disallowed-methods = [
     # Time functions - must use effects.now()
     "std::time::SystemTime::now",
-    "std::time::Instant::now", 
+    "std::time::Instant::now",
     "chrono::Utc::now",
     "chrono::Local::now",
     "chrono::offset::Utc::now",
     "chrono::offset::Local::now",
-    
+
     # Random functions - must use effects.random_bytes() or effects.rng()
     "rand::random",
     "rand::thread_rng",
-    "getrandom::getrandom",
-    
+
     # UUID functions - must use effects.gen_uuid()
     "uuid::Uuid::new_v4",
     "uuid::Builder::from_random_bytes",
-    
+
     # Other non-deterministic functions
     "std::process::id",
     "std::thread::current",

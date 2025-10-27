@@ -12,10 +12,12 @@ workspace = true
 
 [dependencies]
 # Workspace crates
+aura-errors = { path = "../aura-errors" }
 aura-journal = { path = "../journal" }
-aura-transport = { path = "../transport" }
+# aura-transport = { path = "../transport" }  # Temporarily disabled due to coordination dependencies
 aura-crypto = { path = "../crypto" }
 aura-groups = { path = "../groups" }
+aura-types = { path = "../aura-types" }
 
 # Storage
 redb = { workspace = true }

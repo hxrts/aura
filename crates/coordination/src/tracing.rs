@@ -3,17 +3,18 @@
 //! Provides injectable logging that works seamlessly in both production
 //! and simulation environments with rich context and protocol awareness.
 
-pub mod protocol;
 pub mod production;
+pub mod protocol;
 
-use aura_journal::{DeviceId, ProtocolType};
+use aura_types::{DeviceId};
+use aura_journal::{ProtocolType};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub use protocol::*;
 pub use production::*;
+pub use protocol::*;
 
 /// A structured logging span with rich context
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,7 +77,7 @@ pub enum SpanOutcome {
     /// Successful completion
     Success,
     /// Completed with error
-    Error(aura_journal::AuraErrorKind),
+    Error(aura_errors::AuraError),
     /// Byzantine behavior detected
     Byzantine(DeviceId, aura_journal::ByzantineEvidence),
     /// Cancelled or interrupted
@@ -87,19 +88,19 @@ pub enum SpanOutcome {
 pub trait LogSink: Send + Sync {
     /// Log a structured event
     fn log_event(
-        &self, 
-        level: LogLevel, 
-        span: &AuraSpan, 
-        message: String, 
-        fields: BTreeMap<String, LogValue>
+        &self,
+        level: LogLevel,
+        span: &AuraSpan,
+        message: String,
+        fields: BTreeMap<String, LogValue>,
     );
-    
+
     /// Enter a new span
     fn enter_span(&self, span: AuraSpan);
-    
+
     /// Exit a span with outcome
     fn exit_span(&self, span_id: Uuid, outcome: SpanOutcome);
-    
+
     /// Check if a log level is enabled
     fn is_enabled(&self, level: LogLevel) -> bool;
 }
@@ -126,31 +127,31 @@ impl SpanBuilder {
             fields: BTreeMap::new(),
         }
     }
-    
+
     /// Set the protocol for this span
     pub fn with_protocol(mut self, protocol: ProtocolType) -> Self {
         self.protocol = Some(protocol);
         self
     }
-    
+
     /// Set the session ID for this span
     pub fn with_session(mut self, session_id: Uuid) -> Self {
         self.session_id = Some(session_id);
         self
     }
-    
+
     /// Set the parent span
     pub fn with_parent(mut self, parent_id: Uuid) -> Self {
         self.parent_id = Some(parent_id);
         self
     }
-    
+
     /// Add a field to the span
     pub fn with_field(mut self, key: &str, value: LogValue) -> Self {
         self.fields.insert(key.to_string(), value);
         self
     }
-    
+
     /// Build the span
     pub fn build(self, started_at: u64) -> AuraSpan {
         AuraSpan {
@@ -183,53 +184,58 @@ impl TracedOperation {
             completed: false,
         }
     }
-    
+
     /// Log an event within this operation
     pub fn log(&self, level: LogLevel, message: &str) {
         if self.log_sink.is_enabled(level) {
-            self.log_sink.log_event(level, &self.span, message.to_string(), BTreeMap::new());
+            self.log_sink
+                .log_event(level, &self.span, message.to_string(), BTreeMap::new());
         }
     }
-    
+
     /// Log an event with structured fields
     pub fn log_with_fields(
-        &self, 
-        level: LogLevel, 
-        message: &str, 
-        fields: BTreeMap<String, LogValue>
+        &self,
+        level: LogLevel,
+        message: &str,
+        fields: BTreeMap<String, LogValue>,
     ) {
         if self.log_sink.is_enabled(level) {
-            self.log_sink.log_event(level, &self.span, message.to_string(), fields);
+            self.log_sink
+                .log_event(level, &self.span, message.to_string(), fields);
         }
     }
-    
+
     /// Complete the operation successfully
     pub fn complete(mut self) {
-        self.log_sink.exit_span(self.span.span_id, SpanOutcome::Success);
+        self.log_sink
+            .exit_span(self.span.span_id, SpanOutcome::Success);
         self.completed = true;
     }
-    
+
     /// Complete the operation with an error
-    pub fn complete_with_error(mut self, error: aura_journal::AuraErrorKind) {
-        self.log_sink.exit_span(self.span.span_id, SpanOutcome::Error(error));
+    pub fn complete_with_error(mut self, error: aura_errors::AuraError) {
+        self.log_sink
+            .exit_span(self.span.span_id, SpanOutcome::Error(error));
         self.completed = true;
     }
-    
+
     /// Complete the operation with Byzantine evidence
     pub fn complete_with_byzantine(
-        mut self, 
-        accused: DeviceId, 
-        evidence: aura_journal::ByzantineEvidence
+        mut self,
+        accused: DeviceId,
+        evidence: aura_journal::ByzantineEvidence,
     ) {
-        self.log_sink.exit_span(self.span.span_id, SpanOutcome::Byzantine(accused, evidence));
+        self.log_sink
+            .exit_span(self.span.span_id, SpanOutcome::Byzantine(accused, evidence));
         self.completed = true;
     }
-    
+
     /// Get the span ID
     pub fn span_id(&self) -> Uuid {
         self.span.span_id
     }
-    
+
     /// Get a reference to the span
     pub fn span(&self) -> &AuraSpan {
         &self.span
@@ -239,7 +245,8 @@ impl TracedOperation {
 impl Drop for TracedOperation {
     fn drop(&mut self) {
         if !self.completed {
-            self.log_sink.exit_span(self.span.span_id, SpanOutcome::Cancelled);
+            self.log_sink
+                .exit_span(self.span.span_id, SpanOutcome::Cancelled);
         }
     }
 }
@@ -262,7 +269,7 @@ impl LogLevel {
     pub fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Trace => "trace",
-            LogLevel::Debug => "debug", 
+            LogLevel::Debug => "debug",
             LogLevel::Info => "info",
             LogLevel::Warn => "warn",
             LogLevel::Error => "error",

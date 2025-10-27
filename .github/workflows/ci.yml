@@ -92,28 +92,28 @@ jobs:
         run: |
           echo "Checking for direct time usage violations..."
           if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number; then
-            echo "❌ Found direct time usage! Use effects.now() instead."
+            echo "[ERROR] Found direct time usage! Use effects.now() instead."
             exit 1
           else
-            echo "✅ No direct time usage violations found"
+            echo "[OK] No direct time usage violations found"
           fi
       - name: Check for direct randomness usage
         run: |
           echo "Checking for direct randomness usage violations..."
           if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number; then
-            echo "❌ Found direct randomness usage! Use effects.random_bytes() or effects.rng() instead."
+            echo "[ERROR] Found direct randomness usage! Use effects.random_bytes() or effects.rng() instead."
             exit 1
           else
-            echo "✅ No direct randomness usage violations found"
+            echo "[OK] No direct randomness usage violations found"
           fi
       - name: Check for direct UUID usage
         run: |
           echo "Checking for direct UUID usage violations..."
           if rg --type rust "Uuid::new_v4\(\)" crates/ --line-number; then
-            echo "❌ Found direct UUID usage! Use effects.gen_uuid() instead."
+            echo "[ERROR] Found direct UUID usage! Use effects.gen_uuid() instead."
             exit 1
           else
-            echo "✅ No direct UUID usage violations found"
+            echo "[OK] No direct UUID usage violations found"
           fi
 
   build:
@@ -172,8 +172,8 @@ jobs:
           path = "test_lints.rs"
           EOF
           ); then
-            echo "❌ Lints should have failed but didn't!"
+            echo "[ERROR] Lints should have failed but didn't!"
             exit 1
           else
-            echo "✅ Lints correctly caught violations"
+            echo "[OK] Lints correctly caught violations"
           fi

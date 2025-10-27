@@ -182,7 +182,7 @@ pub fn derive_key_material(
     output_length: usize,
 ) -> Result<Vec<u8>> {
     if output_length == 0 || output_length > 255 * 32 {
-        return Err(CryptoError::InvalidParameter(
+        return Err(CryptoError::crypto_operation_failed(
             "Invalid output length for key derivation".to_string(),
         ));
     }
@@ -195,7 +195,7 @@ pub fn derive_key_material(
     // HKDF-Expand: expand to desired output length
     let mut output = vec![0u8; output_length];
     hkdf.expand(&info, &mut output)
-        .map_err(|e| CryptoError::KeyDerivationFailed(format!("HKDF expansion failed: {:?}", e)))?;
+        .map_err(|e| CryptoError::key_derivation_failed(format!("HKDF expansion failed: {:?}", e)))?;
 
     Ok(output)
 }

@@ -1,0 +1,55 @@
+# Group Communication Invariant Testing
+
+[metadata]
+name = "group_communication"
+description = "Verify group communication protocols maintain message ordering"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["group", "communication", "ordering", "invariant"]
+
+[setup]
+participants = 5
+threshold = 3
+seed = 444
+
+[network]
+latency_range = [10, 100]
+drop_rate = 0.05
+
+[[phases]]
+name = "group_setup"
+description = "Initialize group communication"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "group_initialization", participants = ["p1", "p2", "p3", "p4", "p5"], threshold = 3 }
+]
+
+[[phases]]
+name = "message_broadcast"
+description = "Broadcast messages to group"
+timeout_seconds = 3
+actions = [
+    { type = "run_choreography", choreography = "group_broadcast", participants = ["p1", "p2", "p3", "p4", "p5"] }
+]
+
+[[phases]]
+name = "ordering_verification"
+description = "Verify causal ordering maintained"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "causal_order_maintained", expected = true },
+    { type = "verify_property", property = "all_messages_delivered", expected = true }
+]
+
+[[properties]]
+name = "causal_order_maintained"
+property_type = "safety"
+
+[[properties]]
+name = "all_messages_delivered"
+property_type = "liveness"
+
+[[properties]]
+name = "no_message_duplication"
+property_type = "safety"
+

@@ -6,8 +6,7 @@
 //!
 //! Reference: work/pre_ssb_storage_tests.md - Category 2.2
 
-use aura_journal::state::AccountState;
-use aura_journal::types::*;
+use aura_journal::{types::*, AccountState};
 use aura_test_utils::*;
 use proptest::prelude::*;
 use std::collections::BTreeMap;
@@ -67,11 +66,10 @@ fn merge_states(mut state_a: AccountState, state_b: &AccountState) -> AccountSta
 fn add_device_to_state(state: &mut AccountState, seed: u64) {
     let effects = test_effects_deterministic(seed, 1000);
     let device_metadata = test_device_with_name(&format!("Device {}", seed), &effects);
-    
-    state.devices.insert(
-        device_metadata.device_id,
-        device_metadata,
-    );
+
+    state
+        .devices
+        .insert(device_metadata.device_id, device_metadata);
 }
 
 /// Modify state with random operations (for property testing)

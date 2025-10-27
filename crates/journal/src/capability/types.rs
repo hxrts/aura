@@ -9,19 +9,23 @@ pub struct CapabilityId(pub [u8; 32]);
 
 impl CapabilityId {
     /// Generate deterministic ID from parent chain
-    pub fn from_chain(parent_id: Option<&CapabilityId>, subject_id: &Subject, scope: &CapabilityScope) -> Self {
+    pub fn from_chain(
+        parent_id: Option<&CapabilityId>,
+        subject_id: &Subject,
+        scope: &CapabilityScope,
+    ) -> Self {
         let mut hasher = blake3::Hasher::new();
-        
+
         if let Some(parent) = parent_id {
             hasher.update(&parent.0);
         }
-        
+
         hasher.update(subject_id.as_bytes());
         hasher.update(&serde_json::to_vec(scope).unwrap_or_default());
-        
+
         CapabilityId(hasher.finalize().into())
     }
-    
+
     pub fn as_hex(&self) -> String {
         hex::encode(self.0)
     }
@@ -35,7 +39,7 @@ impl Subject {
     pub fn new(id: &str) -> Self {
         Self(id.to_string())
     }
-    
+
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
@@ -64,7 +68,7 @@ impl CapabilityScope {
             params: BTreeMap::new(),
         }
     }
-    
+
     /// Create scope with resource constraint
     pub fn with_resource(namespace: &str, operation: &str, resource: &str) -> Self {
         Self {
@@ -74,19 +78,19 @@ impl CapabilityScope {
             params: BTreeMap::new(),
         }
     }
-    
+
     /// Check if this scope subsumes another (is more general)
     pub fn subsumes(&self, other: &CapabilityScope) -> bool {
         // Namespace must match
         if self.namespace != other.namespace {
             return false;
         }
-        
+
         // Operation must match or be wildcard
         if self.operation != "*" && self.operation != other.operation {
             return false;
         }
-        
+
         // Resource constraint: None means no constraint (subsumes all)
         if let Some(self_resource) = &self.resource {
             if let Some(other_resource) = &other.resource {
@@ -98,14 +102,14 @@ impl CapabilityScope {
                 return false;
             }
         }
-        
+
         // Check parameters (simplified - exact match required)
         for (key, value) in &other.params {
             if self.params.get(key) != Some(value) {
                 return false;
             }
         }
-        
+
         true
     }
 }

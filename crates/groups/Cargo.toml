@@ -12,6 +12,10 @@ workspace = true
 
 [dependencies]
 
+# Internal crates
+aura-errors = { path = "../aura-errors" }
+session_types = { path = "../session-types" }
+
 # Cryptography
 ed25519-dalek = { workspace = true }
 blake3 = { workspace = true }
@@ -34,9 +38,9 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 hex = { workspace = true }
 
-# Local dependencies
-aura-journal = { path = "../journal" }
 aura-crypto = { path = "../crypto" }
+aura-journal = { path = "../journal" }
+aura-types = { path = "../aura-types" }
 
 [dev-dependencies]
 tokio-test = "0.4"

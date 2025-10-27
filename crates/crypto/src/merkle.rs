@@ -6,8 +6,8 @@
 // for DKD commitments. This allows recovery to verify guardian shares after ledger
 // compaction has pruned the original commitment events.
 
-use crate::{CryptoError, Result};
 use crate::MerkleProof;
+use crate::{CryptoError, Result};
 
 /// Build a Merkle tree from commitment hashes
 ///
@@ -16,7 +16,7 @@ use crate::MerkleProof;
 /// Reference: 080 spec Part 3: Ledger Compaction
 pub fn build_commitment_tree(commitments: &[[u8; 32]]) -> Result<([u8; 32], Vec<MerkleProof>)> {
     if commitments.is_empty() {
-        return Err(CryptoError::CryptoError(
+        return Err(CryptoError::crypto_operation_failed(
             "Cannot build Merkle tree from empty commitment list".to_string(),
         ));
     }

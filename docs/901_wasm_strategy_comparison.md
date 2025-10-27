@@ -427,10 +427,10 @@ build:
 
 ### Phase 1: Prototype (Current - db-test)
 **Keep the simple approach for now:**
-- ✅ Basic wasm-pack build
-- ✅ Simple static HTML test page
-- ✅ Single-threaded Datafrog queries
-- ✅ Manual testing
+- [OK] Basic wasm-pack build
+- [OK] Simple static HTML test page
+- [OK] Single-threaded Datafrog queries
+- [OK] Manual testing
 
 **Good for:**
 - Validating Datafrog works in WASM

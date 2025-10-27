@@ -26,8 +26,9 @@ impl EncryptionContext {
 
     /// Encrypt data
     pub fn encrypt(&self, plaintext: &[u8], effects: &Effects) -> Result<Vec<u8>> {
-        let cipher = Aes256Gcm::new_from_slice(&self.key)
-            .map_err(|e| CryptoError::CryptoError(format!("Failed to create cipher: {}", e)))?;
+        let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|e| {
+            CryptoError::crypto_operation_failed(format!("Failed to create cipher: {}", e))
+        })?;
 
         // Generate random nonce using injected effects
         let nonce_bytes: [u8; 12] = effects.random_bytes();
@@ -36,7 +37,7 @@ impl EncryptionContext {
         // Encrypt
         let ciphertext = cipher
             .encrypt(&nonce, plaintext)
-            .map_err(|e| CryptoError::CryptoError(format!("Encryption failed: {}", e)))?;
+            .map_err(|e| CryptoError::encryption_failed(format!("Encryption failed: {}", e)))?;
 
         // Prepend nonce to ciphertext
         let mut result = nonce_bytes.to_vec();
@@ -48,23 +49,26 @@ impl EncryptionContext {
     /// Decrypt data
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
         if ciphertext.len() < 12 {
-            return Err(CryptoError::CryptoError("Ciphertext too short".to_string()));
+            return Err(CryptoError::crypto_operation_failed(
+                "Ciphertext too short".to_string(),
+            ));
         }
 
-        let cipher = Aes256Gcm::new_from_slice(&self.key)
-            .map_err(|e| CryptoError::CryptoError(format!("Failed to create cipher: {}", e)))?;
+        let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|e| {
+            CryptoError::crypto_operation_failed(format!("Failed to create cipher: {}", e))
+        })?;
 
         // Extract nonce and actual ciphertext
-        let nonce_bytes: [u8; 12] = ciphertext[..12]
-            .try_into()
-            .map_err(|_| CryptoError::CryptoError("Invalid nonce length".to_string()))?;
+        let nonce_bytes: [u8; 12] = ciphertext[..12].try_into().map_err(|_| {
+            CryptoError::crypto_operation_failed("Invalid nonce length".to_string())
+        })?;
         let nonce = Nonce::from(nonce_bytes);
         let actual_ciphertext = &ciphertext[12..];
 
         // Decrypt
         let plaintext = cipher
             .decrypt(&nonce, actual_ciphertext)
-            .map_err(|e| CryptoError::CryptoError(format!("Decryption failed: {}", e)))?;
+            .map_err(|e| CryptoError::decryption_failed(format!("Decryption failed: {}", e)))?;
 
         Ok(plaintext)
     }
@@ -129,8 +133,8 @@ pub fn wrap_key_for_recipients(
             // For broadcast, we would need to get all active devices from the ledger
             // This function now requires explicit device information instead of implicit broadcast
             // Callers should use Recipients::Devices with all devices from ledger
-            return Err(CryptoError::InvalidParameter(
-                "Broadcast recipients require explicit device list from ledger".to_string()
+            return Err(CryptoError::crypto_operation_failed(
+                "Broadcast recipients require explicit device list from ledger".to_string(),
             ));
         }
         Recipients::Devices(devices) => devices
@@ -145,7 +149,9 @@ pub fn wrap_key_for_recipients(
                     None,
                     effects,
                 )
-                .map_err(|e| CryptoError::CryptoError(format!("Key wrapping failed: {}", e)))?;
+                .map_err(|e| {
+                    CryptoError::crypto_operation_failed(format!("Key wrapping failed: {}", e))
+                })?;
 
                 Ok(WrappedKey {
                     device_id: recipient.device_id,
@@ -208,20 +214,21 @@ pub fn unwrap_key(
         .iter()
         .find(|w| w.device_id == device_id)
         .ok_or_else(|| {
-            CryptoError::CryptoError(format!("No key found for device {}", device_id.0))
+            CryptoError::crypto_operation_failed(format!("No key found for device {}", device_id.0))
         })?;
 
     // Unwrap using the unified crypto utilities
     wrapped
         .sealed_key
         .unseal_value(device_secret)
-        .map_err(|e| CryptoError::CryptoError(format!("Key unwrapping failed: {}", e)))
+        .map_err(|e| CryptoError::crypto_operation_failed(format!("Key unwrapping failed: {}", e)))
 }
 
 #[cfg(test)]
 #[allow(warnings, clippy::all)]
 mod tests {
     use super::*;
+    use aura_types::DeviceIdExt;
 
     #[test]
     fn test_encryption_roundtrip() {

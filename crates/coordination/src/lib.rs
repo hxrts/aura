@@ -1,6 +1,49 @@
 //! Protocol Coordination for Aura
+#![allow(clippy::result_large_err)]
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::single_match_else)]
+#![allow(clippy::manual_async_fn)]
+#![allow(clippy::empty_line_after_doc_comments)]
 //!
 //! This crate provides coordination infrastructure for Aura's distributed protocols.
+//!
+//! ## Architecture
+//!
+//! The coordination crate is organized into several key layers:
+//!
+//! - **`protocols/`** - Complete protocol implementations combining session types
+//!   and choreographic execution (DKD, Recovery, Resharing)
+//! - **`execution/`** - Protocol execution infrastructure and context management
+//! - **`session_types/`** - Session type infrastructure for type-safe protocols
+//! - **`local_runtime/`** - Local session runtime for per-device coordination
+//! - **`instrumentation/`** - Dev console integration hooks and trace recording
+//! - **`utils/`** - Low-level coordination-specific utilities
+//!
+//! ## Usage
+//!
+//! For most use cases, import the complete protocol implementations:
+//!
+//! ```rust,ignore
+//! use aura_coordination::protocols::{dkd_choreography, recovery_choreography};
+//! use aura_coordination::execution::ProtocolContext;
+//! ```
+//!
+//! For dev console integration:
+//!
+//! ```rust,ignore
+//! #[cfg(feature = "dev-console")]
+//! use aura_coordination::instrumentation::{InstrumentationHooks, TraceRecorder};
+//! ```
+//!
+//! ## Crate Dependencies
+//!
+//! This crate follows a clean dependency hierarchy:
+//!
+//! - **Dependencies**: `aura-crypto`, `aura-journal`, `session`, `aura-groups`
+//! - **Dev Dependencies**: `aura-test-utils` (for testing utilities)
+//! - **Used By**: `aura-simulator` (protocol execution), `aura-sim-server` (trace recording)
+//! - **Features**: `dev-console` enables instrumentation for the Aura Dev Console
 
 #![allow(
     missing_docs,
@@ -8,12 +51,7 @@
     clippy::disallowed_methods,
     clippy::expect_used,
     clippy::unwrap_used,
-    clippy::too_many_arguments,
-    clippy::manual_async_fn,
-    clippy::large_enum_variant,
-    clippy::single_match,
-    clippy::format_in_format_args,
-    clippy::default_constructed_unit_structs
+    clippy::too_many_arguments
 )]
 
 // ========== Error Types ==========
@@ -23,35 +61,88 @@ pub use error::{CoordinationError, Result};
 // ========== Basic Infrastructure ==========
 pub mod utils;
 
-// ========== Legacy Types ==========
+// ========== Core Types ==========
 pub mod types;
-pub use types::*;
+pub use types::{
+    IdentifierMapping, KeyShare, ParticipantId, PublicKeyPackage, SealedShare, SessionId,
+    ThresholdConfig, ThresholdSignature,
+};
 
-// Re-export utilities that compile
+// Utility exports
 pub use utils::{compute_lottery_ticket, determine_lock_winner};
 
 // ========== Protocol Execution ==========
 pub mod execution;
 pub use execution::{ProductionTimeSource, ProtocolContext, StubTransport, Transport};
 
-// ========== Choreography ==========
-pub mod choreography;
+// ========== Complete Protocols ==========
+pub mod protocols;
+// Direct exports for core protocols
+pub use protocols::{
+    counter_increment_choreography,
+    counter_range_choreography,
+    // DKD protocol
+    dkd_choreography,
+    // Utility protocols
+    locking_choreography,
+    new_dkd_protocol,
+    new_recovery_protocol,
+    new_resharing_protocol,
+    nudge_guardian,
+    // Recovery protocol
+    recovery_choreography,
+    rehydrate_dkd_protocol,
+    rehydrate_recovery_protocol,
+    rehydrate_resharing_protocol,
+    // Resharing protocol
+    resharing_choreography,
+    DkdProtocolCore,
+    DkdProtocolState,
+    DkdSessionError,
+    RecoveryProtocolCore,
+    RecoveryProtocolState,
+    RecoverySessionError,
+    ResharingProtocolCore,
+    ResharingProtocolState,
+    ResharingSessionError,
+};
 
 // ========== Tracing and Logging ==========
 pub mod tracing;
-pub use tracing::*;
 
 // ========== Test Utilities ==========
-#[cfg(test)]
-#[allow(warnings, clippy::all)]
-pub mod test_utils;
+// Test utilities are now located in tests/test_utils.rs
 
 // ========== Error Recovery ==========
 pub mod error_recovery;
-pub use error_recovery::*;
 
 // ========== Local Session Runtime ==========
 pub mod local_runtime;
+pub mod session_runtime_config;
 pub use local_runtime::{
     DkdResult, LocalSessionRuntime, SessionCommand, SessionProtocolType, SessionResponse,
 };
+pub use session_runtime_config::{
+    ConfigurationError, SecurityConfig, SessionConfig, SessionRuntimeConfig,
+    SessionRuntimeConfigBuilder, SessionRuntimeFactory, TransportConfig,
+};
+
+// ========== Session Types ==========
+pub mod session_types;
+pub use protocols::{
+    rehydrate_protocol, IntoProtocolWrapper, ProtocolWrapper, ProtocolWrapperBuilder,
+    ProtocolWrapperError,
+};
+pub use session_types::{SessionProtocol, SessionTypedProtocol};
+
+// ========== Service Layer Architecture ==========
+pub mod context_builder;
+pub mod coordination_service;
+pub mod protocol_results;
+pub use coordination_service::{
+    CoordinationService, CryptoService, ProtocolContextFactory, ProtocolSetupError, RuntimeStats,
+    SecureStorage, SigningContext,
+};
+
+// ========== Dev Console Instrumentation ==========
+pub mod instrumentation;

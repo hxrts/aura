@@ -1,0 +1,30 @@
+# Core shared types for Aura - fundamental data structures used across the entire workspace
+[package]
+name = "aura-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Identifiers and hashing
+uuid = { workspace = true }
+blake3 = { workspace = true }
+
+# Utilities
+thiserror = { workspace = true }
+hex = { workspace = true }
+
+# Time utilities
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+# None needed - this is a pure types crate

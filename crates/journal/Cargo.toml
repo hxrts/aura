@@ -13,7 +13,10 @@ workspace = true
 [dependencies]
 
 # Internal crates
+aura-errors = { path = "../aura-errors" }
 aura-crypto = { path = "../crypto" }
+aura-types = { path = "../aura-types" }
+# aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
 
 # CRDT
 automerge = { workspace = true }

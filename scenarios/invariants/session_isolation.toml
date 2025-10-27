@@ -1,0 +1,64 @@
+# Session Isolation Invariant Testing
+
+[metadata]
+name = "session_isolation"
+description = "Verify session credentials are properly isolated between epochs"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["session", "isolation", "security", "invariant"]
+
+[setup]
+participants = 3
+threshold = 2
+seed = 111
+
+[network]
+latency_range = [10, 30]
+drop_rate = 0.0
+
+[[phases]]
+name = "epoch1_establishment"
+description = "Establish session epoch 1"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "session_establishment", participants = ["alice", "bob", "charlie"], threshold = 2 }
+]
+
+[[phases]]
+name = "epoch1_operations"
+description = "Perform operations in epoch 1"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "session_operation", participants = ["alice", "bob"] },
+    { type = "create_checkpoint", label = "epoch1_complete" }
+]
+
+[[phases]]
+name = "epoch_transition"
+description = "Transition to epoch 2"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "epoch_increment", participants = ["alice", "bob", "charlie"], threshold = 2 }
+]
+
+[[phases]]
+name = "epoch2_operations"
+description = "Verify epoch 1 credentials rejected"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "epoch1_credentials_invalid", expected = true },
+    { type = "verify_property", property = "epoch2_credentials_valid", expected = true }
+]
+
+[[properties]]
+name = "epoch1_credentials_invalid"
+property_type = "safety"
+
+[[properties]]
+name = "epoch2_credentials_valid"
+property_type = "safety"
+
+[[properties]]
+name = "session_isolation_maintained"
+property_type = "safety"
+

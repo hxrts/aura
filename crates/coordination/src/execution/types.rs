@@ -7,7 +7,8 @@
 //!
 //! Reference: work/04_declarative_protocol_evolution.md
 
-use aura_journal::{DeviceId, Event};
+use aura_journal::Event;
+use aura_types::{AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -284,7 +285,7 @@ pub enum InstructionResult {
 /// Snapshot of ledger state for instruction results
 #[derive(Debug, Clone)]
 pub struct LedgerStateSnapshot {
-    pub account_id: aura_journal::AccountId,
+    pub account_id: AccountId,
     pub next_nonce: u64,
     pub last_event_hash: Option<[u8; 32]>,
     pub current_epoch: u64,

@@ -1,0 +1,55 @@
+# Threshold Security Invariant Testing
+
+[metadata]
+name = "threshold_security_3_of_5"
+description = "Test signature with exactly threshold participants"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["threshold", "frost", "security", "invariant"]
+
+[setup]
+participants = 5
+threshold = 3
+seed = 23456
+
+[network]
+latency_range = [10, 30]
+drop_rate = 0.0
+
+[[phases]]
+name = "key_generation"
+description = "Generate threshold keys"
+timeout_seconds = 3
+actions = [
+    { type = "run_choreography", choreography = "frost_key_generation", participants = ["p0", "p1", "p2", "p3", "p4"], threshold = 3 }
+]
+
+[[phases]]
+name = "signing"
+description = "Create threshold signature with exactly threshold signers"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "frost_signing", participants = ["p0", "p1", "p2"], threshold = 3 }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify threshold security maintained"
+timeout_seconds = 1
+actions = [
+    { type = "verify_property", property = "threshold_security_maintained", expected = true },
+    { type = "verify_property", property = "signature_valid", expected = true }
+]
+
+[[properties]]
+name = "threshold_security_maintained"
+property_type = "safety"
+
+[[properties]]
+name = "signature_valid"
+property_type = "safety"
+
+[[properties]]
+name = "no_single_signer"
+property_type = "safety"
+
