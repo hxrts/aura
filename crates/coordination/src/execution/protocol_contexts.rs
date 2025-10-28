@@ -9,8 +9,8 @@ use super::{
     EventFilter, EventPredicate, EventTypePattern, Instruction, InstructionResult,
     LedgerStateSnapshot, ProtocolError, ProtocolErrorType,
 };
-use aura_types::{DeviceId, GuardianId};
 use aura_journal::{Event, EventType};
+use aura_types::{DeviceId, GuardianId};
 use uuid::Uuid;
 
 /// Context for DKD protocol - uses only base fields
@@ -180,20 +180,16 @@ impl ProtocolContextTrait for BaseContext {
     fn base(&self) -> &BaseContext {
         self
     }
-    
+
     fn base_mut(&mut self) -> &mut BaseContext {
         self
     }
-    
+
     fn execute(
         &mut self,
         instruction: Instruction,
     ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<InstructionResult, ProtocolError>>
-                + Send
-                + '_,
-        >,
+        Box<dyn std::future::Future<Output = Result<InstructionResult, ProtocolError>> + Send + '_>,
     > {
         Box::pin(async move { execute_instruction(self, instruction).await })
     }
@@ -212,7 +208,6 @@ impl RecoveryContext {
         self.base.get_guardian_merkle_proof(guardian_id).await
     }
 }
-
 
 /// Common instruction execution logic
 async fn execute_instruction(
@@ -258,7 +253,7 @@ async fn write_to_ledger(
 ) -> Result<InstructionResult, ProtocolError> {
     // Store a copy of the event for protocol result collection
     base._collected_events.push(event.clone());
-    
+
     // Write to ledger (may be shared in simulation for instant CRDT sync)
     let mut ledger = base.ledger.write().await;
 
@@ -499,6 +494,7 @@ async fn check_session_collision(
         // Check if this session matches our operation type and context
         let protocol_type = match operation_type {
             aura_journal::OperationType::Dkd => aura_journal::ProtocolType::Dkd,
+            aura_journal::OperationType::Counter => aura_journal::ProtocolType::Counter,
             aura_journal::OperationType::Resharing => aura_journal::ProtocolType::Resharing,
             aura_journal::OperationType::Recovery => aura_journal::ProtocolType::Recovery,
             aura_journal::OperationType::Locking => aura_journal::ProtocolType::Locking,

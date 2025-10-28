@@ -1124,9 +1124,9 @@ Generated at: {}
                     "| {} | {} | {} |",
                     name,
                     if result.success {
-                        "✅ Success"
+                        "[OK] Success"
                     } else {
-                        "❌ Failed"
+                        "[ERROR] Failed"
                     },
                     result.duration_ms.unwrap_or(0)
                 ))
@@ -1260,7 +1260,9 @@ fn handle_run_scenarios(args: RunArgs) -> Result<()> {
                 } else {
                     PathBuf::from("outcomes").join(output_file)
                 };
-                std::fs::create_dir_all(output_path.parent().unwrap_or(&PathBuf::from("outcomes")))?;
+                std::fs::create_dir_all(
+                    output_path.parent().unwrap_or(&PathBuf::from("outcomes")),
+                )?;
                 std::fs::write(output_path, json)?;
             } else {
                 println!("{}", json);
@@ -1274,9 +1276,9 @@ fn handle_run_scenarios(args: RunArgs) -> Result<()> {
                     "{}: {} ({}ms)",
                     name,
                     if result.success {
-                        "✅ Success"
+                        "[OK] Success"
                     } else {
-                        "❌ Failed"
+                        "[ERROR] Failed"
                     },
                     result.duration_ms.unwrap_or(0)
                 );
@@ -1355,25 +1357,25 @@ fn handle_validate_scenarios(args: ValidateArgs) -> Result<()> {
     for (name, status) in &results {
         match status {
             ValidationStatus::Valid => {
-                println!("{}: ✅ Valid", name);
+                println!("{}: [OK] Valid", name);
                 valid_count += 1;
             }
             ValidationStatus::Invalid(errors) => {
-                println!("{}: ❌ Invalid", name);
+                println!("{}: [ERROR] Invalid", name);
                 for error in errors {
                     println!("  Error: {}", error);
                 }
                 invalid_count += 1;
             }
             ValidationStatus::Warning(warnings) => {
-                println!("{}: ⚠️  Valid with warnings", name);
+                println!("{}: [WARN] Valid with warnings", name);
                 for warning in warnings {
                     println!("  Warning: {}", warning);
                 }
                 valid_count += 1;
             }
             ValidationStatus::NotValidated => {
-                println!("{}: ❓ Not validated", name);
+                println!("{}: [UNKNOWN] Not validated", name);
             }
         }
     }

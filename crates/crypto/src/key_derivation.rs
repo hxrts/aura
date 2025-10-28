@@ -194,8 +194,9 @@ pub fn derive_key_material(
 
     // HKDF-Expand: expand to desired output length
     let mut output = vec![0u8; output_length];
-    hkdf.expand(&info, &mut output)
-        .map_err(|e| CryptoError::key_derivation_failed(format!("HKDF expansion failed: {:?}", e)))?;
+    hkdf.expand(&info, &mut output).map_err(|e| {
+        CryptoError::key_derivation_failed(format!("HKDF expansion failed: {:?}", e))
+    })?;
 
     Ok(output)
 }

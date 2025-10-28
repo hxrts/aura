@@ -14,11 +14,11 @@ pub mod leptos;
 
 pub use error::{WasmError, WasmResult};
 pub use handlers::{AnalysisHandler, LiveNetworkHandler, SimulationHandler};
-pub use setup::initialize_wasm;
+pub use setup::{init_manually, initialize_wasm};
 pub use websocket::{ClientHandler, ClientMode, MessageEnvelope, UnifiedWebSocketClient};
 
 #[cfg(feature = "leptos")]
-pub use leptos::{ConnectionState, ReactiveWebSocketClient, use_reactive_websocket};
+pub use leptos::{use_reactive_websocket, ConnectionState, ReactiveWebSocketClient};
 
 // Re-export commonly used types
 pub use serde::{Deserialize, Serialize};

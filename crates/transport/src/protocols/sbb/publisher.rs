@@ -11,7 +11,7 @@
 //! 5. Add to local CRDT (will gossip to neighbors)
 
 use crate::envelope::{Envelope, Header, HeaderBare, RoutingTag, ENVELOPE_SIZE};
-use crate::{TransportResult, TransportError, TransportErrorBuilder};
+use crate::{TransportError, TransportErrorBuilder, TransportResult};
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 
@@ -62,7 +62,11 @@ impl SbbPublisher {
     ///
     /// The routing tag is a truncated BLAKE3 keyed hash that allows recipients
     /// to efficiently check if an envelope might be for them without decryption.
-    pub fn compute_routing_tag(k_tag: &[u8; 32], epoch: u64, counter: u64) -> TransportResult<RoutingTag> {
+    pub fn compute_routing_tag(
+        k_tag: &[u8; 32],
+        epoch: u64,
+        counter: u64,
+    ) -> TransportResult<RoutingTag> {
         // Build the input: epoch || counter || "rt"
         let mut input = Vec::new();
         input.extend_from_slice(&epoch.to_le_bytes());
@@ -93,12 +97,14 @@ impl SbbPublisher {
         use chacha20poly1305::{AeadInPlace, KeyInit, XChaCha20Poly1305};
 
         // Serialize payload
-        let serialized = bincode::serialize(payload)
-            .map_err(|e| TransportErrorBuilder::transport(format!("serialization failed: {}", e)))?;
+        let serialized = bincode::serialize(payload).map_err(|e| {
+            TransportErrorBuilder::transport(format!("serialization failed: {}", e))
+        })?;
 
         // Create cipher instance
-        let cipher = XChaCha20Poly1305::new_from_slice(k_box)
-            .map_err(|e| TransportErrorBuilder::transport(format!("cipher creation failed: {}", e)))?;
+        let cipher = XChaCha20Poly1305::new_from_slice(k_box).map_err(|e| {
+            TransportErrorBuilder::transport(format!("cipher creation failed: {}", e))
+        })?;
 
         // Convert nonce to correct type
         let nonce_array = Nonce::<XChaCha20Poly1305>::from_slice(nonce);
@@ -121,8 +127,9 @@ impl SbbPublisher {
         use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
 
         // Create cipher instance
-        let cipher = XChaCha20Poly1305::new_from_slice(k_box)
-            .map_err(|e| TransportErrorBuilder::transport(format!("cipher creation failed: {}", e)))?;
+        let cipher = XChaCha20Poly1305::new_from_slice(k_box).map_err(|e| {
+            TransportErrorBuilder::transport(format!("cipher creation failed: {}", e))
+        })?;
 
         // Convert nonce to correct type
         let nonce_array = Nonce::<XChaCha20Poly1305>::from_slice(nonce);
@@ -176,12 +183,14 @@ impl SbbPublisher {
 
         // 4. Create envelope header
         let bare = HeaderBare::new(self.epoch, counter, rtag, ttl_epochs);
-        let header = Header::new(bare, &ciphertext)
-            .map_err(|e| TransportErrorBuilder::transport(format!("header creation failed: {}", e)))?;
+        let header = Header::new(bare, &ciphertext).map_err(|e| {
+            TransportErrorBuilder::transport(format!("header creation failed: {}", e))
+        })?;
 
         // 5. Create complete envelope
-        let envelope = Envelope::new(header, ciphertext)
-            .map_err(|e| TransportErrorBuilder::transport(format!("envelope creation failed: {}", e)))?;
+        let envelope = Envelope::new(header, ciphertext).map_err(|e| {
+            TransportErrorBuilder::transport(format!("envelope creation failed: {}", e))
+        })?;
 
         // 6. Verify envelope size
         let envelope_bytes = envelope.to_bytes().map_err(|e| {

@@ -162,7 +162,7 @@ pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> any
                         success_count += 1;
                     }
                     Err(e) => {
-                        let error_msg = format!("  ✗ Failed to grant {}:{}: {}", namespace, op, e);
+                        let error_msg = format!("  [ERROR] Failed to grant {}:{}: {}", namespace, op, e);
                         println!("{}", error_msg);
                         errors.push(error_msg);
                     }
@@ -251,7 +251,7 @@ pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> any
                             }
                             Err(e) => {
                                 let error_msg =
-                                    format!("  ✗ Failed to revoke {}:{}: {}", namespace, op, e);
+                                    format!("  [ERROR] Failed to revoke {}:{}: {}", namespace, op, e);
                                 println!("{}", error_msg);
                                 errors.push(error_msg);
                                 found_capability = true;
@@ -312,7 +312,7 @@ pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> any
 
             println!(
                 "  Authorized: {}",
-                if has_permission { "[OK] YES" } else { "✗ NO" }
+                if has_permission { "[OK] YES" } else { "[ERROR] NO" }
             );
 
             if has_permission {
@@ -412,7 +412,7 @@ pub async fn handle_authz_command(command: AuthzCommand, config: &Config) -> any
                     println!("  The subject can now perform the delegated operation");
                 }
                 Err(e) => {
-                    println!("  Status: ✗ Capability delegation failed");
+                    println!("  Status: [ERROR] Capability delegation failed");
                     println!("  Error: {}", e);
                     return Err(anyhow::anyhow!("Capability delegation failed: {}", e));
                 }

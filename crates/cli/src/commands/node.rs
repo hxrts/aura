@@ -3,6 +3,7 @@
 //! Commands for running and managing Aura nodes with optional dev console integration.
 
 use anyhow::Result;
+use aura_agent::Agent;
 use clap::Args;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -35,7 +36,7 @@ pub async fn handle_node_command(cmd: NodeCommand, config: &crate::config::Confi
     info!("Starting Aura node...");
 
     // Load agent from config
-    let integrated_agent = create_integrated_agent(config).await?;
+    let _integrated_agent = create_integrated_agent(config).await?;
 
     // Start instrumentation server if requested
     #[cfg(feature = "dev-console")]
@@ -95,30 +96,16 @@ pub async fn handle_node_command(cmd: NodeCommand, config: &crate::config::Confi
 /// Create an integrated agent from configuration
 async fn create_integrated_agent(
     config: &crate::config::Config,
-) -> Result<Arc<aura_agent::IntegratedAgent>> {
-    // This is a simplified version - in a real implementation, this would
-    // properly initialize the IntegratedAgent with the configuration
+) -> Result<Arc<dyn aura_agent::Agent>> {
+    // Create agent using the common utility
+    let agent = crate::commands::common::create_agent(config).await?;
 
-    use aura_types::{AccountId, DeviceId};
+    info!("Created agent for node (device_id: {})", agent.device_id());
 
-    // Mock agent creation for demonstration
-    // In reality, this would load the agent from the config
-    let device_id = DeviceId::new();
-    let account_id = AccountId::new();
-
-    // For now, return a basic mock since the full implementation requires
-    // the agent crate to compile properly
-    info!("Creating mock integrated agent (device_id: {})", device_id);
-
-    // This would be: IntegratedAgent::new(device_id, account_id, &config.data_dir).await?
-    // For now, we'll just simulate the agent creation
-
-    // Create a placeholder that represents what would be a real IntegratedAgent
-    // The actual implementation would depend on the agent crate compiling
-
-    Err(anyhow::anyhow!(
-        "Agent creation not yet implemented - placeholder for full integration"
-    ))
+    // Wrap the agent in an Arc for shared ownership
+    // Note: This is a simplified approach - a real node might need additional
+    // infrastructure around the agent for background tasks, etc.
+    Ok(Arc::new(agent))
 }
 
 /// Set up graceful shutdown handling

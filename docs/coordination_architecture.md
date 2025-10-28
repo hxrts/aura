@@ -21,6 +21,10 @@ The architecture organizes into distinct layers with clear responsibilities:
 - The **session types layer** adds compile-time safety by tracking protocol state at the type level. Each protocol phase has its own type, preventing invalid state transitions.
 - The **local runtime layer** manages multiple concurrent protocol sessions on a single device. It routes messages, manages session lifecycles, and provides the async API for protocol management.
 
+### Lifecycle Scheduler Migration
+
+Aura is consolidating protocols onto a unified `ProtocolLifecycle` contract defined in the `protocol-core` crate. DKD, resharing, recovery, locking, and counter reservations now execute through the lifecycle scheduler, which injects shared journal/transport adapters and returns structured results (`DkdProtocolResult`, `ResharingProtocolResult`, `RecoveryProtocolResult`, `LockingProtocolResult`, `CounterProtocolResult`). Legacy choreographic entry points remain temporarily for compatibility but are marked as deprecated; new callers should drive the scheduler via `LifecycleScheduler::execute_*` helpers or the `LocalSessionRuntime` APIs.
+
 ## Protocol Execution Model
 
 Protocols execute through an instruction-based model that abstracts away the complexity of distributed coordination.
@@ -47,7 +51,7 @@ Protocol execution operates within validated contexts that provide secure access
 
 The `BaseContext` provides common functionality shared by all protocols: session management, device identification, ledger access, and effects injection. Protocol-specific contexts like `ResharingContext` and `RecoveryContext` extend this base with specialized capabilities.
 
-The `ContextBuilder` validates device authorization, capability permissions, and threshold material availability before creating contexts. It loads real ledger state, verifies device keys match the crypto service, and ensures devices are not revoked. This ensures protocols execute only when they have the necessary cryptographic materials and permissions.
+The new scheduler pipeline validates device authorization, capability permissions, and threshold material availability before executing protocols. Runtime configuration loads real ledger state, verifies device keys match the crypto service, and ensures devices are not revoked. This ensures protocols execute only when they have the necessary cryptographic materials and permissions.
 
 ### Session Type Safety
 

@@ -39,7 +39,7 @@ pub mod types;
 // Re-export main API types
 pub use error::{QuintError, QuintResult};
 pub use evaluator::QuintEvaluator;
-pub use properties::{PropertySpec, PropertySuite, PropertyKind};
+pub use properties::{PropertyKind, PropertySpec, PropertySuite};
 pub use runner::{QuintRunner, RunnerConfig};
 pub use types::VerificationResult;
 

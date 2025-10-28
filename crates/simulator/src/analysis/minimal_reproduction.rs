@@ -408,10 +408,9 @@ impl MinimalReproductionFinder {
                 if complexity_reduction >= self.config.min_complexity_reduction
                     && (best_reproduction.is_none()
                         || variation.expected_complexity < best_reproduction.as_ref().unwrap().1)
-                    {
-                        best_reproduction =
-                            Some((variation.clone(), variation.expected_complexity));
-                    }
+                {
+                    best_reproduction = Some((variation.clone(), variation.expected_complexity));
+                }
             }
 
             reproduction_attempts.push(attempt);

@@ -4,10 +4,10 @@
 //! events fed to it by external runners, without any knowledge of or coupling
 //! to the core simulation logic.
 
+use crate::testing::PropertyViolation;
 use crate::world_state::WorldState;
 use crate::{Result, SimError};
 use aura_console_types::trace::CheckpointRef;
-use crate::testing::PropertyViolation;
 use aura_console_types::{
     NetworkTopology, ParticipantInfo, SimulationTrace, TraceEvent, TraceMetadata,
 };
@@ -135,6 +135,7 @@ impl PassiveTraceRecorder {
                     violation_state: crate::testing::SimulationState {
                         tick: event.tick,
                         time: event.tick * 100, // Convert tick to time estimate
+                        variables: std::collections::HashMap::new(),
                         participants: vec![],
                         protocol_state: crate::testing::ProtocolMonitoringState {
                             active_sessions: vec![],
@@ -144,15 +145,15 @@ impl PassiveTraceRecorder {
                         network_state: crate::testing::NetworkStateSnapshot {
                             partitions: vec![],
                             message_stats: crate::testing::MessageDeliveryStats {
-                                total_sent: 0,
-                                total_delivered: 0,
-                                total_dropped: 0,
+                                messages_sent: 0,
+                                messages_delivered: 0,
+                                messages_dropped: 0,
                                 average_latency_ms: 0.0,
                             },
                             failure_conditions: crate::testing::NetworkFailureConditions {
                                 drop_rate: 0.0,
-                                latency_range: (0, 0),
-                                partition_count: 0,
+                                latency_range_ms: (0, 0),
+                                partitions_active: false,
                             },
                         },
                     },
@@ -368,7 +369,7 @@ impl PassiveTraceRecorder {
         self.checkpoints.clear();
         self.violations.clear();
         self.metadata.total_ticks = 0;
-        // TODO: Fix metadata violations field mismatch  
+        // TODO: Fix metadata violations field mismatch
         // self.metadata.violations.clear();
     }
 

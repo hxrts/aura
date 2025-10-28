@@ -1130,6 +1130,13 @@ impl AuraError {
         })
     }
 
+    pub fn frost_operation_failed(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::OperationFailed {
+            message: format!("FROST operation failed: {}", message.into()),
+            context: ErrorContext::new().with_code(ErrorCode::CryptoEncryptionFailed),
+        })
+    }
+
     pub fn key_derivation_failed(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::KeyDerivationFailed {
             message: message.into(),

@@ -3,8 +3,8 @@
 //! This module defines common traits and interfaces used across
 //! all protocol implementations for consistency and interoperability.
 
-use aura_types::{DeviceId};
-use aura_journal::{Event};
+use aura_journal::Event;
+use aura_types::DeviceId;
 
 /// Factory function type for creating new protocol instances
 pub type ProtocolFactory<T> = fn(DeviceId, String, String) -> Result<T, Box<dyn std::error::Error>>;

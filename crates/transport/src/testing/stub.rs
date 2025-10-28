@@ -8,7 +8,10 @@
 
 #![allow(clippy::unwrap_used)] // Test transport can use unwrap for simplicity
 
-use crate::{BroadcastResult, Connection, PresenceTicket, TransportResult, Transport, TransportError, TransportErrorBuilder};
+use crate::{
+    BroadcastResult, Connection, PresenceTicket, Transport, TransportError, TransportErrorBuilder,
+    TransportResult,
+};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -118,7 +121,11 @@ impl Transport for StubTransport {
         Ok(())
     }
 
-    async fn receive(&self, conn: &Connection, _timeout: Duration) -> TransportResult<Option<Vec<u8>>> {
+    async fn receive(
+        &self,
+        conn: &Connection,
+        _timeout: Duration,
+    ) -> TransportResult<Option<Vec<u8>>> {
         // In stub transport, we ignore timeout and return immediately
         // Real implementation would block up to timeout
 

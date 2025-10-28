@@ -14,33 +14,12 @@ workspace = true
 
 # Internal crates
 aura-errors = { path = "../aura-errors" }
-session_types = { path = "../session-types" }
-
-# Cryptography
-ed25519-dalek = { workspace = true }
-blake3 = { workspace = true }
-rand = { workspace = true }
-aes-gcm = { workspace = true }
-
-# Serialization
-serde = { workspace = true }
-serde_json = { workspace = true }
-serde_cbor = { workspace = true }
-
-# Async
-tokio = { workspace = true }
-
-# Utilities
-uuid = { workspace = true }
-time = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
-hex = { workspace = true }
-
 aura-crypto = { path = "../crypto" }
 aura-journal = { path = "../journal" }
-aura-types = { path = "../aura-types" }
+keyhive_core = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

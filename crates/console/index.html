@@ -1,42 +1,43 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aura Dev Console</title>
-    <meta name="description" content="Interactive development console for Aura threshold identity platform">
-    
-    <!-- Preload critical resources -->
-    <link rel="preload" href="/styles/global.css" as="style">
-    
-    <!-- Global CSS -->
-    <link rel="stylesheet" href="/styles/global.css">
-    
-    <!-- App CSS -->
-    <link rel="stylesheet" href="/styles/app.css">
-    
-    <!-- Component CSS -->
-    <link rel="stylesheet" href="/styles/timeline.css">
-    <link rel="stylesheet" href="/styles/network.css">
-    <link rel="stylesheet" href="/styles/state-inspector.css">
-    <link rel="stylesheet" href="/styles/repl.css">
-    <link rel="stylesheet" href="/styles/branch-manager.css">
-    
-    <!-- D3.js for timeline visualization -->
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-    
-    <!-- Cytoscape.js for network topology -->
-    <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
-    <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
-    
-    <!-- CodeMirror for syntax highlighting in REPL -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.0.1/codemirror.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.0.1/codemirror.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.0.1/mode/javascript/javascript.min.js"></script>
-</head>
-<body>
-    <div id="root"></div>
-    
-    <!-- WASM module scripts will be injected by Trunk -->
-</body>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Aura</title>
+        <meta
+            name="description"
+            content="Interactive development console for Aura threshold identity platform"
+        />
+
+        <!-- Perun Font -->
+        <link rel="stylesheet" href="fonts.css" />
+
+        <!-- Tailwind CSS -->
+        <link data-trunk rel="tailwind-css" href="tailwind.css" />
+
+        <!-- Cytoscape.js for network topology visualization -->
+        <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
+
+        <!-- CodeMirror for syntax highlighting in REPL - TODO: Integrate with Leptos -->
+        <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.0.1/codemirror.min.css"> -->
+        <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.0.1/codemirror.min.js"></script> -->
+        <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.0.1/mode/javascript/javascript.min.js"></script> -->
+    </head>
+    <body>
+        <div id="root"></div>
+
+        <!-- WASM module scripts will be injected by Trunk -->
+
+        <!-- Suppress MetaMask extension errors (harmless) -->
+        <script>
+            if (typeof window.ethereum === "undefined") {
+                window.ethereum = {
+                    connect: () =>
+                        Promise.reject(
+                            new Error("MetaMask extension not found"),
+                        ),
+                };
+            }
+        </script>
+    </body>
 </html>

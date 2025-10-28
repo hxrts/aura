@@ -1,13 +1,13 @@
 //! Leptos integration for reactive WebSocket clients
 
-#[cfg(feature = "leptos")]
-use leptos::prelude::*;
 use crate::error::{WasmError, WasmResult};
 use crate::websocket::{ClientMode, DefaultHandler, MessageEnvelope, UnifiedWebSocketClient};
+#[cfg(feature = "leptos")]
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 /// Connection states for reactive UI
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -44,12 +44,12 @@ impl ReactiveWebSocketClient {
     ) -> WasmResult<Self> {
         let client_mode = match mode {
             "simulation" => ClientMode::Simulation,
-            "live" => ClientMode::LiveNetwork, 
+            "live" => ClientMode::LiveNetwork,
             "analysis" => ClientMode::Analysis,
             _ => ClientMode::Simulation,
         };
         let client = UnifiedWebSocketClient::new(client_mode, url);
-        
+
         Ok(Self {
             client: Rc::new(RefCell::new(client)),
             connection_state,
@@ -64,15 +64,14 @@ impl ReactiveWebSocketClient {
     /// Connect with event handlers set up
     pub fn connect(&mut self) -> WasmResult<()> {
         self.connection_state.set(ConnectionState::Connecting);
-        
+
         let handler = Rc::new(RefCell::new(DefaultHandler::new(ClientMode::Simulation)));
         let mut client = self.client.borrow_mut();
         client.connect(handler)?;
         self.connection_state.set(ConnectionState::Connected);
-        
+
         Ok(())
     }
-
 
     /// Send a message
     pub fn send_message(&self, envelope: &MessageEnvelope) -> WasmResult<()> {
@@ -82,8 +81,7 @@ impl ReactiveWebSocketClient {
 
     /// Send a typed message
     pub fn send_typed<T: Serialize>(&self, message_type: &str, payload: &T) -> WasmResult<()> {
-        let payload_json = serde_json::to_value(payload)
-            .map_err(WasmError::from)?;
+        let payload_json = serde_json::to_value(payload).map_err(WasmError::from)?;
         let envelope = MessageEnvelope::new(message_type, payload_json);
         self.send_message(&envelope)
     }
@@ -103,6 +101,7 @@ impl ReactiveWebSocketClient {
 
 /// Hook for using reactive WebSocket in Leptos components
 #[cfg(feature = "leptos")]
+#[allow(clippy::type_complexity)]
 pub fn use_reactive_websocket(
     mode: &str,
     url: String,
@@ -120,7 +119,7 @@ pub fn use_reactive_websocket(
 
     let client = Rc::new(RefCell::new(
         ReactiveWebSocketClient::new(mode, url, set_connection_state, set_messages, set_responses)
-            .expect("Failed to create WebSocket client")
+            .expect("Failed to create WebSocket client"),
     ));
 
     // Connect function
@@ -156,9 +155,9 @@ pub fn use_reactive_websocket(
     });
 
     (
-        connection_state.into(),
-        messages.into(),
-        responses.into(),
+        connection_state,
+        messages,
+        responses,
         send_message,
         connect,
         disconnect,

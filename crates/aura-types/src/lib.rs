@@ -21,20 +21,20 @@
 //! - `capabilities`: Capability system types
 //! - `relationships`: Relationship and context types
 
-pub mod identifiers;
-pub mod sessions;
-pub mod protocols;
-pub mod content;
 pub mod capabilities;
+pub mod content;
+pub mod identifiers;
+pub mod protocols;
 pub mod relationships;
+pub mod sessions;
 
 // Re-export all public types for convenient access
-pub use identifiers::*;
-pub use sessions::*;
-pub use protocols::*;
-pub use content::*;
 pub use capabilities::*;
+pub use content::*;
+pub use identifiers::*;
+pub use protocols::*;
 pub use relationships::*;
+pub use sessions::*;
 
 /// Result type for type-related operations
 pub type Result<T> = std::result::Result<T, TypeError>;
@@ -45,11 +45,11 @@ pub enum TypeError {
     /// Invalid identifier format error
     #[error("Invalid identifier format: {0}")]
     InvalidIdentifier(String),
-    
+
     /// Serialization error
     #[error("Serialization error: {0}")]
     SerializationError(String),
-    
+
     /// Parse error
     #[error("Parse error: {0}")]
     ParseError(String),

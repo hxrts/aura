@@ -1,9 +1,8 @@
 use super::d3_timeline::D3Timeline;
+use crate::app::components::{ChevronDown, Pause, Play};
+use crate::app::services::data_source::{use_data_source, DataSource};
 use leptos::prelude::*;
 use std::collections::VecDeque;
-use stylance::import_style;
-
-import_style!(style, "../../../styles/timeline.css");
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct TimelineEvent {
@@ -22,84 +21,84 @@ pub fn Timeline() -> impl IntoView {
     let (current_time, _set_current_time) = signal(0);
     let (_playback_speed, set_playback_speed) = signal(1.0);
 
+    let data_source_manager = use_data_source();
+    let current_source = data_source_manager.current_source();
+
     let websocket_events = use_context::<ReadSignal<VecDeque<serde_json::Value>>>()
         .unwrap_or_else(|| signal(VecDeque::new()).0);
 
+    // Update events when data source changes
     Effect::new(move |_| {
-        let ws_events = websocket_events.get();
-        let mut timeline_events = Vec::new();
+        let source = current_source.get();
+        log::info!("Timeline updating for data source: {:?}", source);
 
-        for (index, envelope) in ws_events.iter().enumerate() {
-            if let Ok(timeline_event) = convert_envelope_to_timeline_event(envelope, index) {
-                timeline_events.push(timeline_event);
+        match source {
+            DataSource::Mock | DataSource::Simulator | DataSource::Real => {
+                let service = data_source_manager.get_service();
+                let timeline_events = service.get_timeline_events();
+                set_events.set(timeline_events);
             }
         }
-
-        set_events.set(timeline_events);
     });
 
+    // WebSocket events effect (for real-time data when available)
     Effect::new(move |_| {
-        let mock_events = vec![
-            TimelineEvent {
-                id: "1".to_string(),
-                timestamp: 0.0,
-                event_type: "NodeStart".to_string(),
-                description: "Node Alice started".to_string(),
-                node_id: Some("alice".to_string()),
-                metadata: None,
-            },
-            TimelineEvent {
-                id: "2".to_string(),
-                timestamp: 1.5,
-                event_type: "KeyGen".to_string(),
-                description: "Threshold key generation initiated".to_string(),
-                node_id: None,
-                metadata: None,
-            },
-            TimelineEvent {
-                id: "3".to_string(),
-                timestamp: 3.2,
-                event_type: "NodeStart".to_string(),
-                description: "Node Bob started".to_string(),
-                node_id: Some("bob".to_string()),
-                metadata: None,
-            },
-        ];
-        set_events.set(mock_events);
+        if current_source.get() == DataSource::Real {
+            let ws_events = websocket_events.get();
+            let mut timeline_events = Vec::new();
+
+            for (index, envelope) in ws_events.iter().enumerate() {
+                if let Ok(timeline_event) = convert_envelope_to_timeline_event(envelope, index) {
+                    timeline_events.push(timeline_event);
+                }
+            }
+
+            if !timeline_events.is_empty() {
+                set_events.set(timeline_events);
+            }
+        }
     });
 
     view! {
-        <div class=style::timeline_container>
-            <div class=style::timeline_header>
-                <h3>"Timeline"</h3>
-                <div class=style::timeline_controls>
+        <div class="flex flex-col h-full gap-4">
+            <div class="flex-between gap-3">
+                <h3 class="heading-1">"Timeline"</h3>
+                <div class="flex gap-2 items-center">
                     <button
-                        class=style::control_button
+                        class="btn-icon"
                         on:click=move |_| set_is_playing.update(|p| *p = !*p)
+                        title=move || if is_playing.get() { "Pause" } else { "Play" }
                     >
                         {move || if is_playing.get() {
-                            "Pause"
+                            view! { <Pause size=16 /> }.into_any()
                         } else {
-                            "Play"
+                            view! { <Play size=16 /> }.into_any()
                         }}
                     </button>
 
-                    <select
-                        class=style::speed_select
-                        on:change=move |ev| {
-                            let value = event_target_value(&ev).parse::<f64>().unwrap_or(1.0);
-                            set_playback_speed.set(value);
-                        }
-                    >
-                        <option value="0.5">"0.5x"</option>
-                        <option value="1.0" selected>"1.0x"</option>
-                        <option value="2.0">"2.0x"</option>
-                        <option value="4.0">"4.0x"</option>
-                    </select>
+                    <div class="flex items-center gap-1.5">
+                        <div class="relative">
+                            <select
+                                class="input-base text-xs pl-2 pr-6 py-2 appearance-none cursor-pointer"
+                                on:change=move |ev| {
+                                    let value = event_target_value(&ev).parse::<f64>().unwrap_or(1.0);
+                                    set_playback_speed.set(value);
+                                }
+                            >
+                                <option value="0.5">"0.5×"</option>
+                                <option value="1.0" selected>"1.0×"</option>
+                                <option value="2.0">"2.0×"</option>
+                                <option value="4.0">"4.0×"</option>
+                            </select>
+                            <div class="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400 dark:text-zinc-500">
+                                <ChevronDown size=14 />
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div class=style::timeline_visualization>
+            <div class="card-secondary p-4 h-40">
                 <D3Timeline
                     events=events.into()
                     current_tick=current_time.into()
@@ -110,33 +109,29 @@ pub fn Timeline() -> impl IntoView {
                 />
             </div>
 
-            <div class=style::timeline_events>
-                <For
-                    each=move || events.get()
-                    key=|event| event.id.clone()
-                    children=move |event: TimelineEvent| {
-                        view! {
-                            <div class=style::timeline_event>
-                                <div class=style::event_time>
-                                    {format!("{:.1}s", event.timestamp)}
-                                </div>
-                                <div class=style::event_content>
-                                    <div class=style::event_type>
-                                        {event.event_type}
+            <div class="flex-1 overflow-y-auto">
+                <div class="space-y-2">
+                    <For
+                        each=move || events.get()
+                        key=|event| event.id.clone()
+                        children=move |event: TimelineEvent| {
+                            view! {
+                                <div class="card-secondary card-compact flex gap-3 border border-transparent hover:border-[#bc6de3]">
+                                    <div class="flex-shrink-0 w-14 text-right">
+                                        <span class="text-xs text-zinc-500 dark:text-zinc-400 font-mono">{format!("{:.1}s", event.timestamp)}</span>
                                     </div>
-                                    <div class=style::event_description>
-                                        {event.description}
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{event.event_type}</div>
+                                        <p class="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{event.description}</p>
+                                        {event.node_id.map(|node_id| view! {
+                                            <div class="text-xs highlight font-medium mt-1">"Node: "{node_id}</div>
+                                        })}
                                     </div>
-                                    {event.node_id.map(|node_id| view! {
-                                        <div class=style::event_node>
-                                            {node_id}
-                                        </div>
-                                    })}
                                 </div>
-                            </div>
+                            }
                         }
-                    }
-                />
+                    />
+                </div>
             </div>
         </div>
     }

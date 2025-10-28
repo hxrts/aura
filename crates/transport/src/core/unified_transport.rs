@@ -4,7 +4,7 @@
 //! "Unified Transport Architecture" with clear separation between authentication
 //! (transport layer) and authorization (application layer).
 
-use crate::{TransportResult, TransportError, TransportErrorBuilder};
+use crate::{TransportError, TransportErrorBuilder, TransportResult};
 use async_trait::async_trait;
 use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -73,12 +73,13 @@ impl DeviceCredentials {
 
     /// Verify device signature
     pub fn verify_signature(&self, message: &[u8], signature: &[u8]) -> TransportResult<()> {
-        let verifying_key = VerifyingKey::from_bytes(
-            self.device_public_key.as_slice().try_into().map_err(|_| {
-                TransportErrorBuilder::not_authorized("Invalid device public key".to_string())
-            })?,
-        )
-        .map_err(|e| TransportErrorBuilder::not_authorized(format!("Invalid verifying key: {:?}", e)))?;
+        let verifying_key =
+            VerifyingKey::from_bytes(self.device_public_key.as_slice().try_into().map_err(
+                |_| TransportErrorBuilder::not_authorized("Invalid device public key".to_string()),
+            )?)
+            .map_err(|e| {
+                TransportErrorBuilder::not_authorized(format!("Invalid verifying key: {:?}", e))
+            })?;
 
         let sig = Signature::from_slice(signature).map_err(|e| {
             TransportErrorBuilder::not_authorized(format!("Invalid signature format: {:?}", e))

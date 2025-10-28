@@ -1,0 +1,4 @@
+# Aura Agent Configuration
+device_id = "d5c13985-dc11-4d3e-9b85-349f4ac35f6d"
+account_id = "fe0b09b5-127a-4d3f-85eb-a8b65fc3df61"
+data_dir = ".aura/device_2"

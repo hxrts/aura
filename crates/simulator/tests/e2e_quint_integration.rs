@@ -2,15 +2,14 @@
 //!
 //! This test validates the complete pipeline:
 //! 1. Parse Quint specification
-//! 2. Load scenario configuration with Quint properties 
+//! 2. Load scenario configuration with Quint properties
 //! 3. Execute scenario with property monitoring
 //! 4. Verify formal properties during execution
 
 use aura_simulator::{
-    UnifiedScenarioEngine, UnifiedEngineConfig, PropertyMonitor,
-    testing::{QuintInvariant, QuintSafetyProperty, QuintEvaluationConfig},
     scenario::UnifiedScenarioLoader,
-    Result, SimError
+    testing::{QuintEvaluationConfig, QuintInvariant, QuintSafetyProperty},
+    PropertyMonitor, Result, SimError, UnifiedEngineConfig, UnifiedScenarioEngine,
 };
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -20,7 +19,7 @@ async fn test_e2e_quint_integration() -> Result<()> {
     // Setup test environment
     let temp_dir = TempDir::new()
         .map_err(|e| SimError::PropertyError(format!("Failed to create temp dir: {}", e)))?;
-    
+
     // Create unified scenario engine with debugging enabled
     let config = UnifiedEngineConfig {
         enable_debugging: true,
@@ -30,48 +29,55 @@ async fn test_e2e_quint_integration() -> Result<()> {
         max_execution_time: std::time::Duration::from_secs(30),
         ..Default::default()
     };
-    
-    let mut engine = UnifiedScenarioEngine::new(temp_dir.path())?
-        .configure(config);
-    
+
+    let mut engine = UnifiedScenarioEngine::new(temp_dir.path())?.configure(config);
+
     // Load the e2e scenario configuration
     let scenario_path = PathBuf::from("examples/e2e_quint_scenario.toml");
-    
+
     // Create a simple scenario if the file doesn't exist
     if !scenario_path.exists() {
         create_test_scenario(&scenario_path).await?;
     }
-    
+
     let mut loader = UnifiedScenarioLoader::new(temp_dir.path());
-    let scenario = loader.load_scenario(&scenario_path)
+    let scenario = loader
+        .load_scenario(&scenario_path)
         .map_err(|e| SimError::PropertyError(format!("Failed to load scenario: {}", e)))?;
-    
+
     // Create property monitor with Quint properties
     let mut property_monitor = create_property_monitor()?;
-    
+
     // Add the property monitor to the engine
     // Note: This would require extending the engine API to accept a property monitor
-    
+
     // Execute the scenario
     let result = engine.execute_scenario(&scenario)?;
-    
+
     // Verify the results
     assert!(result.success, "E2E scenario should succeed");
     assert_eq!(result.scenario_name, "dkd_e2e_with_quint");
-    assert!(!result.phase_results.is_empty(), "Should have phase results");
-    
+    assert!(
+        !result.phase_results.is_empty(),
+        "Should have phase results"
+    );
+
     // Verify that all phases completed successfully
     for phase_result in &result.phase_results {
-        assert!(phase_result.success, "All phases should succeed: {}", phase_result.phase_name);
+        assert!(
+            phase_result.success,
+            "All phases should succeed: {}",
+            phase_result.phase_name
+        );
     }
-    
+
     // Verify property checking occurred
     // Note: This would be enhanced once the property monitor is integrated
     println!("[OK] E2E test completed successfully");
     println!("   Scenario: {}", result.scenario_name);
     println!("   Phases executed: {}", result.phase_results.len());
     println!("   Final tick: {}", result.final_state.current_tick);
-    
+
     Ok(())
 }
 
@@ -79,33 +85,45 @@ async fn test_e2e_quint_integration() -> Result<()> {
 async fn test_property_monitor_with_quint() -> Result<()> {
     // Test the property monitor in isolation
     let mut monitor = create_property_monitor()?;
-    
+
     // Create a simple simulation state
     let sim_state = create_test_simulation_state();
-    
+
     // Check properties
     let check_result = monitor.check_properties(&sim_state)?;
-    
+
     // Verify results
-    assert!(check_result.validation_result.passed, "Properties should pass");
-    assert!(!check_result.checked_properties.is_empty(), "Should check some properties");
-    assert!(check_result.violations.is_empty(), "Should have no violations");
-    
+    assert!(
+        check_result.validation_result.passed,
+        "Properties should pass"
+    );
+    assert!(
+        !check_result.checked_properties.is_empty(),
+        "Should check some properties"
+    );
+    assert!(
+        check_result.violations.is_empty(),
+        "Should have no violations"
+    );
+
     println!("[OK] Property monitor test completed");
-    println!("   Properties checked: {}", check_result.checked_properties.len());
+    println!(
+        "   Properties checked: {}",
+        check_result.checked_properties.len()
+    );
     println!("   Violations found: {}", check_result.violations.len());
-    
+
     Ok(())
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn test_quint_specification_parsing() -> Result<()> {
     // Test that we can parse the Quint specification
     use quint_api::QuintEvaluator;
-    
+
     let evaluator = QuintEvaluator::default();
     let spec_path = "tests/quint_specs/dkd_minimal.qnt";
-    
+
     // Try to parse the specification
     match evaluator.parse_file(spec_path).await {
         Ok(json_ir) => {
@@ -115,10 +133,13 @@ async fn test_quint_specification_parsing() -> Result<()> {
         }
         Err(e) => {
             // If parsing fails, that's okay for this test - we're just verifying the integration
-            println!("[WARN]  Quint parsing failed (expected in test environment): {}", e);
+            println!(
+                "[WARN]  Quint parsing failed (expected in test environment): {}",
+                e
+            );
         }
     }
-    
+
     Ok(())
 }
 
@@ -130,32 +151,31 @@ fn create_property_monitor() -> Result<PropertyMonitor> {
         parallel_evaluation: false,
         evaluation_timeout_ms: 1000,
     };
-    
+
     let mut monitor = PropertyMonitor::with_config(config);
-    
+
     // Add invariant properties that match our Quint specification
     monitor.add_invariant(QuintInvariant {
         name: "validCounts".to_string(),
         expression: "validCounts".to_string(),
         description: Some("Session counts remain consistent".to_string()),
     });
-    
+
     monitor.add_safety_property(QuintSafetyProperty {
         name: "safetyProperty".to_string(),
         expression: "safetyProperty".to_string(),
         description: Some("Basic safety property".to_string()),
     });
-    
+
     Ok(monitor)
 }
 
 fn create_test_simulation_state() -> aura_simulator::testing::SimulationState {
     use aura_simulator::testing::{
-        SimulationState, ProtocolExecutionState, SessionInfo, 
-        ParticipantStateSnapshot, NetworkStateSnapshot, MessageDeliveryStats,
-        NetworkFailureConditions
+        MessageDeliveryStats, NetworkFailureConditions, NetworkStateSnapshot,
+        ParticipantStateSnapshot, ProtocolExecutionState, SessionInfo, SimulationState,
     };
-    
+
     SimulationState {
         tick: 10,
         time: 1000,
@@ -174,15 +194,13 @@ fn create_test_simulation_state() -> aura_simulator::testing::SimulationState {
             },
         ],
         protocol_state: ProtocolExecutionState {
-            active_sessions: vec![
-                SessionInfo {
-                    session_id: "session_1".to_string(),
-                    protocol_type: "dkd".to_string(),
-                    current_phase: "commitment".to_string(),
-                    participants: vec!["participant_0".to_string(), "participant_1".to_string()],
-                    status: "active".to_string(),
-                },
-            ],
+            active_sessions: vec![SessionInfo {
+                session_id: "session_1".to_string(),
+                protocol_type: "dkd".to_string(),
+                current_phase: "commitment".to_string(),
+                participants: vec!["participant_0".to_string(), "participant_1".to_string()],
+                status: "active".to_string(),
+            }],
             completed_sessions: vec![], // No completed sessions yet
             queued_protocols: vec![],
         },
@@ -223,9 +241,9 @@ ticks = 5
 
 expected_outcome = "success"
 "#;
-    
+
     std::fs::write(path, scenario_toml)
         .map_err(|e| SimError::PropertyError(format!("Failed to write scenario: {}", e)))?;
-    
+
     Ok(())
 }

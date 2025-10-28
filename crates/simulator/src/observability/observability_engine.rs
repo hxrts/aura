@@ -495,6 +495,7 @@ impl ScenarioEngine {
                                             violation_state: crate::testing::SimulationState {
                                                 tick: world_state.current_tick,
                                                 time: world_state.current_time,
+                                                variables: std::collections::HashMap::new(),
                                                 participants: vec![],
                                                 protocol_state: crate::testing::ProtocolMonitoringState {
                                                     active_sessions: vec![],
@@ -504,15 +505,15 @@ impl ScenarioEngine {
                                                 network_state: crate::testing::NetworkStateSnapshot {
                                                     partitions: vec![],
                                                     message_stats: crate::testing::MessageDeliveryStats {
-                                                        total_sent: 0,
-                                                        total_delivered: 0,
-                                                        total_dropped: 0,
+                                                        messages_sent: 0,
+                                                        messages_delivered: 0,
+                                                        messages_dropped: 0,
                                                         average_latency_ms: 0.0,
                                                     },
                                                     failure_conditions: crate::testing::NetworkFailureConditions {
                                                         drop_rate: 0.0,
-                                                        latency_range: (0, 0),
-                                                        partition_count: 0,
+                                                        latency_range_ms: (0, 0),
+                                                        partitions_active: false,
                                                     },
                                                 },
                                             },

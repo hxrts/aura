@@ -166,10 +166,9 @@ impl CheckpointManager {
 
     /// Load a world state from a checkpoint
     pub fn load(&self, checkpoint_id: &str) -> Result<WorldState> {
-        let info = self
-            .checkpoints
-            .get(checkpoint_id)
-            .ok_or_else(|| SimError::CheckpointError(format!("Checkpoint {} not found", checkpoint_id)))?;
+        let info = self.checkpoints.get(checkpoint_id).ok_or_else(|| {
+            SimError::CheckpointError(format!("Checkpoint {} not found", checkpoint_id))
+        })?;
 
         let json = fs::read_to_string(&info.file_path).map_err(|e| {
             SimError::CheckpointError(format!("Failed to read checkpoint file: {}", e))
@@ -195,7 +194,11 @@ impl CheckpointManager {
     }
 
     /// List checkpoints for a specific tick range
-    pub fn list_checkpoints_in_range(&self, start_tick: u64, end_tick: u64) -> Vec<&CheckpointInfo> {
+    pub fn list_checkpoints_in_range(
+        &self,
+        start_tick: u64,
+        end_tick: u64,
+    ) -> Vec<&CheckpointInfo> {
         let mut checkpoints: Vec<&CheckpointInfo> = self
             .checkpoints
             .values()
@@ -207,10 +210,9 @@ impl CheckpointManager {
 
     /// Delete a checkpoint
     pub fn delete(&mut self, checkpoint_id: &str) -> Result<()> {
-        let info = self
-            .checkpoints
-            .remove(checkpoint_id)
-            .ok_or_else(|| SimError::CheckpointError(format!("Checkpoint {} not found", checkpoint_id)))?;
+        let info = self.checkpoints.remove(checkpoint_id).ok_or_else(|| {
+            SimError::CheckpointError(format!("Checkpoint {} not found", checkpoint_id))
+        })?;
 
         // Delete the file
         if info.file_path.exists() {
@@ -336,8 +338,7 @@ impl CheckpointManager {
         }
 
         // Sort by creation time, oldest first
-        let mut checkpoints: Vec<(String, CheckpointInfo)> =
-            self.checkpoints.drain().collect();
+        let mut checkpoints: Vec<(String, CheckpointInfo)> = self.checkpoints.drain().collect();
         checkpoints.sort_by_key(|(_, info)| info.created_at);
 
         // Keep only the most recent max_checkpoints
@@ -407,13 +408,17 @@ mod tests {
         let mut manager = CheckpointManager::new(temp_dir.path()).unwrap();
 
         let mut world_state = create_test_world_state();
-        
+
         // Create checkpoints at different ticks
         world_state.current_tick = 10;
-        let _cp1 = manager.save(&world_state, Some("checkpoint 1".to_string())).unwrap();
-        
+        let _cp1 = manager
+            .save(&world_state, Some("checkpoint 1".to_string()))
+            .unwrap();
+
         world_state.current_tick = 20;
-        let _cp2 = manager.save(&world_state, Some("checkpoint 2".to_string())).unwrap();
+        let _cp2 = manager
+            .save(&world_state, Some("checkpoint 2".to_string()))
+            .unwrap();
 
         let all_checkpoints = manager.list_checkpoints();
         assert_eq!(all_checkpoints.len(), 2);
@@ -429,10 +434,10 @@ mod tests {
         let mut manager = CheckpointManager::new(temp_dir.path()).unwrap();
 
         let mut world_state = create_test_world_state();
-        
+
         world_state.current_tick = 10;
         let _cp1 = manager.save(&world_state, None).unwrap();
-        
+
         world_state.current_tick = 30;
         let _cp2 = manager.save(&world_state, None).unwrap();
 
@@ -469,9 +474,15 @@ mod tests {
         let world_state = create_test_world_state();
 
         // Create 3 checkpoints
-        let _cp1 = manager.save(&world_state, Some("first".to_string())).unwrap();
-        let _cp2 = manager.save(&world_state, Some("second".to_string())).unwrap();
-        let _cp3 = manager.save(&world_state, Some("third".to_string())).unwrap();
+        let _cp1 = manager
+            .save(&world_state, Some("first".to_string()))
+            .unwrap();
+        let _cp2 = manager
+            .save(&world_state, Some("second".to_string()))
+            .unwrap();
+        let _cp3 = manager
+            .save(&world_state, Some("third".to_string()))
+            .unwrap();
 
         // Should only keep the last 2
         assert_eq!(manager.checkpoint_count(), 2);

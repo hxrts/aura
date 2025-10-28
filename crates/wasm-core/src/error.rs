@@ -34,9 +34,9 @@ impl From<JsValue> for WasmError {
     }
 }
 
-impl Into<JsValue> for WasmError {
-    fn into(self) -> JsValue {
-        JsValue::from_str(&self.to_string())
+impl From<WasmError> for JsValue {
+    fn from(err: WasmError) -> Self {
+        JsValue::from_str(&err.to_string())
     }
 }
 

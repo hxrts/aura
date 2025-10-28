@@ -69,8 +69,7 @@ pub fn D3Timeline(
 }
 
 fn init_d3_timeline(container: &HtmlElement) {
-    let js_code = format!(
-        r#"
+    let js_code = r#"
         const container = arguments[0];
         const width = container.clientWidth;
         const height = 180;
@@ -126,10 +125,9 @@ fn init_d3_timeline(container: &HtmlElement) {
                 container.dispatchEvent(seekEvent);
             }}
         }});
-    "#
-    );
+    "#;
 
-    let _ = js_sys::eval(&js_code);
+    let _ = js_sys::eval(js_code);
 
     // Set up event listener for seek events
     let _container_clone = container.clone();
@@ -214,7 +212,7 @@ fn update_timeline_data(events: &[TimelineEvent], _current_tick: u64) {
                 const tooltip = timeline.g.append("g")
                     .attr("class", "tooltip")
                     .attr("transform", `translate(${{timeline.xScale(d.timestamp)}}, ${{timeline.height / 2 - 20}})`);
-                    
+
                 tooltip.append("rect")
                     .attr("x", -50)
                     .attr("y", -15)
@@ -223,7 +221,7 @@ fn update_timeline_data(events: &[TimelineEvent], _current_tick: u64) {
                     .attr("fill", "var(--bg-primary)")
                     .attr("stroke", "var(--border-light)")
                     .attr("rx", 3);
-                    
+
                 tooltip.append("text")
                     .attr("text-anchor", "middle")
                     .attr("font-size", "10px")

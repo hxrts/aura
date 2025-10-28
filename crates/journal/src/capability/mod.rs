@@ -4,6 +4,7 @@ pub mod authority_graph;
 pub mod events;
 pub mod identity;
 pub mod manager;
+pub mod keyhive_manager;
 pub mod resource_allocation;
 pub mod types;
 pub mod unified;
@@ -12,6 +13,10 @@ pub mod visibility;
 pub use authority_graph::AuthorityGraph;
 pub use events::{CapabilityDelegation, CapabilityRevocation};
 pub use manager::{CapabilityGrant, CapabilityManager};
+pub use keyhive_manager::{
+    GroupMembershipProvider, InMemoryGroupProvider, KeyhiveCapabilityManager, KeyhiveConfig,
+    VerificationResult,
+};
 pub use resource_allocation::*;
 pub use types::{CapabilityId, CapabilityScope, Subject};
 pub use unified::{

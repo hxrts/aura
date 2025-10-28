@@ -109,4 +109,60 @@ pub trait StorageAgent: Send + Sync {
 
     /// Get storage statistics
     async fn get_storage_stats(&self) -> Result<serde_json::Value>;
+
+    /// Replicate data to peer devices
+    async fn replicate_data(
+        &self,
+        data_id: &str,
+        peer_device_ids: Vec<String>,
+    ) -> Result<Vec<String>>;
+
+    /// Retrieve replicated data from peer devices
+    async fn retrieve_replica(&self, data_id: &str, peer_device_id: &str) -> Result<Vec<u8>>;
+
+    /// List all available replicas for a data ID
+    async fn list_replicas(&self, data_id: &str) -> Result<Vec<String>>;
+
+    /// Simulate data tampering for testing purposes
+    async fn simulate_data_tamper(&self, data_id: &str) -> Result<()>;
+
+    /// Verify data integrity using cryptographic checks
+    async fn verify_data_integrity(&self, data_id: &str) -> Result<bool>;
+
+    /// Set storage quota limit for a device or capability scope
+    async fn set_storage_quota(&self, scope: &str, limit_bytes: u64) -> Result<()>;
+
+    /// Get current storage usage and quota information
+    async fn get_storage_quota_info(&self, scope: &str) -> Result<serde_json::Value>;
+
+    /// Enforce storage quota and trigger eviction if needed
+    async fn enforce_storage_quota(&self, scope: &str) -> Result<bool>;
+
+    /// Get list of eviction candidates based on LRU policy
+    async fn get_eviction_candidates(&self, scope: &str, bytes_needed: u64) -> Result<Vec<String>>;
+
+    /// Grant storage capability to a device for specific data
+    async fn grant_storage_capability(
+        &self,
+        data_id: &str,
+        grantee_device: DeviceId,
+        permissions: Vec<String>,
+    ) -> Result<String>;
+
+    /// Revoke storage capability from a device
+    async fn revoke_storage_capability(&self, capability_id: &str, reason: &str) -> Result<()>;
+
+    /// Verify if a device has capability to access specific data
+    async fn verify_storage_capability(
+        &self,
+        data_id: &str,
+        requesting_device: DeviceId,
+        required_permission: &str,
+    ) -> Result<bool>;
+
+    /// List active capabilities for a data item
+    async fn list_storage_capabilities(&self, data_id: &str) -> Result<serde_json::Value>;
+
+    /// Test access to data using device credentials (simulates cross-device access)
+    async fn test_access_with_device(&self, data_id: &str, device_id: DeviceId) -> Result<bool>;
 }

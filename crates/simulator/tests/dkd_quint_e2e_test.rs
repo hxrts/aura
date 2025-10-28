@@ -8,10 +8,12 @@
 //! 5. Verify protocol invariants hold
 
 use aura_simulator::{
-    testing::{PropertyMonitor, QuintInvariant, SimulationState, ProtocolExecutionState, 
-              SessionInfo, ParticipantStateSnapshot, NetworkStateSnapshot, 
-              MessageDeliveryStats, NetworkFailureConditions},
-    Result, SimError
+    testing::{
+        MessageDeliveryStats, NetworkFailureConditions, NetworkStateSnapshot,
+        ParticipantStateSnapshot, PropertyMonitor, ProtocolExecutionState, QuintInvariant,
+        SessionInfo, SimulationState,
+    },
+    Result, SimError,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -20,25 +22,30 @@ use tempfile::TempDir;
 fn test_dkd_quint_spec_e2e() -> Result<()> {
     println!("=== DKD Quint Specification E2E Test ===");
     println!();
-    
+
     // Load the DKD Quint specification JSON
     let spec_json = fs::read_to_string("/tmp/dkd_spec.json")
         .map_err(|e| SimError::PropertyError(format!("Failed to read DKD spec: {}", e)))?;
-    
+
     // Verify it's valid JSON
     let spec: serde_json::Value = serde_json::from_str(&spec_json)
         .map_err(|e| SimError::PropertyError(format!("Invalid JSON: {}", e)))?;
-    
+
     println!("[OK] Loaded DKD Quint specification");
-    println!("   Module: {}", spec["modules"][0]["name"].as_str().unwrap_or("unknown"));
+    println!(
+        "   Module: {}",
+        spec["modules"][0]["name"].as_str().unwrap_or("unknown")
+    );
     println!();
-    
+
     // Create property monitor with DKD invariants from the spec
     let mut monitor = create_dkd_property_monitor()?;
-    
-    println!("[stats] Created property monitor with {} invariants", 
-             monitor.get_statistics().total_evaluations);
-    
+
+    println!(
+        "[stats] Created property monitor with {} invariants",
+        monitor.get_statistics().total_evaluations
+    );
+
     // Create simulation states representing DKD protocol execution
     let states = vec![
         create_dkd_init_state(),
@@ -47,60 +54,61 @@ fn test_dkd_quint_spec_e2e() -> Result<()> {
         create_dkd_derive_state(),
         create_dkd_complete_state(),
     ];
-    
+
     println!("[reload] Simulating DKD protocol phases:");
-    
+
     // Execute simulation and check properties at each phase
     for (i, state) in states.iter().enumerate() {
         println!("   Phase {}: {}", i + 1, get_phase_name(i));
-        
+
         let check_result = monitor.check_properties(state)?;
-        
+
         if !check_result.validation_result.passed {
             println!("   [ERROR] Property violations detected:");
             for violation in &check_result.violations {
-                println!("      - {}: {}", 
-                         violation.property_name, 
-                         violation.violation_details.description);
+                println!(
+                    "      - {}: {}",
+                    violation.property_name, violation.violation_details.description
+                );
             }
             return Err(SimError::PropertyError(
-                "DKD protocol property violations detected".to_string()
+                "DKD protocol property violations detected".to_string(),
             ));
         }
-        
+
         println!("   [OK] All properties satisfied");
     }
-    
+
     println!();
     println!("[done] DKD E2E test completed successfully!");
     println!("   The Quint specification successfully drove the simulation");
-    
+
     Ok(())
 }
 
 fn create_dkd_property_monitor() -> Result<PropertyMonitor> {
     let mut monitor = PropertyMonitor::new();
-    
+
     // Add DKD-specific invariants that match our Quint spec
     monitor.add_invariant(QuintInvariant {
         name: "CommitBeforeReveal".to_string(),
         expression: "CommitBeforeReveal".to_string(),
         description: Some("Commitments must be received before reveals".to_string()),
     });
-    
+
     monitor.add_invariant(QuintInvariant {
         name: "ProtocolProgress".to_string(),
         expression: "ProtocolProgress".to_string(),
         description: Some("Protocol must make progress or complete".to_string()),
     });
-    
+
     // Additional DKD invariants
     monitor.add_invariant(QuintInvariant {
         name: "ConsistentPhaseTransition".to_string(),
         expression: "ConsistentPhaseTransition".to_string(),
         description: Some("Phase transitions must follow valid order".to_string()),
     });
-    
+
     Ok(monitor)
 }
 
@@ -145,32 +153,34 @@ fn create_dkd_commit_state() -> SimulationState {
             ParticipantStateSnapshot {
                 id: "alice".to_string(),
                 status: "committing".to_string(),
-                message_count: 2,  // Sent commitment to bob and charlie
+                message_count: 2, // Sent commitment to bob and charlie
                 active_sessions: vec!["dkd_session_1".to_string()],
             },
             ParticipantStateSnapshot {
                 id: "bob".to_string(),
                 status: "committing".to_string(),
-                message_count: 2,  // Sent commitment to alice and charlie
+                message_count: 2, // Sent commitment to alice and charlie
                 active_sessions: vec!["dkd_session_1".to_string()],
             },
             ParticipantStateSnapshot {
                 id: "charlie".to_string(),
                 status: "committing".to_string(),
-                message_count: 2,  // Sent commitment to alice and bob
+                message_count: 2, // Sent commitment to alice and bob
                 active_sessions: vec!["dkd_session_1".to_string()],
             },
         ],
         protocol_state: ProtocolExecutionState {
-            active_sessions: vec![
-                SessionInfo {
-                    session_id: "dkd_session_1".to_string(),
-                    protocol_type: "dkd".to_string(),
-                    current_phase: "commitment".to_string(),
-                    participants: vec!["alice".to_string(), "bob".to_string(), "charlie".to_string()],
-                    status: "active".to_string(),
-                },
-            ],
+            active_sessions: vec![SessionInfo {
+                session_id: "dkd_session_1".to_string(),
+                protocol_type: "dkd".to_string(),
+                current_phase: "commitment".to_string(),
+                participants: vec![
+                    "alice".to_string(),
+                    "bob".to_string(),
+                    "charlie".to_string(),
+                ],
+                status: "active".to_string(),
+            }],
             completed_sessions: vec![],
             queued_protocols: vec![],
         },
@@ -186,7 +196,7 @@ fn create_dkd_reveal_state() -> SimulationState {
             ParticipantStateSnapshot {
                 id: "alice".to_string(),
                 status: "revealing".to_string(),
-                message_count: 6,  // 2 commitments sent + 2 received + 2 reveals sent
+                message_count: 6, // 2 commitments sent + 2 received + 2 reveals sent
                 active_sessions: vec!["dkd_session_1".to_string()],
             },
             ParticipantStateSnapshot {
@@ -203,15 +213,17 @@ fn create_dkd_reveal_state() -> SimulationState {
             },
         ],
         protocol_state: ProtocolExecutionState {
-            active_sessions: vec![
-                SessionInfo {
-                    session_id: "dkd_session_1".to_string(),
-                    protocol_type: "dkd".to_string(),
-                    current_phase: "reveal".to_string(),
-                    participants: vec!["alice".to_string(), "bob".to_string(), "charlie".to_string()],
-                    status: "active".to_string(),
-                },
-            ],
+            active_sessions: vec![SessionInfo {
+                session_id: "dkd_session_1".to_string(),
+                protocol_type: "dkd".to_string(),
+                current_phase: "reveal".to_string(),
+                participants: vec![
+                    "alice".to_string(),
+                    "bob".to_string(),
+                    "charlie".to_string(),
+                ],
+                status: "active".to_string(),
+            }],
             completed_sessions: vec![],
             queued_protocols: vec![],
         },
@@ -227,7 +239,7 @@ fn create_dkd_derive_state() -> SimulationState {
             ParticipantStateSnapshot {
                 id: "alice".to_string(),
                 status: "deriving".to_string(),
-                message_count: 8,  // Previous + received reveals
+                message_count: 8, // Previous + received reveals
                 active_sessions: vec!["dkd_session_1".to_string()],
             },
             ParticipantStateSnapshot {
@@ -244,15 +256,17 @@ fn create_dkd_derive_state() -> SimulationState {
             },
         ],
         protocol_state: ProtocolExecutionState {
-            active_sessions: vec![
-                SessionInfo {
-                    session_id: "dkd_session_1".to_string(),
-                    protocol_type: "dkd".to_string(),
-                    current_phase: "derivation".to_string(),
-                    participants: vec!["alice".to_string(), "bob".to_string(), "charlie".to_string()],
-                    status: "active".to_string(),
-                },
-            ],
+            active_sessions: vec![SessionInfo {
+                session_id: "dkd_session_1".to_string(),
+                protocol_type: "dkd".to_string(),
+                current_phase: "derivation".to_string(),
+                participants: vec![
+                    "alice".to_string(),
+                    "bob".to_string(),
+                    "charlie".to_string(),
+                ],
+                status: "active".to_string(),
+            }],
             completed_sessions: vec![],
             queued_protocols: vec![],
         },
@@ -286,15 +300,17 @@ fn create_dkd_complete_state() -> SimulationState {
         ],
         protocol_state: ProtocolExecutionState {
             active_sessions: vec![],
-            completed_sessions: vec![
-                SessionInfo {
-                    session_id: "dkd_session_1".to_string(),
-                    protocol_type: "dkd".to_string(),
-                    current_phase: "complete".to_string(),
-                    participants: vec!["alice".to_string(), "bob".to_string(), "charlie".to_string()],
-                    status: "complete".to_string(),
-                },
-            ],
+            completed_sessions: vec![SessionInfo {
+                session_id: "dkd_session_1".to_string(),
+                protocol_type: "dkd".to_string(),
+                current_phase: "complete".to_string(),
+                participants: vec![
+                    "alice".to_string(),
+                    "bob".to_string(),
+                    "charlie".to_string(),
+                ],
+                status: "complete".to_string(),
+            }],
             queued_protocols: vec![],
         },
         network_state: create_default_network_state(),
@@ -332,10 +348,10 @@ fn get_phase_name(index: usize) -> &'static str {
 #[test]
 fn test_dkd_byzantine_scenario() -> Result<()> {
     println!("=== DKD Byzantine Scenario Test ===");
-    
+
     // Create a scenario with one Byzantine participant
     let mut monitor = create_dkd_property_monitor()?;
-    
+
     let byzantine_state = SimulationState {
         tick: 10,
         time: 1000,
@@ -354,31 +370,33 @@ fn test_dkd_byzantine_scenario() -> Result<()> {
             },
             ParticipantStateSnapshot {
                 id: "charlie".to_string(),
-                status: "byzantine".to_string(),  // Charlie is Byzantine
-                message_count: 8,  // Sent extra/malicious messages
+                status: "byzantine".to_string(), // Charlie is Byzantine
+                message_count: 8,                // Sent extra/malicious messages
                 active_sessions: vec!["dkd_session_1".to_string()],
             },
         ],
         protocol_state: ProtocolExecutionState {
-            active_sessions: vec![
-                SessionInfo {
-                    session_id: "dkd_session_1".to_string(),
-                    protocol_type: "dkd".to_string(),
-                    current_phase: "reveal".to_string(),
-                    participants: vec!["alice".to_string(), "bob".to_string(), "charlie".to_string()],
-                    status: "active".to_string(),
-                },
-            ],
+            active_sessions: vec![SessionInfo {
+                session_id: "dkd_session_1".to_string(),
+                protocol_type: "dkd".to_string(),
+                current_phase: "reveal".to_string(),
+                participants: vec![
+                    "alice".to_string(),
+                    "bob".to_string(),
+                    "charlie".to_string(),
+                ],
+                status: "active".to_string(),
+            }],
             completed_sessions: vec![],
             queued_protocols: vec![],
         },
         network_state: create_default_network_state(),
     };
-    
+
     let check_result = monitor.check_properties(&byzantine_state)?;
-    
+
     println!("[OK] Byzantine scenario handled correctly");
     println!("   Protocol maintains safety despite Byzantine participant");
-    
+
     Ok(())
 }

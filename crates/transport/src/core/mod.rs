@@ -13,5 +13,5 @@ pub use factory::*;
 // Re-export the primary Transport trait (from transport.rs)
 pub use transport::*;
 // Re-export unified transport trait with specific name to avoid ambiguity
-pub use transport_trait::{Transport as UnifiedTransport};
+pub use transport_trait::Transport as UnifiedTransport;
 pub use unified_transport::*;

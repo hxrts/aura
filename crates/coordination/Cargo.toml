@@ -21,6 +21,7 @@ aura-journal = { path = "../journal" }
 aura-types = { path = "../aura-types" }
 aura-errors = { path = "../aura-errors" }
 session_types = { path = "../session-types" }
+protocol-core = { path = "../protocol-core" }
 # aura-session-types = { path = "../session-types" }  # Moved to local session_types module
 # Transport dependency removed to break circular dependency
 # Transport implements traits defined in coordination

@@ -76,7 +76,7 @@ async fn demonstrate_before_and_after() -> Result<()> {
         .await?;
 
     println!(
-        "✓ Identity derived successfully: {}",
+        "[OK] Identity derived successfully: {}",
         identity.capsule.app_id
     );
 
@@ -107,7 +107,7 @@ async fn demonstrate_service_composition() -> Result<()> {
             .with_config_manager(config_manager.clone()),
     );
 
-    println!("✓ Created custom service composition");
+    println!("[OK] Created custom service composition");
 
     // Services can be used independently
     println!("\nDirect service usage:");
@@ -115,7 +115,7 @@ async fn demonstrate_service_composition() -> Result<()> {
     let derived = identity_service
         .derive_simple_identity("app", "context")
         .await?;
-    println!("• IdentityService.derive_simple_identity(): ✓");
+    println!("• IdentityService.derive_simple_identity(): [OK]");
 
     // Or through the agent (service delegation)
     let device_id = DeviceId(Uuid::new_v4());
@@ -126,10 +126,10 @@ async fn demonstrate_service_composition() -> Result<()> {
     };
 
     let agent = DeviceAgent::new(device_id, account_id, config, services);
-    println!("✓ Agent created with custom service composition");
+    println!("[OK] Agent created with custom service composition");
 
     let agent_derived = agent.derive_simple_identity("app", "context").await?;
-    println!("• DeviceAgent.derive_simple_identity() (delegates to service): ✓");
+    println!("• DeviceAgent.derive_simple_identity() (delegates to service): [OK]");
 
     println!("\nService composition benefits:");
     println!("• Services can be mocked for testing");
@@ -162,7 +162,7 @@ async fn demonstrate_error_handling() -> Result<()> {
     match agent.derive_simple_identity("app", "context").await {
         Ok(_) => println!("Unexpected success"),
         Err(AgentError::ProtocolError(msg)) => {
-            println!("✓ Clean error handling: {}", msg);
+            println!("[OK] Clean error handling: {}", msg);
             println!("  Error propagated from service layer to agent layer");
         }
         Err(e) => println!("Other error: {:?}", e),

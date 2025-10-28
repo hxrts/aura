@@ -3,9 +3,9 @@
 //! Defines event types that are compatible with the dev console's
 //! trace format for seamless integration.
 
-use DeviceId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use DeviceId;
 
 /// Console event for dev console integration
 ///

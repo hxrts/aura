@@ -25,17 +25,17 @@
 | Choreographic Tests | [VERIFIED] IMPLEMENTED | `crates/simulator/tests/` | Multi-party protocol testing |
 | **API Surface** |
 | DeviceAgent API | [VERIFIED] IMPLEMENTED | `crates/agent/src/agent.rs` | High-level choreographic integration |
-| Simulation API | 🚧 PARTIAL | `crates/simulator/` | Good coverage, some convenience methods missing |
+| Simulation API | PARTIAL | `crates/simulator/` | Good coverage, some convenience methods missing |
 | **Integration Components** |
 | Event Signing | [VERIFIED] IMPLEMENTED | Throughout | Device certificate + FROST when required |
-| Transport Abstraction | 🚧 PARTIAL | `crates/transport/` | Stub implementation, production transport pending |
+| Transport Abstraction | PARTIAL | `crates/transport/` | Stub implementation, production transport pending |
 | Ledger Integration | [VERIFIED] IMPLEMENTED | `crates/journal/` | CRDT events with threshold signatures |
 
 **Legend:**
 - [VERIFIED] **IMPLEMENTED**: Fully working as documented
-- 🚧 **PARTIAL**: Exists but incomplete
+- **PARTIAL**: Exists but incomplete
 - [NOT IMPLEMENTED] **NOT_IMPLEMENTED**: Missing or stub only
-- 📝 **NEEDS_UPDATE**: Implemented but documentation outdated
+- **NEEDS_UPDATE**: Implemented but documentation outdated
 
 This document explains how Aura’s Phase 2 “choreographic” runtime stitches together
 threshold identities, the CRDT ledger, and the simulation engine.  It supersedes

@@ -37,7 +37,7 @@ async fn demo_capability_agent() -> Result<()> {
     // Create pure capability agent
     let mut agent = CapabilityAgent::new(device_id, account_id);
 
-    println!("✓ Created CapabilityAgent");
+    println!("[OK] Created CapabilityAgent");
 
     // Demonstrate capability-based operations
     // Note: These would be implemented in the actual CapabilityAgent
@@ -61,7 +61,7 @@ async fn demo_integrated_agent() -> Result<()> {
     let agent = IntegratedAgent::new(device_id, account_id, storage_path).await?;
 
     println!(
-        "✓ Created IntegratedAgent with storage at: {}",
+        "[OK] Created IntegratedAgent with storage at: {}",
         storage_path
     );
 
@@ -84,7 +84,7 @@ async fn demo_service_layer() -> Result<()> {
     let identity_service = IdentityService::new();
     let account_service = AccountService::new();
 
-    println!("✓ Created IdentityService and AccountService");
+    println!("[OK] Created IdentityService and AccountService");
 
     // Demonstrate service capabilities
     println!("• IdentityService: derive_key(), issue_tickets(), manage_contexts()");

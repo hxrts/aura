@@ -7,9 +7,11 @@
 use crate::local_runtime::LocalSessionRuntime;
 use crate::Transport;
 use aura_crypto::Effects;
+use aura_journal::AccountLedger;
 use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -119,23 +121,32 @@ impl Default for SecurityConfig {
 /// Session runtime factory for configuration-driven construction
 pub struct SessionRuntimeFactory {
     /// Effects for deterministic operations
-    effects: Effects,
+    effects: Arc<Effects>,
     /// Optional transport override
     transport: Option<Arc<dyn Transport>>,
+    /// Optional shared ledger handle
+    ledger: Option<Arc<RwLock<AccountLedger>>>,
 }
 
 impl SessionRuntimeFactory {
     /// Create new session runtime factory
     pub fn new(effects: Effects) -> Self {
         Self {
-            effects,
+            effects: Arc::new(effects),
             transport: None,
+            ledger: None,
         }
     }
 
     /// Create factory with custom transport for testing
     pub fn with_transport(mut self, transport: Arc<dyn Transport>) -> Self {
         self.transport = Some(transport);
+        self
+    }
+
+    /// Provide a shared ledger environment for created runtimes
+    pub fn with_ledger(mut self, ledger: Arc<RwLock<AccountLedger>>) -> Self {
+        self.ledger = Some(ledger);
         self
     }
 
@@ -167,8 +178,18 @@ impl SessionRuntimeFactory {
 
         // Create runtime with enhanced constructor (if it existed)
         // For now, demonstrate the pattern with the existing constructor
-        let runtime =
-            LocalSessionRuntime::new(config.device_id, config.account_id, self.effects.clone());
+        let mut runtime =
+            LocalSessionRuntime::new(config.device_id, config.account_id, (*self.effects).clone());
+
+        if let (Some(ledger), Some(transport)) = (self.ledger.clone(), self.transport.clone()) {
+            // Note: This is currently a sync context, but set_environment is async.
+            // In a production setup, this would need to be handled asynchronously.
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    runtime.set_environment(ledger, transport).await;
+                });
+            });
+        }
 
         debug!(
             "Session runtime created with config: max_sessions={}, timeout={}s",
@@ -247,8 +268,8 @@ impl LocalSessionRuntime {
             ));
         }
 
-        // Create runtime using existing constructor
-        let runtime = Self::new(config.device_id, config.account_id, effects);
+        let runtime =
+            LocalSessionRuntime::new(config.device_id, config.account_id, effects);
 
         debug!(
             "Session runtime configured with {} max sessions, {}s timeout",

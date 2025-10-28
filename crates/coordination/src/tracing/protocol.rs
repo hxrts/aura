@@ -6,8 +6,9 @@
 use super::{AuraSpan, LogLevel, LogSink, LogValue, SpanBuilder, TracedOperation};
 use aura_crypto::Effects;
 use aura_errors::AuraError;
-use aura_types::{DeviceId};
 use aura_journal::{ByzantineEvidence, ByzantineSeverity, ProtocolType};
+use aura_types::DeviceId;
+use protocol_core::{ProtocolDescriptor, ProtocolStep};
 use session_types::SessionState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -312,6 +313,167 @@ impl ProtocolTracer {
     /// Clean up completed spans
     pub fn cleanup_span(&mut self, span_id: Uuid) {
         self.current_spans.remove(&span_id);
+    }
+
+    /// Trace protocol lifecycle start
+    pub fn trace_lifecycle_start(&mut self, descriptor: &ProtocolDescriptor) -> TracedOperation {
+        // Convert protocol_core::ProtocolType to aura_journal::ProtocolType
+        let journal_protocol_type = match descriptor.protocol_type {
+            protocol_core::ProtocolType::Counter => ProtocolType::Counter,
+            protocol_core::ProtocolType::Dkd => ProtocolType::Dkd,
+            protocol_core::ProtocolType::Dkd => ProtocolType::Dkd,
+            protocol_core::ProtocolType::Resharing => ProtocolType::Resharing,
+            protocol_core::ProtocolType::Recovery => ProtocolType::Recovery,
+            protocol_core::ProtocolType::Locking => ProtocolType::Locking,
+            protocol_core::ProtocolType::LockAcquisition => ProtocolType::LockAcquisition,
+            _ => ProtocolType::Dkd, // Default fallback
+        };
+
+        let span = SpanBuilder::new("protocol_lifecycle", descriptor.device_id)
+            .with_protocol(journal_protocol_type)
+            .with_session(descriptor.session_id.into())
+            .build(self.effects.now().unwrap_or(0));
+
+        let span_id = span.span_id;
+        self.current_spans.insert(span_id, span.clone());
+
+        let fields = crate::btreemap! {
+            "protocol_id" => LogValue::String(descriptor.protocol_id.to_string()),
+            "protocol_type" => LogValue::String(format!("{:?}", descriptor.protocol_type)),
+            "operation_type" => LogValue::String(format!("{:?}", descriptor.operation_type)),
+            "priority" => LogValue::String(format!("{:?}", descriptor.priority)),
+            "mode" => LogValue::String(format!("{:?}", descriptor.mode)),
+        };
+
+        self.log_sink.log_event(
+            LogLevel::Info,
+            &span,
+            format!(
+                "Starting protocol lifecycle: {:?}",
+                descriptor.protocol_type
+            ),
+            fields,
+        );
+
+        TracedOperation::new(span, self.log_sink.clone())
+    }
+
+    /// Trace protocol lifecycle step
+    pub fn trace_lifecycle_step<T, E>(
+        &self,
+        descriptor: &ProtocolDescriptor,
+        step: &ProtocolStep<T, E>,
+    ) where
+        T: std::fmt::Debug,
+        E: std::fmt::Debug,
+    {
+        if let Some(span) = self
+            .current_spans
+            .values()
+            .find(|s| s.session_id == Some(descriptor.session_id.into()))
+        {
+            let (step_name, success) = match &step.outcome {
+                Some(Ok(_)) => ("completed_success", true),
+                Some(Err(_)) => ("completed_error", false),
+                None => ("progress", true),
+            };
+
+            let effects_count = step.effects.len();
+            let has_transition = step.transition.is_some();
+
+            let fields = crate::btreemap! {
+                "protocol_id" => LogValue::String(descriptor.protocol_id.to_string()),
+                "step_type" => LogValue::String(step_name.to_string()),
+                "success" => LogValue::Boolean(success),
+                "effects_count" => LogValue::Number(effects_count as i64),
+                "has_transition" => LogValue::Boolean(has_transition),
+            };
+
+            let level = if success {
+                LogLevel::Debug
+            } else {
+                LogLevel::Error
+            };
+            let message = format!(
+                "Protocol step: {} - {} ({} effects, transition: {})",
+                descriptor.protocol_id, step_name, effects_count, has_transition
+            );
+
+            self.log_sink.log_event(level, span, message, fields);
+        }
+    }
+
+    /// Trace protocol lifecycle completion
+    pub fn trace_lifecycle_complete(&self, descriptor: &ProtocolDescriptor, success: bool) {
+        if let Some(span) = self
+            .current_spans
+            .values()
+            .find(|s| s.session_id == Some(descriptor.session_id.into()))
+        {
+            let fields = crate::btreemap! {
+                "protocol_id" => LogValue::String(descriptor.protocol_id.to_string()),
+                "protocol_type" => LogValue::String(format!("{:?}", descriptor.protocol_type)),
+                "success" => LogValue::Boolean(success),
+            };
+
+            let level = if success {
+                LogLevel::Info
+            } else {
+                LogLevel::Error
+            };
+            let message = if success {
+                format!(
+                    "Protocol completed successfully: {}",
+                    descriptor.protocol_id
+                )
+            } else {
+                format!("Protocol failed: {}", descriptor.protocol_id)
+            };
+
+            self.log_sink.log_event(level, span, message, fields);
+        }
+    }
+
+    /// Trace scheduler environment injection
+    pub fn trace_environment_injection(&self, has_ledger: bool, has_transport: bool) {
+        let span = SpanBuilder::new("environment_injection", self.device_id)
+            .build(self.effects.now().unwrap_or(0));
+
+        let fields = crate::btreemap! {
+            "has_shared_ledger" => LogValue::Boolean(has_ledger),
+            "has_shared_transport" => LogValue::Boolean(has_transport),
+        };
+
+        self.log_sink.log_event(
+            LogLevel::Info,
+            &span,
+            "Environment bundle configured for scheduler".to_string(),
+            fields,
+        );
+    }
+
+    /// Trace peer metrics
+    pub fn trace_peer_metrics(
+        &self,
+        active_sessions: u64,
+        connected_peers: u64,
+        completed_sessions: u64,
+    ) {
+        let span =
+            SpanBuilder::new("peer_metrics", self.device_id).build(self.effects.now().unwrap_or(0));
+
+        let fields = crate::btreemap! {
+            "active_sessions" => LogValue::Number(active_sessions as i64),
+            "connected_peers" => LogValue::Number(connected_peers as i64),
+            "completed_sessions" => LogValue::Number(completed_sessions as i64),
+        };
+
+        self.log_sink.log_event(
+            LogLevel::Debug,
+            &span,
+            "Peer metrics snapshot".to_string(),
+            fields,
+        );
     }
 
     /// Get access to the log sink for advanced logging

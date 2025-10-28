@@ -20,6 +20,7 @@ aura-agent = { path = "../agent" }
 aura-coordination = { path = "../coordination" }
 aura-crypto = { path = "../crypto" }
 aura-errors = { path = "../aura-errors" }
+aura-groups = { path = "../groups" }
 aura-journal = { path = "../journal" }
 aura-simulator = { path = "../simulator" }
 aura-types = { path = "../aura-types" }
@@ -44,6 +45,7 @@ rand = { workspace = true }
 uuid = { workspace = true }
 ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
+blake3 = { workspace = true }
 dirs = "5.0"
 
 [features]

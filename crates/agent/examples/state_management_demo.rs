@@ -23,13 +23,6 @@ impl StateManager {
     }
 
     /// Create properly signed event with actual hash instead of placeholder
-    ///
-    /// BEFORE: TODO placeholder at multiple locations (lines 472, 1053, 1116, 1154, 1197, 1247)
-    /// ```rust,ignore
-    /// signature: self.sign_event_hash(&[0u8; 32]).await?, // TODO: Sign actual event hash
-    /// ```
-    ///
-    /// AFTER: Real event hash computation and signing
     pub async fn create_signed_event(
         &self,
         event_data: EventData,

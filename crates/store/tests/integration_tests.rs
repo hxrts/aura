@@ -8,10 +8,12 @@
 use aura_crypto::Effects;
 use aura_journal::serialization::Serializable;
 use aura_store::{
-    manifest::{Permission, ResourceScope, StorageOperation, ThresholdSignature, SignatureShare},
-    social_storage::{TrustLevel, SocialStoragePeerDiscovery, StoragePeer, StorageCapabilityAnnouncement, StorageMetrics, StorageRequirements},
-    CapabilityManager, CapabilityToken,
-    *,
+    manifest::{Permission, ResourceScope, SignatureShare, StorageOperation, ThresholdSignature},
+    social_storage::{
+        SocialStoragePeerDiscovery, StorageCapabilityAnnouncement, StorageMetrics, StoragePeer,
+        StorageRequirements, TrustLevel,
+    },
+    CapabilityManager, CapabilityToken, *,
 };
 use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
 
@@ -196,7 +198,8 @@ fn test_coordinated_revocation_scenario() {
     let initial_storage_version = coordinator.tracker().get_storage_version();
 
     // Trigger coordinated revocation
-    let (_event, new_specs) = coordinator.coordinated_revocation(device_id.to_bytes().unwrap(), now);
+    let (_event, new_specs) =
+        coordinator.coordinated_revocation(device_id.to_bytes().unwrap(), now);
 
     // All versions should be incremented
     assert_eq!(

@@ -30,6 +30,9 @@ pub enum ConsoleResponse {
     Events {
         events: Vec<super::TraceEvent>,
     },
+    NetworkTopology {
+        topology: super::NetworkTopology,
+    },
 
     // Control responses
     Step {
@@ -181,5 +184,8 @@ pub enum ConsoleEvent {
         branch_id: Uuid,
         new_tick: u64,
         new_time: u64,
+    },
+    NetworkTopologyChanged {
+        topology: super::NetworkTopology,
     },
 }

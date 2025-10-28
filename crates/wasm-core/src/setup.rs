@@ -1,13 +1,15 @@
 //! WASM initialization and setup utilities
 
-use wasm_bindgen::prelude::*;
-
 // WASM memory allocator
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 /// Initialize WASM environment with panic hooks and logging
-#[wasm_bindgen(start)]
+///
+/// Note: This is not marked with #[wasm_bindgen(start)] to avoid conflicts
+/// when wasm_core is used as a library in applications that have their own
+/// start function (like aura-console). Call this function or init_manually()
+/// from your application's start function instead.
 pub fn initialize_wasm() {
     console_error_panic_hook::set_once();
     crate::logging::init_logging();

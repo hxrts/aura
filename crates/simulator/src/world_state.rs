@@ -2,7 +2,7 @@
 //!
 //! This module implements a functional approach to simulation state management
 //! by separating the "what" (WorldState) from the "how" (pure tick function).
-//! 
+//!
 //! This design provides several benefits:
 //! - Pure, testable state transitions
 //! - Deterministic execution
@@ -176,7 +176,6 @@ pub struct NetworkPartition {
     pub duration: Option<u64>,
 }
 
-
 /// Network failure simulation configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkFailureConfig {
@@ -269,7 +268,6 @@ pub enum SessionResult {
     Timeout,
 }
 
-
 /// Queued protocol waiting for execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueuedProtocol {
@@ -314,10 +312,10 @@ pub enum ByzantineStrategy {
     /// Refuse to participate in protocols
     RefuseParticipation,
     /// Custom strategy with parameters
-    Custom { 
-        name: String, 
+    Custom {
+        name: String,
         implementation: String,
-        parameters: HashMap<String, String> 
+        parameters: HashMap<String, String>,
     },
 }
 
@@ -373,7 +371,7 @@ impl WorldState {
             },
             config: SimulationConfiguration {
                 max_ticks: 10000,
-                max_time: 60000, // 60 seconds
+                max_time: 60000,       // 60 seconds
                 tick_duration_ms: 100, // 100ms per tick
                 scenario_name: None,
                 rng_state: Vec::new(),
@@ -431,14 +429,14 @@ impl WorldState {
 
     /// Check if simulation should continue running
     pub fn should_continue(&self) -> bool {
-        self.current_tick < self.config.max_ticks 
+        self.current_tick < self.config.max_ticks
             && self.current_time < self.config.max_time
             && !self.is_idle()
     }
 
     /// Check if simulation is idle (no active work)
     pub fn is_idle(&self) -> bool {
-        self.protocols.active_sessions.is_empty() 
+        self.protocols.active_sessions.is_empty()
             && self.protocols.execution_queue.is_empty()
             && self.network.in_flight_messages.is_empty()
     }
@@ -476,7 +474,7 @@ impl WorldState {
         self.current_time.hash(&mut hasher);
         self.participants.len().hash(&mut hasher);
         self.protocols.active_sessions.len().hash(&mut hasher);
-        
+
         format!("{:x}", hasher.finish())
     }
 }
@@ -515,16 +513,18 @@ mod tests {
     #[test]
     fn test_participant_management() {
         let mut world = WorldState::new(42);
-        
-        world.add_participant(
-            "alice".to_string(),
-            "device_alice".to_string(), 
-            "account_1".to_string()
-        ).unwrap();
-        
+
+        world
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+
         assert_eq!(world.participants.len(), 1);
         assert!(world.get_participant("alice").is_some());
-        
+
         let alice = world.get_participant("alice").unwrap();
         assert_eq!(alice.id, "alice");
         assert_eq!(alice.device_id, "device_alice");
@@ -536,12 +536,14 @@ mod tests {
     #[test]
     fn test_state_snapshot() {
         let mut world = WorldState::new(42);
-        world.add_participant(
-            "alice".to_string(),
-            "device_alice".to_string(),
-            "account_1".to_string()
-        ).unwrap();
-        
+        world
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+
         let snapshot = world.snapshot();
         assert_eq!(snapshot.tick, 0);
         assert_eq!(snapshot.time, 0);
@@ -556,7 +558,7 @@ mod tests {
         let world = WorldState::new(42);
         assert!(world.is_idle());
         assert!(world.should_continue()); // Should continue even if idle until max_ticks
-        
+
         // Test max tick boundary
         let mut world_at_limit = world;
         world_at_limit.current_tick = world_at_limit.config.max_ticks;

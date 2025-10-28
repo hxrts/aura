@@ -3,13 +3,13 @@ name = "aura-console"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
 # Leptos framework for reactive UI
 leptos = { version = "0.7", features = ["csr"] }
-stylance = "0.5"
 
-phosphor-leptos = "0.6"
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
   "WebSocket",
@@ -34,6 +34,7 @@ js-sys = "0.3"
 log = "0.4"
 wasm-logger = "0.2"
 console_error_panic_hook = "0.1"
-wasm_core = { path = "../crates/wasm-core", features = ["leptos"] }
+wasm_core = { path = "../wasm-core", features = ["leptos"] }
+aura-console-types = { path = "../console-types" }
 
 # Note: Profile settings moved to workspace root Cargo.toml

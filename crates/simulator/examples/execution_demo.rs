@@ -5,13 +5,12 @@
 //! have been converted to declarative choreography actions.
 
 use aura_simulator::{
-    UnifiedScenarioEngine, UnifiedScenarioLoader, UnifiedEngineConfig,
     choreography_actions::register_standard_choreographies,
     unified_scenario_engine::{
-        UnifiedScenario, ScenarioSetupConfig, ScenarioPhaseWithActions, 
-        ChoreographyAction, ExpectedOutcome, PropertyCheck
+        ChoreographyAction, ExpectedOutcome, PropertyCheck, ScenarioPhaseWithActions,
+        ScenarioSetupConfig, UnifiedScenario,
     },
-    Result
+    Result, UnifiedEngineConfig, UnifiedScenarioEngine, UnifiedScenarioLoader,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -23,16 +22,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Demonstrate the unified approach
     demonstrate_toml_scenario_execution()?;
     println!();
-    
+
     demonstrate_programmatic_scenario_creation()?;
     println!();
-    
+
     demonstrate_choreography_actions()?;
     println!();
-    
+
     demonstrate_debugging_integration()?;
     println!();
-    
+
     demonstrate_scenario_inheritance()?;
 
     Ok(())
@@ -44,18 +43,21 @@ fn demonstrate_toml_scenario_execution() -> Result<(), Box<dyn std::error::Error
     println!("==========================");
 
     let temp_dir = TempDir::new()?;
-    
+
     // Create a scenario loader and generate sample TOML
     let loader = UnifiedScenarioLoader::new(temp_dir.path());
     let scenario_path = temp_dir.path().join("dkd_test.toml");
     loader.generate_sample_toml(&scenario_path)?;
-    
-    println!("[OK] Generated sample TOML scenario at: {}", scenario_path.display());
+
+    println!(
+        "[OK] Generated sample TOML scenario at: {}",
+        scenario_path.display()
+    );
 
     // Load the scenario
     let mut loader = UnifiedScenarioLoader::new(temp_dir.path());
     let scenario = loader.load_scenario(&scenario_path)?;
-    
+
     println!("[OK] Loaded scenario: '{}'", scenario.name);
     println!("  - Description: {}", scenario.description);
     println!("  - Participants: {}", scenario.setup.participants);
@@ -64,12 +66,12 @@ fn demonstrate_toml_scenario_execution() -> Result<(), Box<dyn std::error::Error
     // Create unified engine and register choreographies
     let mut engine = UnifiedScenarioEngine::new(temp_dir.path())?;
     register_standard_choreographies(&mut engine);
-    
+
     println!("[OK] Created unified engine with standard choreographies");
 
     // Execute the scenario
     let result = engine.execute_scenario(&scenario)?;
-    
+
     println!("[OK] Scenario execution completed:");
     println!("  - Success: {}", result.success);
     println!("  - Phases executed: {}", result.phase_results.len());
@@ -110,12 +112,22 @@ fn demonstrate_programmatic_scenario_creation() -> Result<(), Box<dyn std::error
                 actions: vec![
                     ChoreographyAction::RunChoreography {
                         choreography_type: "dkd".to_string(),
-                        participants: Some(vec!["alice".to_string(), "bob".to_string(), "charlie".to_string()]),
+                        participants: Some(vec![
+                            "alice".to_string(),
+                            "bob".to_string(),
+                            "charlie".to_string(),
+                        ]),
                         parameters: {
                             let mut params = HashMap::new();
                             params.insert("threshold".to_string(), toml::Value::Integer(2));
-                            params.insert("app_id".to_string(), toml::Value::String("programmatic_test".to_string()));
-                            params.insert("context".to_string(), toml::Value::String("demo_context".to_string()));
+                            params.insert(
+                                "app_id".to_string(),
+                                toml::Value::String("programmatic_test".to_string()),
+                            );
+                            params.insert(
+                                "context".to_string(),
+                                toml::Value::String("demo_context".to_string()),
+                            );
                             params
                         },
                     },
@@ -150,21 +162,29 @@ fn demonstrate_programmatic_scenario_creation() -> Result<(), Box<dyn std::error
         ],
         network: None,
         byzantine: None,
-        properties: vec![
-            PropertyCheck {
-                name: "threshold_security".to_string(),
-                property_type: "byzantine_tolerance".to_string(),
-                parameters: None,
-                check_in_phases: Some(vec!["network_testing".to_string()]),
-            },
-        ],
+        properties: vec![PropertyCheck {
+            name: "threshold_security".to_string(),
+            property_type: "byzantine_tolerance".to_string(),
+            parameters: None,
+            check_in_phases: Some(vec!["network_testing".to_string()]),
+        }],
         expected_outcome: ExpectedOutcome::Success,
         extends: None,
     };
 
-    println!("[OK] Created scenario programmatically: '{}'", scenario.name);
+    println!(
+        "[OK] Created scenario programmatically: '{}'",
+        scenario.name
+    );
     println!("  - Phases: {}", scenario.phases.len());
-    println!("  - Total actions: {}", scenario.phases.iter().map(|p| p.actions.len()).sum::<usize>());
+    println!(
+        "  - Total actions: {}",
+        scenario
+            .phases
+            .iter()
+            .map(|p| p.actions.len())
+            .sum::<usize>()
+    );
 
     // Execute with debugging enabled
     let config = UnifiedEngineConfig {
@@ -176,14 +196,19 @@ fn demonstrate_programmatic_scenario_creation() -> Result<(), Box<dyn std::error
 
     let mut engine = UnifiedScenarioEngine::new(temp_dir.path())?.configure(config);
     register_standard_choreographies(&mut engine);
-    
+
     let result = engine.execute_scenario(&scenario)?;
-    
+
     println!("[OK] Programmatic scenario execution completed:");
     println!("  - Success: {}", result.success);
     for (i, phase_result) in result.phase_results.iter().enumerate() {
-        println!("  - Phase {}: '{}' - Success: {}, Actions: {}", 
-                 i + 1, phase_result.phase_name, phase_result.success, phase_result.action_results.len());
+        println!(
+            "  - Phase {}: '{}' - Success: {}, Actions: {}",
+            i + 1,
+            phase_result.phase_name,
+            phase_result.success,
+            phase_result.action_results.len()
+        );
     }
 
     println!("[OK] Programming benefits:");
@@ -201,7 +226,7 @@ fn demonstrate_choreography_actions() -> Result<(), Box<dyn std::error::Error>> 
     println!("=============================================");
 
     let temp_dir = TempDir::new()?;
-    
+
     // Create engine with verbose logging
     let config = UnifiedEngineConfig {
         verbose: true,
@@ -232,19 +257,23 @@ fn demonstrate_choreography_actions() -> Result<(), Box<dyn std::error::Error>> 
             ScenarioPhaseWithActions {
                 name: "dkd_demo".to_string(),
                 description: Some("DKD choreography demonstration".to_string()),
-                actions: vec![
-                    ChoreographyAction::RunChoreography {
-                        choreography_type: "dkd".to_string(),
-                        participants: None, // Use all participants
-                        parameters: {
-                            let mut params = HashMap::new();
-                            params.insert("threshold".to_string(), toml::Value::Integer(3));
-                            params.insert("app_id".to_string(), toml::Value::String("demo_app".to_string()));
-                            params.insert("context".to_string(), toml::Value::String("choreography_demo".to_string()));
-                            params
-                        },
+                actions: vec![ChoreographyAction::RunChoreography {
+                    choreography_type: "dkd".to_string(),
+                    participants: None, // Use all participants
+                    parameters: {
+                        let mut params = HashMap::new();
+                        params.insert("threshold".to_string(), toml::Value::Integer(3));
+                        params.insert(
+                            "app_id".to_string(),
+                            toml::Value::String("demo_app".to_string()),
+                        );
+                        params.insert(
+                            "context".to_string(),
+                            toml::Value::String("choreography_demo".to_string()),
+                        );
+                        params
                     },
-                ],
+                }],
                 checkpoints: Some(vec!["dkd_complete".to_string()]),
                 verify_properties: None,
                 timeout: None,
@@ -252,18 +281,16 @@ fn demonstrate_choreography_actions() -> Result<(), Box<dyn std::error::Error>> 
             ScenarioPhaseWithActions {
                 name: "resharing_demo".to_string(),
                 description: Some("Resharing choreography demonstration".to_string()),
-                actions: vec![
-                    ChoreographyAction::RunChoreography {
-                        choreography_type: "resharing".to_string(),
-                        participants: None,
-                        parameters: {
-                            let mut params = HashMap::new();
-                            params.insert("old_threshold".to_string(), toml::Value::Integer(3));
-                            params.insert("new_threshold".to_string(), toml::Value::Integer(2));
-                            params
-                        },
+                actions: vec![ChoreographyAction::RunChoreography {
+                    choreography_type: "resharing".to_string(),
+                    participants: None,
+                    parameters: {
+                        let mut params = HashMap::new();
+                        params.insert("old_threshold".to_string(), toml::Value::Integer(3));
+                        params.insert("new_threshold".to_string(), toml::Value::Integer(2));
+                        params
                     },
-                ],
+                }],
                 checkpoints: None,
                 verify_properties: None,
                 timeout: None,
@@ -271,18 +298,16 @@ fn demonstrate_choreography_actions() -> Result<(), Box<dyn std::error::Error>> 
             ScenarioPhaseWithActions {
                 name: "recovery_demo".to_string(),
                 description: Some("Recovery choreography demonstration".to_string()),
-                actions: vec![
-                    ChoreographyAction::RunChoreography {
-                        choreography_type: "recovery".to_string(),
-                        participants: Some(vec!["alice".to_string(), "bob".to_string()]),
-                        parameters: {
-                            let mut params = HashMap::new();
-                            params.insert("guardian_threshold".to_string(), toml::Value::Integer(2));
-                            params.insert("cooldown_hours".to_string(), toml::Value::Integer(24));
-                            params
-                        },
+                actions: vec![ChoreographyAction::RunChoreography {
+                    choreography_type: "recovery".to_string(),
+                    participants: Some(vec!["alice".to_string(), "bob".to_string()]),
+                    parameters: {
+                        let mut params = HashMap::new();
+                        params.insert("guardian_threshold".to_string(), toml::Value::Integer(2));
+                        params.insert("cooldown_hours".to_string(), toml::Value::Integer(24));
+                        params
                     },
-                ],
+                }],
                 checkpoints: None,
                 verify_properties: None,
                 timeout: None,
@@ -296,12 +321,24 @@ fn demonstrate_choreography_actions() -> Result<(), Box<dyn std::error::Error>> 
     };
 
     let result = engine.execute_scenario(&choreography_demo)?;
-    
+
     println!("[OK] Choreography actions demonstration completed:");
-    println!("  - All phases: {}", result.phase_results.iter().all(|p| p.success));
-    println!("  - DKD action: {}", result.phase_results[0].action_results[0].success);
-    println!("  - Resharing action: {}", result.phase_results[1].action_results[0].success);
-    println!("  - Recovery action: {}", result.phase_results[2].action_results[0].success);
+    println!(
+        "  - All phases: {}",
+        result.phase_results.iter().all(|p| p.success)
+    );
+    println!(
+        "  - DKD action: {}",
+        result.phase_results[0].action_results[0].success
+    );
+    println!(
+        "  - Resharing action: {}",
+        result.phase_results[1].action_results[0].success
+    );
+    println!(
+        "  - Recovery action: {}",
+        result.phase_results[2].action_results[0].success
+    );
 
     println!("[OK] Refactoring benefits:");
     println!("  - Imperative runners/ helpers → declarative actions");
@@ -318,7 +355,7 @@ fn demonstrate_debugging_integration() -> Result<(), Box<dyn std::error::Error>>
     println!("========================");
 
     let temp_dir = TempDir::new()?;
-    
+
     // Create engine with full debugging enabled
     let config = UnifiedEngineConfig {
         enable_debugging: true,
@@ -361,7 +398,10 @@ fn demonstrate_debugging_integration() -> Result<(), Box<dyn std::error::Error>>
                         participants: None,
                         parameters: {
                             let mut params = HashMap::new();
-                            params.insert("app_id".to_string(), toml::Value::String("debug_test".to_string()));
+                            params.insert(
+                                "app_id".to_string(),
+                                toml::Value::String("debug_test".to_string()),
+                            );
                             params
                         },
                     },
@@ -395,27 +435,31 @@ fn demonstrate_debugging_integration() -> Result<(), Box<dyn std::error::Error>>
         ],
         network: None,
         byzantine: None,
-        properties: vec![
-            PropertyCheck {
-                name: "byzantine_tolerance".to_string(),
-                property_type: "safety_under_byzantine".to_string(),
-                parameters: None,
-                check_in_phases: Some(vec!["byzantine_injection".to_string()]),
-            },
-        ],
+        properties: vec![PropertyCheck {
+            name: "byzantine_tolerance".to_string(),
+            property_type: "safety_under_byzantine".to_string(),
+            parameters: None,
+            check_in_phases: Some(vec!["byzantine_injection".to_string()]),
+        }],
         expected_outcome: ExpectedOutcome::Success,
         extends: None,
     };
 
     let result = engine.execute_scenario(&debug_scenario)?;
-    
+
     println!("[OK] Debug scenario execution completed:");
     println!("  - Success: {}", result.success);
     println!("  - Total execution time: {:?}", result.execution_time);
     println!("  - Final world state:");
     println!("    - Tick: {}", result.final_state.current_tick);
-    println!("    - Participants: {}", result.final_state.participant_count);
-    println!("    - Byzantine count: {}", result.final_state.byzantine_count);
+    println!(
+        "    - Participants: {}",
+        result.final_state.participant_count
+    );
+    println!(
+        "    - Byzantine count: {}",
+        result.final_state.byzantine_count
+    );
     println!("  - Generated artifacts: {}", result.artifacts.len());
 
     for artifact in &result.artifacts {
@@ -504,7 +548,10 @@ property_type = "safety_under_byzantine"
 
     println!("[OK] Loaded child scenario with inheritance:");
     println!("  - Name: {} (overridden)", scenario.name);
-    println!("  - Participants: {} (inherited)", scenario.setup.participants);
+    println!(
+        "  - Participants: {} (inherited)",
+        scenario.setup.participants
+    );
     println!("  - Threshold: {} (inherited)", scenario.setup.threshold);
     println!("  - Phases: {} (base + extended)", scenario.phases.len());
     println!("  - Properties: {} (added)", scenario.properties.len());
@@ -512,13 +559,19 @@ property_type = "safety_under_byzantine"
     // Execute the inherited scenario
     let mut engine = UnifiedScenarioEngine::new(temp_dir.path())?;
     register_standard_choreographies(&mut engine);
-    
+
     let result = engine.execute_scenario(&scenario)?;
-    
+
     println!("[OK] Inherited scenario execution completed:");
     println!("  - Success: {}", result.success);
-    println!("  - Base phase (inherited): {}", result.phase_results[0].success);
-    println!("  - Extended phase (new): {}", result.phase_results[1].success);
+    println!(
+        "  - Base phase (inherited): {}",
+        result.phase_results[0].success
+    );
+    println!(
+        "  - Extended phase (new): {}",
+        result.phase_results[1].success
+    );
 
     println!("[OK] Inheritance benefits:");
     println!("  - Scenario composition and reuse");

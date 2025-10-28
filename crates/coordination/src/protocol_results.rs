@@ -5,8 +5,11 @@
 
 use crate::ThresholdSignature;
 use aura_errors::Result;
+use aura_groups::{Epoch, GroupRoster, KeyhiveCgkaOperation};
+use aura_journal::{
+    events::RelationshipId, Event, OperationType as JournalOperationType, SessionId,
+};
 use aura_types::{DeviceId, GuardianId};
-use aura_journal::{Event, SessionId};
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
@@ -146,6 +149,72 @@ pub struct RecoveryCommitPayload {
     pub revocation_proof: Option<RevocationProof>,
 }
 
+/// Result of Locking protocol execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LockingProtocolResult {
+    /// Session ID for this locking operation
+    pub session_id: SessionId,
+    /// Operation type governed by the lock
+    pub operation_type: JournalOperationType,
+    /// Winner of the deterministic lottery
+    pub winner: DeviceId,
+    /// Whether the lock was granted
+    pub granted: bool,
+    /// Threshold signature attesting to quorum approval
+    pub threshold_signature: ThresholdSignature,
+    /// Ledger events to persist as part of the lock
+    pub ledger_events: Vec<Event>,
+    /// Participants that contributed to the decision
+    pub participants: Vec<DeviceId>,
+}
+
+impl LockingProtocolResult {
+    /// Produce the canonical commit payload for ledger persistence.
+    pub fn commit_payload(&self) -> LockingCommitPayload {
+        LockingCommitPayload {
+            session_id: self.session_id,
+            operation_type: self.operation_type,
+            winner: self.winner,
+            participants: self.participants.clone(),
+        }
+    }
+}
+
+/// Canonical locking commit payload for ledger
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LockingCommitPayload {
+    pub session_id: SessionId,
+    pub operation_type: JournalOperationType,
+    pub winner: DeviceId,
+    pub participants: Vec<DeviceId>,
+}
+
+/// Result of Counter reservation execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CounterProtocolResult {
+    /// Session ID for the reservation
+    pub session_id: SessionId,
+    /// Relationship the counter belongs to
+    pub relationship_id: RelationshipId,
+    /// Device requesting the reservation
+    pub requesting_device: DeviceId,
+    /// Reserved counter values (single or range)
+    pub reserved_values: Vec<u64>,
+    /// TTL for the reservation in epochs
+    pub ttl_epochs: u64,
+    /// Ledger events to persist
+    pub ledger_events: Vec<Event>,
+    /// Participants involved in authorization
+    pub participants: Vec<DeviceId>,
+}
+
+impl CounterProtocolResult {
+    /// Return the first reserved value when a single count is requested.
+    pub fn primary_value(&self) -> Option<u64> {
+        self.reserved_values.first().copied()
+    }
+}
+
 /// Guardian signature over recovery request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianSignature {
@@ -173,6 +242,53 @@ pub trait ProtocolResultWriter {
 
     /// Write recovery result to ledger
     async fn write_recovery_result(&mut self, result: &RecoveryProtocolResult) -> Result<()>;
+
+    /// Write group result to ledger
+    async fn write_group_result(&mut self, result: &GroupProtocolResult) -> Result<()>;
+}
+
+/// Result of Group protocol execution including CGKA operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupProtocolResult {
+    /// Session ID for this group operation
+    pub session_id: SessionId,
+    /// Group identifier
+    pub group_id: String,
+    /// Current group epoch after operation
+    pub epoch: Epoch,
+    /// Current group roster after operation
+    pub roster: GroupRoster,
+    /// CGKA operations performed
+    pub cgka_operations: Vec<KeyhiveCgkaOperation>,
+    /// Events to be written to ledger
+    pub ledger_events: Vec<Event>,
+    /// Participants who contributed
+    pub participants: Vec<DeviceId>,
+}
+
+impl GroupProtocolResult {
+    /// Get the canonical commit payload for ledger
+    pub fn commit_payload(&self) -> GroupCommitPayload {
+        GroupCommitPayload {
+            session_id: self.session_id,
+            group_id: self.group_id.clone(),
+            epoch: self.epoch,
+            roster: self.roster.clone(),
+            cgka_operations: self.cgka_operations.clone(),
+            participants: self.participants.clone(),
+        }
+    }
+}
+
+/// Canonical Group commit payload for ledger
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupCommitPayload {
+    pub session_id: SessionId,
+    pub group_id: String,
+    pub epoch: Epoch,
+    pub roster: GroupRoster,
+    pub cgka_operations: Vec<KeyhiveCgkaOperation>,
+    pub participants: Vec<DeviceId>,
 }
 
 #[cfg(test)]

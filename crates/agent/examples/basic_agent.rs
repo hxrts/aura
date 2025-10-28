@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
     // 3. Create agent with default services (simple case)
     println!("Creating agent with default services...");
     let agent = DeviceAgent::with_default_services(device_id, account_id, config).await?;
-    println!("✓ Agent created successfully\n");
+    println!("[OK] Agent created successfully\n");
 
     // 4. Demonstrate 3-line service delegation methods
 
@@ -46,18 +46,18 @@ async fn main() -> Result<()> {
     let identity = agent
         .derive_simple_identity("my-app", "user-session")
         .await?;
-    println!("✓ Derived identity for app: {}", identity.capsule.app_id);
+    println!("[OK] Derived identity for app: {}", identity.capsule.app_id);
 
     // Account bootstrap (clean service delegation)
     println!("\nBootstrapping account...");
     let initial_devices = vec![device_id];
     agent.bootstrap_account(initial_devices, 1).await?;
-    println!("✓ Account bootstrapped successfully");
+    println!("[OK] Account bootstrapped successfully");
 
     // Session statistics (clean delegation)
     println!("\nGetting session statistics...");
     let stats = agent.get_session_stats().await?;
-    println!("✓ Retrieved session statistics");
+    println!("[OK] Retrieved session statistics");
 
     println!("\n=== Example completed successfully! ===");
     println!("\nKey benefits of the refactored architecture:");

@@ -75,7 +75,7 @@ fn advance_time(world: &mut WorldState) {
 
 /// Process network message delivery
 fn process_network_messages(
-    world: &mut WorldState, 
+    world: &mut WorldState,
     events: &mut Vec<TraceEvent>,
     next_event_id: &mut impl FnMut() -> u64,
 ) -> Result<()> {
@@ -85,9 +85,12 @@ fn process_network_messages(
 
     // Find messages ready for delivery
     while let Some(message) = world.network.in_flight_messages.front() {
-        if message.deliver_at.is_some_and(|deliver_time| deliver_time <= current_time) {
+        if message
+            .deliver_at
+            .is_some_and(|deliver_time| deliver_time <= current_time)
+        {
             let message = world.network.in_flight_messages.pop_front().unwrap();
-            
+
             if message.will_drop {
                 dropped_messages.push(message);
             } else {
@@ -133,36 +136,36 @@ fn deliver_message(
                     deliver_at: Some(world.current_time),
                     will_drop: false,
                 };
-                
-                recipient.message_inbox.push_back(inbox_message);
-            recipient.message_count += 1;
-            recipient.last_active = world.current_time;
 
-            // Record delivery event
-            let event = TraceEvent {
-                tick: world.current_tick,
-                event_id: next_event_id(),
-                event_type: EventType::MessageReceived {
-                    envelope_id: message.message_id.clone(),
-                    from: message.from.clone(),
-                    message_type: message.message_type.clone(),
-                },
-                participant: to_participant.clone(),
-                causality: CausalityInfo {
-                    parent_events: Vec::new(),
-                    happens_before: Vec::new(),
-                    concurrent_with: Vec::new(),
-                },
-            };
-            events.push(event);
+                recipient.message_inbox.push_back(inbox_message);
+                recipient.message_count += 1;
+                recipient.last_active = world.current_time;
+
+                // Record delivery event
+                let event = TraceEvent {
+                    tick: world.current_tick,
+                    event_id: next_event_id(),
+                    event_type: EventType::MessageReceived {
+                        envelope_id: message.message_id.clone(),
+                        from: message.from.clone(),
+                        message_type: message.message_type.clone(),
+                    },
+                    participant: to_participant.clone(),
+                    causality: CausalityInfo {
+                        parent_events: Vec::new(),
+                        happens_before: Vec::new(),
+                        concurrent_with: Vec::new(),
+                    },
+                };
+                events.push(event);
             } else {
                 // Recipient is offline, drop message
                 record_message_dropped_with_reason(
-                    world, 
-                    message, 
-                    DropReason::NetworkPartition, 
-                    events, 
-                    next_event_id
+                    world,
+                    message,
+                    DropReason::NetworkPartition,
+                    events,
+                    next_event_id,
                 );
             }
         } else {
@@ -172,7 +175,7 @@ fn deliver_message(
                 message,
                 DropReason::NetworkPartition,
                 events,
-                next_event_id
+                next_event_id,
             );
         }
     } else {
@@ -191,11 +194,11 @@ fn record_message_dropped(
     next_event_id: &mut impl FnMut() -> u64,
 ) {
     record_message_dropped_with_reason(
-        world, 
-        message, 
-        DropReason::NetworkPartition, 
-        events, 
-        next_event_id
+        world,
+        message,
+        DropReason::NetworkPartition,
+        events,
+        next_event_id,
     );
 }
 
@@ -258,7 +261,9 @@ fn start_protocol_session(
     next_event_id: &mut impl FnMut() -> u64,
 ) -> Result<()> {
     let session_id = Uuid::new_v4().to_string();
-    let coordinator = queued_protocol.participants.first()
+    let coordinator = queued_protocol
+        .participants
+        .first()
         .ok_or_else(|| SimError::RuntimeError("Protocol has no participants".to_string()))?
         .clone();
 
@@ -277,7 +282,10 @@ fn start_protocol_session(
     };
 
     // Add session to active sessions
-    world.protocols.active_sessions.insert(session_id.clone(), session);
+    world
+        .protocols
+        .active_sessions
+        .insert(session_id.clone(), session);
 
     // Update participant states
     for participant_id in &queued_protocol.participants {
@@ -294,7 +302,9 @@ fn start_protocol_session(
                 state_data: Vec::new(),
                 joined_at: world.current_time,
             };
-            participant.active_sessions.insert(session_id.clone(), participation);
+            participant
+                .active_sessions
+                .insert(session_id.clone(), participation);
         }
     }
 
@@ -330,7 +340,8 @@ fn update_protocol_sessions(
 
     // Collect sessions that need to advance
     for (session_id, session) in &world.protocols.active_sessions {
-        if session.status == SessionStatus::Initializing || session.status == SessionStatus::Active {
+        if session.status == SessionStatus::Initializing || session.status == SessionStatus::Active
+        {
             sessions_to_advance.push(session_id.clone());
         }
     }
@@ -350,12 +361,15 @@ fn advance_protocol_session(
     events: &mut Vec<TraceEvent>,
     next_event_id: &mut impl FnMut() -> u64,
 ) -> Result<()> {
-    let session = world.protocols.active_sessions.get_mut(session_id)
+    let session = world
+        .protocols
+        .active_sessions
+        .get_mut(session_id)
         .ok_or_else(|| SimError::RuntimeError(format!("Session {} not found", session_id)))?;
 
     let previous_phase = session.current_phase.clone();
     let coordinator = session.coordinator.clone();
-    
+
     // Simple phase advancement logic
     match session.current_phase.as_str() {
         "initializing" => {
@@ -364,7 +378,8 @@ fn advance_protocol_session(
         }
         "active" => {
             // Check if all participants have responded (simplified)
-            if world.current_time >= session.started_at + 1000 { // 1 second timeout
+            if world.current_time >= session.started_at + 1000 {
+                // 1 second timeout
                 session.current_phase = "completing".to_string();
             }
         }
@@ -421,7 +436,9 @@ fn process_participant_inbox(
     events: &mut Vec<TraceEvent>,
     next_event_id: &mut impl FnMut() -> u64,
 ) -> Result<()> {
-    let participant = world.participants.get_mut(participant_id)
+    let participant = world
+        .participants
+        .get_mut(participant_id)
         .ok_or_else(|| SimError::ParticipantNotFound(participant_id.to_string()))?;
 
     // Process all messages in inbox
@@ -459,7 +476,12 @@ fn apply_byzantine_strategies(
     let byzantine_participants = world.byzantine.byzantine_participants.clone();
 
     for participant_id in byzantine_participants {
-        if let Some(strategy) = world.byzantine.active_strategies.get(&participant_id).cloned() {
+        if let Some(strategy) = world
+            .byzantine
+            .active_strategies
+            .get(&participant_id)
+            .cloned()
+        {
             apply_byzantine_strategy(world, &participant_id, &strategy, events, next_event_id)?;
         }
     }
@@ -582,7 +604,7 @@ fn check_timeouts_and_cleanup(
                 timed_out_sessions.push(session_id.clone());
             }
         }
-        
+
         if session.status == SessionStatus::Completed {
             completed_sessions.push(session_id.clone());
         }
@@ -610,7 +632,7 @@ fn timeout_session(
 ) -> Result<()> {
     if let Some(session) = world.protocols.active_sessions.get_mut(session_id) {
         session.status = SessionStatus::TimedOut;
-        
+
         let event = TraceEvent {
             tick: world.current_tick,
             event_id: next_event_id(),
@@ -643,10 +665,12 @@ fn complete_session(
     if let Some(session) = world.protocols.active_sessions.remove(session_id) {
         let completed_session = CompletedSession {
             session: session.clone(),
-            result: SessionResult::Success { result_data: Vec::new() },
+            result: SessionResult::Success {
+                result_data: Vec::new(),
+            },
             completed_at: world.current_time,
         };
-        
+
         world.protocols.completed_sessions.push(completed_session);
 
         // Remove session from participant states
@@ -719,31 +743,45 @@ mod tests {
     #[test]
     fn test_pure_tick_function() {
         let mut world = WorldState::new(42);
-        
+
         // Initial state
         assert_eq!(world.current_tick, 0);
         assert_eq!(world.current_time, 0);
-        
+
         // Run one tick
         let events = tick(&mut world).unwrap();
-        
+
         // Verify state advancement
         assert_eq!(world.current_tick, 1);
         assert_eq!(world.current_time, world.config.tick_duration_ms);
-        
+
         // Verify events were generated
         assert!(!events.is_empty());
-        assert!(events.iter().any(|e| matches!(e.event_type, EventType::EffectExecuted { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e.event_type, EventType::EffectExecuted { .. })));
     }
 
     #[test]
     fn test_message_delivery() {
         let mut world = WorldState::new(42);
-        
+
         // Add participants
-        world.add_participant("alice".to_string(), "device_alice".to_string(), "account_1".to_string()).unwrap();
-        world.add_participant("bob".to_string(), "device_bob".to_string(), "account_1".to_string()).unwrap();
-        
+        world
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+        world
+            .add_participant(
+                "bob".to_string(),
+                "device_bob".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+
         // Add a message to be delivered
         let message = Message {
             message_id: "msg_1".to_string(),
@@ -756,27 +794,41 @@ mod tests {
             will_drop: false,
         };
         world.network.in_flight_messages.push_back(message);
-        
+
         // Run tick to deliver message
         let events = tick(&mut world).unwrap();
-        
+
         // Verify message was delivered
         let bob = world.get_participant("bob").unwrap();
         assert_eq!(bob.message_count, 1);
         assert_eq!(bob.message_inbox.len(), 1);
-        
+
         // Verify delivery event was recorded
-        assert!(events.iter().any(|e| matches!(e.event_type, EventType::MessageReceived { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e.event_type, EventType::MessageReceived { .. })));
     }
 
     #[test]
     fn test_protocol_execution() {
         let mut world = WorldState::new(42);
-        
+
         // Add participants
-        world.add_participant("alice".to_string(), "device_alice".to_string(), "account_1".to_string()).unwrap();
-        world.add_participant("bob".to_string(), "device_bob".to_string(), "account_1".to_string()).unwrap();
-        
+        world
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+        world
+            .add_participant(
+                "bob".to_string(),
+                "device_bob".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+
         // Queue a protocol
         let protocol = QueuedProtocol {
             protocol_type: "DKD".to_string(),
@@ -786,34 +838,45 @@ mod tests {
             priority: 0,
         };
         world.protocols.execution_queue.push_back(protocol);
-        
+
         // Run tick to start protocol
         let events = tick(&mut world).unwrap();
-        
+
         // Verify protocol was started
         assert_eq!(world.protocols.active_sessions.len(), 1);
         assert!(world.protocols.execution_queue.is_empty());
-        
+
         // Verify participants have the session
         let alice = world.get_participant("alice").unwrap();
         assert_eq!(alice.active_sessions.len(), 1);
-        
+
         // Verify protocol start event was recorded
-        assert!(events.iter().any(|e| matches!(e.event_type, EventType::ProtocolStateTransition { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e.event_type, EventType::ProtocolStateTransition { .. })));
     }
 
     #[test]
     fn test_byzantine_strategy_application() {
         let mut world = WorldState::new(42);
-        
+
         // Add byzantine participant
-        world.add_participant("alice".to_string(), "device_alice".to_string(), "account_1".to_string()).unwrap();
-        world.byzantine.byzantine_participants.push("alice".to_string());
-        world.byzantine.active_strategies.insert(
-            "alice".to_string(), 
-            ByzantineStrategy::DropAllMessages
-        );
-        
+        world
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+        world
+            .byzantine
+            .byzantine_participants
+            .push("alice".to_string());
+        world
+            .byzantine
+            .active_strategies
+            .insert("alice".to_string(), ByzantineStrategy::DropAllMessages);
+
         // Add a message from the byzantine participant
         let message = Message {
             message_id: "msg_1".to_string(),
@@ -826,17 +889,19 @@ mod tests {
             will_drop: false,
         };
         world.network.in_flight_messages.push_back(message);
-        
+
         // Run tick to apply byzantine strategy
         let events = tick(&mut world).unwrap();
-        
+
         // Verify message was marked to be dropped
         let message = world.network.in_flight_messages.front().unwrap();
         assert!(message.will_drop);
-        
+
         // Verify byzantine strategy event was recorded
-        assert!(events.iter().any(|e| matches!(e.event_type, EventType::EffectExecuted { .. }) 
-            && e.participant == "alice"));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e.event_type, EventType::EffectExecuted { .. })
+                && e.participant == "alice"));
     }
 
     #[test]
@@ -844,21 +909,33 @@ mod tests {
         // Run the same simulation twice with the same seed
         let mut world1 = WorldState::new(42);
         let mut world2 = WorldState::new(42);
-        
-        world1.add_participant("alice".to_string(), "device_alice".to_string(), "account_1".to_string()).unwrap();
-        world2.add_participant("alice".to_string(), "device_alice".to_string(), "account_1".to_string()).unwrap();
-        
+
+        world1
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+        world2
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+
         // Run multiple ticks
         for _ in 0..5 {
             let events1 = tick(&mut world1).unwrap();
             let events2 = tick(&mut world2).unwrap();
-            
+
             // Verify deterministic execution
             assert_eq!(world1.current_tick, world2.current_tick);
             assert_eq!(world1.current_time, world2.current_time);
             assert_eq!(events1.len(), events2.len());
         }
-        
+
         // Verify final states match
         assert_eq!(world1.snapshot().state_hash, world2.snapshot().state_hash);
     }

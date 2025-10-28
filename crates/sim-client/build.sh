@@ -35,7 +35,7 @@ if [ -f "pkg/aura_sim_client_bg.wasm" ]; then
     if [ $SIZE_GZIP_KB -gt 150 ]; then
         echo "WARNING: Bundle size (${SIZE_GZIP_KB}KB) exceeds target of 150KB"
     else
-        echo "✓ Bundle size within target range"
+        echo "[OK] Bundle size within target range"
     fi
 else
     echo "ERROR: WASM file not found"

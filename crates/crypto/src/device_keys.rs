@@ -74,8 +74,9 @@ impl DeviceSigningKey {
     /// Import signing key from secure storage
     pub fn import_from_storage(storage: DeviceKeyStorage) -> Result<Self> {
         let signing_key = SigningKey::from_bytes(&storage.signing_key_bytes);
-        let verifying_key = VerifyingKey::from_bytes(&storage.public_key_bytes)
-            .map_err(|e| CryptoError::crypto_operation_failed(format!("Invalid public key: {}", e)))?;
+        let verifying_key = VerifyingKey::from_bytes(&storage.public_key_bytes).map_err(|e| {
+            CryptoError::crypto_operation_failed(format!("Invalid public key: {}", e))
+        })?;
 
         Ok(Self {
             device_id: storage.device_id,
@@ -141,18 +142,18 @@ impl DeviceKeyManager {
 
     /// Sign message with device key
     pub fn sign_message(&self, message_content: &[u8]) -> Result<Vec<u8>> {
-        let device_key = self
-            .device_key
-            .as_ref()
-            .ok_or_else(|| CryptoError::crypto_operation_failed("No device key available".to_string()))?;
+        let device_key = self.device_key.as_ref().ok_or_else(|| {
+            CryptoError::crypto_operation_failed("No device key available".to_string())
+        })?;
 
         Ok(device_key.sign_message(message_content))
     }
 
     /// Add known public key for device
     pub fn add_public_key(&mut self, device_id: Uuid, public_key_bytes: [u8; 32]) -> Result<()> {
-        let verifying_key = VerifyingKey::from_bytes(&public_key_bytes)
-            .map_err(|e| CryptoError::crypto_operation_failed(format!("Invalid public key: {}", e)))?;
+        let verifying_key = VerifyingKey::from_bytes(&public_key_bytes).map_err(|e| {
+            CryptoError::crypto_operation_failed(format!("Invalid public key: {}", e))
+        })?;
 
         self.known_public_keys.insert(device_id, verifying_key);
         Ok(())
@@ -166,10 +167,9 @@ impl DeviceKeyManager {
         signature_bytes: &[u8],
     ) -> Result<bool> {
         // Get public key for device
-        let public_key = self
-            .known_public_keys
-            .get(&device_id)
-            .ok_or_else(|| CryptoError::crypto_operation_failed(format!("Unknown device: {}", device_id)))?;
+        let public_key = self.known_public_keys.get(&device_id).ok_or_else(|| {
+            CryptoError::crypto_operation_failed(format!("Unknown device: {}", device_id))
+        })?;
 
         // Parse signature
         if signature_bytes.len() != 64 {
@@ -198,10 +198,9 @@ impl DeviceKeyManager {
 
     /// Export device key for secure storage
     pub fn export_device_key(&self) -> Result<DeviceKeyStorage> {
-        let device_key = self
-            .device_key
-            .as_ref()
-            .ok_or_else(|| CryptoError::crypto_operation_failed("No device key to export".to_string()))?;
+        let device_key = self.device_key.as_ref().ok_or_else(|| {
+            CryptoError::crypto_operation_failed("No device key to export".to_string())
+        })?;
 
         Ok(device_key.export_for_storage())
     }
@@ -217,10 +216,9 @@ impl DeviceKeyManager {
     /// for legacy protocol contexts that haven't been updated to use
     /// the DeviceKeyManager directly.
     pub fn get_raw_signing_key(&self) -> Result<ed25519_dalek::SigningKey> {
-        let device_key = self
-            .device_key
-            .as_ref()
-            .ok_or_else(|| CryptoError::crypto_operation_failed("No device key available".to_string()))?;
+        let device_key = self.device_key.as_ref().ok_or_else(|| {
+            CryptoError::crypto_operation_failed("No device key available".to_string())
+        })?;
 
         Ok(device_key.signing_key.clone())
     }

@@ -5,10 +5,9 @@
 
 use crate::types::ThresholdSignature;
 use crate::{
-    context_builder::ContextBuilder,
-    execution::ProtocolContext,
+    execution::{ProtocolContext, context::ProtocolContextBuilder},
     local_runtime::LocalSessionRuntime,
-    protocols::{dkd_choreography, recovery_choreography, resharing_choreography},
+    LifecycleScheduler,
     Transport,
 };
 use aura_crypto::Effects;
@@ -82,12 +81,24 @@ impl CoordinationService {
                 AuraError::coordination_failed(format!("Protocol setup failed: {:?}", e))
             })?;
 
-        // Execute DKD choreography through session runtime
+        // Execute DKD through LifecycleScheduler
+        let scheduler = LifecycleScheduler::with_effects(Effects::production());
         let context_id = request.context.as_bytes().to_vec();
-        let dkd_result = dkd_choreography(&mut protocol_ctx, context_id)
+        let dkd_result = scheduler.execute_dkd(
+            None, // session_id - will be generated
+            request.account_id,
+            request.device_id,
+            request.app_id.clone(),
+            request.context.clone(),
+            request.participants.clone(),
+            request.threshold,
+            context_id,
+            None, // ledger - use scheduler's default
+            None, // transport - use scheduler's default
+        )
             .await
             .map_err(|e| {
-                AuraError::coordination_failed(format!("DKD choreography failed: {:?}", e))
+                AuraError::coordination_failed(format!("DKD lifecycle failed: {:?}", e))
             })?;
 
         // Convert DkdProtocolResult to DerivedIdentity
@@ -127,15 +138,21 @@ impl CoordinationService {
                 AuraError::coordination_failed(format!("Protocol setup failed: {:?}", e))
             })?;
 
-        // Execute resharing choreography through session runtime
-        let result = resharing_choreography(
-            &mut protocol_ctx,
-            Some(request.new_threshold),
-            Some(request.new_participants.clone()),
+        // Execute Resharing through LifecycleScheduler
+        let scheduler = LifecycleScheduler::with_effects(Effects::production());
+        let result = scheduler.execute_resharing(
+            None, // session_id - will be generated
+            request.account_id,
+            request.device_id,
+            request.current_participants.clone(),
+            request.new_participants.clone(),
+            request.new_threshold,
+            None, // ledger - use scheduler's default
+            None, // transport - use scheduler's default
         )
         .await
         .map_err(|e| {
-            AuraError::coordination_failed(format!("Resharing choreography failed: {:?}", e))
+            AuraError::coordination_failed(format!("Resharing lifecycle failed: {:?}", e))
         })?;
 
         // Convert ResharingProtocolResult to ResharingResult
@@ -186,12 +203,22 @@ impl CoordinationService {
             )));
         }
 
-        let result =
-            recovery_choreography(&mut protocol_ctx, guardian_ids, request.required_threshold)
-                .await
-                .map_err(|e| {
-                    AuraError::coordination_failed(format!("Recovery choreography failed: {:?}", e))
-                })?;
+        // Execute Recovery through LifecycleScheduler
+        let scheduler = LifecycleScheduler::with_effects(Effects::production());
+        let result = scheduler.execute_recovery(
+            None, // session_id - will be generated
+            request.account_id,
+            request.device_id,
+            guardian_ids,
+            request.device_id, // new_device_id for recovery (same device)
+            request.required_threshold as usize,
+            None, // ledger - use scheduler's default
+            None, // transport - use scheduler's default
+        )
+        .await
+        .map_err(|e| {
+            AuraError::coordination_failed(format!("Recovery lifecycle failed: {:?}", e))
+        })?;
 
         // Convert RecoveryProtocolResult to RecoveryResult
         Ok(RecoveryResult {
@@ -240,7 +267,7 @@ impl ProtocolContextFactory {
     ///
     /// Uses ContextBuilder to validate capabilities and load real state
     pub async fn create_dkd_context(&self, request: &DkdRequest) -> Result<ProtocolContext> {
-        let mut builder = ContextBuilder::new(
+        let mut builder = ProtocolContextBuilder::new(
             self.crypto_service.clone(),
             self.transport.clone(),
             self.effects.clone(),
@@ -268,7 +295,7 @@ impl ProtocolContextFactory {
         &self,
         request: &ResharingRequest,
     ) -> Result<ProtocolContext> {
-        let mut builder = ContextBuilder::new(
+        let mut builder = ProtocolContextBuilder::new(
             self.crypto_service.clone(),
             self.transport.clone(),
             self.effects.clone(),
@@ -296,7 +323,7 @@ impl ProtocolContextFactory {
         &self,
         request: &RecoveryRequest,
     ) -> Result<ProtocolContext> {
-        let mut builder = ContextBuilder::new(
+        let mut builder = ProtocolContextBuilder::new(
             self.crypto_service.clone(),
             self.transport.clone(),
             self.effects.clone(),

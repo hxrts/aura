@@ -1,22 +1,22 @@
 // Command modules for CLI
-//
-// NOTE: Temporarily simplified - agent/coordination dependent commands disabled
 
-// Temporarily disabled - requires agent crate
-// pub mod authz; // Authorization commands (what you can do)
+// Authorization commands (what you can do) - temporarily disabled
+// pub mod authz;
 
 /// Shared utilities for all commands
 pub mod common;
 
-// Temporarily disabled - requires agent crate
-// pub mod debug; // Interactive debugging tools and analysis commands
+// Interactive debugging tools and analysis commands
+pub mod debug;
 
 /// Account initialization command
 pub mod init;
 
-// Temporarily disabled - requires agent crate
-// pub mod network;
-// pub mod node; // Node management and dev console commands
+// Network management commands
+pub mod network;
+
+// Node management commands
+pub mod node;
 
 /// Scenario management and execution commands
 pub mod scenarios;
@@ -24,5 +24,11 @@ pub mod scenarios;
 /// Account status command
 pub mod status;
 
-// Temporarily disabled - requires agent crate
-// pub mod storage;
+// Storage management commands
+pub mod storage;
+
+/// Threshold signature testing commands
+pub mod threshold;
+
+/// FROST threshold signature operations
+pub mod frost;

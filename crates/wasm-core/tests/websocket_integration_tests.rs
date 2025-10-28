@@ -25,7 +25,7 @@ fn test_message_envelope() {
 
 #[wasm_bindgen_test]
 fn test_unified_websocket_creation() {
-    let client = UnifiedWebSocketClient::new("simulation", "ws://localhost:8080").unwrap();
-    assert_eq!(client.mode_name(), "Simulation");
-    assert!(!client.is_connected());
+    let client = UnifiedWebSocketClient::new(ClientMode::Simulation, "ws://localhost:8080");
+    assert_eq!(client.mode(), ClientMode::Simulation);
+    assert!(!client.is_connected_status());
 }

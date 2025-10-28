@@ -18,12 +18,14 @@ use commands::{
     // Temporarily disabled - requires agent crate
     // authz::{handle_authz_command, AuthzCommand},
     common,
+    frost::{self, FrostCommand},
     init,
-    // network::{handle_network_command, NetworkCommand},
-    // node::{handle_node_command, NodeCommand},
+    network::{handle_network_command, NetworkCommand},
+    node::{handle_node_command, NodeCommand},
     scenarios::{handle_scenarios_command, ScenariosArgs},
     status,
-    // storage::{handle_storage_command, StorageCommand},
+    storage::{handle_storage_command, StorageCommand},
+    threshold::{handle_threshold_command, ThresholdCommand},
 };
 
 #[derive(Parser)]
@@ -64,21 +66,26 @@ enum Commands {
 
     /// Scenario management and execution
     Scenarios(ScenariosArgs),
-    // Temporarily disabled - requires agent crate
-    // /// Start an Aura node with optional dev console
-    // Node(NodeCommand),
+    /// Start an Aura node with optional dev console
+    Node(NodeCommand),
+    /// Test threshold signature operations
+    Threshold(ThresholdCommand),
+
+    /// FROST threshold signature operations
+    #[command(subcommand)]
+    Frost(FrostCommand),
     //
     // /// Authorization commands - permission management (what you can do)
     // #[command(subcommand)]
     // Authz(AuthzCommand),
     //
-    // /// Storage operations with capability protection
-    // #[command(subcommand)]
-    // Storage(StorageCommand),
+    /// Storage operations with capability protection
+    #[command(subcommand)]
+    Storage(StorageCommand),
     //
-    // /// Network and CGKA operations
-    // #[command(subcommand)]
-    // Network(NetworkCommand),
+    /// Network and CGKA operations
+    #[command(subcommand)]
+    Network(NetworkCommand),
 }
 
 #[tokio::main]
@@ -110,25 +117,33 @@ async fn main() -> Result<()> {
         Commands::Scenarios(args) => {
             handle_scenarios_command(args)?;
         } // Temporarily disabled - requires agent crate
-          // Commands::Node(cmd) => {
-          //     let config = common::load_config(&cli.config).await?;
-          //     handle_node_command(cmd, &config).await?;
-          // }
-          //
-          // Commands::Authz(cmd) => {
-          //     let config = common::load_config(&cli.config).await?;
-          //     handle_authz_command(cmd, &config).await?;
-          // }
-          //
-          // Commands::Storage(cmd) => {
-          //     let config = common::load_config(&cli.config).await?;
-          //     handle_storage_command(cmd, &config).await?;
-          // }
-          //
-          // Commands::Network(cmd) => {
-          //     let config = common::load_config(&cli.config).await?;
-          //     handle_network_command(cmd, &config).await?;
-          // }
+        Commands::Node(cmd) => {
+            let config = common::load_config(&cli.config).await?;
+            handle_node_command(cmd, &config).await?;
+        }
+
+        Commands::Threshold(cmd) => {
+            handle_threshold_command(cmd).await?;
+        }
+
+        Commands::Frost(cmd) => {
+            frost::run(cmd).await?;
+        }
+        //
+        // Commands::Authz(cmd) => {
+        //     let config = common::load_config(&cli.config).await?;
+        //     handle_authz_command(cmd, &config).await?;
+        // }
+        //
+        Commands::Storage(cmd) => {
+            let config = common::load_config(&cli.config).await?;
+            handle_storage_command(cmd, &config).await?;
+        }
+        //
+        Commands::Network(cmd) => {
+            let config = common::load_config(&cli.config).await?;
+            handle_network_command(cmd, &config).await?;
+        }
     }
 
     Ok(())

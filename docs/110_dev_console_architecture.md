@@ -21,7 +21,7 @@ The console uses a **client-server architecture** with clear separation between 
 │ Aura Dev Console (Browser)                                       │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │ UI Layer (Leptos → HTML/CSS/JS)                            │ │
+│  │ UI Layer (Leptos -> HTML/CSS/JS)                            │ │
 │  │                                                             │ │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐                 │ │
 │  │  │ Simulate │  │   Live   │  │ Scenario │                 │ │
@@ -192,14 +192,14 @@ Responsibilities:
 
 **Protocol** (WebSocket JSON-RPC):
 ```json
-// Client → Server
+// Client -> Server
 {"method": "step", "params": {"count": 10}}
 {"method": "run_until_idle", "params": {}}
 {"method": "seek_to_tick", "params": {"tick": 1500}}
 {"method": "checkpoint", "params": {"label": "before_dkd"}}
 {"method": "inject_message", "params": {"to": "alice", "message": {...}}}
 
-// Server → Client (streaming)
+// Server -> Client (streaming)
 {"event": "tick", "data": {"tick": 1500}}
 {"event": "trace_events", "data": [{"tick": 1500, "type": "MessageSent", ...}]}
 {"event": "violation", "data": {"property": "commitment_validity", ...}}
@@ -253,7 +253,7 @@ impl InstrumentationServer {
 - **Full P2P transport**: SBB gossip, peer discovery, all normal Aura networking
 - **Instrumentation is observation only**: Taps into existing trace streams
 - **Commands use real APIs**: `inject_message` calls `IntegratedAgent.send_message()` which uses P2P transport
-- **No relay**: WebSocket is purely for dev console ↔ local node communication
+- **No relay**: WebSocket is purely for dev console <-> local node communication
 - **Normal Aura node**: Can participate in real network, not a special "console mode"
 
 **Running Live Mode**:
@@ -337,7 +337,7 @@ WASM LiveNetworkClient.send_command()
   - Serialize command to JSON-RPC
   - Send via instrumentation WebSocket
   ↓
-WebSocket → Instrumentation Server (ws://localhost:9003)
+WebSocket -> Instrumentation Server (ws://localhost:9003)
   ↓
 InstrumentationServer.handle_command(InjectMessage { to, msg })
   ↓
@@ -418,7 +418,7 @@ All views re-render to show state at tick 1000:
 **UI Controls**:
 ```
 ┌─────────────────────────────────────────────────────┐
-│ ▶ Play | ⏸ Pause | ⏭ Step | ⏮ Reset              │
+│ ▶ Play |  Pause |  Step |  Reset              │
 │ Speed: [========●====] 2.5x                        │
 │ Tick: 1247 / 5000                                  │
 └─────────────────────────────────────────────────────┘
@@ -499,8 +499,8 @@ All views re-render to show state at tick 1000:
 - Color-coded by participant type and status
 - Animated message flow along edges
 - Partition visualization (separate clusters)
-- Click node → inspect state
-- Hover edge → see message details
+- Click node -> inspect state
+- Hover edge -> see message details
 
 **Visual Encoding**:
 - Node color: Green (honest), Red (Byzantine), Gray (offline)
@@ -570,19 +570,19 @@ All views re-render to show state at tick 1000:
 
 **DKD Choreography**:
 ```
-[Init] → [Commitment] → [Reveal] → [Finalize]
+[Init] -> [Commitment] -> [Reveal] -> [Finalize]
    ↓                                     ↓
-[Abort] ← ← ← ← ← ← ← ← ← ← ← ← ← ← [Complete]
+[Abort] <- <- <- <- <- <- <- <- <- <- <- <- <- <- [Complete]
 ```
 
 **FROST Signing**:
 ```
-[Idle] → [Commitment Phase] → [Signing Phase] → [Aggregate] → [Complete]
+[Idle] -> [Commitment Phase] -> [Signing Phase] -> [Aggregate] -> [Complete]
 ```
 
 **Recovery Flow**:
 ```
-[Request] → [Guardian Approval] → [Cooldown] → [Share Submission] → [Resharing] → [Complete]
+[Request] -> [Guardian Approval] -> [Cooldown] -> [Share Submission] -> [Resharing] -> [Complete]
 ```
 
 ### Event Log
@@ -684,11 +684,11 @@ Initiated DKD session dkd-session-1
 Participants: alice, bob, carol
 
 >> step 5
-Tick 1: alice → commitment → bob, carol
-Tick 2: bob → commitment → alice, carol
-Tick 3: carol → invalid_commitment → alice, bob
-Tick 4: alice → abort → bob
-Tick 5: bob → abort_ack → alice
+Tick 1: alice -> commitment -> bob, carol
+Tick 2: bob -> commitment -> alice, carol
+Tick 3: carol -> invalid_commitment -> alice, bob
+Tick 4: alice -> abort -> bob
+Tick 5: bob -> abort_ack -> alice
 
 >> violations
 PropertyViolation {
@@ -730,19 +730,19 @@ The console distinguishes between **scripted scenarios** (reproducible, determin
 Timeline View with Branches:
 
 Main (scenario: dkd-basic.toml, seed: 42)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━→
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━->
 tick 0   tick 50   tick 100  tick 150  tick 200
   │        │          │         │         │
   ●────────●──────────●─────────●─────────● (checkpoints)
            │                    │
-           │                    └─→ Interactive Branch 2 (seed: 789)
+           │                    └─-> Interactive Branch 2 (seed: 789)
            │                        "What if alice goes offline?"
-           │                        ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈→
+           │                        ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈->
            │                        tick 150  tick 180
            │
-           └─→ Interactive Branch 1 (seed: 456)
+           └─-> Interactive Branch 1 (seed: 456)
                "Injected malformed DKD commitment"
-               ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈→
+               ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈->
                tick 50   tick 75   tick 100
 
 Legend:
@@ -779,7 +779,7 @@ Any REPL command that modifies simulation state creates a new branch:
 
 ```bash
 >> step 50
-Main branch: tick 0 → 50
+Main branch: tick 0 -> 50
 
 >> inject alice malformed_dkd_commitment
 [WARN]  This command will fork the simulation.
@@ -789,7 +789,7 @@ Created branch: interactive-1 (seed: 456, forked from main@tick50)
 Switched to branch: interactive-1
 
 >> step 10
-Interactive-1: tick 50 → 60
+Interactive-1: tick 50 -> 60
 [Malformed commitment causes protocol abort]
 
 >> branches
@@ -824,7 +824,7 @@ Switched to branch: interactive-1
 Current tick: 60
 
 >> step 20
-Interactive-1: tick 60 → 80
+Interactive-1: tick 60 -> 80
 
 >> checkout main
 Switched to branch: main
@@ -885,7 +885,7 @@ Created new scenario: test-malformed-commitment.toml
 │ Timeline                        Branch: main ▼          │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
-│ Main ━━━━━━━━●━━━━━━━━●━━━━━━━━●━━━━━━━━━→              │
+│ Main ━━━━━━━━●━━━━━━━━●━━━━━━━━●━━━━━━━━━->              │
 │      0       50      100      150      200              │
 │               │                │                        │
 │               │                └┈┈┈┈┈┈ Interactive-2    │
@@ -1231,7 +1231,7 @@ let matches = analyzer.find_pattern(|e| {
 
 ## Technology Stack
 
-### Backend (Rust → WASM)
+### Backend (Rust -> WASM)
 
 **Core Libraries**:
 - `wasm-bindgen`: JavaScript/WASM interop
@@ -1402,7 +1402,7 @@ body {
 ```
 aura/
 ├── crates/
-│   ├── console-core/              # Console backend (Rust → WASM)
+│   ├── console-core/              # Console backend (Rust -> WASM)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs             # WASM entry point

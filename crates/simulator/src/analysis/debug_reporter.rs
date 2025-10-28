@@ -1210,12 +1210,7 @@ impl DebugReporter {
                 .failure_analysis
                 .causal_chains
                 .iter()
-                .flat_map(|chain| {
-                    chain
-                        .events
-                        .iter()
-                        .flat_map(|e| e.participants.clone())
-                })
+                .flat_map(|chain| chain.events.iter().flat_map(|e| e.participants.clone()))
                 .collect::<std::collections::HashSet<_>>()
                 .into_iter()
                 .collect(),

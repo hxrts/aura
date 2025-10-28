@@ -283,6 +283,7 @@ impl TimeTravelDebugger {
                                 violation_state: crate::testing::SimulationState {
                                     tick: event.tick,
                                     time: 0, // TraceEvent doesn't have time field, default to 0
+                                    variables: std::collections::HashMap::new(),
                                     participants: Vec::new(),
                                     protocol_state: crate::testing::ProtocolMonitoringState {
                                         active_sessions: Vec::new(),
@@ -292,16 +293,16 @@ impl TimeTravelDebugger {
                                     network_state: crate::testing::NetworkStateSnapshot {
                                         partitions: Vec::new(),
                                         message_stats: crate::testing::MessageDeliveryStats {
-                                            total_sent: 0,
-                                            total_delivered: 0,
-                                            total_dropped: 0,
+                                            messages_sent: 0,
+                                            messages_delivered: 0,
+                                            messages_dropped: 0,
                                             average_latency_ms: 0.0,
                                         },
                                         failure_conditions:
                                             crate::testing::NetworkFailureConditions {
                                                 drop_rate: 0.0,
-                                                latency_range: (0, 100),
-                                                partition_count: 0,
+                                                latency_range_ms: (0, 100),
+                                                partitions_active: false,
                                             },
                                     },
                                 },

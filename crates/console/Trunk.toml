@@ -1,8 +1,11 @@
 [build]
 public_url = "/"
+dist = "dist"
+preload = false
 
 [serve]
 port = 8080
+addresses = ["127.0.0.1"]
 
 [watch]
-watch = ["src"]
+watch = ["src", "index.html", "tailwind.css", "tailwind.config.js", "public/fonts.css"]

@@ -5,6 +5,7 @@
 //! multiple protocols simultaneously while maintaining session type safety.
 
 use crate::execution::ProtocolError;
+use crate::LifecycleScheduler;
 use crate::session_types::agent::AgentIdleOperations;
 use crate::session_types::{
     new_session_typed_agent,
@@ -593,21 +594,20 @@ impl LocalSessionRuntime {
         ));
         let transport = Arc::new(crate::StubTransport) as Arc<dyn crate::Transport>;
 
-        // Create protocol context with all necessary setup
-        let mut protocol_ctx = crate::ProtocolContext::new_dkd(
-            session_id,
-            self.device_id.0,
+        // Execute DKD through LifecycleScheduler
+        let scheduler = LifecycleScheduler::with_effects(self.effects.clone());
+        match scheduler.execute_dkd(
+            Some(session_id.into()), // session_id - convert Uuid to SessionId
+            self.account_id,
+            self.device_id,
+            app_id.clone(),
+            context_label.clone(),
             participants.clone(),
-            Some(threshold),
-            ledger,
-            transport,
-            self.effects.clone(),
-            ed25519_dalek::SigningKey::from_bytes(&self.effects.random_bytes::<32>()), // Mock device signing key
-            Box::new(crate::ProductionTimeSource::new()),
-        );
-
-        // Execute DKD choreography with context
-        match crate::protocols::dkd_choreography(&mut protocol_ctx, context_bytes).await {
+            threshold as u16,
+            context_bytes,
+            Some(ledger),
+            Some(transport),
+        ).await {
             Ok(dkd_result) => {
                 let derived_key_bytes = dkd_result.derived_key;
                 // Create binding proof if requested

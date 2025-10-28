@@ -5,8 +5,8 @@
 
 use crate::production_transport::{ProductionTransport, TransportConfig};
 use crate::{AgentError, Result};
-use aura_types::{DeviceId};
-use aura_journal::{SessionTicket};
+use aura_journal::SessionTicket;
+use aura_types::DeviceId;
 use std::sync::Arc;
 use tracing::{debug, info};
 use uuid::Uuid;
@@ -79,7 +79,7 @@ impl TransportReplacementDemo {
         let transport = ProductionTransport::new(device_id, config).await?;
 
         info!("ProductionTransport created with real P2P capabilities");
-        debug!("Transport features: connectivity ✓, routing ✓, reliability ✓, monitoring ✓");
+        debug!("Transport features: connectivity [OK], routing [OK], reliability [OK], monitoring [OK]");
 
         Ok(Arc::new(transport))
     }
@@ -208,12 +208,12 @@ pub fn demonstrate_transport_benefits() {
     println!("- Production-ready implementation\n");
 
     println!("=== Key Improvements ===");
-    println!("✓ Real network connectivity for distributed protocols");
-    println!("✓ Reliable message delivery with retry policies");
-    println!("✓ Connection management and monitoring");
-    println!("✓ Production-ready transport layer");
-    println!("✓ Comprehensive error handling and recovery");
-    println!("✓ Performance monitoring and metrics collection");
+    println!("[OK] Real network connectivity for distributed protocols");
+    println!("[OK] Reliable message delivery with retry policies");
+    println!("[OK] Connection management and monitoring");
+    println!("[OK] Production-ready transport layer");
+    println!("[OK] Comprehensive error handling and recovery");
+    println!("[OK] Performance monitoring and metrics collection");
 }
 
 #[cfg(test)]

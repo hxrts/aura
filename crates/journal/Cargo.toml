@@ -16,6 +16,8 @@ workspace = true
 aura-errors = { path = "../aura-errors" }
 aura-crypto = { path = "../crypto" }
 aura-types = { path = "../aura-types" }
+protocol-core = { path = "../protocol-core" }
+keyhive_core = { workspace = true }
 # aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
 
 # CRDT

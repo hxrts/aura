@@ -7,7 +7,7 @@ use aura_agent::{
     Agent, AgentFactory, BootstrapConfig, CoordinatingAgent, ProtocolCompleted, ProtocolStatus,
     Storage, Transport, UnifiedAgent,
 };
-use aura_types::{DeviceId, AccountId, GuardianId};
+use aura_types::{AccountId, DeviceId, GuardianId};
 use std::sync::Arc;
 use uuid::Uuid;
 

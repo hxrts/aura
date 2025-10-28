@@ -12,7 +12,7 @@ This document outlines the testing approach for the Aura Dev Console, including 
 4. **Cross-Browser Compatibility**: Tested in Chrome, Firefox, and Safari
 5. **Documentation Testing**: All documentation examples have been verified
 
-### 🚧 Planned Testing (Future Implementation)
+### Planned Testing (Future Implementation)
 
 The following tests are outlined but not yet implemented due to the complexity of setting up WASM testing infrastructure:
 

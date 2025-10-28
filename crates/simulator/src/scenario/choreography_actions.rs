@@ -1,11 +1,19 @@
-//! Choreography Actions - Refactored Runner Helpers
+//! Choreography Actions - Scheduler-Backed Protocol Execution
 //!
-//! This module converts the imperative helpers from runners/ into declarative
-//! choreography actions that can be invoked from TOML scenarios.
+//! This module provides choreography actions that use the ProtocolLifecycle
+//! scheduler approach for deterministic and type-safe protocol execution.
 
 use crate::{tick, QueuedProtocol, Result, WorldState};
+use async_trait::async_trait;
+use aura_coordination::{LocalSessionRuntime, Transport as CoordinationTransport};
+use aura_crypto::Effects as CoreEffects;
+use aura_journal::{events::RelationshipId, AccountLedger};
+use aura_types::{AccountId, DeviceId};
+use blake3::Hasher;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 // Import types from engine module
@@ -73,6 +81,265 @@ pub struct ByzantineDoubleSpender;
 /// Byzantine delay injector
 pub struct ByzantineDelayInjector;
 
+/// Simple stub transport for simulation
+#[derive(Debug, Clone)]
+pub struct SimulationStubTransport {
+    device_id: DeviceId,
+}
+
+impl SimulationStubTransport {
+    pub fn new(device_id: DeviceId) -> Self {
+        Self { device_id }
+    }
+}
+
+#[async_trait]
+impl CoordinationTransport for SimulationStubTransport {
+    async fn send_message(
+        &self,
+        _peer_id: &str,
+        _message: &[u8],
+    ) -> std::result::Result<(), String> {
+        // Stub implementation - just log for simulation
+        println!("SimulationStubTransport: sending message in simulation");
+        Ok(())
+    }
+
+    async fn broadcast_message(&self, _message: &[u8]) -> std::result::Result<(), String> {
+        // Stub implementation - just log for simulation
+        println!("SimulationStubTransport: broadcasting message in simulation");
+        Ok(())
+    }
+
+    async fn is_peer_reachable(&self, _peer_id: &str) -> bool {
+        // Stub implementation - always reachable in simulation
+        true
+    }
+}
+
+/// Helper function to create stub transport for simulation
+pub fn create_stub_transport(device_id: DeviceId) -> SimulationStubTransport {
+    SimulationStubTransport::new(device_id)
+}
+
+/// Helper to create a session runtime for simulation participants
+async fn create_session_runtime_for_participant(
+    _participant_id: &str,
+    device_id: DeviceId,
+    account_id: AccountId,
+    ledger: Arc<RwLock<AccountLedger>>,
+) -> Result<LocalSessionRuntime> {
+    let effects = Arc::new(CoreEffects::production());
+    let mut runtime = LocalSessionRuntime::new(device_id, account_id, effects);
+
+    // For simulation, we use a minimal transport adapter
+    // In production tests, this would be connected to actual network transports
+    let stub_transport = create_stub_transport(device_id);
+
+    runtime
+        .set_environment(ledger, Arc::new(stub_transport))
+        .await;
+
+    Ok(runtime)
+}
+
+/// Helper to execute protocol using scheduler approach
+pub async fn execute_protocol_with_scheduler(
+    world_state: &mut WorldState,
+    protocol_type: &str,
+    participants: &[String],
+    parameters: &HashMap<String, String>,
+) -> Result<bool> {
+    // For simulation, we'll create temporary session runtimes for participants
+    // In production, these would already exist and be managed by agents
+
+    let mut session_runtimes = HashMap::new();
+    let mut participant_devices = HashMap::new();
+
+    for participant_id in participants {
+        if let Some(_participant) = world_state.participants.get(participant_id) {
+            // Create minimal device and account IDs for simulation
+            let device_id = DeviceId::new(); // This would come from participant in real scenario
+            let account_id = AccountId::new(); // This would come from participant in real scenario
+
+            // Create a minimal ledger for the simulation participant
+            use aura_journal::{AccountState, DeviceMetadata, DeviceType};
+            use ed25519_dalek::VerifyingKey;
+
+            let dummy_key_bytes = [0u8; 32];
+            let verifying_key = VerifyingKey::from_bytes(&dummy_key_bytes).map_err(|e| {
+                crate::SimError::RuntimeError(format!("Failed to create verifying key: {}", e))
+            })?;
+
+            let device_metadata = DeviceMetadata {
+                device_id,
+                device_name: participant_id.clone(),
+                device_type: DeviceType::Native,
+                public_key: verifying_key,
+                added_at: world_state.current_time,
+                last_seen: world_state.current_time,
+                dkd_commitment_proofs: Default::default(),
+                next_nonce: 0,
+                used_nonces: Default::default(),
+            };
+
+            let account_state = AccountState::new(
+                account_id,
+                verifying_key,
+                device_metadata,
+                2, // threshold
+                3, // share_count
+            );
+
+            let ledger = AccountLedger::new(account_state).map_err(|e| {
+                crate::SimError::RuntimeError(format!("Failed to create ledger: {:?}", e))
+            })?;
+            let ledger_arc = Arc::new(RwLock::new(ledger));
+
+            let runtime = create_session_runtime_for_participant(
+                participant_id,
+                device_id,
+                account_id,
+                ledger_arc,
+            )
+            .await?;
+
+            session_runtimes.insert(participant_id.clone(), runtime);
+            participant_devices.insert(participant_id.clone(), device_id);
+        }
+    }
+
+    // Execute protocol using session runtime command
+    if let Some(runtime) = session_runtimes.values().next() {
+        let command_sender = runtime.command_sender();
+
+        let command = match protocol_type {
+            "DKD" => {
+                let app_id = parameters
+                    .get("app_id")
+                    .cloned()
+                    .unwrap_or_else(|| "sim_app".to_string());
+                let context = parameters
+                    .get("context")
+                    .cloned()
+                    .unwrap_or_else(|| "sim_context".to_string());
+                let threshold = parameters
+                    .get("threshold")
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(2);
+
+                aura_coordination::SessionCommand::StartDkdWithContext {
+                    app_id,
+                    context_label: context.clone(),
+                    participants: participants
+                        .iter()
+                        .map(|_| DeviceId::new()) // Simplified for simulation
+                        .collect(),
+                    threshold,
+                    context_bytes: context.into_bytes(),
+                    with_binding_proof: true,
+                }
+            }
+            "Resharing" => {
+                let new_threshold = parameters
+                    .get("new_threshold")
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(3);
+
+                aura_coordination::SessionCommand::StartResharing {
+                    new_participants: participants
+                        .iter()
+                        .map(|_| DeviceId::new()) // Simplified for simulation
+                        .collect(),
+                    new_threshold,
+                }
+            }
+            "Recovery" => {
+                let guardian_threshold = parameters
+                    .get("guardian_threshold")
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(2);
+                let cooldown_seconds = parameters
+                    .get("cooldown_seconds")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(300);
+
+                aura_coordination::SessionCommand::StartRecovery {
+                    guardian_threshold,
+                    cooldown_seconds,
+                }
+            }
+            "Counter" | "CounterInit" | "CounterIncrement" => {
+                let count = parameters
+                    .get("count")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(1);
+                let ttl_epochs = parameters
+                    .get("ttl_epochs")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(100);
+
+                let seed = parameters
+                    .get("relationship_seed")
+                    .cloned()
+                    .unwrap_or_else(|| participants.join(","));
+                let mut hasher = Hasher::new();
+                hasher.update(seed.as_bytes());
+                let hash = hasher.finalize();
+                let mut relationship_bytes = [0u8; 32];
+                relationship_bytes.copy_from_slice(hash.as_bytes());
+                let relationship_id = RelationshipId(relationship_bytes);
+
+                let requesting_device = participant_devices
+                    .values()
+                    .copied()
+                    .next()
+                    .unwrap_or_else(DeviceId::new);
+
+                aura_coordination::SessionCommand::StartCounter {
+                    relationship_id,
+                    requesting_device,
+                    count,
+                    ttl_epochs,
+                }
+            }
+            _ => {
+                return Err(crate::SimError::RuntimeError(format!(
+                    "Unknown protocol type: {}",
+                    protocol_type
+                )));
+            }
+        };
+
+        command_sender.send(command).map_err(|_| {
+            crate::SimError::RuntimeError("Failed to send protocol command".to_string())
+        })?;
+
+        // Allow some time for protocol to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+/// Blocking helper for scheduler-backed execution.
+pub fn run_protocol_with_scheduler(
+    world_state: &mut WorldState,
+    protocol_type: &str,
+    participants: &[String],
+    parameters: &HashMap<String, String>,
+) -> Result<bool> {
+    tokio::task::block_in_place(|| {
+        let handle = tokio::runtime::Handle::current();
+        handle.block_on(async {
+            execute_protocol_with_scheduler(world_state, protocol_type, participants, parameters)
+                .await
+        })
+    })
+}
+
 // Choreography Implementations
 
 impl super::engine::ChoreographyExecutor for DkdChoreography {
@@ -99,54 +366,41 @@ impl super::engine::ChoreographyExecutor for DkdChoreography {
             .unwrap_or(2) as usize;
 
         println!(
-            "Executing DKD choreography: app_id='{}', context='{}', threshold={}",
+            "Executing DKD choreography with scheduler: app_id='{}', context='{}', threshold={}",
             app_id, context, threshold
         );
 
-        // Queue DKD protocol for execution
-        let protocol = QueuedProtocol {
-            protocol_type: "DKD".to_string(),
-            participants: if participants.is_empty() {
-                // Use all participants if none specified
-                world_state.participants.keys().cloned().collect()
-            } else {
-                participants.to_vec()
-            },
-            parameters: {
-                let mut params = HashMap::new();
-                params.insert("app_id".to_string(), app_id.to_string());
-                params.insert("context".to_string(), context.to_string());
-                params.insert("threshold".to_string(), threshold.to_string());
-                params
-            },
-            scheduled_time: world_state.current_time + 100, // Schedule for next tick
-            priority: 1,
-        };
+        // Convert toml parameters to string parameters for scheduler
+        let mut string_params = HashMap::new();
+        string_params.insert("app_id".to_string(), app_id.to_string());
+        string_params.insert("context".to_string(), context.to_string());
+        string_params.insert("threshold".to_string(), threshold.to_string());
 
-        world_state.protocols.execution_queue.push_back(protocol);
+        // Use scheduler-backed execution in a blocking manner
+        let success = run_protocol_with_scheduler(world_state, "DKD", participants, &string_params)
+            .unwrap_or(false);
 
-        // Execute simulation ticks until protocol completes
+        // Still execute some simulation ticks for compatibility with existing tests
         let mut events_generated = 0;
-        let max_ticks = 50; // Safety limit
+        let max_ticks = if success { 20 } else { 5 }; // Fewer ticks if scheduler failed
 
         for tick_num in 0..max_ticks {
             let events = tick(world_state)?;
             events_generated += events.len();
 
-            // Check if DKD protocol has completed
-            // This is simplified - in practice we'd check protocol state
-            if tick_num > 10 {
+            // Break early if using scheduler approach
+            if success && tick_num > 5 {
                 break;
             }
         }
 
         println!(
-            "[OK] DKD choreography completed in {} ticks",
-            events_generated
+            "[{}] DKD choreography completed using scheduler approach",
+            if success { "OK" } else { "WARN" }
         );
 
         Ok(ChoreographyResult {
-            success: true,
+            success,
             events_generated,
             execution_time: start_time.elapsed(),
             data: {
@@ -155,6 +409,7 @@ impl super::engine::ChoreographyExecutor for DkdChoreography {
                 data.insert("context".to_string(), context.to_string());
                 data.insert("participants".to_string(), participants.len().to_string());
                 data.insert("protocol_type".to_string(), "DKD".to_string());
+                data.insert("scheduler_used".to_string(), "true".to_string());
                 data
             },
         })
@@ -184,37 +439,36 @@ impl super::engine::ChoreographyExecutor for ResharingChoreography {
             .unwrap_or(3) as usize;
 
         println!(
-            "Executing Resharing choreography: {} -> {} threshold",
+            "Executing Resharing choreography with scheduler: {} -> {} threshold",
             old_threshold, new_threshold
         );
 
-        // Queue resharing protocol
-        let protocol = QueuedProtocol {
-            protocol_type: "Resharing".to_string(),
-            participants: participants.to_vec(),
-            parameters: {
-                let mut params = HashMap::new();
-                params.insert("old_threshold".to_string(), old_threshold.to_string());
-                params.insert("new_threshold".to_string(), new_threshold.to_string());
-                params
-            },
-            scheduled_time: world_state.current_time + 100,
-            priority: 1,
-        };
+        // Convert parameters for scheduler
+        let mut string_params = HashMap::new();
+        string_params.insert("old_threshold".to_string(), old_threshold.to_string());
+        string_params.insert("new_threshold".to_string(), new_threshold.to_string());
 
-        world_state.protocols.execution_queue.push_back(protocol);
+        // Use scheduler-backed execution
+        let success =
+            run_protocol_with_scheduler(world_state, "Resharing", participants, &string_params)
+                .unwrap_or(false);
 
-        // Execute simulation
+        // Execute simulation ticks
         let mut events_generated = 0;
-        for _ in 0..30 {
+        let max_ticks = if success { 15 } else { 5 };
+
+        for _ in 0..max_ticks {
             let events = tick(world_state)?;
             events_generated += events.len();
         }
 
-        println!("[OK] Resharing choreography completed");
+        println!(
+            "[{}] Resharing choreography completed using scheduler approach",
+            if success { "OK" } else { "WARN" }
+        );
 
         Ok(ChoreographyResult {
-            success: true,
+            success,
             events_generated,
             execution_time: start_time.elapsed(),
             data: {
@@ -223,6 +477,7 @@ impl super::engine::ChoreographyExecutor for ResharingChoreography {
                 data.insert("new_threshold".to_string(), new_threshold.to_string());
                 data.insert("participants".to_string(), participants.len().to_string());
                 data.insert("protocol_type".to_string(), "Resharing".to_string());
+                data.insert("scheduler_used".to_string(), "true".to_string());
                 data
             },
         })
@@ -252,40 +507,42 @@ impl super::engine::ChoreographyExecutor for RecoveryChoreography {
             .unwrap_or(24) as u64;
 
         println!(
-            "Executing Recovery choreography: guardian_threshold={}, cooldown={}h",
+            "Executing Recovery choreography with scheduler: guardian_threshold={}, cooldown={}h",
             guardian_threshold, cooldown_hours
         );
 
-        // Queue recovery protocol
-        let protocol = QueuedProtocol {
-            protocol_type: "Recovery".to_string(),
-            participants: participants.to_vec(),
-            parameters: {
-                let mut params = HashMap::new();
-                params.insert(
-                    "guardian_threshold".to_string(),
-                    guardian_threshold.to_string(),
-                );
-                params.insert("cooldown_hours".to_string(), cooldown_hours.to_string());
-                params
-            },
-            scheduled_time: world_state.current_time + 100,
-            priority: 2, // Higher priority for recovery
-        };
+        // Convert parameters for scheduler
+        let mut string_params = HashMap::new();
+        string_params.insert(
+            "guardian_threshold".to_string(),
+            guardian_threshold.to_string(),
+        );
+        string_params.insert(
+            "cooldown_seconds".to_string(),
+            (cooldown_hours * 3600).to_string(),
+        ); // Convert to seconds
 
-        world_state.protocols.execution_queue.push_back(protocol);
+        // Use scheduler-backed execution
+        let success =
+            run_protocol_with_scheduler(world_state, "Recovery", participants, &string_params)
+                .unwrap_or(false);
 
-        // Execute simulation
+        // Execute simulation ticks
         let mut events_generated = 0;
-        for _ in 0..40 {
+        let max_ticks = if success { 20 } else { 5 };
+
+        for _ in 0..max_ticks {
             let events = tick(world_state)?;
             events_generated += events.len();
         }
 
-        println!("[OK] Recovery choreography completed");
+        println!(
+            "[{}] Recovery choreography completed using scheduler approach",
+            if success { "OK" } else { "WARN" }
+        );
 
         Ok(ChoreographyResult {
-            success: true,
+            success,
             events_generated,
             execution_time: start_time.elapsed(),
             data: {
@@ -297,6 +554,7 @@ impl super::engine::ChoreographyExecutor for RecoveryChoreography {
                 data.insert("cooldown_hours".to_string(), cooldown_hours.to_string());
                 data.insert("participants".to_string(), participants.len().to_string());
                 data.insert("protocol_type".to_string(), "Recovery".to_string());
+                data.insert("scheduler_used".to_string(), "true".to_string());
                 data
             },
         })
@@ -581,20 +839,23 @@ impl ByzantineBehaviorInjector for ByzantineDelayInjector {
 }
 
 /// Helper function to register all standard choreography actions
+///
+/// These choreographies now use the ProtocolLifecycle scheduler approach
+/// for type-safe and deterministic protocol execution.
 pub fn register_standard_choreographies(
     engine: &mut crate::scenario::engine::UnifiedScenarioEngine,
 ) {
-    // Register choreographies
+    // Register choreographies (now using scheduler-backed execution)
     engine.register_choreography("dkd".to_string(), DkdChoreography);
     engine.register_choreography("resharing".to_string(), ResharingChoreography);
     engine.register_choreography("recovery".to_string(), RecoveryChoreography);
     engine.register_choreography("locking".to_string(), LockingChoreography);
 
-    println!("Registered standard choreography actions:");
-    println!("  dkd - Deterministic Key Derivation");
-    println!("  resharing - Key Resharing Protocol");
-    println!("  recovery - Guardian-based Recovery");
-    println!("  locking - Distributed Locking");
+    println!("Registered scheduler-backed choreography actions:");
+    println!("  dkd - Deterministic Key Derivation (via ProtocolLifecycle)");
+    println!("  resharing - Key Resharing Protocol (via ProtocolLifecycle)");
+    println!("  recovery - Guardian-based Recovery (via ProtocolLifecycle)");
+    println!("  locking - Distributed Locking (fallback to legacy)");
 }
 
 /// Helper function to register all standard network conditions

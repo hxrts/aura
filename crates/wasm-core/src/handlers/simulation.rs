@@ -20,6 +20,12 @@ impl SimulationHandler {
     }
 }
 
+impl Default for SimulationHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClientHandler for SimulationHandler {
     fn handle_message(&mut self, data: &str) -> WasmResult<()> {
         console_log!("[Simulation] Received message: {}", data);

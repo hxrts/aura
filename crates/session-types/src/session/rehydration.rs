@@ -151,34 +151,34 @@ pub enum CrashRecoveryError {
 
     /// Protocol rehydration failed
     #[error("Failed to rehydrate protocol {protocol_id}: {error}")]
-    RehydrationFailed { 
+    RehydrationFailed {
         /// Identifier of the protocol that failed to rehydrate
-        protocol_id: Uuid, 
+        protocol_id: Uuid,
         /// Error message describing the failure
-        error: String 
+        error: String,
     },
 
     /// Conflicting evidence found
     #[error("Conflicting evidence for protocol {protocol_id}: {details}")]
-    ConflictingEvidence { 
+    ConflictingEvidence {
         /// Identifier of the protocol with conflicting evidence
-        protocol_id: Uuid, 
+        protocol_id: Uuid,
         /// Details about the conflicting evidence
-        details: String 
+        details: String,
     },
 
     /// Evidence corruption detected
     #[error("Evidence corruption detected for protocol {protocol_id}")]
-    CorruptedEvidence { 
+    CorruptedEvidence {
         /// Identifier of the protocol with corrupted evidence
-        protocol_id: Uuid 
+        protocol_id: Uuid,
     },
 
     /// Journal is inconsistent
     #[error("Journal inconsistency detected: {details}")]
-    JournalInconsistency { 
+    JournalInconsistency {
         /// Details about the journal inconsistency
-        details: String 
+        details: String,
     },
 
     /// Protocol version mismatch

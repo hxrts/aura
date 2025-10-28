@@ -4,11 +4,13 @@
 //! across all protocol implementations.
 
 use crate::execution::{
-    EventAwaiter, EventBuilder, ProtocolContext, ProtocolError, ProtocolErrorType,
-    Instruction, InstructionResult, EventTypePattern,
+    EventAwaiter, EventBuilder, EventTypePattern, Instruction, InstructionResult, ProtocolContext,
+    ProtocolError, ProtocolErrorType,
 };
-use aura_types::{DeviceId};
-use aura_journal::{Event, EventType, OperationType, ProtocolType, Session, SessionId, ParticipantId};
+use aura_journal::{
+    Event, EventType, OperationType, ParticipantId, ProtocolType, Session, SessionId,
+};
+use aura_types::DeviceId;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
@@ -38,7 +40,8 @@ impl<'a> ProtocolBase<'a> {
 
     /// Create a session for this protocol
     pub async fn create_session(&mut self) -> Result<Session, ProtocolError> {
-        let participants = self.ctx
+        let participants = self
+            .ctx
             .participants()
             .iter()
             .map(|device_id| ParticipantId::Device(*device_id))
@@ -65,10 +68,7 @@ impl<'a> ProtocolBase<'a> {
     pub async fn get_current_epoch(&mut self) -> Result<u64, ProtocolError> {
         match self.ctx.execute(Instruction::GetCurrentEpoch).await? {
             InstructionResult::CurrentEpoch(epoch) => Ok(epoch),
-            _ => Err(self.error(
-                ProtocolErrorType::Other,
-                "Failed to get current epoch"
-            )),
+            _ => Err(self.error(ProtocolErrorType::Other, "Failed to get current epoch")),
         }
     }
 
@@ -192,7 +192,9 @@ macro_rules! emit_event {
 #[macro_export]
 macro_rules! await_events {
     ($base:expr, $patterns:expr, $threshold:expr, $timeout:expr) => {
-        $base.await_threshold($patterns, $threshold, $timeout).await?
+        $base
+            .await_threshold($patterns, $threshold, $timeout)
+            .await?
     };
 }
 

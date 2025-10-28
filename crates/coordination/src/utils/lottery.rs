@@ -6,8 +6,8 @@
 // Uses hash-based lottery: hash(device_id || last_event_hash) to ensure fairness while
 // maintaining determinism.
 
-use aura_types::{DeviceId};
 use aura_journal::{LedgerError, RequestOperationLockEvent, Result};
+use aura_types::DeviceId;
 
 /// Determine lock winner using deterministic lottery
 ///

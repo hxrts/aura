@@ -1,83 +1,124 @@
-//! Session Type States for Journal/Ledger Protocol
-//!
-//! This module provides session type definitions for the CRDT-based authenticated ledger.
-//! Note: These session types are currently placeholders for future implementation.
+//! Journal protocol lifecycle placeholder.
 
-use aura_session_core::{SessionProtocol, SessionState};
-use aura_types::DeviceId;
+use aura_types::{AccountId, DeviceId, SessionId};
+use protocol_core::{
+    capabilities::{ProtocolCapabilities, ProtocolEffects},
+    lifecycle::{
+        ProtocolDescriptor, ProtocolInput, ProtocolLifecycle, ProtocolRehydration, ProtocolStep,
+    },
+    metadata::{ProtocolMode, ProtocolPriority, ProtocolType},
+    typestate::SessionState,
+};
 use uuid::Uuid;
 
-/// Journal protocol core (placeholder for future implementation)
-#[derive(Debug, Clone)]
-pub struct JournalProtocolCore {
-    pub session_id: Uuid,
-}
-
-/// Journal session error (placeholder for future implementation)
+/// Journal protocol error placeholder.
 #[derive(Debug, thiserror::Error)]
-pub enum JournalSessionError {
-    #[error("Journal protocol error: {0}")]
-    ProtocolError(String),
+pub enum JournalProtocolError {
+    #[error("unsupported journal input: {0}")]
+    Unsupported(&'static str),
 }
 
-/// Ledger empty state (placeholder for future implementation)
+/// Ledger empty typestate marker.
 #[derive(Debug, Clone)]
-pub struct LedgerEmpty;
+pub struct LedgerInitialized;
 
-impl SessionState for LedgerEmpty {
-    const NAME: &'static str = "LedgerEmpty";
+impl SessionState for LedgerInitialized {
+    const NAME: &'static str = "LedgerInitialized";
     const IS_FINAL: bool = false;
     const CAN_TERMINATE: bool = false;
 }
 
-/// Journal protocol state union (placeholder for future implementation)
-#[derive(Debug)]
-pub enum JournalSessionState {
-    LedgerEmpty(LedgerEmpty),
+/// Journal protocol implementing the unified lifecycle trait.
+#[derive(Debug, Clone)]
+pub struct JournalProtocol {
+    descriptor: ProtocolDescriptor,
+    state: LedgerInitialized,
+    finished: bool,
 }
 
-impl SessionProtocol for JournalSessionState {
-    type Error = JournalSessionError;
+impl JournalProtocol {
+    /// Create a new journal protocol instance.
+    pub fn new(device_id: DeviceId, session_id: SessionId) -> Self {
+        let descriptor = ProtocolDescriptor::new(
+            Uuid::new_v4(),
+            session_id,
+            device_id,
+            ProtocolType::Locking,
+        )
+        .with_priority(ProtocolPriority::Normal)
+        .with_mode(ProtocolMode::Asynchronous);
 
-    fn session_id(&self) -> Uuid {
-        match self {
-            JournalSessionState::LedgerEmpty(_) => Uuid::new_v4(),
+        Self {
+            descriptor,
+            state: LedgerInitialized,
+            finished: false,
         }
     }
 
-    fn device_id(&self) -> DeviceId {
-        DeviceId(Uuid::new_v4())
+    /// Convenience helper with generated session ID.
+    #[allow(clippy::disallowed_methods)]
+    pub fn new_ephemeral(device_id: DeviceId) -> Self {
+        Self::new(device_id, SessionId::new())
+    }
+}
+
+impl ProtocolLifecycle for JournalProtocol {
+    type State = LedgerInitialized;
+    type Output = ();
+    type Error = JournalProtocolError;
+
+    fn descriptor(&self) -> &ProtocolDescriptor {
+        &self.descriptor
     }
 
-    fn state_name(&self) -> &'static str {
-        match self {
-            JournalSessionState::LedgerEmpty(_) => LedgerEmpty::NAME,
+    fn step(
+        &mut self,
+        input: ProtocolInput<'_>,
+        _caps: &mut ProtocolCapabilities<'_>,
+    ) -> ProtocolStep<Self::Output, Self::Error> {
+        match input {
+            ProtocolInput::LocalSignal { signal, .. } if signal == "finalize" => {
+                self.finished = true;
+                ProtocolStep::completed(
+                    Vec::<ProtocolEffects>::new(),
+                    None,
+                    Ok(()),
+                )
+            }
+            _ => ProtocolStep::progress(Vec::<ProtocolEffects>::new(), None),
         }
     }
 
     fn is_final(&self) -> bool {
-        match self {
-            JournalSessionState::LedgerEmpty(_) => LedgerEmpty::IS_FINAL,
-        }
-    }
-
-    fn can_terminate(&self) -> bool {
-        match self {
-            JournalSessionState::LedgerEmpty(_) => LedgerEmpty::CAN_TERMINATE,
-        }
+        self.finished
     }
 }
 
-/// Create a new journal protocol instance (placeholder for future implementation)
-pub fn new_session_typed_journal() -> Result<JournalSessionState, JournalSessionError> {
-    Ok(JournalSessionState::LedgerEmpty(LedgerEmpty))
+impl ProtocolRehydration for JournalProtocol {
+    type Evidence = ();
+
+    fn validate_evidence(_evidence: &Self::Evidence) -> bool {
+        true
+    }
+
+    fn rehydrate(
+        device_id: DeviceId,
+        _account_id: AccountId,
+        _evidence: Self::Evidence,
+    ) -> Result<Self, Self::Error> {
+        Ok(Self::new(device_id, SessionId::new()))
+    }
 }
 
-/// Rehydrate journal protocol from evidence (placeholder for future implementation)
-pub fn rehydrate_journal_session() -> Result<JournalSessionState, JournalSessionError> {
-    new_session_typed_journal()
+/// Legacy-compatible constructor.
+pub fn new_journal_protocol(device_id: DeviceId) -> JournalProtocol {
+    JournalProtocol::new_ephemeral(device_id)
 }
 
-// Re-export for compatibility
-pub use JournalSessionState as JournalProtocolState;
-pub type SessionTypedJournal = JournalSessionState;
+/// Legacy-compatible rehydration helper.
+pub fn rehydrate_journal_protocol(
+    device_id: DeviceId,
+    account_id: AccountId,
+) -> Result<JournalProtocol, JournalProtocolError> {
+    JournalProtocol::rehydrate(device_id, account_id, ())
+}

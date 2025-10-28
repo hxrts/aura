@@ -79,26 +79,19 @@ pub use execution::{ProductionTimeSource, ProtocolContext, StubTransport, Transp
 pub mod protocols;
 // Direct exports for core protocols
 pub use protocols::{
-    counter_increment_choreography,
-    counter_range_choreography,
-    // DKD protocol
-    dkd_choreography,
     // Utility protocols
     locking_choreography,
-    new_dkd_protocol,
     new_recovery_protocol,
     new_resharing_protocol,
     nudge_guardian,
     // Recovery protocol
     recovery_choreography,
-    rehydrate_dkd_protocol,
     rehydrate_recovery_protocol,
     rehydrate_resharing_protocol,
     // Resharing protocol
     resharing_choreography,
-    DkdProtocolCore,
-    DkdProtocolState,
-    DkdSessionError,
+    CounterLifecycle,
+    CounterLifecycleError,
     RecoveryProtocolCore,
     RecoveryProtocolState,
     RecoverySessionError,
@@ -106,6 +99,12 @@ pub use protocols::{
     ResharingProtocolState,
     ResharingSessionError,
 };
+
+// Counter choreographic functions removed - use CounterLifecycle through LifecycleScheduler
+
+// ========== Lifecycle Scheduler ==========
+pub mod runtime;
+pub use runtime::lifecycle_scheduler::LifecycleScheduler;
 
 // ========== Tracing and Logging ==========
 pub mod tracing;
@@ -136,12 +135,11 @@ pub use protocols::{
 pub use session_types::{SessionProtocol, SessionTypedProtocol};
 
 // ========== Service Layer Architecture ==========
-pub mod context_builder;
 pub mod coordination_service;
 pub mod protocol_results;
 pub use coordination_service::{
-    CoordinationService, CryptoService, ProtocolContextFactory, ProtocolSetupError, RuntimeStats,
-    SecureStorage, SigningContext,
+    CoordinationService, CryptoService, ProtocolSetupError, RuntimeStats, SecureStorage,
+    SigningContext,
 };
 
 // ========== Dev Console Instrumentation ==========

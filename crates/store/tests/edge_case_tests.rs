@@ -10,12 +10,13 @@
 
 use aura_crypto::{Effects, KeyRotationCoordinator};
 use aura_store::{
-    manifest::{Permission, ResourceScope, StorageOperation, ThresholdSignature, SignatureShare},
-    social_storage::{TrustLevel, SocialStoragePeerDiscovery, StoragePeer, StorageCapabilityAnnouncement, StorageMetrics, StorageRequirements},
+    manifest::{Permission, ResourceScope, SignatureShare, StorageOperation, ThresholdSignature},
+    social_storage::{
+        SocialStoragePeerDiscovery, StorageCapabilityAnnouncement, StorageMetrics, StoragePeer,
+        StorageRequirements, TrustLevel,
+    },
     storage::chunk_store::ChunkStore,
-    AccessControl,
-    CapabilityManager,
-    *,
+    AccessControl, CapabilityManager, *,
 };
 use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
 
@@ -288,7 +289,7 @@ fn test_rapid_capability_expiration_renewal() {
     // All capabilities should now be expired (if they had expiration set)
     let _future_time = base_time + 10 * 100;
     // Note: cleanup_expired_tokens method may not exist in current API
-    
+
     // Capabilities were granted but without expiration through current API
     // This test demonstrates rapid capability grant/verify cycles work
     let capabilities = manager.list_device_capabilities(&device_id);

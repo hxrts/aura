@@ -3,10 +3,10 @@
 //! Records protocol execution events for dev console visualization.
 
 use super::events::ConsoleEvent;
-use DeviceId;
 use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+use DeviceId;
 
 /// Records trace events for dev console integration
 pub struct TraceRecorder {

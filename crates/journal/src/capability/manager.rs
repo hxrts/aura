@@ -142,7 +142,7 @@ impl CapabilityManager {
     }
 
     /// Unified permission verification
-    fn verify_permission(
+    pub fn verify_permission(
         &self,
         device_id: &DeviceId,
         required: &Permission,

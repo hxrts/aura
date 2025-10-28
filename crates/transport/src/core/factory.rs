@@ -3,10 +3,13 @@
 //! Provides a clean interface for instantiating different transport types
 //! with appropriate configuration and capability wrapping.
 
-use crate::{CapabilityTransportAdapter, TransportResult, StubTransport, TransportError, TransportErrorBuilder};
+use crate::{
+    CapabilityTransportAdapter, StubTransport, TransportError, TransportErrorBuilder,
+    TransportResult,
+};
 use aura_crypto::{DeviceKeyManager, Effects};
-use aura_types::{DeviceId};
-use aura_journal::{capability::identity::IndividualId};
+use aura_journal::capability::identity::IndividualId;
+use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -377,8 +380,8 @@ impl TransportConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use DeviceId;
     use uuid::Uuid;
+    use DeviceId;
 
     #[test]
     fn test_transport_config_builder() {

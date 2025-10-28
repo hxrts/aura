@@ -1,0 +1,525 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles for the Aura console */
+@layer base {
+    /* CSS Variables */
+    :root {
+        --transition-duration: 200ms;
+        --color-success: #22c55e;
+        --color-success-hover: #16a34a;
+        --color-danger: #ef4444;
+        --color-danger-hover: #dc2626;
+    }
+
+    /* Light mode (default) */
+    body {
+        @apply bg-zinc-50 text-zinc-900 antialiased;
+        font-family: "Perun", sans-serif;
+        color-scheme: light;
+        transition:
+            background-color var(--transition-duration),
+            color var(--transition-duration);
+    }
+
+    /* Dark mode - completely desaturated/grayscale */
+    body.dark {
+        @apply bg-zinc-950 text-zinc-50;
+        color-scheme: dark;
+    }
+
+    /* Remove all focus outlines and borders globally */
+    *:focus,
+    *:focus-visible {
+        outline: none !important;
+        box-shadow: none !important;
+        ring: 0 !important;
+    }
+
+    button:focus,
+    button:active,
+    input:focus,
+    input:active,
+    select:focus,
+    select:active,
+    textarea:focus,
+    textarea:active {
+        outline: none !important;
+        box-shadow: none !important;
+        border-color: inherit !important;
+        ring: 0 !important;
+    }
+
+    /* Dark mode specific focus removal */
+    body.dark *:focus,
+    body.dark *:focus-visible,
+    body.dark button:focus,
+    body.dark button:active {
+        outline: none !important;
+        box-shadow: none !important;
+        border-color: inherit !important;
+        ring: 0 !important;
+    }
+}
+
+/* Custom component styles */
+@layer components {
+    /* ===== Highlight Colors ===== */
+    .highlight {
+        @apply text-[#bc6de3];
+    }
+
+    .highlight-bg {
+        @apply bg-[#bc6de3];
+    }
+
+    .highlight-border {
+        @apply border-[#bc6de3];
+    }
+
+    /* ===== Semantic Colors ===== */
+    .bg-primary {
+        @apply bg-white dark:bg-zinc-900;
+    }
+
+    .bg-secondary {
+        @apply bg-zinc-100 dark:bg-zinc-800;
+    }
+
+    .border-primary {
+        @apply border-zinc-200 dark:border-zinc-700;
+    }
+
+    .border-secondary {
+        @apply border-zinc-300 dark:border-zinc-600;
+    }
+
+    .text-primary {
+        @apply text-zinc-900 dark:text-zinc-50;
+    }
+
+    .text-secondary {
+        @apply text-zinc-600 dark:text-zinc-400;
+    }
+
+    .text-tertiary {
+        @apply text-zinc-700 dark:text-zinc-300;
+    }
+
+    /* ===== Button Styles ===== */
+    /* Primary button - highlight color */
+    .btn-primary {
+        @apply px-4 py-2 ui-button rounded-lg bg-[#bc6de3] text-white shadow-sm hover:brightness-90 border border-transparent focus:outline-none;
+        transition: all var(--transition-duration);
+    }
+
+    .btn-primary:focus,
+    .btn-primary:focus-visible {
+        border-color: transparent !important;
+    }
+
+    /* Secondary button - light theme */
+    .btn-secondary {
+        @apply px-4 py-2 ui-button rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700 focus:outline-none;
+        transition: all var(--transition-duration);
+    }
+
+    .btn-secondary:focus,
+    .btn-secondary:focus-visible {
+        border-color: #e4e4e7 !important;
+    }
+
+    body.dark .btn-secondary:focus,
+    body.dark .btn-secondary:focus-visible {
+        border-color: #3f3f46 !important;
+    }
+
+    /* Success button - for save/confirm actions */
+    .btn-success {
+        @apply px-2 py-1 ui-button-sm rounded text-white focus:outline-none;
+        background-color: var(--color-success);
+        transition: all var(--transition-duration);
+    }
+
+    .btn-success:hover {
+        background-color: var(--color-success-hover);
+    }
+
+    .btn-success:focus,
+    .btn-success:focus-visible {
+        border-color: transparent !important;
+    }
+
+    /* Danger button - for delete/destructive actions */
+    .btn-danger {
+        @apply px-2 py-1 ui-button-sm rounded text-white focus:outline-none;
+        background-color: var(--color-danger);
+        transition: all var(--transition-duration);
+    }
+
+    .btn-danger:hover {
+        background-color: var(--color-danger-hover);
+    }
+
+    .btn-danger:focus,
+    .btn-danger:focus-visible {
+        border-color: transparent !important;
+    }
+
+    /* Small button variant */
+    .btn-sm {
+        @apply px-3 py-1.5 ui-button;
+    }
+
+    /* Button icon (for emoji or icon buttons) */
+    .btn-icon {
+        @apply px-3 py-2 ui-button rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 focus:outline-none;
+        transition: all var(--transition-duration);
+    }
+
+    .btn-icon:focus,
+    .btn-icon:focus-visible {
+        border-color: #e4e4e7 !important;
+    }
+
+    body.dark .btn-icon:focus,
+    body.dark .btn-icon:focus-visible {
+        border-color: #3f3f46 !important;
+    }
+
+    /* ===== Card/Container Styles ===== */
+    .card {
+        @apply bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700;
+    }
+
+    .card-padding {
+        @apply p-4;
+    }
+
+    .card-compact {
+        @apply p-3;
+    }
+
+    /* Secondary card (lighter background) */
+    .card-secondary {
+        @apply bg-zinc-50 dark:bg-zinc-800 rounded-md border border-zinc-200 dark:border-zinc-700;
+    }
+
+    /* ===== Input/Form Styles ===== */
+    .input-base {
+        @apply px-3 py-1.5 ui-input rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-50 placeholder-zinc-500 dark:placeholder-zinc-400 focus:outline-none;
+        transition: all var(--transition-duration);
+    }
+
+    .input-lg {
+        @apply px-4 py-2 body-lg;
+    }
+
+    .input-sm {
+        @apply px-2 py-1 body-sm;
+    }
+
+    /* Select dropdown with custom arrow */
+    .select-base {
+        @apply input-base appearance-none bg-no-repeat cursor-pointer;
+        background-image: url('data:image/svg+xml;charset=UTF-8,%3csvg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"%3e%3cpath d="M1 1L5 5L9 1" stroke="%23a1a1aa" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/%3e%3c/svg%3e');
+        background-position: right 0.75rem center;
+        padding-right: 2.5rem;
+    }
+
+    .select-base:focus,
+    .select-base:focus-visible {
+        border-color: #d4d4d8 !important;
+    }
+
+    body.dark .select-base:focus,
+    body.dark .select-base:focus-visible {
+        border-color: #52525b !important;
+    }
+
+    .select-sm {
+        @apply body-sm pl-2 pr-7 py-1.5;
+        background-position: right 0.5rem center;
+    }
+
+    /* Select option styling */
+    select option {
+        padding: 0.5rem 0.75rem;
+    }
+
+    select option:checked {
+        background-color: #f3e8ff;
+        color: #18181b;
+    }
+
+    body.dark select option:checked {
+        background-color: #3b2558;
+        color: #fafafa;
+    }
+
+    /* ===== Typography System ===== */
+
+    /* Display Scale - App/Page Level */
+    .display-1 {
+        @apply text-2xl font-bold text-primary;
+    }
+
+    .display-2 {
+        @apply text-xl font-bold text-primary;
+    }
+
+    /* Heading Scale - Content Structure */
+    .heading-1 {
+        @apply text-lg font-semibold text-primary;
+    }
+
+    .heading-2 {
+        @apply text-base font-semibold text-primary;
+    }
+
+    .heading-3 {
+        @apply text-sm font-semibold text-primary;
+    }
+
+    .heading-4 {
+        @apply text-xs font-semibold text-primary uppercase tracking-wide;
+    }
+
+    /* Body Scale - Content */
+    .body-lg {
+        @apply text-base text-primary;
+    }
+
+    .body {
+        @apply text-sm text-primary;
+    }
+
+    .body-sm {
+        @apply text-xs text-secondary;
+    }
+
+    .caption {
+        @apply text-xs text-zinc-500 dark:text-zinc-400;
+    }
+
+    /* UI Scale - Interactive Elements */
+    .ui-button {
+        @apply text-sm font-medium;
+    }
+
+    .ui-button-sm {
+        @apply text-xs font-medium;
+    }
+
+    .ui-input {
+        @apply text-sm;
+    }
+
+    .ui-label {
+        @apply text-xs font-medium;
+    }
+
+    .ui-badge {
+        @apply text-xs font-medium;
+    }
+
+    /* Code Scale - Monospace */
+    .code {
+        @apply text-xs font-mono;
+    }
+
+    /* ===== Layout/Grid Helpers ===== */
+    .flex-center {
+        @apply flex items-center justify-center;
+    }
+
+    .flex-between {
+        @apply flex items-center justify-between;
+    }
+
+    .grid-cols-auto {
+        @apply grid grid-cols-1 sm:grid-cols-2 gap-4;
+    }
+
+    /* ===== Section/Panel Styles ===== */
+    .section-header {
+        @apply flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3;
+    }
+
+    .status-badge-connected {
+        @apply inline-flex items-center gap-1.5 px-2 py-1 ui-badge text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-800 rounded;
+    }
+
+    .status-badge-connecting {
+        @apply inline-flex items-center gap-1.5 px-2 py-1 ui-badge text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-800 rounded;
+    }
+    .status-badge-error {
+        @apply inline-flex items-center gap-1.5 px-2 py-1 ui-badge text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-800 rounded;
+    }
+    .status-badge-disconnected {
+        @apply inline-flex items-center gap-1.5 px-2 py-1 ui-badge text-zinc-700 dark:text-zinc-300 bg-zinc-200 dark:bg-zinc-800 rounded;
+    }
+
+    .indicator-dot {
+        @apply w-1.5 h-1.5 rounded-full;
+    }
+
+    .indicator-connected {
+        @apply indicator-dot bg-green-600 dark:bg-green-400;
+    }
+
+    .indicator-connecting {
+        @apply indicator-dot bg-blue-500 dark:bg-blue-400 animate-pulse;
+    }
+    .indicator-error {
+        @apply indicator-dot bg-red-500 dark:bg-red-500;
+    }
+    .indicator-disconnected {
+        @apply indicator-dot bg-red-500 dark:bg-red-500;
+    }
+
+    /* ===== Divider ===== */
+    .divider {
+        @apply w-px h-6 bg-zinc-200 dark:bg-zinc-700;
+    }
+
+    /* ===== Code/Monospace ===== */
+    .code-block {
+        @apply bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-md code p-3 overflow-x-auto;
+    }
+
+    .code-inline {
+        @apply bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 code px-1.5 py-0.5 rounded;
+    }
+
+    .code-prompt {
+        @apply text-green-600 dark:text-green-400 code flex-shrink-0;
+    }
+
+    .code-text {
+        @apply text-zinc-900 dark:text-zinc-100 code;
+    }
+
+    .code-error {
+        @apply text-red-600 dark:text-red-400 code;
+    }
+
+    .code-output {
+        @apply text-zinc-700 dark:text-zinc-300 code;
+    }
+
+    /* ===== Header Styles ===== */
+    .header-base {
+        @apply bg-white dark:bg-zinc-900 shadow-sm border-b border-zinc-200 dark:border-zinc-700;
+        transition: all var(--transition-duration);
+    }
+
+    .header-title {
+        @apply display-2 sm:display-1 text-zinc-900 dark:text-zinc-50;
+    }
+
+    /* ===== Panel Wrapper ===== */
+    .panel {
+        @apply bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700;
+    }
+
+    .panel-padding {
+        @apply p-4;
+    }
+
+    /* ===== Branch Item Styles ===== */
+    .branch-item {
+        @apply p-3 rounded-md cursor-pointer;
+        transition: all var(--transition-duration);
+    }
+
+    .branch-item-active {
+        @apply bg-purple-50 dark:bg-zinc-800 border border-[#bc6de3];
+    }
+
+    .branch-item-inactive {
+        @apply bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-[#bc6de3];
+    }
+
+    .branch-title {
+        @apply heading-3 truncate;
+    }
+
+    .branch-meta {
+        @apply body-sm;
+    }
+
+    .branch-indicator {
+        @apply w-2 h-2 rounded-full border-2 border-zinc-400 dark:border-zinc-600 mt-1.5;
+    }
+
+    /* ===== Gradient Overlay ===== */
+    .gradient-overlay-bottom {
+        @apply pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white dark:from-zinc-900 to-transparent;
+    }
+
+    /* ===== Main Layout ===== */
+    .main-container {
+        @apply h-screen flex flex-col bg-white dark:bg-zinc-950 overflow-hidden;
+        transition: background-color var(--transition-duration);
+    }
+
+    .main-content {
+        @apply flex-1 overflow-hidden bg-white dark:bg-zinc-950;
+        transition: background-color var(--transition-duration);
+    }
+
+    /* ===== Section Divider ===== */
+    .section-divider {
+        @apply w-px h-6 bg-zinc-200 dark:bg-zinc-700 mx-1;
+    }
+
+    /* ===== Scrollable Container ===== */
+    .scrollable {
+        @apply flex-1 overflow-y-auto;
+    }
+
+    /* ===== Flex Helpers ===== */
+    .flex-row-center {
+        @apply flex items-center;
+    }
+
+    .flex-col-start {
+        @apply flex flex-col;
+    }
+
+    /* ===== Modal Styles ===== */
+    .modal-overlay {
+        @apply fixed inset-0 bg-zinc-900/50 flex items-center justify-center z-50;
+    }
+
+    .modal {
+        @apply bg-white dark:bg-zinc-900 rounded-lg shadow-lg border border-zinc-200 dark:border-zinc-700 p-6 max-w-md w-full mx-4;
+    }
+
+    .modal-header {
+        @apply mb-4;
+    }
+
+    .modal-header h4 {
+        @apply heading-1;
+    }
+
+    .modal-body {
+        @apply mb-6;
+    }
+
+    .modal-body p {
+        @apply body body-sm mb-3;
+    }
+
+    .modal-input {
+        @apply w-full px-3 py-2 ui-input rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-50 placeholder-zinc-500 dark:placeholder-zinc-400 focus:outline-none;
+        transition: all var(--transition-duration);
+    }
+
+    .modal-actions {
+        @apply flex gap-2 justify-end;
+    }
+}

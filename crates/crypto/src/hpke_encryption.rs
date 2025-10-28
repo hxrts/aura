@@ -39,8 +39,9 @@ impl HpkePublicKey {
 
     /// Deserialize public key from bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let inner = <KemAlg as Kem>::PublicKey::from_bytes(bytes)
-            .map_err(|e| CryptoError::crypto_operation_failed(format!("Invalid HPKE public key: {:?}", e)))?;
+        let inner = <KemAlg as Kem>::PublicKey::from_bytes(bytes).map_err(|e| {
+            CryptoError::crypto_operation_failed(format!("Invalid HPKE public key: {:?}", e))
+        })?;
         Ok(HpkePublicKey { inner })
     }
 }
@@ -60,8 +61,9 @@ impl HpkePrivateKey {
 
     /// Deserialize private key from bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let inner = <KemAlg as Kem>::PrivateKey::from_bytes(bytes)
-            .map_err(|e| CryptoError::crypto_operation_failed(format!("Invalid HPKE private key: {:?}", e)))?;
+        let inner = <KemAlg as Kem>::PrivateKey::from_bytes(bytes).map_err(|e| {
+            CryptoError::crypto_operation_failed(format!("Invalid HPKE private key: {:?}", e))
+        })?;
         Ok(HpkePrivateKey { inner })
     }
 }

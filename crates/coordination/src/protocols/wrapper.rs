@@ -5,13 +5,12 @@
 //! through a common interface.
 
 use crate::protocols::{
-    dkd::{new_dkd_protocol, rehydrate_dkd_protocol, DkdProtocolState},
     recovery::{new_recovery_protocol, rehydrate_recovery_protocol, RecoveryProtocolState},
     resharing::{new_resharing_protocol, rehydrate_resharing_protocol, ResharingProtocolState},
 };
 use crate::session_types::wrapper::SessionProtocol;
+use aura_journal::Event;
 use aura_types::{DeviceId, GuardianId};
-use aura_journal::{Event};
 use uuid::Uuid;
 
 /// Protocol wrapper enum that can hold any protocol type
@@ -20,8 +19,6 @@ use uuid::Uuid;
 /// stored in collections or passed through APIs that don't use generics.
 #[derive(Debug, Clone)]
 pub enum ProtocolWrapper {
-    /// DKD (Deterministic Key Derivation) protocol
-    Dkd(DkdProtocolState),
     /// Recovery protocol
     Recovery(RecoveryProtocolState),
     /// Resharing protocol
@@ -32,19 +29,11 @@ impl ProtocolWrapper {
     /// Get the protocol type as a string
     pub fn protocol_type(&self) -> &'static str {
         match self {
-            ProtocolWrapper::Dkd(_) => "DKD",
             ProtocolWrapper::Recovery(_) => "Recovery",
             ProtocolWrapper::Resharing(_) => "Resharing",
         }
     }
 
-    /// Extract DKD protocol if this is a DKD protocol
-    pub fn as_dkd(&self) -> Option<&DkdProtocolState> {
-        match self {
-            ProtocolWrapper::Dkd(dkd) => Some(dkd),
-            _ => None,
-        }
-    }
 
     /// Extract recovery protocol if this is a recovery protocol
     pub fn as_recovery(&self) -> Option<&RecoveryProtocolState> {
@@ -66,7 +55,6 @@ impl ProtocolWrapper {
 impl SessionProtocol for ProtocolWrapper {
     fn session_id(&self) -> Uuid {
         match self {
-            ProtocolWrapper::Dkd(dkd) => dkd.session_id(),
             ProtocolWrapper::Recovery(recovery) => recovery.session_id(),
             ProtocolWrapper::Resharing(resharing) => resharing.session_id(),
         }
@@ -74,7 +62,6 @@ impl SessionProtocol for ProtocolWrapper {
 
     fn state_name(&self) -> &'static str {
         match self {
-            ProtocolWrapper::Dkd(dkd) => dkd.state_name(),
             ProtocolWrapper::Recovery(recovery) => recovery.state_name(),
             ProtocolWrapper::Resharing(resharing) => resharing.state_name(),
         }
@@ -82,7 +69,6 @@ impl SessionProtocol for ProtocolWrapper {
 
     fn is_final(&self) -> bool {
         match self {
-            ProtocolWrapper::Dkd(dkd) => dkd.is_final(),
             ProtocolWrapper::Recovery(recovery) => recovery.is_final(),
             ProtocolWrapper::Resharing(resharing) => resharing.is_final(),
         }
@@ -90,7 +76,6 @@ impl SessionProtocol for ProtocolWrapper {
 
     fn can_terminate(&self) -> bool {
         match self {
-            ProtocolWrapper::Dkd(dkd) => dkd.can_terminate(),
             ProtocolWrapper::Recovery(recovery) => recovery.can_terminate(),
             ProtocolWrapper::Resharing(resharing) => resharing.can_terminate(),
         }
@@ -98,7 +83,6 @@ impl SessionProtocol for ProtocolWrapper {
 
     fn protocol_id(&self) -> Uuid {
         match self {
-            ProtocolWrapper::Dkd(dkd) => dkd.protocol_id(),
             ProtocolWrapper::Recovery(recovery) => recovery.protocol_id(),
             ProtocolWrapper::Resharing(resharing) => resharing.protocol_id(),
         }
@@ -106,7 +90,6 @@ impl SessionProtocol for ProtocolWrapper {
 
     fn device_id(&self) -> Uuid {
         match self {
-            ProtocolWrapper::Dkd(dkd) => dkd.device_id(),
             ProtocolWrapper::Recovery(recovery) => recovery.device_id(),
             ProtocolWrapper::Resharing(resharing) => resharing.device_id().0,
         }
@@ -119,11 +102,6 @@ pub trait IntoProtocolWrapper {
     fn into_wrapper(self) -> ProtocolWrapper;
 }
 
-impl IntoProtocolWrapper for DkdProtocolState {
-    fn into_wrapper(self) -> ProtocolWrapper {
-        ProtocolWrapper::Dkd(self)
-    }
-}
 
 impl IntoProtocolWrapper for RecoveryProtocolState {
     fn into_wrapper(self) -> ProtocolWrapper {
@@ -169,20 +147,6 @@ impl ProtocolWrapperBuilder {
         self
     }
 
-    /// Build a DKD protocol
-    pub fn build_dkd(
-        self,
-        app_id: String,
-        context: String,
-    ) -> Result<ProtocolWrapper, ProtocolWrapperError> {
-        let device_id = self
-            .device_id
-            .ok_or_else(|| ProtocolWrapperError::ProtocolError("Device ID required".to_string()))?;
-
-        new_dkd_protocol(device_id, app_id, context)
-            .map(|dkd| ProtocolWrapper::Dkd(dkd))
-            .map_err(|e| ProtocolWrapperError::ProtocolError(e.to_string()))
-    }
 
     /// Build a recovery protocol
     pub fn build_recovery(
@@ -234,20 +198,6 @@ pub fn rehydrate_protocol(
     context: Option<String>,
 ) -> Result<ProtocolWrapper, ProtocolWrapperError> {
     match protocol_type {
-        "DKD" => {
-            let context = context.ok_or_else(|| {
-                ProtocolWrapperError::ProtocolError(
-                    "Context required for DKD rehydration".to_string(),
-                )
-            })?;
-
-            // Extract app_id from evidence or use default
-            let app_id = "recovered".to_string(); // TODO: Extract from evidence
-
-            rehydrate_dkd_protocol(device_id, app_id, context, evidence)
-                .map(|dkd| ProtocolWrapper::Dkd(dkd))
-                .map_err(|e| ProtocolWrapperError::ProtocolError(e.to_string()))
-        }
         "Recovery" => {
             // Extract recovery parameters from evidence
             let recovery_id = Uuid::new_v4(); // TODO: Extract from evidence

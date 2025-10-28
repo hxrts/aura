@@ -1,0 +1,18 @@
+[package]
+name = "protocol-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "protocol_core"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+aura-errors = { path = "../aura-errors" }
+aura-types = { path = "../aura-types" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

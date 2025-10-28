@@ -6,7 +6,7 @@
 // They are signed with the account's threshold key and include the session epoch to enable
 // automatic revocation when the account configuration changes.
 
-use crate::{TransportResult, TransportError, TransportErrorBuilder};
+use crate::{TransportError, TransportErrorBuilder, TransportResult};
 use aura_journal::serialization::{from_cbor_bytes, to_cbor_bytes};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -161,7 +161,11 @@ impl PresenceTicket {
     /// 3. Session epoch matches expected
     ///
     /// Reference: 080 spec Part 5: Transport Handshake Specification
-    pub fn verify(&self, group_public_key: &VerifyingKey, current_epoch: u64) -> TransportResult<()> {
+    pub fn verify(
+        &self,
+        group_public_key: &VerifyingKey,
+        current_epoch: u64,
+    ) -> TransportResult<()> {
         #[allow(clippy::disallowed_methods)]
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

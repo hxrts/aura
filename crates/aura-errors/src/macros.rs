@@ -4,7 +4,7 @@
 //! methods, significantly reducing the amount of boilerplate code required
 //! for error handling across the Aura codebase.
 
-use crate::{AuraError, ErrorContext, ErrorCode};
+use crate::{AuraError, ErrorCode, ErrorContext};
 
 /// Generate error constructor methods automatically
 ///
@@ -23,7 +23,7 @@ use crate::{AuraError, ErrorContext, ErrorCode};
 ///         })
 ///     }
 /// }
-/// 
+///
 /// // The macro would generate all constructors automatically
 /// error_constructors! {
 ///     Protocol {
@@ -166,21 +166,21 @@ macro_rules! error_context_helpers {
 
 /// Simple helper functions for common error patterns
 ///
-/// Since the macro approach is overly complex, let's implement 
+/// Since the macro approach is overly complex, let's implement
 /// the most common error constructors directly.
 impl AuraError {
     // Additional convenience constructors beyond those in lib.rs
-    
+
     /// Create a timeout error
     pub fn timeout_error(message: impl Into<String>) -> Self {
         Self::protocol_timeout(message)
     }
-    
+
     /// Create a connection error  
     pub fn connection_error(message: impl Into<String>) -> Self {
         Self::transport_connection_failed(message)
     }
-    
+
     /// Create a quota error
     pub fn quota_error(message: impl Into<String>) -> Self {
         Self::Infrastructure(crate::InfrastructureError::StorageQuotaExceeded {
@@ -188,12 +188,12 @@ impl AuraError {
             context: ErrorContext::new().with_code(ErrorCode::InfraStorageQuotaExceeded),
         })
     }
-    
+
     /// Create a hash mismatch error
     pub fn hash_mismatch_error(message: impl Into<String>) -> Self {
         Self::data_corruption_detected(message)
     }
-    
+
     /// Create a witness verification error
     pub fn witness_error(message: impl Into<String>) -> Self {
         Self::Session(crate::SessionError::ProtocolViolation {
@@ -229,7 +229,10 @@ mod tests {
             .with_context("round", "2");
 
         let context = error.context();
-        assert_eq!(context.context.get("participant"), Some(&"alice".to_string()));
+        assert_eq!(
+            context.context.get("participant"),
+            Some(&"alice".to_string())
+        );
         assert_eq!(context.context.get("round"), Some(&"2".to_string()));
     }
 }

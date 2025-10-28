@@ -24,11 +24,12 @@ members = [
     # "crates/sim-client",
     # "crates/live-client",
     # "crates/analysis-client",
-    # "crates/wasm-core", # Temporarily disabled - needs error API migration
+    "crates/wasm-core",
     "crates/quint-api",
     "crates/session-types",
     "crates/aura-types",
-    # "crates/console",       # Temporarily disabled - needs error API migration
+    "crates/console",
+    "crates/keyhive-mock",
 ]
 
 
@@ -97,7 +98,8 @@ dirs = "5.0"
 wasm_core = { path = "crates/wasm-core" }
 
 # Authorization & CGKA (placeholder until Keyhive is available)
-# keyhive_core = { git = "https://github.com/inkandswitch/keyhive", rev = "main" }
+# TODO: Replace with real keyhive_core when available
+keyhive_core = { path = "crates/keyhive-mock" }
 
 [profile.release]
 opt-level = 3

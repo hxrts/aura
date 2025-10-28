@@ -4,8 +4,8 @@
 //! with production-ready signature verification, certificate validation, and replay attack protection.
 
 use crate::{AgentError, Result};
-use aura_types::{DeviceId};
-use aura_journal::{DeviceMetadata};
+use aura_journal::DeviceMetadata;
+use aura_types::DeviceId;
 use blake3::Hash;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::collections::BTreeMap;

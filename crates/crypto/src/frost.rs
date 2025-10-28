@@ -28,6 +28,122 @@ pub struct FrostKeyShare {
     pub verifying_key: frost::VerifyingKey,
 }
 
+// Manual serde implementation since FROST types don't derive serde
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+impl Serialize for FrostKeyShare {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("FrostKeyShare", 3)?;
+        state.serialize_field("identifier", &self.identifier.serialize().to_vec())?;
+        state.serialize_field("signing_share", &self.signing_share.serialize().to_vec())?;
+        state.serialize_field("verifying_key", &self.verifying_key.serialize().to_vec())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for FrostKeyShare {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Identifier,
+            SigningShare,
+            VerifyingKey,
+        }
+
+        struct FrostKeyShareVisitor;
+
+        impl<'de> Visitor<'de> for FrostKeyShareVisitor {
+            type Value = FrostKeyShare;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct FrostKeyShare")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> std::result::Result<FrostKeyShare, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut identifier = None;
+                let mut signing_share = None;
+                let mut verifying_key = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Identifier => {
+                            if identifier.is_some() {
+                                return Err(de::Error::duplicate_field("identifier"));
+                            }
+                            let bytes: Vec<u8> = map.next_value()?;
+                            let id_bytes: [u8; 32] = bytes
+                                .as_slice()
+                                .try_into()
+                                .map_err(|_| de::Error::invalid_length(bytes.len(), &"32 bytes"))?;
+                            identifier =
+                                Some(frost::Identifier::deserialize(&id_bytes).map_err(|e| {
+                                    de::Error::custom(format!("Invalid identifier: {:?}", e))
+                                })?);
+                        }
+                        Field::SigningShare => {
+                            if signing_share.is_some() {
+                                return Err(de::Error::duplicate_field("signing_share"));
+                            }
+                            let bytes: Vec<u8> = map.next_value()?;
+                            let share_bytes: [u8; 32] = bytes
+                                .as_slice()
+                                .try_into()
+                                .map_err(|_| de::Error::invalid_length(bytes.len(), &"32 bytes"))?;
+                            signing_share =
+                                Some(frost::keys::SigningShare::deserialize(share_bytes).map_err(
+                                    |e| {
+                                        de::Error::custom(format!("Invalid signing share: {:?}", e))
+                                    },
+                                )?);
+                        }
+                        Field::VerifyingKey => {
+                            if verifying_key.is_some() {
+                                return Err(de::Error::duplicate_field("verifying_key"));
+                            }
+                            let bytes: Vec<u8> = map.next_value()?;
+                            let key_bytes: [u8; 32] = bytes
+                                .as_slice()
+                                .try_into()
+                                .map_err(|_| de::Error::invalid_length(bytes.len(), &"32 bytes"))?;
+                            verifying_key =
+                                Some(frost::VerifyingKey::deserialize(key_bytes).map_err(|e| {
+                                    de::Error::custom(format!("Invalid verifying key: {:?}", e))
+                                })?);
+                        }
+                    }
+                }
+                let identifier =
+                    identifier.ok_or_else(|| de::Error::missing_field("identifier"))?;
+                let signing_share =
+                    signing_share.ok_or_else(|| de::Error::missing_field("signing_share"))?;
+                let verifying_key =
+                    verifying_key.ok_or_else(|| de::Error::missing_field("verifying_key"))?;
+                Ok(FrostKeyShare {
+                    identifier,
+                    signing_share,
+                    verifying_key,
+                })
+            }
+        }
+
+        const FIELDS: &'static [&'static str] = &["identifier", "signing_share", "verifying_key"];
+        deserializer.deserialize_struct("FrostKeyShare", FIELDS, FrostKeyShareVisitor)
+    }
+}
+
 impl FrostKeyShare {
     /// Create from raw bytes (for deserialization)
     pub fn from_bytes(
@@ -65,6 +181,7 @@ impl FrostKeyShare {
 }
 
 /// FROST signing commitment (Round 1)
+#[derive(Clone)]
 pub struct SigningCommitment {
     /// Participant identifier
     pub identifier: frost::Identifier,
@@ -72,7 +189,8 @@ pub struct SigningCommitment {
     pub commitment: frost::round1::SigningCommitments,
 }
 
-/// FROST signature share (Round 2)
+/// FROST signature share (Round 2)  
+#[derive(Clone)]
 pub struct SignatureShare {
     /// Participant identifier
     pub identifier: frost::Identifier,

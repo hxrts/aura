@@ -7,9 +7,9 @@
 
 use crate::services::minimal_services::MinimalIdentityService;
 use crate::{ContextCapsule, DerivedIdentity, Result};
-use DeviceId;
 use std::sync::Arc;
 use tracing::info;
+use DeviceId;
 
 /// DeviceAgent demonstrating service layer delegation
 ///
@@ -87,8 +87,8 @@ mod tests {
     use super::*;
     use crate::ContextCapsule;
     use aura_crypto::Effects;
-    use DeviceId;
     use uuid::Uuid;
+    use DeviceId;
 
     #[tokio::test]
     async fn test_simple_identity() {

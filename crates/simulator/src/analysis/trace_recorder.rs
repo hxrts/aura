@@ -5,8 +5,7 @@
 
 use crate::testing::PropertyViolation;
 use aura_console_types::{
-    NetworkTopology, SimulationTrace, TraceEvent, TraceMetadata,
-    trace::CheckpointRef,
+    trace::CheckpointRef, NetworkTopology, SimulationTrace, TraceEvent, TraceMetadata,
 };
 use std::collections::HashMap;
 
@@ -85,6 +84,7 @@ impl TraceRecorder {
                 violation_state: crate::testing::SimulationState {
                     tick: event.tick,
                     time: event.tick * 100, // Convert tick to time estimate
+                    variables: std::collections::HashMap::new(),
                     participants: vec![],
                     protocol_state: crate::testing::ProtocolMonitoringState {
                         active_sessions: vec![],
@@ -94,15 +94,15 @@ impl TraceRecorder {
                     network_state: crate::testing::NetworkStateSnapshot {
                         partitions: vec![],
                         message_stats: crate::testing::MessageDeliveryStats {
-                            total_sent: 0,
-                            total_delivered: 0,
-                            total_dropped: 0,
+                            messages_sent: 0,
+                            messages_delivered: 0,
+                            messages_dropped: 0,
                             average_latency_ms: 0.0,
                         },
                         failure_conditions: crate::testing::NetworkFailureConditions {
                             drop_rate: 0.0,
-                            latency_range: (0, 0),
-                            partition_count: 0,
+                            latency_range_ms: (0, 0),
+                            partitions_active: false,
                         },
                     },
                 },
@@ -295,10 +295,7 @@ impl TraceRecorder {
                 .or_default()
                 .push(i);
 
-            self.tick_index
-                .entry(event.tick)
-                .or_default()
-                .push(i);
+            self.tick_index.entry(event.tick).or_default().push(i);
         }
     }
 }

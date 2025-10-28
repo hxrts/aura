@@ -5,8 +5,8 @@
 //! challenges combined with device signatures to verify data integrity and availability.
 
 use crate::{Result, StorageError, StoreErrorBuilder};
-use aura_types::{DeviceId, DeviceIdExt};
 use aura_journal::{Cid, SessionEpoch};
+use aura_types::{DeviceId, DeviceIdExt};
 use blake3;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};

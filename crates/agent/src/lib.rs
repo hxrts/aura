@@ -83,8 +83,17 @@ pub mod traits;
 /// Infrastructure implementations of Transport and Storage
 pub mod infrastructure;
 
+/// Transport adapters for bridging agent and coordination layers
+pub mod transport_adapter;
+
+/// FROST threshold signature management
+pub mod frost_manager;
+
 /// Structured error hierarchy
 pub mod error;
+
+/// Platform-specific secure storage
+pub mod secure_storage;
 
 // ========== Essential Types ==========
 /// Derived identity result from DKD protocol
@@ -123,10 +132,23 @@ pub use agent::{
 // Infrastructure implementations
 pub use infrastructure::{ProductionFactory, ProductionStorage, ProductionTransport};
 
+// Transport adapters
+pub use transport_adapter::{CoordinationTransportAdapter, TransportAdapterFactory};
+
+// FROST management
+pub use frost_manager::{FrostAgent, FrostKeyManager, FrostSigningSession};
+
 // Agent traits
 pub use traits::{Agent, CoordinatingAgent, GroupAgent, IdentityAgent, NetworkAgent, StorageAgent};
 
 // Error types
 pub use error::{
     AgentError, CapabilityError, DataError, InfrastructureError, ProtocolError, Result,
+};
+
+// Secure storage types
+pub use secure_storage::{
+    DeviceAttestation, PlatformSecureStorage, SecureStorage, SecurityLevel,
+    #[cfg(target_os = "android")]
+    AndroidKeystoreStorage,
 };

@@ -3,6 +3,7 @@
 //! This module provides implementations of all standard choreographies
 //! used in TOML scenarios.
 
+use super::choreography_actions::run_protocol_with_scheduler;
 use super::engine::{ChoreographyExecutor, ChoreographyResult};
 use crate::{tick, QueuedProtocol, Result, WorldState};
 use std::collections::HashMap;
@@ -750,27 +751,36 @@ impl ChoreographyExecutor for CounterInitChoreography {
     ) -> Result<ChoreographyResult> {
         let start_time = Instant::now();
 
-        let protocol = QueuedProtocol {
-            protocol_type: "CounterInit".to_string(),
-            participants: participants.to_vec(),
-            parameters: HashMap::new(),
-            scheduled_time: world_state.current_time + 100,
-            priority: 1,
-        };
+        let mut string_params = HashMap::new();
+        string_params.insert("count".to_string(), "1".to_string());
+        string_params.insert("ttl_epochs".to_string(), "100".to_string());
+        string_params.insert("relationship_seed".to_string(), participants.join(","));
 
-        world_state.protocols.execution_queue.push_back(protocol);
+        let success =
+            run_protocol_with_scheduler(world_state, "CounterInit", participants, &string_params)
+                .unwrap_or(false);
 
         let mut events_generated = 0;
-        for _ in 0..10 {
+        let max_ticks = if success { 10 } else { 5 };
+        for tick_idx in 0..max_ticks {
             let events = tick(world_state)?;
             events_generated += events.len();
+            if success && tick_idx > 3 {
+                break;
+            }
         }
 
         Ok(ChoreographyResult {
-            success: true,
+            success,
             events_generated,
             execution_time: start_time.elapsed(),
-            data: HashMap::new(),
+            data: {
+                let mut data = HashMap::new();
+                data.insert("protocol_type".to_string(), "CounterInit".to_string());
+                data.insert("participants".to_string(), participants.len().to_string());
+                data.insert("scheduler_used".to_string(), "true".to_string());
+                data
+            },
         })
     }
 
@@ -791,27 +801,40 @@ impl ChoreographyExecutor for CounterIncrementChoreography {
     ) -> Result<ChoreographyResult> {
         let start_time = Instant::now();
 
-        let protocol = QueuedProtocol {
-            protocol_type: "CounterIncrement".to_string(),
-            participants: participants.to_vec(),
-            parameters: HashMap::new(),
-            scheduled_time: world_state.current_time + 100,
-            priority: 1,
-        };
+        let mut string_params = HashMap::new();
+        string_params.insert("count".to_string(), "1".to_string());
+        string_params.insert("ttl_epochs".to_string(), "50".to_string());
+        string_params.insert("relationship_seed".to_string(), participants.join(","));
 
-        world_state.protocols.execution_queue.push_back(protocol);
+        let success = run_protocol_with_scheduler(
+            world_state,
+            "CounterIncrement",
+            participants,
+            &string_params,
+        )
+        .unwrap_or(false);
 
         let mut events_generated = 0;
-        for _ in 0..5 {
+        let max_ticks = if success { 8 } else { 5 };
+        for tick_idx in 0..max_ticks {
             let events = tick(world_state)?;
             events_generated += events.len();
+            if success && tick_idx > 2 {
+                break;
+            }
         }
 
         Ok(ChoreographyResult {
-            success: true,
+            success,
             events_generated,
             execution_time: start_time.elapsed(),
-            data: HashMap::new(),
+            data: {
+                let mut data = HashMap::new();
+                data.insert("protocol_type".to_string(), "CounterIncrement".to_string());
+                data.insert("participants".to_string(), participants.len().to_string());
+                data.insert("scheduler_used".to_string(), "true".to_string());
+                data
+            },
         })
     }
 

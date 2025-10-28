@@ -75,6 +75,7 @@ impl AccountLedger {
             } => {
                 self.validate_guardian_signature(event, *guardian_id, signature)?;
             }
+            EventAuthorization::LifecycleInternal => {}
         }
 
         // Event-specific validation
@@ -100,19 +101,90 @@ impl AccountLedger {
             });
         }
 
+        // Verify signer indices are valid and unique
+        self.validate_signer_indices(&threshold_sig.signers)?;
+
         // Compute event hash (what was signed)
         let event_hash = event.hash()?;
 
-        // Verify signature against group public key
-        self.state
-            .group_public_key
-            .verify(&event_hash, &threshold_sig.signature)
-            .map_err(|e| {
-                LedgerError::InvalidSignature(format!(
-                    "Threshold signature verification failed: {}",
-                    e
-                ))
-            })?;
+        // Verify signature against group public key using FROST verification
+        self.verify_frost_signature(&event_hash, threshold_sig)?;
+
+        Ok(())
+    }
+
+    /// Validate that signer indices are valid and unique
+    fn validate_signer_indices(&self, signers: &[u8]) -> Result<()> {
+        // Check for duplicates
+        let mut sorted_signers = signers.to_vec();
+        sorted_signers.sort_unstable();
+        if sorted_signers.windows(2).any(|w| w[0] == w[1]) {
+            return Err(LedgerError::InvalidSignature(
+                "Duplicate signer indices in threshold signature".to_string(),
+            ));
+        }
+
+        // Check that all indices are within valid range
+        let max_participants = self.state.devices.len() as u8;
+        if let Some(&invalid_index) = signers.iter().find(|&&idx| idx >= max_participants) {
+            return Err(LedgerError::InvalidSignature(format!(
+                "Invalid signer index {} (max: {})",
+                invalid_index,
+                max_participants - 1
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Verify FROST threshold signature
+    fn verify_frost_signature(&self, message: &[u8], threshold_sig: &ThresholdSig) -> Result<()> {
+        use aura_crypto::frost::verify_signature;
+
+        // Verify signature using standard Ed25519 verification
+        // FROST signatures are compatible with standard Ed25519 verification
+        verify_signature(
+            message,
+            &threshold_sig.signature,
+            &self.state.group_public_key,
+        )
+        .map_err(|e| {
+            LedgerError::InvalidSignature(format!(
+                "FROST threshold signature verification failed: {:?}",
+                e
+            ))
+        })?;
+
+        // Additional FROST-specific validation if signature shares are present
+        if !threshold_sig.signature_shares.is_empty() {
+            self.validate_frost_signature_shares(message, threshold_sig)?;
+        }
+
+        Ok(())
+    }
+
+    /// Validate individual FROST signature shares (optional detailed verification)
+    fn validate_frost_signature_shares(
+        &self,
+        _message: &[u8],
+        threshold_sig: &ThresholdSig,
+    ) -> Result<()> {
+        // Verify we have the expected number of signature shares
+        if threshold_sig.signature_shares.len() != threshold_sig.signers.len() {
+            return Err(LedgerError::InvalidSignature(format!(
+                "Signature share count mismatch: expected {}, got {}",
+                threshold_sig.signers.len(),
+                threshold_sig.signature_shares.len()
+            )));
+        }
+
+        // Individual signature shares validation would require access to individual
+        // participant public keys and the FROST aggregation process.
+        // For now, we rely on the aggregated signature verification above.
+
+        // TODO: Implement full signature share verification if detailed audit trails are needed
+        // This would require storing participant public keys and implementing
+        // FROST signature share verification logic.
 
         Ok(())
     }
@@ -347,6 +419,7 @@ impl AccountLedger {
             } => {
                 self.validate_guardian_signature(registration_event, *guardian_id, signature)?;
             }
+            EventAuthorization::LifecycleInternal => {}
         }
 
         // Verify no subsequent revocation

@@ -6,8 +6,8 @@
 use aura_coordination::execution::time::ProductionTimeSource;
 use aura_coordination::execution::{ProtocolContext, StubTransport};
 use aura_crypto::Effects;
-use aura_types::{AccountId, DeviceId};
 use aura_journal::{AccountLedger, AccountState, DeviceMetadata, DeviceType};
+use aura_types::{AccountId, DeviceId};
 use ed25519_dalek::SigningKey;
 use std::sync::Arc;
 use tokio::sync::RwLock;

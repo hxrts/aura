@@ -342,8 +342,7 @@ fn quint_type_to_string(quint_type: &QuintType) -> String {
             if params.is_empty() {
                 name.clone()
             } else {
-                let param_strs: Vec<String> =
-                    params.iter().map(quint_type_to_string).collect();
+                let param_strs: Vec<String> = params.iter().map(quint_type_to_string).collect();
                 format!("{}[{}]", name, param_strs.join(", "))
             }
         }

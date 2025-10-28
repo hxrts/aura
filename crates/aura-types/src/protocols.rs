@@ -13,6 +13,8 @@ use std::fmt;
 pub enum ProtocolType {
     /// Deterministic Key Derivation protocol
     Dkd,
+    /// Counter reservation protocol
+    Counter,
     /// Key resharing protocol for threshold updates
     Resharing,
     /// Account recovery protocol
@@ -27,6 +29,7 @@ impl fmt::Display for ProtocolType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProtocolType::Dkd => write!(f, "dkd"),
+            ProtocolType::Counter => write!(f, "counter"),
             ProtocolType::Resharing => write!(f, "resharing"),
             ProtocolType::Recovery => write!(f, "recovery"),
             ProtocolType::Locking => write!(f, "locking"),
@@ -40,6 +43,7 @@ impl ProtocolType {
     pub fn all() -> &'static [ProtocolType] {
         &[
             ProtocolType::Dkd,
+            ProtocolType::Counter,
             ProtocolType::Resharing,
             ProtocolType::Recovery,
             ProtocolType::Locking,
@@ -51,7 +55,10 @@ impl ProtocolType {
     pub fn supports_threshold(&self) -> bool {
         matches!(
             self,
-            ProtocolType::Dkd | ProtocolType::Resharing | ProtocolType::Recovery
+            ProtocolType::Dkd
+                | ProtocolType::Counter
+                | ProtocolType::Resharing
+                | ProtocolType::Recovery
         )
     }
 
@@ -59,7 +66,10 @@ impl ProtocolType {
     pub fn modifies_account_state(&self) -> bool {
         matches!(
             self,
-            ProtocolType::Dkd | ProtocolType::Resharing | ProtocolType::Recovery
+            ProtocolType::Dkd
+                | ProtocolType::Counter
+                | ProtocolType::Resharing
+                | ProtocolType::Recovery
         )
     }
 
@@ -67,6 +77,7 @@ impl ProtocolType {
     pub fn duration_category(&self) -> ProtocolDuration {
         match self {
             ProtocolType::Dkd => ProtocolDuration::Short,
+            ProtocolType::Counter => ProtocolDuration::Short,
             ProtocolType::Resharing => ProtocolDuration::Medium,
             ProtocolType::Recovery => ProtocolDuration::Long,
             ProtocolType::Locking => ProtocolDuration::Short,
@@ -88,12 +99,15 @@ pub enum OperationType {
     Recovery,
     /// Resource locking operation
     Locking,
+    /// Counter reservation operation
+    Counter,
 }
 
 impl fmt::Display for OperationType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             OperationType::Dkd => write!(f, "dkd"),
+            OperationType::Counter => write!(f, "counter"),
             OperationType::Resharing => write!(f, "resharing"),
             OperationType::Recovery => write!(f, "recovery"),
             OperationType::Locking => write!(f, "locking"),
@@ -105,6 +119,7 @@ impl From<ProtocolType> for OperationType {
     fn from(protocol: ProtocolType) -> Self {
         match protocol {
             ProtocolType::Dkd => OperationType::Dkd,
+            ProtocolType::Counter => OperationType::Counter,
             ProtocolType::Resharing => OperationType::Resharing,
             ProtocolType::Recovery => OperationType::Recovery,
             ProtocolType::Locking => OperationType::Locking,

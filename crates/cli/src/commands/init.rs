@@ -46,16 +46,61 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
 
     info!("Account initialization complete, persisting to disk");
 
+    // Validate we have enough device IDs for all participants
+    if init_result.device_ids.len() != participants as usize {
+        return Err(aura_errors::AuraError::bootstrap_failed(format!(
+            "Device ID mismatch: expected {} device IDs but got {}. This indicates a bootstrap failure.",
+            participants, init_result.device_ids.len()
+        )));
+    }
+
+    // Check for device ID collisions
+    use std::collections::HashSet;
+    let unique_device_ids: HashSet<_> = init_result.device_ids.iter().collect();
+    if unique_device_ids.len() != init_result.device_ids.len() {
+        return Err(aura_errors::AuraError::bootstrap_failed(
+            "Device ID collision detected: duplicate device IDs generated during bootstrap. This is a critical error.".to_string()
+        ));
+    }
+
+    // Create configs directory
+    let configs_dir = format!("{}/configs", output_dir);
+    std::fs::create_dir_all(&configs_dir).map_err(|e| {
+        aura_errors::AuraError::configuration_error(format!(
+            "Failed to create configs directory '{}': {}",
+            configs_dir, e
+        ))
+    })?;
+
     // Create configuration files for each device
     for i in 0..participants {
-        let config_path = format!("{}/config_{}.toml", output_dir, i + 1);
+        let config_path = format!("{}/configs/device_{}.toml", output_dir, i + 1);
+        let device_id = init_result.device_ids[i as usize].0; // Safe indexing after validation
+
+        info!(
+            "Creating config for device {} with ID: {}",
+            i + 1,
+            device_id
+        );
+
+        // Each device gets its own data subdirectory
+        let device_data_dir = format!("{}/device_{}", output_dir, i + 1);
+
+        // Create the device-specific data directory
+        std::fs::create_dir_all(&device_data_dir).map_err(|e| {
+            aura_errors::AuraError::configuration_error(format!(
+                "Failed to create device data directory '{}': {}",
+                device_data_dir, e
+            ))
+        })?;
+
         let config_content = format!(
             r#"# Aura Agent Configuration
 device_id = "{}"
 account_id = "{}"
 data_dir = "{}"
 "#,
-            init_result.primary_device_id.0, init_result.account_id.0, output_dir
+            device_id, init_result.account_id.0, device_data_dir
         );
         std::fs::write(&config_path, config_content).map_err(|e| {
             aura_errors::AuraError::configuration_error(format!(
@@ -100,7 +145,7 @@ data_dir = "{}"
     println!("\nConfiguration files created successfully!");
     println!("\nNext steps:");
     println!(
-        "   • Use 'aura status -c {}/config_1.toml' to view account details",
+        "   • Use 'aura status -c {}/configs/device_1.toml' to view account details",
         output_dir
     );
     println!("   • Run threshold operations with multiple devices\n");

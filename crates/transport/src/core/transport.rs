@@ -24,7 +24,6 @@ use uuid::Uuid;
 
 // Re-exports for capability-driven transport
 use aura_crypto::{DeviceKeyManager, Effects};
-use aura_groups::{events::KeyhiveCgkaOperation, state::CgkaState};
 use aura_journal::{
     capability::{
         authority_graph::AuthorityGraph,
@@ -32,7 +31,6 @@ use aura_journal::{
         identity::IndividualId,
         types::{CapabilityResult, CapabilityScope},
     },
-    events::{CgkaEpochTransitionEvent, CgkaStateSyncEvent},
 };
 use aura_types::DeviceId;
 
@@ -181,12 +179,6 @@ pub enum MessageContent {
     CapabilityDelegation(CapabilityDelegation),
     /// Capability revocation event
     CapabilityRevocation(CapabilityRevocation),
-    /// CGKA operation
-    CgkaOperation(KeyhiveCgkaOperation),
-    /// CGKA state synchronization
-    CgkaStateSync(CgkaStateSyncEvent),
-    /// CGKA epoch transition
-    CgkaEpochTransition(CgkaEpochTransitionEvent),
     /// General data with capability requirements
     Data { data: Vec<u8>, context: String },
     /// Delivery confirmation for a message
@@ -549,8 +541,6 @@ pub struct CapabilityTransportAdapter<T: Transport> {
     connected_peers: RwLock<BTreeMap<String, IndividualId>>,
     /// Message delivery confirmations
     _delivery_confirmations: RwLock<BTreeMap<Uuid, BTreeSet<IndividualId>>>,
-    /// CGKA state manager for group operations
-    _cgka_states: RwLock<BTreeMap<String, CgkaState>>,
     /// Injectable effects for deterministic testing
     effects: Effects,
 }
@@ -578,7 +568,6 @@ impl<T: Transport> CapabilityTransportAdapter<T> {
             connections: RwLock::new(BTreeMap::new()),
             connected_peers: RwLock::new(BTreeMap::new()),
             _delivery_confirmations: RwLock::new(BTreeMap::new()),
-            _cgka_states: RwLock::new(BTreeMap::new()),
             effects,
         }
     }

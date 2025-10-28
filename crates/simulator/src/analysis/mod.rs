@@ -175,7 +175,11 @@ impl CheckpointSimulation {
             events.extend(tick_events);
 
             // Take checkpoint if needed
-            if self.world_state.current_tick.is_multiple_of(self.config.checkpoint_interval) {
+            if self
+                .world_state
+                .current_tick
+                .is_multiple_of(self.config.checkpoint_interval)
+            {
                 self.take_checkpoint(format!("auto_{}", self.world_state.current_tick));
             }
         }

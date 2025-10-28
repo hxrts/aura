@@ -20,6 +20,12 @@ impl LiveNetworkHandler {
     }
 }
 
+impl Default for LiveNetworkHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClientHandler for LiveNetworkHandler {
     fn handle_message(&mut self, data: &str) -> WasmResult<()> {
         console_log!("[LiveNetwork] Received message: {}", data);

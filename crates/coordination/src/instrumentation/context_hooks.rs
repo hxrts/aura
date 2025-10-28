@@ -4,9 +4,9 @@
 //! with dev console trace recording.
 
 use super::recorder::TraceRecorder;
-use DeviceId;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+use DeviceId;
 
 /// Instrumentation hooks for ProtocolContext
 ///

@@ -78,13 +78,22 @@ impl EventType {
             // ========== Capabilities ==========
             EventType::CapabilityDelegation(e) => e.apply(state, effects),
             EventType::CapabilityRevocation(e) => e.apply(state, effects),
+            
+            // ========== Keyhive Integration ==========
+            EventType::KeyhiveCapabilityDelegation(e) => {
+                debug!("Applying Keyhive capability delegation: {}", e.capability_id);
+                apply_keyhive_capability_delegation(e, state, effects)
+            }
+            EventType::KeyhiveCapabilityRevocation(e) => {
+                debug!("Applying Keyhive capability revocation: {}", e.capability_id);
+                apply_keyhive_capability_revocation(e, state, effects)
+            }
+            EventType::KeyhiveCgka(e) => {
+                debug!("Applying Keyhive CGKA operation: {}", e.operation_id);
+                apply_keyhive_cgka_operation(e, state, effects)
+            }
 
-            // ========== CGKA ==========
-            EventType::CgkaOperation(e) => e.apply(state, effects),
-            EventType::CgkaStateSync(e) => e.apply(state, effects),
-            EventType::CgkaEpochTransition(e) => e.apply(state, effects),
-
-            // ========== Counter Coordination ==========
+            // ========== SSB Counters ==========
             EventType::IncrementCounter(e) => e.apply(state, effects),
             EventType::ReserveCounterRange(e) => e.apply(state, effects),
 
@@ -95,6 +104,39 @@ impl EventType {
             EventType::AbortSession(e) => e.apply(state, effects),
             EventType::CleanupExpiredSessions(e) => e.apply(state, effects),
         }
+    }
+}
+
+// ========== SSB Counters ==========
+
+impl Appliable for IncrementCounterEvent {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
+        let expiry_epoch = self.requested_at_epoch.saturating_add(self.ttl_epochs);
+        state
+            .relationship_counters
+            .insert(self.relationship_id, (self.new_counter_value, expiry_epoch));
+        Ok(())
+    }
+}
+
+impl Appliable for ReserveCounterRangeEvent {
+    fn apply(
+        &self,
+        state: &mut AccountState,
+        _effects: &aura_crypto::Effects,
+    ) -> Result<(), LedgerError> {
+        let last_counter = self
+            .start_counter
+            .saturating_add(self.range_size.saturating_sub(1));
+        let expiry_epoch = self.requested_at_epoch.saturating_add(self.ttl_epochs);
+        state
+            .relationship_counters
+            .insert(self.relationship_id, (last_counter, expiry_epoch));
+        Ok(())
     }
 }
 
@@ -825,114 +867,6 @@ impl Appliable for crate::capability::events::CapabilityRevocation {
     }
 }
 
-// ========== CGKA ==========
-
-impl Appliable for CgkaOperationEvent {
-    fn apply(
-        &self,
-        _state: &mut AccountState,
-        _effects: &aura_crypto::Effects,
-    ) -> Result<(), LedgerError> {
-        // CGKA operations are primarily handled by the CGKA layer
-        // Here we just record the operation in the ledger for audit/replay
-
-        // CGKA state tracking in AccountState for group operation audit trail
-        // Record operation metadata for compliance and debugging
-
-        debug!(
-            "Applied CGKA operation {} for group {} (epoch {} -> {})",
-            self.operation_id, self.group_id, self.current_epoch, self.target_epoch
-        );
-
-        Ok(())
-    }
-}
-
-impl Appliable for CgkaStateSyncEvent {
-    fn apply(
-        &self,
-        _state: &mut AccountState,
-        _effects: &aura_crypto::Effects,
-    ) -> Result<(), LedgerError> {
-        // State sync events help nodes catch up on CGKA state
-        // The actual state is managed by the CGKA layer
-
-        debug!(
-            "Applied CGKA state sync for group {} at epoch {} with {} members",
-            self.group_id,
-            self.epoch,
-            self.roster_snapshot.len()
-        );
-
-        Ok(())
-    }
-}
-
-impl Appliable for CgkaEpochTransitionEvent {
-    fn apply(
-        &self,
-        _state: &mut AccountState,
-        _effects: &aura_crypto::Effects,
-    ) -> Result<(), LedgerError> {
-        // Epoch transitions mark major CGKA state changes
-        // Record the transition for ordering and consistency
-
-        debug!(
-            "Applied CGKA epoch transition for group {} (epoch {} -> {}) with {} operations",
-            self.group_id,
-            self.previous_epoch,
-            self.new_epoch,
-            self.committed_operations.len()
-        );
-
-        Ok(())
-    }
-}
-
-// ========== Counter Coordination ==========
-
-impl Appliable for crate::events::IncrementCounterEvent {
-    fn apply(
-        &self,
-        _state: &mut AccountState,
-        _effects: &aura_crypto::Effects,
-    ) -> Result<(), LedgerError> {
-        // Update the counter value for this relationship
-        // The counter is used for envelope sequence numbers in SSB
-
-        // Counter tracking in AccountState for SSB envelope sequence management
-        // This maintains causal ordering in SSB-style communication
-
-        debug!(
-            "Incremented counter for relationship {:?}: {} -> {}",
-            self.relationship_id, self.previous_counter_value, self.new_counter_value
-        );
-
-        Ok(())
-    }
-}
-
-impl Appliable for crate::events::ReserveCounterRangeEvent {
-    fn apply(
-        &self,
-        _state: &mut AccountState,
-        _effects: &aura_crypto::Effects,
-    ) -> Result<(), LedgerError> {
-        // Reserve a range of counter values for batch operations
-        // This allows a device to publish multiple envelopes without coordination
-
-        // Counter range tracking in AccountState for efficient batch operations
-        // Allows devices to reserve counter ranges for offline publishing
-
-        debug!(
-            "Reserved counter range for relationship {:?}: {} values starting at {}",
-            self.relationship_id, self.range_size, self.start_counter
-        );
-
-        Ok(())
-    }
-}
-
 // ========== Session Management ==========
 
 impl Appliable for CreateSessionEvent {
@@ -1097,4 +1031,90 @@ impl Appliable for CleanupExpiredSessionsEvent {
 
         Ok(())
     }
+}
+
+// ========== Keyhive Integration Application Functions ==========
+
+/// Apply Keyhive capability delegation to account state
+fn apply_keyhive_capability_delegation(
+    delegation: &keyhive_core::capability::Delegation,
+    _state: &mut AccountState,
+    _effects: &aura_crypto::Effects,
+) -> Result<(), LedgerError> {
+    // TODO: Integrate Keyhive delegation with Aura's capability system
+    // For now, we'll store it in a separate collection to avoid conflicts
+    
+    debug!(
+        "Applied Keyhive capability delegation: {} -> {}",
+        delegation.capability_id, delegation.subject_id
+    );
+    
+    // In a full implementation, this would:
+    // 1. Validate the delegation against the authority graph
+    // 2. Update the capability state
+    // 3. Trigger any necessary group membership updates
+    
+    Ok(())
+}
+
+/// Apply Keyhive capability revocation to account state
+fn apply_keyhive_capability_revocation(
+    revocation: &keyhive_core::capability::Revocation,
+    _state: &mut AccountState,
+    _effects: &aura_crypto::Effects,
+) -> Result<(), LedgerError> {
+    // TODO: Integrate Keyhive revocation with Aura's capability system
+    
+    debug!(
+        "Applied Keyhive capability revocation: {}",
+        revocation.capability_id
+    );
+    
+    // In a full implementation, this would:
+    // 1. Validate the revocation authority
+    // 2. Update the capability state
+    // 3. Trigger cascading revocations if necessary
+    // 4. Update group membership based on capability changes
+    
+    Ok(())
+}
+
+/// Apply Keyhive CGKA operation to account state
+fn apply_keyhive_cgka_operation(
+    operation: &keyhive_core::cgka::operation::CgkaOperation,
+    state: &mut AccountState,
+    effects: &aura_crypto::Effects,
+) -> Result<(), LedgerError> {
+    use crate::types::Session;
+    
+    debug!(
+        "Applying CGKA operation {} for group {}",
+        operation.operation_id, operation.group_id
+    );
+    
+    // Create or update session tracking for this CGKA operation
+    let session_id = aura_types::SessionId::from_uuid(operation.operation_id);
+    let session = Session::new(
+        session_id,
+        aura_types::ProtocolType::Dkd, // Use DKD since Group is not available in aura_types
+        Vec::new(), // TODO: Extract participants from operation
+        effects.now().unwrap_or(0),
+        100, // TTL epochs
+        effects.now().unwrap_or(0),
+    );
+    
+    state.sessions.insert(session_id.into(), session);
+    
+    // In a full implementation, this would:
+    // 1. Validate the CGKA operation against current group state
+    // 2. Apply the operation to update group membership
+    // 3. Update key material and epoch
+    // 4. Notify other group members of the change
+    
+    debug!(
+        "Successfully applied CGKA operation for group {} at epoch {}",
+        operation.group_id, operation.target_epoch
+    );
+    
+    Ok(())
 }

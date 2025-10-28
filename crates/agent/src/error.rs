@@ -9,7 +9,7 @@ pub use aura_errors::{AuraError, ErrorCode, ErrorSeverity, Result};
 // Type aliases for backward compatibility
 pub type AgentError = AuraError;
 pub type ProtocolError = AuraError;
-pub type CryptoError = AuraError; 
+pub type CryptoError = AuraError;
 pub type DataError = AuraError;
 pub type InfrastructureError = AuraError;
 pub type CapabilityError = AuraError;

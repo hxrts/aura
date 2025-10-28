@@ -4,8 +4,8 @@
 //! for protocol coordination and state management at the device level.
 
 use crate::session_types::wrapper::SessionTypedProtocol;
-use aura_types::{DeviceId};
 use aura_journal::{OperationType, ProtocolType, SessionId, SessionOutcome, SessionStatus};
+use aura_types::DeviceId;
 use session_types::witnesses::RuntimeWitness;
 use session_types::SessionState;
 use uuid::Uuid;
@@ -713,6 +713,9 @@ pub fn rehydrate_agent_session(
         }
         Some(ProtocolType::Locking) => {
             AgentSessionState::AgentOperationLocked(SessionTypedProtocol::new(core))
+        }
+        Some(ProtocolType::Counter) => {
+            AgentSessionState::AgentIdle(SessionTypedProtocol::new(core))
         }
         None => AgentSessionState::AgentIdle(SessionTypedProtocol::new(core)),
     }

@@ -24,8 +24,7 @@ pub struct Scenario {
     pub quint_source: Option<QuintMetadata>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ScenarioSetup {
     pub participants: usize,
     pub threshold: usize,
@@ -128,7 +127,6 @@ pub struct QuintMetadata {
     pub property: String,
     pub violation_pattern: String,
 }
-
 
 impl Scenario {
     pub fn inherit_from(&mut self, base: &Scenario) {

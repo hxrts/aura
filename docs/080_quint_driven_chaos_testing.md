@@ -518,7 +518,7 @@ impl TimeTravelDebugger {
 
         // Phase 2: Create strategic checkpoints around the failure
         let debug_checkpoints = self.create_debug_checkpoints(&critical_window);
-        println!("📍 Created {} debug checkpoints", debug_checkpoints.len());
+        println!("[DEBUG] Created {} debug checkpoints", debug_checkpoints.len());
 
         // Phase 3: Generate focused chaos tests around each checkpoint
         let focused_tests = self.generate_focused_tests(&debug_checkpoints, &violation);
@@ -526,7 +526,7 @@ impl TimeTravelDebugger {
 
         // Phase 4: Execute focused tests to gather insights
         let insights = self.execute_focused_tests(&focused_tests);
-        println!("💡 Discovered {} debugging insights", insights.len());
+        println!("[INFO] Discovered {} debugging insights", insights.len());
 
         // Phase 5: Attempt to find minimal reproduction
         let minimal_reproduction = self.find_minimal_reproduction(&violation, &insights);
@@ -598,7 +598,7 @@ impl TimeTravelDebugger {
         let mut insights = Vec::new();
 
         for (test_idx, test) in tests.iter().enumerate() {
-            println!("🧪 Executing focused test {}/{}: {}", test_idx + 1, tests.len(), test.scenario.name);
+            println!(" Executing focused test {}/{}: {}", test_idx + 1, tests.len(), test.scenario.name);
 
             // Restore to checkpoint
             if let Err(e) = self.simulation.restore_checkpoint(test.checkpoint_id) {

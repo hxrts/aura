@@ -46,9 +46,9 @@ quint run <spec>.qnt
 | Session Management & Presence | `session_epochs.qnt` | [OK] Core |
 | Distributed Counter Coordination | `counter_coordination.qnt` | [OK] Core |
 | CRDT Journal & Capabilities | `journal_ledger.qnt` | [OK] Core |
-| Session Types & Choreographies | `choreographic_coordination.qnt` | 🔴 Critical |
-| Social Web-of-Trust & P2P Discovery | `social_bulletin_board.qnt` | 🔴 Critical |
-| BeeKEM Group Communication | `group_communication.qnt` | 🔴 Critical |
+| Session Types & Choreographies | `choreographic_coordination.qnt` | [CRITICAL] Critical |
+| Social Web-of-Trust & P2P Discovery | `social_bulletin_board.qnt` | [CRITICAL] Critical |
+| BeeKEM Group Communication | `group_communication.qnt` | [CRITICAL] Critical |
 | Key Resharing & Recovery | Covered in `threshold_signatures.qnt` | [OK] Integrated |
 | Transport & Network Protocols | Covered in `social_bulletin_board.qnt` | [OK] Integrated |
 | Storage & Replication | Covered in `journal_ledger.qnt` | [OK] Integrated |

@@ -275,13 +275,13 @@ mod tests {
         // After one success, reliability score should be high (around 1.0)
         assert!(score.is_acceptable(0.5));
         assert!(score.is_acceptable(0.99));
-        
+
         // Test with a peer that has failures
         let mut failing_score = TrustScore::new(2000);
         failing_score.record_success(2000);
         failing_score.record_failure(2001);
         failing_score.record_failure(2002);
-        
+
         // Should still be acceptable at low threshold but not high threshold
         assert!(failing_score.is_acceptable(0.3));
         assert!(!failing_score.is_acceptable(0.9));

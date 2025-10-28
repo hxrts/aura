@@ -164,6 +164,8 @@ pub struct SimulationState {
     pub tick: u64,
     /// Current time
     pub time: u64,
+    /// State variables
+    pub variables: HashMap<String, String>,
     /// Participant states
     pub participants: Vec<ParticipantStateSnapshot>,
     /// Protocol execution state
@@ -196,6 +198,9 @@ pub struct ProtocolMonitoringState {
     pub queued_protocols: Vec<String>,
 }
 
+/// Type alias for backward compatibility
+pub type ProtocolExecutionState = ProtocolMonitoringState;
+
 /// Session information for monitoring
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
@@ -226,11 +231,11 @@ pub struct NetworkStateSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageDeliveryStats {
     /// Total messages sent
-    pub total_sent: u64,
+    pub messages_sent: u64,
     /// Total messages delivered
-    pub total_delivered: u64,
+    pub messages_delivered: u64,
     /// Total messages dropped
-    pub total_dropped: u64,
+    pub messages_dropped: u64,
     /// Average delivery latency
     pub average_latency_ms: f64,
 }
@@ -240,10 +245,10 @@ pub struct MessageDeliveryStats {
 pub struct NetworkFailureConditions {
     /// Drop rate
     pub drop_rate: f64,
-    /// Latency range
-    pub latency_range: (u64, u64),
-    /// Partition count
-    pub partition_count: usize,
+    /// Latency range in milliseconds
+    pub latency_range_ms: (u64, u64),
+    /// Partitions active flag
+    pub partitions_active: bool,
 }
 
 /// Violation detection report

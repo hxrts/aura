@@ -8,8 +8,11 @@
 // - Session epoch enforcement: Old session credentials are rejected
 
 use aura_crypto::Effects;
+use aura_journal::{
+    AccountLedger, DeviceMetadata, DeviceType, EpochTickEvent, Event, EventAuthorization, EventId,
+    EventType,
+};
 use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
-use aura_journal::{AccountLedger, DeviceMetadata, DeviceType, EpochTickEvent, Event, EventAuthorization, EventId, EventType};
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use rand::Rng;
 use std::collections::{BTreeMap, BTreeSet, HashSet};

@@ -1,63 +1,58 @@
-//! Complete Protocol Implementations
+//! Unified Protocol Lifecycle Implementations
 //!
-//! This module contains complete protocol implementations that combine
-//! session type definitions with choreographic execution logic.
-//! Each protocol is self-contained and provides both compile-time safety
-//! and runtime execution.
+//! This module contains protocol lifecycle implementations following the
+//! unified protocol-core architecture. All protocols use the LifecycleScheduler
+//! for execution with session type safety and deterministic coordination.
 //!
-//! ## Choreographic Programming
+//! ## Architecture
 //!
-//! Protocols are implemented using **choreographic programming**, where
-//! distributed protocols are written as linear async functions that look like
-//! single-threaded code but coordinate across multiple devices.
+//! Protocols are implemented as lifecycle state machines using **protocol-core**:
+//! - **Type Safety**: Session types ensure correct state transitions
+//! - **Deterministic**: Injectable effects for reproducible execution 
+//! - **Composable**: Protocol capabilities provided through dependency injection
+//! - **Testable**: Pure state machines with effects injected at boundaries
 //!
-//! Benefits:
-//! - **Global viewpoint**: Protocol described as single program
-//! - **Local projection**: Each device executes its role automatically
-//! - **Session types**: Communication patterns type-checked
-//! - **Deadlock freedom**: Guaranteed by choreographic structure
+//! ## Usage
+//!
+//! Execute protocols through LifecycleScheduler:
+//! ```rust,ignore
+//! let scheduler = LifecycleScheduler::with_effects(effects);
+//! let result = scheduler.execute_dkd(session_id, account_id, device_id, ...).await?;
+//! ```
 
-// Core protocol modules
+// ========== Protocol Lifecycle Modules ==========
+pub mod counter_lifecycle;
+pub mod dkd_lifecycle;  
+pub mod group_lifecycle;
+pub mod locking_lifecycle;
+pub mod recovery_lifecycle;
+pub mod resharing_lifecycle;
+
+// ========== Supporting Modules ==========
 pub mod base;
-pub mod dkd;
 pub mod protocol_traits;
-pub mod recovery;
-pub mod resharing;
 pub mod traits;
 pub mod wrapper;
 
-// Utility protocol modules
-pub mod counter;
-pub mod locking;
+// ========== Utility Protocols ==========
 pub mod rendezvous;
 
-// Re-export all protocol implementations
-pub use dkd::{
-    dkd_choreography, new_dkd_protocol, rehydrate_dkd_protocol, DkdProtocolCore, DkdProtocolState,
-    DkdSessionError,
-};
-pub use recovery::{
-    new_recovery_protocol, nudge_guardian, recovery_choreography, rehydrate_recovery_protocol,
-    RecoveryProtocolCore, RecoveryProtocolState, RecoverySessionError,
-};
-pub use resharing::{
-    new_resharing_protocol, rehydrate_resharing_protocol, resharing_choreography,
-    ResharingProtocolCore, ResharingProtocolState, ResharingSessionError,
-};
-pub use traits::*;
+// ========== Protocol Lifecycle Exports ==========
+pub use counter_lifecycle::{CounterLifecycle, CounterLifecycleError};
+pub use dkd_lifecycle::{DkdLifecycle, DkdLifecycleError};
+pub use group_lifecycle::{GroupLifecycle, GroupLifecycleError};
+pub use locking_lifecycle::{LockingLifecycle, LockingLifecycleError};
+pub use recovery_lifecycle::{RecoveryLifecycle, RecoveryLifecycleError};
+pub use resharing_lifecycle::{ResharingLifecycle, ResharingLifecycleError};
 
-// Re-export protocol wrapper utilities
+// ========== Supporting Exports ==========
+pub use traits::*;
 pub use wrapper::{
     rehydrate_protocol, IntoProtocolWrapper, ProtocolWrapper, ProtocolWrapperBuilder,
     ProtocolWrapperError,
 };
 
-// Re-export utility protocol implementations
-pub use counter::{
-    counter_increment_choreography, counter_range_choreography, CounterReservationConfig,
-    CounterReservationResult,
-};
-pub use locking::locking_choreography;
+// ========== Utility Protocol Exports ==========
 pub use rendezvous::{
     AuthenticationPayload, HandshakeResult, HandshakeTranscript, PayloadKind, PskHandshakeConfig,
     RendezvousEnvelope, RendezvousError, RendezvousProtocol, TransportDescriptor, TransportKind,

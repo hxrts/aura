@@ -165,6 +165,8 @@ pub enum EventAuthorization {
         #[serde(with = "signature_serde")]
         signature: Signature,
     },
+    /// Lifecycle-internal authorization used during protocol execution.
+    LifecycleInternal,
 }
 
 mod signature_serde {
@@ -273,18 +275,18 @@ pub enum EventType {
     PresenceTicketCache(PresenceTicketCacheEvent),
 
     // ========== Capabilities ==========
-    /// Delegate a capability
+    /// Delegate a capability (legacy Aura format)
     CapabilityDelegation(crate::capability::events::CapabilityDelegation),
-    /// Revoke a capability
+    /// Revoke a capability (legacy Aura format)
     CapabilityRevocation(crate::capability::events::CapabilityRevocation),
-
-    // ========== CGKA (Continuous Group Key Agreement) ==========
-    /// BeeKEM CGKA operation
-    CgkaOperation(CgkaOperationEvent),
-    /// CGKA state synchronization
-    CgkaStateSync(CgkaStateSyncEvent),
-    /// CGKA epoch transition
-    CgkaEpochTransition(CgkaEpochTransitionEvent),
+    
+    // ========== Keyhive Integration ==========
+    /// Keyhive capability delegation
+    KeyhiveCapabilityDelegation(keyhive_core::capability::Delegation),
+    /// Keyhive capability revocation
+    KeyhiveCapabilityRevocation(keyhive_core::capability::Revocation),
+    /// Keyhive CGKA operation
+    KeyhiveCgka(keyhive_core::cgka::operation::CgkaOperation),
 
     // ========== SSB Counter Coordination ==========
     /// Increment counter for unique envelope identifiers
@@ -599,97 +601,6 @@ pub struct PresenceTicketCacheEvent {
     pub ticket_digest: [u8; 32],
     pub issued_at: u64,
     pub expires_at: u64,
-}
-
-// ========== CGKA Events ==========
-
-/// BeeKEM CGKA operation event
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CgkaOperationEvent {
-    pub operation_id: uuid::Uuid,
-    pub group_id: String,
-    pub current_epoch: u64,
-    pub target_epoch: u64,
-    pub operation_type: CgkaOperationType,
-    pub roster_delta: CgkaRosterDelta,
-    pub tree_updates: Vec<CgkaTreeUpdate>,
-    pub issued_by: DeviceId,
-    pub issued_at: u64,
-    pub signature: Vec<u8>,
-}
-
-/// Type of CGKA operation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CgkaOperationType {
-    /// Add new members to the group
-    Add { members: Vec<String> },
-    /// Remove members from the group
-    Remove { members: Vec<String> },
-    /// Update tree without changing membership
-    Update,
-    /// Initialize new group
-    Init { initial_members: Vec<String> },
-}
-
-/// Changes to group roster
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CgkaRosterDelta {
-    pub added_members: Vec<String>,
-    pub removed_members: Vec<String>,
-    pub previous_size: u32,
-    pub new_size: u32,
-}
-
-/// Tree update operation for BeeKEM
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CgkaTreeUpdate {
-    pub position: u32,
-    pub update_type: CgkaTreeUpdateType,
-    pub path_updates: Vec<CgkaPathUpdate>,
-}
-
-/// Type of tree update
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CgkaTreeUpdateType {
-    /// Add new leaf node
-    AddLeaf {
-        member_id: String,
-        public_key: Vec<u8>,
-    },
-    /// Remove leaf node
-    RemoveLeaf { member_id: String },
-    /// Update existing node
-    UpdateNode { new_public_key: Vec<u8> },
-}
-
-/// Update to a node in the tree path
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CgkaPathUpdate {
-    pub position: u32,
-    pub public_key: Vec<u8>,
-    pub encrypted_secret: Vec<u8>,
-}
-
-/// CGKA state synchronization event
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CgkaStateSyncEvent {
-    pub group_id: String,
-    pub epoch: u64,
-    pub roster_snapshot: Vec<String>,
-    pub tree_snapshot: Vec<u8>,                   // Serialized tree state
-    pub application_secrets: Vec<(u64, Vec<u8>)>, // (epoch, secret) pairs
-    pub sync_timestamp: u64,
-}
-
-/// CGKA epoch transition event
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CgkaEpochTransitionEvent {
-    pub group_id: String,
-    pub previous_epoch: u64,
-    pub new_epoch: u64,
-    pub roster_delta: CgkaRosterDelta,
-    pub committed_operations: Vec<uuid::Uuid>,
-    pub transition_timestamp: u64,
 }
 
 // ========== SSB Counter Coordination ==========

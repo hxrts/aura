@@ -73,25 +73,25 @@ Demonstrates transport layer replacement patterns and P2P networking concepts.
 
 The examples showcase the key benefits of the refactored architecture:
 
-### 🏗️ **Clean Separation of Concerns**
+### **Clean Separation of Concerns**
 - **Core agents** contain only business logic (3-line methods)
 - **Services** handle complex operations and domain logic
 - **Infrastructure** manages platform-specific code
 - **Clear boundaries** between each layer
 
-### 🧪 **Testability**
+### **Testability**
 - Services can be mocked independently
 - Clean dependency injection through `ServiceRegistry`
 - No layer violations or complex interdependencies
 - Each service has a single responsibility
 
-### 📦 **Maintainability**
+### **Maintainability**
 - Small, focused files (no more 1,800-line monoliths)
 - Clear ownership of functionality by domain
 - Easy to locate and modify specific features
 - Consistent naming and organization patterns
 
-### 🔄 **Extensibility**
+### **Extensibility**
 - New protocols easily added to `protocols/` directory
 - Platform support added to `infrastructure/` without core changes
 - Service implementations can be swapped or enhanced

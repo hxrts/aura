@@ -20,6 +20,12 @@ impl AnalysisHandler {
     }
 }
 
+impl Default for AnalysisHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClientHandler for AnalysisHandler {
     fn handle_message(&mut self, data: &str) -> WasmResult<()> {
         console_log!("[Analysis] Received message: {}", data);

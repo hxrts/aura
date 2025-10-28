@@ -7,8 +7,8 @@
 use crate::simulation_engine::tick;
 use crate::world_state::{WorldState, WorldStateSnapshot};
 use crate::{Result, SimError};
-use aura_console_types::{TraceEvent, SimulationTrace, TraceMetadata};
 use aura_console_types::trace::CheckpointRef;
+use aura_console_types::{SimulationTrace, TraceEvent, TraceMetadata};
 use std::collections::VecDeque;
 
 /// Functional simulation runner that executes pure state transitions
@@ -183,7 +183,6 @@ impl FunctionalRunner {
 
     /// Run simulation until completion or stopping condition
     pub fn run_until_complete(&mut self) -> Result<RunResult> {
-
         let mut _total_events = 0;
 
         while self.world.should_continue() {
@@ -237,7 +236,6 @@ impl FunctionalRunner {
 
     /// Run simulation until idle (no more work to do)
     pub fn run_until_idle(&mut self) -> Result<RunResult> {
-
         while !self.world.is_idle() && self.world.should_continue() {
             self.step()?;
         }
@@ -258,7 +256,6 @@ impl FunctionalRunner {
 
     /// Run simulation for a specific number of ticks
     pub fn run_for_ticks(&mut self, tick_count: u64) -> Result<RunResult> {
-
         let target_tick = self.world.current_tick + tick_count;
 
         while self.world.current_tick < target_tick && self.world.should_continue() {
@@ -309,7 +306,9 @@ impl FunctionalRunner {
             .checkpoints
             .iter()
             .find(|cp| cp.id == checkpoint_id)
-            .ok_or_else(|| SimError::CheckpointError(format!("Checkpoint {} not found", checkpoint_id)))?;
+            .ok_or_else(|| {
+                SimError::CheckpointError(format!("Checkpoint {} not found", checkpoint_id))
+            })?;
 
         // Restoring checkpoint
 
@@ -455,10 +454,10 @@ mod tests {
     #[test]
     fn test_runner_step() {
         let mut runner = FunctionalRunner::new(42);
-        
+
         let initial_tick = runner.current_tick();
         let events = runner.step().unwrap();
-        
+
         assert_eq!(runner.current_tick(), initial_tick + 1);
         assert!(!events.is_empty());
         assert!(!runner.event_trace().is_empty());
@@ -467,21 +466,25 @@ mod tests {
     #[test]
     fn test_runner_with_participants() {
         let mut runner = FunctionalRunner::new(42);
-        
-        runner.add_participant(
-            "alice".to_string(),
-            "device_alice".to_string(),
-            "account_1".to_string(),
-        ).unwrap();
-        
-        runner.add_participant(
-            "bob".to_string(),
-            "device_bob".to_string(),
-            "account_1".to_string(),
-        ).unwrap();
-        
+
+        runner
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+
+        runner
+            .add_participant(
+                "bob".to_string(),
+                "device_bob".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+
         assert_eq!(runner.world_state().participants.len(), 2);
-        
+
         let events = runner.step().unwrap();
         assert!(!events.is_empty());
     }
@@ -489,18 +492,20 @@ mod tests {
     #[test]
     fn test_checkpointing() {
         let mut runner = FunctionalRunner::new(42);
-        
+
         // Run a few steps
         runner.step_n(3).unwrap();
         let checkpoint_tick = runner.current_tick();
-        
+
         // Create checkpoint
-        let checkpoint_id = runner.create_checkpoint(Some("test_checkpoint".to_string())).unwrap();
-        
+        let checkpoint_id = runner
+            .create_checkpoint(Some("test_checkpoint".to_string()))
+            .unwrap();
+
         // Run more steps
         runner.step_n(2).unwrap();
         assert!(runner.current_tick() > checkpoint_tick);
-        
+
         // Restore checkpoint
         runner.restore_checkpoint(&checkpoint_id).unwrap();
         assert_eq!(runner.current_tick(), checkpoint_tick);
@@ -508,12 +513,11 @@ mod tests {
 
     #[test]
     fn test_auto_checkpointing() {
-        let mut runner = FunctionalRunner::new(42)
-            .with_auto_checkpoints(2); // Checkpoint every 2 ticks
-        
+        let mut runner = FunctionalRunner::new(42).with_auto_checkpoints(2); // Checkpoint every 2 ticks
+
         // Run enough steps to trigger auto-checkpointing
         runner.step_n(5).unwrap();
-        
+
         // Should have created checkpoints at ticks 2 and 4
         let checkpoints = runner.list_checkpoints();
         assert!(checkpoints.len() >= 2);
@@ -522,9 +526,9 @@ mod tests {
     #[test]
     fn test_run_for_ticks() {
         let mut runner = FunctionalRunner::new(42);
-        
+
         let result = runner.run_for_ticks(5).unwrap();
-        
+
         assert_eq!(result.final_tick, 5);
         assert!(matches!(result.stop_reason, StopReason::ManualStop));
         assert!(result.success);
@@ -533,16 +537,18 @@ mod tests {
     #[test]
     fn test_statistics() {
         let mut runner = FunctionalRunner::new(42);
-        
-        runner.add_participant(
-            "alice".to_string(),
-            "device_alice".to_string(),
-            "account_1".to_string(),
-        ).unwrap();
-        
+
+        runner
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+
         runner.step_n(3).unwrap();
         runner.create_checkpoint(Some("test".to_string())).unwrap();
-        
+
         let stats = runner.get_statistics();
         assert_eq!(stats.current_tick, 3);
         assert_eq!(stats.participant_count, 1);
@@ -553,15 +559,17 @@ mod tests {
     #[test]
     fn test_trace_export() {
         let mut runner = FunctionalRunner::new(42);
-        
-        runner.add_participant(
-            "alice".to_string(),
-            "device_alice".to_string(),
-            "account_1".to_string(),
-        ).unwrap();
-        
+
+        runner
+            .add_participant(
+                "alice".to_string(),
+                "device_alice".to_string(),
+                "account_1".to_string(),
+            )
+            .unwrap();
+
         runner.step_n(2).unwrap();
-        
+
         let trace = runner.export_trace();
         assert_eq!(trace.metadata.seed, 42);
         assert_eq!(trace.metadata.total_ticks, 2);
