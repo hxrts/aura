@@ -5,7 +5,7 @@
 
 use anyhow::{anyhow, Result};
 use aura_console_types::{BranchInfo, ConsoleCommand, SimulationInfo, TraceEvent};
-use aura_simulator::{InstrumentedSimulation, SimulationResult};
+use crate::simulation_wrapper::SimulationWrapper;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -36,8 +36,8 @@ pub struct BranchManager {
 pub struct SimulationBranch {
     /// Unique branch identifier
     pub id: BranchId,
-    /// The simulation instance for this branch
-    pub simulation: Arc<Mutex<InstrumentedSimulation>>,
+    /// The simulation wrapper for this branch
+    pub simulation: Arc<Mutex<SimulationWrapper>>,
     /// Branch creation metadata
     pub metadata: BranchMetadata,
     /// Whether this branch is currently active
@@ -90,7 +90,7 @@ impl BranchManager {
         // Create a new default branch
         let branch_id = self
             .create_branch_from_simulation(
-                InstrumentedSimulation::new(42), // Default seed
+                SimulationWrapper::new(42), // Default seed
                 Some("main".to_string()),
                 None,
             )
@@ -105,12 +105,12 @@ impl BranchManager {
     /// Create a new branch from a simulation
     pub fn create_branch_from_simulation(
         &mut self,
-        simulation: InstrumentedSimulation,
+        simulation: SimulationWrapper,
         name: Option<String>,
         parent_branch: Option<BranchId>,
     ) -> Result<BranchId> {
         let branch_id = Uuid::new_v4();
-        let simulation_id = simulation.id;
+        let simulation_id = Uuid::new_v4(); // Generate new simulation ID
 
         let metadata = BranchMetadata {
             id: branch_id,
@@ -163,7 +163,7 @@ impl BranchManager {
             // Create a new simulation with the same state
             // For now, we'll create a new simulation with the same seed
             // In a full implementation, we would copy the exact state
-            InstrumentedSimulation::new(parent_sim.seed)
+            SimulationWrapper::new(42) // TODO: Get seed from parent simulation
         };
 
         // Create the forked branch

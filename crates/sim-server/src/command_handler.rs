@@ -8,7 +8,7 @@ use aura_console_types::{
     BranchInfo, ConsoleCommand, ConsoleResponse, DeviceInfo, EventType, LedgerStateInfo,
     SimulationInfo, TraceEvent,
 };
-use aura_simulator::{InstrumentedSimulation, MockParticipant};
+use crate::simulation_wrapper::SimulationWrapper;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
@@ -397,7 +397,7 @@ Testing:
             };
 
             // Create a new simulation with the same seed
-            let new_simulation = InstrumentedSimulation::new(original_seed);
+            let new_simulation = SimulationWrapper::new(original_seed);
             *branch.simulation.lock().unwrap() = new_simulation;
 
             info!("Reset simulation on branch {}", branch_id);

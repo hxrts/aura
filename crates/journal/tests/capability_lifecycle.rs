@@ -8,7 +8,7 @@
 
 use aura_crypto::Effects;
 use aura_journal::capability::CapabilityId;
-use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+use aura_crypto::{ed25519_sign, Ed25519SigningKey, ed25519_verify, Ed25519VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -93,7 +93,7 @@ impl CapabilityToken {
     pub fn verify(&self, verifying_key: &VerifyingKey) -> Result<(), String> {
         let message = self.signing_message()?;
 
-        use ed25519_dalek::Signature;
+        use aura_crypto::Ed25519Signature;
         let sig = Signature::from_bytes(
             self.signature
                 .as_slice()
@@ -208,7 +208,7 @@ impl ThresholdCollector {
 
         for (device_id, sig_bytes) in &self.signatures {
             if let Some(verifying_key) = device_keys.get(device_id) {
-                use ed25519_dalek::Signature;
+                use aura_crypto::Ed25519Signature;
                 if let Ok(sig) = Signature::try_from(sig_bytes.as_slice()) {
                     if verifying_key.verify(message, &sig).is_err() {
                         return false;

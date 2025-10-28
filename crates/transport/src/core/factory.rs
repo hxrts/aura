@@ -4,8 +4,11 @@
 //! with appropriate configuration and capability wrapping.
 
 use crate::{
-    CapabilityTransportAdapter, StubTransport, TransportError, TransportErrorBuilder,
-    TransportResult,
+    adapters::{
+        https_relay::HttpsRelayTransport, memory::MemoryTransport, noise_tcp::NoiseTcpTransport,
+        simple_tcp::SimpleTcpTransport,
+    },
+    ConnectionManager, CapabilityTransportAdapter, TransportError, TransportErrorBuilder, TransportResult,
 };
 use aura_crypto::{DeviceKeyManager, Effects};
 use aura_journal::capability::identity::IndividualId;
@@ -13,12 +16,90 @@ use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// Enum for different transport implementations
+pub enum AnyTransport {
+    Memory(MemoryTransport),
+    HttpsRelay(HttpsRelayTransport),
+    NoiseTcp(NoiseTcpTransport),
+    SimpleTcp(SimpleTcpTransport),
+}
+
+#[async_trait::async_trait]
+impl ConnectionManager for AnyTransport {
+    async fn connect(
+        &self,
+        peer_id: &str,
+        my_ticket: &crate::PresenceTicket,
+        peer_ticket: &crate::PresenceTicket,
+    ) -> TransportResult<crate::Connection> {
+        match self {
+            AnyTransport::Memory(t) => t.connect(peer_id, my_ticket, peer_ticket).await,
+            AnyTransport::HttpsRelay(t) => t.connect(peer_id, my_ticket, peer_ticket).await,
+            AnyTransport::NoiseTcp(t) => t.connect(peer_id, my_ticket, peer_ticket).await,
+            AnyTransport::SimpleTcp(t) => t.connect(peer_id, my_ticket, peer_ticket).await,
+        }
+    }
+
+    async fn send(&self, conn: &crate::Connection, message: &[u8]) -> TransportResult<()> {
+        match self {
+            AnyTransport::Memory(t) => t.send(conn, message).await,
+            AnyTransport::HttpsRelay(t) => t.send(conn, message).await,
+            AnyTransport::NoiseTcp(t) => t.send(conn, message).await,
+            AnyTransport::SimpleTcp(t) => t.send(conn, message).await,
+        }
+    }
+
+    async fn receive(
+        &self,
+        conn: &crate::Connection,
+        timeout: std::time::Duration,
+    ) -> TransportResult<Option<Vec<u8>>> {
+        match self {
+            AnyTransport::Memory(t) => t.receive(conn, timeout).await,
+            AnyTransport::HttpsRelay(t) => t.receive(conn, timeout).await,
+            AnyTransport::NoiseTcp(t) => t.receive(conn, timeout).await,
+            AnyTransport::SimpleTcp(t) => t.receive(conn, timeout).await,
+        }
+    }
+
+    async fn broadcast(
+        &self,
+        connections: &[crate::Connection],
+        message: &[u8],
+    ) -> TransportResult<crate::BroadcastResult> {
+        match self {
+            AnyTransport::Memory(t) => t.broadcast(connections, message).await,
+            AnyTransport::HttpsRelay(t) => t.broadcast(connections, message).await,
+            AnyTransport::NoiseTcp(t) => t.broadcast(connections, message).await,
+            AnyTransport::SimpleTcp(t) => t.broadcast(connections, message).await,
+        }
+    }
+
+    async fn disconnect(&self, conn: &crate::Connection) -> TransportResult<()> {
+        match self {
+            AnyTransport::Memory(t) => t.disconnect(conn).await,
+            AnyTransport::HttpsRelay(t) => t.disconnect(conn).await,
+            AnyTransport::NoiseTcp(t) => t.disconnect(conn).await,
+            AnyTransport::SimpleTcp(t) => t.disconnect(conn).await,
+        }
+    }
+
+    async fn is_connected(&self, conn: &crate::Connection) -> bool {
+        match self {
+            AnyTransport::Memory(t) => t.is_connected(conn).await,
+            AnyTransport::HttpsRelay(t) => t.is_connected(conn).await,
+            AnyTransport::NoiseTcp(t) => t.is_connected(conn).await,
+            AnyTransport::SimpleTcp(t) => t.is_connected(conn).await,
+        }
+    }
+}
+
 /// Configuration for transport creation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TransportConfig {
-    /// In-memory stub transport for testing
-    Stub {
+    /// In-memory transport adapter for testing
+    Memory {
         /// Optional device ID for transport identification
         device_id: Option<DeviceId>,
     },
@@ -30,12 +111,23 @@ pub enum TransportConfig {
         participant_id: String,
     },
 
-    /// Future: HTTPS relay transport configuration
-    #[serde(skip)]
+    /// HTTPS relay transport configuration
     HttpsRelay {
         relay_url: String,
         timeout_seconds: u64,
         max_retries: u32,
+    },
+
+    /// Direct P2P transport with Noise protocol
+    NoiseTcp {
+        listen_address: String,
+        connection_timeout_seconds: u64,
+    },
+
+    /// Simple TCP transport (without encryption, for testing)
+    SimpleTcp {
+        listen_address: String,
+        connection_timeout_seconds: u64,
     },
 
     /// Future: QUIC transport configuration
@@ -57,7 +149,7 @@ pub enum TransportConfig {
 
 impl Default for TransportConfig {
     fn default() -> Self {
-        Self::Stub { device_id: None }
+        Self::Memory { device_id: None }
     }
 }
 
@@ -81,17 +173,84 @@ impl TransportFactory {
     /// * `config` - Transport configuration specifying type and parameters
     ///
     /// # Returns
-    /// * `Ok(StubTransport)` - Configured transport instance
+    /// * `Ok(AnyTransport)` - Configured transport instance
     /// * `Err(TransportError)` - Configuration or creation error
-    pub fn create_raw_transport(config: &TransportConfig) -> TransportResult<StubTransport> {
+    pub async fn create_raw_transport(config: &TransportConfig) -> TransportResult<AnyTransport> {
         match config {
-            TransportConfig::Stub { .. } => {
-                let transport = StubTransport::new();
-                Ok(transport)
+            TransportConfig::Memory { .. } => {
+                let transport = MemoryTransport::new();
+                Ok(AnyTransport::Memory(transport))
+            }
+
+            TransportConfig::HttpsRelay {
+                relay_url,
+                timeout_seconds,
+                max_retries,
+            } => {
+                // Create a device ID for HTTPS relay transport
+                let effects = Effects::test(); // TODO: Use real effects in production
+                let device_id = DeviceId::new_with_effects(&effects);
+
+                let transport = HttpsRelayTransport::new(
+                    device_id,
+                    relay_url.clone(),
+                    *timeout_seconds,
+                    *max_retries,
+                );
+                Ok(AnyTransport::HttpsRelay(transport))
+            }
+
+            TransportConfig::NoiseTcp {
+                listen_address,
+                connection_timeout_seconds,
+            } => {
+                // Create device key and ID for Noise TCP transport
+                let effects = Effects::test(); // TODO: Use real effects in production
+                let device_key =
+                    ed25519_dalek::SigningKey::from_bytes(&effects.random_bytes::<32>());
+                let device_id = DeviceId::new_with_effects(&effects);
+
+                // Parse listen address
+                let listen_addr: std::net::SocketAddr = listen_address.parse().map_err(|e| {
+                    TransportError::configuration_error(&format!("Invalid listen address: {}", e))
+                })?;
+
+                let transport = NoiseTcpTransportBuilder::new()
+                    .device_key(device_key)
+                    .device_id(device_id)
+                    .listen_addr(listen_addr)
+                    .connection_timeout(std::time::Duration::from_secs(*connection_timeout_seconds))
+                    .build()
+                    .await?;
+
+                Ok(AnyTransport::NoiseTcp(transport))
+            }
+
+            TransportConfig::SimpleTcp {
+                listen_address,
+                connection_timeout_seconds,
+            } => {
+                // Create device ID for Simple TCP transport
+                let effects = Effects::test(); // TODO: Use real effects in production
+                let device_id = DeviceId::new_with_effects(&effects);
+
+                // Parse listen address
+                let listen_addr: std::net::SocketAddr = listen_address.parse().map_err(|e| {
+                    TransportError::configuration_error(&format!("Invalid listen address: {}", e))
+                })?;
+
+                let transport = SimpleTcpTransportBuilder::new()
+                    .device_id(device_id)
+                    .listen_addr(listen_addr)
+                    .connection_timeout(std::time::Duration::from_secs(*connection_timeout_seconds))
+                    .build()
+                    .await?;
+
+                Ok(AnyTransport::SimpleTcp(transport))
             }
 
             _ => Err(TransportErrorBuilder::transport(
-                "Only stub transport is currently implemented".to_string(),
+                "Transport type not yet implemented".to_string(),
             )),
         }
     }
@@ -106,13 +265,13 @@ impl TransportFactory {
     /// * `capability_config` - Capability system configuration
     ///
     /// # Returns
-    /// * `Ok(CapabilityTransportAdapter<StubTransport>)` - Capability-wrapped transport
+    /// * `Ok(CapabilityTransportAdapter<AnyTransport>)` - Capability-wrapped transport
     /// * `Err(TransportError)` - Configuration or creation error
-    pub fn create_capability_transport(
+    pub async fn create_capability_transport(
         transport_config: &TransportConfig,
         capability_config: CapabilityConfig,
-    ) -> TransportResult<CapabilityTransportAdapter<StubTransport>> {
-        let raw_transport = Self::create_raw_transport(transport_config)?;
+    ) -> TransportResult<CapabilityTransportAdapter<AnyTransport>> {
+        let raw_transport = Self::create_raw_transport(transport_config).await?;
 
         let capability_transport = CapabilityTransportAdapter::new(
             Arc::new(raw_transport),
@@ -134,12 +293,12 @@ impl TransportFactory {
     /// * `capability_config` - Capability system configuration
     ///
     /// # Returns
-    /// * `Ok(CapabilityTransportAdapter<StubTransport>)` - Ready-to-use capability transport
+    /// * `Ok(CapabilityTransportAdapter<AnyTransport>)` - Ready-to-use capability transport
     /// * `Err(TransportError)` - Configuration or creation error
     pub fn create_transport(
         transport_config: &TransportConfig,
         capability_config: CapabilityConfig,
-    ) -> TransportResult<CapabilityTransportAdapter<StubTransport>> {
+    ) -> TransportResult<CapabilityTransportAdapter<AnyTransport>> {
         Self::create_capability_transport(transport_config, capability_config)
     }
 
@@ -149,7 +308,7 @@ impl TransportFactory {
     /// Useful for configuration validation and user interfaces.
     pub fn available_transport_types() -> Vec<&'static str> {
         vec![
-            "stub",
+            "memory",
             "simulation",  // Created directly by simulation system
             "https_relay", // Future implementation
             "quic",        // Future implementation
@@ -166,7 +325,7 @@ impl TransportFactory {
     /// * `true` if the transport type is implemented and can be created
     /// * `false` if the transport type is not yet implemented
     pub fn is_transport_implemented(transport_type: &str) -> bool {
-        matches!(transport_type, "stub")
+        matches!(transport_type, "memory" | "https_relay")
     }
 
     /// Validate transport configuration
@@ -182,8 +341,8 @@ impl TransportFactory {
     /// * `Err(TransportError)` if configuration has issues
     pub fn validate_config(config: &TransportConfig) -> TransportResult<()> {
         match config {
-            TransportConfig::Stub { .. } => {
-                // Stub transport always valid
+            TransportConfig::Memory { .. } => {
+                // Memory transport always valid
                 Ok(())
             }
 
@@ -220,10 +379,8 @@ impl TransportFactory {
                     ));
                 }
 
-                // For now, reject since not implemented
-                Err(TransportErrorBuilder::transport(
-                    "HTTPS relay transport not yet implemented".to_string(),
-                ))
+                // HTTPS relay is now implemented
+                Ok(())
             }
 
             TransportConfig::Quic { bind_address, .. } => {
@@ -261,10 +418,10 @@ pub struct TransportConfigBuilder {
 }
 
 impl TransportConfigBuilder {
-    /// Start building a stub transport configuration
-    pub fn stub() -> Self {
+    /// Start building a memory transport configuration
+    pub fn memory() -> Self {
         Self {
-            config: TransportConfig::Stub { device_id: None },
+            config: TransportConfig::Memory { device_id: None },
         }
     }
 
@@ -310,9 +467,9 @@ impl TransportConfigBuilder {
         }
     }
 
-    /// Set device ID for stub transport
+    /// Set device ID for memory transport
     pub fn with_device_id(mut self, device_id: DeviceId) -> Self {
-        if let TransportConfig::Stub {
+        if let TransportConfig::Memory {
             device_id: ref mut id,
         } = self.config
         {
@@ -385,12 +542,12 @@ mod tests {
 
     #[test]
     fn test_transport_config_builder() {
-        // Test stub transport builder
-        let stub_config = TransportConfigBuilder::stub()
+        // Test memory transport builder
+        let memory_config = TransportConfigBuilder::memory()
             .with_device_id(DeviceId(Uuid::new_v4()))
             .build();
 
-        assert!(matches!(stub_config, TransportConfig::Stub { .. }));
+        assert!(matches!(memory_config, TransportConfig::Memory { .. }));
 
         // Test simulation transport builder
         let sim_config = TransportConfigBuilder::simulation("participant-1").build();
@@ -416,9 +573,9 @@ mod tests {
 
     #[test]
     fn test_config_validation() {
-        // Valid stub config
-        let stub_config = TransportConfig::Stub { device_id: None };
-        assert!(TransportFactory::validate_config(&stub_config).is_ok());
+        // Valid memory config
+        let memory_config = TransportConfig::Memory { device_id: None };
+        assert!(TransportFactory::validate_config(&memory_config).is_ok());
 
         // Valid simulation config
         let sim_config = TransportConfig::Simulation {
@@ -432,6 +589,14 @@ mod tests {
         };
         assert!(TransportFactory::validate_config(&invalid_sim).is_err());
 
+        // Valid HTTPS config
+        let valid_https = TransportConfig::HttpsRelay {
+            relay_url: "https://relay.example.com".to_string(),
+            timeout_seconds: 30,
+            max_retries: 3,
+        };
+        assert!(TransportFactory::validate_config(&valid_https).is_ok());
+
         // Invalid HTTPS config (empty URL)
         let invalid_https = TransportConfig::HttpsRelay {
             relay_url: "".to_string(),
@@ -444,7 +609,7 @@ mod tests {
     #[test]
     fn test_available_transport_types() {
         let types = TransportFactory::available_transport_types();
-        assert!(types.contains(&"stub"));
+        assert!(types.contains(&"memory"));
         assert!(types.contains(&"simulation"));
         assert!(types.contains(&"https_relay"));
         assert!(types.contains(&"quic"));
@@ -453,28 +618,28 @@ mod tests {
 
     #[test]
     fn test_transport_implementation_status() {
-        assert!(TransportFactory::is_transport_implemented("stub"));
-        assert!(!TransportFactory::is_transport_implemented("https_relay"));
+        assert!(TransportFactory::is_transport_implemented("memory"));
+        assert!(TransportFactory::is_transport_implemented("https_relay"));
         assert!(!TransportFactory::is_transport_implemented("quic"));
         assert!(!TransportFactory::is_transport_implemented("webrtc"));
     }
 
     #[test]
     fn test_raw_transport_creation() {
-        // Test stub transport creation
-        let stub_config = TransportConfig::Stub {
+        // Test memory transport creation
+        let memory_config = TransportConfig::Memory {
             device_id: Some(DeviceId(Uuid::new_v4())),
         };
-        let transport = TransportFactory::create_raw_transport(&stub_config);
+        let transport = TransportFactory::create_raw_transport(&memory_config);
         assert!(transport.is_ok());
 
-        // Test unimplemented transport
+        // Test HTTPS relay transport (now implemented)
         let https_config = TransportConfig::HttpsRelay {
             relay_url: "https://relay.example.com".to_string(),
             timeout_seconds: 30,
             max_retries: 3,
         };
         let transport = TransportFactory::create_raw_transport(&https_config);
-        assert!(transport.is_err());
+        assert!(transport.is_ok());
     }
 }

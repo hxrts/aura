@@ -7,12 +7,12 @@ use std::sync::{
 
 use super::shared_adapters::EnvironmentBundle;
 use crate::protocols::{
-    CounterLifecycle, DkdLifecycle, GroupLifecycle, LockingLifecycle, RecoveryLifecycle, ResharingLifecycle,
+    CounterLifecycle, DkdLifecycle, LockingLifecycle, RecoveryLifecycle, ResharingLifecycle,
 };
 use crate::tracing::protocol::ProtocolTracer;
-use crate::{StubTransport, Transport};
+use crate::{MemoryTransport, Transport};
 use aura_crypto::Effects;
-use aura_errors::{AuraError, Result as AuraResult};
+use aura_types::{AuraError, Result as AuraResult};
 use aura_journal::{
     events::{IncrementCounterEvent, RelationshipId, ReserveCounterRangeEvent},
     protocols::events::{Event, EventAuthorization, EventType},
@@ -27,7 +27,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::super::protocol_results::{
-    CounterProtocolResult, DkdProtocolResult, GroupProtocolResult, LockingProtocolResult, RecoveryProtocolResult,
+    CounterProtocolResult, DkdProtocolResult, LockingProtocolResult, RecoveryProtocolResult,
     ResharingProtocolResult,
 };
 
@@ -278,7 +278,7 @@ impl LifecycleScheduler {
             }
             (None, None) => {
                 warn!("No transport provided and no environment configured, using stub transport");
-                Arc::new(StubTransport::default()) as Arc<dyn Transport>
+                Arc::new(MemoryTransport::default()) as Arc<dyn Transport>
             }
         };
 
@@ -450,7 +450,7 @@ impl LifecycleScheduler {
             }
             (None, None) => {
                 warn!("No transport provided and no environment configured, using stub transport");
-                Arc::new(StubTransport::default()) as Arc<dyn Transport>
+                Arc::new(MemoryTransport::default()) as Arc<dyn Transport>
             }
         };
 
@@ -616,7 +616,7 @@ impl LifecycleScheduler {
             }
             (None, None) => {
                 warn!("No transport provided and no environment configured, using stub transport");
-                Arc::new(StubTransport::default()) as Arc<dyn Transport>
+                Arc::new(MemoryTransport::default()) as Arc<dyn Transport>
             }
         };
         let session_id_core = aura_types::SessionId::from_uuid(session_uuid);
@@ -777,7 +777,7 @@ impl LifecycleScheduler {
             }
             (None, None) => {
                 warn!("No transport provided and no environment configured, using stub transport");
-                Arc::new(StubTransport::default()) as Arc<dyn Transport>
+                Arc::new(MemoryTransport::default()) as Arc<dyn Transport>
             }
         };
         let session_id_core = aura_types::SessionId::from_uuid(session_uuid);
@@ -939,7 +939,7 @@ impl LifecycleScheduler {
             }
             (None, None) => {
                 warn!("No transport provided and no environment configured, using stub transport");
-                Arc::new(StubTransport::default()) as Arc<dyn Transport>
+                Arc::new(MemoryTransport::default()) as Arc<dyn Transport>
             }
         };
         let session_id_core = aura_types::SessionId::from_uuid(session_uuid);
@@ -1114,7 +1114,7 @@ impl protocol_core::capabilities::ProtocolTransport for StubProtocolTransportAda
     async fn send(
         &self,
         _message: protocol_core::capabilities::ProtocolMessage,
-    ) -> aura_errors::Result<()> {
+    ) -> aura_types::Result<()> {
         // Stub implementation - just accept the message
         Ok(())
     }
@@ -1124,12 +1124,12 @@ impl protocol_core::capabilities::ProtocolTransport for StubProtocolTransportAda
         _from: aura_types::DeviceId,
         _payload: Vec<u8>,
         _session_id: Option<uuid::Uuid>,
-    ) -> aura_errors::Result<()> {
+    ) -> aura_types::Result<()> {
         // Stub implementation - just accept the broadcast
         Ok(())
     }
 
-    async fn receive(&self) -> aura_errors::Result<protocol_core::capabilities::ProtocolMessage> {
+    async fn receive(&self) -> aura_types::Result<protocol_core::capabilities::ProtocolMessage> {
         // Stub implementation - return a dummy message
         use aura_types::DeviceId;
         use uuid::Uuid;

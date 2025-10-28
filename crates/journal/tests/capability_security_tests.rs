@@ -12,7 +12,7 @@
 use aura_crypto::Effects;
 use aura_journal::capability::{CapabilityGrant, CapabilityManager, Permission, StorageOperation};
 use aura_types::{DeviceId, DeviceIdExt};
-use ed25519_dalek::SigningKey;
+use aura_crypto::Ed25519SigningKey;
 
 /// Test that only authorized devices can access resources
 #[test]

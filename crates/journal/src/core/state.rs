@@ -3,7 +3,7 @@
 use crate::types::*;
 use aura_crypto::MerkleProof;
 use aura_types::{AccountId, DeviceId, GuardianId};
-use ed25519_dalek::VerifyingKey;
+use aura_crypto::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct AccountState {
     pub account_id: AccountId,
     #[serde(with = "verifying_key_serde")]
-    pub group_public_key: VerifyingKey,
+    pub group_public_key: Ed25519VerifyingKey,
 
     /// Active devices (G-Set with metadata)
     pub devices: BTreeMap<DeviceId, DeviceMetadata>,
@@ -109,7 +109,7 @@ impl AccountState {
     /// Create a new account state with initial device
     pub fn new(
         account_id: AccountId,
-        group_public_key: VerifyingKey,
+        group_public_key: Ed25519VerifyingKey,
         initial_device: DeviceMetadata,
         threshold: u16,
         total_participants: u16,
@@ -549,22 +549,22 @@ pub fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> u64 {
 }
 
 mod verifying_key_serde {
-    use ed25519_dalek::VerifyingKey;
+    use aura_crypto::Ed25519VerifyingKey;
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S>(key: &VerifyingKey, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(key: &Ed25519VerifyingKey, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_bytes(key.as_bytes())
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<VerifyingKey, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Ed25519VerifyingKey, D::Error>
     where
         D: Deserializer<'de>,
     {
         let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
-        VerifyingKey::from_bytes(
+        aura_crypto::Ed25519VerifyingKey::from_bytes(
             bytes
                 .as_slice()
                 .try_into()
@@ -581,9 +581,9 @@ mod tests {
     use aura_types::{AccountIdExt, DeviceIdExt};
 
     fn mock_device(id: u16, effects: &aura_crypto::Effects) -> DeviceMetadata {
-        use ed25519_dalek::SigningKey;
+        use aura_crypto::Ed25519SigningKey;
 
-        let signing_key = SigningKey::from_bytes(&rand::random());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&rand::random());
         let public_key = signing_key.verifying_key();
 
         DeviceMetadata {
@@ -601,11 +601,11 @@ mod tests {
 
     #[test]
     fn test_account_state_device_lifecycle() {
-        use ed25519_dalek::SigningKey;
+        use aura_crypto::Ed25519SigningKey;
 
         let effects = aura_crypto::Effects::for_test("test_account_state_device_lifecycle");
         let account_id = AccountId::new_with_effects(&effects);
-        let signing_key = SigningKey::from_bytes(&rand::random());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&rand::random());
         let group_public_key = signing_key.verifying_key();
 
         let device1 = mock_device(1, &effects);
@@ -633,11 +633,11 @@ mod tests {
 
     #[test]
     fn test_session_epoch_bump() {
-        use ed25519_dalek::SigningKey;
+        use aura_crypto::Ed25519SigningKey;
 
         let effects = aura_crypto::Effects::for_test("test_session_epoch_bump");
         let account_id = AccountId::new_with_effects(&effects);
-        let signing_key = SigningKey::from_bytes(&rand::random());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&rand::random());
         let group_public_key = signing_key.verifying_key();
         let device = mock_device(1, &effects);
 

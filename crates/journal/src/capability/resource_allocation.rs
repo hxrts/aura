@@ -519,8 +519,7 @@ impl ResourceAllocationManager {
 
     /// Generate a unique ID
     fn generate_id(&self, account_id: &[u8], timestamp: u64) -> Vec<u8> {
-        use blake3::Hasher;
-        let mut hasher = Hasher::new();
+        let mut hasher = aura_crypto::blake3_hasher();
         hasher.update(account_id);
         hasher.update(&timestamp.to_le_bytes());
         hasher.update(&(self.relay_quotas.len() as u64).to_le_bytes());

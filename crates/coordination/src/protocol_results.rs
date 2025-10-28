@@ -1,17 +1,73 @@
-//! Protocol Results with Ledger Mutations
+//! Protocol Results with Ledger Mutations and Capability Verification
 //!
 //! This module defines the result types returned by protocols that include
-//! the canonical commit payloads and ledger mutations.
+//! the canonical commit payloads, ledger mutations, and threshold capability
+//! proofs for authorization.
 
 use crate::ThresholdSignature;
-use aura_errors::Result;
-use aura_groups::{Epoch, GroupRoster, KeyhiveCgkaOperation};
+use aura_types::{AuraError, AuraResult as Result};
+use aura_journal::capability::{Epoch, GroupRoster, KeyhiveCgkaOperation};
 use aura_journal::{
-    events::RelationshipId, Event, OperationType as JournalOperationType, SessionId,
+    capability::{unified_manager::VerificationContext, ThresholdCapability},
+    events::RelationshipId,
+    Event, OperationType as JournalOperationType, SessionId,
 };
 use aura_types::{DeviceId, GuardianId};
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
+
+/// Capability proof for protocol authorization
+///
+/// Contains threshold-signed capability tokens proving that protocol
+/// participants have proper authorization for the operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityProof {
+    /// Primary capability authorizing the operation
+    pub primary_capability: ThresholdCapability,
+    /// Additional capabilities from other participants
+    pub participant_capabilities: Vec<ThresholdCapability>,
+    /// Verification context from capability system
+    pub verification_context: VerificationContext,
+    /// Administrative operation flag
+    pub requires_admin: bool,
+}
+
+impl CapabilityProof {
+    /// Create new capability proof
+    pub fn new(
+        primary_capability: ThresholdCapability,
+        participant_capabilities: Vec<ThresholdCapability>,
+        verification_context: VerificationContext,
+        requires_admin: bool,
+    ) -> Self {
+        Self {
+            primary_capability,
+            participant_capabilities,
+            verification_context,
+            requires_admin,
+        }
+    }
+
+    /// Get all capabilities in the proof
+    pub fn all_capabilities(&self) -> Vec<&ThresholdCapability> {
+        let mut caps = vec![&self.primary_capability];
+        caps.extend(self.participant_capabilities.iter());
+        caps
+    }
+
+    /// Get total authority level across all capabilities
+    pub fn total_authority(&self) -> u32 {
+        self.all_capabilities()
+            .iter()
+            .map(|cap| cap.authority_level() as u32)
+            .sum()
+    }
+
+    /// Check if proof meets minimum authority requirements
+    pub fn meets_authority_threshold(&self, minimum: u32) -> bool {
+        self.verification_context.authority_level >= minimum
+    }
+}
 
 /// Result of DKD protocol execution including commit payload
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +86,8 @@ pub struct DkdProtocolResult {
     pub ledger_events: Vec<Event>,
     /// Participants who contributed
     pub participants: Vec<DeviceId>,
+    /// Capability proof authorizing this operation
+    pub capability_proof: CapabilityProof,
 }
 
 impl DkdProtocolResult {
@@ -41,7 +99,43 @@ impl DkdProtocolResult {
             transcript_hash: self.transcript_hash,
             threshold_signature: self.threshold_signature.clone(),
             participants: self.participants.clone(),
+            capability_proof: self.capability_proof.clone(),
         }
+    }
+
+    /// Verify authorization for this protocol result
+    pub fn verify_authorization(&self) -> Result<()> {
+        // Verify primary capability signature
+        self.capability_proof
+            .primary_capability
+            .verify_signature()
+            .map_err(|e| {
+                AuraError::insufficient_capability(format!(
+                    "Primary capability verification failed: {}",
+                    e
+                ))
+            })?;
+
+        // Verify participant capabilities
+        for cap in &self.capability_proof.participant_capabilities {
+            cap.verify_signature().map_err(|e| {
+                AuraError::insufficient_capability(format!(
+                    "Participant capability verification failed: {}",
+                    e
+                ))
+            })?;
+        }
+
+        // Check authority threshold for admin operations
+        if self.capability_proof.requires_admin
+            && !self.capability_proof.meets_authority_threshold(2)
+        {
+            return Err(AuraError::insufficient_capability(
+                "Insufficient authority for administrative DKD operation",
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -53,6 +147,7 @@ pub struct DkdCommitPayload {
     pub transcript_hash: [u8; 32],
     pub threshold_signature: ThresholdSignature,
     pub participants: Vec<DeviceId>,
+    pub capability_proof: CapabilityProof,
 }
 
 /// Result of Resharing protocol execution
@@ -72,6 +167,8 @@ pub struct ResharingProtocolResult {
     pub approval_signature: ThresholdSignature,
     /// Events to be written to ledger
     pub ledger_events: Vec<Event>,
+    /// Capability proof authorizing this resharing operation
+    pub capability_proof: CapabilityProof,
 }
 
 impl ResharingProtocolResult {
@@ -84,7 +181,27 @@ impl ResharingProtocolResult {
             old_participants: self.old_participants.clone(),
             share_commitments: self.new_shares.iter().map(|s| s.commitment).collect(),
             approval_signature: self.approval_signature.clone(),
+            capability_proof: self.capability_proof.clone(),
         }
+    }
+
+    /// Verify authorization for this resharing operation
+    pub fn verify_authorization(&self) -> Result<()> {
+        // Resharing is always administrative - requires high authority
+        if !self.capability_proof.meets_authority_threshold(3) {
+            return Err(AuraError::insufficient_capability(
+                "Insufficient authority for resharing operation - requires administrative privileges"
+            ));
+        }
+
+        // Verify all capability signatures
+        for cap in self.capability_proof.all_capabilities() {
+            cap.verify_signature().map_err(|e| {
+                AuraError::insufficient_capability(format!("Capability verification failed: {}", e))
+            })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -97,6 +214,7 @@ pub struct ResharingCommitPayload {
     pub old_participants: Vec<DeviceId>,
     pub share_commitments: Vec<[u8; 32]>,
     pub approval_signature: ThresholdSignature,
+    pub capability_proof: CapabilityProof,
 }
 
 /// Encrypted share for a participant
@@ -124,6 +242,8 @@ pub struct RecoveryProtocolResult {
     pub revocation_proof: Option<RevocationProof>,
     /// Events to be written to ledger
     pub ledger_events: Vec<Event>,
+    /// Capability proof authorizing this recovery operation
+    pub capability_proof: CapabilityProof,
 }
 
 impl RecoveryProtocolResult {
@@ -135,7 +255,27 @@ impl RecoveryProtocolResult {
             approving_guardians: self.approving_guardians.clone(),
             guardian_signatures: self.guardian_signatures.clone(),
             revocation_proof: self.revocation_proof.clone(),
+            capability_proof: self.capability_proof.clone(),
         }
+    }
+
+    /// Verify authorization for this recovery operation
+    pub fn verify_authorization(&self) -> Result<()> {
+        // Recovery is administrative - requires high authority from guardians
+        if !self.capability_proof.meets_authority_threshold(2) {
+            return Err(AuraError::insufficient_capability(
+                "Insufficient authority for recovery operation",
+            ));
+        }
+
+        // Verify all capability signatures
+        for cap in self.capability_proof.all_capabilities() {
+            cap.verify_signature().map_err(|e| {
+                AuraError::insufficient_capability(format!("Capability verification failed: {}", e))
+            })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -147,6 +287,7 @@ pub struct RecoveryCommitPayload {
     pub approving_guardians: Vec<GuardianId>,
     pub guardian_signatures: Vec<GuardianSignature>,
     pub revocation_proof: Option<RevocationProof>,
+    pub capability_proof: CapabilityProof,
 }
 
 /// Result of Locking protocol execution
@@ -166,6 +307,8 @@ pub struct LockingProtocolResult {
     pub ledger_events: Vec<Event>,
     /// Participants that contributed to the decision
     pub participants: Vec<DeviceId>,
+    /// Capability proof authorizing this locking operation
+    pub capability_proof: CapabilityProof,
 }
 
 impl LockingProtocolResult {
@@ -176,7 +319,20 @@ impl LockingProtocolResult {
             operation_type: self.operation_type,
             winner: self.winner,
             participants: self.participants.clone(),
+            capability_proof: self.capability_proof.clone(),
         }
+    }
+
+    /// Verify authorization for this locking operation
+    pub fn verify_authorization(&self) -> Result<()> {
+        // Verify capability signatures
+        for cap in self.capability_proof.all_capabilities() {
+            cap.verify_signature().map_err(|e| {
+                AuraError::insufficient_capability(format!("Capability verification failed: {}", e))
+            })?
+        }
+
+        Ok(())
     }
 }
 
@@ -187,6 +343,7 @@ pub struct LockingCommitPayload {
     pub operation_type: JournalOperationType,
     pub winner: DeviceId,
     pub participants: Vec<DeviceId>,
+    pub capability_proof: CapabilityProof,
 }
 
 /// Result of Counter reservation execution
@@ -206,6 +363,8 @@ pub struct CounterProtocolResult {
     pub ledger_events: Vec<Event>,
     /// Participants involved in authorization
     pub participants: Vec<DeviceId>,
+    /// Capability proof authorizing this counter operation
+    pub capability_proof: CapabilityProof,
 }
 
 impl CounterProtocolResult {
@@ -264,6 +423,8 @@ pub struct GroupProtocolResult {
     pub ledger_events: Vec<Event>,
     /// Participants who contributed
     pub participants: Vec<DeviceId>,
+    /// Capability proof authorizing this group operation
+    pub capability_proof: CapabilityProof,
 }
 
 impl GroupProtocolResult {
@@ -276,7 +437,20 @@ impl GroupProtocolResult {
             roster: self.roster.clone(),
             cgka_operations: self.cgka_operations.clone(),
             participants: self.participants.clone(),
+            capability_proof: self.capability_proof.clone(),
         }
+    }
+
+    /// Verify authorization for this group operation
+    pub fn verify_authorization(&self) -> Result<()> {
+        // Group operations require authentication
+        for cap in self.capability_proof.all_capabilities() {
+            cap.verify_signature().map_err(|e| {
+                AuraError::insufficient_capability(format!("Capability verification failed: {}", e))
+            })?
+        }
+
+        Ok(())
     }
 }
 
@@ -289,6 +463,7 @@ pub struct GroupCommitPayload {
     pub roster: GroupRoster,
     pub cgka_operations: Vec<KeyhiveCgkaOperation>,
     pub participants: Vec<DeviceId>,
+    pub capability_proof: CapabilityProof,
 }
 
 #[cfg(test)]
@@ -298,6 +473,16 @@ mod tests {
 
     #[test]
     fn test_dkd_commit_payload() {
+        use aura_journal::capability::unified_manager::VerificationContext;
+        use aura_journal::capability::ThresholdCapability;
+        
+        let capability_proof = CapabilityProof {
+            primary_capability: ThresholdCapability::new_test_capability(),
+            participant_capabilities: vec![],
+            verification_context: VerificationContext::new_test_context(),
+            requires_admin: false,
+        };
+        
         let result = DkdProtocolResult {
             session_id: SessionId(Uuid::new_v4()),
             derived_key: vec![1, 2, 3, 4],
@@ -309,6 +494,7 @@ mod tests {
             },
             ledger_events: vec![],
             participants: vec![],
+            capability_proof,
         };
 
         let payload = result.commit_payload();

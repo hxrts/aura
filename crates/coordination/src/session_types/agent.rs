@@ -4,10 +4,11 @@
 //! for protocol coordination and state management at the device level.
 
 use crate::session_types::wrapper::SessionTypedProtocol;
+use crate::session_types::session_errors::AgentSessionError;
 use aura_journal::{OperationType, ProtocolType, SessionId, SessionOutcome, SessionStatus};
 use aura_types::DeviceId;
-use session_types::witnesses::RuntimeWitness;
-use session_types::SessionState;
+use crate::session_types::witnesses::RuntimeWitness;
+use crate::session_types::SessionState;
 use uuid::Uuid;
 
 // ========== Agent Core ==========
@@ -31,22 +32,6 @@ impl DeviceAgentCore {
             active_sessions: Vec::new(),
         }
     }
-}
-
-// ========== Error Type ==========
-
-#[derive(Debug, thiserror::Error)]
-pub enum AgentSessionError {
-    #[error("Protocol error: {0}")]
-    ProtocolError(String),
-    #[error("Invalid operation for current agent state")]
-    InvalidOperation,
-    #[error("Agent operation failed: {0}")]
-    OperationFailed(String),
-    #[error("Session management error: {0}")]
-    SessionError(String),
-    #[error("Concurrent protocol already active: {0:?}")]
-    ConcurrentProtocol(ProtocolType),
 }
 
 // ========== Session States ==========
@@ -528,7 +513,7 @@ impl AgentDkdOperations for SessionTypedAgent<DkdInProgress> {
     async fn check_dkd_progress(&self, session_status: SessionStatus) -> Option<DkdCompleted> {
         if session_status == SessionStatus::Completed {
             if let Some(session_id) = self.current_dkd_session() {
-                return DkdCompleted::verify(
+                return RuntimeWitness::verify(
                     (session_id, SessionOutcome::Success),
                     ProtocolType::Dkd,
                 );
@@ -560,7 +545,7 @@ impl AgentRecoveryOperations for SessionTypedAgent<RecoveryInProgress> {
     ) -> Option<RecoveryCompleted> {
         if session_status == SessionStatus::Completed {
             if let Some(session_id) = self.current_recovery_session() {
-                return RecoveryCompleted::verify(
+                return RuntimeWitness::verify(
                     (session_id, SessionOutcome::Success),
                     ProtocolType::Recovery,
                 );
@@ -592,7 +577,7 @@ impl AgentResharingOperations for SessionTypedAgent<ResharingInProgress> {
     ) -> Option<AgentResharingCompleted> {
         if session_status == SessionStatus::Completed {
             if let Some(session_id) = self.current_resharing_session() {
-                return AgentResharingCompleted::verify(
+                return RuntimeWitness::verify(
                     (session_id, SessionOutcome::Success),
                     ProtocolType::Resharing,
                 );
@@ -626,7 +611,7 @@ impl AgentLockingOperations for SessionTypedAgent<LockingInProgress> {
     ) -> Option<AgentLockAcquired> {
         if session_status == SessionStatus::Completed {
             if let Some(session_id) = self.current_locking_session() {
-                return AgentLockAcquired::verify(
+                return RuntimeWitness::verify(
                     (session_id, SessionOutcome::Success),
                     operation_type,
                 );

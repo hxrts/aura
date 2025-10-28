@@ -4,8 +4,8 @@
 //! enabling visualization of property violations and their temporal relationships.
 
 use crate::property_monitor::{PropertyEvaluationResult, PropertyResults, StateHash};
+use aura_types::session_utils::{properties::PropertyId, trace::TraceId};
 use serde::{Deserialize, Serialize};
-use session_types::{properties::PropertyId, trace::TraceId};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
@@ -140,7 +140,7 @@ impl PropertyTimelineBuilder {
         for (property_id, result) in &results.results {
             let is_new_violation = self.is_new_violation(*property_id, result);
             let is_resolved = self.is_resolved_violation(*property_id, result);
-            
+
             if !result.holds {
                 has_violations = true;
                 properties_violated += 1;
@@ -149,7 +149,8 @@ impl PropertyTimelineBuilder {
             }
 
             let severity = self.determine_violation_severity(result);
-            let violation_summary = result.violation_details
+            let violation_summary = result
+                .violation_details
                 .as_ref()
                 .map(|details| details.description.clone());
 
@@ -192,19 +193,23 @@ impl PropertyTimelineBuilder {
 
         match self.previous_states.get(&property_id) {
             Some(prev_status) => prev_status.holds, // Was holding before, now violated
-            None => true, // First evaluation, and it's violated
+            None => true,                           // First evaluation, and it's violated
         }
     }
 
     /// Check if this violation was resolved from previous tick
-    fn is_resolved_violation(&self, property_id: PropertyId, result: &PropertyEvaluationResult) -> bool {
+    fn is_resolved_violation(
+        &self,
+        property_id: PropertyId,
+        result: &PropertyEvaluationResult,
+    ) -> bool {
         if !result.holds {
             return false;
         }
 
         match self.previous_states.get(&property_id) {
             Some(prev_status) => !prev_status.holds, // Was violated before, now holding
-            None => false, // First evaluation, not a resolution
+            None => false,                           // First evaluation, not a resolution
         }
     }
 
@@ -218,9 +223,13 @@ impl PropertyTimelineBuilder {
         if let Some(ref details) = result.violation_details {
             if details.description.contains("critical") || details.description.contains("safety") {
                 ViolationSeverity::Critical
-            } else if details.description.contains("invariant") || details.description.contains("consistency") {
+            } else if details.description.contains("invariant")
+                || details.description.contains("consistency")
+            {
                 ViolationSeverity::High
-            } else if details.description.contains("performance") || details.description.contains("liveness") {
+            } else if details.description.contains("performance")
+                || details.description.contains("liveness")
+            {
                 ViolationSeverity::Medium
             } else {
                 ViolationSeverity::Low
@@ -246,7 +255,7 @@ impl PropertyTimelineBuilder {
     /// Calculate timeline span
     fn calculate_span(&self) -> TimelineSpan {
         let ticks: Vec<u64> = self.entries.keys().cloned().collect();
-        
+
         if ticks.is_empty() {
             return TimelineSpan {
                 start_tick: 0,
@@ -269,11 +278,15 @@ impl PropertyTimelineBuilder {
     /// Calculate summary statistics
     fn calculate_summary(&self) -> TimelineSummary {
         let total_ticks = self.entries.len() as u64;
-        let total_evaluations = self.entries.values()
+        let total_evaluations = self
+            .entries
+            .values()
             .map(|entry| entry.property_states.len())
             .sum();
 
-        let ticks_with_violations = self.entries.values()
+        let ticks_with_violations = self
+            .entries
+            .values()
             .filter(|entry| entry.has_violations)
             .count() as u64;
 
@@ -297,12 +310,16 @@ impl PropertyTimelineBuilder {
             }
         }
 
-        let never_violated: Vec<PropertyId> = self.properties.iter()
+        let never_violated: Vec<PropertyId> = self
+            .properties
+            .iter()
             .filter(|&property_id| property_violation_counts.get(property_id).unwrap_or(&0) == &0)
             .cloned()
             .collect();
 
-        let always_violated: Vec<PropertyId> = self.properties.iter()
+        let always_violated: Vec<PropertyId> = self
+            .properties
+            .iter()
             .filter(|&property_id| {
                 let violations = property_violation_counts.get(property_id).unwrap_or(&0);
                 let total = property_total_counts.get(property_id).unwrap_or(&0);
@@ -311,7 +328,8 @@ impl PropertyTimelineBuilder {
             .cloned()
             .collect();
 
-        let mut most_violated: Vec<(PropertyId, u64)> = property_violation_counts.into_iter().collect();
+        let mut most_violated: Vec<(PropertyId, u64)> =
+            property_violation_counts.into_iter().collect();
         most_violated.sort_by(|a, b| b.1.cmp(&a.1));
         most_violated.truncate(5); // Top 5 most violated
 
@@ -360,18 +378,23 @@ impl WasmPropertyTimeline {
     /// Get property states for a specific tick
     pub fn get_tick_states(&self, tick: u64) -> JsValue {
         match self.inner.timeline.get(&tick) {
-            Some(entry) => serde_wasm_bindgen::to_value(&entry.property_states).unwrap_or(JsValue::NULL),
+            Some(entry) => {
+                serde_wasm_bindgen::to_value(&entry.property_states).unwrap_or(JsValue::NULL)
+            }
             None => JsValue::NULL,
         }
     }
 
     /// Get all ticks with violations
     pub fn get_violation_ticks(&self) -> JsValue {
-        let violation_ticks: Vec<u64> = self.inner.timeline.iter()
+        let violation_ticks: Vec<u64> = self
+            .inner
+            .timeline
+            .iter()
             .filter(|(_, entry)| entry.has_violations)
             .map(|(tick, _)| *tick)
             .collect();
-        
+
         serde_wasm_bindgen::to_value(&violation_ticks).unwrap_or(JsValue::NULL)
     }
 
@@ -382,7 +405,9 @@ impl WasmPropertyTimeline {
 
     /// Check if a specific tick has violations
     pub fn tick_has_violations(&self, tick: u64) -> bool {
-        self.inner.timeline.get(&tick)
+        self.inner
+            .timeline
+            .get(&tick)
             .map(|entry| entry.has_violations)
             .unwrap_or(false)
     }
@@ -418,7 +443,7 @@ impl WasmPropertyTimelineBuilder {
     pub fn add_tick_results_json(&mut self, tick: u64, results_json: &str) -> Result<(), JsValue> {
         let results: PropertyResults = serde_json::from_str(results_json)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse results: {}", e)))?;
-        
+
         self.inner.add_tick_results(tick, &results);
         Ok(())
     }
@@ -443,18 +468,21 @@ mod tests {
     fn create_test_results(holds: bool, description: Option<String>) -> PropertyResults {
         let property_id = PropertyId::new_v4();
         let mut results = HashMap::new();
-        
-        results.insert(property_id, PropertyEvaluationResult {
-            holds,
-            evaluation_time_ms: 10,
-            violation_details: description.map(|desc| ViolationDetails {
-                description: desc,
-                context: HashMap::new(),
-                causality_trace: Vec::new(),
-                debugging_hints: Vec::new(),
-            }),
-            verification_result: None,
-        });
+
+        results.insert(
+            property_id,
+            PropertyEvaluationResult {
+                holds,
+                evaluation_time_ms: 10,
+                violation_details: description.map(|desc| ViolationDetails {
+                    description: desc,
+                    context: HashMap::new(),
+                    causality_trace: Vec::new(),
+                    debugging_hints: Vec::new(),
+                }),
+                verification_result: None,
+            },
+        );
 
         PropertyResults {
             results,
@@ -466,16 +494,16 @@ mod tests {
     #[test]
     fn test_timeline_builder() {
         let mut builder = PropertyTimelineBuilder::new();
-        
+
         // Add some test results
         let results1 = create_test_results(true, None);
         let results2 = create_test_results(false, Some("Test violation".to_string()));
-        
+
         builder.add_tick_results(0, &results1);
         builder.add_tick_results(1, &results2);
-        
+
         let timeline = builder.build();
-        
+
         assert_eq!(timeline.timeline.len(), 2);
         assert_eq!(timeline.span.duration, 2);
         assert_eq!(timeline.summary.ticks_with_violations, 1);
@@ -484,7 +512,7 @@ mod tests {
     #[test]
     fn test_violation_severity() {
         let builder = PropertyTimelineBuilder::new();
-        
+
         let critical_result = PropertyEvaluationResult {
             holds: false,
             evaluation_time_ms: 10,
@@ -496,7 +524,7 @@ mod tests {
             }),
             verification_result: None,
         };
-        
+
         let severity = builder.determine_violation_severity(&critical_result);
         assert_eq!(severity, ViolationSeverity::Critical);
     }
@@ -504,17 +532,17 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_wasm_timeline_builder() {
         let mut builder = WasmPropertyTimelineBuilder::new();
-        
+
         // This would normally come from property monitor results
         let results_json = r#"{
             "results": {},
             "computed_at": 0,
             "state_hash": 12345
         }"#;
-        
+
         builder.add_tick_results_json(0, results_json).unwrap();
         let timeline = builder.build();
-        
+
         assert_eq!(timeline.get_duration(), 1);
     }
 }

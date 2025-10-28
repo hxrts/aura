@@ -3,8 +3,8 @@
 //! This module provides real-time property monitoring capabilities using the Quint API
 //! for formal verification of system properties during simulation trace analysis.
 
-use quint_api::{PropertySpec, PropertySuite, QuintApi, VerificationResult, QuintResult};
-use session_types::{properties::PropertyId, trace::TraceId};
+use aura_types::session_utils::{properties::PropertyId, trace::TraceId};
+use quint_api::{PropertySpec, PropertySuite, QuintResult, QuintRunner, VerificationResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -228,7 +228,7 @@ impl<K: Clone + std::hash::Hash + Eq, V> LruCache<K, V> {
 /// Main property monitoring engine
 pub struct PropertyMonitor {
     /// Quint API for property evaluation
-    quint_api: Option<QuintApi>,
+    quint_runner: Option<QuintRunner>,
     /// Currently active properties being monitored
     active_properties: HashMap<PropertyId, PropertySpec>,
     /// Cache for property evaluation results
@@ -259,10 +259,10 @@ pub struct PropertyMonitorStats {
 impl PropertyMonitor {
     /// Create a new property monitor
     pub async fn new() -> QuintResult<Self> {
-        let quint_api = QuintApi::initialize().await.ok();
+        let quint_runner = QuintRunner::new().ok();
 
         Ok(Self {
-            quint_api,
+            quint_runner,
             active_properties: HashMap::new(),
             evaluation_cache: LruCache::new(1000), // Cache up to 1000 state evaluations
             violation_tracker: ViolationTracker::new(),
@@ -311,10 +311,12 @@ impl PropertyMonitor {
         for (property_id, property) in &self.active_properties {
             let property_start = js_sys::Date::now() as u64;
 
-            let evaluation_result = if let Some(ref api) = self.quint_api {
+            let evaluation_result = if let Some(ref api) = self.quint_runner {
                 // Use Quint API for verification
-                match api.verify_property(*property_id).await {
-                    Ok(verification_result) => self.convert_verification_result(verification_result),
+                match api.verify_property(property).await {
+                    Ok(verification_result) => {
+                        self.convert_verification_result(verification_result)
+                    }
                     Err(_) => PropertyEvaluationResult {
                         holds: false,
                         evaluation_time_ms: js_sys::Date::now() as u64 - property_start,
@@ -366,70 +368,58 @@ impl PropertyMonitor {
         // Update statistics
         self.stats.total_evaluations += self.active_properties.len() as u64;
         self.stats.total_evaluation_time_ms += total_time;
-        self.stats.avg_evaluation_time_ms = 
+        self.stats.avg_evaluation_time_ms =
             self.stats.total_evaluation_time_ms as f64 / self.stats.total_evaluations as f64;
 
         // Cache the results
-        self.evaluation_cache.insert(state_hash, property_results.clone());
+        self.evaluation_cache
+            .insert(state_hash, property_results.clone());
 
         property_results
     }
 
     /// Convert Quint verification result to our format
     fn convert_verification_result(&self, result: VerificationResult) -> PropertyEvaluationResult {
-        match result {
-            VerificationResult::Success { duration_ms, .. } => PropertyEvaluationResult {
+        let duration_ms = result.duration.as_millis() as u64;
+        
+        if result.success {
+            PropertyEvaluationResult {
                 holds: true,
                 evaluation_time_ms: duration_ms,
                 violation_details: None,
                 verification_result: Some("Success".to_string()),
-            },
-            VerificationResult::Violation { counterexample, duration_ms } => {
-                PropertyEvaluationResult {
-                    holds: false,
-                    evaluation_time_ms: duration_ms,
-                    violation_details: Some(ViolationDetails {
-                        description: counterexample.violation_description,
-                        context: HashMap::new(),
-                        causality_trace: Vec::new(), // TODO: Extract from counterexample
-                        debugging_hints: vec![
-                            "Review the counterexample trace".to_string(),
-                            "Check state invariants".to_string(),
-                        ],
-                    }),
-                    verification_result: Some("Violation".to_string()),
-                }
             }
-            VerificationResult::Inconclusive { reason, duration_ms } => {
-                PropertyEvaluationResult {
-                    holds: false,
-                    evaluation_time_ms: duration_ms,
-                    violation_details: Some(ViolationDetails {
-                        description: format!("Inconclusive: {}", reason),
-                        context: HashMap::new(),
-                        causality_trace: Vec::new(),
-                        debugging_hints: vec![
-                            "Increase verification timeout".to_string(),
-                            "Simplify property specification".to_string(),
-                        ],
-                    }),
-                    verification_result: Some(format!("Inconclusive: {}", reason)),
-                }
-            }
-            VerificationResult::Error { message, .. } => PropertyEvaluationResult {
-                holds: false,
-                evaluation_time_ms: 0,
-                violation_details: Some(ViolationDetails {
-                    description: format!("Verification error: {}", message),
-                    context: HashMap::new(),
-                    causality_trace: Vec::new(),
-                    debugging_hints: vec![
-                        "Check property syntax".to_string(),
+        } else {
+            // Check if we have a counterexample indicating a property violation
+            let (description, debugging_hints) = if result.counterexample.is_some() {
+                (
+                    "Property violation found".to_string(),
+                    vec![
+                        "Review the counterexample trace".to_string(),
+                        "Check state invariants".to_string(),
+                    ]
+                )
+            } else {
+                (
+                    "Verification failed without counterexample".to_string(),
+                    vec![
+                        "Check property specification syntax".to_string(),
                         "Verify Quint installation".to_string(),
-                    ],
+                    ]
+                )
+            };
+            
+            PropertyEvaluationResult {
+                holds: false,
+                evaluation_time_ms: duration_ms,
+                violation_details: Some(ViolationDetails {
+                    description,
+                    context: HashMap::new(),
+                    causality_trace: Vec::new(), // TODO: Extract from counterexample
+                    debugging_hints,
                 }),
-                verification_result: Some(format!("Error: {}", message)),
-            },
+                verification_result: Some("Failed".to_string()),
+            }
         }
     }
 
@@ -457,7 +447,7 @@ impl PropertyMonitor {
 
     /// Check if Quint API is available
     pub fn has_quint_api(&self) -> bool {
-        self.quint_api.is_some()
+        self.quint_runner.is_some()
     }
 
     /// Get list of active property IDs
@@ -487,7 +477,10 @@ impl WasmPropertyMonitor {
                 self.inner = Some(monitor);
                 Ok(())
             }
-            Err(e) => Err(JsValue::from_str(&format!("Failed to initialize property monitor: {}", e))),
+            Err(e) => Err(JsValue::from_str(&format!(
+                "Failed to initialize property monitor: {}",
+                e
+            ))),
         }
     }
 
@@ -515,7 +508,10 @@ impl WasmPropertyMonitor {
 
     /// Check if the monitor has Quint API available
     pub fn has_quint_api(&self) -> bool {
-        self.inner.as_ref().map(|m| m.has_quint_api()).unwrap_or(false)
+        self.inner
+            .as_ref()
+            .map(|m| m.has_quint_api())
+            .unwrap_or(false)
     }
 
     /// Clear the evaluation cache
@@ -536,13 +532,13 @@ mod tests {
     #[test]
     fn test_lru_cache() {
         let mut cache = LruCache::new(2);
-        
+
         cache.insert("a", 1);
         cache.insert("b", 2);
-        
+
         assert_eq!(cache.get(&"a"), Some(&1));
         assert_eq!(cache.get(&"b"), Some(&2));
-        
+
         // Insert third item, should evict "a" since "b" was accessed more recently
         cache.insert("c", 3);
         assert_eq!(cache.get(&"a"), None);
@@ -554,7 +550,7 @@ mod tests {
     fn test_violation_tracker() {
         let mut tracker = ViolationTracker::new();
         let property_id = PropertyId::new_v4();
-        
+
         tracker.record_violation(
             property_id,
             10,
@@ -566,11 +562,11 @@ mod tests {
                 debugging_hints: Vec::new(),
             },
         );
-        
+
         let stats = tracker.get_stats();
         assert_eq!(stats.total_violations, 1);
         assert_eq!(stats.active_violations, 1);
-        
+
         tracker.resolve_violation(property_id, 10);
         let stats = tracker.get_stats();
         assert_eq!(stats.resolved_violations, 1);

@@ -7,7 +7,7 @@ use crate::capability::{
 };
 use crate::ThresholdSig;
 use aura_types::DeviceId;
-use ed25519_dalek::VerifyingKey;
+use aura_crypto::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tracing::{debug, info};
@@ -72,7 +72,7 @@ impl ThresholdCapabilityAuth {
     }
 
     /// Verify threshold signature for capability operation
-    pub fn verify(&self, _group_public_key: &VerifyingKey) -> Result<()> {
+    pub fn verify(&self, _group_public_key: &Ed25519VerifyingKey) -> Result<()> {
         // In a full implementation, this would verify the threshold signature
         // For now, we'll do basic validation
 
@@ -151,7 +151,7 @@ impl IdentityCapabilityManager {
 
         // Verify threshold signature
         // Note: In production, this would use the actual group public key
-        // threshold_auth.verify(&group_public_key)?;
+        // threshold_authaura_crypto::ed25519_verify(&&group_public_key)?;
 
         // Create root capability (no parent)
         let delegation = CapabilityDelegation::new(
@@ -162,7 +162,7 @@ impl IdentityCapabilityManager {
             threshold_auth
                 .threshold_signature
                 .signature
-                .to_bytes()
+                
                 .to_vec(),
             issued_by,
             effects,
@@ -197,7 +197,7 @@ impl IdentityCapabilityManager {
         );
 
         // Verify threshold signature
-        // threshold_auth.verify(&group_public_key)?;
+        // threshold_authaura_crypto::ed25519_verify(&&group_public_key)?;
 
         let delegation = CapabilityDelegation::new(
             Some(parent_id),
@@ -207,7 +207,7 @@ impl IdentityCapabilityManager {
             threshold_auth
                 .threshold_signature
                 .signature
-                .to_bytes()
+                
                 .to_vec(),
             issued_by,
             effects,
@@ -236,7 +236,7 @@ impl IdentityCapabilityManager {
         );
 
         // Verify threshold signature
-        // threshold_auth.verify(&group_public_key)?;
+        // threshold_authaura_crypto::ed25519_verify(&&group_public_key)?;
 
         let revocation = CapabilityRevocation::new(
             capability_id,
@@ -244,7 +244,7 @@ impl IdentityCapabilityManager {
             threshold_auth
                 .threshold_signature
                 .signature
-                .to_bytes()
+                
                 .to_vec(),
             issued_by,
             effects,
@@ -351,9 +351,9 @@ pub mod dkd_keys {
     pub fn derive_capability_keys(
         dkd_seed: &[u8; 32],
         capability_scope: &CapabilityScope,
-    ) -> Result<(ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey)> {
+    ) -> Result<(aura_crypto::Ed25519SigningKey, aura_crypto::Ed25519VerifyingKey)> {
         // Derive deterministic key for this capability scope
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = aura_crypto::blake3_hasher();
         hasher.update(dkd_seed);
         hasher.update(b"capability:");
         hasher.update(capability_scope.namespace.as_bytes());
@@ -366,7 +366,7 @@ pub mod dkd_keys {
         }
 
         let derived_seed = hasher.finalize();
-        let signing_key = ed25519_dalek::SigningKey::from_bytes(derived_seed.as_bytes());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(derived_seed.as_bytes());
         let verifying_key = signing_key.verifying_key();
 
         debug!("Derived capability keys for scope {:?}", capability_scope);
@@ -376,7 +376,7 @@ pub mod dkd_keys {
 
     /// Create individual identity from DKD context
     pub fn create_dkd_identity(context: &str, dkd_seed: &[u8; 32]) -> IndividualId {
-        let fingerprint = blake3::hash(dkd_seed);
-        IndividualId::from_dkd_context(context, fingerprint.as_bytes())
+        let fingerprint = aura_crypto::blake3_hash(dkd_seed);
+        IndividualId::from_dkd_context(context, &fingerprint)
     }
 }

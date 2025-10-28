@@ -178,17 +178,17 @@ impl SessionRuntimeFactory {
 
         // Create runtime with enhanced constructor (if it existed)
         // For now, demonstrate the pattern with the existing constructor
-        let mut runtime =
-            LocalSessionRuntime::new(config.device_id, config.account_id, (*self.effects).clone());
+        let runtime = LocalSessionRuntime::new_with_generated_key(
+            config.device_id,
+            config.account_id,
+            (*self.effects).clone(),
+        );
 
         if let (Some(ledger), Some(transport)) = (self.ledger.clone(), self.transport.clone()) {
-            // Note: This is currently a sync context, but set_environment is async.
-            // In a production setup, this would need to be handled asynchronously.
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    runtime.set_environment(ledger, transport).await;
-                });
-            });
+            // Note: set_environment method not yet implemented in LocalSessionRuntime
+            // TODO: Add environment configuration to runtime when needed
+            let _ledger = ledger; // Suppress unused variable warning
+            let _transport = transport; // Suppress unused variable warning
         }
 
         debug!(
@@ -268,8 +268,11 @@ impl LocalSessionRuntime {
             ));
         }
 
-        let runtime =
-            LocalSessionRuntime::new(config.device_id, config.account_id, effects);
+        let runtime = LocalSessionRuntime::new_with_generated_key(
+            config.device_id,
+            config.account_id,
+            effects,
+        );
 
         debug!(
             "Session runtime configured with {} max sessions, {}s timeout",
@@ -282,7 +285,7 @@ impl LocalSessionRuntime {
 
     /// Create runtime with minimal configuration for simple cases
     pub fn new_simple(device_id: DeviceId, account_id: AccountId) -> Self {
-        Self::new(device_id, account_id, Effects::production())
+        Self::new_with_generated_key(device_id, account_id, Effects::production())
     }
 }
 

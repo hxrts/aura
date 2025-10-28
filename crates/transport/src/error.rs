@@ -1,8 +1,8 @@
 //! Transport errors - using unified error system
 
 // Re-export unified error system
-pub use aura_errors::Result as TransportResult;
-pub use aura_errors::{AuraError, ErrorCode, ErrorSeverity};
+pub use aura_types::Result as TransportResult;
+pub use aura_types::{AuraError, ErrorCode, ErrorSeverity};
 
 // Type aliases for backward compatibility
 pub type TransportError = AuraError;

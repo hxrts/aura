@@ -4,7 +4,7 @@
 //! the unified Aura error system, providing agent-specific constructors.
 
 // Re-export unified error system
-pub use aura_errors::{AuraError, ErrorCode, ErrorSeverity, Result};
+pub use aura_types::{AuraError, ErrorCode, ErrorSeverity, Result};
 
 // Type aliases for backward compatibility
 pub type AgentError = AuraError;

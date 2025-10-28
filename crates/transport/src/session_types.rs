@@ -72,25 +72,6 @@ pub struct MessageContext {
     pub timestamp: u64,
 }
 
-// ========== Error Type ==========
-
-/// Errors that can occur in transport session operations
-#[derive(Debug, thiserror::Error)]
-pub enum TransportSessionError {
-    #[error("Transport error: {0}")]
-    Transport(#[from] TransportError),
-    #[error("Invalid presence ticket: {0}")]
-    InvalidTicket(String),
-    #[error("Connection handshake failed: {0}")]
-    HandshakeFailed(String),
-    #[error("Message delivery failed: {0}")]
-    DeliveryFailed(String),
-    #[error("Broadcast operation failed: {0}")]
-    BroadcastFailed(String),
-    #[error("Session error: {0}")]
-    SessionError(String),
-}
-
 // ========== Transport Session States ==========
 
 /// Session states for transport protocols

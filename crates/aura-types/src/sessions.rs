@@ -66,56 +66,12 @@ impl fmt::Display for ParticipantId {
     }
 }
 
-/// Session epoch for versioning and ordering
+/// General-purpose epoch for versioning and coordination.
 ///
-/// Provides versioning for sessions and ensures proper ordering of operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct SessionEpoch(pub u64);
-
-impl SessionEpoch {
-    /// Create a new session epoch
-    pub fn new(epoch: u64) -> Self {
-        Self(epoch)
-    }
-
-    /// Get the epoch value
-    pub fn value(&self) -> u64 {
-        self.0
-    }
-
-    /// Get the next epoch
-    pub fn next(self) -> Self {
-        Self(self.0 + 1)
-    }
-
-    /// Get the initial epoch (0)
-    pub fn initial() -> Self {
-        Self(0)
-    }
-}
-
-impl fmt::Display for SessionEpoch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "epoch-{}", self.0)
-    }
-}
-
-impl From<u64> for SessionEpoch {
-    fn from(epoch: u64) -> Self {
-        Self(epoch)
-    }
-}
-
-impl From<SessionEpoch> for u64 {
-    fn from(epoch: SessionEpoch) -> Self {
-        epoch.0
-    }
-}
-
-/// General-purpose epoch for versioning and coordination
-///
-/// Used by various subsystems for versioning and coordination.
-/// Note: This consolidates the `Epoch` type from the groups crate.
+/// All epoch counters in Aura share the same semantics: they are monotonic
+/// `u64` values that start at zero and advance by one. Subsidiary modules
+/// (ledger session epochs, logical clocks, etc.) should alias this struct
+/// to make their intent clear while keeping behaviour uniform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Epoch(pub u64);
 
@@ -158,6 +114,19 @@ impl From<Epoch> for u64 {
         epoch.0
     }
 }
+
+impl Default for Epoch {
+    fn default() -> Self {
+        Self::initial()
+    }
+}
+
+/// Session-specific epoch counter.
+///
+/// This is an alias for [`Epoch`] that callers can use when they specifically
+/// mean the session epoch maintained by the ledger. Retaining the alias keeps
+/// call sites readable without introducing divergent implementations.
+pub type SessionEpoch = Epoch;
 
 /// Session status enumeration
 ///

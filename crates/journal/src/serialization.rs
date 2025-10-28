@@ -159,7 +159,7 @@ mod tests {
         };
 
         // Use trait methods
-        let bytes = original.to_bytes().unwrap();
+        let bytes = original.unwrap();
         let deserialized: TestData = TestData::from_bytes(&bytes).unwrap();
 
         assert_eq!(original, deserialized);

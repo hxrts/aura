@@ -11,6 +11,7 @@
 use crate::manifest::{
     CapabilityId, DeviceId, Permission, ResourceScope, StorageOperation, ThresholdSignature,
 };
+use aura_types::AuraError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -193,41 +194,8 @@ impl Default for CapabilityManager {
 }
 
 /// Errors in capability operations
-#[derive(Debug, Clone)]
-pub enum CapabilityError {
-    /// Token not found
-    TokenNotFound,
-
-    /// Token is expired
-    TokenExpired,
-
-    /// Token is revoked
-    TokenRevoked,
-
-    /// Permission denied
-    PermissionDenied,
-
-    /// Invalid signature
-    InvalidSignature,
-
-    /// Capability validation failed
-    ValidationFailed(String),
-}
-
-impl std::fmt::Display for CapabilityError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CapabilityError::TokenNotFound => write!(f, "Token not found"),
-            CapabilityError::TokenExpired => write!(f, "Token expired"),
-            CapabilityError::TokenRevoked => write!(f, "Token revoked"),
-            CapabilityError::PermissionDenied => write!(f, "Permission denied"),
-            CapabilityError::InvalidSignature => write!(f, "Invalid signature"),
-            CapabilityError::ValidationFailed(reason) => write!(f, "Validation failed: {}", reason),
-        }
-    }
-}
-
-impl std::error::Error for CapabilityError {}
+// Re-export CapabilityError from aura_errors for use in this module
+pub use aura_types::CapabilityError;
 
 #[cfg(test)]
 mod tests {

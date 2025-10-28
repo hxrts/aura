@@ -5,25 +5,131 @@
 //! key rotation/resharing.
 
 use crate::{AgentError, Result};
-use aura_coordination::{
-    protocols::dkg::{create_dkg_protocol, DkgOutput},
-    session_types::frost::{
-        new_session_typed_frost, FrostAggregationOperations, FrostCommitmentOperations, FrostIdle,
-        FrostSessionState, FrostSigningOperations, SessionTypedFrost,
-    },
-};
 use aura_crypto::{
     frost::{FrostKeyShare, FrostSigner},
     Effects,
 };
 use aura_types::{DeviceId, SessionId};
-use ed25519_dalek::{Signature, VerifyingKey};
-use frost_ed25519 as frost;
+use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+/// DKG output placeholder - simplified version for compilation
+#[derive(Debug, Clone)]
+pub struct DkgOutput {
+    pub key_package: frost::keys::KeyPackage,
+    pub public_key_package: frost::keys::PublicKeyPackage,
+    pub participant_id: frost::Identifier,
+}
+
+/// FROST session state with proper lifecycle management
+#[derive(Debug, Clone)]
+pub enum FrostSessionState {
+    Uninitialized,
+    Initialized,
+    DkgInProgress,
+    DkgComplete,
+    SigningInProgress,
+    SigningComplete,
+    Failed(String),
+}
+
+/// FROST session with proper state management
+#[derive(Debug, Clone)]
+pub struct FrostSessionInitialized {
+    pub device_id: DeviceId,
+    pub participant_id: frost::Identifier,
+    pub threshold: u16,
+    pub max_participants: u16,
+    pub state: FrostSessionState,
+}
+
+/// FROST idle state placeholder (for backward compatibility)
+#[derive(Debug, Clone)]
+pub struct FrostIdle;
+
+/// DKG protocol configuration
+#[derive(Debug, Clone)]
+pub struct DkgProtocolConfig {
+    pub session_id: SessionId,
+    pub device_id: DeviceId,
+    pub threshold: u16,
+    pub max_participants: u16,
+    pub participants: Vec<DeviceId>,
+}
+
+/// Create new session typed frost with proper initialization
+pub fn new_session_typed_frost(
+    device_id: DeviceId,
+    participant_id: frost::Identifier,
+    threshold: u16,
+    max_participants: u16,
+) -> Result<FrostSessionInitialized> {
+    if threshold == 0 || threshold > max_participants {
+        return Err(AgentError::frost_operation_failed(
+            "Invalid threshold: must be > 0 and <= max_participants"
+        ));
+    }
+
+    if max_participants == 0 {
+        return Err(AgentError::frost_operation_failed(
+            "Max participants must be greater than 0"
+        ));
+    }
+
+    info!(
+        "Initializing FROST session for device {} with {}-of-{} threshold",
+        device_id, threshold, max_participants
+    );
+
+    Ok(FrostSessionInitialized {
+        device_id,
+        participant_id,
+        threshold,
+        max_participants,
+        state: FrostSessionState::Initialized,
+    })
+}
+
+/// Create DKG protocol with proper initialization
+pub fn create_dkg_protocol(
+    session_id: SessionId,
+    device_id: DeviceId,
+    threshold: u16,
+    participants: Vec<DeviceId>,
+) -> Result<DkgProtocolConfig> {
+    if threshold == 0 {
+        return Err(AgentError::frost_operation_failed("Threshold must be greater than 0"));
+    }
+    
+    if participants.len() < threshold as usize {
+        return Err(AgentError::frost_operation_failed(
+            "Number of participants must be at least threshold"
+        ));
+    }
+
+    if !participants.contains(&device_id) {
+        return Err(AgentError::frost_operation_failed(
+            "Device ID must be included in participants list"
+        ));
+    }
+
+    info!(
+        "Creating DKG protocol for session {}: {}-of-{} threshold", 
+        session_id.0, threshold, participants.len()
+    );
+
+    Ok(DkgProtocolConfig {
+        session_id,
+        device_id,
+        threshold,
+        max_participants: participants.len() as u16,
+        participants,
+    })
+}
 
 /// FROST key share storage and management
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,7 +194,7 @@ impl FrostKeyManager {
     }
 
     /// Get the group public key for verification
-    pub fn get_group_public_key(&self) -> Result<VerifyingKey> {
+    pub fn get_group_public_key(&self) -> Result<Ed25519VerifyingKey> {
         let public_key_package = self
             .public_key_package
             .as_ref()
@@ -146,7 +252,7 @@ impl FrostKeyManager {
     }
 
     /// Verify a threshold signature
-    pub fn verify_threshold_signature(&self, message: &[u8], signature: &Signature) -> Result<()> {
+    pub fn verify_threshold_signature(&self, message: &[u8], signature: &Ed25519Signature) -> Result<()> {
         let group_public_key = self.get_group_public_key()?;
 
         aura_crypto::frost::verify_signature(message, signature, &group_public_key).map_err(|e| {
@@ -465,7 +571,7 @@ impl FrostAgent {
 
         // Create DKG protocol
         let session_id = SessionId::from_uuid(Uuid::new_v4());
-        let dkg_protocol = create_dkg_protocol(session_id, self.device_id, threshold, participants)
+        let dkg_protocol = create_dkg_protocol(session_id, self.device_id, threshold, participants.clone())
             .map_err(|e| {
                 AgentError::frost_operation_failed(&format!(
                     "DKG protocol creation failed: {:?}",
@@ -586,100 +692,118 @@ impl FrostAgent {
         BTreeMap<frost::Identifier, frost::keys::SecretShare>,
         frost::keys::PublicKeyPackage,
     )> {
-        use aura_coordination::context_builder::ContextBuilder;
-        use aura_coordination::execution::context::ExecutionContext;
-        use aura_coordination::protocols::dkg::{DkgResult, DkgSession};
+        // Validate parameters
+        if threshold == 0 {
+            return Err(AgentError::frost_operation_failed("Threshold must be > 0"));
+        }
+        if threshold > max_participants {
+            return Err(AgentError::frost_operation_failed(
+                "Threshold cannot exceed max participants"
+            ));
+        }
+        if participants.len() != max_participants as usize {
+            return Err(AgentError::frost_operation_failed(
+                "Participant count must match max_participants"
+            ));
+        }
 
         info!(
-            "Starting distributed key generation with {} participants",
-            participants.len()
+            "Starting distributed key generation with {} participants (threshold: {})",
+            participants.len(), threshold
         );
 
-        // Create execution context for DKG protocol
-        let context = ContextBuilder::new(self.device_id)
-            .with_session_id(SessionId::from_uuid(uuid::Uuid::new_v4()))
-            .with_participants(participants.to_vec())
-            .build()
-            .map_err(|e| {
-                AgentError::frost_operation_failed(&format!("Context creation failed: {:?}", e))
-            })?;
+        // TODO: Real distributed DKG requires coordination layer and transport
+        // Current limitation: Transport layer is completely stubbed (see reality.md item 1)
+        // When transport is implemented, this should coordinate with other devices
+        
+        // For now, use FROST's cryptographically secure dealer-based DKG
+        // This provides real FROST keys but lacks distributed generation
+        warn!("Using dealer-based DKG - not truly distributed (requires transport layer)");
+        
+        let effects = Effects::production();
+        let mut rng = effects.rng();
 
-        // Create DKG session
-        let dkg_session = DkgSession::new(
-            context,
+        let (secret_shares, public_key_package) = frost::keys::generate_with_dealer(
             threshold,
             max_participants,
-            participants.to_vec(),
+            frost::keys::IdentifierList::Default,
+            &mut rng,
         )
         .map_err(|e| {
-            AgentError::frost_operation_failed(&format!("DKG session creation failed: {:?}", e))
+            AgentError::frost_operation_failed(&format!("DKG generation failed: {:?}", e))
         })?;
 
-        // Execute DKG protocol through coordination layer
-        match dkg_session.execute().await {
-            Ok(DkgResult::Success {
-                secret_shares,
-                public_key_package,
-            }) => {
-                info!("DKG protocol completed successfully");
-                Ok((secret_shares, public_key_package))
-            }
-            Ok(DkgResult::Failed { error }) => Err(AgentError::frost_operation_failed(&format!(
-                "DKG protocol failed: {}",
-                error
-            ))),
-            Err(e) => Err(AgentError::frost_operation_failed(&format!(
-                "DKG execution error: {:?}",
-                e
-            ))),
+        // Validate the results
+        if secret_shares.len() != max_participants as usize {
+            return Err(AgentError::frost_operation_failed(
+                "Generated shares count doesn't match expected participants"
+            ));
         }
+
+        info!(
+            "DKG protocol completed successfully: generated {}-of-{} threshold keys", 
+            threshold, max_participants
+        );
+        
+        Ok((secret_shares, public_key_package))
     }
 
     /// Run distributed threshold signing using coordination layer
     async fn run_distributed_signing(&self, session: FrostSigningSession) -> Result<Signature> {
-        use aura_coordination::context_builder::ContextBuilder;
-        use aura_coordination::protocols::threshold_signing::{
-            SigningResult, ThresholdSigningSession,
-        };
-
         let (session_id, device_id, threshold, max_participants) = session.get_session_info();
 
         info!(
-            "Starting distributed threshold signing session {}",
-            session_id.0
+            "Starting distributed threshold signing session {} ({}-of-{})",
+            session_id.0, threshold, max_participants
         );
 
-        // Create execution context for threshold signing
-        let context = ContextBuilder::new(device_id)
-            .with_session_id(session_id)
-            .with_threshold(threshold)
-            .build()
-            .map_err(|e| {
-                AgentError::frost_operation_failed(&format!(
-                    "Signing context creation failed: {:?}",
-                    e
-                ))
-            })?;
+        // TODO: Real distributed signing requires coordination layer and transport
+        // Current limitation: Transport layer is completely stubbed (see reality.md item 1)
+        // When transport is implemented, this should coordinate with other devices
+        
+        // For now, use single-device simulation that demonstrates FROST protocol
+        // This provides real FROST signatures but lacks distributed coordination
+        warn!("Using single-device FROST simulation - not truly distributed (requires transport layer)");
 
-        // Create threshold signing session
-        let signing_session = ThresholdSigningSession::new(context, session).map_err(|e| {
-            AgentError::frost_operation_failed(&format!("Signing session creation failed: {:?}", e))
-        })?;
+        // Phase 1: Generate commitment
+        let commitment = session.generate_commitment().await
+            .map_err(|e| AgentError::frost_operation_failed(&format!("Commitment generation failed: {}", e)))?;
+        
+        // In a real distributed implementation, this would:
+        // 1. Send commitment to all other participants via transport
+        // 2. Wait for commitments from threshold number of participants
+        // 3. Validate all received commitments
+        
+        // Create commitment map (simulating threshold participants)
+        let mut commitments = BTreeMap::new();
+        commitments.insert(commitment.identifier, commitment);
 
-        // Execute threshold signing protocol
-        match signing_session.execute().await {
-            Ok(SigningResult::Success { signature }) => {
-                info!("Threshold signing completed successfully");
-                Ok(signature)
-            }
-            Ok(SigningResult::Failed { error }) => Err(AgentError::frost_operation_failed(
-                &format!("Threshold signing failed: {}", error),
-            )),
-            Err(e) => Err(AgentError::frost_operation_failed(&format!(
-                "Signing execution error: {:?}",
-                e
-            ))),
+        // Phase 2: Create signature shares
+        let signature_shares = session.create_signature_share(commitments.clone()).await
+            .map_err(|e| AgentError::frost_operation_failed(&format!("Signature share creation failed: {}", e)))?;
+        
+        // In a real distributed implementation, this would:
+        // 1. Send signature share to coordinator
+        // 2. Wait for shares from threshold number of participants
+        // 3. Validate all received shares
+        
+        let mut shares_map = BTreeMap::new();
+        shares_map.insert(signature_shares.identifier, signature_shares);
+
+        // Phase 3: Aggregate signature
+        let signature = session.aggregate_signature(commitments, shares_map).await
+            .map_err(|e| AgentError::frost_operation_failed(&format!("Signature aggregation failed: {}", e)))?;
+
+        // Verify the signature is valid
+        let is_valid = session.verify_signature(&signature).await
+            .map_err(|e| AgentError::frost_operation_failed(&format!("Signature verification failed: {}", e)))?;
+            
+        if !is_valid {
+            return Err(AgentError::frost_operation_failed("Generated signature is invalid"));
         }
+
+        info!("Threshold signing completed successfully: signature validated");
+        Ok(signature)
     }
 }
 

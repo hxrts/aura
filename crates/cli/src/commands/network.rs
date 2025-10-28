@@ -28,6 +28,25 @@ pub enum NetworkCommand {
     /// List connected peers
     Peers,
 
+    /// Test P2P transport layer
+    TestTransport {
+        /// Transport type (stub, simple_tcp, noise_tcp, https_relay)
+        #[arg(long, default_value = "simple_tcp")]
+        transport_type: String,
+
+        /// Listen address for transport
+        #[arg(long, default_value = "127.0.0.1:9000")]
+        listen_addr: String,
+
+        /// Start as server (accept connections)
+        #[arg(long)]
+        server: bool,
+
+        /// Connect to peer address (client mode)
+        #[arg(long)]
+        connect_to: Option<String>,
+    },
+
     /// Create MLS group with network propagation
     CreateGroup {
         /// Group identifier
@@ -714,21 +733,27 @@ async fn create_group(_config: &Config, group_id: &str, members: &str) -> anyhow
         return Err(anyhow::anyhow!("At least one member must be specified"));
     }
 
-    // Create BeeKEM manager for group operations
+    // Create group capability manager for group operations
     let effects = aura_crypto::Effects::test(); // Use test effects for CLI
-    let mut beekem_manager = aura_groups::BeeKemManager::new(effects);
+
+    // Create authority graph and unified manager (simplified for CLI)
+    let authority_graph = aura_journal::capability::authority_graph::AuthorityGraph::new();
+    let unified_manager =
+        aura_journal::capability::unified_manager::UnifiedCapabilityManager::new();
+    let mut group_manager = aura_journal::capability::GroupCapabilityManager::new(
+        authority_graph.clone(),
+        unified_manager,
+        effects,
+    );
 
     // Convert members to MemberIds
-    let initial_members: Vec<aura_groups::MemberId> = member_ids
+    let initial_members: Vec<aura_journal::capability::MemberId> = member_ids
         .iter()
-        .map(|m| aura_groups::MemberId::new(m))
+        .map(|m| aura_journal::capability::MemberId::new(m))
         .collect();
 
-    // Create authority graph (simplified for CLI)
-    let authority_graph = aura_journal::capability::authority_graph::AuthorityGraph::new();
-
     // Initialize the group
-    match beekem_manager.initialize_group(group_id.to_string(), &authority_graph) {
+    match group_manager.initialize_group(group_id.to_string()) {
         Ok(()) => {
             println!("✓ CGKA Group Created Successfully");
             println!("  Group ID: {}", group_id);
@@ -738,11 +763,11 @@ async fn create_group(_config: &Config, group_id: &str, members: &str) -> anyhow
             }
 
             // Display group status
-            if let Some(epoch) = beekem_manager.get_epoch(group_id) {
+            if let Some(epoch) = group_manager.get_epoch(group_id) {
                 println!("  Current Epoch: {}", epoch.value());
             }
 
-            if let Some(roster) = beekem_manager.get_roster(group_id) {
+            if let Some(roster) = group_manager.get_roster(group_id) {
                 println!("  Roster Size: {}", roster.member_count());
             }
 
@@ -775,15 +800,22 @@ async fn send_data(
 
     let data_bytes = data.as_bytes().to_vec();
 
-    // Create BeeKEM manager for group operations
+    // Create group capability manager for group operations
     let effects = aura_crypto::Effects::test();
-    let beekem_manager = aura_groups::BeeKemManager::new(effects);
+    let authority_graph = aura_journal::capability::authority_graph::AuthorityGraph::new();
+    let unified_manager =
+        aura_journal::capability::unified_manager::UnifiedCapabilityManager::new();
+    let group_manager = aura_journal::capability::GroupCapabilityManager::new(
+        authority_graph,
+        unified_manager,
+        effects,
+    );
 
     // Create a mock sender (in real implementation, this would come from device context)
-    let sender = aura_groups::MemberId::new("cli-user");
+    let sender = aura_journal::capability::MemberId::new("cli-user");
 
     // Encrypt the message for the group
-    match beekem_manager.encrypt_group_message(group_id, &data_bytes, &sender) {
+    match group_manager.encrypt_group_message(group_id, &data_bytes, &sender) {
         Ok(encrypted_message) => {
             println!("✓ Group Message Encrypted Successfully");
             println!("  Group ID: {}", group_id);
@@ -892,16 +924,15 @@ async fn show_network_stats(config: &Config) -> anyhow::Result<()> {
 async fn show_groups(_config: &Config) -> anyhow::Result<()> {
     info!("Showing CGKA groups");
 
-    // Create BeeKEM manager to check for existing groups
-    let effects = aura_crypto::Effects::test();
-    let beekem_manager = aura_groups::BeeKemManager::new(effects);
+    // In a real implementation, this would query persistent storage for active groups
 
     println!("CGKA Groups Overview");
     println!("===================");
 
     // In a real implementation, this would query persistent storage
     // For now, show the structure and capabilities
-    if beekem_manager.groups.is_empty() {
+    // CLI doesn't maintain persistent state, so always show this message
+    {
         println!("No active groups found.");
         println!();
         println!("To create a group:");
@@ -914,30 +945,7 @@ async fn show_groups(_config: &Config) -> anyhow::Result<()> {
         println!("  ✓ Causal encryption for messages");
         println!("  ✓ Capability-based membership management");
         println!("  ✓ Concurrent operation merging");
-    } else {
-        println!("Active Groups:");
-        for (group_id, state) in &beekem_manager.groups {
-            println!();
-            println!("Group: {}", group_id);
-            println!("  Current Epoch: {}", state.current_epoch.value());
-            println!("  Member Count: {}", state.roster.member_count());
-            println!("  Last Updated: {}", state.last_updated);
-
-            // Show ordered members
-            let members = state.get_ordered_members();
-            println!("  Members:");
-            for (i, member) in members.iter().enumerate() {
-                println!("    {}. {}", i + 1, member.as_str());
-            }
-
-            // Show application secrets count
-            println!("  Available Epochs: {}", state.application_secrets.len());
-
-            // Show pending operations
-            if !state.pending_operations.is_empty() {
-                println!("  Pending Operations: {}", state.pending_operations.len());
-            }
-        }
+        println!("  ✓ Integration with journal capability system");
     }
 
     Ok(())

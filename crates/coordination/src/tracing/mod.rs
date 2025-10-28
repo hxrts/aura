@@ -77,7 +77,7 @@ pub enum SpanOutcome {
     /// Successful completion
     Success,
     /// Completed with error
-    Error(aura_errors::AuraError),
+    Error(aura_types::AuraError),
     /// Byzantine behavior detected
     Byzantine(DeviceId, aura_journal::ByzantineEvidence),
     /// Cancelled or interrupted
@@ -214,7 +214,7 @@ impl TracedOperation {
     }
 
     /// Complete the operation with an error
-    pub fn complete_with_error(mut self, error: aura_errors::AuraError) {
+    pub fn complete_with_error(mut self, error: aura_types::AuraError) {
         self.log_sink
             .exit_span(self.span.span_id, SpanOutcome::Error(error));
         self.completed = true;

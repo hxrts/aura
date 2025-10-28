@@ -3,7 +3,7 @@
 // NOTE: Temporarily simplified - agent/coordination dependencies disabled
 
 use aura_crypto::Effects;
-use aura_errors::Result;
+use aura_types::Result;
 use aura_journal::bootstrap::BootstrapManager;
 use aura_journal::serialization::to_cbor_bytes;
 use tracing::info;
@@ -23,7 +23,7 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
 
     // Create output directory
     std::fs::create_dir_all(output_dir).map_err(|e| {
-        aura_errors::AuraError::configuration_error(format!(
+        aura_types::AuraError::configuration_error(format!(
             "Failed to create output directory '{}': {}",
             output_dir, e
         ))
@@ -38,7 +38,7 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
     let init_result = bootstrap_manager
         .initialize_account(participants, threshold, &effects)
         .map_err(|e| {
-            aura_errors::AuraError::bootstrap_failed(format!(
+            aura_types::AuraError::bootstrap_failed(format!(
                 "Account initialization failed: {}",
                 e
             ))
@@ -48,7 +48,7 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
 
     // Validate we have enough device IDs for all participants
     if init_result.device_ids.len() != participants as usize {
-        return Err(aura_errors::AuraError::bootstrap_failed(format!(
+        return Err(aura_types::AuraError::bootstrap_failed(format!(
             "Device ID mismatch: expected {} device IDs but got {}. This indicates a bootstrap failure.",
             participants, init_result.device_ids.len()
         )));
@@ -58,7 +58,7 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
     use std::collections::HashSet;
     let unique_device_ids: HashSet<_> = init_result.device_ids.iter().collect();
     if unique_device_ids.len() != init_result.device_ids.len() {
-        return Err(aura_errors::AuraError::bootstrap_failed(
+        return Err(aura_types::AuraError::bootstrap_failed(
             "Device ID collision detected: duplicate device IDs generated during bootstrap. This is a critical error.".to_string()
         ));
     }
@@ -66,7 +66,7 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
     // Create configs directory
     let configs_dir = format!("{}/configs", output_dir);
     std::fs::create_dir_all(&configs_dir).map_err(|e| {
-        aura_errors::AuraError::configuration_error(format!(
+        aura_types::AuraError::configuration_error(format!(
             "Failed to create configs directory '{}': {}",
             configs_dir, e
         ))
@@ -88,7 +88,7 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
 
         // Create the device-specific data directory
         std::fs::create_dir_all(&device_data_dir).map_err(|e| {
-            aura_errors::AuraError::configuration_error(format!(
+            aura_types::AuraError::configuration_error(format!(
                 "Failed to create device data directory '{}': {}",
                 device_data_dir, e
             ))
@@ -103,7 +103,7 @@ data_dir = "{}"
             device_id, init_result.account_id.0, device_data_dir
         );
         std::fs::write(&config_path, config_content).map_err(|e| {
-            aura_errors::AuraError::configuration_error(format!(
+            aura_types::AuraError::configuration_error(format!(
                 "Failed to create config file '{}': {}",
                 config_path, e
             ))
@@ -113,14 +113,14 @@ data_dir = "{}"
 
     // Save ledger state
     let state_bytes = to_cbor_bytes(init_result.ledger.state()).map_err(|e| {
-        aura_errors::AuraError::serialization_failed(format!(
+        aura_types::AuraError::serialization_failed(format!(
             "Failed to serialize ledger state: {}",
             e
         ))
     })?;
     let ledger_path = format!("{}/ledger.cbor", output_dir);
     std::fs::write(&ledger_path, state_bytes).map_err(|e| {
-        aura_errors::AuraError::configuration_error(format!(
+        aura_types::AuraError::configuration_error(format!(
             "Failed to write ledger file '{}': {}",
             ledger_path, e
         ))

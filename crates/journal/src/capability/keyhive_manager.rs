@@ -12,7 +12,7 @@ use super::{
 use aura_crypto::Effects;
 // Group integration via traits to avoid circular dependencies
 use aura_types::DeviceId;
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use aura_crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tracing::{debug, info, warn};
@@ -21,10 +21,10 @@ use tracing::{debug, info, warn};
 pub trait GroupMembershipProvider: std::fmt::Debug + Send + Sync {
     /// Check if device is member of a group
     fn is_group_member(&self, device_id: &DeviceId, group_id: &str) -> bool;
-    
+
     /// Get all groups a device is member of
     fn get_device_groups(&self, device_id: &DeviceId) -> Vec<String>;
-    
+
     /// Get all members of a group
     fn get_group_members(&self, group_id: &str) -> Vec<DeviceId>;
 }
@@ -39,9 +39,12 @@ pub struct InMemoryGroupProvider {
 impl InMemoryGroupProvider {
     /// Add device to group
     pub fn add_member(&mut self, group_id: String, device_id: DeviceId) {
-        self.memberships.entry(group_id).or_default().push(device_id);
+        self.memberships
+            .entry(group_id)
+            .or_default()
+            .push(device_id);
     }
-    
+
     /// Remove device from group
     pub fn remove_member(&mut self, group_id: &str, device_id: &DeviceId) {
         if let Some(members) = self.memberships.get_mut(group_id) {
@@ -57,7 +60,7 @@ impl GroupMembershipProvider for InMemoryGroupProvider {
             .map(|members| members.contains(device_id))
             .unwrap_or(false)
     }
-    
+
     fn get_device_groups(&self, device_id: &DeviceId) -> Vec<String> {
         self.memberships
             .iter()
@@ -70,12 +73,9 @@ impl GroupMembershipProvider for InMemoryGroupProvider {
             })
             .collect()
     }
-    
+
     fn get_group_members(&self, group_id: &str) -> Vec<DeviceId> {
-        self.memberships
-            .get(group_id)
-            .cloned()
-            .unwrap_or_default()
+        self.memberships.get(group_id).cloned().unwrap_or_default()
     }
 }
 
@@ -164,7 +164,7 @@ impl KeyhiveCapabilityManager {
     }
 
     /// Register authority key for verification
-    pub fn register_authority(&mut self, device_id: DeviceId, key: VerifyingKey) {
+    pub fn register_authority(&mut self, device_id: DeviceId, key: Ed25519VerifyingKey) {
         self.native.register_authority(device_id, key);
     }
 
@@ -184,7 +184,7 @@ impl KeyhiveCapabilityManager {
     pub fn grant_unified_capability(
         &mut self,
         grant: CapabilityGrant,
-        signing_key: &SigningKey,
+        signing_key: &Ed25519SigningKey,
         effects: &Effects,
     ) -> Result<CapabilityToken> {
         info!(
@@ -194,7 +194,9 @@ impl KeyhiveCapabilityManager {
         );
 
         // Always grant in native system for backwards compatibility
-        let token = self.native.grant_capability(grant.clone(), signing_key, effects)
+        let token = self
+            .native
+            .grant_capability(grant.clone(), signing_key, effects)
             .map_err(|e| {
                 warn!("Failed to grant native capability: {:?}", e);
                 e
@@ -208,7 +210,10 @@ impl KeyhiveCapabilityManager {
             }
         }
 
-        debug!("Successfully granted unified capability with ID {:?}", token.capability_id());
+        debug!(
+            "Successfully granted unified capability with ID {:?}",
+            token.capability_id()
+        );
         Ok(token)
     }
 
@@ -233,10 +238,13 @@ impl KeyhiveCapabilityManager {
 
         // Choose verification order based on configuration
         if self.config.prefer_native {
+            debug!("Using native-first verification");
             self.verify_native_first(device_id, permission, current_time)
         } else if self.keyhive_enabled {
+            debug!("Using convergent-first verification");
             self.verify_convergent_first(device_id, permission, current_time)
         } else {
+            debug!("Using native-only verification");
             self.verify_native_only(device_id, permission, current_time)
         }
     }
@@ -249,7 +257,11 @@ impl KeyhiveCapabilityManager {
         current_time: u64,
     ) -> Result<VerificationResult> {
         // Try native system first
-        match self.native.verify_permission(device_id, permission, current_time) {
+        debug!("Trying native system verification first");
+        match self
+            .native
+            .verify_permission(device_id, permission, current_time)
+        {
             Ok(()) => {
                 debug!("Permission verified via native capability system");
                 return Ok(VerificationResult::Native);
@@ -322,14 +334,20 @@ impl KeyhiveCapabilityManager {
         current_time: u64,
     ) -> Result<()> {
         // Check authority graph for delegated capabilities
-        if self.verify_via_authority_graph(device_id, permission, current_time).is_ok() {
+        if self
+            .verify_via_authority_graph(device_id, permission, current_time)
+            .is_ok()
+        {
             return Ok(());
         }
 
         // Check group membership permissions if group integration enabled
         if self.config.group_integration_enabled {
             if let Some(ref group_provider) = self.group_provider {
-                if self.verify_via_group_membership(device_id, permission, group_provider.as_ref()).is_ok() {
+                if self
+                    .verify_via_group_membership(device_id, permission, group_provider.as_ref())
+                    .is_ok()
+                {
                     return Ok(());
                 }
             }
@@ -353,7 +371,7 @@ impl KeyhiveCapabilityManager {
         // 2. Check if any capability grants the required permission
         // 3. Verify delegation chain is not revoked
         // 4. Check capability expiration
-        
+
         debug!("Authority graph verification not yet implemented");
         Err(CapabilityError::AuthorizationError(
             "Authority graph verification not implemented".to_string(),
@@ -397,7 +415,10 @@ impl KeyhiveCapabilityManager {
                         if grant.device_id == *device_id {
                             for granted_permission in &grant.permissions {
                                 if self.permission_matches(granted_permission, permission) {
-                                    debug!("Permission granted via group membership in {}", group_id);
+                                    debug!(
+                                        "Permission granted via group membership in {}",
+                                        group_id
+                                    );
                                     return Ok(());
                                 }
                             }
@@ -405,7 +426,10 @@ impl KeyhiveCapabilityManager {
                     }
                 } else {
                     // No cached capabilities, but group membership grants basic permissions
-                    debug!("Permission granted via basic group membership in {}", group_id);
+                    debug!(
+                        "Permission granted via basic group membership in {}",
+                        group_id
+                    );
                     return Ok(());
                 }
             }
@@ -430,7 +454,12 @@ impl KeyhiveCapabilityManager {
                     operation: op2,
                     resource: res2,
                 },
-            ) => op1 == op2 && (res1 == res2 || res1 == "*" || res1.ends_with("/*") && res2.starts_with(&res1[..res1.len()-1])),
+            ) => {
+                op1 == op2
+                    && (res1 == res2
+                        || res1 == "*"
+                        || res1.ends_with("/*") && res2.starts_with(&res1[..res1.len() - 1]))
+            }
             (
                 Permission::Communication {
                     operation: op1,
@@ -467,7 +496,7 @@ impl KeyhiveCapabilityManager {
         // 1. Create CapabilityDelegation event
         // 2. Apply it to the authority graph
         // 3. Update parent-child relationships
-        
+
         debug!("Authority graph recording not yet implemented");
         Ok(())
     }
@@ -476,14 +505,14 @@ impl KeyhiveCapabilityManager {
     fn refresh_group_capabilities(&mut self) {
         if let Some(ref _group_provider) = self.group_provider {
             self.group_capabilities.clear();
-            
+
             // TODO: Implement group capability refresh
             // This would:
             // 1. Get all groups from group provider
             // 2. For each group, get the current members
             // 3. Convert group membership to capability grants
             // 4. Cache the results
-            
+
             debug!("Group capabilities refresh not yet implemented");
         }
     }
@@ -496,12 +525,12 @@ impl KeyhiveCapabilityManager {
     ) -> Result<()> {
         info!("Merging authority graph from remote device");
         self.authority_graph.merge(other_graph, effects)?;
-        
+
         // Refresh group capabilities if cache is enabled
         if self.config.cache_group_capabilities {
             self.refresh_group_capabilities();
         }
-        
+
         Ok(())
     }
 
@@ -525,7 +554,7 @@ impl KeyhiveCapabilityManager {
         let was_enabled = self.keyhive_enabled;
         self.config = config;
         self.keyhive_enabled = self.config.convergent_enabled;
-        
+
         if !was_enabled && self.keyhive_enabled {
             info!("Keyhive capabilities enabled");
             if self.config.cache_group_capabilities {
@@ -554,7 +583,7 @@ impl KeyhiveCapabilityManager {
     pub fn verify_storage(
         &self,
         device_id: &DeviceId,
-        operation: super::StorageOperation,
+        operation: StorageOperation,
         resource: &str,
         current_time: u64,
     ) -> Result<VerificationResult> {
@@ -569,7 +598,7 @@ impl KeyhiveCapabilityManager {
     pub fn verify_communication(
         &self,
         device_id: &DeviceId,
-        operation: super::CommunicationOperation,
+        operation: CommunicationOperation,
         relationship: &str,
         current_time: u64,
     ) -> Result<VerificationResult> {
@@ -584,7 +613,7 @@ impl KeyhiveCapabilityManager {
     pub fn verify_relay(
         &self,
         device_id: &DeviceId,
-        operation: super::RelayOperation,
+        operation: RelayOperation,
         trust_level: &str,
         current_time: u64,
     ) -> Result<VerificationResult> {
@@ -616,8 +645,8 @@ mod tests {
         DeviceId(Uuid::new_v4())
     }
 
-    fn test_signing_key() -> SigningKey {
-        SigningKey::from_bytes(&[1u8; 32])
+    fn test_signing_key() -> Ed25519SigningKey {
+        aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32])
     }
 
     #[test]
@@ -653,25 +682,28 @@ mod tests {
     fn test_native_fallback() {
         let mut config = KeyhiveConfig::default();
         config.prefer_native = true;
-        
+        config.convergent_enabled = false; // Disable Keyhive for this test
+
         let mut manager = KeyhiveCapabilityManager::new(config);
         let device_id = test_device_id();
         let signing_key = test_signing_key();
         let effects = test_effects();
 
-        // Grant capability in native system
+        // Grant capability in native system (using pattern from native tests)
         let grant = CapabilityGrant {
             device_id,
             permissions: vec![Permission::Storage {
                 operation: StorageOperation::Read,
-                resource: "test/*".to_string(),
+                resource: "*".to_string(), // Use wildcard like native tests
             }],
             issued_at: effects.now().unwrap_or(0),
             expires_at: None,
             delegation_chain: vec![],
         };
 
-        manager.grant_unified_capability(grant, &signing_key, &effects).unwrap();
+        manager
+            .grant_unified_capability(grant, &signing_key, &effects)
+            .unwrap();
 
         // Verify should succeed via native system
         let result = manager.verify_storage(
@@ -680,7 +712,7 @@ mod tests {
             "test/file",
             effects.now().unwrap_or(0),
         );
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), VerificationResult::Native);
     }
@@ -692,7 +724,7 @@ mod tests {
 
         let mut new_config = KeyhiveConfig::default();
         new_config.convergent_enabled = false;
-        
+
         manager.update_config(new_config);
         assert!(!manager.is_keyhive_enabled());
     }

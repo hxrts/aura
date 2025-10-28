@@ -14,12 +14,9 @@ aura-transport = { path = "../transport" }
 aura-crypto = { path = "../crypto" }
 aura-coordination = { path = "../coordination" }
 aura-console-types = { path = "../console-types" }
-aura-errors = { path = "../aura-errors" }
-aura-types = { path = "../aura-types" }
 quint_api = { path = "../quint-api" }
 
-# Cryptography
-ed25519-dalek = "2.1"
+# Cryptography provided through aura-crypto
 
 # Core dependencies
 uuid = { version = "1.6", features = ["v4", "v5", "serde"] }

@@ -28,14 +28,14 @@ mod violation_analyzer;
 
 pub use analyzer::AnalysisEngine;
 pub use property_causality::{
-    PropertyCausalityAnalyzer, PropertyCausalityAnalysis, ViolationCausalityChain,
-    ContributingFactor, CriticalEvent, CounterfactualPath, CausalityVisualizationData,
+    CausalityVisualizationData, ContributingFactor, CounterfactualPath, CriticalEvent,
+    PropertyCausalityAnalysis, PropertyCausalityAnalyzer, ViolationCausalityChain,
 };
 pub use property_monitor::{PropertyMonitor, WasmPropertyMonitor};
 pub use property_timeline::{PropertyTimeline, WasmPropertyTimeline, WasmPropertyTimelineBuilder};
 pub use violation_analyzer::{
-    ViolationAnalyzer, WasmViolationAnalyzer, ViolationAnalysis, ViolationClassification,
-    ViolationType, SeverityLevel, RemediationStrategy, DebuggingGuide, ImpactAssessment,
+    DebuggingGuide, ImpactAssessment, RemediationStrategy, SeverityLevel, ViolationAnalysis,
+    ViolationAnalyzer, ViolationClassification, ViolationType, WasmViolationAnalyzer,
 };
 
 // Initialize WASM
@@ -64,7 +64,11 @@ impl AnalysisClient {
         let empty_trace = Vec::new();
         let engine = AnalysisEngine::new(&empty_trace).unwrap_or_else(|_| {
             // Fallback: create from empty events
-            AnalysisEngine::from_events(wasm_bindgen::JsValue::from(serde_wasm_bindgen::to_value(&Vec::<aura_console_types::TraceEvent>::new()).unwrap())).unwrap()
+            AnalysisEngine::from_events(wasm_bindgen::JsValue::from(
+                serde_wasm_bindgen::to_value(&Vec::<aura_console_types::TraceEvent>::new())
+                    .unwrap(),
+            ))
+            .unwrap()
         });
         let property_monitor = Some(WasmPropertyMonitor::new());
 
@@ -162,28 +166,40 @@ impl AnalysisClient {
     }
 
     /// Initialize property causality analysis from trace events
-    pub fn initialize_causality_analysis(&mut self, trace_events: wasm_bindgen::JsValue) -> Result<(), wasm_bindgen::JsValue> {
-        let events: Vec<aura_console_types::TraceEvent> = serde_wasm_bindgen::from_value(trace_events)
-            .map_err(|e| wasm_bindgen::JsValue::from_str(&format!("Failed to parse trace events: {}", e)))?;
-        
+    pub fn initialize_causality_analysis(
+        &mut self,
+        trace_events: wasm_bindgen::JsValue,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let events: Vec<aura_console_types::TraceEvent> =
+            serde_wasm_bindgen::from_value(trace_events).map_err(|e| {
+                wasm_bindgen::JsValue::from_str(&format!("Failed to parse trace events: {}", e))
+            })?;
+
         let analyzer = PropertyCausalityAnalyzer::new(&events);
         self.causality_analyzer = Some(analyzer);
-        
-        console_log!("Property causality analysis initialized with {} events", events.len());
+
+        console_log!(
+            "Property causality analysis initialized with {} events",
+            events.len()
+        );
         Ok(())
     }
 
     /// Analyze causality for a specific property violation
-    pub fn analyze_violation_causality(&mut self, property_id: &str, violation_event_id: u64) -> wasm_bindgen::JsValue {
+    pub fn analyze_violation_causality(
+        &mut self,
+        property_id: &str,
+        violation_event_id: u64,
+    ) -> wasm_bindgen::JsValue {
         if let Some(ref mut analyzer) = self.causality_analyzer {
             // Convert property_id string to PropertyId (simplified)
             if let Ok(property_uuid) = uuid::Uuid::parse_str(property_id) {
-                let property_id = session_types::properties::PropertyId::from(property_uuid);
-                
+                let property_id =
+                    aura_types::session_utils::properties::PropertyId::from(property_uuid);
+
                 match analyzer.analyze_violation_causality(property_id, violation_event_id) {
-                    Some(analysis) => {
-                        serde_wasm_bindgen::to_value(&analysis).unwrap_or(wasm_bindgen::JsValue::NULL)
-                    }
+                    Some(analysis) => serde_wasm_bindgen::to_value(&analysis)
+                        .unwrap_or(wasm_bindgen::JsValue::NULL),
                     None => wasm_bindgen::JsValue::NULL,
                 }
             } else {
@@ -191,7 +207,9 @@ impl AnalysisClient {
                 wasm_bindgen::JsValue::NULL
             }
         } else {
-            console_error!("Causality analyzer not initialized. Call initialize_causality_analysis first.");
+            console_error!(
+                "Causality analyzer not initialized. Call initialize_causality_analysis first."
+            );
             wasm_bindgen::JsValue::NULL
         }
     }
@@ -229,7 +247,11 @@ impl AnalysisClient {
     }
 
     /// Analyze a property violation with comprehensive insights
-    pub fn analyze_violation(&mut self, property_id: &str, violation_data: wasm_bindgen::JsValue) -> wasm_bindgen::JsValue {
+    pub fn analyze_violation(
+        &mut self,
+        property_id: &str,
+        violation_data: wasm_bindgen::JsValue,
+    ) -> wasm_bindgen::JsValue {
         if let Some(ref mut analyzer) = self.violation_analyzer {
             analyzer.analyze_violation_simple(property_id, violation_data)
         } else {

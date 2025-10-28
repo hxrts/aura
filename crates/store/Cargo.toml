@@ -12,12 +12,9 @@ workspace = true
 
 [dependencies]
 # Workspace crates
-aura-errors = { path = "../aura-errors" }
 aura-journal = { path = "../journal" }
 # aura-transport = { path = "../transport" }  # Temporarily disabled due to coordination dependencies
 aura-crypto = { path = "../crypto" }
-aura-groups = { path = "../groups" }
-aura-types = { path = "../aura-types" }
 
 # Storage
 redb = { workspace = true }
@@ -38,11 +35,10 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
-ed25519-dalek = { workspace = true }
+hex = { workspace = true }
+# Cryptography provided through aura-crypto
 blake3 = { workspace = true }
 chacha20poly1305 = { workspace = true }
-hex = { workspace = true }
-aes-gcm = "0.10"
 
 [dev-dependencies]
 tokio-test = "0.4"

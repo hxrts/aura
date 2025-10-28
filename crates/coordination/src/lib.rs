@@ -73,31 +73,15 @@ pub use utils::{compute_lottery_ticket, determine_lock_winner};
 
 // ========== Protocol Execution ==========
 pub mod execution;
-pub use execution::{ProductionTimeSource, ProtocolContext, StubTransport, Transport};
+pub use execution::{ProductionTimeSource, ProtocolContext, MemoryTransport, Transport};
 
 // ========== Complete Protocols ==========
 pub mod protocols;
-// Direct exports for core protocols
+// Direct exports for core protocols - lifecycle-only architecture
 pub use protocols::{
-    // Utility protocols
-    locking_choreography,
-    new_recovery_protocol,
-    new_resharing_protocol,
-    nudge_guardian,
-    // Recovery protocol
-    recovery_choreography,
-    rehydrate_recovery_protocol,
-    rehydrate_resharing_protocol,
-    // Resharing protocol
-    resharing_choreography,
-    CounterLifecycle,
-    CounterLifecycleError,
-    RecoveryProtocolCore,
-    RecoveryProtocolState,
-    RecoverySessionError,
-    ResharingProtocolCore,
-    ResharingProtocolState,
-    ResharingSessionError,
+    CounterLifecycle, CounterLifecycleError, DkdLifecycle, DkdLifecycleError, GroupLifecycle,
+    GroupLifecycleError, LockingLifecycle, LockingLifecycleError, RecoveryLifecycle,
+    RecoveryLifecycleError, ResharingLifecycle, ResharingLifecycleError,
 };
 
 // Counter choreographic functions removed - use CounterLifecycle through LifecycleScheduler
@@ -120,27 +104,32 @@ pub mod local_runtime;
 pub mod session_runtime_config;
 pub use local_runtime::{
     DkdResult, LocalSessionRuntime, SessionCommand, SessionProtocolType, SessionResponse,
+    SessionStatusInfo,
 };
 pub use session_runtime_config::{
     ConfigurationError, SecurityConfig, SessionConfig, SessionRuntimeConfig,
     SessionRuntimeConfigBuilder, SessionRuntimeFactory, TransportConfig,
 };
 
+// ========== FROST Session Management ==========
+pub mod frost_session_manager;
+pub use frost_session_manager::{FrostSession, FrostSessionManager};
+
+// ========== Capability Authorization ==========
+pub mod capability_authorization;
+pub use capability_authorization::{
+    create_capability_authorization_manager, CapabilityAuthError, CapabilityAuthorizationManager,
+};
+
 // ========== Session Types ==========
 pub mod session_types;
-pub use protocols::{
-    rehydrate_protocol, IntoProtocolWrapper, ProtocolWrapper, ProtocolWrapperBuilder,
-    ProtocolWrapperError,
-};
+pub use protocols::{ProtocolWrapper, ProtocolWrapperBuilder, ProtocolWrapperError};
 pub use session_types::{SessionProtocol, SessionTypedProtocol};
 
 // ========== Service Layer Architecture ==========
 pub mod coordination_service;
 pub mod protocol_results;
-pub use coordination_service::{
-    CoordinationService, CryptoService, ProtocolSetupError, RuntimeStats, SecureStorage,
-    SigningContext,
-};
+pub use coordination_service::{CoordinationService, ServiceHealthStatus};
 
 // ========== Dev Console Instrumentation ==========
 pub mod instrumentation;

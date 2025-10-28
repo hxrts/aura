@@ -1,7 +1,7 @@
 //! Protocol transport abstractions.
 
 use async_trait::async_trait;
-use aura_errors::Result;
+use aura_types::Result;
 use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

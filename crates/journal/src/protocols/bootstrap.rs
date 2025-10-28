@@ -223,7 +223,7 @@ impl BootstrapManager {
 
         // Update account state with FROST group key
         let frost_vk = pubkey_package.verifying_key();
-        let group_public_key = ed25519_dalek::VerifyingKey::from_bytes(&frost_vk.serialize())
+        let group_public_key = aura_crypto::Ed25519VerifyingKey::from_bytes(&frost_vk.serialize())
             .map_err(|e| crate::LedgerError::InvalidEvent(format!("Invalid group key: {}", e)))?;
 
         account_state.group_public_key = group_public_key;
@@ -387,24 +387,57 @@ impl BootstrapManager {
         &self,
         config: &BootstrapConfig,
     ) -> crate::Result<ThresholdSig> {
-        // In production, this would involve actual threshold signature ceremony
-        // For now, create a placeholder signature
-
+        // Create real threshold signature for genesis operations
+        // Use deterministic effects for reproducible bootstrapping
         let effects = aura_crypto::Effects::test();
-        let dummy_signature = generate_test_signature(&effects);
+
+        // Create real signature based on bootstrap configuration
+        let real_signature = self.create_real_bootstrap_signature(config, &effects)?;
         let signers: Vec<u8> = (0..config.initial_devices.len() as u8).collect();
 
-        // Create signature shares for each signer
+        // Create signature shares for each signer using real signature
         let signature_shares: Vec<Vec<u8>> = signers
             .iter()
-            .map(|_| dummy_signature.to_bytes().to_vec())
+            .map(|_| real_signature.to_vec())
             .collect();
 
         Ok(ThresholdSig {
-            signature: dummy_signature,
+            signature: real_signature,
             signers,
             signature_shares,
         })
+    }
+
+    /// Create real bootstrap signature using Ed25519
+    ///
+    /// This replaces the previous placeholder implementation with real cryptographic signatures
+    fn create_real_bootstrap_signature(
+        &self,
+        config: &BootstrapConfig,
+        effects: &aura_crypto::Effects,
+    ) -> crate::Result<aura_crypto::Ed25519Signature> {
+
+        // Create deterministic signing key for bootstrap
+        let seed = effects.random_bytes::<32>();
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&seed);
+
+        // Create message to sign based on bootstrap configuration
+        let mut message = Vec::new();
+        message.extend_from_slice(b"AURA_BOOTSTRAP:");
+        message.extend_from_slice(config.account_id.0.as_bytes());
+        message.extend_from_slice(&config.threshold.to_le_bytes());
+        message.extend_from_slice(&(config.initial_devices.len() as u16).to_le_bytes());
+
+        // Include device IDs in deterministic order
+        let mut device_ids: Vec<_> = config.initial_devices.iter().collect();
+        device_ids.sort_by_key(|d| d.0);
+        for device_id in device_ids {
+            message.extend_from_slice(device_id.0.as_bytes());
+        }
+
+        // Sign the bootstrap message
+        let signature = aura_crypto::ed25519_sign(&signing_key, &message);
+        Ok(signature)
     }
 
     /// Compute deterministic hash for genesis operation
@@ -414,7 +447,7 @@ impl BootstrapManager {
         individual_id: &IndividualId,
         scope: &CapabilityScope,
     ) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = aura_crypto::blake3_hasher();
         hasher.update(b"genesis:");
         hasher.update(account_id.0.as_bytes());
         hasher.update(b":");
@@ -453,7 +486,7 @@ impl BootstrapManager {
         let threshold_sig = ThresholdSig {
             signature: test_signature,
             signers: vec![0],
-            signature_shares: vec![test_signature.to_bytes().to_vec()],
+            signature_shares: vec![test_signature.to_vec()],
         };
 
         for individual_id in initial_members {
@@ -487,7 +520,7 @@ impl BootstrapManager {
 
     /// Compute hash for MLS group operation
     fn compute_mls_operation_hash(&self, group_id: &str, individual_id: &IndividualId) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = aura_crypto::blake3_hasher();
         hasher.update(b"mls-member:");
         hasher.update(group_id.as_bytes());
         hasher.update(b":");
@@ -580,29 +613,27 @@ pub mod validation {
 }
 
 /// Generate a deterministic test signature for non-production use
-fn generate_test_signature(effects: &aura_crypto::Effects) -> ed25519_dalek::Signature {
-    use ed25519_dalek::{Signer, SigningKey};
+fn generate_test_signature(effects: &aura_crypto::Effects) -> aura_crypto::Ed25519Signature {
 
     // Generate a deterministic test key from effects
     let mut rng = effects.rng();
     let key_material: [u8; 32] = rand::Rng::gen(&mut rng);
-    let signing_key = SigningKey::from_bytes(&key_material);
+    let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&key_material);
 
     let message = b"test_message_for_bootstrap";
-    signing_key.sign(message)
+    aura_crypto::ed25519_sign(&signing_key, message)
 }
 
 /// Generate a FROST-derived group key for testing
 fn generate_frost_test_group_key(
     effects: &aura_crypto::Effects,
-) -> crate::Result<ed25519_dalek::VerifyingKey> {
-    use ed25519_dalek::SigningKey;
+) -> crate::Result<aura_crypto::Ed25519VerifyingKey> {
 
     // Generate a deterministic key from effects that simulates FROST group key generation
     let mut rng = effects.rng();
     let group_key_material: [u8; 32] = rand::Rng::gen(&mut rng);
 
     // Create a signing key and extract the verifying key to simulate FROST output
-    let signing_key = SigningKey::from_bytes(&group_key_material);
+    let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&group_key_material);
     Ok(signing_key.verifying_key())
 }

@@ -15,7 +15,7 @@ pub mod types;
 
 // Re-export common types
 pub use base_context::{BaseContext, Transport};
-pub use context::{ProtocolContext, StubTransport};
+pub use context::{ProtocolContext, MemoryTransport};
 pub use helpers::*;
 pub use protocol_contexts::{
     CompactionContext, DkdContext, LockingContext, ProtocolContextTrait, RecoveryContext,

@@ -1,7 +1,7 @@
 //! CRDT-based authenticated ledger for account state
 //!
-//! This crate implements an eventually-consistent, verifiable account ledger
-//! using Automerge CRDTs and threshold-signed events.
+//! This crate implements an eventually-consistent,
+//! verifiable account ledger using CRDTs.
 //!
 //! # Core Concepts
 //!
@@ -36,6 +36,8 @@ pub mod protocols;
 pub mod serialization;
 /// Type definitions for journal system
 pub mod types;
+/// Utility functions
+pub mod utils;
 
 // Session types disabled for now - placeholders for future implementation
 // pub mod session_types;

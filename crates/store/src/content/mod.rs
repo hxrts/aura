@@ -39,7 +39,7 @@ pub mod encryption;
 pub mod erasure;
 
 pub use chunking::{chunk_data, compute_chunk_metadata, reassemble_chunks};
-pub use encryption::{EncryptionContext, Recipients};
+pub use encryption::{ContentEncryptionContext, Recipients};
 pub use erasure::{
     ErasureCoder, ErasureError, ErasureFragment, ErasureParams, FragmentDistribution,
 };

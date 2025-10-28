@@ -12,8 +12,8 @@ workspace = true
 [dependencies]
 # Internal crates
 aura-console-types = { path = "../console-types" }
+aura-types = { path = "../aura-types" }
 wasm_core = { path = "../wasm-core" }
-session_types = { path = "../session-types" }
 quint_api = { path = "../quint-api" }
 
 # WASM and web APIs

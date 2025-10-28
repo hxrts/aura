@@ -14,7 +14,7 @@ impl CapabilityId {
         subject_id: &Subject,
         scope: &CapabilityScope,
     ) -> Self {
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = aura_crypto::blake3_hasher();
 
         if let Some(parent) = parent_id {
             hasher.update(&parent.0);

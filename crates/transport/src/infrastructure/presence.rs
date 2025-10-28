@@ -7,6 +7,7 @@
 // automatic revocation when the account configuration changes.
 
 use crate::{TransportError, TransportErrorBuilder, TransportResult};
+use aura_crypto::signature_serde;
 use aura_journal::serialization::{from_cbor_bytes, to_cbor_bytes};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -48,62 +49,6 @@ pub struct PresenceTicket {
     /// Signed by M-of-N devices using FROST
     #[serde(with = "signature_serde")]
     pub signature: Signature,
-}
-
-mod signature_serde {
-    use ed25519_dalek::Signature;
-    use serde::{Deserializer, Serializer};
-
-    pub fn serialize<S>(sig: &Signature, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(&sig.to_bytes())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Signature, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Handle both byte arrays and sequences
-        struct SignatureVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for SignatureVisitor {
-            type Value = Vec<u8>;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a byte array or sequence of bytes")
-            }
-
-            fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(value.to_vec())
-            }
-
-            fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(value)
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                let mut bytes = Vec::new();
-                while let Some(byte) = seq.next_element()? {
-                    bytes.push(byte);
-                }
-                Ok(bytes)
-            }
-        }
-
-        let bytes = deserializer.deserialize_any(SignatureVisitor)?;
-        Signature::from_slice(&bytes).map_err(serde::de::Error::custom)
-    }
 }
 
 impl PresenceTicket {

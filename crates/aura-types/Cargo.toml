@@ -14,17 +14,29 @@ workspace = true
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_cbor = { workspace = true }
+bincode = { workspace = true }
+toml = { workspace = true }
+postcard = { version = "1.0", optional = true }
 
-# Identifiers and hashing
+# Identifiers
 uuid = { workspace = true }
-blake3 = { workspace = true }
 
 # Utilities
 thiserror = { workspace = true }
 hex = { workspace = true }
+base64 = { workspace = true }
+
+# Cryptographic hashing
+blake3 = { workspace = true }
 
 # Time utilities
 chrono = { version = "0.4", features = ["serde"] }
+time = { workspace = true }
+
+[features]
+# Optional postcard support for trace compression
+postcard-support = ["postcard"]
 
 [dev-dependencies]
 # None needed - this is a pure types crate

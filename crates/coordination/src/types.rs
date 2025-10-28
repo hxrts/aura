@@ -1,8 +1,8 @@
 // Core types for threshold signing operations
 
 use crate::Result;
-use aura_errors::AuraError;
-use ed25519_dalek::VerifyingKey;
+use aura_crypto::{signature_serde, Ed25519VerifyingKey};
+use aura_types::AuraError;
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -159,29 +159,29 @@ impl Drop for KeyShare {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicKeyPackage {
     #[serde(with = "verifying_key_serde")]
-    pub group_public: VerifyingKey,
+    pub group_public: Ed25519VerifyingKey,
     pub verifying_shares: BTreeMap<ParticipantId, frost::keys::VerifyingShare>,
     pub threshold: u16,
     pub total_participants: u16,
 }
 
 mod verifying_key_serde {
-    use ed25519_dalek::VerifyingKey;
+    use aura_crypto::Ed25519VerifyingKey;
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S>(key: &VerifyingKey, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(key: &Ed25519VerifyingKey, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_bytes(key.as_bytes())
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<VerifyingKey, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Ed25519VerifyingKey, D::Error>
     where
         D: Deserializer<'de>,
     {
         let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
-        VerifyingKey::from_bytes(
+        Ed25519VerifyingKey::from_bytes(
             bytes
                 .as_slice()
                 .try_into()
@@ -529,22 +529,52 @@ pub struct ThresholdSignature {
     pub signers: Vec<ParticipantId>,
 }
 
-mod signature_serde {
-    use ed25519_dalek::Signature;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(sig: &Signature, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(&sig.to_bytes())
+impl ThresholdSignature {
+    /// Create a placeholder threshold signature for testing purposes
+    ///
+    /// **WARNING: This creates a fake signature with no cryptographic security.**
+    /// Use only for testing. For production, use FROST aggregation.
+    pub fn placeholder() -> Self {
+        Self {
+            signature: ed25519_dalek::Signature::from([0u8; 64]),
+            signers: vec![
+                ParticipantId::from_u16_unchecked(1),
+                ParticipantId::from_u16_unchecked(2),
+            ],
+        }
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Signature, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
-        Signature::from_slice(&bytes).map_err(serde::de::Error::custom)
+    /// Create a real threshold signature from FROST aggregation
+    ///
+    /// This method should be used in production to create actual cryptographically
+    /// secure threshold signatures from FROST protocol outputs.
+    ///
+    /// # Arguments
+    ///
+    /// * `signature` - The aggregated ed25519 signature from FROST
+    /// * `signers` - The participant IDs who contributed to the signature
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // After running FROST threshold signing protocol:
+    /// let aggregated_signature = frost_session.aggregate_signature()?;
+    /// let signer_ids = frost_session.get_signers();
+    /// let threshold_sig = ThresholdSignature::from_frost(aggregated_signature, signer_ids);
+    /// ```
+    pub fn from_frost(signature: ed25519_dalek::Signature, signers: Vec<ParticipantId>) -> Self {
+        Self { signature, signers }
+    }
+
+    /// Verify the threshold signature against provided data and public key
+    ///
+    /// This uses standard ed25519 verification on the aggregated signature.
+    pub fn verify(&self, data: &[u8], public_key: &ed25519_dalek::Ed25519VerifyingKey) -> bool {
+        public_key.verify_strict(data, &self.signature).is_ok()
+    }
+
+    /// Get the number of signers
+    pub fn signer_count(&self) -> usize {
+        self.signers.len()
     }
 }

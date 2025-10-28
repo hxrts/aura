@@ -1,8 +1,8 @@
 //! Storage backend abstractions for protocol execution.
 
 use async_trait::async_trait;
-use aura_errors::Result;
-use aura_types::{AccountId, DeviceId};
+use aura_types::{AccountId, DeviceId, AuraResult as Result};
+use aura_types::AuraError;
 use serde::{Deserialize, Serialize};
 
 /// Content identifier used by storage backends.
@@ -77,7 +77,7 @@ pub trait AccessControllerExt: AccessController {
     async fn require(&self, decision: AccessDecision) -> Result<()> {
         match decision {
             AccessDecision::Allow => Ok(()),
-            AccessDecision::Deny => Err(aura_errors::AuraError::permission_denied(
+            AccessDecision::Deny => Err(AuraError::permission_denied(
                 "capability check denied",
             )),
         }

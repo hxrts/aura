@@ -83,31 +83,31 @@ pub struct ByzantineDelayInjector;
 
 /// Simple stub transport for simulation
 #[derive(Debug, Clone)]
-pub struct SimulationStubTransport {
+pub struct SimulationMemoryTransport {
     device_id: DeviceId,
 }
 
-impl SimulationStubTransport {
+impl SimulationMemoryTransport {
     pub fn new(device_id: DeviceId) -> Self {
         Self { device_id }
     }
 }
 
 #[async_trait]
-impl CoordinationTransport for SimulationStubTransport {
+impl CoordinationTransport for SimulationMemoryTransport {
     async fn send_message(
         &self,
         _peer_id: &str,
         _message: &[u8],
     ) -> std::result::Result<(), String> {
         // Stub implementation - just log for simulation
-        println!("SimulationStubTransport: sending message in simulation");
+        println!("SimulationMemoryTransport: sending message in simulation");
         Ok(())
     }
 
     async fn broadcast_message(&self, _message: &[u8]) -> std::result::Result<(), String> {
         // Stub implementation - just log for simulation
-        println!("SimulationStubTransport: broadcasting message in simulation");
+        println!("SimulationMemoryTransport: broadcasting message in simulation");
         Ok(())
     }
 
@@ -118,8 +118,8 @@ impl CoordinationTransport for SimulationStubTransport {
 }
 
 /// Helper function to create stub transport for simulation
-pub fn create_stub_transport(device_id: DeviceId) -> SimulationStubTransport {
-    SimulationStubTransport::new(device_id)
+pub fn create_stub_transport(device_id: DeviceId) -> SimulationMemoryTransport {
+    SimulationMemoryTransport::new(device_id)
 }
 
 /// Helper to create a session runtime for simulation participants

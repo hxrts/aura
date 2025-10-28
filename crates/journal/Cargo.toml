@@ -13,9 +13,8 @@ workspace = true
 [dependencies]
 
 # Internal crates
-aura-errors = { path = "../aura-errors" }
-aura-crypto = { path = "../crypto" }
 aura-types = { path = "../aura-types" }
+aura-crypto = { path = "../crypto" }
 protocol-core = { path = "../protocol-core" }
 keyhive_core = { workspace = true }
 # aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
@@ -23,10 +22,11 @@ keyhive_core = { workspace = true }
 # CRDT
 automerge = { workspace = true }
 
-# Cryptography
-ed25519-dalek = { workspace = true }
+# Cryptography provided through aura-crypto
 blake3 = { workspace = true }
+ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
+signature = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

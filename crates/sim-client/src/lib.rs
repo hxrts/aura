@@ -8,6 +8,8 @@ use wasm_bindgen::prelude::*;
 use wasm_core::{
     console_log, initialize_wasm, ClientMode, SimulationHandler, UnifiedWebSocketClient,
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 
 mod event_buffer;
 mod simple_client;
@@ -33,7 +35,7 @@ impl SimulationClient {
     /// Create new simulation client
     #[wasm_bindgen(constructor)]
     pub fn new(url: &str) -> Result<SimulationClient, wasm_bindgen::JsValue> {
-        let websocket = UnifiedWebSocketClient::new("simulation", url).map_err(|e| e.into())?;
+        let websocket = UnifiedWebSocketClient::new(ClientMode::Simulation, url);
         let handler = SimulationHandler::new();
 
         Ok(SimulationClient { websocket, handler })
@@ -42,22 +44,23 @@ impl SimulationClient {
     /// Connect to simulation server
     pub fn connect(&mut self) -> Result<(), wasm_bindgen::JsValue> {
         console_log!("Connecting simulation client using unified foundation");
-        self.websocket.connect().map_err(|e| e.into())
+        let handler = Rc::new(RefCell::new(SimulationHandler::new()));
+        self.websocket.connect(handler).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Send command to simulation server
     pub fn send(&self, message: &str) -> Result<(), wasm_bindgen::JsValue> {
-        self.websocket.send(message).map_err(|e| e.into())
+        self.websocket.send(message).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Close connection
     pub fn close(&mut self) -> Result<(), wasm_bindgen::JsValue> {
-        self.websocket.close().map_err(|e| e.into())
+        self.websocket.close().map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Check connection status
     pub fn is_connected(&self) -> bool {
-        self.websocket.is_connected()
+        self.websocket.is_connected_status()
     }
 }
 

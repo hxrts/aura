@@ -5,20 +5,20 @@
 
 use std::sync::Arc;
 
-/// Create a default stub transport for testing
+/// Create a default memory transport for testing
 ///
 /// Standard pattern for creating transport in tests.
-/// This assumes the StubTransport is available from aura_transport.
-pub fn test_transport_stub() -> Arc<dyn TestTransport> {
-    Arc::new(StubTransportImpl)
+/// This assumes the MemoryTransport is available from aura_transport.
+pub fn test_transport_memory() -> Arc<dyn TestTransport> {
+    Arc::new(MemoryTransportImpl)
 }
 
-/// Create a stub transport with specific configuration
+/// Create a memory transport with specific configuration
 ///
 /// For tests that need to configure transport behavior.
 pub fn test_transport_configured() -> Arc<dyn TestTransport> {
-    // This would be implemented based on actual StubTransport capabilities
-    Arc::new(StubTransportImpl)
+    // This would be implemented based on actual MemoryTransport capabilities
+    Arc::new(MemoryTransportImpl)
 }
 
 /// Trait to abstract over transport implementations for testing
@@ -27,13 +27,13 @@ pub trait TestTransport: Send + Sync {
     fn name(&self) -> &str;
 }
 
-/// Basic stub implementation - this would be replaced with actual StubTransport
+/// Basic memory implementation - this would be replaced with actual MemoryTransport
 #[derive(Default)]
-pub struct StubTransportImpl;
+pub struct MemoryTransportImpl;
 
-impl TestTransport for StubTransportImpl {
+impl TestTransport for MemoryTransportImpl {
     fn name(&self) -> &str {
-        "stub"
+        "memory"
     }
 }
 

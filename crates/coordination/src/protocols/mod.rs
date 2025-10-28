@@ -8,7 +8,7 @@
 //!
 //! Protocols are implemented as lifecycle state machines using **protocol-core**:
 //! - **Type Safety**: Session types ensure correct state transitions
-//! - **Deterministic**: Injectable effects for reproducible execution 
+//! - **Deterministic**: Injectable effects for reproducible execution
 //! - **Composable**: Protocol capabilities provided through dependency injection
 //! - **Testable**: Pure state machines with effects injected at boundaries
 //!
@@ -22,7 +22,7 @@
 
 // ========== Protocol Lifecycle Modules ==========
 pub mod counter_lifecycle;
-pub mod dkd_lifecycle;  
+pub mod dkd_lifecycle;
 pub mod group_lifecycle;
 pub mod locking_lifecycle;
 pub mod recovery_lifecycle;
@@ -38,19 +38,24 @@ pub mod wrapper;
 pub mod rendezvous;
 
 // ========== Protocol Lifecycle Exports ==========
-pub use counter_lifecycle::{CounterLifecycle, CounterLifecycleError};
-pub use dkd_lifecycle::{DkdLifecycle, DkdLifecycleError};
-pub use group_lifecycle::{GroupLifecycle, GroupLifecycleError};
-pub use locking_lifecycle::{LockingLifecycle, LockingLifecycleError};
-pub use recovery_lifecycle::{RecoveryLifecycle, RecoveryLifecycleError};
-pub use resharing_lifecycle::{ResharingLifecycle, ResharingLifecycleError};
+pub use counter_lifecycle::CounterLifecycle;
+pub use dkd_lifecycle::DkdLifecycle;
+pub use group_lifecycle::GroupLifecycle;
+pub use locking_lifecycle::LockingLifecycle;
+pub use recovery_lifecycle::RecoveryLifecycle;
+pub use resharing_lifecycle::ResharingLifecycle;
+
+// ========== Error Type Aliases ==========
+pub type CounterLifecycleError = aura_types::AuraError;
+pub type DkdLifecycleError = aura_types::AuraError;
+pub type GroupLifecycleError = aura_types::AuraError;
+pub type LockingLifecycleError = aura_types::AuraError;
+pub type RecoveryLifecycleError = aura_types::AuraError;
+pub type ResharingLifecycleError = aura_types::AuraError;
 
 // ========== Supporting Exports ==========
 pub use traits::*;
-pub use wrapper::{
-    rehydrate_protocol, IntoProtocolWrapper, ProtocolWrapper, ProtocolWrapperBuilder,
-    ProtocolWrapperError,
-};
+pub use wrapper::{ProtocolWrapper, ProtocolWrapperBuilder, ProtocolWrapperError};
 
 // ========== Utility Protocol Exports ==========
 pub use rendezvous::{

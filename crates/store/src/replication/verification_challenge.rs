@@ -10,12 +10,12 @@
 //! Reference: docs/040_storage.md Section 6.1
 
 use crate::error::{Result, StoreError};
+use aura_types::SessionEpoch;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub type Cid = Vec<u8>;
 pub type DeviceId = Vec<u8>;
-pub type SessionEpoch = u64;
 
 /// Replica tag for tracking storage replicas
 ///
@@ -74,7 +74,7 @@ pub struct ProofResponse {
     pub replica_tag: ReplicaTag,
 
     /// Session epoch when the proof was generated
-    pub session_epoch: u64,
+    pub session_epoch: SessionEpoch,
 
     /// Digest of the presence ticket (for authentication)
     pub ticket_digest: [u8; 32],

@@ -1,6 +1,6 @@
 //! Effects provider abstraction.
 
-use aura_errors::Result;
+use aura_types::Result;
 use uuid::Uuid;
 
 /// Provider for injectable side effects used by protocols.

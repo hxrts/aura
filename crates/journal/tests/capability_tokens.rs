@@ -7,7 +7,7 @@
 
 use aura_crypto::Effects;
 use aura_journal::capability::{CapabilityId, CapabilityScope, Subject};
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use aura_crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 // TODO: These types will be added to aura-journal/src/capability/types.rs
@@ -71,7 +71,7 @@ impl CapabilityToken {
 
         // Sign the token
         let message = token.signing_message()?;
-        use ed25519_dalek::Signer;
+        use aura_crypto::Signer;
         token.signature = signing_key.sign(&message).to_bytes().to_vec();
 
         Ok(token)
@@ -102,7 +102,7 @@ impl CapabilityToken {
     pub fn verify(&self, verifying_key: &VerifyingKey) -> Result<(), String> {
         let message = self.signing_message()?;
 
-        use ed25519_dalek::{Signature, Verifier};
+        use aura_crypto::{Ed25519Signature, ed25519_verify};
         let sig = Signature::from_bytes(
             self.signature
                 .as_slice()
@@ -133,7 +133,7 @@ impl CapabilityToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::SigningKey;
+    use aura_crypto::Ed25519SigningKey;
 
     fn create_test_device_key() -> SigningKey {
         let effects = Effects::deterministic(42, 0);

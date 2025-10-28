@@ -4,7 +4,7 @@
 //! enabling clean separation of concerns and testing.
 
 use async_trait::async_trait;
-use aura_errors::Result;
+use aura_types::AuraResult as Result;
 use aura_types::{AccountId, DeviceId};
 
 /// Content identifier (CID)
@@ -101,7 +101,7 @@ pub trait AccessControllerExt: AccessController {
     async fn require_access(&self, decision: AccessDecision) -> Result<()> {
         match decision {
             AccessDecision::Allow => Ok(()),
-            AccessDecision::Deny => Err(aura_errors::AuraError::permission_denied("Access denied")),
+            AccessDecision::Deny => Err(aura_types::AuraError::permission_denied("Access denied")),
         }
     }
 }
@@ -152,7 +152,7 @@ mod tests {
                 .await
                 .get(cid)
                 .map(|(data, _)| data.clone())
-                .ok_or_else(|| aura_errors::AuraError::storage_read_failed("Chunk not found"))
+                .ok_or_else(|| aura_types::AuraError::storage_read_failed("Chunk not found"))
         }
 
         async fn has(&self, cid: &ContentId) -> Result<bool> {
@@ -170,7 +170,7 @@ mod tests {
                 .await
                 .get(cid)
                 .map(|(_, metadata)| metadata.clone())
-                .ok_or_else(|| aura_errors::AuraError::storage_read_failed("Chunk not found"))
+                .ok_or_else(|| aura_types::AuraError::storage_read_failed("Chunk not found"))
         }
 
         async fn list(&self, owner: AccountId) -> Result<Vec<ChunkMetadata>> {

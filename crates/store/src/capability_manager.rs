@@ -9,6 +9,7 @@ use crate::manifest::{
     AccessControl, CapabilityId, DeviceId, Permission, ResourceScope, StorageOperation,
     ThresholdSignature,
 };
+use aura_types::AuraError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -101,11 +102,11 @@ impl CapabilityManager {
         device_id: &DeviceId,
         required_access: &AccessControl,
         current_time: u64,
-    ) -> Result<(), CapabilityError> {
+    ) -> Result<(), AuraError> {
         let device_tokens = self
             .tokens
             .get(device_id)
-            .ok_or(CapabilityError::NoCapabilities)?;
+            .ok_or_else(|| AuraError::no_capabilities("Device has no capabilities"))?;
 
         let active_tokens: Vec<_> = device_tokens
             .iter()
@@ -113,7 +114,9 @@ impl CapabilityManager {
             .collect();
 
         if active_tokens.is_empty() {
-            return Err(CapabilityError::ExpiredCapabilities);
+            return Err(AuraError::expired_capabilities(
+                "All capabilities have expired",
+            ));
         }
 
         match required_access {
@@ -137,7 +140,9 @@ impl CapabilityManager {
                     }
                 }
 
-                Err(CapabilityError::InsufficientPermissions)
+                Err(AuraError::capability_insufficient_permissions(
+                    "Insufficient permissions for operation",
+                ))
             }
         }
     }
@@ -199,10 +204,7 @@ impl CapabilityManager {
         }
     }
 
-    pub fn revoke_capability(
-        &mut self,
-        capability_id: CapabilityId,
-    ) -> Result<(), CapabilityError> {
+    pub fn revoke_capability(&mut self, capability_id: CapabilityId) -> Result<(), AuraError> {
         self.revoked_capabilities.insert(capability_id.clone());
 
         if let Some(delegated) = self.delegation_graph.remove(&capability_id) {
@@ -214,7 +216,7 @@ impl CapabilityManager {
         Ok(())
     }
 
-    fn is_revoked(&self, delegation_chain: &[CapabilityId]) -> Result<bool, CapabilityError> {
+    fn is_revoked(&self, delegation_chain: &[CapabilityId]) -> Result<bool, AuraError> {
         for cap_id in delegation_chain {
             if self.revoked_capabilities.contains(cap_id) {
                 return Ok(true);
@@ -223,7 +225,7 @@ impl CapabilityManager {
         Ok(false)
     }
 
-    fn verify_delegation_chain(&self, chain: &[CapabilityId]) -> Result<bool, CapabilityError> {
+    fn verify_delegation_chain(&self, chain: &[CapabilityId]) -> Result<bool, AuraError> {
         if chain.is_empty() {
             return Ok(true);
         }
@@ -252,9 +254,11 @@ impl CapabilityManager {
         &mut self,
         parent_capability: CapabilityId,
         child_capability: CapabilityId,
-    ) -> Result<(), CapabilityError> {
+    ) -> Result<(), AuraError> {
         if self.revoked_capabilities.contains(&parent_capability) {
-            return Err(CapabilityError::ParentRevoked);
+            return Err(AuraError::parent_revoked(
+                "Parent capability has been revoked",
+            ));
         }
 
         self.delegation_graph
@@ -279,36 +283,24 @@ impl CapabilityManager {
 }
 
 #[derive(Debug, Clone)]
-pub enum CapabilityError {
-    NoCapabilities,
-    ExpiredCapabilities,
-    InsufficientPermissions,
-    InvalidDelegation,
-    ParentRevoked,
-    VerificationFailed(String),
-}
-
-impl std::fmt::Display for CapabilityError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoCapabilities => write!(f, "No capabilities found for device"),
-            Self::ExpiredCapabilities => write!(f, "All capabilities have expired"),
-            Self::InsufficientPermissions => write!(f, "Insufficient permissions"),
-            Self::InvalidDelegation => write!(f, "Invalid delegation chain"),
-            Self::ParentRevoked => write!(f, "Parent capability has been revoked"),
-            Self::VerificationFailed(msg) => write!(f, "Verification failed: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for CapabilityError {}
+// Re-export CapabilityError from aura_errors for use in this module
+pub use aura_types::CapabilityError;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn create_test_signature() -> ThresholdSignature {
-        ThresholdSignature::placeholder()
+        // Create a more realistic test signature using the from_frost method
+        let device_id_1 = vec![42u8; 32]; // Example device ID
+        let device_id_2 = vec![43u8; 32]; // Example device ID  
+        let signature_share_1 = vec![0xAB; 32]; // Example signature share
+        let signature_share_2 = vec![0xCD; 32]; // Example signature share
+        
+        ThresholdSignature::from_frost(2, vec![
+            (device_id_1, signature_share_1),
+            (device_id_2, signature_share_2),
+        ])
     }
 
     fn create_test_device_id() -> DeviceId {

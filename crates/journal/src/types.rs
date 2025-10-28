@@ -1,6 +1,7 @@
 // Core types for the CRDT ledger
 
-use ed25519_dalek::{Signature, VerifyingKey};
+use aura_crypto::{signature_serde, verifying_key_serde};
+use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,8 +11,8 @@ use aura_types::{DeviceId, GuardianId};
 
 // Re-export consolidated types from aura-types
 pub use aura_types::{
-    Cid as AuraTypesCid, EventNonce, OperationType, ParticipantId, ProtocolType, SessionId,
-    SessionOutcome, SessionStatus,
+    Cid as AuraTypesCid, Epoch, EventNonce, OperationType, ParticipantId, ProtocolType,
+    SessionEpoch, SessionId, SessionOutcome, SessionStatus,
 };
 
 /// Content Identifier for storage operations
@@ -21,7 +22,8 @@ pub struct Cid(pub String);
 impl Cid {
     /// Create a CID from bytes using Blake3 hash
     pub fn from_bytes(data: &[u8]) -> Self {
-        Cid(hex::encode(blake3::hash(data).as_bytes()))
+        use aura_crypto::blake3_hash;
+        Cid(hex::encode(blake3_hash(data)))
     }
 
     /// Create a CID from a string
@@ -41,7 +43,7 @@ pub struct DeviceMetadata {
     pub device_name: String,
     pub device_type: DeviceType,
     #[serde(with = "verifying_key_serde")]
-    pub public_key: VerifyingKey,
+    pub public_key: Ed25519VerifyingKey,
     pub added_at: u64,
     pub last_seen: u64,
     /// Merkle proofs for DKD commitments (session_id -> proof)
@@ -53,32 +55,6 @@ pub struct DeviceMetadata {
     /// Recently used nonces for replay protection (bounded set)
     /// Maintains a sliding window of recent nonces to prevent replay attacks
     pub used_nonces: std::collections::BTreeSet<u64>,
-}
-
-mod verifying_key_serde {
-    use ed25519_dalek::VerifyingKey;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(key: &VerifyingKey, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(key.as_bytes())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<VerifyingKey, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
-        VerifyingKey::from_bytes(
-            bytes
-                .as_slice()
-                .try_into()
-                .map_err(serde::de::Error::custom)?,
-        )
-        .map_err(serde::de::Error::custom)
-    }
 }
 
 /// Device type classification
@@ -96,7 +72,7 @@ pub struct GuardianMetadata {
     pub device_id: DeviceId,
     pub email: String,
     #[serde(with = "verifying_key_serde")]
-    pub public_key: VerifyingKey,
+    pub public_key: Ed25519VerifyingKey,
     pub added_at: u64,
     pub policy: GuardianPolicy,
 }
@@ -116,32 +92,6 @@ impl Default for GuardianPolicy {
             cooldown_period: 86400, // 24 hours
             max_recoveries_per_day: 1,
         }
-    }
-}
-
-/// Session epoch for replay protection
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct SessionEpoch(pub u64);
-
-impl SessionEpoch {
-    pub fn initial() -> Self {
-        SessionEpoch(0)
-    }
-
-    pub fn next(self) -> Self {
-        SessionEpoch(self.0 + 1)
-    }
-}
-
-impl Default for SessionEpoch {
-    fn default() -> Self {
-        Self::initial()
-    }
-}
-
-impl std::fmt::Display for SessionEpoch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 
@@ -167,35 +117,75 @@ impl SessionIdExt for SessionId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThresholdSig {
     #[serde(with = "signature_serde")]
-    pub signature: Signature,
+    pub signature: Ed25519Signature,
     /// Indices of signers who contributed to this signature
     pub signers: Vec<u8>,
     /// Individual signature shares (for verification)
     pub signature_shares: Vec<Vec<u8>>,
 }
 
-mod signature_serde {
-    use ed25519_dalek::Signature;
-    use serde::{Deserialize, Deserializer, Serializer};
+/// Comprehensive audit trail for signature share verification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignatureShareAuditTrail {
+    /// Hash of the message that was signed
+    pub message_hash: Vec<u8>,
+    /// Hash of the aggregated signature
+    pub signature_hash: Vec<u8>,
+    /// Total number of signature shares provided
+    pub total_shares: usize,
+    /// Details of valid signature shares
+    pub valid_shares: Vec<ValidShareDetail>,
+    /// Details of invalid signature shares
+    pub invalid_shares: Vec<InvalidShareDetail>,
+    /// All verification details for comprehensive audit
+    pub verification_details: Vec<ValidShareDetail>,
+    /// Calculated authority level based on valid shares
+    pub authority_level: f64,
+    /// Timestamp when verification was performed
+    pub verification_timestamp: u64,
+}
 
-    pub fn serialize<S>(signature: &Signature, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(&signature.to_bytes())
-    }
+/// Details of a valid signature share
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidShareDetail {
+    /// ID of the participant who created this share
+    pub signer_id: u8,
+    /// Index of this share in the share list
+    pub share_index: usize,
+    /// Hash of the signature share bytes
+    pub share_hash: Vec<u8>,
+    /// Verification status of this share
+    pub verification_status: ShareVerificationStatus,
+    /// Weight of this share's contribution to authority
+    pub contribution_weight: f64,
+    /// Timestamp when this share was verified
+    pub timestamp: u64,
+}
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Signature, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
-        let bytes_array: [u8; 64] = bytes
-            .as_slice()
-            .try_into()
-            .map_err(serde::de::Error::custom)?;
-        Ok(Signature::from_bytes(&bytes_array))
-    }
+/// Details of an invalid signature share
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvalidShareDetail {
+    /// ID of the participant who created this share
+    pub signer_id: u8,
+    /// Index of this share in the share list
+    pub share_index: usize,
+    /// Reason why this share failed verification
+    pub error_reason: String,
+    /// Timestamp when verification failure was detected
+    pub timestamp: u64,
+}
+
+/// Status of signature share verification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ShareVerificationStatus {
+    /// Share is structurally valid but not cryptographically verified
+    StructurallyValid,
+    /// Share is fully cryptographically verified
+    CryptographicallyVerified,
+    /// Share failed structural validation
+    StructurallyInvalid,
+    /// Share failed cryptographic verification
+    CryptographicallyInvalid,
 }
 
 // EventNonce is now imported from aura-types
@@ -325,7 +315,7 @@ impl Session {
 
 // SessionOutcome is now imported from aura-types
 
-/// Signature share for threshold signatures
+/// Ed25519Signature share for threshold signatures
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignatureShare {
     pub participant_id: ParticipantId,

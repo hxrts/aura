@@ -4,7 +4,7 @@
 //! enabling automatic retry and escalation based on error characteristics.
 
 use crate::tracing::{LogLevel, LogValue, ProtocolTracer};
-use aura_errors::AuraError;
+use aura_types::AuraError;
 use aura_types::DeviceId;
 use std::collections::BTreeMap;
 use uuid::Uuid;

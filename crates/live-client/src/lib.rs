@@ -4,11 +4,11 @@
 //! Provides real-time trace events and command forwarding for live network nodes.
 
 use wasm_bindgen::prelude::*;
-use wasm_core::{console_log, initialize_wasm, LiveNetworkHandler, UnifiedWebSocketClient};
+use wasm_core::{console_log, initialize_wasm, LiveNetworkHandler, WebSocketClientJs};
 
-mod client;
+// mod client;  // Temporarily disabled - needs refactoring for new wasm-core API
 
-pub use client::LiveNetworkClient;
+// pub use client::LiveNetworkClient;
 
 // Initialize WASM using foundation
 #[wasm_bindgen(start)]
@@ -19,7 +19,7 @@ pub fn main() {
 /// Enhanced live network client using unified foundation
 #[wasm_bindgen]
 pub struct LiveClient {
-    websocket: UnifiedWebSocketClient,
+    websocket: WebSocketClientJs,
     handler: LiveNetworkHandler,
 }
 
@@ -28,7 +28,7 @@ impl LiveClient {
     /// Create new live network client
     #[wasm_bindgen(constructor)]
     pub fn new(url: &str) -> Result<LiveClient, wasm_bindgen::JsValue> {
-        let websocket = UnifiedWebSocketClient::new("live", url).map_err(|e| e.into())?;
+        let websocket = WebSocketClientJs::new("live", url).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let handler = LiveNetworkHandler::new();
 
         Ok(LiveClient { websocket, handler })
@@ -37,17 +37,17 @@ impl LiveClient {
     /// Connect to live network node
     pub fn connect(&mut self) -> Result<(), wasm_bindgen::JsValue> {
         console_log!("Connecting live network client using unified foundation");
-        self.websocket.connect().map_err(|e| e.into())
+        self.websocket.connect().map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Send command to live network node
     pub fn send(&self, message: &str) -> Result<(), wasm_bindgen::JsValue> {
-        self.websocket.send(message).map_err(|e| e.into())
+        self.websocket.send(message).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Close connection
     pub fn close(&mut self) -> Result<(), wasm_bindgen::JsValue> {
-        self.websocket.close().map_err(|e| e.into())
+        self.websocket.close().map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Check connection status

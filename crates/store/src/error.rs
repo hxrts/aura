@@ -1,7 +1,7 @@
 //! Store errors - using unified error system
 
 // Re-export unified error system
-pub use aura_errors::{AuraError, ErrorCode, ErrorContext, ErrorSeverity, Result};
+pub use aura_types::{AuraError, ErrorCode, ErrorContext, ErrorSeverity, Result};
 
 // Type aliases for backward compatibility
 pub type StoreError = AuraError;
@@ -12,7 +12,7 @@ pub struct StoreErrorBuilder;
 impl StoreErrorBuilder {
     /// Create a quota exceeded error
     pub fn quota_exceeded(used: u64, limit: u64) -> AuraError {
-        AuraError::Infrastructure(aura_errors::InfrastructureError::StorageQuotaExceeded {
+        AuraError::Infrastructure(aura_types::errors::InfrastructureError::StorageQuotaExceeded {
             message: format!("Storage quota exceeded: used {}, limit {}", used, limit),
             context: ErrorContext::new().with_code(ErrorCode::InfraStorageQuotaExceeded),
         })

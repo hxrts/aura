@@ -3,13 +3,15 @@
 //! This module defines session types for the ProtocolContext execution environment,
 //! providing compile-time safety for protocol execution phases and instruction flows.
 
+use crate::session_types::session_errors::ContextSessionError;
 use crate::session_types::wrapper::{SessionProtocol, SessionTypedProtocol};
+use crate::session_types::SessionState;
+use crate::session_types::*; // Import macros
+use aura_types::AuraError;
 use aura_journal::{Event, ProtocolType};
+use aura_types::session_core::witnesses::RuntimeWitness;
 use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
-use session_types::witnesses::RuntimeWitness;
-use session_types::SessionState;
-use session_types::*; // Import macros
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -39,14 +41,6 @@ pub enum InstructionResult {
     ThresholdMet { count: u16 },
     SubProtocolComplete { result: String },
     Error { message: String },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ProtocolError {
-    #[error("Execution failed: {0}")]
-    ExecutionFailed(String),
-    #[error("Invalid instruction: {0}")]
-    InvalidInstruction(String),
 }
 
 // ========== Core Protocol Structure ==========
@@ -79,7 +73,7 @@ impl ProtocolContextCore {
     pub async fn execute(
         &mut self,
         instruction: Instruction,
-    ) -> std::result::Result<InstructionResult, ProtocolError> {
+    ) -> std::result::Result<InstructionResult, AuraError> {
         // Placeholder implementation - this will be properly implemented
         // when the session types are integrated with the actual execution runtime
         match instruction {
@@ -94,26 +88,6 @@ impl ProtocolContextCore {
                 result: "Success".to_string(),
             }),
         }
-    }
-}
-
-// ========== Error Type ==========
-
-#[derive(Debug, thiserror::Error)]
-pub enum ContextSessionError {
-    #[error("Protocol error: {0}")]
-    ProtocolError(String),
-    #[error("Invalid instruction for current state")]
-    InvalidInstruction,
-    #[error("Context execution failed: {0}")]
-    ExecutionFailed(String),
-    #[error("Timeout occurred")]
-    Timeout,
-}
-
-impl From<ProtocolError> for ContextSessionError {
-    fn from(err: ProtocolError) -> Self {
-        ContextSessionError::ProtocolError(err.to_string())
     }
 }
 
@@ -171,25 +145,25 @@ impl SessionProtocol for ContextSessionState {
 
     fn state_name(&self) -> &'static str {
         match self {
-            ContextSessionState::ContextInitialized(_) => ContextInitialized::NAME,
-            ContextSessionState::ExecutingInstructions(_) => ExecutingInstructions::NAME,
-            ContextSessionState::AwaitingCondition(_) => AwaitingCondition::NAME,
-            ContextSessionState::WritingToLedger(_) => WritingToLedger::NAME,
-            ContextSessionState::ExecutingSubProtocol(_) => ExecutingSubProtocol::NAME,
-            ContextSessionState::ExecutionComplete(_) => ExecutionComplete::NAME,
-            ContextSessionState::ExecutionFailed(_) => ExecutionFailed::NAME,
+            ContextSessionState::ContextInitialized(_) => "ContextInitialized",
+            ContextSessionState::ExecutingInstructions(_) => "ExecutingInstructions",
+            ContextSessionState::AwaitingCondition(_) => "AwaitingCondition",
+            ContextSessionState::WritingToLedger(_) => "WritingToLedger",
+            ContextSessionState::ExecutingSubProtocol(_) => "ExecutingSubProtocol",
+            ContextSessionState::ExecutionComplete(_) => "ExecutionComplete",
+            ContextSessionState::ExecutionFailed(_) => "ExecutionFailed",
         }
     }
 
     fn can_terminate(&self) -> bool {
         match self {
-            ContextSessionState::ContextInitialized(_) => ContextInitialized::CAN_TERMINATE,
-            ContextSessionState::ExecutingInstructions(_) => ExecutingInstructions::CAN_TERMINATE,
-            ContextSessionState::AwaitingCondition(_) => AwaitingCondition::CAN_TERMINATE,
-            ContextSessionState::WritingToLedger(_) => WritingToLedger::CAN_TERMINATE,
-            ContextSessionState::ExecutingSubProtocol(_) => ExecutingSubProtocol::CAN_TERMINATE,
-            ContextSessionState::ExecutionComplete(_) => ExecutionComplete::CAN_TERMINATE,
-            ContextSessionState::ExecutionFailed(_) => ExecutionFailed::CAN_TERMINATE,
+            ContextSessionState::ContextInitialized(_) => true,
+            ContextSessionState::ExecutingInstructions(_) => false, // Cannot terminate while executing
+            ContextSessionState::AwaitingCondition(_) => true,
+            ContextSessionState::WritingToLedger(_) => false, // Cannot terminate while writing
+            ContextSessionState::ExecutingSubProtocol(_) => false, // Cannot terminate while in sub-protocol
+            ContextSessionState::ExecutionComplete(_) => true,
+            ContextSessionState::ExecutionFailed(_) => true,
         }
     }
 
@@ -573,9 +547,9 @@ impl WritingToLedgerOperations for SessionTypedProtocol<ProtocolContextCore, Wri
             .inner
             .execute(Instruction::WriteToLedger(Box::new(event)))
             .await?;
-        LedgerWriteComplete::verify(result, ()).ok_or(ContextSessionError::ExecutionFailed(
-            "Ledger write failed".to_string(),
-        ))
+        <LedgerWriteComplete as RuntimeWitness>::verify(result, ()).ok_or(
+            ContextSessionError::ExecutionFailed("Ledger write failed".to_string()),
+        )
     }
 }
 
@@ -608,9 +582,9 @@ impl ExecutingSubProtocolOperations
             parameters: params,
         };
         let result = self.inner.execute(instruction).await?;
-        SubProtocolComplete::verify(result, ()).ok_or(ContextSessionError::ExecutionFailed(
-            "Sub-protocol execution failed".to_string(),
-        ))
+        <SubProtocolComplete as RuntimeWitness>::verify(result, ()).ok_or(
+            ContextSessionError::ExecutionFailed("Sub-protocol execution failed".to_string()),
+        )
     }
 }
 

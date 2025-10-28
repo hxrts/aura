@@ -19,26 +19,23 @@ dev-console = ["postcard"]
 aura-crypto = { path = "../crypto" }
 aura-journal = { path = "../journal" }
 aura-types = { path = "../aura-types" }
-aura-errors = { path = "../aura-errors" }
-session_types = { path = "../session-types" }
+# session_types removed during refactor - implementation moved to local modules
 protocol-core = { path = "../protocol-core" }
 # aura-session-types = { path = "../session-types" }  # Moved to local session_types module
 # Transport dependency removed to break circular dependency
 # Transport implements traits defined in coordination
 # aura-transport = { path = "../transport" }
-aura-groups = { path = "../groups" }
 
 # Curve operations
 curve25519-dalek = { workspace = true }
-
-# Cryptography
-frost-core = { workspace = true }
-frost-ed25519 = { workspace = true }
 ed25519-dalek = { workspace = true }
-blake3 = { workspace = true }
-zeroize = { workspace = true }
-aes-gcm = { workspace = true }
+
+# FROST threshold signatures
+frost-ed25519 = { workspace = true }
 sha2 = { workspace = true }
+
+# Cryptography provided through aura-crypto
+blake3 = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

@@ -9,7 +9,6 @@ uuid = { version = "1.11", features = ["v4", "serde"] }
 serde = { version = "1.0", features = ["derive"] }
 
 # Error handling
-aura-errors = { path = "../aura-errors" }
 
 # Types
 aura-types = { path = "../aura-types" }

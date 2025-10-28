@@ -109,6 +109,16 @@ impl From<aura_crypto::CryptoError> for ProtocolError {
     }
 }
 
+impl From<crate::runtime::lifecycle_scheduler::LifecycleSchedulerError> for ProtocolError {
+    fn from(err: crate::runtime::lifecycle_scheduler::LifecycleSchedulerError) -> Self {
+        ProtocolError {
+            session_id: Uuid::nil(), // Will be set by caller if needed
+            error_type: ProtocolErrorType::Other,
+            message: format!("Lifecycle scheduler error: {}", err),
+        }
+    }
+}
+
 /// Type of protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProtocolType {

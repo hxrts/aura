@@ -13,8 +13,8 @@ path = "src/main.rs"
 [dependencies]
 # Internal crates
 aura-console-types = { path = "../console-types" }
-# aura-simulator = { path = "../simulator" }  # Temporarily disabled due to compilation errors
-# aura-coordination = { path = "../coordination", features = ["dev-console"] }  # Temporarily disabled due to compilation errors
+aura-simulator = { path = "../simulator" }
+aura-coordination = { path = "../coordination" }
 
 # WebSocket and HTTP server
 tokio = { workspace = true }

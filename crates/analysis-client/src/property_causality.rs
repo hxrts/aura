@@ -5,14 +5,13 @@
 //! causality module to provide detailed analysis of how violations emerge from
 //! sequences of events and state transitions.
 
-use crate::causality::{CausalityGraph, CausalityEdge};
+use crate::causality::{CausalityEdge, CausalityGraph};
 use crate::property_monitor::ViolationDetails;
-use aura_console_types::{TraceEvent, EventType};
-use session_types::properties::PropertyId;
+use aura_console_types::{EventType, TraceEvent};
+use aura_types::session_utils::properties::PropertyId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use web_sys;
-
 
 /// Specialized causality analyzer for property violations
 #[derive(Debug, Clone)]
@@ -379,16 +378,22 @@ pub struct GraphStyling {
 impl PropertyCausalityAnalyzer {
     /// Create a new property causality analyzer from trace events
     pub fn new(events: &[TraceEvent]) -> Self {
-        web_sys::console::log_1(&format!("Building property causality analyzer for {} events", events.len()).into());
-        
+        web_sys::console::log_1(
+            &format!(
+                "Building property causality analyzer for {} events",
+                events.len()
+            )
+            .into(),
+        );
+
         let causality_graph = CausalityGraph::build(events);
-        
+
         let mut events_by_id = HashMap::new();
         let mut violation_events = HashMap::new();
-        
+
         for event in events {
             events_by_id.insert(event.event_id, event.clone());
-            
+
             // Look for property violations in the event type
             if let EventType::PropertyViolation { property, .. } = &event.event_type {
                 // Convert property name to PropertyId (this is a simplified approach)
@@ -400,13 +405,16 @@ impl PropertyCausalityAnalyzer {
                     .push(event.event_id);
             }
         }
-        
-        web_sys::console::log_1(&format!(
-            "Built analyzer: {} events, {} violation events tracked",
-            events_by_id.len(),
-            violation_events.values().map(|v| v.len()).sum::<usize>()
-        ).into());
-        
+
+        web_sys::console::log_1(
+            &format!(
+                "Built analyzer: {} events, {} violation events tracked",
+                events_by_id.len(),
+                violation_events.values().map(|v| v.len()).sum::<usize>()
+            )
+            .into(),
+        );
+
         Self {
             causality_graph,
             events_by_id,
@@ -414,7 +422,7 @@ impl PropertyCausalityAnalyzer {
             analysis_cache: HashMap::new(),
         }
     }
-    
+
     /// Analyze causality leading to a specific property violation
     pub fn analyze_violation_causality(
         &mut self,
@@ -425,36 +433,39 @@ impl PropertyCausalityAnalyzer {
             property_id,
             violation_event_id,
         };
-        
+
         // Check cache first
         if let Some(cached_analysis) = self.analysis_cache.get(&cache_key) {
             return Some(cached_analysis.clone());
         }
-        
-        web_sys::console::log_1(&format!(
-            "Analyzing violation causality for property {:?}, event {}",
-            property_id,
-            violation_event_id
-        ).into());
-        
+
+        web_sys::console::log_1(
+            &format!(
+                "Analyzing violation causality for property {:?}, event {}",
+                property_id, violation_event_id
+            )
+            .into(),
+        );
+
         // Get the violation event
         let violation_event = self.events_by_id.get(&violation_event_id)?;
-        
+
         // Build causality chain
         let causality_chain = self.build_causality_chain(violation_event_id)?;
-        
+
         // Analyze contributing factors
         let contributing_factors = self.analyze_contributing_factors(&causality_chain);
-        
+
         // Identify critical events
         let critical_events = self.identify_critical_events(&causality_chain);
-        
+
         // Generate counterfactual paths
-        let counterfactual_paths = self.generate_counterfactual_paths(&causality_chain, &critical_events);
-        
+        let counterfactual_paths =
+            self.generate_counterfactual_paths(&causality_chain, &critical_events);
+
         // Create visualization data
         let visualization_data = self.create_visualization_data(&causality_chain, &critical_events);
-        
+
         let analysis = PropertyCausalityAnalysis {
             property_id,
             violation_event_id,
@@ -464,48 +475,49 @@ impl PropertyCausalityAnalyzer {
             counterfactual_paths,
             visualization_data,
         };
-        
+
         // Cache the result
         self.analysis_cache.insert(cache_key, analysis.clone());
-        
+
         Some(analysis)
     }
-    
+
     /// Build the complete causality chain leading to a violation
     fn build_causality_chain(&self, violation_event_id: u64) -> Option<ViolationCausalityChain> {
         // Get all dependencies of the violation event
         let dependency_ids = self.causality_graph.get_dependencies(violation_event_id);
         let mut all_event_ids = dependency_ids;
         all_event_ids.push(violation_event_id);
-        
+
         // Build events with causality information
         let mut events = Vec::new();
         let mut participants = HashSet::new();
         let mut min_tick = u64::MAX;
         let mut max_tick = 0;
-        
+
         for (position, &event_id) in all_event_ids.iter().enumerate() {
             if let Some(event) = self.events_by_id.get(&event_id) {
                 participants.insert(event.participant.clone());
                 min_tick = min_tick.min(event.tick);
                 max_tick = max_tick.max(event.tick);
-                
+
                 // Calculate contribution score based on position and dependencies
-                let contribution_score = self.calculate_contribution_score(event_id, violation_event_id);
-                
+                let contribution_score =
+                    self.calculate_contribution_score(event_id, violation_event_id);
+
                 // Determine if this event was necessary
                 let is_necessary = self.is_event_necessary(event_id, violation_event_id);
-                
+
                 // Calculate depth from root causes
                 let depth = self.calculate_event_depth(event_id);
-                
+
                 // Get edge to next event
                 let edge_to_next = if position + 1 < all_event_ids.len() {
                     self.get_edge_between_events(event_id, all_event_ids[position + 1])
                 } else {
                     None
                 };
-                
+
                 events.push(CausalityChainEvent {
                     event_id,
                     chain_position: position,
@@ -517,10 +529,14 @@ impl PropertyCausalityAnalyzer {
                 });
             }
         }
-        
-        let time_span_ticks = if max_tick >= min_tick { max_tick - min_tick } else { 0 };
+
+        let time_span_ticks = if max_tick >= min_tick {
+            max_tick - min_tick
+        } else {
+            0
+        };
         let max_depth = events.iter().map(|e| e.depth).max().unwrap_or(0);
-        
+
         Some(ViolationCausalityChain {
             events,
             chain_length: all_event_ids.len(),
@@ -529,42 +545,45 @@ impl PropertyCausalityAnalyzer {
             participants,
         })
     }
-    
+
     /// Analyze contributing factors to the violation
-    fn analyze_contributing_factors(&self, chain: &ViolationCausalityChain) -> Vec<ContributingFactor> {
+    fn analyze_contributing_factors(
+        &self,
+        chain: &ViolationCausalityChain,
+    ) -> Vec<ContributingFactor> {
         let mut factors = Vec::new();
-        
+
         // Analyze network partitions
         factors.extend(self.analyze_network_partitions(chain));
-        
+
         // Analyze byzantine behavior
         factors.extend(self.analyze_byzantine_behavior(chain));
-        
+
         // Analyze message ordering issues
         factors.extend(self.analyze_message_ordering(chain));
-        
+
         // Analyze race conditions
         factors.extend(self.analyze_race_conditions(chain));
-        
+
         // Analyze state inconsistencies
         factors.extend(self.analyze_state_inconsistencies(chain));
-        
+
         // Analyze threshold failures
         factors.extend(self.analyze_threshold_failures(chain));
-        
+
         factors
     }
-    
+
     /// Identify critical events that were necessary for the violation
     fn identify_critical_events(&self, chain: &ViolationCausalityChain) -> Vec<CriticalEvent> {
         let mut critical_events = Vec::new();
-        
+
         for chain_event in &chain.events {
             if chain_event.is_necessary {
                 let criticality_reason = self.determine_criticality_reason(&chain_event.event);
                 let dependent_events = self.causality_graph.get_dependents(chain_event.event_id);
                 let alternatives = self.generate_alternative_events(&chain_event.event);
-                
+
                 critical_events.push(CriticalEvent {
                     event_id: chain_event.event_id,
                     event: chain_event.event.clone(),
@@ -574,10 +593,10 @@ impl PropertyCausalityAnalyzer {
                 });
             }
         }
-        
+
         critical_events
     }
-    
+
     /// Generate counterfactual paths showing how violation could be prevented
     fn generate_counterfactual_paths(
         &self,
@@ -585,7 +604,7 @@ impl PropertyCausalityAnalyzer {
         critical_events: &[CriticalEvent],
     ) -> Vec<CounterfactualPath> {
         let mut paths = Vec::new();
-        
+
         // For each critical event, generate prevention strategies
         for critical_event in critical_events {
             match critical_event.criticality_reason {
@@ -607,10 +626,10 @@ impl PropertyCausalityAnalyzer {
                 }
             }
         }
-        
+
         paths
     }
-    
+
     /// Create visualization data for the causality graph
     fn create_visualization_data(
         &self,
@@ -619,11 +638,10 @@ impl PropertyCausalityAnalyzer {
     ) -> CausalityVisualizationData {
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
-        
-        let critical_event_ids: HashSet<u64> = critical_events.iter()
-            .map(|ce| ce.event_id)
-            .collect();
-        
+
+        let critical_event_ids: HashSet<u64> =
+            critical_events.iter().map(|ce| ce.event_id).collect();
+
         // Create nodes
         for (i, chain_event) in chain.events.iter().enumerate() {
             let node_type = if i == 0 {
@@ -637,20 +655,26 @@ impl PropertyCausalityAnalyzer {
             } else {
                 VisualizationNodeType::Normal
             };
-            
+
             let position = NodePosition {
                 x: i as f64 * 100.0, // Simple linear layout
                 y: (chain_event.depth as f64) * 50.0,
                 z: None,
             };
-            
+
             let style = self.get_node_style(&node_type);
-            
+
             let mut metadata = HashMap::new();
             metadata.insert("tick".to_string(), chain_event.event.tick.to_string());
-            metadata.insert("participant".to_string(), chain_event.event.participant.clone());
-            metadata.insert("contribution".to_string(), format!("{:.2}", chain_event.contribution_score));
-            
+            metadata.insert(
+                "participant".to_string(),
+                chain_event.event.participant.clone(),
+            );
+            metadata.insert(
+                "contribution".to_string(),
+                format!("{:.2}", chain_event.contribution_score),
+            );
+
             nodes.push(CausalityVisualizationNode {
                 id: chain_event.event_id,
                 label: self.create_event_label(&chain_event.event),
@@ -660,13 +684,15 @@ impl PropertyCausalityAnalyzer {
                 metadata,
             });
         }
-        
+
         // Create edges
         for chain_event in &chain.events {
             if let Some(edge_type) = chain_event.edge_to_next {
-                if let Some(next_event) = chain.events.iter()
-                    .find(|e| e.chain_position == chain_event.chain_position + 1) {
-                    
+                if let Some(next_event) = chain
+                    .events
+                    .iter()
+                    .find(|e| e.chain_position == chain_event.chain_position + 1)
+                {
                     edges.push(CausalityVisualizationEdge {
                         source: chain_event.event_id,
                         target: next_event.event_id,
@@ -677,10 +703,10 @@ impl PropertyCausalityAnalyzer {
                 }
             }
         }
-        
+
         let layout = self.create_layout(&nodes);
         let styling = self.create_styling();
-        
+
         CausalityVisualizationData {
             nodes,
             edges,
@@ -688,9 +714,9 @@ impl PropertyCausalityAnalyzer {
             styling,
         }
     }
-    
+
     // Helper methods for analysis
-    
+
     fn calculate_contribution_score(&self, event_id: u64, violation_event_id: u64) -> f64 {
         // Calculate how much this event contributed to the violation
         // This is a simplified calculation - in practice, this would be more sophisticated
@@ -702,7 +728,7 @@ impl PropertyCausalityAnalyzer {
             0.0
         }
     }
-    
+
     fn is_event_necessary(&self, event_id: u64, violation_event_id: u64) -> bool {
         // Determine if removing this event would prevent the violation
         // This is a simplified heuristic - proper analysis would require
@@ -710,62 +736,80 @@ impl PropertyCausalityAnalyzer {
         let path = self.causality_graph.path_to(violation_event_id);
         path.map(|p| p.events.contains(&event_id)).unwrap_or(false)
     }
-    
+
     fn calculate_event_depth(&self, event_id: u64) -> usize {
         // Calculate depth from root causes
         let dependencies = self.causality_graph.get_dependencies(event_id);
         if dependencies.is_empty() {
             0
         } else {
-            1 + dependencies.iter()
+            1 + dependencies
+                .iter()
                 .map(|&dep_id| self.calculate_event_depth(dep_id))
                 .max()
                 .unwrap_or(0)
         }
     }
-    
+
     fn get_edge_between_events(&self, source: u64, target: u64) -> Option<CausalityEdge> {
         // This is a placeholder - the actual implementation would query the causality graph
         Some(CausalityEdge::HappensBefore)
     }
-    
+
     // Analysis helper methods (simplified implementations)
-    
-    fn analyze_network_partitions(&self, _chain: &ViolationCausalityChain) -> Vec<ContributingFactor> {
+
+    fn analyze_network_partitions(
+        &self,
+        _chain: &ViolationCausalityChain,
+    ) -> Vec<ContributingFactor> {
         // Analyze events for network partition patterns
         Vec::new()
     }
-    
-    fn analyze_byzantine_behavior(&self, _chain: &ViolationCausalityChain) -> Vec<ContributingFactor> {
+
+    fn analyze_byzantine_behavior(
+        &self,
+        _chain: &ViolationCausalityChain,
+    ) -> Vec<ContributingFactor> {
         // Analyze events for byzantine behavior patterns
         Vec::new()
     }
-    
-    fn analyze_message_ordering(&self, _chain: &ViolationCausalityChain) -> Vec<ContributingFactor> {
+
+    fn analyze_message_ordering(
+        &self,
+        _chain: &ViolationCausalityChain,
+    ) -> Vec<ContributingFactor> {
         // Analyze message ordering issues
         Vec::new()
     }
-    
+
     fn analyze_race_conditions(&self, _chain: &ViolationCausalityChain) -> Vec<ContributingFactor> {
         // Analyze concurrent events for race conditions
         Vec::new()
     }
-    
-    fn analyze_state_inconsistencies(&self, _chain: &ViolationCausalityChain) -> Vec<ContributingFactor> {
+
+    fn analyze_state_inconsistencies(
+        &self,
+        _chain: &ViolationCausalityChain,
+    ) -> Vec<ContributingFactor> {
         // Analyze CRDT merges and state transitions
         Vec::new()
     }
-    
-    fn analyze_threshold_failures(&self, _chain: &ViolationCausalityChain) -> Vec<ContributingFactor> {
+
+    fn analyze_threshold_failures(
+        &self,
+        _chain: &ViolationCausalityChain,
+    ) -> Vec<ContributingFactor> {
         // Analyze threshold signature failures
         Vec::new()
     }
-    
+
     fn determine_criticality_reason(&self, event: &TraceEvent) -> CriticalityReason {
         // Determine why this event was critical based on its type
         match &event.event_type {
             EventType::MessageDropped { reason, .. } => match reason {
-                aura_console_types::trace::DropReason::NetworkPartition => CriticalityReason::NetworkPartition,
+                aura_console_types::trace::DropReason::NetworkPartition => {
+                    CriticalityReason::NetworkPartition
+                }
                 _ => CriticalityReason::StateCorruption,
             },
             EventType::CrdtMerge { .. } => CriticalityReason::StateCorruption,
@@ -773,15 +817,18 @@ impl PropertyCausalityAnalyzer {
             _ => CriticalityReason::StateCorruption,
         }
     }
-    
+
     fn generate_alternative_events(&self, _event: &TraceEvent) -> Vec<AlternativeEvent> {
         // Generate alternative events that could have been sent instead
         Vec::new()
     }
-    
+
     // Counterfactual path generation methods
-    
-    fn generate_partition_prevention_path(&self, _critical_event: &CriticalEvent) -> CounterfactualPath {
+
+    fn generate_partition_prevention_path(
+        &self,
+        _critical_event: &CriticalEvent,
+    ) -> CounterfactualPath {
         CounterfactualPath {
             prevention_strategy: "Maintain network connectivity".to_string(),
             modified_events: Vec::new(),
@@ -790,8 +837,11 @@ impl PropertyCausalityAnalyzer {
             prevention_confidence: 0.8,
         }
     }
-    
-    fn generate_byzantine_prevention_path(&self, _critical_event: &CriticalEvent) -> CounterfactualPath {
+
+    fn generate_byzantine_prevention_path(
+        &self,
+        _critical_event: &CriticalEvent,
+    ) -> CounterfactualPath {
         CounterfactualPath {
             prevention_strategy: "Prevent byzantine behavior".to_string(),
             modified_events: Vec::new(),
@@ -800,8 +850,12 @@ impl PropertyCausalityAnalyzer {
             prevention_confidence: 0.7,
         }
     }
-    
-    fn generate_race_prevention_path(&self, _critical_event: &CriticalEvent, _chain: &ViolationCausalityChain) -> CounterfactualPath {
+
+    fn generate_race_prevention_path(
+        &self,
+        _critical_event: &CriticalEvent,
+        _chain: &ViolationCausalityChain,
+    ) -> CounterfactualPath {
         CounterfactualPath {
             prevention_strategy: "Synchronize concurrent operations".to_string(),
             modified_events: Vec::new(),
@@ -810,8 +864,11 @@ impl PropertyCausalityAnalyzer {
             prevention_confidence: 0.6,
         }
     }
-    
-    fn generate_state_prevention_path(&self, _critical_event: &CriticalEvent) -> CounterfactualPath {
+
+    fn generate_state_prevention_path(
+        &self,
+        _critical_event: &CriticalEvent,
+    ) -> CounterfactualPath {
         CounterfactualPath {
             prevention_strategy: "Maintain state consistency".to_string(),
             modified_events: Vec::new(),
@@ -820,8 +877,11 @@ impl PropertyCausalityAnalyzer {
             prevention_confidence: 0.9,
         }
     }
-    
-    fn generate_generic_prevention_path(&self, _critical_event: &CriticalEvent) -> CounterfactualPath {
+
+    fn generate_generic_prevention_path(
+        &self,
+        _critical_event: &CriticalEvent,
+    ) -> CounterfactualPath {
         CounterfactualPath {
             prevention_strategy: "General violation prevention".to_string(),
             modified_events: Vec::new(),
@@ -830,9 +890,9 @@ impl PropertyCausalityAnalyzer {
             prevention_confidence: 0.5,
         }
     }
-    
+
     // Visualization helper methods
-    
+
     fn get_node_style(&self, node_type: &VisualizationNodeType) -> NodeStyle {
         let (color, size) = match node_type {
             VisualizationNodeType::RootCause => ("#ff4444".to_string(), 20.0),
@@ -841,7 +901,7 @@ impl PropertyCausalityAnalyzer {
             VisualizationNodeType::Violation => ("#cc0000".to_string(), 25.0),
             VisualizationNodeType::Normal => ("#888888".to_string(), 10.0),
         };
-        
+
         NodeStyle {
             color,
             size,
@@ -850,14 +910,14 @@ impl PropertyCausalityAnalyzer {
             shape: NodeShape::Circle,
         }
     }
-    
+
     fn get_edge_style(&self, edge_type: &CausalityEdge) -> EdgeStyle {
         let (color, width, line_style) = match edge_type {
             CausalityEdge::HappensBefore => ("#000000".to_string(), 2.0, LineStyle::Solid),
             CausalityEdge::ProgramOrder => ("#666666".to_string(), 1.0, LineStyle::Dashed),
             CausalityEdge::Concurrent => ("#cccccc".to_string(), 1.0, LineStyle::Dotted),
         };
-        
+
         EdgeStyle {
             color,
             width,
@@ -865,10 +925,12 @@ impl PropertyCausalityAnalyzer {
             arrow_style: ArrowStyle::Standard,
         }
     }
-    
+
     fn create_event_label(&self, event: &TraceEvent) -> String {
         match &event.event_type {
-            EventType::ProtocolStateTransition { protocol, to_state, .. } => {
+            EventType::ProtocolStateTransition {
+                protocol, to_state, ..
+            } => {
                 format!("{}→{}", protocol, to_state)
             }
             EventType::MessageSent { message_type, .. } => {
@@ -883,39 +945,45 @@ impl PropertyCausalityAnalyzer {
             _ => format!("Event {}", event.event_id),
         }
     }
-    
+
     fn create_layout(&self, nodes: &[CausalityVisualizationNode]) -> GraphLayout {
         let mut layers = HashMap::new();
         let mut min_x = f64::INFINITY;
         let mut max_x = f64::NEG_INFINITY;
         let mut min_y = f64::INFINITY;
         let mut max_y = f64::NEG_INFINITY;
-        
+
         for node in nodes {
             min_x = min_x.min(node.position.x);
             max_x = max_x.max(node.position.x);
             min_y = min_y.min(node.position.y);
             max_y = max_y.max(node.position.y);
-            
+
             let layer = (node.position.y / 50.0) as usize;
             layers.entry(layer).or_insert_with(Vec::new).push(node.id);
         }
-        
-        let graph_layers = layers.into_iter()
+
+        let graph_layers = layers
+            .into_iter()
             .map(|(layer, events)| GraphLayer {
                 layer,
                 events,
                 y_position: layer as f64 * 50.0,
             })
             .collect();
-        
+
         GraphLayout {
             algorithm: LayoutAlgorithm::Hierarchical,
-            bounds: BoundingBox { min_x, min_y, max_x, max_y },
+            bounds: BoundingBox {
+                min_x,
+                min_y,
+                max_x,
+                max_y,
+            },
             layers: graph_layers,
         }
     }
-    
+
     fn create_styling(&self) -> GraphStyling {
         let mut color_scheme = HashMap::new();
         color_scheme.insert(VisualizationNodeType::RootCause, "#ff4444".to_string());
@@ -923,7 +991,7 @@ impl PropertyCausalityAnalyzer {
         color_scheme.insert(VisualizationNodeType::Contributing, "#ffcc00".to_string());
         color_scheme.insert(VisualizationNodeType::Violation, "#cc0000".to_string());
         color_scheme.insert(VisualizationNodeType::Normal, "#888888".to_string());
-        
+
         GraphStyling {
             color_scheme,
             default_node_style: NodeStyle {
@@ -942,31 +1010,36 @@ impl PropertyCausalityAnalyzer {
             highlight_styles: HashMap::new(),
         }
     }
-    
+
     /// Get all property violations that have been analyzed
     pub fn get_analyzed_violations(&self) -> Vec<(PropertyId, Vec<u64>)> {
-        self.violation_events.iter()
+        self.violation_events
+            .iter()
             .map(|(id, events)| (*id, events.clone()))
             .collect()
     }
-    
+
     /// Get causality paths for all violations of a specific property
-    pub fn get_property_violation_paths(&mut self, property_id: PropertyId) -> Vec<PropertyCausalityAnalysis> {
+    pub fn get_property_violation_paths(
+        &mut self,
+        property_id: PropertyId,
+    ) -> Vec<PropertyCausalityAnalysis> {
         if let Some(violation_event_ids) = self.violation_events.get(&property_id).cloned() {
-            violation_event_ids.iter()
+            violation_event_ids
+                .iter()
                 .filter_map(|&event_id| self.analyze_violation_causality(property_id, event_id))
                 .collect()
         } else {
             Vec::new()
         }
     }
-    
+
     /// Clear the analysis cache
     pub fn clear_cache(&mut self) {
         self.analysis_cache.clear();
         web_sys::console::log_1(&"Property causality analysis cache cleared".into());
     }
-    
+
     /// Get statistics about the analyzer
     pub fn get_stats(&self) -> PropertyCausalityStats {
         PropertyCausalityStats {
@@ -1020,25 +1093,29 @@ mod tests {
     fn test_property_causality_analyzer_creation() {
         let events = vec![
             create_test_event(
-                0, 1, "alice",
+                0,
+                1,
+                "alice",
                 EventType::EffectExecuted {
                     effect_type: "test".to_string(),
                     effect_data: vec![],
                 },
-                vec![]
+                vec![],
             ),
             create_test_event(
-                1, 2, "bob",
+                1,
+                2,
+                "bob",
                 EventType::PropertyViolation {
                     property: "safety".to_string(),
                     violation_details: "Test violation".to_string(),
                 },
-                vec![1]
+                vec![1],
             ),
         ];
 
         let analyzer = PropertyCausalityAnalyzer::new(&events);
-        
+
         assert_eq!(analyzer.events_by_id.len(), 2);
         let stats = analyzer.get_stats();
         assert_eq!(stats.total_events, 2);
@@ -1048,36 +1125,42 @@ mod tests {
     fn test_causality_chain_building() {
         let events = vec![
             create_test_event(
-                0, 1, "alice",
+                0,
+                1,
+                "alice",
                 EventType::EffectExecuted {
                     effect_type: "init".to_string(),
                     effect_data: vec![],
                 },
-                vec![]
+                vec![],
             ),
             create_test_event(
-                1, 2, "bob",
+                1,
+                2,
+                "bob",
                 EventType::MessageSent {
                     envelope_id: "msg1".to_string(),
                     to: vec!["charlie".to_string()],
                     message_type: "proposal".to_string(),
                     size_bytes: 100,
                 },
-                vec![1]
+                vec![1],
             ),
             create_test_event(
-                2, 3, "charlie",
+                2,
+                3,
+                "charlie",
                 EventType::PropertyViolation {
                     property: "consensus".to_string(),
                     violation_details: "Consensus failed".to_string(),
                 },
-                vec![2]
+                vec![2],
             ),
         ];
 
         let mut analyzer = PropertyCausalityAnalyzer::new(&events);
         let property_id = PropertyId::new_v4();
-        
+
         // This would typically find the violation through the violation_events mapping
         // For testing, we'll check the basic structure
         assert_eq!(analyzer.events_by_id.len(), 3);

@@ -12,7 +12,7 @@
 use aura_crypto::Effects;
 use aura_journal::{types::*, AccountState};
 use aura_test_utils::*;
-use ed25519_dalek::SigningKey;
+use aura_crypto::Ed25519SigningKey;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Test that CRDT merge operations are commutative and idempotent

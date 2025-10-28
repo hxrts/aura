@@ -1,10 +1,7 @@
 //! Encryption utilities for storage
 
-use aes_gcm::aead::generic_array::typenum::U12;
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce as AesNonce,
-};
+use aura_crypto::{Effects, CryptoError};
+use chacha20poly1305::{aead::{Aead, KeyInit}, ChaCha20Poly1305, Nonce};
 use rand::RngCore;
 
 #[derive(Debug, Clone)]
@@ -18,19 +15,19 @@ impl Recipients {
     }
 }
 
-pub struct EncryptionContext {
-    cipher: Aes256Gcm,
+pub struct ContentEncryptionContext {
+    cipher: ChaCha20Poly1305,
 }
 
-impl EncryptionContext {
+impl ContentEncryptionContext {
     pub fn new() -> Self {
         let key = Self::generate_random_key();
-        let cipher = Aes256Gcm::new(&key.into());
+        let cipher = ChaCha20Poly1305::new(&key.into());
         Self { cipher }
     }
 
     pub fn from_key(key: [u8; 32]) -> Self {
-        let cipher = Aes256Gcm::new(&key.into());
+        let cipher = ChaCha20Poly1305::new(&key.into());
         Self { cipher }
     }
 
@@ -52,7 +49,7 @@ impl EncryptionContext {
         }
 
         let (nonce_bytes, ciphertext) = data.split_at(12);
-        let nonce = AesNonce::<U12>::from_slice(nonce_bytes);
+        let nonce = Nonce::from_slice(nonce_bytes);
 
         self.cipher
             .decrypt(nonce, ciphertext)
@@ -65,9 +62,9 @@ impl EncryptionContext {
         key
     }
 
-    fn generate_nonce() -> AesNonce<U12> {
+    fn generate_nonce() -> Nonce {
         let mut nonce_bytes = [0u8; 12];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
-        *AesNonce::<U12>::from_slice(&nonce_bytes)
+        *Nonce::from_slice(&nonce_bytes)
     }
 }

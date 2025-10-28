@@ -32,9 +32,9 @@ impl RelationshipId {
         }
     }
 
-    /// Create from blake3 hash
-    pub fn from_blake3_hash(hash: &blake3::Hash) -> Self {
-        Self(*hash.as_bytes())
+    /// Create from a 32-byte hash (typically Blake3)
+    pub fn from_hash(hash: &[u8; 32]) -> Self {
+        Self(*hash)
     }
 
     /// Get the raw bytes
@@ -88,11 +88,6 @@ impl From<[u8; 32]> for RelationshipId {
     }
 }
 
-impl From<blake3::Hash> for RelationshipId {
-    fn from(hash: blake3::Hash) -> Self {
-        Self::from_blake3_hash(&hash)
-    }
-}
 
 impl From<RelationshipId> for [u8; 32] {
     fn from(relationship_id: RelationshipId) -> Self {

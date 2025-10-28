@@ -11,7 +11,7 @@ pub fn chunk_data(data: &[u8], params: &ChunkingParams) -> Result<Vec<(ChunkId, 
 
     // Temporary CID for chunk naming (would compute actual manifest CID first)
     let temp_hash = blake3::hash(data);
-    let temp_cid = Cid::from_blake3_hash(&temp_hash);
+    let temp_cid = Cid::from_hash(temp_hash.as_bytes());
 
     for (i, chunk_data) in data.chunks(chunk_size).enumerate() {
         let chunk_id = ChunkId::for_manifest_chunk(&temp_cid, i as u32);

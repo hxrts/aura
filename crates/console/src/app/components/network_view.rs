@@ -13,7 +13,7 @@ pub fn NetworkView() -> impl IntoView {
     log::info!("Initial data source: {:?}", current_source.get_untracked());
 
     let (nodes, set_nodes) = signal(Vec::<NetworkNode>::new());
-    let (edges, set_edges) = signal(Vec::<NetworkEdge>::new());
+    let (_edges, set_edges) = signal(Vec::<NetworkEdge>::new());
     let (selected_node, _set_selected_node) = signal(None::<String>);
     let network_ref = NodeRef::<leptos::html::Div>::new();
 

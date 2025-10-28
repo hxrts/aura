@@ -5,7 +5,6 @@ exclude = ["ext/*"]  # ext/* are external dependencies
 # Note: ext/quint/evaluator still shows profile warnings due to path dependency in quint-api
 members = [
     "crates/agent",
-    "crates/groups",
     "crates/coordination",
     "crates/protocol-core",
     "crates/crypto",
@@ -15,21 +14,16 @@ members = [
     "crates/test-utils",
     "crates/cli",
     "crates/simulator",
-    "crates/aura-errors",
     "crates/aura-interfaces",
-    # "crates/db-test",       # Temporarily disabled - needs error API migration
     "crates/console-types",
-    # Temporarily disabled - depend on legacy simulator APIs
-    # "crates/sim-server",
-    # "crates/sim-client",
-    # "crates/live-client",
-    # "crates/analysis-client",
+    "crates/sim-server",
+    "crates/sim-client",
+    "crates/live-client",
+    "crates/analysis-client",
     "crates/wasm-core",
     "crates/quint-api",
-    "crates/session-types",
     "crates/aura-types",
     "crates/console",
-    "crates/keyhive-mock",
 ]
 
 
@@ -45,19 +39,19 @@ repository = "https://github.com/aura-project/aura"
 # Cryptography
 frost-core = "1.0"
 frost-ed25519 = "1.0"
-ed25519-dalek = { version = "2.1", features = ["serde"] }
+ed25519-dalek = { version = "2.0", features = ["rand_core", "serde"] }
 curve25519-dalek = "4.1"
 blake3 = "1.5"
 hkdf = "0.12"
 sha2 = "0.10"
 aes-gcm = "0.10"
 hpke = "0.12"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.10.1"
 zeroize = { version = "1.7", features = ["derive"] }
 
 # CRDT & serialization
 automerge = "0.5"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 serde_cbor = "0.11"
 bincode = "1.3"
@@ -90,16 +84,30 @@ toml = "0.8"
 rand = "0.8"
 rand_chacha = "0.3"
 hex = "0.4"
+base64 = "0.21"
 indexmap = "2.0"
 proptest = "1.4"
 dirs = "5.0"
 
+# Keyhive dependencies
+arbitrary = { version = "1.4.1", features = ["derive"] }
+derive_more = { version = "1.0", features = ["from", "into", "try_into", "deref", "display", "debug"] }
+dupe = "0.9.0"
+nonempty = { version = "0.10.0", features = ["serialize"] }
+signature = "2.2"
+x25519-dalek = { version = "2.0", features = ["serde", "reusable_secrets", "static_secrets"] }
+bolero = { version = "0.11.1", features = ["arbitrary"] }
+num = { version = "0.4.3", features = ["num-bigint"] }
+derivative = "2.2"
+derive-where = "1.2"
+topological-sort = "0.2"
+trait-variant = "0.1.2"
+
 # WASM Core
 wasm_core = { path = "crates/wasm-core" }
 
-# Authorization & CGKA (placeholder until Keyhive is available)
-# TODO: Replace with real keyhive_core when available
-keyhive_core = { path = "crates/keyhive-mock" }
+# Authorization & CGKA using real Keyhive
+keyhive_core = { path = "ext/keyhive/keyhive_core" }
 
 [profile.release]
 opt-level = 3

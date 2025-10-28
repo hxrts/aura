@@ -5,7 +5,7 @@
 
 #![cfg(test)]
 
-use aura_coordination::execution::{BaseContext, ProtocolContext, StubTransport, Transport};
+use aura_coordination::execution::{BaseContext, ProtocolContext, MemoryTransport, Transport};
 use aura_coordination::types::ThresholdConfig;
 use aura_crypto::Effects;
 use aura_journal::{AccountLedger, AccountState, DeviceMetadata, DeviceType};
@@ -22,7 +22,7 @@ pub struct TestFixture {
     pub participants: Vec<DeviceId>,
     pub threshold: usize,
     pub effects: Effects,
-    pub transport: Arc<StubTransport>,
+    pub transport: Arc<MemoryTransport>,
 }
 
 impl TestFixture {
@@ -41,7 +41,7 @@ impl TestFixture {
             .map(|_| DeviceId(Uuid::new_v4()))
             .collect();
 
-        let transport = Arc::new(StubTransport::new());
+        let transport = Arc::new(MemoryTransport::new());
 
         Self {
             device_id,

@@ -13,6 +13,7 @@ mod command_handler;
 mod scenario_export;
 mod server;
 mod simple_command_handler;
+mod simulation_wrapper;
 mod websocket;
 
 use server::SimulationServer;

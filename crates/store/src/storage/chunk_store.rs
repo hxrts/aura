@@ -191,8 +191,7 @@ impl ChunkStore {
     }
 
     fn derive_encryption_key(&self, key_spec: &KeyDerivationSpec) -> Result<[u8; 32], ChunkError> {
-        use blake3::Hasher;
-        let mut hasher = Hasher::new();
+        let mut hasher = aura_crypto::blake3_hasher();
 
         hasher.update(b"encryption-key");
         hasher.update(&key_spec.domain);
@@ -207,8 +206,10 @@ impl ChunkStore {
     }
 
     fn generate_nonce(&self, data: &[u8]) -> [u8; 24] {
-        use blake3::Hasher;
-        let hash = Hasher::new().update(data).update(b"nonce").finalize();
+        let mut hasher = aura_crypto::blake3_hasher();
+        hasher.update(data);
+        hasher.update(b"nonce");
+        let hash = hasher.finalize();
         let mut nonce = [0u8; 24];
         nonce.copy_from_slice(&hash.as_bytes()[..24]);
         nonce

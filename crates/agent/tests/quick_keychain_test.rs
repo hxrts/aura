@@ -5,7 +5,7 @@
 
 #![cfg(target_os = "macos")]
 
-use aura_agent::secure_storage::{DeviceAttestation, PlatformSecureStorage, SecureStorage};
+use aura_agent::device_secure_store::{DeviceAttestation, PlatformSecureStorage, SecureStorage};
 
 /// Quick compilation and instantiation test
 #[tokio::test]

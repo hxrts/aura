@@ -5,10 +5,12 @@
 //! challenges combined with device signatures to verify data integrity and availability.
 
 use crate::{Result, StorageError, StoreErrorBuilder};
+use aura_crypto::{
+    blake3_hash, ed25519_sign, ed25519_verify, signature_serde, Ed25519Signature,
+    Ed25519SigningKey, Ed25519VerifyingKey,
+};
 use aura_journal::{Cid, SessionEpoch};
 use aura_types::{DeviceId, DeviceIdExt};
-use blake3;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -66,34 +68,14 @@ pub struct ProofResponse {
     /// Replica tag identifying this specific storage replica
     pub replica_tag: ReplicaTag,
     /// Session epoch when the proof was generated
-    pub session_epoch: u64,
+    pub session_epoch: SessionEpoch,
     /// Digest of the presence ticket (for authentication)
     pub ticket_digest: [u8; 32],
     /// BLAKE3 hash proving possession of the data
     pub proof_hash: [u8; 32],
     /// Ed25519 signature over the proof hash
     #[serde(with = "signature_serde")]
-    pub signature: Signature,
-}
-
-mod signature_serde {
-    use ed25519_dalek::Signature;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(sig: &Signature, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(&sig.to_bytes())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Signature, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
-        Signature::from_slice(&bytes).map_err(serde::de::Error::custom)
-    }
+    pub signature: Ed25519Signature,
 }
 
 /// Generate proof response
@@ -113,25 +95,25 @@ pub fn generate_proof(
     replica_tag: &ReplicaTag,
     challenge: &Challenge,
     session_epoch: SessionEpoch,
-    signing_key: &SigningKey,
+    signing_key: &Ed25519SigningKey,
 ) -> Result<ProofResponse> {
     // Compute proof hash: BLAKE3(chunk || replica_tag || nonce || session_epoch)
     let mut hasher = blake3::Hasher::new();
     hasher.update(chunk_data);
     hasher.update(replica_tag.0.as_bytes());
     hasher.update(&challenge.nonce);
-    hasher.update(&session_epoch.0.to_le_bytes());
+    hasher.update(&session_epoch.value().to_le_bytes());
     let proof_hash = *hasher.finalize().as_bytes();
 
     // Sign the proof hash
-    let signature = signing_key.sign(&proof_hash);
+    let signature = ed25519_sign(signing_key, &proof_hash);
 
     // Compute ticket digest (mock for MVP)
     let ticket_digest = [0u8; 32];
 
     Ok(ProofResponse {
         replica_tag: replica_tag.clone(),
-        session_epoch: session_epoch.0,
+        session_epoch,
         ticket_digest,
         proof_hash,
         signature,
@@ -156,13 +138,14 @@ pub fn verify_proof(
     challenge: &Challenge,
     response: &ProofResponse,
     current_epoch: SessionEpoch,
-    verifying_key: &VerifyingKey,
+    verifying_key: &Ed25519VerifyingKey,
 ) -> Result<bool> {
     // Check epoch
-    if response.session_epoch != current_epoch.0 {
+    if response.session_epoch != current_epoch {
         return Err(StoreErrorBuilder::invalid_protocol_state(format!(
             "Stale epoch: {} != {}",
-            response.session_epoch, current_epoch.0
+            response.session_epoch.value(),
+            current_epoch.value()
         )));
     }
 
@@ -171,7 +154,7 @@ pub fn verify_proof(
     hasher.update(chunk_data);
     hasher.update(response.replica_tag.0.as_bytes());
     hasher.update(&challenge.nonce);
-    hasher.update(&response.session_epoch.to_le_bytes());
+    hasher.update(&response.session_epoch.value().to_le_bytes());
     let expected_hash = *hasher.finalize().as_bytes();
 
     // Verify hash matches
@@ -180,8 +163,7 @@ pub fn verify_proof(
     }
 
     // Verify signature
-    verifying_key
-        .verify(&response.proof_hash, &response.signature)
+    ed25519_verify(verifying_key, &response.proof_hash, &response.signature)
         .map_err(|_| StoreErrorBuilder::integrity_check_failed("Invalid signature"))?;
 
     Ok(true)

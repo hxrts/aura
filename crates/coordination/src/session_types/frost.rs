@@ -3,11 +3,13 @@
 //! This module defines session types for FROST threshold signature operations,
 //! providing compile-time safety for the signing protocol state machine.
 
+use crate::frost_session_manager::FrostSession;
+use crate::session_types::session_errors::FrostSessionError;
 use crate::session_types::wrapper::SessionTypedProtocol;
 use aura_crypto::{CryptoError, FrostKeyShare, SignatureShare, SigningCommitment};
+use aura_types::session_core::{witnesses::RuntimeWitness, SessionState};
 use aura_types::DeviceId;
 use frost_ed25519 as frost;
-use session_types::{witnesses::RuntimeWitness, SessionState};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use tracing::{debug, warn};
@@ -244,64 +246,6 @@ impl FrostProtocolCore {
             collected_shares: BTreeMap::new(),
             threshold,
             participant_count,
-        }
-    }
-}
-
-// ========== Error Type ==========
-
-/// Errors that can occur in FROST session operations
-#[derive(Debug, thiserror::Error)]
-pub enum FrostSessionError {
-    #[error("Crypto error: {0}")]
-    Crypto(#[from] CryptoError),
-    #[error("Insufficient participants: need {need}, have {have}")]
-    InsufficientParticipants { need: u16, have: u16 },
-    #[error("Invalid participant: {0}")]
-    InvalidParticipant(String),
-    #[error("Threshold not met: need {threshold}, have {count}")]
-    ThresholdNotMet { threshold: u16, count: usize },
-    #[error("Invalid signing state: {0}")]
-    InvalidState(String),
-    #[error("Nonce reuse detected")]
-    NonceReuse,
-    #[error("Session error: {0}")]
-    SessionError(String),
-}
-
-impl From<FrostSessionError> for aura_errors::AuraError {
-    fn from(error: FrostSessionError) -> Self {
-        match error {
-            FrostSessionError::Crypto(crypto_err) => {
-                aura_errors::AuraError::crypto_operation_failed(format!(
-                    "FROST crypto error: {:?}",
-                    crypto_err
-                ))
-            }
-            FrostSessionError::InsufficientParticipants { need, have } => {
-                aura_errors::AuraError::protocol_timeout(format!(
-                    "Insufficient participants: need {}, have {}",
-                    need, have
-                ))
-            }
-            FrostSessionError::InvalidParticipant(msg) => {
-                aura_errors::AuraError::protocol_timeout(format!("Invalid participant: {}", msg))
-            }
-            FrostSessionError::ThresholdNotMet { threshold, count } => {
-                aura_errors::AuraError::protocol_timeout(format!(
-                    "Threshold not met: need {}, have {}",
-                    threshold, count
-                ))
-            }
-            FrostSessionError::InvalidState(msg) => {
-                aura_errors::AuraError::invalid_transition(format!("Invalid FROST state: {}", msg))
-            }
-            FrostSessionError::NonceReuse => {
-                aura_errors::AuraError::crypto_operation_failed("FROST nonce reuse detected")
-            }
-            FrostSessionError::SessionError(msg) => {
-                aura_errors::AuraError::session_aborted(format!("FROST session error: {}", msg))
-            }
         }
     }
 }
@@ -609,6 +553,12 @@ impl<S: SessionState> FrostProtocolOperations for SessionTypedProtocol<FrostProt
 }
 
 // ========== State Transitions ==========
+//
+// IMPORTANT: The implementations below violate Rust's orphan rules and are
+// commented out. Use the safe implementations in frost_safe.rs instead.
+//
+// The safe implementations provide the same compile-time safety guarantees
+// without violating orphan rules by using local wrapper types and traits.
 
 // BEGIN DEPRECATED: Orphan rule violation implementations
 /*
@@ -1100,9 +1050,10 @@ impl FrostAggregationOperations for SessionTypedProtocol<FrostProtocolCore, Fros
             self.create_fallback_signature(commitments, signature_shares, message)
         };
 
-        let witness = SignatureAggregated::verify(signature_bytes, ()).ok_or_else(|| {
-            FrostSessionError::SessionError("Failed to create signature witness".to_string())
-        })?;
+        let witness = <SignatureAggregated as RuntimeWitness>::verify(signature_bytes, ())
+            .ok_or_else(|| {
+                FrostSessionError::SessionError("Failed to create signature witness".to_string())
+            })?;
 
         Ok(witness)
     }
@@ -1267,9 +1218,12 @@ impl FrostKeyGenerationOperations
         };
 
         // Create completion witness with the generated key share
-        let witness = KeyGenerationCompleted::verify(_frost_key_share, ()).ok_or_else(|| {
-            FrostSessionError::SessionError("Failed to create key generation witness".to_string())
-        })?;
+        let witness = <KeyGenerationCompleted as RuntimeWitness>::verify(_frost_key_share, ())
+            .ok_or_else(|| {
+                FrostSessionError::SessionError(
+                    "Failed to create key generation witness".to_string(),
+                )
+            })?;
 
         Ok(witness)
     }
@@ -1328,10 +1282,12 @@ pub fn rehydrate_frost_session(
 
 // ========== Helper Functions for Testing ==========
 
-/// Create a placeholder signing commitment for testing
+/// Create a real signing commitment using FrostSession
+///
+/// This replaces the previous placeholder implementation with real FROST cryptography
 #[allow(clippy::expect_used)]
 fn create_placeholder_commitment(participant_id: frost::Identifier) -> SigningCommitment {
-    use aura_crypto::{Effects, FrostSigner};
+    use aura_crypto::Effects;
 
     // Create test effects for deterministic randomness based on participant ID
     let effects = Effects::for_test(&format!(
@@ -1349,29 +1305,40 @@ fn create_placeholder_commitment(participant_id: frost::Identifier) -> SigningCo
     )
     .expect("Should generate test keys");
 
-    // Use the first available share to generate a commitment
-    let (_id, key_share) = shares
-        .into_iter()
-        .next()
+    // Find the key share for this participant or use the first one
+    let (id, key_share) = shares
+        .get(&participant_id)
+        .map(|share| (participant_id, share.clone()))
+        .or_else(|| shares.into_iter().next())
         .expect("Should have at least one share");
-    let key_package =
-        frost::keys::KeyPackage::try_from(key_share).expect("Should create key package");
 
-    // Generate nonces and commitment
-    let (_nonces, commitments) =
-        FrostSigner::generate_nonces(key_package.signing_share(), &mut rng);
+    let frost_key_share = FrostKeyShare {
+        identifier: id,
+        signing_share: *key_share.signing_share(),
+        verifying_key: *_pubkey_package.verifying_key(),
+    };
 
-    SigningCommitment {
-        identifier: participant_id,
-        commitment: commitments,
-    }
+    // Create a real FROST session for commitment generation
+    let test_message = format!("test_commitment_{}", participant_id.serialize()[0]);
+    let mut frost_session = FrostSession::new(
+        uuid::Uuid::new_v4(),
+        test_message.as_bytes().to_vec(),
+        2,
+        frost_key_share,
+    );
+
+    // Generate real commitment using FROST session
+    frost_session
+        .generate_commitment(&mut rng)
+        .expect("Should generate real commitment")
 }
 
-/// Create a placeholder signature share for testing
+/// Create a real signature share using FrostSession
+///
+/// This replaces the previous placeholder implementation with real FROST cryptography
 #[allow(clippy::expect_used)]
 fn create_placeholder_signature_share(participant_id: frost::Identifier) -> SignatureShare {
-    use aura_crypto::{Effects, FrostSigner};
-    use std::collections::BTreeMap;
+    use aura_crypto::Effects;
 
     // Create test effects for deterministic randomness based on participant ID
     let effects = Effects::for_test(&format!(
@@ -1389,31 +1356,42 @@ fn create_placeholder_signature_share(participant_id: frost::Identifier) -> Sign
     )
     .expect("Should generate test keys");
 
-    // Use the first available share to generate a signature share
-    let (_id, key_share) = shares
-        .into_iter()
-        .next()
+    // Find the key share for this participant or use the first one
+    let (id, key_share) = shares
+        .get(&participant_id)
+        .map(|share| (participant_id, share.clone()))
+        .or_else(|| shares.into_iter().next())
         .expect("Should have at least one share");
-    let key_package =
-        frost::keys::KeyPackage::try_from(key_share).expect("Should create key package");
 
-    // Generate nonces and commitments for this participant
-    let (nonces, commitments) = FrostSigner::generate_nonces(key_package.signing_share(), &mut rng);
+    let frost_key_share = FrostKeyShare {
+        identifier: id,
+        signing_share: *key_share.signing_share(),
+        verifying_key: *_pubkey_package.verifying_key(),
+    };
 
-    // Create a minimal commitment map with this participant only
-    let mut all_commitments = BTreeMap::new();
-    all_commitments.insert(participant_id, commitments);
+    // Create a real FROST session for signature share generation
+    let test_message = format!("test_signature_{}", participant_id.serialize()[0]);
+    let mut frost_session = FrostSession::new(
+        uuid::Uuid::new_v4(),
+        test_message.as_bytes().to_vec(),
+        2,
+        frost_key_share,
+    );
 
-    // Sign a test message
-    let test_message = b"test message for placeholder signature share";
-    let signature_share =
-        FrostSigner::sign_share_with_package(test_message, &nonces, &all_commitments, &key_package)
-            .expect("Should create signature share");
+    // First generate commitment to reach proper state
+    let commitment = frost_session
+        .generate_commitment(&mut rng)
+        .expect("Should generate commitment");
 
-    SignatureShare {
-        identifier: participant_id,
-        share: signature_share,
-    }
+    // Add the commitment to reach signing phase
+    frost_session
+        .add_commitment(commitment)
+        .expect("Should add commitment");
+
+    // Generate real signature share using FROST session
+    frost_session
+        .generate_signature_share()
+        .expect("Should generate real signature share")
 }
 
 #[allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]

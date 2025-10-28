@@ -20,20 +20,38 @@
 //! - `content`: Content addressing and chunk types
 //! - `capabilities`: Capability system types
 //! - `relationships`: Relationship and context types
+//! - `session_core`: Core session type primitives and infrastructure
+//! - `session_utils`: Session type utilities, events, and formal verification properties
 
 pub mod capabilities;
 pub mod content;
+pub mod encoding;
+pub mod errors;
 pub mod identifiers;
 pub mod protocols;
 pub mod relationships;
+pub mod serialization;
+pub mod session_core;
+pub mod session_utils;
 pub mod sessions;
 
 // Re-export all public types for convenient access
 pub use capabilities::*;
 pub use content::*;
+pub use encoding::{FromBase64, FromHex, ToBase64, ToHex};
+pub use errors::{
+    AuraError, AgentError, CapabilityError, CryptoError, DataError, ErrorCode, ErrorContext,
+    ErrorSeverity, InfrastructureError, ProtocolError, SessionError,
+    SystemError,
+};
+// Re-export Result from errors module separately to avoid naming conflicts
+pub use errors::Result as AuraResult;
 pub use identifiers::*;
 pub use protocols::*;
 pub use relationships::*;
+pub use serialization::{Result as SerializationResult, SerializationError};
+pub use session_core::*;
+pub use session_utils::*;
 pub use sessions::*;
 
 /// Result type for type-related operations

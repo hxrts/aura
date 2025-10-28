@@ -5,8 +5,8 @@ mod storage;
 mod transport;
 
 use crate::metadata::ProtocolType;
-use aura_errors::Result;
-use aura_types::{AccountId, DeviceId, SessionId};
+use aura_types::{AccountId, DeviceId, SessionId, AuraResult as Result};
+use aura_types::AuraError;
 pub use effects::{EffectsExt, EffectsProvider};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -75,7 +75,7 @@ impl<'a> ProtocolCapabilities<'a> {
         if let Some(ledger) = self.ledger {
             ledger.append_event(session_id, event_type, payload)
         } else {
-            Err(aura_errors::AuraError::coordination_failed(
+            Err(aura_types::AuraError::coordination_failed(
                 "ledger capability unavailable",
             ))
         }

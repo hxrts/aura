@@ -7,7 +7,7 @@
 use super::CapabilityId;
 use aura_crypto::Effects;
 use aura_types::DeviceId;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use aura_crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 /// Permission enum with three scopes: Storage, Communication, and Relay
@@ -73,7 +73,7 @@ impl DeviceAuthentication {
     pub fn new(
         device_id: DeviceId,
         account_id: Vec<u8>,
-        signing_key: &SigningKey,
+        signing_key: &Ed25519SigningKey,
     ) -> Result<Self, String> {
         // Create authentication payload
         let mut payload = Vec::new();
@@ -81,29 +81,28 @@ impl DeviceAuthentication {
         payload.extend_from_slice(&account_id);
 
         // Sign the payload
-        let signature: Signature = signing_key.sign(&payload);
+        let signature: Ed25519Signature = aura_crypto::ed25519_sign(signing_key, &payload);
 
         Ok(Self {
             device_id,
             account_id,
-            device_signature: signature.to_bytes().to_vec(),
+            device_signature: signature.to_vec(),
         })
     }
 
     /// Verify device authentication
-    pub fn verify(&self, verifying_key: &VerifyingKey) -> Result<(), String> {
+    pub fn verify(&self, verifying_key: &Ed25519VerifyingKey) -> Result<(), String> {
         // Reconstruct authentication payload
         let mut payload = Vec::new();
         payload.extend_from_slice(self.device_id.0.as_bytes());
         payload.extend_from_slice(&self.account_id);
 
         // Parse signature
-        let signature = Signature::from_slice(&self.device_signature)
+        let signature = aura_crypto::Ed25519Signature::from_slice(&self.device_signature)
             .map_err(|e| format!("Invalid signature format: {:?}", e))?;
 
         // Verify signature
-        verifying_key
-            .verify(&payload, &signature)
+        aura_crypto::ed25519_verify(&verifying_key, &payload, &signature)
             .map_err(|e| format!("Invalid device signature: {:?}", e))
     }
 }
@@ -133,7 +132,7 @@ impl CapabilityToken {
         device_id: DeviceId,
         permissions: Vec<Permission>,
         delegation_chain: Vec<CapabilityId>,
-        signing_key: &SigningKey,
+        signing_key: &Ed25519SigningKey,
         effects: &Effects,
     ) -> Result<Self, String> {
         let issued_at = effects
@@ -151,13 +150,13 @@ impl CapabilityToken {
         payload.extend_from_slice(&issued_at.to_le_bytes());
 
         // Sign the token
-        let signature: Signature = signing_key.sign(&payload);
+        let signature: Ed25519Signature = aura_crypto::ed25519_sign(signing_key, &payload);
 
         Ok(Self {
             authenticated_device: device_id,
             granted_permissions: permissions,
             delegation_chain,
-            signature: signature.to_bytes().to_vec(),
+            signature: signature.to_vec(),
             issued_at,
             expires_at: None,
         })
@@ -171,8 +170,7 @@ impl CapabilityToken {
 
     /// Get capability ID (hash of token)
     pub fn capability_id(&self) -> CapabilityId {
-        use blake3::Hasher;
-        let mut hasher = Hasher::new();
+        let mut hasher = aura_crypto::blake3_hasher();
         hasher.update(self.authenticated_device.0.as_bytes());
         hasher.update(&self.issued_at.to_le_bytes());
         hasher.update(&self.signature);
@@ -180,7 +178,7 @@ impl CapabilityToken {
     }
 
     /// Verify capability token signature
-    pub fn verify(&self, verifying_key: &VerifyingKey) -> Result<(), String> {
+    pub fn verify(&self, verifying_key: &Ed25519VerifyingKey) -> Result<(), String> {
         // Serialize permissions
         let permissions_bytes = bincode::serialize(&self.granted_permissions)
             .map_err(|e| format!("Failed to serialize permissions: {}", e))?;
@@ -192,12 +190,11 @@ impl CapabilityToken {
         payload.extend_from_slice(&self.issued_at.to_le_bytes());
 
         // Parse signature
-        let signature = Signature::from_slice(&self.signature)
+        let signature = aura_crypto::Ed25519Signature::from_slice(&self.signature)
             .map_err(|e| format!("Invalid signature format: {:?}", e))?;
 
         // Verify signature
-        verifying_key
-            .verify(&payload, &signature)
+        aura_crypto::ed25519_verify(&verifying_key, &payload, &signature)
             .map_err(|e| format!("Invalid capability token signature: {:?}", e))
     }
 
@@ -230,7 +227,7 @@ pub mod verification {
     /// Verify device authentication only (answers "who are you?")
     pub fn verify_authentication(
         auth: &DeviceAuthentication,
-        verifying_key: &VerifyingKey,
+        verifying_key: &Ed25519VerifyingKey,
     ) -> Result<(), String> {
         auth.verify(verifying_key)
     }
@@ -238,7 +235,7 @@ pub mod verification {
     /// Verify capability token (answers "who are you?" and "what can you do?")
     pub fn verify_capability(
         token: &CapabilityToken,
-        verifying_key: &VerifyingKey,
+        verifying_key: &Ed25519VerifyingKey,
         required_permissions: &[Permission],
         current_time: u64,
     ) -> Result<(), String> {
@@ -292,7 +289,7 @@ mod tests {
         let device_id = DeviceId(Uuid::new_v4());
         let account_id = b"test_account".to_vec();
 
-        let signing_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
         let verifying_key = signing_key.verifying_key();
 
         let auth = DeviceAuthentication::new(device_id, account_id, &signing_key).unwrap();
@@ -316,7 +313,7 @@ mod tests {
             },
         ];
 
-        let signing_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
         let verifying_key = signing_key.verifying_key();
 
         let token = CapabilityToken::new(
@@ -345,7 +342,7 @@ mod tests {
             resource: "file1".to_string(),
         }];
 
-        let signing_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
 
         let current_time = effects.now().unwrap();
         let token = CapabilityToken::new(device_id, permissions, vec![], &signing_key, &effects)
@@ -368,7 +365,7 @@ mod tests {
             resource: "file1".to_string(),
         }];
 
-        let signing_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
         let verifying_key = signing_key.verifying_key();
 
         let token =

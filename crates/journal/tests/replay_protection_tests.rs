@@ -13,7 +13,7 @@ use aura_journal::{
     EventType,
 };
 use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
-use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
+use aura_crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
 use rand::Rng;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use uuid::Uuid;
@@ -27,7 +27,7 @@ fn test_replay_protection_event_id() {
 
     // Create minimal state for testing
     let device_metadata = create_test_device_metadata(device_id, &effects);
-    let group_public_key = ed25519_dalek::VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
+    let group_public_key = aura_crypto::Ed25519VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
     let state = aura_journal::AccountState::new(
         account_id,
         group_public_key,
@@ -64,7 +64,7 @@ fn test_nonce_enforcement() {
 
     // Create minimal state for testing
     let device_metadata = create_test_device_metadata(device_id, &effects);
-    let group_public_key = ed25519_dalek::VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
+    let group_public_key = aura_crypto::Ed25519VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
     let state = aura_journal::AccountState::new(
         account_id,
         group_public_key,
@@ -105,7 +105,7 @@ fn test_timestamp_tolerance() {
 
     // Create minimal state for testing
     let device_metadata = create_test_device_metadata(device_id, &effects);
-    let group_public_key = ed25519_dalek::VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
+    let group_public_key = aura_crypto::Ed25519VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
     let state = aura_journal::AccountState::new(
         account_id,
         group_public_key,

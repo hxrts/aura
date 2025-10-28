@@ -1,6 +1,6 @@
 //! Transport Replacement Demonstration
 //!
-//! Shows how to replace StubTransport with ProductionTransport for real
+//! Shows how to replace MemoryTransport with ProductionTransport for real
 //! P2P networking, message routing, reliability, and monitoring.
 
 use crate::production_transport::{ProductionTransport, TransportConfig};
@@ -15,11 +15,11 @@ use uuid::Uuid;
 pub struct TransportReplacementDemo;
 
 impl TransportReplacementDemo {
-    /// BEFORE: StubTransport with no real networking
+    /// BEFORE: MemoryTransport with no real networking
     ///
     /// The original code in integrated_agent.rs:56, 121 uses:
     /// ```rust,ignore
-    /// let base_transport = Arc::new(aura_transport::StubTransport::new());
+    /// let base_transport = Arc::new(aura_transport::MemoryTransport::new());
     /// // - No real network connectivity
     /// // - No message routing or delivery
     /// // - No reliability or retry logic
@@ -28,19 +28,19 @@ impl TransportReplacementDemo {
     /// ```
     #[allow(dead_code)]
     pub async fn create_stub_transport() -> Result<Arc<dyn aura_coordination::Transport>> {
-        info!("BEFORE: Creating StubTransport with no real networking");
+        info!("BEFORE: Creating MemoryTransport with no real networking");
 
         // Original stub implementation - no real networking
         // This represents the placeholder pattern we want to eliminate
 
-        // Would create StubTransport here
-        // let transport = Arc::new(aura_transport::StubTransport::new());
+        // Would create MemoryTransport here
+        // let transport = Arc::new(aura_transport::MemoryTransport::new());
 
-        info!("StubTransport created - no real P2P capabilities");
+        info!("MemoryTransport created - no real P2P capabilities");
 
         // Return placeholder for compilation
         Err(AgentError::transport(
-            "StubTransport demonstration - not a real transport".to_string(),
+            "MemoryTransport demonstration - not a real transport".to_string(),
         ))
     }
 
@@ -154,9 +154,9 @@ impl TransportReplacementDemo {
 
         let device_id = DeviceId(Uuid::new_v4());
 
-        // BEFORE: StubTransport in integrated_agent.rs
+        // BEFORE: MemoryTransport in integrated_agent.rs
         // ```rust,ignore
-        // let base_transport = Arc::new(aura_transport::StubTransport::new());
+        // let base_transport = Arc::new(aura_transport::MemoryTransport::new());
         // ```
 
         // AFTER: ProductionTransport replacement
@@ -169,7 +169,7 @@ impl TransportReplacementDemo {
 
         let production_transport = ProductionTransport::new(device_id, transport_config).await?;
 
-        // The IntegratedAgent would now use ProductionTransport instead of StubTransport
+        // The IntegratedAgent would now use ProductionTransport instead of MemoryTransport
         // This provides real P2P networking for:
         // - Presence ticket exchange
         // - Peer connection establishment
@@ -185,11 +185,11 @@ impl TransportReplacementDemo {
     }
 }
 
-/// Benefits of ProductionTransport over StubTransport
+/// Benefits of ProductionTransport over MemoryTransport
 pub fn demonstrate_transport_benefits() {
     println!("=== Transport Layer Improvement Demonstration ===\n");
 
-    println!("BEFORE (StubTransport): No real networking capabilities");
+    println!("BEFORE (MemoryTransport): No real networking capabilities");
     println!("- No actual network connections");
     println!("- No message routing or delivery");
     println!("- No reliability or retry logic");

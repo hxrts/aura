@@ -12,12 +12,9 @@ workspace = true
 
 [dependencies]
 # Workspace crates
-aura-errors = { path = "../aura-errors" }
 aura-crypto = { path = "../crypto" }
 aura-journal = { path = "../journal" }
-aura-groups = { path = "../groups" }
-aura-types = { path = "../aura-types" }
-session_types = { path = "../session-types" }
+# session_types removed during refactor - implementation moved to coordination
 aura-coordination = { path = "../coordination" }
 
 # Networking
@@ -25,10 +22,7 @@ reqwest = { workspace = true }
 snow = { workspace = true }
 async-trait = { workspace = true }
 
-# Cryptography
-ed25519-dalek = { workspace = true }
-blake3 = { workspace = true }
-chacha20poly1305 = { workspace = true }
+# Cryptography provided through aura-crypto
 
 # Serialization
 serde = { workspace = true }

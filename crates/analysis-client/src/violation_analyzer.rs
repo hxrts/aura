@@ -4,11 +4,11 @@
 //! context extraction, debugging insights, and actionable remediation strategies. It builds
 //! on the property monitor and causality analysis to deliver investigation-ready reports.
 
+use crate::property_causality::{ContributingFactorType, PropertyCausalityAnalysis};
 use crate::property_monitor::{ViolationDetails, ViolationInstance};
-use crate::property_causality::{PropertyCausalityAnalysis, ContributingFactorType};
-use session_types::properties::PropertyId;
+use aura_types::session_utils::properties::PropertyId;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, BTreeMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use wasm_bindgen::prelude::*;
 
 /// Comprehensive violation analysis with actionable insights
@@ -796,11 +796,14 @@ impl ViolationAnalyzer {
         causality_analysis: Option<PropertyCausalityAnalysis>,
     ) -> ViolationAnalysis {
         let start_time = js_sys::Date::now() as u64;
-        
-        web_sys::console::log_1(&format!(
-            "Starting comprehensive violation analysis for property {:?}",
-            property_id
-        ).into());
+
+        web_sys::console::log_1(
+            &format!(
+                "Starting comprehensive violation analysis for property {:?}",
+                property_id
+            )
+            .into(),
+        );
 
         // Generate unique analysis ID
         let analysis_id = format!("violation_{}_{}", violation.tick, violation.state_hash);
@@ -812,25 +815,19 @@ impl ViolationAnalyzer {
         let context = self.extract_violation_context(&violation, causality_analysis.as_ref());
 
         // Perform root cause analysis
-        let root_cause_analysis = self.perform_root_cause_analysis(
-            &violation,
-            causality_analysis.as_ref(),
-            &context
-        );
+        let root_cause_analysis =
+            self.perform_root_cause_analysis(&violation, causality_analysis.as_ref(), &context);
 
         // Generate debugging guide
         let debugging_guide = self.generate_debugging_guide(
             &classification,
             &root_cause_analysis,
-            causality_analysis.as_ref()
+            causality_analysis.as_ref(),
         );
 
         // Create remediation strategies
-        let remediation_strategies = self.generate_remediation_strategies(
-            &classification,
-            &root_cause_analysis,
-            &context
-        );
+        let remediation_strategies =
+            self.generate_remediation_strategies(&classification, &root_cause_analysis, &context);
 
         // Assess impact
         let impact_assessment = self.assess_impact(&violation, &classification, &context);
@@ -839,11 +836,8 @@ impl ViolationAnalyzer {
         let similarity_analysis = self.analyze_similarities(&classification, &context);
 
         // Generate export data
-        let export_data = self.generate_export_data(
-            &violation,
-            &classification,
-            &impact_assessment
-        );
+        let export_data =
+            self.generate_export_data(&violation, &classification, &impact_assessment);
 
         let computation_time_ms = js_sys::Date::now() as u64 - start_time;
 
@@ -852,8 +846,12 @@ impl ViolationAnalyzer {
             version: "1.0.0".to_string(),
             analyzer_config: HashMap::new(),
             computation_time_ms,
-            data_sources: vec!["property_monitor".to_string(), "causality_analyzer".to_string()],
-            quality_score: self.calculate_quality_score(&classification, causality_analysis.is_some()),
+            data_sources: vec![
+                "property_monitor".to_string(),
+                "causality_analyzer".to_string(),
+            ],
+            quality_score: self
+                .calculate_quality_score(&classification, causality_analysis.is_some()),
         };
 
         let analysis = ViolationAnalysis {
@@ -883,10 +881,9 @@ impl ViolationAnalyzer {
         // Update statistics
         self.update_statistics(&analysis);
 
-        web_sys::console::log_1(&format!(
-            "Violation analysis completed in {}ms",
-            computation_time_ms
-        ).into());
+        web_sys::console::log_1(
+            &format!("Violation analysis completed in {}ms", computation_time_ms).into(),
+        );
 
         analysis
     }
@@ -898,10 +895,10 @@ impl ViolationAnalyzer {
         analysis2: &ViolationAnalysis,
     ) -> ViolationComparison {
         let similarity_score = self.calculate_similarity_score(analysis1, analysis2);
-        
+
         let key_similarities = self.identify_similarities(analysis1, analysis2);
         let key_differences = self.identify_differences(analysis1, analysis2);
-        
+
         ViolationComparison {
             analysis1_id: analysis1.analysis_id.clone(),
             analysis2_id: analysis2.analysis_id.clone(),
@@ -916,8 +913,9 @@ impl ViolationAnalyzer {
     pub fn get_trend_analysis(&self, time_window: u64) -> TrendAnalysis {
         let current_time = js_sys::Date::now() as u64;
         let window_start = current_time.saturating_sub(time_window);
-        
-        let recent_violations: Vec<_> = self.violation_history
+
+        let recent_violations: Vec<_> = self
+            .violation_history
             .range(window_start..)
             .map(|(_, analysis)| analysis)
             .collect();
@@ -993,7 +991,7 @@ impl ViolationAnalyzer {
         let violation_type = self.determine_violation_type(&violation.details);
         let severity = self.assess_severity(violation, causality_analysis);
         let confidence = self.calculate_classification_confidence(violation, causality_analysis);
-        
+
         let tags = self.extract_classification_tags(&violation.details);
         let is_recurring = self.check_if_recurring(&violation_type);
         let pattern_family = self.identify_pattern_family(&violation_type, causality_analysis);
@@ -1019,7 +1017,8 @@ impl ViolationAnalyzer {
         let participant_status = self.extract_participant_status(violation, causality_analysis);
         let resource_utilization = self.extract_resource_utilization(violation);
         let recent_events = self.extract_recent_events(violation, causality_analysis);
-        let environmental_factors = self.extract_environmental_factors(violation, causality_analysis);
+        let environmental_factors =
+            self.extract_environmental_factors(violation, causality_analysis);
 
         ViolationContext {
             system_state,
@@ -1087,7 +1086,9 @@ impl ViolationAnalyzer {
         let mut strategies = Vec::new();
 
         // Immediate fix strategy
-        if let Some(immediate_fix) = self.generate_immediate_fix(classification, root_cause_analysis) {
+        if let Some(immediate_fix) =
+            self.generate_immediate_fix(classification, root_cause_analysis)
+        {
             strategies.push(immediate_fix);
         }
 
@@ -1154,7 +1155,8 @@ impl ViolationAnalyzer {
     ) -> ExportData {
         let json_export = self.generate_json_export(violation, classification, impact_assessment);
         let csv_export = self.generate_csv_export(violation, classification, impact_assessment);
-        let grafana_metrics = self.generate_grafana_metrics(violation, classification, impact_assessment);
+        let grafana_metrics =
+            self.generate_grafana_metrics(violation, classification, impact_assessment);
         let siem_events = self.generate_siem_events(violation, classification, impact_assessment);
         let custom_exports = HashMap::new();
 
@@ -1226,7 +1228,7 @@ impl ViolationAnalyzer {
 
     fn extract_classification_tags(&self, details: &ViolationDetails) -> Vec<String> {
         let mut tags = Vec::new();
-        
+
         if details.description.contains("network") {
             tags.push("network".to_string());
         }
@@ -1236,7 +1238,7 @@ impl ViolationAnalyzer {
         if details.description.contains("threshold") {
             tags.push("threshold".to_string());
         }
-        
+
         tags
     }
 
@@ -1262,9 +1264,17 @@ impl ViolationAnalyzer {
             _ => {
                 // Use causality analysis to determine pattern family
                 if let Some(ca) = causality_analysis {
-                    if ca.contributing_factors.iter().any(|f| f.factor_type == ContributingFactorType::RaceCondition) {
+                    if ca
+                        .contributing_factors
+                        .iter()
+                        .any(|f| f.factor_type == ContributingFactorType::RaceCondition)
+                    {
                         PatternFamily::RaceConditions
-                    } else if ca.contributing_factors.iter().any(|f| f.factor_type == ContributingFactorType::NetworkPartition) {
+                    } else if ca
+                        .contributing_factors
+                        .iter()
+                        .any(|f| f.factor_type == ContributingFactorType::NetworkPartition)
+                    {
                         PatternFamily::PartitionPatterns
                     } else {
                         PatternFamily::Unknown
@@ -1369,15 +1379,24 @@ impl ViolationAnalyzer {
         Vec::new()
     }
 
-    fn summarize_causal_chain(&self, causality_analysis: Option<&PropertyCausalityAnalysis>) -> String {
+    fn summarize_causal_chain(
+        &self,
+        causality_analysis: Option<&PropertyCausalityAnalysis>,
+    ) -> String {
         if let Some(ca) = causality_analysis {
-            format!("Causal chain with {} events leading to violation", ca.causality_chain.chain_length)
+            format!(
+                "Causal chain with {} events leading to violation",
+                ca.causality_chain.chain_length
+            )
         } else {
             "No detailed causal chain available".to_string()
         }
     }
 
-    fn identify_decision_points(&self, _causality_analysis: Option<&PropertyCausalityAnalysis>) -> Vec<DecisionPoint> {
+    fn identify_decision_points(
+        &self,
+        _causality_analysis: Option<&PropertyCausalityAnalysis>,
+    ) -> Vec<DecisionPoint> {
         Vec::new()
     }
 
@@ -1394,31 +1413,36 @@ impl ViolationAnalyzer {
         classification: &ViolationClassification,
         _root_cause_analysis: &RootCauseAnalysis,
     ) -> Vec<DebuggingStep> {
-        vec![
-            DebuggingStep {
-                step_number: 1,
-                title: "Verify violation occurrence".to_string(),
-                instructions: format!("Confirm the {} violation actually occurred", format!("{:?}", classification.violation_type)),
-                expected_outcomes: vec!["Violation confirmed".to_string()],
-                fallback_actions: vec!["Check property specification".to_string()],
-                related_events: Vec::new(),
-                suggested_commands: vec!["Check logs".to_string()],
-            }
-        ]
+        vec![DebuggingStep {
+            step_number: 1,
+            title: "Verify violation occurrence".to_string(),
+            instructions: format!(
+                "Confirm the {} violation actually occurred",
+                format!("{:?}", classification.violation_type)
+            ),
+            expected_outcomes: vec!["Violation confirmed".to_string()],
+            fallback_actions: vec!["Check property specification".to_string()],
+            related_events: Vec::new(),
+            suggested_commands: vec!["Check logs".to_string()],
+        }]
     }
 
-    fn recommend_debugging_tools(&self, _classification: &ViolationClassification) -> Vec<RecommendedTool> {
-        vec![
-            RecommendedTool {
-                name: "Causality Graph Analyzer".to_string(),
-                description: "Analyze event causality".to_string(),
-                usage_guidance: "Examine event dependencies".to_string(),
-                expected_insights: vec!["Root cause identification".to_string()],
-            }
-        ]
+    fn recommend_debugging_tools(
+        &self,
+        _classification: &ViolationClassification,
+    ) -> Vec<RecommendedTool> {
+        vec![RecommendedTool {
+            name: "Causality Graph Analyzer".to_string(),
+            description: "Analyze event causality".to_string(),
+            usage_guidance: "Examine event dependencies".to_string(),
+            expected_insights: vec!["Root cause identification".to_string()],
+        }]
     }
 
-    fn identify_debugging_pitfalls(&self, _classification: &ViolationClassification) -> Vec<String> {
+    fn identify_debugging_pitfalls(
+        &self,
+        _classification: &ViolationClassification,
+    ) -> Vec<String> {
         vec![
             "Don't assume first suspicious event is the root cause".to_string(),
             "Consider concurrent events that may not be directly related".to_string(),
@@ -1469,7 +1493,10 @@ impl ViolationAnalyzer {
         Vec::new()
     }
 
-    fn generate_monitoring_strategies(&self, _classification: &ViolationClassification) -> Vec<RemediationStrategy> {
+    fn generate_monitoring_strategies(
+        &self,
+        _classification: &ViolationClassification,
+    ) -> Vec<RemediationStrategy> {
         Vec::new()
     }
 
@@ -1560,7 +1587,9 @@ impl ViolationAnalyzer {
     ) -> Vec<SimilarViolation> {
         self.violation_history
             .values()
-            .filter(|analysis| analysis.classification.violation_type == classification.violation_type)
+            .filter(|analysis| {
+                analysis.classification.violation_type == classification.violation_type
+            })
             .take(5)
             .map(|analysis| SimilarViolation {
                 analysis_id: analysis.analysis_id.clone(),
@@ -1574,7 +1603,10 @@ impl ViolationAnalyzer {
             .collect()
     }
 
-    fn identify_violation_patterns(&self, _classification: &ViolationClassification) -> Vec<ViolationPattern> {
+    fn identify_violation_patterns(
+        &self,
+        _classification: &ViolationClassification,
+    ) -> Vec<ViolationPattern> {
         Vec::new()
     }
 
@@ -1582,57 +1614,71 @@ impl ViolationAnalyzer {
         vec!["Monitor for similar patterns".to_string()]
     }
 
-    fn calculate_similarity_score(&self, analysis1: &ViolationAnalysis, analysis2: &ViolationAnalysis) -> f64 {
+    fn calculate_similarity_score(
+        &self,
+        analysis1: &ViolationAnalysis,
+        analysis2: &ViolationAnalysis,
+    ) -> f64 {
         let mut score = 0.0;
-        
+
         // Same violation type
         if analysis1.classification.violation_type == analysis2.classification.violation_type {
             score += 0.3;
         }
-        
+
         // Same severity
         if analysis1.classification.severity == analysis2.classification.severity {
             score += 0.2;
         }
-        
+
         // Same pattern family
         if analysis1.classification.pattern_family == analysis2.classification.pattern_family {
             score += 0.3;
         }
-        
+
         // Similar contexts (simplified)
-        if !analysis1.context.recent_events.is_empty() && !analysis2.context.recent_events.is_empty() {
+        if !analysis1.context.recent_events.is_empty()
+            && !analysis2.context.recent_events.is_empty()
+        {
             score += 0.2;
         }
-        
+
         score
     }
 
-    fn identify_similarities(&self, analysis1: &ViolationAnalysis, analysis2: &ViolationAnalysis) -> Vec<String> {
+    fn identify_similarities(
+        &self,
+        analysis1: &ViolationAnalysis,
+        analysis2: &ViolationAnalysis,
+    ) -> Vec<String> {
         let mut similarities = Vec::new();
-        
+
         if analysis1.classification.violation_type == analysis2.classification.violation_type {
             similarities.push("Same violation type".to_string());
         }
-        
+
         if analysis1.classification.severity == analysis2.classification.severity {
             similarities.push("Same severity level".to_string());
         }
-        
+
         similarities
     }
 
-    fn identify_differences(&self, analysis1: &ViolationAnalysis, analysis2: &ViolationAnalysis) -> Vec<String> {
+    fn identify_differences(
+        &self,
+        analysis1: &ViolationAnalysis,
+        analysis2: &ViolationAnalysis,
+    ) -> Vec<String> {
         let mut differences = Vec::new();
-        
+
         if analysis1.classification.violation_type != analysis2.classification.violation_type {
             differences.push("Different violation types".to_string());
         }
-        
+
         if analysis1.classification.severity != analysis2.classification.severity {
             differences.push("Different severity levels".to_string());
         }
-        
+
         differences
     }
 
@@ -1672,7 +1718,7 @@ impl ViolationAnalyzer {
     fn export_as_csv(&self, violations: &[&ViolationAnalysis]) -> Result<String, String> {
         let mut csv = String::new();
         csv.push_str("analysis_id,property_id,violation_type,severity,tick,description\n");
-        
+
         for violation in violations {
             csv.push_str(&format!(
                 "{},{:?},{:?},{:?},{},{}\n",
@@ -1684,25 +1730,35 @@ impl ViolationAnalyzer {
                 violation.violation.details.description.replace(',', ";")
             ));
         }
-        
+
         Ok(csv)
     }
 
     fn export_as_grafana(&self, violations: &[&ViolationAnalysis]) -> Result<String, String> {
-        let metrics: Vec<_> = violations.iter()
-            .map(|v| format!("violation_count{{type=\"{:?}\",severity=\"{:?}\"}} 1", 
-                v.classification.violation_type, v.classification.severity))
+        let metrics: Vec<_> = violations
+            .iter()
+            .map(|v| {
+                format!(
+                    "violation_count{{type=\"{:?}\",severity=\"{:?}\"}} 1",
+                    v.classification.violation_type, v.classification.severity
+                )
+            })
             .collect();
-        
+
         Ok(metrics.join("\n"))
     }
 
     fn export_as_siem(&self, violations: &[&ViolationAnalysis]) -> Result<String, String> {
-        let events: Vec<_> = violations.iter()
-            .map(|v| format!("timestamp={} severity={:?} category=property_violation description=\"{}\"",
-                v.violation.tick, v.classification.severity, v.violation.details.description))
+        let events: Vec<_> = violations
+            .iter()
+            .map(|v| {
+                format!(
+                    "timestamp={} severity={:?} category=property_violation description=\"{}\"",
+                    v.violation.tick, v.classification.severity, v.violation.details.description
+                )
+            })
             .collect();
-        
+
         Ok(events.join("\n"))
     }
 
@@ -1746,17 +1802,28 @@ impl ViolationAnalyzer {
         Vec::new()
     }
 
-    fn calculate_quality_score(&self, _classification: &ViolationClassification, has_causality: bool) -> f64 {
-        if has_causality { 0.9 } else { 0.6 }
+    fn calculate_quality_score(
+        &self,
+        _classification: &ViolationClassification,
+        has_causality: bool,
+    ) -> f64 {
+        if has_causality {
+            0.9
+        } else {
+            0.6
+        }
     }
 
     fn update_statistics(&mut self, analysis: &ViolationAnalysis) {
         self.stats.total_violations_analyzed += 1;
-        self.stats.avg_analysis_time_ms = 
-            (self.stats.avg_analysis_time_ms * (self.stats.total_violations_analyzed - 1) as f64 
-             + analysis.metadata.computation_time_ms as f64) / self.stats.total_violations_analyzed as f64;
-        
-        *self.stats.common_violation_types
+        self.stats.avg_analysis_time_ms = (self.stats.avg_analysis_time_ms
+            * (self.stats.total_violations_analyzed - 1) as f64
+            + analysis.metadata.computation_time_ms as f64)
+            / self.stats.total_violations_analyzed as f64;
+
+        *self
+            .stats
+            .common_violation_types
             .entry(analysis.classification.violation_type.clone())
             .or_insert(0) += 1;
     }
@@ -1853,7 +1920,9 @@ impl WasmViolationAnalyzer {
 
     /// Export violations in specified format
     pub fn export_violations(&self, format: &str) -> String {
-        self.inner.export_violations(format, None).unwrap_or_default()
+        self.inner
+            .export_violations(format, None)
+            .unwrap_or_default()
     }
 
     /// Clear violation history
@@ -1900,19 +1969,22 @@ mod tests {
         let violation = create_test_violation();
 
         let analysis = analyzer.analyze_violation(property_id, violation, None);
-        
+
         assert_eq!(analysis.property_id, property_id);
-        assert_eq!(analysis.classification.violation_type, ViolationType::SafetyViolation);
+        assert_eq!(
+            analysis.classification.violation_type,
+            ViolationType::SafetyViolation
+        );
         assert!(analysis.metadata.computation_time_ms >= 0);
     }
 
     #[test]
     fn test_violation_export() {
         let analyzer = ViolationAnalyzer::new();
-        
+
         let json_export = analyzer.export_violations("json", None);
         assert!(json_export.is_ok());
-        
+
         let csv_export = analyzer.export_violations("csv", None);
         assert!(csv_export.is_ok());
     }
@@ -1926,7 +1998,7 @@ mod tests {
 
         let analysis1 = analyzer.analyze_violation(property_id, violation1, None);
         let analysis2 = analyzer.analyze_violation(property_id, violation2, None);
-        
+
         let comparison = analyzer.compare_violations(&analysis1, &analysis2);
         assert!(comparison.similarity_score >= 0.0);
     }
@@ -1935,17 +2007,26 @@ mod tests {
     fn test_violation_classification_types() {
         let mut analyzer = ViolationAnalyzer::new();
         let property_id = PropertyId::new_v4();
-        
+
         // Test different violation types based on description
         let test_cases = vec![
             ("Test safety violation", ViolationType::SafetyViolation),
             ("Test liveness violation", ViolationType::LivenessViolation),
-            ("Test consistency violation", ViolationType::ConsistencyViolation),
-            ("Test threshold violation", ViolationType::ThresholdViolation),
+            (
+                "Test consistency violation",
+                ViolationType::ConsistencyViolation,
+            ),
+            (
+                "Test threshold violation",
+                ViolationType::ThresholdViolation,
+            ),
             ("Test protocol violation", ViolationType::ProtocolViolation),
-            ("Test byzantine violation", ViolationType::ByzantineViolation),
+            (
+                "Test byzantine violation",
+                ViolationType::ByzantineViolation,
+            ),
         ];
-        
+
         for (description, expected_type) in test_cases {
             let violation = ViolationInstance {
                 tick: 100,
@@ -1958,7 +2039,7 @@ mod tests {
                 },
                 resolved: false,
             };
-            
+
             let analysis = analyzer.analyze_violation(property_id, violation, None);
             assert_eq!(analysis.classification.violation_type, expected_type);
         }
@@ -1968,14 +2049,14 @@ mod tests {
     fn test_severity_assessment() {
         let mut analyzer = ViolationAnalyzer::new();
         let property_id = PropertyId::new_v4();
-        
+
         let test_cases = vec![
             ("critical system failure", SeverityLevel::Critical),
             ("high impact error", SeverityLevel::High),
             ("medium priority issue", SeverityLevel::Medium),
             ("low impact warning", SeverityLevel::Low),
         ];
-        
+
         for (description, expected_severity) in test_cases {
             let violation = ViolationInstance {
                 tick: 100,
@@ -1988,7 +2069,7 @@ mod tests {
                 },
                 resolved: false,
             };
-            
+
             let analysis = analyzer.analyze_violation(property_id, violation, None);
             assert_eq!(analysis.classification.severity, expected_severity);
         }
@@ -1998,7 +2079,7 @@ mod tests {
     fn test_wasm_integration() {
         let wasm_analyzer = WasmViolationAnalyzer::new();
         let stats = wasm_analyzer.get_statistics();
-        
+
         // Should return valid JSON
         assert!(!stats.is_null());
     }

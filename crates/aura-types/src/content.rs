@@ -29,9 +29,9 @@ impl ChunkId {
         Self(s.into().into_bytes())
     }
 
-    /// Create from blake3 hash
-    pub fn from_blake3_hash(hash: &blake3::Hash) -> Self {
-        Self(hash.as_bytes().to_vec())
+    /// Create from a 32-byte hash (typically Blake3)
+    pub fn from_hash(hash: &[u8; 32]) -> Self {
+        Self(hash.to_vec())
     }
 
     /// Get the raw bytes
@@ -68,7 +68,7 @@ impl ChunkId {
     /// Create chunk ID from content using blake3 hash
     pub fn from_content(content: &[u8]) -> Self {
         let hash = blake3::hash(content);
-        Self::from_blake3_hash(&hash)
+        Self::from_hash(hash.as_bytes())
     }
 
     /// Create chunk ID for a specific chunk within a manifest
@@ -78,7 +78,7 @@ impl ChunkId {
         hasher.update(&chunk_index.to_le_bytes());
         hasher.update(b"chunk-id");
         let hash = hasher.finalize();
-        Self::from_blake3_hash(&hash)
+        Self::from_hash(hash.as_bytes())
     }
 }
 
@@ -112,9 +112,9 @@ impl From<&str> for ChunkId {
     }
 }
 
-impl From<blake3::Hash> for ChunkId {
-    fn from(hash: blake3::Hash) -> Self {
-        Self::from_blake3_hash(&hash)
+impl From<[u8; 32]> for ChunkId {
+    fn from(hash: [u8; 32]) -> Self {
+        Self::from_hash(&hash)
     }
 }
 
@@ -142,8 +142,8 @@ impl Cid {
     }
 
     /// Create from blake3 hash
-    pub fn from_blake3_hash(hash: &blake3::Hash) -> Self {
-        Self(format!("blake3-{}", hex::encode(hash.as_bytes())))
+    pub fn from_hash(hash: &[u8; 32]) -> Self {
+        Self(format!("blake3-{}", hex::encode(hash)))
     }
 
     /// Create from chunk ID
@@ -176,9 +176,9 @@ impl From<ChunkId> for Cid {
     }
 }
 
-impl From<blake3::Hash> for Cid {
-    fn from(hash: blake3::Hash) -> Self {
-        Self::from_blake3_hash(&hash)
+impl From<[u8; 32]> for Cid {
+    fn from(hash: [u8; 32]) -> Self {
+        Self::from_hash(&hash)
     }
 }
 

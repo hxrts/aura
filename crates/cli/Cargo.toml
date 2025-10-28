@@ -19,12 +19,9 @@ path = "src/main.rs"
 aura-agent = { path = "../agent" }
 aura-coordination = { path = "../coordination" }
 aura-crypto = { path = "../crypto" }
-aura-errors = { path = "../aura-errors" }
-aura-groups = { path = "../groups" }
 aura-journal = { path = "../journal" }
 aura-simulator = { path = "../simulator" }
-aura-types = { path = "../aura-types" }
-session_types = { path = "../session-types" }
+# session_types removed during refactor - implementation moved to coordination
 
 # CLI
 clap = { workspace = true }

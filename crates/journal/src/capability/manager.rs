@@ -11,7 +11,7 @@ use super::{
 };
 use aura_crypto::Effects;
 use aura_types::DeviceId;
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use aura_crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Capability grant request
@@ -37,7 +37,7 @@ pub struct CapabilityManager {
     /// Delegation graph for cascading revocation
     delegation_graph: BTreeMap<CapabilityId, Vec<CapabilityId>>,
     /// Authority keys for verification
-    authority_keys: BTreeMap<DeviceId, VerifyingKey>,
+    authority_keys: BTreeMap<DeviceId, Ed25519VerifyingKey>,
 }
 
 impl CapabilityManager {
@@ -52,7 +52,7 @@ impl CapabilityManager {
     }
 
     /// Register an authority key for verification
-    pub fn register_authority(&mut self, device_id: DeviceId, key: VerifyingKey) {
+    pub fn register_authority(&mut self, device_id: DeviceId, key: Ed25519VerifyingKey) {
         self.authority_keys.insert(device_id, key);
     }
 
@@ -63,7 +63,7 @@ impl CapabilityManager {
     pub fn grant_capability(
         &mut self,
         grant: CapabilityGrant,
-        signing_key: &SigningKey,
+        signing_key: &Ed25519SigningKey,
         effects: &Effects,
     ) -> Result<CapabilityToken> {
         // Validate permissions
@@ -229,7 +229,7 @@ impl CapabilityManager {
         parent_id: CapabilityId,
         child_device: DeviceId,
         restricted_permissions: Vec<Permission>,
-        signing_key: &SigningKey,
+        signing_key: &Ed25519SigningKey,
         effects: &Effects,
     ) -> Result<CapabilityToken> {
         // Build delegation chain
@@ -344,8 +344,8 @@ mod tests {
     use super::*;
     use uuid::Uuid;
 
-    fn test_signing_key() -> SigningKey {
-        SigningKey::from_bytes(&[1u8; 32])
+    fn test_signing_key() -> Ed25519SigningKey {
+        aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32])
     }
 
     fn test_effects() -> Effects {

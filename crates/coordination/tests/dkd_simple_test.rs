@@ -4,7 +4,7 @@
 //! by directly testing the coordination layer implementation.
 
 use aura_coordination::execution::time::ProductionTimeSource;
-use aura_coordination::execution::{ProtocolContext, StubTransport};
+use aura_coordination::execution::{ProtocolContext, MemoryTransport};
 use aura_crypto::Effects;
 use aura_journal::{AccountLedger, AccountState, DeviceMetadata, DeviceType};
 use aura_types::{AccountId, DeviceId};
@@ -59,7 +59,7 @@ async fn test_dkd_choreography_execution() {
     ));
 
     // Create stub transport
-    let transport = Arc::new(StubTransport::default());
+    let transport = Arc::new(MemoryTransport::default());
 
     // Create device signing key deterministically
     let device_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
@@ -124,7 +124,7 @@ async fn test_dkd_deterministic_setup() {
         let ledger = Arc::new(RwLock::new(
             AccountLedger::new(initial_state).expect("Failed to create test ledger"),
         ));
-        let transport = Arc::new(StubTransport::default());
+        let transport = Arc::new(MemoryTransport::default());
 
         let device_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
         let time_source = Box::new(ProductionTimeSource::new());
@@ -180,7 +180,7 @@ async fn test_dkd_different_contexts() {
         let ledger = Arc::new(RwLock::new(
             AccountLedger::new(initial_state).expect("Failed to create test ledger"),
         ));
-        let transport = Arc::new(StubTransport::default());
+        let transport = Arc::new(MemoryTransport::default());
 
         let device_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
         let time_source = Box::new(ProductionTimeSource::new());

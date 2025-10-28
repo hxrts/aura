@@ -64,7 +64,7 @@ impl CapabilityDelegation {
     pub fn hash(&self) -> crate::capability::Result<[u8; 32]> {
         let bytes = serde_json::to_vec(self)
             .map_err(|e| crate::capability::CapabilityError::SerializationError(e.to_string()))?;
-        Ok(blake3::hash(&bytes).into())
+        Ok(aura_crypto::blake3_hash(&bytes).into())
     }
 }
 
@@ -105,6 +105,6 @@ impl CapabilityRevocation {
     pub fn hash(&self) -> crate::capability::Result<[u8; 32]> {
         let bytes = serde_json::to_vec(self)
             .map_err(|e| crate::capability::CapabilityError::SerializationError(e.to_string()))?;
-        Ok(blake3::hash(&bytes).into())
+        Ok(aura_crypto::blake3_hash(&bytes).into())
     }
 }

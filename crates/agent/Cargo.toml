@@ -12,25 +12,13 @@ categories = ["cryptography", "authentication"]
 
 [dependencies]
 # Workspace crates
-aura-errors = { path = "../aura-errors" }
 aura-coordination = { path = "../coordination" }
-aura-types = { path = "../aura-types" }
-session_types = { path = "../session-types" }
 aura-journal = { path = "../journal" }
 aura-crypto = { path = "../crypto" }
 aura-transport = { path = "../transport" }
-aura-groups = { path = "../groups" }
 aura-store = { path = "../store" }
 
-# Cryptography
-frost-ed25519 = { workspace = true }
-ed25519-dalek = { workspace = true }
-blake3 = { workspace = true }
-hkdf = { workspace = true }
-sha2 = { workspace = true }
-hpke = { workspace = true }
-zeroize = { workspace = true }
-aes-gcm = { workspace = true }
+# Cryptography provided through aura-crypto
 qrcode = { version = "0.13", optional = true }
 
 # Serialization
@@ -83,11 +71,15 @@ windows = { version = "0.52", features = ["Win32_Security_Credentials", "Win32_S
 [target.'cfg(target_os = "linux")'.dependencies]
 keyutils = "0.1"
 
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
 
 [features]
 default = []
 qrcode = ["dep:qrcode"]
 dev-console = ["dep:axum", "dep:tokio-tungstenite", "dep:tower", "dep:tower-http"]
+real-android-keystore = []  # Enable real Android Keystore implementation
 
 [dev-dependencies]
 tokio-test = "0.4"

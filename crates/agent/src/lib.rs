@@ -93,7 +93,7 @@ pub mod frost_manager;
 pub mod error;
 
 /// Platform-specific secure storage
-pub mod secure_storage;
+pub mod device_secure_store;
 
 // ========== Essential Types ==========
 /// Derived identity result from DKD protocol
@@ -116,6 +116,7 @@ pub use agent::{
     BootstrapConfig,
     Coordinating,
     Failed,
+    FailureInfo,
     Idle,
     KeyShare,
     ProtocolCompleted,
@@ -147,8 +148,9 @@ pub use error::{
 };
 
 // Secure storage types
-pub use secure_storage::{
+pub use device_secure_store::{
     DeviceAttestation, PlatformSecureStorage, SecureStorage, SecurityLevel,
-    #[cfg(target_os = "android")]
-    AndroidKeystoreStorage,
 };
+
+#[cfg(target_os = "android")]
+pub use device_secure_store::AndroidKeystoreStorage;

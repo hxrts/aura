@@ -12,17 +12,59 @@
 use crate::access_control::capability::{CapabilityError, CapabilityManager, CapabilityToken};
 use crate::error::{Result, StoreError, StoreErrorBuilder};
 use crate::manifest::{ResourceScope, StorageOperation};
+use aura_journal::core::ledger::AccountLedger;
+
+/// Context for access control evaluation
+#[derive(Debug, Clone)]
+pub struct AccessContext {
+    pub current_time: u64,
+    pub authority_level: u32,
+    pub quota_info: Option<QuotaInfo>,
+}
+
+/// Quota information for resource access
+#[derive(Debug, Clone)]
+pub struct QuotaInfo {
+    pub current_usage: u64,
+    pub limit: u64,
+}
+
+/// Result of resource access evaluation
+#[derive(Debug, Clone)]
+pub enum ResourceAccessResult {
+    /// Access granted
+    Granted {
+        granted_at: u64,
+        authority_level: u32,
+    },
+    /// Access denied
+    Denied { reason: String, details: String },
+}
 use aura_types::{DeviceId, DeviceIdExt};
 
 /// Capability checker - verifies storage access permissions
 pub struct CapabilityChecker {
     manager: CapabilityManager,
+    /// Optional ledger for device-to-account verification
+    /// None if running in test mode or if ledger is not available
+    ledger: Option<std::sync::Arc<AccountLedger>>,
 }
 
 impl CapabilityChecker {
     /// Create a new capability checker
     pub fn new(manager: CapabilityManager) -> Self {
-        Self { manager }
+        Self { 
+            manager,
+            ledger: None,
+        }
+    }
+
+    /// Create a new capability checker with ledger integration
+    pub fn with_ledger(manager: CapabilityManager, ledger: std::sync::Arc<AccountLedger>) -> Self {
+        Self { 
+            manager,
+            ledger: Some(ledger),
+        }
     }
 
     /// Verify a device can perform an operation on a resource
@@ -76,43 +118,366 @@ impl CapabilityChecker {
             }
         }
 
-        // Check permissions
+        // Check permissions with fine-grained resource matching
         let has_permission = token
             .granted_permissions
             .iter()
-            .any(|p| p.operation == operation);
-        // TODO: Add resource matching when Permission struct includes resource field
+            .any(|p| p.operation == operation && self.resource_matches(&p.resource, resource));
 
         if has_permission {
+            tracing::debug!(
+                operation = ?operation,
+                resource = ?resource,
+                "Resource permission granted"
+            );
             Ok(())
         } else {
+            tracing::warn!(
+                operation = ?operation,
+                resource = ?resource,
+                granted_permissions = ?token.granted_permissions,
+                "Resource permission denied - no matching permission found"
+            );
             Err(StoreErrorBuilder::insufficient_permissions_store(
-                format!("{} on {:?}", operation as u32, resource),
-                "none",
+                format!("{:?} on {:?}", operation, resource),
+                "no matching resource permission",
             ))
         }
     }
 
-    /// Check if a resource scope matches the requested resource
-    fn resource_matches(granted: &ResourceScope, requested: &ResourceScope) -> bool {
+    /// Check if a resource scope matches the requested resource with fine-grained control
+    fn resource_matches(&self, granted: &ResourceScope, requested: &ResourceScope) -> bool {
         use crate::manifest::ResourceScope as RS;
 
-        match (granted, requested) {
-            // Exact match
+        tracing::trace!(
+            granted = ?granted,
+            requested = ?requested,
+            "Evaluating resource permission match"
+        );
+
+        let matches = match (granted, requested) {
+            // Exact match cases
             (RS::StorageObject { account_id: a1 }, RS::StorageObject { account_id: a2 }) => {
-                a1 == a2
+                let exact_match = a1 == a2;
+                tracing::trace!("StorageObject exact match: {}", exact_match);
+                exact_match
             }
             (RS::AccountStorage { account_id: a1 }, RS::AccountStorage { account_id: a2 }) => {
-                a1 == a2
+                let exact_match = a1 == a2;
+                tracing::trace!("AccountStorage exact match: {}", exact_match);
+                exact_match
             }
-            (RS::DeviceStorage { device_id: d1 }, RS::DeviceStorage { device_id: d2 }) => d1 == d2,
-            (RS::Public, RS::Public) => true,
+            (RS::DeviceStorage { device_id: d1 }, RS::DeviceStorage { device_id: d2 }) => {
+                let exact_match = d1 == d2;
+                tracing::trace!("DeviceStorage exact match: {}", exact_match);
+                exact_match
+            }
+            (RS::Public, RS::Public) => {
+                tracing::trace!("Public resource match: true");
+                true
+            }
 
-            // Account scope grants access to its objects
-            (RS::AccountStorage { .. }, RS::StorageObject { .. }) => true,
+            // Hierarchical scope matching - broader scopes grant access to more specific resources
+            (
+                RS::AccountStorage {
+                    account_id: granted_account,
+                },
+                RS::StorageObject {
+                    account_id: requested_account,
+                },
+            ) => {
+                let hierarchical_match = granted_account == requested_account;
+                tracing::trace!(
+                    "AccountStorage -> StorageObject hierarchical match: {}",
+                    hierarchical_match
+                );
+                hierarchical_match
+            }
 
-            // Everything else: no match
-            _ => false,
+            (
+                RS::AccountStorage {
+                    account_id: granted_account,
+                },
+                RS::DeviceStorage {
+                    device_id: requested_device,
+                },
+            ) => {
+                // Account storage can access device storage if device belongs to account
+                let hierarchical_match =
+                    self.device_belongs_to_account(requested_device, granted_account);
+                tracing::trace!(
+                    "AccountStorage -> DeviceStorage hierarchical match: {}",
+                    hierarchical_match
+                );
+                hierarchical_match
+            }
+
+            // Public scope grants access to public resources only
+            (RS::Public, _) => {
+                tracing::trace!("Public scope cannot access non-public resources");
+                false
+            }
+            (_, RS::Public) => {
+                tracing::trace!("Any scope can access public resources");
+                true
+            }
+
+            // Cross-scope access: not allowed
+            (RS::DeviceStorage { .. }, RS::AccountStorage { .. }) => {
+                tracing::trace!("DeviceStorage cannot access AccountStorage");
+                false
+            }
+            (RS::DeviceStorage { .. }, RS::StorageObject { .. }) => {
+                tracing::trace!("DeviceStorage cannot access StorageObject directly");
+                false
+            }
+            (RS::StorageObject { .. }, RS::AccountStorage { .. }) => {
+                tracing::trace!("StorageObject cannot access AccountStorage");
+                false
+            }
+            (RS::StorageObject { .. }, RS::DeviceStorage { .. }) => {
+                tracing::trace!("StorageObject cannot access DeviceStorage");
+                false
+            }
+
+            // AllOwnedObjects scope patterns - broad access
+            (RS::AllOwnedObjects, _) => {
+                tracing::trace!("AllOwnedObjects grants access to any resource");
+                true
+            }
+            (_, RS::AllOwnedObjects) => {
+                tracing::trace!("Any scope can access AllOwnedObjects");
+                true
+            }
+
+            // Object scope patterns - specific object access
+            (RS::Object { cid: granted_cid }, RS::Object { cid: requested_cid }) => {
+                let exact_match = granted_cid == requested_cid;
+                tracing::trace!("Object exact match: {}", exact_match);
+                exact_match
+            }
+            (RS::Object { .. }, _) => {
+                tracing::trace!("Object scope cannot access other resource types");
+                false
+            }
+            (_, RS::Object { .. }) => {
+                tracing::trace!("Non-object scopes cannot access specific objects");
+                false
+            }
+
+            // Manifest scope patterns - specific manifest access
+            (RS::Manifest { cid: granted_cid }, RS::Manifest { cid: requested_cid }) => {
+                let exact_match = granted_cid == requested_cid;
+                tracing::trace!("Manifest exact match: {}", exact_match);
+                exact_match
+            }
+            (RS::Manifest { .. }, _) => {
+                tracing::trace!("Manifest scope cannot access other resource types");
+                false
+            }
+            (_, RS::Manifest { .. }) => {
+                tracing::trace!("Non-manifest scopes cannot access specific manifests");
+                false
+            }
+        };
+
+        tracing::debug!(
+            granted = ?granted,
+            requested = ?requested,
+            matches = matches,
+            "Resource permission match result"
+        );
+
+        matches
+    }
+
+    /// Check if a device belongs to a specific account
+    /// 
+    /// This method provides real device-to-account verification by querying
+    /// the account ledger to verify that the device is enrolled in the account.
+    fn device_belongs_to_account(
+        &self,
+        device_id: &aura_types::DeviceId,
+        account_id: &aura_types::AccountId,
+    ) -> bool {
+        tracing::debug!(
+            device_id = %device_id,
+            account_id = %account_id,
+            "Verifying device-to-account mapping"
+        );
+
+        // If no ledger is available, fall back to permissive mode for testing
+        let Some(ledger) = &self.ledger else {
+            tracing::warn!(
+                device_id = %device_id,
+                account_id = %account_id,
+                "No ledger available for device-to-account verification - allowing access for testing"
+            );
+            return true;
+        };
+
+        // Verify that this ledger is for the requested account
+        let ledger_account_id = &ledger.state().account_id;
+        if ledger_account_id != account_id {
+            tracing::warn!(
+                device_id = %device_id,
+                requested_account = %account_id,
+                ledger_account = %ledger_account_id,
+                "Account ID mismatch - device requested access to different account than ledger manages"
+            );
+            return false;
+        }
+
+        // Check if the device is enrolled and active in this account
+        let device_enrolled = ledger.state().is_device_active(device_id);
+        
+        if device_enrolled {
+            tracing::debug!(
+                device_id = %device_id,
+                account_id = %account_id,
+                "Device successfully verified as belonging to account"
+            );
+        } else {
+            tracing::warn!(
+                device_id = %device_id,
+                account_id = %account_id,
+                "Device verification failed - device not enrolled or inactive in account"
+            );
+        }
+
+        device_enrolled
+    }
+
+    /// Advanced resource pattern matching with wildcard and path-based permissions
+    pub fn matches_resource_pattern(
+        &self,
+        granted_pattern: &str,
+        requested_resource: &str,
+    ) -> bool {
+        tracing::trace!(
+            granted_pattern = granted_pattern,
+            requested_resource = requested_resource,
+            "Evaluating resource pattern match"
+        );
+
+        let matches = if granted_pattern == "*" {
+            // Universal wildcard grants access to everything
+            true
+        } else if granted_pattern.ends_with("/*") {
+            // Path prefix wildcard (e.g., "user_data/*" matches "user_data/file.txt")
+            let prefix = &granted_pattern[..granted_pattern.len() - 1]; // Remove "*", keep "/"
+            requested_resource.starts_with(prefix)
+        } else if granted_pattern.contains("*") {
+            // Pattern matching with wildcards
+            self.glob_match(granted_pattern, requested_resource)
+        } else {
+            // Exact string match
+            granted_pattern == requested_resource
+        };
+
+        tracing::debug!(
+            granted_pattern = granted_pattern,
+            requested_resource = requested_resource,
+            matches = matches,
+            "Resource pattern match result"
+        );
+
+        matches
+    }
+
+    /// Simple glob-style pattern matching
+    fn glob_match(&self, pattern: &str, text: &str) -> bool {
+        // Convert glob pattern to regex-like matching
+        // This is a simplified implementation - could be enhanced with regex crate
+        let pattern_parts: Vec<&str> = pattern.split('*').collect();
+
+        if pattern_parts.len() == 1 {
+            // No wildcards, exact match
+            return pattern == text;
+        }
+
+        let mut text_pos = 0;
+
+        for (i, part) in pattern_parts.iter().enumerate() {
+            if part.is_empty() {
+                continue;
+            }
+
+            if i == 0 {
+                // First part must match at the beginning
+                if !text[text_pos..].starts_with(part) {
+                    return false;
+                }
+                text_pos += part.len();
+            } else if i == pattern_parts.len() - 1 {
+                // Last part must match at the end
+                return text[text_pos..].ends_with(part);
+            } else {
+                // Middle part must be found somewhere
+                if let Some(pos) = text[text_pos..].find(part) {
+                    text_pos += pos + part.len();
+                } else {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Evaluate resource permission with context-aware access control
+    pub fn evaluate_resource_access(
+        &self,
+        granted_permission: &crate::manifest::Permission,
+        requested_operation: &crate::manifest::StorageOperation,
+        requested_resource: &ResourceScope,
+        context: &AccessContext,
+    ) -> ResourceAccessResult {
+        // Check operation match
+        if granted_permission.operation != *requested_operation {
+            return ResourceAccessResult::Denied {
+                reason: "Operation mismatch".to_string(),
+                details: format!(
+                    "Granted: {:?}, Requested: {:?}",
+                    granted_permission.operation, requested_operation
+                ),
+            };
+        }
+
+        // Check resource scope match
+        if !self.resource_matches(&granted_permission.resource, requested_resource) {
+            return ResourceAccessResult::Denied {
+                reason: "Resource scope mismatch".to_string(),
+                details: format!(
+                    "Granted: {:?}, Requested: {:?}",
+                    granted_permission.resource, requested_resource
+                ),
+            };
+        }
+
+        // Check time-based constraints
+        if let Some(expiry) = granted_permission.expiry {
+            if context.current_time >= expiry {
+                return ResourceAccessResult::Denied {
+                    reason: "Permission expired".to_string(),
+                    details: format!("Expired at: {}, Current: {}", expiry, context.current_time),
+                };
+            }
+        }
+
+        // Check rate limiting and quota constraints
+        if let Some(ref quota) = context.quota_info {
+            if quota.current_usage >= quota.limit {
+                return ResourceAccessResult::Denied {
+                    reason: "Quota exceeded".to_string(),
+                    details: format!("Usage: {}/{}", quota.current_usage, quota.limit),
+                };
+            }
+        }
+
+        ResourceAccessResult::Granted {
+            granted_at: context.current_time,
+            authority_level: context.authority_level,
         }
     }
 

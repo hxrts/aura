@@ -5,11 +5,11 @@
 
 use super::{AuraSpan, LogLevel, LogSink, LogValue, SpanBuilder, TracedOperation};
 use aura_crypto::Effects;
-use aura_errors::AuraError;
+use aura_types::AuraError;
 use aura_journal::{ByzantineEvidence, ByzantineSeverity, ProtocolType};
 use aura_types::DeviceId;
 use protocol_core::{ProtocolDescriptor, ProtocolStep};
-use session_types::SessionState;
+use crate::session_types::SessionState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -320,7 +320,6 @@ impl ProtocolTracer {
         // Convert protocol_core::ProtocolType to aura_journal::ProtocolType
         let journal_protocol_type = match descriptor.protocol_type {
             protocol_core::ProtocolType::Counter => ProtocolType::Counter,
-            protocol_core::ProtocolType::Dkd => ProtocolType::Dkd,
             protocol_core::ProtocolType::Dkd => ProtocolType::Dkd,
             protocol_core::ProtocolType::Resharing => ProtocolType::Resharing,
             protocol_core::ProtocolType::Recovery => ProtocolType::Recovery,

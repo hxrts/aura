@@ -3,7 +3,7 @@
 //! Provides an abstract interface for deterministic and controllable side effects
 //! such as time, randomness, and UUID generation.
 
-use aura_errors::Result;
+use aura_types::Result;
 use uuid::Uuid;
 
 /// Provider for injectable side effects

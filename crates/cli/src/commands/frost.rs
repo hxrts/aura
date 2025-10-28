@@ -4,7 +4,7 @@
 //! including key generation, signing, verification, and testing.
 
 use aura_agent::{FrostAgent, FrostKeyManager};
-use aura_errors::Result;
+use aura_types::Result;
 use aura_types::{DeviceId, DeviceIdExt};
 use clap::Args;
 use ed25519_dalek::Signature;
@@ -124,7 +124,7 @@ pub async fn keygen(args: KeygenArgs) -> Result<()> {
     );
 
     if args.threshold == 0 || args.threshold > args.participants {
-        return Err(aura_errors::AuraError::configuration_error(format!(
+        return Err(aura_types::AuraError::configuration_error(format!(
             "Invalid threshold: {} must be between 1 and {}",
             args.threshold, args.participants
         )));
@@ -132,7 +132,7 @@ pub async fn keygen(args: KeygenArgs) -> Result<()> {
 
     // Create output directory
     std::fs::create_dir_all(&args.output_dir).map_err(|e| {
-        aura_errors::AuraError::configuration_error(format!(
+        aura_types::AuraError::configuration_error(format!(
             "Failed to create output directory '{}': {}",
             args.output_dir, e
         ))
@@ -173,7 +173,7 @@ pub async fn keygen(args: KeygenArgs) -> Result<()> {
         );
 
         std::fs::write(&key_file, &key_data).map_err(|e| {
-            aura_errors::AuraError::configuration_error(format!(
+            aura_types::AuraError::configuration_error(format!(
                 "Failed to write key file '{}': {}",
                 key_file, e
             ))
@@ -203,7 +203,7 @@ pub async fn keygen(args: KeygenArgs) -> Result<()> {
 
     let summary_file = format!("{}/summary.txt", args.output_dir);
     std::fs::write(&summary_file, summary).map_err(|e| {
-        aura_errors::AuraError::configuration_error(format!(
+        aura_types::AuraError::configuration_error(format!(
             "Failed to write summary file '{}': {}",
             summary_file, e
         ))
@@ -225,13 +225,13 @@ pub async fn sign(args: SignArgs) -> Result<()> {
 
     let device_id = if let Some(id_str) = args.device_id {
         DeviceId::from_str(&id_str).map_err(|e| {
-            aura_errors::AuraError::configuration_error(format!("Invalid device ID: {}", e))
+            aura_types::AuraError::configuration_error(format!("Invalid device ID: {}", e))
         })?
     } else {
         // Find the first available key file
         let key_dir = Path::new(&args.key_dir);
         if !key_dir.exists() {
-            return Err(aura_errors::AuraError::configuration_error(format!(
+            return Err(aura_types::AuraError::configuration_error(format!(
                 "Key directory does not exist: {}",
                 args.key_dir
             )));
@@ -240,7 +240,7 @@ pub async fn sign(args: SignArgs) -> Result<()> {
         // Look for key files
         let key_files: Vec<_> = std::fs::read_dir(key_dir)
             .map_err(|e| {
-                aura_errors::AuraError::configuration_error(format!(
+                aura_types::AuraError::configuration_error(format!(
                     "Cannot read key directory: {}",
                     e
                 ))
@@ -257,7 +257,7 @@ pub async fn sign(args: SignArgs) -> Result<()> {
             .collect();
 
         if key_files.is_empty() {
-            return Err(aura_errors::AuraError::configuration_error(
+            return Err(aura_types::AuraError::configuration_error(
                 "No key files found in directory".to_string(),
             ));
         }
@@ -281,7 +281,7 @@ pub async fn sign(args: SignArgs) -> Result<()> {
 
     if let Some(output_file) = args.output {
         std::fs::write(&output_file, &signature_hex).map_err(|e| {
-            aura_errors::AuraError::configuration_error(format!(
+            aura_types::AuraError::configuration_error(format!(
                 "Failed to write signature to '{}': {}",
                 output_file, e
             ))
@@ -311,12 +311,12 @@ pub async fn verify(args: VerifyArgs) -> Result<()> {
     let signature_bytes = if args.signature.len() == 128 {
         // Assume hex string
         hex::decode(&args.signature).map_err(|e| {
-            aura_errors::AuraError::configuration_error(format!("Invalid hex signature: {}", e))
+            aura_types::AuraError::configuration_error(format!("Invalid hex signature: {}", e))
         })?
     } else {
         // Assume file path
         let sig_data = std::fs::read(&args.signature).map_err(|e| {
-            aura_errors::AuraError::configuration_error(format!(
+            aura_types::AuraError::configuration_error(format!(
                 "Failed to read signature file '{}': {}",
                 args.signature, e
             ))
@@ -328,14 +328,14 @@ pub async fn verify(args: VerifyArgs) -> Result<()> {
             // Try to parse as hex
             String::from_utf8(sig_data)
                 .map_err(|e| {
-                    aura_errors::AuraError::configuration_error(format!(
+                    aura_types::AuraError::configuration_error(format!(
                         "Invalid signature file: {}",
                         e
                     ))
                 })
                 .and_then(|hex_str| {
                     hex::decode(hex_str.trim()).map_err(|e| {
-                        aura_errors::AuraError::configuration_error(format!(
+                        aura_types::AuraError::configuration_error(format!(
                             "Invalid hex in file: {}",
                             e
                         ))
@@ -345,7 +345,7 @@ pub async fn verify(args: VerifyArgs) -> Result<()> {
     };
 
     if signature_bytes.len() != 64 {
-        return Err(aura_errors::AuraError::configuration_error(format!(
+        return Err(aura_types::AuraError::configuration_error(format!(
             "Invalid signature length: expected 64 bytes, got {}",
             signature_bytes.len()
         )));
@@ -476,7 +476,7 @@ pub async fn info(args: InfoArgs) -> Result<()> {
 
     let key_dir = Path::new(&args.key_dir);
     if !key_dir.exists() {
-        return Err(aura_errors::AuraError::configuration_error(format!(
+        return Err(aura_types::AuraError::configuration_error(format!(
             "Key directory does not exist: {}",
             args.key_dir
         )));
@@ -486,7 +486,7 @@ pub async fn info(args: InfoArgs) -> Result<()> {
     let summary_file = key_dir.join("summary.txt");
     if summary_file.exists() {
         let summary = std::fs::read_to_string(&summary_file).map_err(|e| {
-            aura_errors::AuraError::configuration_error(format!(
+            aura_types::AuraError::configuration_error(format!(
                 "Failed to read summary file: {}",
                 e
             ))
@@ -497,7 +497,7 @@ pub async fn info(args: InfoArgs) -> Result<()> {
     // List key files
     let key_files: Vec<_> = std::fs::read_dir(key_dir)
         .map_err(|e| {
-            aura_errors::AuraError::configuration_error(format!("Cannot read key directory: {}", e))
+            aura_types::AuraError::configuration_error(format!("Cannot read key directory: {}", e))
         })?
         .filter_map(|entry| {
             let entry = entry.ok()?;

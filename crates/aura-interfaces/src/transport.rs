@@ -4,7 +4,7 @@
 //! enabling dependency injection and testing.
 
 use async_trait::async_trait;
-use aura_errors::Result;
+use aura_types::Result;
 use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 
@@ -128,7 +128,7 @@ mod tests {
             let mut messages = self.messages.lock().await;
             messages
                 .pop()
-                .ok_or_else(|| aura_errors::AuraError::transport_failed("No messages available"))
+                .ok_or_else(|| aura_types::AuraError::transport_failed("No messages available"))
         }
 
         async fn is_reachable(&self, _device_id: DeviceId) -> bool {

@@ -41,6 +41,15 @@ pub trait CoordinatingAgent: Agent {
 
     /// Check the status of any running protocol
     async fn check_protocol_status(&self) -> Result<crate::ProtocolStatus>;
+
+    /// Get detailed status of all active sessions
+    async fn get_detailed_session_status(&self) -> Result<Vec<aura_coordination::SessionStatusInfo>>;
+
+    /// Check if any sessions are in a failed state that requires intervention  
+    async fn has_failed_sessions(&self) -> Result<bool>;
+
+    /// Get the time remaining before any active sessions timeout
+    async fn get_session_timeout_info(&self) -> Result<Option<std::time::Duration>>;
 }
 
 /// Agent capability for identity management

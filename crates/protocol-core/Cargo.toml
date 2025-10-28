@@ -8,9 +8,8 @@ name = "protocol_core"
 path = "src/lib.rs"
 
 [dependencies]
-async-trait = { workspace = true }
-aura-errors = { path = "../aura-errors" }
 aura-types = { path = "../aura-types" }
+async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
