@@ -541,12 +541,16 @@ mod tests {
                 expression: "no_double_spending".to_string(),
                 description: "No double spending occurs".to_string(),
                 source_location: "test.qnt:10".to_string(),
+                enabled: true,
+                tags: vec!["safety".to_string()],
             },
             QuintInvariant {
                 name: "consensus_invariant".to_string(),
                 expression: "all_honest_agree".to_string(),
                 description: "All honest parties agree".to_string(),
                 source_location: "test.qnt:15".to_string(),
+                enabled: true,
+                tags: vec!["consensus".to_string()],
             },
         ];
         
@@ -557,6 +561,8 @@ mod tests {
                 expression: "eventually complete".to_string(),
                 description: "Protocol eventually completes".to_string(),
                 source_location: "test.qnt:20".to_string(),
+                enabled: true,
+                tags: vec!["liveness".to_string()],
             },
         ];
         
@@ -580,6 +586,8 @@ mod tests {
                 expression: "valid_signatures".to_string(),
                 description: "All signatures are valid".to_string(),
                 source_location: "test.qnt:5".to_string(),
+                enabled: true,
+                tags: vec!["crypto".to_string(), "safety".to_string()],
             },
         ];
         

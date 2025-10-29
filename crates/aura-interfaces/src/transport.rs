@@ -4,8 +4,8 @@
 //! enabling dependency injection and testing.
 
 use async_trait::async_trait;
-use aura_types::Result;
 use aura_types::DeviceId;
+use aura_types::Result;
 use serde::{Deserialize, Serialize};
 
 /// Message sent between protocol participants
@@ -126,9 +126,9 @@ mod tests {
 
         async fn receive(&self) -> Result<ProtocolMessage> {
             let mut messages = self.messages.lock().await;
-            messages
-                .pop()
-                .ok_or_else(|| aura_types::AuraError::transport_failed("No messages available"))
+            messages.pop().ok_or_else(|| {
+                aura_types::TypeError::ParseError("No messages available".to_string())
+            })
         }
 
         async fn is_reachable(&self, _device_id: DeviceId) -> bool {

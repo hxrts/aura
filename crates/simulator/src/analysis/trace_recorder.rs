@@ -80,37 +80,20 @@ impl TraceRecorder {
         {
             let violation = PropertyViolation {
                 property_name: property.clone(),
-                property_type: crate::testing::PropertyViolationType::Safety,
-                violation_state: crate::testing::SimulationState {
+                property_type: crate::results::PropertyViolationType::Safety,
+                violation_state: crate::results::SimulationStateSnapshot {
                     tick: event.tick,
                     time: event.tick * 100, // Convert tick to time estimate
-                    variables: std::collections::HashMap::new(),
-                    participants: vec![],
-                    protocol_state: crate::testing::ProtocolMonitoringState {
-                        active_sessions: vec![],
-                        completed_sessions: vec![],
-                        queued_protocols: vec![],
-                    },
-                    network_state: crate::testing::NetworkStateSnapshot {
-                        partitions: vec![],
-                        message_stats: crate::testing::MessageDeliveryStats {
-                            messages_sent: 0,
-                            messages_delivered: 0,
-                            messages_dropped: 0,
-                            average_latency_ms: 0.0,
-                        },
-                        failure_conditions: crate::testing::NetworkFailureConditions {
-                            drop_rate: 0.0,
-                            latency_range_ms: (0, 0),
-                            partitions_active: false,
-                        },
-                    },
+                    participant_count: 0,   // TODO: Extract from event data
+                    active_sessions: 0,     // TODO: Extract from event data
+                    completed_sessions: 0,  // TODO: Extract from event data
+                    state_hash: "placeholder".to_string(), // TODO: Generate proper hash
                 },
-                violation_details: crate::testing::ViolationDetails {
+                violation_details: crate::results::ViolationDetails {
                     description: violation_details.clone(),
                     evidence: vec![format!("Participant: {}", event.participant)],
                     potential_causes: vec![],
-                    severity: crate::testing::ViolationSeverity::Medium,
+                    severity: crate::results::ViolationSeverity::Medium,
                     remediation_suggestions: vec![],
                 },
                 confidence: 0.8,
@@ -309,7 +292,7 @@ impl Default for TraceRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_console_types::EventType;
+    use aura_console_types::{CausalityInfo, EventType};
 
     fn create_test_event(tick: u64, event_id: u64, participant: &str) -> TraceEvent {
         TraceEvent {
@@ -421,7 +404,7 @@ mod tests {
         recorder.record(violation_event);
 
         assert_eq!(recorder.violations().len(), 1);
-        assert_eq!(recorder.violations()[0].property, "safety");
-        assert_eq!(recorder.violations()[0].tick, 5);
+        assert_eq!(recorder.violations()[0].property_name, "safety");
+        assert_eq!(recorder.violations()[0].violation_state.tick, 5);
     }
 }

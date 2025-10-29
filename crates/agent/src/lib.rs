@@ -5,13 +5,35 @@
 //!
 //! ## Architecture Overview
 //!
-//! The unified agent replaces the previous multiple agent types with a single,
-//! session-typed, generic implementation that provides:
+//! The agent crate has been completely refactored for clean, modular architecture:
 //!
 //! - **Session Types** - Compile-time state safety preventing invalid operations
 //! - **Generic Abstractions** - Transport and Storage traits for maximum testability
-//! - **State-Gated API** - Only valid operations available for each state
-//! - **Witness-Based Transitions** - Cryptographic proofs for state changes
+//! - **Modular Design** - Session logic split into focused, maintainable modules
+//! - **Platform Abstractions** - Unified secure storage across macOS, iOS, Linux, Android
+//! - **Utility Helpers** - Shared validation, error handling, and ID generation utilities
+//!
+//! ## Code Organization
+//!
+//! ### Session Module (`agent/session/`)
+//! - `states.rs` - Session state types and trait implementations
+//! - `bootstrap.rs` - Agent initialization and FROST key generation
+//! - `identity.rs` - DKD identity derivation protocols
+//! - `storage_ops.rs` - Encrypted storage operations with capabilities
+//! - `coordination.rs` - Recovery and resharing protocol coordination
+//! - `trait_impls.rs` - Agent trait implementations for each state
+//!
+//! ### Platform Secure Storage (`device_secure_store/`)
+//! - `common.rs` - Generic `SecureStoreImpl<P>` with shared logic
+//! - `macos.rs`, `ios.rs`, `linux.rs`, `android.rs` - Platform-specific implementations
+//! - `store_interface.rs` - Unified interface factory functions
+//!
+//! ### Utilities (`utils/`)
+//! - `validation.rs` - Input validation with builder pattern
+//! - `error_ext.rs` - Error context helpers for cleaner error handling
+//! - `storage_keys.rs` - Consistent storage key generation
+//! - `time.rs` - Timestamp utilities
+//! - `id_gen.rs` - ID generation utilities
 //!
 //! ## Agent States and Transitions
 //!
@@ -80,20 +102,20 @@ pub mod agent;
 /// Agent trait definitions
 pub mod traits;
 
-/// Infrastructure implementations of Transport and Storage
-pub mod infrastructure;
+/// Storage adapter implementations
+pub mod storage_adapter;
 
 /// Transport adapters for bridging agent and coordination layers
 pub mod transport_adapter;
-
-/// FROST threshold signature management
-pub mod frost_manager;
 
 /// Structured error hierarchy
 pub mod error;
 
 /// Platform-specific secure storage
 pub mod device_secure_store;
+
+/// Utility modules for reducing code duplication
+pub mod utils;
 
 // ========== Essential Types ==========
 /// Derived identity result from DKD protocol
@@ -109,48 +131,39 @@ pub struct DerivedIdentity {
 
 // Agent types (main interface)
 pub use agent::{
+    // Capability types
+    AccessControlMetadata,
     // Agent-specific types
     AgentCore,
     AgentFactory,
     AgentProtocol,
     BootstrapConfig,
+    // SessionState implementations
     Coordinating,
+    Effects,
     Failed,
-    FailureInfo,
     Idle,
     KeyShare,
-    ProtocolCompleted,
+    // Protocol types
     ProtocolStatus,
-    Storage,
+    // Utility types
     StorageStats,
-    Transport,
-    // Type aliases for convenience
-    UnifiedAgent,
-    // Session states
     Uninitialized,
 };
 
-// Infrastructure implementations
-pub use infrastructure::{ProductionFactory, ProductionStorage, ProductionTransport};
+// Storage adapter implementations
+pub use storage_adapter::{ProductionFactory, ProductionStorage};
 
 // Transport adapters
 pub use transport_adapter::{CoordinationTransportAdapter, TransportAdapterFactory};
 
-// FROST management
-pub use frost_manager::{FrostAgent, FrostKeyManager, FrostSigningSession};
-
 // Agent traits
-pub use traits::{Agent, CoordinatingAgent, GroupAgent, IdentityAgent, NetworkAgent, StorageAgent};
+pub use traits::{Agent, IdentityAgent, Storage, StorageAgent, Transport, TransportAdapter};
 
 // Error types
-pub use error::{
-    AgentError, CapabilityError, DataError, InfrastructureError, ProtocolError, Result,
-};
+pub use error::{AgentError, Result};
 
 // Secure storage types
 pub use device_secure_store::{
     DeviceAttestation, PlatformSecureStorage, SecureStorage, SecurityLevel,
 };
-
-#[cfg(target_os = "android")]
-pub use device_secure_store::AndroidKeystoreStorage;

@@ -7,6 +7,7 @@
 use aura_crypto::Effects;
 use aura_types::AuraError;
 use aura_types::Epoch;
+use aura_types::MemberId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -24,19 +25,6 @@ use crate::capability::unified_manager::UnifiedCapabilityManager;
 pub type Result<T> = std::result::Result<T, AuraError>;
 
 // ========== Core Group Types ==========
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct MemberId(pub String);
-
-impl MemberId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum GroupOperation {
@@ -241,8 +229,9 @@ impl BeeKEM {
         // let doc_id = DocumentId::generate(&mut rng);
         // Create a deterministic document ID from group_id
         let group_hash = aura_crypto::blake3_hash(group_id.as_bytes());
-        let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&group_hash)
-            .map_err(|e| AuraError::capability_system_error(format!("Invalid group ID hash: {}", e)))?;
+        let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&group_hash).map_err(|e| {
+            AuraError::capability_system_error(format!("Invalid group ID hash: {}", e))
+        })?;
         let identifier = keyhive_core::principal::identifier::Identifier::from(verifying_key);
         let doc_id = keyhive_core::principal::document::id::DocumentId::from(identifier);
 
@@ -946,12 +935,3 @@ pub enum MemberRole {
 }
 
 // ========== Legacy Compatibility Types ==========
-
-/// Operation transition helper
-pub struct OperationId(pub Uuid);
-
-impl OperationId {
-    pub fn new() -> Self {
-        OperationId(Uuid::new_v4())
-    }
-}

@@ -1,0 +1,10 @@
+[package]
+name = "aura-protocol-types"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+aura-types = { path = "../aura-types" }
+serde = { workspace = true }
+uuid = { workspace = true }
+frost-ed25519 = { workspace = true }

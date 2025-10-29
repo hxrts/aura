@@ -155,11 +155,11 @@ impl AuthorityGraph {
                 Some(existing_delegation) => {
                     // Conflict: resolve deterministically using timestamp + issuing device
                     if self.should_prefer_delegation(existing_delegation, other_delegation) {
-                        debug!("Keeping existing delegation for {}", cap_id.as_hex());
+                        debug!("Keeping existing delegation for {}", cap_id.to_hex());
                     } else {
                         debug!(
                             "Replacing delegation for {} with newer version",
-                            cap_id.as_hex()
+                            cap_id.to_hex()
                         );
                         // Remove and re-add to update indices
                         self.remove_delegation_indices(cap_id);
@@ -181,7 +181,7 @@ impl AuthorityGraph {
                     if other_revocation.revoked_at < existing_revocation.revoked_at {
                         debug!(
                             "Replacing revocation for {} with earlier timestamp",
-                            cap_id.as_hex()
+                            cap_id.to_hex()
                         );
                         self.revocations
                             .insert(cap_id.clone(), other_revocation.clone());
@@ -275,7 +275,7 @@ impl AuthorityGraph {
 
         debug!(
             "Applying capability delegation for {}",
-            capability_id.as_hex()
+            capability_id.to_hex()
         );
 
         // Update parent-child relationships
@@ -312,7 +312,7 @@ impl AuthorityGraph {
 
         debug!(
             "Applying capability revocation for {}",
-            capability_id.as_hex()
+            capability_id.to_hex()
         );
 
         // Store the revocation
@@ -354,7 +354,7 @@ impl AuthorityGraph {
 
                 // Check if scope matches
                 if delegation.scope.subsumes(scope) {
-                    debug!("Found matching capability: {}", cap_id.as_hex());
+                    debug!("Found matching capability: {}", cap_id.to_hex());
                     return CapabilityResult::Granted;
                 }
             }

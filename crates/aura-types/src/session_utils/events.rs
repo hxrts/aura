@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Unique identifier for an event
-pub type EventId = Uuid;
+pub type SessionEventId = Uuid;
 
 /// Event severity level for filtering and prioritization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ pub enum EventSeverity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     /// Unique event identifier
-    pub id: EventId,
+    pub id: SessionEventId,
     /// Event type identifier
     pub event_type: String,
     /// Timestamp when event occurred

@@ -44,10 +44,7 @@ impl ObjectManifest {
         sig: ThresholdSignature,
     ) -> Self {
         use aura_crypto::blake3_hash_chunks;
-        let nonce = blake3_hash_chunks(&[
-            root_cid.as_str().as_bytes(),
-            &size.to_le_bytes(),
-        ]);
+        let nonce = blake3_hash_chunks(&[root_cid.as_str().as_bytes(), &size.to_le_bytes()]);
 
         Self {
             root_cid,
@@ -285,7 +282,7 @@ impl ThresholdSignature {
     /// # Example Integration with Coordination Layer
     ///
     /// ```rust,ignore
-    /// use aura_coordination::FrostSession;
+    /// use aura_protocol::FrostSession;
     ///
     /// // After running a complete FROST session:
     /// let mut frost_session = FrostSession::new(session_id, message, threshold, key_share);

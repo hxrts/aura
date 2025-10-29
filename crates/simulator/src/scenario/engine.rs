@@ -4,9 +4,7 @@
 //! into a single, powerful testing framework. All tests, from simple protocol checks
 //! to complex multi-phase chaos scenarios, are defined declaratively.
 
-use crate::{
-    tick, CheckpointManager, PassiveTraceRecorder, Result, SimError, TimeTravelDebugger, WorldState,
-};
+use crate::{tick, AuraError, PassiveTraceRecorder, Result, TimeTravelDebugger, WorldState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,15 +16,15 @@ pub struct UnifiedScenarioEngine {
     /// Base directory for artifacts and debugging data
     base_dir: PathBuf,
     /// Debugging tools integration
-    debug_engine: crate::observability::ScenarioEngine,
+    _debug_engine: crate::observability::ScenarioEngine,
     /// Choreography action registry
     choreography_registry: ChoreographyActionRegistry,
     /// Configuration for scenario execution
     config: UnifiedEngineConfig,
     /// Active debugging tools
     trace_recorder: Option<PassiveTraceRecorder>,
-    checkpoint_manager: Option<CheckpointManager>,
-    time_travel_debugger: Option<TimeTravelDebugger>,
+    checkpoint_manager: Option<crate::observability::checkpoint_manager::CheckpointManager>,
+    _time_travel_debugger: Option<TimeTravelDebugger>,
 }
 
 /// Configuration for the unified engine
@@ -233,9 +231,9 @@ pub struct ChoreographyActionRegistry {
     /// Registered protocol executors
     protocols: HashMap<String, Box<dyn ProtocolExecutor>>,
     /// Registered network condition handlers
-    network_conditions: HashMap<String, Box<dyn NetworkConditionHandler>>,
+    _network_conditions: HashMap<String, Box<dyn NetworkConditionHandler>>,
     /// Registered byzantine behavior injectors
-    byzantine_behaviors: HashMap<String, Box<dyn ByzantineBehaviorInjector>>,
+    _byzantine_behaviors: HashMap<String, Box<dyn ByzantineBehaviorInjector>>,
 }
 
 /// Trait for executing choreographies
@@ -423,12 +421,12 @@ impl UnifiedScenarioEngine {
 
         Ok(Self {
             base_dir: base_path,
-            debug_engine,
+            _debug_engine: debug_engine,
             choreography_registry,
             config: UnifiedEngineConfig::default(),
             trace_recorder: None,
             checkpoint_manager: None,
-            time_travel_debugger: None,
+            _time_travel_debugger: None,
         })
     }
 
@@ -436,6 +434,11 @@ impl UnifiedScenarioEngine {
     pub fn configure(mut self, config: UnifiedEngineConfig) -> Self {
         self.config = config;
         self
+    }
+
+    /// Get a reference to the engine configuration
+    pub fn config(&self) -> &UnifiedEngineConfig {
+        &self.config
     }
 
     /// Register a choreography executor
@@ -581,7 +584,9 @@ impl UnifiedScenarioEngine {
 
         if self.checkpoint_manager.is_none() {
             let checkpoint_dir = self.base_dir.join("checkpoints");
-            self.checkpoint_manager = Some(CheckpointManager::new(checkpoint_dir)?);
+            self.checkpoint_manager = Some(
+                crate::observability::checkpoint_manager::CheckpointManager::new(checkpoint_dir)?,
+            );
         }
 
         Ok(())
@@ -896,7 +901,7 @@ impl UnifiedScenarioEngine {
         if let Some(checkpoint_manager) = &mut self.checkpoint_manager {
             checkpoint_manager.save(world_state, Some(label))
         } else {
-            Err(SimError::RuntimeError(
+            Err(AuraError::configuration_error(
                 "Checkpoint manager not initialized".to_string(),
             ))
         }
@@ -964,7 +969,7 @@ impl ChoreographyActionRegistry {
         if let Some(executor) = self.choreographies.get(name) {
             executor.execute(world_state, participants, parameters)
         } else {
-            Err(SimError::RuntimeError(format!(
+            Err(AuraError::configuration_error(format!(
                 "Unknown choreography: {}",
                 name
             )))
@@ -982,7 +987,7 @@ impl ChoreographyActionRegistry {
         if let Some(executor) = self.protocols.get(name) {
             executor.execute(world_state, participants, parameters)
         } else {
-            Err(SimError::RuntimeError(format!(
+            Err(AuraError::configuration_error(format!(
                 "Unknown protocol: {}",
                 name
             )))

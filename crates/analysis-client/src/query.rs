@@ -335,6 +335,7 @@ pub struct TraceSummary {
 mod tests {
     use super::*;
     use aura_console_types::CausalityInfo;
+    use std::collections::HashMap;
 
     fn create_test_event(
         tick: u64,

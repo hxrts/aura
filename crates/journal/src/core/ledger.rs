@@ -9,9 +9,17 @@
 // - Handles signature verification
 
 use super::state::AccountState;
-use crate::{protocols::*, types::*, LedgerError, Result};
-use aura_types::{DeviceId, GuardianId};
+use crate::{
+    error::{AuraError, Result as AuraResult},
+    protocols::*,
+    types::*,
+};
+use aura_authentication::{
+    validate_device_signature, validate_guardian_signature, validate_threshold_signature,
+    EventAuthorization, ThresholdSig,
+};
 use aura_crypto::Ed25519Signature;
+use aura_types::{DeviceId, GuardianId};
 
 /// AccountLedger - manages account state and event log
 ///
@@ -28,7 +36,7 @@ pub struct AccountLedger {
 
 impl AccountLedger {
     /// Create a new ledger with initial state
-    pub fn new(initial_state: AccountState) -> Result<Self> {
+    pub fn new(initial_state: AccountState) -> AuraResult<Self> {
         Ok(AccountLedger {
             state: initial_state,
             event_log: Vec::new(),
@@ -38,7 +46,7 @@ impl AccountLedger {
     /// Append and apply an event to the ledger
     ///
     /// Validates the event before applying it to state
-    pub fn append_event(&mut self, event: Event, effects: &aura_crypto::Effects) -> Result<()> {
+    pub fn append_event(&mut self, event: Event, effects: &aura_crypto::Effects) -> AuraResult<()> {
         // Validate event
         self.validate_event(&event)?;
 
@@ -57,7 +65,7 @@ impl AccountLedger {
     /// - Ed25519Signature validity (threshold or device)
     /// - Authorization matches event requirements
     /// - Event-specific preconditions
-    fn validate_event(&self, event: &Event) -> Result<()> {
+    fn validate_event(&self, event: &Event) -> AuraResult<()> {
         // Validate authorization
         match &event.authorization {
             EventAuthorization::ThresholdSignature(threshold_sig) => {
@@ -92,34 +100,32 @@ impl AccountLedger {
         &self,
         event: &Event,
         threshold_sig: &ThresholdSig,
-    ) -> Result<()> {
-        // Check we have enough signers
-        if threshold_sig.signers.len() < self.state.threshold as usize {
-            return Err(LedgerError::ThresholdNotMet {
-                current: threshold_sig.signers.len(),
-                required: self.state.threshold as usize,
-            });
-        }
-
-        // Verify signer indices are valid and unique
-        self.validate_signer_indices(&threshold_sig.signers)?;
-
+    ) -> AuraResult<()> {
         // Compute event hash (what was signed)
         let event_hash = event.hash()?;
 
-        // Verify signature against group public key using FROST verification
-        self.verify_frost_signature(&event_hash, threshold_sig)?;
+        // Use authentication crate validation
+        validate_threshold_signature(
+            threshold_sig,
+            &event_hash,
+            &self.state.group_public_key,
+            self.state.threshold,
+        )
+        .map_err(|e| {
+            AuraError::invalid_signature(format!("Threshold signature validation failed: {}", e))
+        })?;
 
         Ok(())
     }
 
     /// Validate that signer indices are valid and unique
-    fn validate_signer_indices(&self, signers: &[u8]) -> Result<()> {
+    #[allow(dead_code)]
+    fn validate_signer_indices(&self, signers: &[u8]) -> AuraResult<()> {
         // Check for duplicates
         let mut sorted_signers = signers.to_vec();
         sorted_signers.sort_unstable();
         if sorted_signers.windows(2).any(|w| w[0] == w[1]) {
-            return Err(LedgerError::InvalidSignature(
+            return Err(AuraError::invalid_signature(
                 "Duplicate signer indices in threshold signature".to_string(),
             ));
         }
@@ -127,7 +133,7 @@ impl AccountLedger {
         // Check that all indices are within valid range
         let max_participants = self.state.devices.len() as u8;
         if let Some(&invalid_index) = signers.iter().find(|&&idx| idx >= max_participants) {
-            return Err(LedgerError::InvalidSignature(format!(
+            return Err(AuraError::invalid_signature(format!(
                 "Invalid signer index {} (max: {})",
                 invalid_index,
                 max_participants - 1
@@ -138,7 +144,12 @@ impl AccountLedger {
     }
 
     /// Verify FROST threshold signature
-    fn verify_frost_signature(&self, message: &[u8], threshold_sig: &ThresholdSig) -> Result<()> {
+    #[allow(dead_code)]
+    fn verify_frost_signature(
+        &self,
+        message: &[u8],
+        threshold_sig: &ThresholdSig,
+    ) -> AuraResult<()> {
         use aura_crypto::frost::verify_signature;
 
         // Verify signature using standard Ed25519 verification
@@ -149,7 +160,7 @@ impl AccountLedger {
             &self.state.group_public_key,
         )
         .map_err(|e| {
-            LedgerError::InvalidSignature(format!(
+            AuraError::invalid_signature(format!(
                 "FROST threshold signature verification failed: {:?}",
                 e
             ))
@@ -164,14 +175,15 @@ impl AccountLedger {
     }
 
     /// Validate individual FROST signature shares with detailed audit trail
+    #[allow(dead_code)]
     fn validate_frost_signature_shares(
         &self,
         message: &[u8],
         threshold_sig: &ThresholdSig,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         // Verify we have the expected number of signature shares
         if threshold_sig.signature_shares.len() != threshold_sig.signers.len() {
-            return Err(LedgerError::InvalidSignature(format!(
+            return Err(AuraError::invalid_signature(format!(
                 "Signature share count mismatch: expected {}, got {}",
                 threshold_sig.signers.len(),
                 threshold_sig.signature_shares.len()
@@ -191,7 +203,7 @@ impl AccountLedger {
         );
 
         if !audit_trail.invalid_shares.is_empty() {
-            return Err(LedgerError::InvalidSignature(format!(
+            return Err(AuraError::invalid_signature(format!(
                 "Invalid signature shares detected: {} shares failed verification",
                 audit_trail.invalid_shares.len()
             )));
@@ -199,7 +211,7 @@ impl AccountLedger {
 
         // Verify minimum threshold was met
         if audit_trail.valid_shares.len() < 2 {
-            return Err(LedgerError::InvalidSignature(format!(
+            return Err(AuraError::invalid_signature(format!(
                 "Insufficient valid signature shares: {} valid, minimum 2 required",
                 audit_trail.valid_shares.len()
             )));
@@ -209,11 +221,12 @@ impl AccountLedger {
     }
 
     /// Perform detailed signature share verification with comprehensive audit trail
+    #[allow(dead_code)]
     fn verify_signature_shares_with_audit(
         &self,
         message: &[u8],
         threshold_sig: &ThresholdSig,
-    ) -> Result<SignatureShareAuditTrail> {
+    ) -> AuraResult<SignatureShareAuditTrail> {
         // frost_ed25519 imported in verify_individual_signature_share
 
         let mut valid_shares = Vec::new();
@@ -264,8 +277,10 @@ impl AccountLedger {
 
         Ok(SignatureShareAuditTrail {
             message_hash: aura_crypto::blake3_hash(message).to_vec(),
-            signature_hash: aura_crypto::blake3_hash(&aura_crypto::ed25519_signature_to_bytes(&threshold_sig.signature))
-                .to_vec(),
+            signature_hash: aura_crypto::blake3_hash(&aura_crypto::ed25519_signature_to_bytes(
+                &threshold_sig.signature,
+            ))
+            .to_vec(),
             total_shares: threshold_sig.signature_shares.len(),
             valid_shares,
             invalid_shares,
@@ -276,6 +291,7 @@ impl AccountLedger {
     }
 
     /// Verify an individual signature share with detailed metadata
+    #[allow(dead_code)]
     fn verify_individual_signature_share(
         &self,
         _message: &[u8],
@@ -283,10 +299,10 @@ impl AccountLedger {
         share_bytes: &[u8],
         _aggregated_signature: &aura_crypto::Ed25519Signature,
         share_index: usize,
-    ) -> Result<ValidShareDetail> {
+    ) -> AuraResult<ValidShareDetail> {
         // Attempt to deserialize the signature share
         if share_bytes.len() != 32 {
-            return Err(LedgerError::InvalidSignature(format!(
+            return Err(AuraError::invalid_signature(format!(
                 "Invalid signature share length: expected 32 bytes, got {}",
                 share_bytes.len()
             )));
@@ -299,7 +315,7 @@ impl AccountLedger {
         // Attempt FROST signature share deserialization
         let _frost_share = frost_ed25519::round2::SignatureShare::deserialize(share_array)
             .map_err(|e| {
-                LedgerError::InvalidSignature(format!(
+                AuraError::invalid_signature(format!(
                     "Failed to deserialize FROST signature share: {}",
                     e
                 ))
@@ -320,6 +336,7 @@ impl AccountLedger {
     }
 
     /// Calculate authority level based on valid signature shares
+    #[allow(dead_code)]
     fn calculate_authority_level(&self, valid_shares: &[ValidShareDetail]) -> f64 {
         valid_shares
             .iter()
@@ -333,16 +350,16 @@ impl AccountLedger {
         event: &Event,
         device_id: DeviceId,
         signature: &Ed25519Signature,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         // Get device metadata
         let device = self
             .state
             .get_device(&device_id)
-            .ok_or_else(|| LedgerError::DeviceNotFound(device_id.to_string()))?;
+            .ok_or_else(|| AuraError::device_not_found(device_id.to_string()))?;
 
         // Check device is active
         if !self.state.is_device_active(&device_id) {
-            return Err(LedgerError::DeviceNotFound(format!(
+            return Err(AuraError::device_not_found(format!(
                 "Device {} is not active (tombstoned)",
                 device_id
             )));
@@ -351,14 +368,10 @@ impl AccountLedger {
         // Compute event hash (excluding authorization field for signing)
         let event_hash = event.signable_hash()?;
 
-        // Verify signature
-        aura_crypto::ed25519_verify(&device.public_key, &event_hash, signature)
-            .map_err(|e| {
-                LedgerError::InvalidSignature(format!(
-                    "Device signature verification failed: {}",
-                    e
-                ))
-            })?;
+        // Use authentication crate validation
+        validate_device_signature(device_id, signature, &event_hash, &device.public_key).map_err(
+            |e| AuraError::invalid_signature(format!("Device signature validation failed: {}", e)),
+        )?;
 
         Ok(())
     }
@@ -369,12 +382,12 @@ impl AccountLedger {
         event: &Event,
         guardian_id: GuardianId,
         signature: &Ed25519Signature,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         // Get guardian metadata
         let guardian = self
             .state
             .get_guardian(&guardian_id)
-            .ok_or_else(|| LedgerError::GuardianNotFound(format!("{:?}", guardian_id)))?;
+            .ok_or_else(|| AuraError::authority_not_found(format!("{:?}", guardian_id)))?;
 
         // Verify guardian public key exists and is valid
         let guardian_public_key = &guardian.public_key;
@@ -385,13 +398,10 @@ impl AccountLedger {
         // Create canonical verification message for the event
         let message = self.create_guardian_event_message(event, &guardian_id)?;
 
-        // Verify the actual signature provided with the event
-        aura_crypto::ed25519_verify(guardian_public_key, &message, signature)
+        // Use authentication crate validation
+        validate_guardian_signature(guardian_id, signature, &message, guardian_public_key)
             .map_err(|e| {
-                LedgerError::InvalidSignature(format!(
-                    "Guardian signature verification failed for {:?}: {}",
-                    guardian_id, e
-                ))
+                AuraError::invalid_signature(format!("Guardian signature validation failed: {}", e))
             })?;
 
         // Verify guardian is still authorized and active
@@ -411,33 +421,33 @@ impl AccountLedger {
     fn validate_guardian_public_key_security(
         &self,
         public_key: &aura_crypto::Ed25519VerifyingKey,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         let key_bytes = aura_crypto::ed25519_verifying_key_to_bytes(public_key);
 
         // Check for obvious weak keys
         if key_bytes.iter().all(|&b| b == 0) {
-            return Err(LedgerError::WeakKey(
+            return Err(AuraError::key_derivation_failed(
                 "Guardian public key is all zeros".to_string(),
             ));
         }
 
         if key_bytes.iter().all(|&b| b == 0xFF) {
-            return Err(LedgerError::WeakKey(
+            return Err(AuraError::key_derivation_failed(
                 "Guardian public key is all ones".to_string(),
             ));
         }
 
         // Check for simple patterns
         if key_bytes[0] != 0 && key_bytes.iter().all(|&b| b == key_bytes[0]) {
-            return Err(LedgerError::WeakKey(
+            return Err(AuraError::key_derivation_failed(
                 "Guardian public key has repeating pattern".to_string(),
             ));
         }
 
         // Check known compromised keys (placeholder - in production, check against blacklist)
         if self.is_key_compromised(&key_bytes) {
-            return Err(LedgerError::CompromisedKey(
-                "Guardian public key is known to be compromised".to_string(),
+            return Err(AuraError::key_derivation_failed(
+                "Guardian public key is known to be compromised",
             ));
         }
 
@@ -450,7 +460,7 @@ impl AccountLedger {
         &self,
         event: &Event,
         guardian_id: &GuardianId,
-    ) -> Result<Vec<u8>> {
+    ) -> AuraResult<Vec<u8>> {
         let mut message = Vec::new();
 
         // Add event context
@@ -487,15 +497,18 @@ impl AccountLedger {
     }
 
     /// Verify guardian is authorized and active
-    fn verify_guardian_authorization(&self, guardian_id: &GuardianId) -> Result<()> {
+    fn verify_guardian_authorization(&self, guardian_id: &GuardianId) -> AuraResult<()> {
         let _guardian = self
             .state
             .get_guardian(guardian_id)
-            .ok_or_else(|| LedgerError::GuardianNotFound(format!("{:?}", guardian_id)))?;
+            .ok_or_else(|| AuraError::authority_not_found(format!("{:?}", guardian_id)))?;
 
         // Check if guardian has been removed (tombstoned)
         if self.state.removed_guardians.contains(guardian_id) {
-            return Err(LedgerError::GuardianRevoked(format!("{:?}", guardian_id)));
+            return Err(AuraError::token_revoked(format!(
+                "Guardian {:?} has been removed",
+                guardian_id
+            )));
         }
 
         tracing::debug!(
@@ -510,15 +523,15 @@ impl AccountLedger {
         &self,
         guardian_id: &GuardianId,
         public_key: &aura_crypto::Ed25519VerifyingKey,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         let guardian = self
             .state
             .get_guardian(guardian_id)
-            .ok_or_else(|| LedgerError::GuardianNotFound(format!("{:?}", guardian_id)))?;
+            .ok_or_else(|| AuraError::authority_not_found(format!("{:?}", guardian_id)))?;
 
         // Verify key matches registration
         if guardian.public_key != *public_key {
-            return Err(LedgerError::KeyMismatch(format!(
+            return Err(AuraError::invalid_signature(format!(
                 "Guardian public key mismatch for {:?}",
                 guardian_id
             )));
@@ -532,33 +545,36 @@ impl AccountLedger {
     }
 
     /// Verify guardian registration chain integrity
-    fn verify_guardian_registration_chain(&self, guardian_id: &GuardianId) -> Result<()> {
+    fn verify_guardian_registration_chain(&self, guardian_id: &GuardianId) -> AuraResult<()> {
         // Find the guardian registration event
         let registration_event = self.find_guardian_registration_event(guardian_id)?;
 
         // Verify the registration event was properly authorized
         match &registration_event.authorization {
             EventAuthorization::ThresholdSignature(threshold_sig) => {
-                self.verify_threshold_signature_integrity(registration_event, threshold_sig)?;
+                self.verify_threshold_signature_integrity(registration_event, &threshold_sig)?;
             }
             EventAuthorization::DeviceCertificate {
                 device_id,
                 signature,
             } => {
-                self.verify_device_signature_integrity(registration_event, device_id, signature)?;
+                self.verify_device_signature_integrity(registration_event, &device_id, &signature)?;
             }
             EventAuthorization::GuardianSignature {
                 guardian_id,
                 signature,
             } => {
-                self.validate_guardian_signature(registration_event, *guardian_id, signature)?;
+                self.validate_guardian_signature(registration_event, *guardian_id, &signature)?;
             }
             EventAuthorization::LifecycleInternal => {}
         }
 
         // Verify no subsequent revocation
         if self.find_guardian_revocation_event(guardian_id)?.is_some() {
-            return Err(LedgerError::GuardianRevoked(format!("{:?}", guardian_id)));
+            return Err(AuraError::token_revoked(format!(
+                "Guardian {:?} has been revoked",
+                guardian_id
+            )));
         }
 
         tracing::debug!(
@@ -569,7 +585,7 @@ impl AccountLedger {
     }
 
     /// Find guardian registration event in ledger
-    fn find_guardian_registration_event(&self, guardian_id: &GuardianId) -> Result<&Event> {
+    fn find_guardian_registration_event(&self, guardian_id: &GuardianId) -> AuraResult<&Event> {
         for event in self.event_log() {
             if let EventType::AddGuardian(add_event) = &event.event_type {
                 if add_event.guardian_id == *guardian_id {
@@ -577,14 +593,17 @@ impl AccountLedger {
                 }
             }
         }
-        Err(LedgerError::GuardianNotFound(format!(
+        Err(AuraError::authority_not_found(format!(
             "No registration event found for guardian {:?}",
             guardian_id
         )))
     }
 
     /// Find guardian revocation event if it exists
-    fn find_guardian_revocation_event(&self, guardian_id: &GuardianId) -> Result<Option<&Event>> {
+    fn find_guardian_revocation_event(
+        &self,
+        guardian_id: &GuardianId,
+    ) -> AuraResult<Option<&Event>> {
         for event in self.event_log() {
             if let EventType::RemoveGuardian(remove_event) = &event.event_type {
                 if remove_event.guardian_id == *guardian_id {
@@ -599,17 +618,17 @@ impl AccountLedger {
     fn verify_threshold_signature_integrity(
         &self,
         event: &Event,
-        threshold_sig: &crate::ThresholdSig,
-    ) -> Result<()> {
+        threshold_sig: &ThresholdSig,
+    ) -> AuraResult<()> {
         // Basic validation
         if threshold_sig.signers.is_empty() {
-            return Err(LedgerError::InvalidSignature(
+            return Err(AuraError::invalid_signature(
                 "No signers in threshold signature".to_string(),
             ));
         }
 
         if threshold_sig.signature_shares.len() < threshold_sig.signers.len() {
-            return Err(LedgerError::InvalidSignature(
+            return Err(AuraError::invalid_signature(
                 "Insufficient signature shares".to_string(),
             ));
         }
@@ -618,7 +637,7 @@ impl AccountLedger {
         let threshold = self.state.threshold as usize;
 
         if threshold_sig.signers.len() < threshold {
-            return Err(LedgerError::InsufficientSigners(format!(
+            return Err(AuraError::insufficient_permissions(format!(
                 "Need {} signers, got {}",
                 threshold,
                 threshold_sig.signers.len()
@@ -639,7 +658,7 @@ impl AccountLedger {
 
         // Verify FROST signature
         verify_signature(&message, signature, &group_public_key).map_err(|e| {
-            LedgerError::InvalidSignature(format!("FROST signature verification failed: {:?}", e))
+            AuraError::invalid_signature(format!("FROST signature verification failed: {:?}", e))
         })?;
 
         tracing::debug!("FROST threshold signature verification successful");
@@ -647,7 +666,7 @@ impl AccountLedger {
     }
 
     /// Reconstruct the message that was signed for verification
-    fn reconstruct_signed_message(&self, event: &Event) -> Result<Vec<u8>> {
+    fn reconstruct_signed_message(&self, event: &Event) -> AuraResult<Vec<u8>> {
         // Serialize the event data (excluding signature) for verification
         let mut message = Vec::new();
 
@@ -681,19 +700,19 @@ impl AccountLedger {
         event: &Event,
         device_id: &DeviceId,
         signature: &aura_crypto::Ed25519Signature,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         // Get device public key
         let device = self
             .state
             .get_device(device_id)
-            .ok_or_else(|| LedgerError::DeviceNotFound(format!("{:?}", device_id)))?;
+            .ok_or_else(|| AuraError::device_not_found(format!("{:?}", device_id)))?;
 
         // Create canonical message for event
         let message = self.create_device_event_message(event)?;
 
         // Verify signature
         aura_crypto::ed25519_verify(&device.public_key, &message, signature).map_err(|e| {
-            LedgerError::InvalidSignature(format!("Device signature verification failed: {}", e))
+            AuraError::invalid_signature(format!("Device signature verification failed: {}", e))
         })?;
 
         tracing::debug!("Device signature verification passed for {:?}", device_id);
@@ -701,7 +720,7 @@ impl AccountLedger {
     }
 
     /// Create canonical message for device event signing
-    fn create_device_event_message(&self, event: &Event) -> Result<Vec<u8>> {
+    fn create_device_event_message(&self, event: &Event) -> AuraResult<Vec<u8>> {
         let mut message = Vec::new();
 
         message.extend_from_slice(event.event_id.0.as_bytes());
@@ -744,19 +763,19 @@ impl AccountLedger {
     /// Validate EpochTick event
     ///
     /// Reference: 080 spec Part 1: Logical Clock for Epoch-Based Timeouts
-    fn validate_epoch_tick(&self, tick: &EpochTickEvent) -> Result<()> {
+    fn validate_epoch_tick(&self, tick: &EpochTickEvent) -> AuraResult<()> {
         // Verify new epoch is monotonically increasing
         if tick.new_epoch <= self.state.lamport_clock {
-            return Err(LedgerError::StaleEpoch {
-                provided: tick.new_epoch,
-                current: self.state.lamport_clock,
-            });
+            return Err(AuraError::epoch_mismatch(format!(
+                "Stale epoch: provided {} <= current {}",
+                tick.new_epoch, self.state.lamport_clock
+            )));
         }
 
         // Verify evidence_hash matches current state hash
         let current_state_hash = self.compute_state_hash()?;
         if tick.evidence_hash != current_state_hash {
-            return Err(LedgerError::InvalidEvent(format!(
+            return Err(AuraError::protocol_invalid_instruction(format!(
                 "Evidence hash mismatch: provided {:?}, computed {:?}",
                 hex::encode(tick.evidence_hash),
                 hex::encode(current_state_hash)
@@ -767,7 +786,7 @@ impl AccountLedger {
         let min_epoch_gap = 5; // Minimum 5 epochs between ticks
         let epoch_gap = tick.new_epoch - self.state.lamport_clock;
         if epoch_gap < min_epoch_gap {
-            return Err(LedgerError::InvalidEvent(format!(
+            return Err(AuraError::protocol_invalid_instruction(format!(
                 "Epoch tick rate limit exceeded: gap {} < minimum {}",
                 epoch_gap, min_epoch_gap
             )));
@@ -779,7 +798,7 @@ impl AccountLedger {
             if let Some(current_time) = self.get_current_time_estimate() {
                 let time_gap = current_time.saturating_sub(last_tick_time);
                 if time_gap < min_time_gap_ms {
-                    return Err(LedgerError::InvalidEvent(format!(
+                    return Err(AuraError::protocol_invalid_instruction(format!(
                         "Epoch tick time rate limit exceeded: gap {}ms < minimum {}ms",
                         time_gap, min_time_gap_ms
                     )));
@@ -844,7 +863,7 @@ impl AccountLedger {
     }
 
     /// Compute state hash (for EpochTick verification)
-    pub fn compute_state_hash(&self) -> Result<[u8; 32]> {
+    pub fn compute_state_hash(&self) -> AuraResult<[u8; 32]> {
         // Serialize account state and hash
         let serialized = crate::serialization::serialize_cbor(&self.state)?;
         Ok(aura_crypto::blake3_hash(&serialized))
@@ -896,10 +915,10 @@ impl AccountLedger {
         session_id: uuid::Uuid,
         status: SessionStatus,
         effects: &aura_crypto::Effects,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         self.state
             .update_session_status(session_id, status, effects)
-            .map_err(LedgerError::InvalidEvent)
+            .map_err(AuraError::protocol_invalid_instruction)
     }
 
     /// Complete a session with outcome
@@ -908,10 +927,10 @@ impl AccountLedger {
         session_id: uuid::Uuid,
         outcome: SessionOutcome,
         effects: &aura_crypto::Effects,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         self.state
             .complete_session(session_id, outcome, effects)
-            .map_err(LedgerError::InvalidEvent)
+            .map_err(AuraError::protocol_invalid_instruction)
     }
 
     /// Abort a session with failure
@@ -921,10 +940,10 @@ impl AccountLedger {
         reason: String,
         blamed_party: Option<ParticipantId>,
         effects: &aura_crypto::Effects,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         self.state
             .abort_session(session_id, reason, blamed_party, effects)
-            .map_err(LedgerError::InvalidEvent)
+            .map_err(AuraError::protocol_invalid_instruction)
     }
 
     /// Clean up expired sessions based on current epoch
@@ -944,10 +963,10 @@ impl AccountLedger {
         before_epoch: u64,
         session_ids_to_preserve: Vec<uuid::Uuid>,
         effects: &aura_crypto::Effects,
-    ) -> Result<CompactionProposal> {
+    ) -> AuraResult<CompactionProposal> {
         // Validate proposal
         if before_epoch >= self.lamport_clock() {
-            return Err(LedgerError::InvalidEvent(
+            return Err(AuraError::protocol_invalid_instruction(
                 "Cannot compact events from current or future epochs".to_string(),
             ));
         }
@@ -984,9 +1003,9 @@ impl AccountLedger {
         &self,
         _proposal_id: uuid::Uuid,
         has_required_proofs: bool,
-    ) -> Result<()> {
+    ) -> AuraResult<()> {
         if !has_required_proofs {
-            return Err(LedgerError::InvalidEvent(
+            return Err(AuraError::protocol_invalid_instruction(
                 "Cannot acknowledge compaction without required Merkle proofs".to_string(),
             ));
         }
@@ -1006,8 +1025,8 @@ impl AccountLedger {
     pub fn commit_compaction(
         &mut self,
         _proposal_id: uuid::Uuid,
-        _threshold_signature: crate::ThresholdSig,
-    ) -> Result<()> {
+        _threshold_signature: ThresholdSig,
+    ) -> AuraResult<()> {
         // Validate threshold signature
         // (In practice, this would verify the signature covers the compaction proposal)
 
@@ -1024,7 +1043,7 @@ impl AccountLedger {
     ///
     /// This is the actual compaction operation that removes old events
     /// from the event log. Only call after threshold authorization.
-    pub fn prune_events(&mut self, before_epoch: u64) -> Result<usize> {
+    pub fn prune_events(&mut self, before_epoch: u64) -> AuraResult<usize> {
         let initial_count = self.event_log.len();
 
         // Remove events before the compaction epoch
@@ -1151,8 +1170,8 @@ pub struct CompactionStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_types::{AccountId, AccountIdExt, DeviceIdExt};
     use aura_crypto::Ed25519SigningKey;
+    use aura_types::{AccountId, AccountIdExt, DeviceIdExt};
 
     fn create_test_ledger() -> AccountLedger {
         let effects = aura_crypto::Effects::test();

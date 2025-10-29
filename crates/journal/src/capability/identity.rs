@@ -5,40 +5,22 @@ use crate::capability::{
     types::{CapabilityId, CapabilityScope, Subject},
     CapabilityError, Result,
 };
-use crate::ThresholdSig;
-use aura_types::DeviceId;
+use aura_authentication::ThresholdSig;
 use aura_crypto::Ed25519VerifyingKey;
+use aura_types::{DeviceId, IndividualId, IndividualIdExt};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tracing::{debug, info};
 
-/// Individual identity derived from threshold signatures
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct IndividualId(pub String);
-
-impl IndividualId {
-    pub fn new(id: &str) -> Self {
-        Self(id.to_string())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
+/// Extension trait for IndividualId to add capability-specific utilities
+pub trait IndividualIdCapabilityExt {
     /// Convert to capability subject
-    pub fn to_subject(&self) -> Subject {
-        Subject::new(&self.0)
-    }
+    fn to_subject(&self) -> Subject;
+}
 
-    /// Create from device ID (device-specific identity)
-    pub fn from_device(device_id: &DeviceId) -> Self {
-        Self(format!("device:{}", device_id.0))
-    }
-
-    /// Create from DKD context (derived identity)
-    pub fn from_dkd_context(context: &str, fingerprint: &[u8; 32]) -> Self {
-        let fingerprint_hex = hex::encode(fingerprint);
-        Self(format!("dkd:{}:{}", context, fingerprint_hex))
+impl IndividualIdCapabilityExt for IndividualId {
+    fn to_subject(&self) -> Subject {
+        Subject::new(self.as_str())
     }
 }
 
@@ -159,11 +141,7 @@ impl IdentityCapabilityManager {
             subject_id.clone(),
             scope.clone(),
             None, // No expiry for genesis
-            threshold_auth
-                .threshold_signature
-                .signature
-                
-                .to_vec(),
+            threshold_auth.threshold_signature.signature.to_vec(),
             issued_by,
             effects,
         );
@@ -174,7 +152,7 @@ impl IdentityCapabilityManager {
 
         debug!(
             "Created genesis delegation with ID: {}",
-            delegation.capability_id.as_hex()
+            delegation.capability_id.to_hex()
         );
 
         Ok(delegation)
@@ -193,7 +171,7 @@ impl IdentityCapabilityManager {
     ) -> Result<CapabilityDelegation> {
         debug!(
             "Creating threshold-signed delegation from parent {}",
-            parent_id.as_hex()
+            parent_id.to_hex()
         );
 
         // Verify threshold signature
@@ -204,18 +182,14 @@ impl IdentityCapabilityManager {
             subject_id,
             scope,
             expiry,
-            threshold_auth
-                .threshold_signature
-                .signature
-                
-                .to_vec(),
+            threshold_auth.threshold_signature.signature.to_vec(),
             issued_by,
             effects,
         );
 
         debug!(
             "Created threshold delegation with ID: {}",
-            delegation.capability_id.as_hex()
+            delegation.capability_id.to_hex()
         );
 
         Ok(delegation)
@@ -232,7 +206,7 @@ impl IdentityCapabilityManager {
     ) -> Result<CapabilityRevocation> {
         debug!(
             "Creating threshold-signed revocation for capability {}",
-            capability_id.as_hex()
+            capability_id.to_hex()
         );
 
         // Verify threshold signature
@@ -241,11 +215,7 @@ impl IdentityCapabilityManager {
         let revocation = CapabilityRevocation::new(
             capability_id,
             reason,
-            threshold_auth
-                .threshold_signature
-                .signature
-                
-                .to_vec(),
+            threshold_auth.threshold_signature.signature.to_vec(),
             issued_by,
             effects,
         );
@@ -351,7 +321,10 @@ pub mod dkd_keys {
     pub fn derive_capability_keys(
         dkd_seed: &[u8; 32],
         capability_scope: &CapabilityScope,
-    ) -> Result<(aura_crypto::Ed25519SigningKey, aura_crypto::Ed25519VerifyingKey)> {
+    ) -> Result<(
+        aura_crypto::Ed25519SigningKey,
+        aura_crypto::Ed25519VerifyingKey,
+    )> {
         // Derive deterministic key for this capability scope
         let mut hasher = aura_crypto::blake3_hasher();
         hasher.update(dkd_seed);

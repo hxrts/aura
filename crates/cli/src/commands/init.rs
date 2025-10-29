@@ -3,10 +3,12 @@
 // NOTE: Temporarily simplified - agent/coordination dependencies disabled
 
 use aura_crypto::Effects;
-use aura_types::Result;
 use aura_journal::bootstrap::BootstrapManager;
 use aura_journal::serialization::to_cbor_bytes;
+use aura_types::AuraError;
 use tracing::info;
+
+type Result<T> = std::result::Result<T, AuraError>;
 
 /// Initialize a new Aura account with the specified threshold configuration
 ///
@@ -38,10 +40,7 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
     let init_result = bootstrap_manager
         .initialize_account(participants, threshold, &effects)
         .map_err(|e| {
-            aura_types::AuraError::bootstrap_failed(format!(
-                "Account initialization failed: {}",
-                e
-            ))
+            aura_types::AuraError::bootstrap_failed(format!("Account initialization failed: {}", e))
         })?;
 
     info!("Account initialization complete, persisting to disk");

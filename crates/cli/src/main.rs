@@ -13,14 +13,14 @@ mod commands;
 mod config;
 
 // Temporarily disabled - requires coordination crate
-// use aura_coordination::{production::ConsoleLogSink, LogSink};
+// use aura_protocol::{production::ConsoleLogSink, LogSink};
 use commands::{
     // Temporarily disabled - requires agent crate
     // authz::{handle_authz_command, AuthzCommand},
     common,
     frost::{self, FrostCommand},
     init,
-    network::{handle_network_command, NetworkCommand},
+    // network::{handle_network_command, NetworkCommand},
     node::{handle_node_command, NodeCommand},
     scenarios::{handle_scenarios_command, ScenariosArgs},
     status,
@@ -72,7 +72,6 @@ enum Commands {
     Threshold(ThresholdCommand),
 
     /// FROST threshold signature operations
-    #[command(subcommand)]
     Frost(FrostCommand),
     //
     // /// Authorization commands - permission management (what you can do)
@@ -83,9 +82,9 @@ enum Commands {
     #[command(subcommand)]
     Storage(StorageCommand),
     //
-    /// Network and CGKA operations
-    #[command(subcommand)]
-    Network(NetworkCommand),
+    // Network and CGKA operations (disabled - requires API refactoring)
+    // #[command(subcommand)]
+    // Network(NetworkCommand),
 }
 
 #[tokio::main]
@@ -138,12 +137,11 @@ async fn main() -> Result<()> {
         Commands::Storage(cmd) => {
             let config = common::load_config(&cli.config).await?;
             handle_storage_command(cmd, &config).await?;
-        }
-        //
-        Commands::Network(cmd) => {
-            let config = common::load_config(&cli.config).await?;
-            handle_network_command(cmd, &config).await?;
-        }
+        } // //
+          // Commands::Network(cmd) => {
+          //     let config = common::load_config(&cli.config).await?;
+          //     handle_network_command(cmd, &config).await?;
+          // }
     }
 
     Ok(())

@@ -7,8 +7,9 @@
 //! Reference: work/pre_ssb_storage_tests.md - Category 1.2
 
 use aura_crypto::Effects;
+use aura_crypto::{ed25519_sign, ed25519_verify, Ed25519SigningKey, Ed25519VerifyingKey};
 use aura_journal::capability::{CapabilityId, CapabilityScope, Subject};
-use aura_crypto::{ed25519_sign, Ed25519SigningKey, ed25519_verify, Ed25519VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -167,7 +168,7 @@ fn arb_capability_id() -> impl Strategy<Value = CapabilityId> {
             &format!("subsystem_{}", seed1),
             &format!("action_{}", seed2),
         );
-        CapabilityId::from_chain(None, &subject, &scope)
+        CapabilityId::from_chain(None, subject.as_bytes(), &scope.as_bytes())
     })
 }
 
@@ -277,7 +278,7 @@ proptest! {
         for (idx, seed) in delegator_seeds.iter().enumerate() {
             let subject = Subject::new(&format!("delegator_{}", seed));
             let scope = CapabilityScope::simple("storage", &format!("level_{}", idx));
-            let cap = CapabilityId::from_chain(parent, &subject, &scope);
+            let cap = CapabilityId::from_chain(parent, subject.as_bytes(), &scope.as_bytes());
 
             delegation_chain.push(cap.clone());
             parent = delegation_chain.last();

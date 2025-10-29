@@ -3,8 +3,8 @@
 //! Provides structured logging that captures all events during simulation
 //! for replay, debugging, and Byzantine behavior analysis.
 
-use aura_coordination::tracing::{AuraSpan, LogLevel, LogSink, LogValue, SpanOutcome};
 use aura_journal::{ByzantineEvidence, ProtocolType};
+use aura_protocol::tracing::{AuraSpan, LogLevel, LogSink, LogValue, SpanOutcome};
 use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -182,8 +182,8 @@ impl SimulationLogSink {
         }
 
         // Analyze each device's events for suspicious patterns
-        for (device_id, device_events) in device_events {
-            patterns.extend(self.analyze_device_patterns(device_id, &device_events));
+        for (device_id, device_events) in &device_events {
+            patterns.extend(self.analyze_device_patterns(*device_id, device_events));
         }
 
         patterns

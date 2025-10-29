@@ -6,15 +6,14 @@
 use anyhow::Result;
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{WebSocket, WebSocketUpgrade},
         Path, State,
     },
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::get,
     Router,
 };
-use futures::{sink::SinkExt, stream::StreamExt};
 use serde_json;
 use std::{
     collections::HashMap,
@@ -24,13 +23,8 @@ use std::{
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
-
-use aura_console_types::{
-    BranchInfo, ClientMessage, ConsoleCommand, ConsoleEvent, ConsoleResponse, ServerMessage,
-    SimulationInfo,
-};
 
 use crate::{
     branch_manager::{BranchId, BranchManager},
@@ -55,6 +49,7 @@ pub struct SimulationServer {
 pub type ClientId = Uuid;
 
 /// Per-client connection state
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ClientState {
     /// Unique client identifier
@@ -68,6 +63,7 @@ pub struct ClientState {
 }
 
 /// Client connection metadata
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ClientMetadata {
     /// Client user agent or identifier
@@ -80,12 +76,13 @@ pub struct ClientMetadata {
 
 /// Shared server state for Axum handlers
 #[derive(Clone)]
-struct ServerState {
-    clients: Arc<Mutex<HashMap<ClientId, ClientState>>>,
-    branch_manager: Arc<Mutex<BranchManager>>,
-    command_handler: Arc<CommandHandler>,
+pub struct ServerState {
+    pub clients: Arc<Mutex<HashMap<ClientId, ClientState>>>,
+    pub branch_manager: Arc<Mutex<BranchManager>>,
+    pub command_handler: Arc<CommandHandler>,
 }
 
+#[allow(dead_code)]
 impl SimulationServer {
     /// Create a new simulation server
     pub fn new(bind_address: String) -> Self {

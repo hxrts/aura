@@ -11,32 +11,28 @@
 //! - `adapters` - Capability-driven messaging and session type adapters
 //! - `factory` - Transport factory for creating implementations
 
-pub mod traits;
-pub mod connections;
-pub mod authentication;
 pub mod adapters;
+pub mod authentication;
+pub mod connections;
 pub mod factory;
+pub mod traits;
 
 // Re-export core traits
 pub use traits::Transport;
 
 // Re-export connection management
-pub use connections::{
-    Connection, ConnectionBuilder, ConnectionManager,
-    BroadcastResult,
-};
+pub use connections::{BroadcastResult, Connection, ConnectionBuilder, ConnectionManager};
 
 // Re-export authentication
 pub use authentication::{
-    AuthenticatedChannel, AuthenticatedTransport,
-    DeviceCredentials, AuthenticationChallenge, AuthenticationResponse,
+    AuthenticatedChannel, AuthenticatedTransport, AuthenticationChallenge, AuthenticationResponse,
+    DeviceCredentials,
 };
 
 // Re-export adapters
 pub use adapters::{
-    CapabilityTransportAdapter, CapabilityTransport,
-    CapabilityMessage, MessageContent, AuthenticatedMessage,
-    CapabilityMessageHandler, TransportAdapterFactory,
+    AuthenticatedMessage, CapabilityMessage, CapabilityMessageHandler, CapabilityTransport,
+    CapabilityTransportAdapter, MessageContent, TransportAdapterFactory,
 };
 
 // Re-export factory

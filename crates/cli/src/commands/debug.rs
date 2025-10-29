@@ -3,17 +3,18 @@
 //! Interactive debugging tools for protocol failures, scenario analysis,
 //! and time travel debugging capabilities.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, info, warn};
+use tracing::info;
 
 /// Debug command arguments
 #[derive(Debug, Args)]
 pub struct DebugArgs {
+    /// Debug subcommand to execute
     #[command(subcommand)]
     pub command: DebugCommand,
 }
@@ -252,9 +253,13 @@ pub struct ListArgs {
 /// Analysis depth levels
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AnalysisDepth {
+    /// Quick analysis with basic checks
     Quick,
+    /// Standard analysis with common patterns
     Standard,
+    /// Deep analysis with extensive checks
     Deep,
+    /// Comprehensive analysis with all available checks
     Comprehensive,
 }
 
@@ -275,12 +280,19 @@ impl std::str::FromStr for AnalysisDepth {
 /// Time travel actions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TimeTravelAction {
+    /// Step forward one tick
     StepForward,
+    /// Step backward one tick
     StepBackward,
+    /// Jump to specific tick
     JumpTo,
+    /// Reset to initial state
     Reset,
+    /// Show execution history
     ShowHistory,
+    /// Create a checkpoint at current state
     CreateCheckpoint,
+    /// List all available checkpoints
     ListCheckpoints,
 }
 
@@ -304,9 +316,13 @@ impl std::str::FromStr for TimeTravelAction {
 /// Reproduction strategies
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReproductionStrategy {
+    /// Binary search for minimal reproduction
     BinarySearch,
+    /// Greedy reduction strategy
     GreedyReduction,
+    /// Genetic algorithm approach
     GeneticAlgorithm,
+    /// Simulated annealing optimization
     SimulatedAnnealing,
 }
 
@@ -327,9 +343,13 @@ impl std::str::FromStr for ReproductionStrategy {
 /// Report formats
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReportFormat {
+    /// HTML format
     Html,
+    /// Markdown format
     Markdown,
+    /// PDF format
     Pdf,
+    /// JSON format
     Json,
 }
 
@@ -350,9 +370,13 @@ impl std::str::FromStr for ReportFormat {
 /// Output formats
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OutputFormat {
+    /// JSON output format
     Json,
+    /// YAML output format
     Yaml,
+    /// Table output format
     Table,
+    /// Tree output format
     Tree,
 }
 
@@ -373,11 +397,17 @@ impl std::str::FromStr for OutputFormat {
 /// Inspection targets
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum InspectionTarget {
+    /// Inspect state
     State,
+    /// Inspect properties
     Properties,
+    /// Inspect events
     Events,
+    /// Inspect participants
     Participants,
+    /// Inspect network
     Network,
+    /// Inspect checkpoints
     Checkpoints,
 }
 
@@ -398,6 +428,7 @@ impl std::str::FromStr for InspectionTarget {
 }
 
 /// Interactive debug session manager
+#[allow(dead_code)]
 pub struct DebugSessionManager {
     /// Active sessions
     sessions: HashMap<String, DebugSession>,
@@ -408,6 +439,7 @@ pub struct DebugSessionManager {
 }
 
 /// Debug session information
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebugSession {
     /// Session ID
@@ -431,15 +463,22 @@ pub struct DebugSession {
 }
 
 /// Session status
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Debug session status
 pub enum SessionStatus {
+    /// Session is active
     Active,
+    /// Session is paused
     Paused,
+    /// Session completed successfully
     Completed,
+    /// Session failed
     Failed,
 }
 
 /// Violation information
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViolationInfo {
     /// Property name
@@ -455,15 +494,22 @@ pub struct ViolationInfo {
 }
 
 /// Violation severity
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Violation severity levels
 pub enum ViolationSeverity {
+    /// Low severity
     Low,
+    /// Medium severity
     Medium,
+    /// High severity
     High,
+    /// Critical severity
     Critical,
 }
 
 /// Session configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionConfig {
     /// Auto-analysis enabled
@@ -479,6 +525,7 @@ pub struct SessionConfig {
 }
 
 /// Debug statistics
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebugStatistics {
     /// Checkpoints created
@@ -494,6 +541,7 @@ pub struct DebugStatistics {
 }
 
 /// Analysis result
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
     /// Analysis ID
@@ -513,6 +561,7 @@ pub struct AnalysisResult {
 }
 
 /// Analysis finding
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisFinding {
     /// Finding type
@@ -526,6 +575,7 @@ pub struct AnalysisFinding {
 }
 
 /// Debug configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebugConfig {
     /// Default checkpoint interval
@@ -539,6 +589,7 @@ pub struct DebugConfig {
 }
 
 /// Analysis configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisConfig {
     /// Default analysis depth
@@ -551,6 +602,7 @@ pub struct AnalysisConfig {
     pub analysis_timeout: u64,
 }
 
+#[allow(dead_code)]
 impl DebugSessionManager {
     /// Create new debug session manager
     pub fn new() -> Self {
@@ -697,7 +749,7 @@ impl DebugSessionManager {
         let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
 
         // Load violation and scenario
-        let violation = self.load_violation_info(&args.violation)?;
+        let _violation = self.load_violation_info(&args.violation)?;
 
         // Simulate reproduction generation
         let original_complexity = 10.0; // Placeholder
@@ -754,7 +806,7 @@ impl DebugSessionManager {
 
     // Private helper methods
 
-    fn load_violation_info(&self, path: &PathBuf) -> Result<ViolationInfo> {
+    fn load_violation_info(&self, _path: &PathBuf) -> Result<ViolationInfo> {
         // In a real implementation, this would parse the violation file
         Ok(ViolationInfo {
             property_name: "test_property".to_string(),
@@ -863,6 +915,7 @@ impl DebugSessionManager {
 }
 
 /// Reproduction result
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReproductionResult {
     /// Original scenario path
@@ -888,6 +941,7 @@ pub struct ReproductionResult {
 }
 
 /// Inspection result
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InspectionResult {
     /// Target inspected
@@ -923,6 +977,7 @@ impl Default for AnalysisConfig {
 }
 
 /// Handle debug commands
+#[allow(dead_code)]
 pub fn handle_debug_command(args: DebugArgs) -> Result<()> {
     let mut manager = DebugSessionManager::new();
 
@@ -941,6 +996,7 @@ pub fn handle_debug_command(args: DebugArgs) -> Result<()> {
     }
 }
 
+#[allow(dead_code)]
 fn handle_session_command(manager: &mut DebugSessionManager, args: SessionArgs) -> Result<()> {
     let session_id = manager.create_session(&args)?;
 
@@ -961,6 +1017,7 @@ fn handle_session_command(manager: &mut DebugSessionManager, args: SessionArgs) 
     Ok(())
 }
 
+#[allow(dead_code)]
 fn handle_analyze_command(manager: &mut DebugSessionManager, args: AnalyzeArgs) -> Result<()> {
     let result = manager.analyze_violation(&args)?;
 
@@ -1002,6 +1059,7 @@ fn handle_analyze_command(manager: &mut DebugSessionManager, args: AnalyzeArgs) 
     Ok(())
 }
 
+#[allow(dead_code)]
 fn handle_time_travel_command(
     manager: &mut DebugSessionManager,
     args: TimeTravelArgs,
@@ -1011,6 +1069,7 @@ fn handle_time_travel_command(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn handle_reproduce_command(manager: &DebugSessionManager, args: ReproduceArgs) -> Result<()> {
     let result = manager.generate_reproduction(&args)?;
 
@@ -1039,6 +1098,7 @@ fn handle_reproduce_command(manager: &DebugSessionManager, args: ReproduceArgs) 
     Ok(())
 }
 
+#[allow(dead_code)]
 fn handle_report_command(manager: &DebugSessionManager, args: ReportArgs) -> Result<()> {
     let report = manager.generate_report(&args)?;
     std::fs::write(&args.output, report)?;
@@ -1046,6 +1106,7 @@ fn handle_report_command(manager: &DebugSessionManager, args: ReportArgs) -> Res
     Ok(())
 }
 
+#[allow(dead_code)]
 fn handle_inspect_command(manager: &DebugSessionManager, args: InspectArgs) -> Result<()> {
     let result = manager.inspect(&args)?;
 
@@ -1069,6 +1130,7 @@ fn handle_inspect_command(manager: &DebugSessionManager, args: InspectArgs) -> R
     Ok(())
 }
 
+#[allow(dead_code)]
 fn handle_list_command(manager: &DebugSessionManager, args: ListArgs) -> Result<()> {
     let sessions = manager.list_sessions(args.active_only);
 

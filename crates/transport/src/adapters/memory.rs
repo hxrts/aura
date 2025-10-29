@@ -9,14 +9,17 @@
 #![allow(clippy::unwrap_used)] // Test transport can use unwrap for simplicity
 
 use crate::{
-    BroadcastResult, Connection, PresenceTicket, Transport, TransportError, TransportErrorBuilder,
-    TransportResult,
+    BroadcastResult, Connection, ConnectionBuilder, ConnectionManager, PresenceTicket, Transport,
+    TransportErrorBuilder, TransportResult,
 };
 use async_trait::async_trait;
+use aura_types::DeviceId;
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::debug;
+use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// In-memory message queue for a connection
 #[derive(Debug, Clone)]
@@ -80,30 +83,164 @@ impl Default for MemoryTransport {
 
 #[async_trait]
 impl Transport for MemoryTransport {
+    type ConnectionType = Connection;
+
+    async fn send_to_peer(&self, peer_id: DeviceId, message: &[u8]) -> TransportResult<()> {
+        // Find connection for this peer
+        let connection_id = {
+            let connections = self.connections.lock().unwrap();
+            connections
+                .iter()
+                .find(|(_, conn)| conn.peer_id() == peer_id.to_string())
+                .map(|(id, _)| id.clone())
+        };
+
+        if let Some(conn_id) = connection_id {
+            let mut queues = self.queues.lock().unwrap();
+            let queue = queues.get_mut(&conn_id).ok_or_else(|| {
+                TransportErrorBuilder::connection_failed(format!(
+                    "Connection {} not found",
+                    conn_id
+                ))
+            })?;
+            queue.push(message.to_vec());
+            Ok(())
+        } else {
+            Err(TransportErrorBuilder::peer_unreachable(format!(
+                "No connection to peer: {}",
+                peer_id
+            )))
+        }
+    }
+
+    async fn receive_message(
+        &self,
+        _timeout: Duration,
+    ) -> TransportResult<Option<(DeviceId, Vec<u8>)>> {
+        // Simple implementation: check all queues for messages
+        let mut queues = self.queues.lock().unwrap();
+        let connections = self.connections.lock().unwrap();
+
+        for (conn_id, queue) in queues.iter_mut() {
+            if let Some(message) = queue.pop() {
+                if let Some(conn) = connections.get(conn_id) {
+                    if let Ok(device_id) = DeviceId::from_str(conn.peer_id()) {
+                        return Ok(Some((device_id, message)));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn connect_to_peer(&self, peer_id: DeviceId) -> TransportResult<Uuid> {
+        let connection_id = Uuid::new_v4();
+        let conn = crate::ConnectionBuilder::new(&peer_id.to_string()).build();
+
+        // Register connection
+        {
+            let mut connections = self.connections.lock().unwrap();
+            connections.insert(connection_id.to_string(), conn);
+        }
+
+        // Create message queue
+        {
+            let mut queues = self.queues.lock().unwrap();
+            queues.insert(connection_id.to_string(), MessageQueue::new());
+        }
+
+        Ok(connection_id)
+    }
+
+    async fn disconnect_from_peer(&self, peer_id: DeviceId) -> TransportResult<()> {
+        let connection_id = {
+            let mut connections = self.connections.lock().unwrap();
+            let mut found_id = None;
+            for (id, conn) in connections.iter() {
+                if conn.peer_id() == peer_id.to_string() {
+                    found_id = Some(id.clone());
+                    break;
+                }
+            }
+            if let Some(id) = &found_id {
+                connections.remove(id);
+            }
+            found_id
+        };
+
+        if let Some(conn_id) = connection_id {
+            let mut queues = self.queues.lock().unwrap();
+            queues.remove(&conn_id);
+            Ok(())
+        } else {
+            Err(TransportErrorBuilder::peer_unreachable(format!(
+                "No connection to peer: {}",
+                peer_id
+            )))
+        }
+    }
+
+    async fn is_peer_reachable(&self, peer_id: DeviceId) -> bool {
+        let connections = self.connections.lock().unwrap();
+        connections
+            .values()
+            .any(|conn| conn.peer_id() == peer_id.to_string())
+    }
+
+    fn get_connections(&self) -> Vec<Self::ConnectionType> {
+        let connections = self.connections.lock().unwrap();
+        connections.values().cloned().collect()
+    }
+
+    async fn start(
+        &mut self,
+        _message_sender: mpsc::UnboundedSender<(DeviceId, Vec<u8>)>,
+    ) -> TransportResult<()> {
+        // Memory transport doesn't need explicit start
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> TransportResult<()> {
+        // Clear all connections and queues
+        {
+            let mut connections = self.connections.lock().unwrap();
+            let mut queues = self.queues.lock().unwrap();
+            connections.clear();
+            queues.clear();
+        }
+        Ok(())
+    }
+
+    fn transport_type(&self) -> &'static str {
+        "memory"
+    }
+
+    async fn health_check(&self) -> bool {
+        true
+    }
+}
+
+#[async_trait]
+impl ConnectionManager for MemoryTransport {
     async fn connect(
         &self,
         peer_id: &str,
         _my_ticket: &PresenceTicket,
         _peer_ticket: &PresenceTicket,
     ) -> TransportResult<Connection> {
-        // In memory transport, we don't actually verify tickets
-        // Real implementation would:
-        // 1. Perform handshake
-        // 2. Verify both tickets
-        // 3. Establish encrypted channel
-
-        let conn = crate::ConnectionBuilder::new(peer_id).build();
+        let conn = ConnectionBuilder::new(peer_id).build();
 
         // Register connection
         {
             let mut connections = self.connections.lock().unwrap();
-            connections.insert(conn.id().to_string(), conn.clone());
+            connections.insert(conn.id.clone(), conn.clone());
         }
 
         // Create message queue
         {
             let mut queues = self.queues.lock().unwrap();
-            queues.insert(conn.id().to_string(), MessageQueue::new());
+            queues.insert(conn.id.clone(), MessageQueue::new());
         }
 
         Ok(conn)
@@ -111,14 +248,15 @@ impl Transport for MemoryTransport {
 
     async fn send(&self, conn: &Connection, message: &[u8]) -> TransportResult<()> {
         let mut queues = self.queues.lock().unwrap();
-
-        let queue = queues.get_mut(conn.id()).ok_or_else(|| {
-            TransportErrorBuilder::connection_failed(format!("Connection {} not found", conn.id()))
-        })?;
-
-        queue.push(message.to_vec());
-
-        Ok(())
+        if let Some(queue) = queues.get_mut(&conn.id) {
+            queue.push(message.to_vec());
+            Ok(())
+        } else {
+            Err(TransportErrorBuilder::connection(&format!(
+                "Connection not found: {}",
+                conn.id
+            )))
+        }
     }
 
     async fn receive(
@@ -126,16 +264,15 @@ impl Transport for MemoryTransport {
         conn: &Connection,
         _timeout: Duration,
     ) -> TransportResult<Option<Vec<u8>>> {
-        // In memory transport, we ignore timeout and return immediately
-        // Real implementation would block up to timeout
-
         let mut queues = self.queues.lock().unwrap();
-
-        let queue = queues.get_mut(conn.id()).ok_or_else(|| {
-            TransportErrorBuilder::connection_failed(format!("Connection {} not found", conn.id()))
-        })?;
-
-        Ok(queue.pop())
+        if let Some(queue) = queues.get_mut(&conn.id) {
+            Ok(queue.pop())
+        } else {
+            Err(TransportErrorBuilder::connection(&format!(
+                "Connection not found: {}",
+                conn.id
+            )))
+        }
     }
 
     async fn broadcast(
@@ -148,7 +285,7 @@ impl Transport for MemoryTransport {
 
         for conn in connections {
             match self.send(conn, message).await {
-                Ok(_) => succeeded.push(conn.peer_id().to_string()),
+                Ok(()) => succeeded.push(conn.peer_id().to_string()),
                 Err(_) => failed.push(conn.peer_id().to_string()),
             }
         }
@@ -159,12 +296,12 @@ impl Transport for MemoryTransport {
     async fn disconnect(&self, conn: &Connection) -> TransportResult<()> {
         {
             let mut connections = self.connections.lock().unwrap();
-            connections.remove(conn.id());
+            connections.remove(&conn.id);
         }
 
         {
             let mut queues = self.queues.lock().unwrap();
-            queues.remove(conn.id());
+            queues.remove(&conn.id);
         }
 
         Ok(())
@@ -172,7 +309,7 @@ impl Transport for MemoryTransport {
 
     async fn is_connected(&self, conn: &Connection) -> bool {
         let connections = self.connections.lock().unwrap();
-        connections.contains_key(conn.id())
+        connections.contains_key(&conn.id)
     }
 }
 
@@ -335,7 +472,7 @@ mod tests {
 // This allows coordination protocols to use the transport layer
 /*
 #[async_trait]
-impl aura_coordination::Transport for MemoryTransport {
+impl aura_protocol::Transport for MemoryTransport {
     async fn send_message(&self, peer_id: &str, message: &[u8]) -> std::result::Result<(), String> {
         // Create a dummy ticket for the connection
         let dummy_ticket = PresenceTicket {
@@ -447,6 +584,7 @@ impl MemoryTransport {
     ///
     /// Attempts to parse peer_id as IP:port or hostname:port.
     /// Returns None if the peer_id is not a valid network address.
+    #[allow(dead_code)]
     fn parse_peer_address(&self, peer_id: &str) -> Option<String> {
         // Check if peer_id looks like a network address (contains colon for port)
         if !peer_id.contains(':') {
@@ -474,6 +612,7 @@ impl MemoryTransport {
 }
 
 /// Generate a deterministic test signature for non-production use
+#[allow(dead_code)]
 fn generate_test_signature() -> ed25519_dalek::Signature {
     use ed25519_dalek::{Signer, SigningKey};
 

@@ -206,7 +206,7 @@ mod tests {
         let session_epoch = SessionEpoch::initial();
 
         let random_bytes: [u8; 32] = effects.random_bytes();
-        let signing_key = SigningKey::from_bytes(&random_bytes);
+        let signing_key = aura_crypto::ed25519_key_from_bytes(&random_bytes).unwrap();
         let verifying_key = signing_key.verifying_key();
 
         let proof = generate_proof(
@@ -244,7 +244,7 @@ mod tests {
         let session_epoch = SessionEpoch::initial();
 
         let random_bytes: [u8; 32] = effects.random_bytes();
-        let signing_key = SigningKey::from_bytes(&random_bytes);
+        let signing_key = aura_crypto::ed25519_key_from_bytes(&random_bytes).unwrap();
         let verifying_key = signing_key.verifying_key();
 
         let proof = generate_proof(

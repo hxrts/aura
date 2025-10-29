@@ -167,7 +167,8 @@ fn MainContent() -> impl IntoView {
                                     // Live source: no additional components
                                     view! {
                                         <></>
-                                    }.into_any()
+                                    };
+                                    ().into_any()
                                 },
                             }
                         }}

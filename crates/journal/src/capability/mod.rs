@@ -1,6 +1,7 @@
 // Convergent capabilities for local-first authorization
 
 pub mod authority_graph;
+pub mod authz_bridge;
 pub mod events;
 pub mod group_capabilities;
 pub mod identity;
@@ -19,15 +20,16 @@ pub use events::{CapabilityDelegation, CapabilityRevocation};
 pub use group_capabilities::{
     BeeKEM, CgkaOperationType, CgkaState, EligibilityView, EligibleMember, GroupCapabilityManager,
     GroupCapabilityScope, GroupMessage, GroupOperation, GroupRoster, KeyhiveCgkaOperation,
-    MemberId, MemberRole, OperationId,
+    MemberRole,
 };
-// Re-export Epoch from aura-types for convenience
-pub use aura_types::Epoch;
+// Re-export ID types and Epoch from aura-types
+pub use aura_types::{Epoch, IndividualId, MemberId, OperationId};
+pub use authz_bridge::{device_subject, guardian_subject, AuthorizationBridge};
 pub use keyhive_manager::{
     GroupMembershipProvider, InMemoryGroupProvider, KeyhiveCapabilityManager, KeyhiveConfig,
     VerificationResult,
 };
-pub use manager::{CapabilityGrant, CapabilityManager};
+pub use manager::CapabilityGrant;
 pub use resource_allocation::*;
 pub use testing::MockGroupProvider;
 pub use threshold_capabilities::ThresholdCapability;
@@ -35,6 +37,9 @@ pub use types::{CapabilityId, CapabilityScope, Subject};
 pub use unified::{
     CapabilityToken, CommunicationOperation, DeviceAuthentication, Permission, RelayOperation,
     StorageOperation,
+};
+pub use unified_manager::{
+    UnifiedCapabilityManager, UnifiedCapabilityToken, UnifiedConfig, UnifiedStats,
 };
 pub use visibility::VisibilityIndex;
 
@@ -69,8 +74,8 @@ pub enum CapabilityError {
 
 pub type Result<T> = std::result::Result<T, CapabilityError>;
 
-impl From<crate::LedgerError> for CapabilityError {
-    fn from(err: crate::LedgerError) -> Self {
+impl From<crate::error::AuraError> for CapabilityError {
+    fn from(err: crate::error::AuraError) -> Self {
         CapabilityError::SerializationError(err.to_string())
     }
 }

@@ -4,10 +4,12 @@
 //! the new functional simulation architecture internally.
 
 use anyhow::Result;
-use aura_console_types::{DeviceInfo, SimulationInfo, TraceEvent};
+use aura_console_types::{
+    trace::{ParticipantStatus, ParticipantType},
+    DeviceInfo, TraceEvent,
+};
 use aura_simulator::{FunctionalRunner, WorldState};
 use serde_json::Value;
-use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Wrapper around FunctionalRunner that provides sim-server compatibility
@@ -22,6 +24,7 @@ pub struct SimulationWrapper {
     recording_enabled: bool,
 }
 
+#[allow(dead_code)]
 impl SimulationWrapper {
     /// Create a new simulation wrapper
     pub fn new(seed: u64) -> Self {
@@ -45,7 +48,9 @@ impl SimulationWrapper {
 
     /// Execute a single simulation step
     pub fn step(&mut self) -> Result<Vec<TraceEvent>> {
-        self.runner.step().map_err(|e| anyhow::anyhow!("Step failed: {}", e))
+        self.runner
+            .step()
+            .map_err(|e| anyhow::anyhow!("Step failed: {}", e))
     }
 
     /// Check if recording is enabled
@@ -65,17 +70,21 @@ impl SimulationWrapper {
             .participants
             .iter()
             .map(|(id, participant)| DeviceInfo {
+                id: id.clone(),
                 device_id: participant.device_id.clone(),
                 account_id: participant.account_id.clone(),
-                is_online: true, // Simplified
-                last_seen: Some(self.current_time()),
-                status: "active".to_string(),
+                participant_type: ParticipantType::Honest,
+                status: ParticipantStatus::Online,
+                message_count: 0,
             })
             .collect()
     }
 
     /// Get a specific participant by ID
-    pub fn get_participant(&self, participant_id: &str) -> Option<&aura_simulator::world_state::ParticipantState> {
+    pub fn get_participant(
+        &self,
+        participant_id: &str,
+    ) -> Option<&aura_simulator::world_state::ParticipantState> {
         self.runner.world_state().participants.get(participant_id)
     }
 
@@ -86,7 +95,8 @@ impl SimulationWrapper {
         device_id: String,
         account_id: String,
     ) -> Result<()> {
-        self.runner.add_participant(id, device_id, account_id)
+        self.runner
+            .add_participant(id, device_id, account_id)
             .map_err(|e| anyhow::anyhow!("Failed to add participant: {}", e))
     }
 
@@ -94,13 +104,18 @@ impl SimulationWrapper {
     pub fn set_participant_byzantine(&mut self, participant_id: &str) -> Result<()> {
         // For now, just log this - full byzantine behavior would require more complex integration
         tracing::info!("Marking participant {} as byzantine", participant_id);
-        
+
         // Add to byzantine participants list if it exists in world state
-        if let Some(participant) = self.runner.world_state_mut().participants.get_mut(participant_id) {
+        if let Some(_participant) = self
+            .runner
+            .world_state_mut()
+            .participants
+            .get_mut(participant_id)
+        {
             // Mark participant as byzantine in some way
             tracing::debug!("Participant {} marked as byzantine", participant_id);
         }
-        
+
         Ok(())
     }
 
@@ -115,7 +130,7 @@ impl SimulationWrapper {
         tracing::debug!(
             "State transition: {} -> {} (event: {}, metadata: {})",
             from_state,
-            to_state, 
+            to_state,
             event_type,
             metadata
         );

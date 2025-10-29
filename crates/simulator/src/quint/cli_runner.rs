@@ -3,7 +3,7 @@
 //! Replaces placeholder implementations with actual Quint CLI execution.
 //! Provides parsing, verification, and property evaluation using the real Quint tool.
 
-use crate::quint::types::{QuintSpec, QuintError, QuintInvariant, QuintTemporalProperty};
+use crate::quint::types::{QuintSpec, QuintInvariant};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -109,7 +109,7 @@ pub struct QuintCliRunner {
     /// Working directory for Quint operations
     working_dir: PathBuf,
     /// Timeout for CLI operations in milliseconds
-    timeout_ms: u64,
+    _timeout_ms: u64,
 }
 
 impl QuintCliRunner {
@@ -132,7 +132,7 @@ impl QuintCliRunner {
         Ok(Self {
             quint_path,
             working_dir,
-            timeout_ms: 30000, // 30 second default timeout
+            _timeout_ms: 30000, // 30 second default timeout
         })
     }
 
@@ -262,7 +262,7 @@ impl QuintCliRunner {
             .to_string();
 
         let mut invariants = Vec::new();
-        let mut temporal_properties = Vec::new();
+        let temporal_properties = Vec::new();
 
         // Extract properties from parsed modules
         for module in parse_output.modules {
@@ -275,6 +275,7 @@ impl QuintCliRunner {
                                 name: name.clone(),
                                 description: format!("Invariant: {}", name),
                                 expression: expr,
+                                source_location: "cli_runner".to_string(),
                                 enabled: true,
                                 tags: vec!["auto-extracted".to_string()],
                             });
@@ -286,6 +287,7 @@ impl QuintCliRunner {
                             name: assumption_name.clone(),
                             description: format!("Assumption: {}", assumption_name),
                             expression: expr,
+                            source_location: "cli_runner".to_string(),
                             enabled: true,
                             tags: vec!["assumption".to_string()],
                         });
@@ -298,20 +300,24 @@ impl QuintCliRunner {
         }
 
         Ok(QuintSpec {
-            name: spec_name,
+            name: spec_name.clone(),
+            file_path: file_path.to_path_buf(),
+            module_name: spec_name,
             version: "1.0".to_string(),
             description: format!("Parsed from {}", file_path.display()),
             modules: vec![], // Could be populated from parse_output.modules
+            metadata: HashMap::new(),
             invariants,
             temporal_properties,
             safety_properties: vec![],
-            metadata: HashMap::new(),
+            state_variables: Vec::new(),
+            actions: Vec::new(),
         })
     }
 
     /// Set timeout for CLI operations
     pub fn set_timeout(&mut self, timeout_ms: u64) {
-        self.timeout_ms = timeout_ms;
+        self._timeout_ms = timeout_ms;
     }
 
     /// Get the Quint version

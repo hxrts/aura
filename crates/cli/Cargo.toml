@@ -17,10 +17,13 @@ path = "src/main.rs"
 [dependencies]
 # Workspace crates
 aura-agent = { path = "../agent" }
-aura-coordination = { path = "../coordination" }
+aura-authentication = { path = "../aura-authentication" }
+aura-protocol = { path = "../aura-protocol" }
 aura-crypto = { path = "../crypto" }
 aura-journal = { path = "../journal" }
 aura-simulator = { path = "../simulator" }
+aura-transport = { path = "../transport" }
+aura-types = { path = "../aura-types" }
 # session_types removed during refactor - implementation moved to coordination
 
 # CLI

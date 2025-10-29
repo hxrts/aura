@@ -6,7 +6,6 @@
 //! sequences of events and state transitions.
 
 use crate::causality::{CausalityEdge, CausalityGraph};
-use crate::property_monitor::ViolationDetails;
 use aura_console_types::{EventType, TraceEvent};
 use aura_types::session_utils::properties::PropertyId;
 use serde::{Deserialize, Serialize};
@@ -378,12 +377,9 @@ pub struct GraphStyling {
 impl PropertyCausalityAnalyzer {
     /// Create a new property causality analyzer from trace events
     pub fn new(events: &[TraceEvent]) -> Self {
-        web_sys::console::log_1(
-            &format!(
-                "Building property causality analyzer for {} events",
-                events.len()
-            )
-            .into(),
+        console_log!(
+            "Building property causality analyzer for {} events",
+            events.len()
         );
 
         let causality_graph = CausalityGraph::build(events);
@@ -395,10 +391,13 @@ impl PropertyCausalityAnalyzer {
             events_by_id.insert(event.event_id, event.clone());
 
             // Look for property violations in the event type
-            if let EventType::PropertyViolation { property, .. } = &event.event_type {
+            if let EventType::PropertyViolation { .. } = &event.event_type {
                 // Convert property name to PropertyId (this is a simplified approach)
                 // In practice, you'd have a proper mapping from property names to IDs
-                let property_id = PropertyId::new_v4(); // TODO: Use actual property mapping
+                // TODO: Use actual property mapping from property name to stable PropertyId
+                // For now, derive a deterministic UUID from the event_id
+                use uuid::Uuid;
+                let property_id = Uuid::from_u64_pair(event.event_id, 0);
                 violation_events
                     .entry(property_id)
                     .or_insert_with(Vec::new)
@@ -406,13 +405,10 @@ impl PropertyCausalityAnalyzer {
             }
         }
 
-        web_sys::console::log_1(
-            &format!(
-                "Built analyzer: {} events, {} violation events tracked",
-                events_by_id.len(),
-                violation_events.values().map(|v| v.len()).sum::<usize>()
-            )
-            .into(),
+        console_log!(
+            "Built analyzer: {} events, {} violation events tracked",
+            events_by_id.len(),
+            violation_events.values().map(|v| v.len()).sum::<usize>()
         );
 
         Self {
@@ -448,7 +444,7 @@ impl PropertyCausalityAnalyzer {
         );
 
         // Get the violation event
-        let violation_event = self.events_by_id.get(&violation_event_id)?;
+        let _violation_event = self.events_by_id.get(&violation_event_id)?;
 
         // Build causality chain
         let causality_chain = self.build_causality_chain(violation_event_id)?;
@@ -751,7 +747,7 @@ impl PropertyCausalityAnalyzer {
         }
     }
 
-    fn get_edge_between_events(&self, source: u64, target: u64) -> Option<CausalityEdge> {
+    fn get_edge_between_events(&self, _source: u64, _target: u64) -> Option<CausalityEdge> {
         // This is a placeholder - the actual implementation would query the causality graph
         Some(CausalityEdge::HappensBefore)
     }
@@ -1158,8 +1154,7 @@ mod tests {
             ),
         ];
 
-        let mut analyzer = PropertyCausalityAnalyzer::new(&events);
-        let property_id = PropertyId::new_v4();
+        let analyzer = PropertyCausalityAnalyzer::new(&events);
 
         // This would typically find the violation through the violation_events mapping
         // For testing, we'll check the basic structure

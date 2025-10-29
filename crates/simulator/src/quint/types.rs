@@ -39,6 +39,14 @@ pub struct QuintSpec {
     pub file_path: PathBuf,
     /// Name of the Quint module
     pub module_name: String,
+    /// Version of the specification
+    pub version: String,
+    /// Description of the specification
+    pub description: String,
+    /// Modules defined in this specification
+    pub modules: Vec<String>,
+    /// Metadata for the specification
+    pub metadata: HashMap<String, String>,
     /// Invariant properties defined in this specification
     pub invariants: Vec<QuintInvariant>,
     /// Temporal logic properties (LTL/CTL) defined in this specification
@@ -65,6 +73,10 @@ pub struct QuintInvariant {
     pub description: String,
     /// Source location (file:line) where this invariant is defined
     pub source_location: String,
+    /// Whether this invariant is enabled for checking
+    pub enabled: bool,
+    /// Tags associated with this invariant
+    pub tags: Vec<String>,
 }
 
 /// Temporal logic property from a Quint specification
@@ -83,6 +95,10 @@ pub struct QuintTemporalProperty {
     pub description: String,
     /// Source location (file:line) where this property is defined
     pub source_location: String,
+    /// Whether this property is enabled for checking
+    pub enabled: bool,
+    /// Tags associated with this property
+    pub tags: Vec<String>,
 }
 
 /// State variable definition from a Quint specification
@@ -455,7 +471,7 @@ pub enum PropertyPriority {
 }
 
 /// Violation patterns detected from property analysis
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ViolationPattern {
     /// Key consistency violation patterns
     KeyConsistency,

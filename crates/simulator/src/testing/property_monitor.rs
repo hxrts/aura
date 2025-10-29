@@ -6,19 +6,23 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+// Import unified framework types
+use crate::config::{PropertyMonitoringConfig, SimulationConfig};
+use crate::metrics::{MetricsCollector, MetricsProvider};
+use crate::results::{
+    PropertyCheckResult, PropertyEvaluationResult, PropertyValue, PropertyViolation,
+    PropertyViolationType, SimulationStateSnapshot, ViolationDetails, ViolationSeverity,
+};
 
 // Import types from parent module
 use super::{
-    CheckPerformanceMetrics, ExecutionTrace, MonitoringStatistics, PropertyCheckResult,
-    PropertyEvaluationResult, PropertyPriority, PropertyViolation, QuintEvaluationConfig,
-    QuintInvariant, QuintSafetyProperty, QuintTemporalProperty, QuintValue, SimulationState,
-    TemporalPropertyType, ValidationResult, ViolationDetails, ViolationDetectionReport,
-    ViolationDetectionState,
+    ExecutionTrace, PropertyPriority, QuintInvariant, QuintSafetyProperty, QuintTemporalProperty,
+    SimulationState, TemporalPropertyType, ViolationDetectionState,
 };
 
 // Import from crate root
-use crate::{Result, SimError};
+use crate::{AuraError, Result};
 
 // Import Quint API for actual evaluation
 use quint_api::QuintEvaluator;
@@ -37,16 +41,16 @@ pub struct PropertyMonitor {
     safety_properties: Vec<QuintSafetyProperty>,
     /// Execution trace for temporal property evaluation
     execution_trace: ExecutionTrace,
-    /// Property evaluation configuration
-    evaluation_config: QuintEvaluationConfig,
+    /// Unified property monitoring configuration
+    config: PropertyMonitoringConfig,
     /// Violation detection state
     violation_state: ViolationDetectionState,
-    /// Monitoring statistics
-    monitoring_stats: MonitoringStatistics,
+    /// Metrics collector for monitoring statistics
+    metrics: MetricsCollector,
     /// Property prioritization for efficient checking
     property_priorities: HashMap<String, PropertyPriority>,
     /// Quint evaluator for actual property evaluation
-    quint_evaluator: QuintEvaluator,
+    _quint_evaluator: QuintEvaluator,
 }
 
 /// Quality metrics for execution traces
@@ -65,27 +69,33 @@ pub struct TraceQualityMetrics {
 impl PropertyMonitor {
     /// Create a new property monitor with default configuration
     pub fn new() -> Self {
+        let config = PropertyMonitoringConfig::default();
         Self {
             invariants: Vec::new(),
             temporal_properties: Vec::new(),
             safety_properties: Vec::new(),
-            execution_trace: ExecutionTrace::new(1000),
-            evaluation_config: QuintEvaluationConfig::default(),
+            execution_trace: ExecutionTrace::new(config.max_trace_length),
+            config,
             violation_state: ViolationDetectionState::new(),
-            monitoring_stats: MonitoringStatistics::new(),
+            metrics: MetricsCollector::new(),
             property_priorities: HashMap::new(),
-            quint_evaluator: QuintEvaluator::default(),
+            _quint_evaluator: QuintEvaluator::default(),
         }
     }
 
     /// Create a property monitor with custom configuration
-    pub fn with_config(config: QuintEvaluationConfig) -> Self {
+    pub fn with_config(config: PropertyMonitoringConfig) -> Self {
         Self {
-            evaluation_config: config.clone(),
             execution_trace: ExecutionTrace::new(config.max_trace_length),
-            quint_evaluator: QuintEvaluator::default(),
+            config,
+            _quint_evaluator: QuintEvaluator::default(),
             ..Self::new()
         }
+    }
+
+    /// Create a property monitor from simulation config
+    pub fn from_simulation_config(sim_config: &SimulationConfig) -> Self {
+        Self::with_config(sim_config.property_monitoring.clone())
     }
 
     /// Add an invariant property to monitor
@@ -124,10 +134,7 @@ impl PropertyMonitor {
         &mut self,
         simulation_state: &SimulationState,
     ) -> Result<PropertyCheckResult> {
-        let start_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let start_time = crate::utils::time::current_unix_timestamp_millis();
 
         // Add current state to execution trace
         self.execution_trace.add_state(simulation_state.clone());
@@ -135,6 +142,9 @@ impl PropertyMonitor {
         let mut violations = Vec::new();
         let mut evaluation_results = Vec::new();
         let mut checked_properties = Vec::new();
+
+        // Record metrics for the property check operation
+        self.metrics.counter("property_checks_total", 1);
 
         // Check invariants
         for invariant in &self.invariants {
@@ -150,7 +160,7 @@ impl PropertyMonitor {
                     }
                 }
                 Err(e) => {
-                    return Err(SimError::PropertyError(format!(
+                    return Err(AuraError::configuration_error(format!(
                         "Failed to evaluate invariant {}: {}",
                         invariant.name, e
                     )))
@@ -173,7 +183,7 @@ impl PropertyMonitor {
                         }
                     }
                     Err(e) => {
-                        return Err(SimError::PropertyError(format!(
+                        return Err(AuraError::configuration_error(format!(
                             "Failed to evaluate temporal property {}: {}",
                             property.name, e
                         )))
@@ -195,7 +205,7 @@ impl PropertyMonitor {
                     }
                 }
                 Err(e) => {
-                    return Err(SimError::PropertyError(format!(
+                    return Err(AuraError::configuration_error(format!(
                         "Failed to evaluate safety property {}: {}",
                         property.name, e
                     )))
@@ -203,79 +213,61 @@ impl PropertyMonitor {
             }
         }
 
-        let end_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let end_time = crate::utils::time::current_unix_timestamp_millis();
 
-        // Update statistics
-        self.monitoring_stats.total_evaluations += checked_properties.len() as u64;
-        self.monitoring_stats.total_evaluation_time_ms += end_time - start_time;
-        self.monitoring_stats.violations_detected += violations.len() as u64;
+        let duration_ms = end_time - start_time;
 
-        if self.monitoring_stats.total_evaluations > 0 {
-            self.monitoring_stats.average_evaluation_time_ms =
-                self.monitoring_stats.total_evaluation_time_ms as f64
-                    / self.monitoring_stats.total_evaluations as f64;
-        }
+        // Record metrics using unified metrics system
+        self.metrics
+            .timer("property_evaluation_duration_ms", duration_ms);
+        self.metrics.counter(
+            "properties_evaluated_total",
+            checked_properties.len() as u64,
+        );
+        self.metrics
+            .counter("violations_detected_total", violations.len() as u64);
+        self.metrics.gauge(
+            "violation_rate",
+            violations.len() as f64 / checked_properties.len().max(1) as f64,
+        );
 
-        // Create validation result
-        let validation_result = ValidationResult {
-            passed: violations.is_empty(),
-            message: if violations.is_empty() {
-                "All properties satisfied".to_string()
-            } else {
-                format!("{} property violations detected", violations.len())
-            },
-            errors: violations
-                .iter()
-                .map(|v| v.violation_details.description.clone())
-                .collect(),
-        };
+        // Use the unified result building
+        use crate::results::builder::PropertyCheckResultBuilder;
+        use crate::results::PerformanceMetrics;
 
-        // Create performance metrics
-        let performance_metrics = CheckPerformanceMetrics {
-            check_duration_ms: end_time - start_time,
-            properties_evaluated: checked_properties.len(),
-            memory_usage_bytes: 0, // TODO: Implement memory tracking
-            cpu_utilization: 0.0,  // TODO: Implement CPU tracking
-        };
+        let performance_metrics = PerformanceMetrics::with_duration_ms(duration_ms)
+            .with_items_processed(checked_properties.len())
+            .with_counter("properties_checked", checked_properties.len() as u64)
+            .with_counter("violations_found", violations.len() as u64);
 
-        Ok(PropertyCheckResult {
-            checked_properties,
-            violations,
-            evaluation_results,
-            validation_result,
-            performance_metrics,
-        })
+        let result = PropertyCheckResultBuilder::new()
+            .checked_properties(checked_properties)
+            .violations(violations)
+            .evaluation_results(evaluation_results)
+            .performance_metrics(performance_metrics)
+            .build();
+
+        Ok(result)
     }
 
-    /// Generate a comprehensive violation detection report
-    pub fn generate_violation_report(&self) -> ViolationDetectionReport {
-        ViolationDetectionReport {
-            violations: self.violation_state.violations.clone(),
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            confidence: self.calculate_detection_confidence(),
-            metadata: self.collect_monitoring_metadata(),
-        }
+    /// Get the current violation detection state
+    pub fn get_violation_state(&self) -> &ViolationDetectionState {
+        &self.violation_state
     }
 
-    /// Get current monitoring statistics
-    pub fn get_statistics(&self) -> &MonitoringStatistics {
-        &self.monitoring_stats
+    /// Get current monitoring statistics from metrics collector
+    pub fn get_metrics_snapshot(&self) -> crate::metrics::MetricsSnapshot {
+        self.metrics.snapshot()
     }
 
     /// Reset monitoring statistics
     pub fn reset_statistics(&mut self) {
-        self.monitoring_stats = MonitoringStatistics::new();
+        self.metrics.reset();
     }
 
     /// Clear execution trace
     pub fn clear_trace(&mut self) {
-        self.execution_trace = ExecutionTrace::new(self.evaluation_config.max_trace_length);
+        self.execution_trace = ExecutionTrace::new(self.config.max_trace_length);
     }
 
     /// Get detected violations from the violation state
@@ -309,7 +301,7 @@ impl PropertyMonitor {
         Ok(PropertyEvaluationResult {
             satisfied,
             details: format!("Evaluated invariant '{}': {}", invariant.name, satisfied),
-            value: QuintValue::Bool(satisfied),
+            value: PropertyValue::Bool(satisfied),
         })
     }
 
@@ -321,7 +313,7 @@ impl PropertyMonitor {
         Ok(PropertyEvaluationResult {
             satisfied: true,
             details: format!("Evaluated temporal property: {}", property.expression),
-            value: QuintValue::Bool(true),
+            value: PropertyValue::Bool(true),
         })
     }
 
@@ -334,7 +326,7 @@ impl PropertyMonitor {
         Ok(PropertyEvaluationResult {
             satisfied: true,
             details: format!("Evaluated safety property: {}", property.expression),
-            value: QuintValue::Bool(true),
+            value: PropertyValue::Bool(true),
         })
     }
 
@@ -343,24 +335,32 @@ impl PropertyMonitor {
         invariant: &QuintInvariant,
         state: &SimulationState,
     ) -> Result<PropertyViolation> {
-        // TODO: Create detailed violation information
         Ok(PropertyViolation {
             property_name: invariant.name.clone(),
-            property_type: super::PropertyViolationType::Invariant,
-            violation_state: state.clone(),
+            property_type: PropertyViolationType::Invariant,
+            violation_state: self.convert_simulation_state(state),
             violation_details: ViolationDetails {
                 description: format!("Invariant violation: {}", invariant.name),
                 evidence: vec![format!("Expression: {}", invariant.expression)],
                 potential_causes: vec!["State inconsistency".to_string()],
-                severity: super::ViolationSeverity::High,
+                severity: ViolationSeverity::High,
                 remediation_suggestions: vec!["Check protocol state transitions".to_string()],
             },
             confidence: 0.95,
-            detected_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            detected_at: crate::utils::time::current_unix_timestamp_secs(),
         })
+    }
+
+    /// Convert SimulationState to SimulationStateSnapshot
+    fn convert_simulation_state(&self, state: &SimulationState) -> SimulationStateSnapshot {
+        SimulationStateSnapshot {
+            tick: state.tick,
+            time: state.time,
+            participant_count: state.participants.len(),
+            active_sessions: state.protocol_state.active_sessions.len(),
+            completed_sessions: state.protocol_state.completed_sessions.len(),
+            state_hash: format!("state_{}", state.tick), // Simple hash for now
+        }
     }
 
     fn create_violation_from_temporal(
@@ -370,20 +370,17 @@ impl PropertyMonitor {
     ) -> Result<PropertyViolation> {
         Ok(PropertyViolation {
             property_name: property.name.clone(),
-            property_type: super::PropertyViolationType::Temporal,
-            violation_state: state.clone(),
+            property_type: PropertyViolationType::Temporal,
+            violation_state: self.convert_simulation_state(state),
             violation_details: ViolationDetails {
                 description: format!("Temporal property violation: {}", property.name),
                 evidence: vec![format!("Expression: {}", property.expression)],
                 potential_causes: vec!["Timing constraint violation".to_string()],
-                severity: super::ViolationSeverity::Medium,
+                severity: ViolationSeverity::Medium,
                 remediation_suggestions: vec!["Check protocol timing".to_string()],
             },
             confidence: 0.90,
-            detected_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            detected_at: crate::utils::time::current_unix_timestamp_secs(),
         })
     }
 
@@ -394,20 +391,17 @@ impl PropertyMonitor {
     ) -> Result<PropertyViolation> {
         Ok(PropertyViolation {
             property_name: property.name.clone(),
-            property_type: super::PropertyViolationType::Safety,
-            violation_state: state.clone(),
+            property_type: PropertyViolationType::Safety,
+            violation_state: self.convert_simulation_state(state),
             violation_details: ViolationDetails {
                 description: format!("Safety property violation: {}", property.name),
                 evidence: vec![format!("Expression: {}", property.expression)],
                 potential_causes: vec!["Safety constraint violation".to_string()],
-                severity: super::ViolationSeverity::Critical,
+                severity: ViolationSeverity::Critical,
                 remediation_suggestions: vec!["Immediate protocol halt recommended".to_string()],
             },
             confidence: 0.99,
-            detected_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            detected_at: crate::utils::time::current_unix_timestamp_secs(),
         })
     }
 
@@ -437,7 +431,7 @@ impl PropertyMonitor {
         );
         metadata.insert(
             "evaluation_timeout_ms".to_string(),
-            self.evaluation_config.evaluation_timeout_ms.to_string(),
+            self.config.evaluation_timeout_ms.to_string(),
         );
         metadata
     }
@@ -452,8 +446,9 @@ impl PropertyMonitor {
             "completed_sessions": state.protocol_state.completed_sessions.len()
         });
 
-        serde_json::to_string(&json)
-            .map_err(|e| SimError::PropertyError(format!("Failed to serialize state: {}", e)))
+        serde_json::to_string(&json).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to serialize state: {}", e))
+        })
     }
 
     /// Simple expression evaluation for basic properties

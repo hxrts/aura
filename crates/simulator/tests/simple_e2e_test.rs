@@ -27,6 +27,7 @@ fn test_property_monitor_basic_functionality() -> Result<()> {
     let sim_state = SimulationState {
         tick: 10,
         time: 1000,
+        variables: std::collections::HashMap::new(),
         participants: vec![ParticipantStateSnapshot {
             id: "participant_0".to_string(),
             status: "active".to_string(),
@@ -47,15 +48,15 @@ fn test_property_monitor_basic_functionality() -> Result<()> {
         network_state: NetworkStateSnapshot {
             partitions: vec![],
             message_stats: MessageDeliveryStats {
-                total_sent: 10,
-                total_delivered: 8,
-                total_dropped: 2,
+                messages_sent: 10,
+                messages_delivered: 8,
+                messages_dropped: 2,
                 average_latency_ms: 50.0,
             },
             failure_conditions: NetworkFailureConditions {
                 drop_rate: 0.1,
-                latency_range: (10, 100),
-                partition_count: 0,
+                latency_range_ms: (10, 100),
+                partitions_active: false,
             },
         },
     };
@@ -90,12 +91,13 @@ fn test_property_monitor_basic_functionality() -> Result<()> {
 #[test]
 fn test_property_evaluation_expressions() -> Result<()> {
     // Test the property evaluation expressions directly
-    let monitor = PropertyMonitor::new();
+    let _monitor = PropertyMonitor::new();
 
     // Create test states
     let good_state = SimulationState {
         tick: 5,
         time: 500,
+        variables: std::collections::HashMap::new(),
         participants: vec![],
         protocol_state: ProtocolExecutionState {
             active_sessions: vec![],
@@ -105,15 +107,15 @@ fn test_property_evaluation_expressions() -> Result<()> {
         network_state: NetworkStateSnapshot {
             partitions: vec![],
             message_stats: MessageDeliveryStats {
-                total_sent: 0,
-                total_delivered: 0,
-                total_dropped: 0,
+                messages_sent: 0,
+                messages_delivered: 0,
+                messages_dropped: 0,
                 average_latency_ms: 0.0,
             },
             failure_conditions: NetworkFailureConditions {
                 drop_rate: 0.0,
-                latency_range: (0, 100),
-                partition_count: 0,
+                latency_range_ms: (0, 100),
+                partitions_active: false,
             },
         },
     };
@@ -186,6 +188,7 @@ fn test_end_to_end_pipeline_components() -> Result<()> {
     let state = SimulationState {
         tick: 1,
         time: 100,
+        variables: std::collections::HashMap::new(),
         participants: vec![],
         protocol_state: ProtocolExecutionState {
             active_sessions: vec![],
@@ -195,15 +198,15 @@ fn test_end_to_end_pipeline_components() -> Result<()> {
         network_state: NetworkStateSnapshot {
             partitions: vec![],
             message_stats: MessageDeliveryStats {
-                total_sent: 0,
-                total_delivered: 0,
-                total_dropped: 0,
+                messages_sent: 0,
+                messages_delivered: 0,
+                messages_dropped: 0,
                 average_latency_ms: 0.0,
             },
             failure_conditions: NetworkFailureConditions {
                 drop_rate: 0.0,
-                latency_range: (0, 100),
-                partition_count: 0,
+                latency_range_ms: (0, 100),
+                partitions_active: false,
             },
         },
     };

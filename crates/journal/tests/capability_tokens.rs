@@ -6,9 +6,15 @@
 //! Reference: work/pre_ssb_storage_tests.md - Category 1.1
 
 use aura_crypto::Effects;
+use aura_crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
 use aura_journal::capability::{CapabilityId, CapabilityScope, Subject};
-use aura_crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
+use ed25519_dalek::{Signer, Verifier};
 use serde::{Deserialize, Serialize};
+
+// Type aliases for convenience
+type SigningKey = Ed25519SigningKey;
+type VerifyingKey = Ed25519VerifyingKey;
+type Signature = Ed25519Signature;
 
 // TODO: These types will be added to aura-journal/src/capability/types.rs
 // For now, we define them here to write the tests
@@ -71,7 +77,6 @@ impl CapabilityToken {
 
         // Sign the token
         let message = token.signing_message()?;
-        use aura_crypto::Signer;
         token.signature = signing_key.sign(&message).to_bytes().to_vec();
 
         Ok(token)
@@ -102,7 +107,6 @@ impl CapabilityToken {
     pub fn verify(&self, verifying_key: &VerifyingKey) -> Result<(), String> {
         let message = self.signing_message()?;
 
-        use aura_crypto::{Ed25519Signature, ed25519_verify};
         let sig = Signature::from_bytes(
             self.signature
                 .as_slice()
@@ -243,23 +247,17 @@ mod tests {
         let device_id = b"device_789".to_vec();
 
         // Create delegation chain A → B → C
-        let cap_a = CapabilityId::from_chain(
-            None,
-            &Subject::new("delegator_a"),
-            &CapabilityScope::simple("storage", "admin"),
-        );
+        let subject_a = Subject::new("delegator_a");
+        let scope_a = CapabilityScope::simple("storage", "admin").as_bytes();
+        let cap_a = CapabilityId::from_chain(None, subject_a.as_bytes(), &scope_a);
 
-        let cap_b = CapabilityId::from_chain(
-            Some(&cap_a),
-            &Subject::new("delegator_b"),
-            &CapabilityScope::simple("storage", "write"),
-        );
+        let subject_b = Subject::new("delegator_b");
+        let scope_b = CapabilityScope::simple("storage", "write").as_bytes();
+        let cap_b = CapabilityId::from_chain(Some(&cap_a), subject_b.as_bytes(), &scope_b);
 
-        let cap_c = CapabilityId::from_chain(
-            Some(&cap_b),
-            &Subject::new("delegator_c"),
-            &CapabilityScope::simple("storage", "read"),
-        );
+        let subject_c = Subject::new("delegator_c");
+        let scope_c = CapabilityScope::simple("storage", "read").as_bytes();
+        let cap_c = CapabilityId::from_chain(Some(&cap_b), subject_c.as_bytes(), &scope_c);
 
         let delegation_chain = vec![cap_a.clone(), cap_b.clone(), cap_c.clone()];
 

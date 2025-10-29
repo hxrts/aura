@@ -7,18 +7,22 @@
 //! 4. Verify formal properties during execution
 
 use aura_simulator::{
-    scenario::UnifiedScenarioLoader,
-    testing::{QuintEvaluationConfig, QuintInvariant, QuintSafetyProperty},
-    PropertyMonitor, Result, SimError, UnifiedEngineConfig, UnifiedScenarioEngine,
+    scenario::{
+        UnifiedScenarioLoader, UnifiedEngineConfig, UnifiedScenarioEngine,
+        register_all_standard_choreographies
+    },
+    testing::{PropertyMonitor, QuintInvariant, QuintSafetyProperty},
+    config::PropertyMonitoringConfig,
+    AuraError, Result,
 };
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_e2e_quint_integration() -> Result<()> {
     // Setup test environment
     let temp_dir = TempDir::new()
-        .map_err(|e| SimError::PropertyError(format!("Failed to create temp dir: {}", e)))?;
+        .map_err(|e| AuraError::configuration_error(format!("Failed to create temp dir: {}", e)))?;
 
     // Create unified scenario engine with debugging enabled
     let config = UnifiedEngineConfig {
@@ -32,6 +36,9 @@ async fn test_e2e_quint_integration() -> Result<()> {
 
     let mut engine = UnifiedScenarioEngine::new(temp_dir.path())?.configure(config);
 
+    // Register standard choreographies
+    register_all_standard_choreographies(&mut engine);
+
     // Load the e2e scenario configuration
     let scenario_path = PathBuf::from("examples/e2e_quint_scenario.toml");
 
@@ -43,7 +50,7 @@ async fn test_e2e_quint_integration() -> Result<()> {
     let mut loader = UnifiedScenarioLoader::new(temp_dir.path());
     let scenario = loader
         .load_scenario(&scenario_path)
-        .map_err(|e| SimError::PropertyError(format!("Failed to load scenario: {}", e)))?;
+        .map_err(|e| AuraError::configuration_error(format!("Failed to load scenario: {}", e)))?;
 
     // Create property monitor with Quint properties
     let mut property_monitor = create_property_monitor()?;
@@ -81,7 +88,7 @@ async fn test_e2e_quint_integration() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_property_monitor_with_quint() -> Result<()> {
     // Test the property monitor in isolation
     let mut monitor = create_property_monitor()?;
@@ -116,7 +123,7 @@ async fn test_property_monitor_with_quint() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_quint_specification_parsing() -> Result<()> {
     // Test that we can parse the Quint specification
     use quint_api::QuintEvaluator;
@@ -146,10 +153,13 @@ async fn test_quint_specification_parsing() -> Result<()> {
 // Helper functions
 
 fn create_property_monitor() -> Result<PropertyMonitor> {
-    let config = QuintEvaluationConfig {
+    let config = PropertyMonitoringConfig {
         max_trace_length: 100,
-        parallel_evaluation: false,
         evaluation_timeout_ms: 1000,
+        parallel_evaluation: false,
+        properties: vec![],
+        violation_confidence_threshold: 0.8,
+        stop_on_violation: false,
     };
 
     let mut monitor = PropertyMonitor::with_config(config);
@@ -179,6 +189,7 @@ fn create_test_simulation_state() -> aura_simulator::testing::SimulationState {
     SimulationState {
         tick: 10,
         time: 1000,
+        variables: std::collections::HashMap::new(),
         participants: vec![
             ParticipantStateSnapshot {
                 id: "participant_0".to_string(),
@@ -207,15 +218,15 @@ fn create_test_simulation_state() -> aura_simulator::testing::SimulationState {
         network_state: NetworkStateSnapshot {
             partitions: vec![],
             message_stats: MessageDeliveryStats {
-                total_sent: 10,
-                total_delivered: 8,
-                total_dropped: 2,
+                messages_sent: 10,
+                messages_delivered: 8,
+                messages_dropped: 2,
                 average_latency_ms: 50.0,
             },
             failure_conditions: NetworkFailureConditions {
                 drop_rate: 0.1,
-                latency_range: (10, 100),
-                partition_count: 0,
+                latency_range_ms: (10, 100),
+                partitions_active: false,
             },
         },
     }
@@ -243,7 +254,7 @@ expected_outcome = "success"
 "#;
 
     std::fs::write(path, scenario_toml)
-        .map_err(|e| SimError::PropertyError(format!("Failed to write scenario: {}", e)))?;
+        .map_err(|e| AuraError::configuration_error(format!("Failed to write scenario: {}", e)))?;
 
     Ok(())
 }

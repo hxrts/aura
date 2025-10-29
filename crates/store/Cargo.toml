@@ -15,6 +15,9 @@ workspace = true
 aura-journal = { path = "../journal" }
 # aura-transport = { path = "../transport" }  # Temporarily disabled due to coordination dependencies
 aura-crypto = { path = "../crypto" }
+aura-types = { path = "../aura-types" }
+aura-protocol-types = { path = "../aura-protocol-types" }
+aura-authorization = { path = "../aura-authorization" }
 
 # Storage
 redb = { workspace = true }

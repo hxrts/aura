@@ -15,7 +15,11 @@ workspace = true
 # Internal crates
 aura-types = { path = "../aura-types" }
 aura-crypto = { path = "../crypto" }
-protocol-core = { path = "../protocol-core" }
+aura-authentication = { path = "../aura-authentication" }
+aura-authorization = { path = "../aura-authorization" }
+aura-protocol-types = { path = "../aura-protocol-types" }
+# Note: Cannot import aura-protocol due to circular dependency (aura-protocol imports journal)
+# Use aura-protocol-types for shared types instead
 keyhive_core = { workspace = true }
 # aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
 

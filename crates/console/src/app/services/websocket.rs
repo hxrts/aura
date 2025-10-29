@@ -89,8 +89,10 @@ impl WebSocketService {
                                             _ => {}
                                         }
                                     }
-                                    ServerMessage::Event(event) => match event {
-                                        ConsoleEvent::NetworkTopologyChanged { topology } => {
+                                    ServerMessage::Event(event) => {
+                                        if let ConsoleEvent::NetworkTopologyChanged { topology } =
+                                            event
+                                        {
                                             log::info!(
                                                 "Network topology updated with {} nodes",
                                                 topology.nodes.len()
@@ -99,8 +101,7 @@ impl WebSocketService {
                                                 convert_topology_to_network_data(topology);
                                             network_topology.set(Some((nodes, edges)));
                                         }
-                                        _ => {}
-                                    },
+                                    }
                                 }
 
                                 // Add to message queue
@@ -263,7 +264,7 @@ fn convert_topology_to_network_data(
             source: edge.from.clone(),
             target: edge.to.clone(),
             edge_type,
-            strength: (edge.message_count as f64).min(1.0).max(0.1), // Normalize to 0.1-1.0 range
+            strength: (edge.message_count as f64).clamp(0.1, 1.0), // Normalize to 0.1-1.0 range
         });
     }
 

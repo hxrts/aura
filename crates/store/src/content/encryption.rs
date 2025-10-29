@@ -1,7 +1,10 @@
 //! Encryption utilities for storage
 
-use aura_crypto::{Effects, CryptoError};
-use chacha20poly1305::{aead::{Aead, KeyInit}, ChaCha20Poly1305, Nonce};
+use aura_crypto::{CryptoError, Effects};
+use chacha20poly1305::{
+    aead::{Aead, KeyInit},
+    ChaCha20Poly1305, Nonce,
+};
 use rand::RngCore;
 
 #[derive(Debug, Clone)]

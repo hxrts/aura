@@ -7,9 +7,8 @@
 //!
 //! Reference: docs/040_storage.md Section 5 "Unified Transport Architecture"
 
-use crate::{TransportError, TransportErrorBuilder, TransportResult};
-use async_trait::async_trait;
-use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
+use crate::{TransportErrorBuilder, TransportResult};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -39,11 +38,7 @@ pub struct AuthenticatedChannel {
 
 impl AuthenticatedChannel {
     /// Create a new authenticated channel
-    pub fn new(
-        peer_device_id: Uuid,
-        peer_addr: SocketAddr,
-        current_time: u64,
-    ) -> Self {
+    pub fn new(peer_device_id: Uuid, peer_addr: SocketAddr, current_time: u64) -> Self {
         Self {
             channel_id: Uuid::new_v4(),
             peer_device_id,
@@ -81,7 +76,7 @@ impl DeviceCredentials {
     pub fn generate() -> Self {
         let signing_key = SigningKey::generate(&mut rand::thread_rng());
         let verifying_key = signing_key.verifying_key();
-        
+
         Self {
             device_id: Uuid::new_v4(),
             signing_key,
@@ -92,7 +87,7 @@ impl DeviceCredentials {
     /// Create device credentials from existing key material
     pub fn from_signing_key(device_id: Uuid, signing_key: SigningKey) -> Self {
         let verifying_key = signing_key.verifying_key();
-        
+
         Self {
             device_id,
             signing_key,
@@ -177,7 +172,7 @@ impl AuthenticatedTransport {
             peer_keys.get(&peer_id).cloned()
         };
 
-        let peer_key = peer_key.ok_or_else(|| {
+        let _peer_key = peer_key.ok_or_else(|| {
             TransportErrorBuilder::authentication(format!(
                 "No public key found for peer {}",
                 peer_id
@@ -185,7 +180,7 @@ impl AuthenticatedTransport {
         })?;
 
         // Generate authentication challenge
-        let challenge = AuthenticationChallenge {
+        let _challenge = AuthenticationChallenge {
             nonce: rand::random(),
             challenger_id: self.credentials.device_id,
             timestamp: current_time,
@@ -208,7 +203,7 @@ impl AuthenticatedTransport {
     pub async fn send_authenticated(
         &self,
         peer_id: Uuid,
-        message: &[u8],
+        _message: &[u8],
         current_time: u64,
     ) -> TransportResult<()> {
         // Get and update the channel
@@ -228,7 +223,8 @@ impl AuthenticatedTransport {
         if channel.is_idle(current_time, self.idle_timeout) {
             return Err(TransportErrorBuilder::connection(
                 "Channel is idle and may be closed".to_string(),
-            ).into());
+            )
+            .into());
         }
 
         Ok(())
@@ -238,11 +234,9 @@ impl AuthenticatedTransport {
     pub async fn cleanup_idle_channels(&self, current_time: u64) -> usize {
         let mut channels = self.channels.write().await;
         let initial_count = channels.len();
-        
-        channels.retain(|_, channel| {
-            !channel.is_idle(current_time, self.idle_timeout)
-        });
-        
+
+        channels.retain(|_, channel| !channel.is_idle(current_time, self.idle_timeout));
+
         initial_count - channels.len()
     }
 
@@ -266,10 +260,10 @@ mod tests {
     #[test]
     fn test_device_credentials_generation() {
         let creds = DeviceCredentials::generate();
-        
+
         let message = b"test message";
         let signature = creds.sign_message(message);
-        
+
         assert!(creds.verify_signature(message, &signature));
     }
 
@@ -277,11 +271,7 @@ mod tests {
     fn test_authenticated_channel_idle_detection() {
         let peer_addr = "127.0.0.1:8000".parse().unwrap();
         let current_time = 1000;
-        let mut channel = AuthenticatedChannel::new(
-            Uuid::new_v4(),
-            peer_addr,
-            current_time,
-        );
+        let mut channel = AuthenticatedChannel::new(Uuid::new_v4(), peer_addr, current_time);
 
         // Channel should not be idle immediately
         assert!(!channel.is_idle(current_time, Duration::from_secs(60)));
@@ -302,13 +292,18 @@ mod tests {
 
         let peer_id = Uuid::new_v4();
         let peer_creds = DeviceCredentials::generate();
-        
+
         // Add peer key
-        transport.add_peer_key(peer_id, peer_creds.verifying_key).await;
+        transport
+            .add_peer_key(peer_id, peer_creds.verifying_key)
+            .await;
 
         // Authenticate peer
         let peer_addr = "127.0.0.1:8000".parse().unwrap();
-        let channel = transport.authenticate_peer(peer_id, peer_addr, 1000).await.unwrap();
+        let channel = transport
+            .authenticate_peer(peer_id, peer_addr, 1000)
+            .await
+            .unwrap();
 
         assert_eq!(channel.peer_device_id, peer_id);
         assert_eq!(transport.active_channel_count().await, 1);

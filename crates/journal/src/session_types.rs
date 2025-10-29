@@ -1,320 +1,174 @@
-//! Journal protocol lifecycle and group session types.
+//! Journal session types and event tracking.
+//!
+//! This module provides simplified session management for journal operations,
+//! focusing on event-based state tracking rather than full protocol lifecycle.
 
-use aura_types::{AccountId, DeviceId, SessionId};
-use protocol_core::{
-    capabilities::{ProtocolCapabilities, ProtocolEffects},
-    lifecycle::{
-        ProtocolDescriptor, ProtocolInput, ProtocolLifecycle, ProtocolRehydration, ProtocolStep,
-    },
-    metadata::{ProtocolMode, ProtocolPriority, ProtocolType},
-    typestate::SessionState,
-};
+use aura_types::{AccountId, SessionId};
+// Import protocol types from the dedicated protocol-types crate to break circular dependency
+use aura_protocol_types::{ParticipantId, SessionStatus, ThresholdConfig};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-/// Journal protocol error placeholder.
+/// Journal session errors
 #[derive(Debug, thiserror::Error)]
-pub enum JournalProtocolError {
-    #[error("unsupported journal input: {0}")]
-    Unsupported(&'static str),
+pub enum JournalSessionError {
+    #[error("Session not found: {0}")]
+    SessionNotFound(SessionId),
+
+    #[error("Invalid session state: {0}")]
+    InvalidState(String),
+
+    #[error("Session expired: {0}")]
+    SessionExpired(SessionId),
 }
 
-/// Ledger empty typestate marker.
-#[derive(Debug, Clone)]
-pub struct LedgerInitialized;
+/// Simplified session state tracking for journal operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalSession {
+    /// Session identifier
+    pub session_id: SessionId,
 
-impl SessionState for LedgerInitialized {
-    const NAME: &'static str = "LedgerInitialized";
-    const IS_FINAL: bool = false;
-    const CAN_TERMINATE: bool = false;
+    /// Current session status
+    pub status: SessionStatus,
+
+    /// Session participants
+    pub participants: Vec<ParticipantId>,
+
+    /// Account this session belongs to
+    pub account_id: AccountId,
+
+    /// Session creation timestamp
+    pub created_at: u64,
+
+    /// Optional session expiration
+    pub expires_at: Option<u64>,
+
+    /// Threshold configuration if applicable
+    pub threshold_config: Option<ThresholdConfig>,
 }
 
-/// Journal protocol implementing the unified lifecycle trait.
-#[derive(Debug, Clone)]
-pub struct JournalProtocol {
-    descriptor: ProtocolDescriptor,
-    state: LedgerInitialized,
-    finished: bool,
-}
-
-impl JournalProtocol {
-    /// Create a new journal protocol instance.
-    pub fn new(device_id: DeviceId, session_id: SessionId) -> Self {
-        let descriptor = ProtocolDescriptor::new(
-            Uuid::new_v4(),
-            session_id,
-            device_id,
-            ProtocolType::Locking,
-        )
-        .with_priority(ProtocolPriority::Normal)
-        .with_mode(ProtocolMode::Asynchronous);
-
+impl JournalSession {
+    /// Create a new journal session
+    pub fn new(
+        session_id: SessionId,
+        account_id: AccountId,
+        participants: Vec<ParticipantId>,
+        threshold_config: Option<ThresholdConfig>,
+    ) -> Self {
         Self {
-            descriptor,
-            state: LedgerInitialized,
-            finished: false,
-        }
-    }
-
-    /// Convenience helper with generated session ID.
-    #[allow(clippy::disallowed_methods)]
-    pub fn new_ephemeral(device_id: DeviceId) -> Self {
-        Self::new(device_id, SessionId::new())
-    }
-}
-
-impl ProtocolLifecycle for JournalProtocol {
-    type State = LedgerInitialized;
-    type Output = ();
-    type Error = JournalProtocolError;
-
-    fn descriptor(&self) -> &ProtocolDescriptor {
-        &self.descriptor
-    }
-
-    fn step(
-        &mut self,
-        input: ProtocolInput<'_>,
-        _caps: &mut ProtocolCapabilities<'_>,
-    ) -> ProtocolStep<Self::Output, Self::Error> {
-        match input {
-            ProtocolInput::LocalSignal { signal, .. } if signal == "finalize" => {
-                self.finished = true;
-                ProtocolStep::completed(
-                    Vec::<ProtocolEffects>::new(),
-                    None,
-                    Ok(()),
-                )
-            }
-            _ => ProtocolStep::progress(Vec::<ProtocolEffects>::new(), None),
-        }
-    }
-
-    fn is_final(&self) -> bool {
-        self.finished
-    }
-}
-
-impl ProtocolRehydration for JournalProtocol {
-    type Evidence = ();
-
-    fn validate_evidence(_evidence: &Self::Evidence) -> bool {
-        true
-    }
-
-    fn rehydrate(
-        device_id: DeviceId,
-        _account_id: AccountId,
-        _evidence: Self::Evidence,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self::new(device_id, SessionId::new()))
-    }
-}
-
-/// Legacy-compatible constructor.
-pub fn new_journal_protocol(device_id: DeviceId) -> JournalProtocol {
-    JournalProtocol::new_ephemeral(device_id)
-}
-
-/// Legacy-compatible rehydration helper.
-pub fn rehydrate_journal_protocol(
-    device_id: DeviceId,
-    account_id: AccountId,
-) -> Result<JournalProtocol, JournalProtocolError> {
-    JournalProtocol::rehydrate(device_id, account_id, ())
-}
-
-// ========== Group Session Types ==========
-
-/// Group membership session state
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupMembershipState {
-    pub group_id: String,
-    pub epoch: u64,
-    pub members: Vec<String>,
-}
-
-impl SessionState for GroupMembershipState {
-    const NAME: &'static str = "GroupMembership";
-    const IS_FINAL: bool = false;
-    const CAN_TERMINATE: bool = true;
-}
-
-/// Group messaging session state
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupMessagingState {
-    pub group_id: String,
-    pub current_epoch: u64,
-    pub message_count: u32,
-    pub last_ratchet: u64,
-}
-
-impl SessionState for GroupMessagingState {
-    const NAME: &'static str = "GroupMessaging";
-    const IS_FINAL: bool = false;
-    const CAN_TERMINATE: bool = true;
-}
-
-/// Group administration session state
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupAdminState {
-    pub group_id: String,
-    pub pending_operations: Vec<String>,
-    pub admin_epoch: u64,
-}
-
-impl SessionState for GroupAdminState {
-    const NAME: &'static str = "GroupAdmin";
-    const IS_FINAL: bool = false;
-    const CAN_TERMINATE: bool = true;
-}
-
-/// Group capability verification session state
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupCapabilityVerification {
-    pub group_id: String,
-    pub subject_id: String,
-    pub operation: String,
-    pub verification_complete: bool,
-}
-
-impl SessionState for GroupCapabilityVerification {
-    const NAME: &'static str = "GroupCapabilityVerification";
-    const IS_FINAL: bool = false;
-    const CAN_TERMINATE: bool = true;
-}
-
-/// Group session protocol type
-#[derive(Debug, Clone)]
-pub struct GroupProtocol<T: SessionState> {
-    descriptor: ProtocolDescriptor,
-    state: T,
-    finished: bool,
-}
-
-impl<T: SessionState> GroupProtocol<T> {
-    /// Create a new group protocol instance
-    pub fn new(device_id: DeviceId, session_id: SessionId, initial_state: T) -> Self {
-        let descriptor = ProtocolDescriptor::new(
-            Uuid::new_v4(),
             session_id,
-            device_id,
-            ProtocolType::Group,
+            status: SessionStatus::Initializing,
+            participants,
+            account_id,
+            created_at: 0, // Should be set by effects
+            expires_at: None,
+            threshold_config,
+        }
+    }
+
+    /// Update session status
+    pub fn update_status(&mut self, status: SessionStatus) {
+        self.status = status;
+    }
+
+    /// Check if session is expired
+    pub fn is_expired(&self, current_time: u64) -> bool {
+        self.expires_at.map_or(false, |exp| current_time > exp)
+    }
+
+    /// Check if session is terminal
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self.status,
+            SessionStatus::Completed | SessionStatus::Failed(_) | SessionStatus::Terminated
         )
-        .with_priority(ProtocolPriority::Normal)
-        .with_mode(ProtocolMode::Synchronous);
+    }
+}
 
+/// Simple session manager for journal operations
+#[derive(Debug, Clone)]
+pub struct JournalSessionManager {
+    sessions: std::collections::HashMap<SessionId, JournalSession>,
+}
+
+impl JournalSessionManager {
+    /// Create new session manager
+    pub fn new() -> Self {
         Self {
-            descriptor,
-            state: initial_state,
-            finished: false,
+            sessions: std::collections::HashMap::new(),
         }
     }
 
-    /// Get current session state
-    pub fn state(&self) -> &T {
-        &self.state
+    /// Add a new session
+    pub fn add_session(&mut self, session: JournalSession) {
+        self.sessions.insert(session.session_id, session);
     }
 
-    /// Update session state
-    pub fn update_state(&mut self, new_state: T) {
-        self.state = new_state;
-    }
-}
-
-impl<T: SessionState> ProtocolLifecycle for GroupProtocol<T> {
-    type State = T;
-    type Output = ();
-    type Error = JournalProtocolError;
-
-    fn descriptor(&self) -> &ProtocolDescriptor {
-        &self.descriptor
+    /// Get session by ID
+    pub fn get_session(&self, session_id: &SessionId) -> Option<&JournalSession> {
+        self.sessions.get(session_id)
     }
 
-    fn step(
+    /// Update session status
+    pub fn update_session_status(
         &mut self,
-        input: ProtocolInput<'_>,
-        _caps: &mut ProtocolCapabilities<'_>,
-    ) -> ProtocolStep<Self::Output, Self::Error> {
-        match input {
-            ProtocolInput::LocalSignal { signal, .. } if signal == "finalize" => {
-                self.finished = true;
-                ProtocolStep::completed(
-                    Vec::<ProtocolEffects>::new(),
-                    None,
-                    Ok(()),
-                )
-            }
-            ProtocolInput::LocalSignal { signal, .. } if signal == "update" => {
-                // Group state update logic would go here
-                ProtocolStep::progress(Vec::<ProtocolEffects>::new(), None)
-            }
-            _ => ProtocolStep::progress(Vec::<ProtocolEffects>::new(), None),
+        session_id: &SessionId,
+        status: SessionStatus,
+    ) -> Result<(), JournalSessionError> {
+        let session = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| JournalSessionError::SessionNotFound(*session_id))?;
+        session.update_status(status);
+        Ok(())
+    }
+
+    /// Remove expired sessions
+    pub fn cleanup_expired(&mut self, current_time: u64) -> Vec<SessionId> {
+        let expired: Vec<SessionId> = self
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.is_expired(current_time))
+            .map(|(id, _)| *id)
+            .collect();
+
+        for id in &expired {
+            self.sessions.remove(id);
         }
-    }
 
-    fn is_final(&self) -> bool {
-        self.finished
+        expired
     }
 }
 
-impl<T: SessionState> ProtocolRehydration for GroupProtocol<T> 
-where 
-    T: Clone + Default,
-{
-    type Evidence = T;
-
-    fn validate_evidence(_evidence: &Self::Evidence) -> bool {
-        true
-    }
-
-    fn rehydrate(
-        device_id: DeviceId,
-        _account_id: AccountId,
-        evidence: Self::Evidence,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self::new(device_id, SessionId::new(), evidence))
+/// Default implementation for session manager
+impl Default for JournalSessionManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-// ========== Group Protocol Constructors ==========
+/// Helper functions for session management
+impl JournalSessionManager {
+    /// Get all active sessions
+    pub fn active_sessions(&self) -> Vec<&JournalSession> {
+        self.sessions
+            .values()
+            .filter(|session| !session.is_terminal())
+            .collect()
+    }
 
-/// Create group membership protocol
-pub fn new_group_membership_protocol(
-    device_id: DeviceId,
-    group_id: String,
-) -> GroupProtocol<GroupMembershipState> {
-    let initial_state = GroupMembershipState {
-        group_id,
-        epoch: 0,
-        members: Vec::new(),
-    };
-    GroupProtocol::new(device_id, SessionId::new(), initial_state)
-}
+    /// Get sessions by status
+    pub fn sessions_with_status(&self, status: SessionStatus) -> Vec<&JournalSession> {
+        self.sessions
+            .values()
+            .filter(|session| session.status == status)
+            .collect()
+    }
 
-/// Create group messaging protocol
-pub fn new_group_messaging_protocol(
-    device_id: DeviceId,
-    group_id: String,
-) -> GroupProtocol<GroupMessagingState> {
-    let initial_state = GroupMessagingState {
-        group_id,
-        current_epoch: 0,
-        message_count: 0,
-        last_ratchet: 0,
-    };
-    GroupProtocol::new(device_id, SessionId::new(), initial_state)
-}
-
-/// Create group admin protocol
-pub fn new_group_admin_protocol(
-    device_id: DeviceId,
-    group_id: String,
-) -> GroupProtocol<GroupAdminState> {
-    let initial_state = GroupAdminState {
-        group_id,
-        pending_operations: Vec::new(),
-        admin_epoch: 0,
-    };
-    GroupProtocol::new(device_id, SessionId::new(), initial_state)
+    /// Count sessions by account
+    pub fn session_count_for_account(&self, account_id: AccountId) -> usize {
+        self.sessions
+            .values()
+            .filter(|session| session.account_id == account_id)
+            .count()
+    }
 }

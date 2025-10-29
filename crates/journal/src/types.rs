@@ -1,13 +1,14 @@
 // Core types for the CRDT ledger
 
-use aura_crypto::{signature_serde, verifying_key_serde};
-use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
+use aura_crypto::{verifying_key_serde, Ed25519VerifyingKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // Re-export shared types from crypto and aura-types
 use aura_crypto::MerkleProof;
 use aura_types::{DeviceId, GuardianId};
+
+// Import authentication types (ThresholdSig is imported where needed)
 
 // Re-export consolidated types from aura-types
 pub use aura_types::{
@@ -112,17 +113,6 @@ impl SessionIdExt for SessionId {
 // OperationType is now imported from aura-types
 
 // ProtocolType is now imported from aura-types
-
-/// Threshold signature with participant tracking
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ThresholdSig {
-    #[serde(with = "signature_serde")]
-    pub signature: Ed25519Signature,
-    /// Indices of signers who contributed to this signature
-    pub signers: Vec<u8>,
-    /// Individual signature shares (for verification)
-    pub signature_shares: Vec<Vec<u8>>,
-}
 
 /// Comprehensive audit trail for signature share verification
 #[derive(Debug, Clone, Serialize, Deserialize)]

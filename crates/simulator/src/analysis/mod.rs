@@ -17,38 +17,16 @@ pub use focused_tester::*;
 pub use minimal_reproduction::*;
 pub use trace_recorder::*;
 
+// Re-export unified types
+pub use crate::metrics::{MetricsSnapshot, SimulationMetrics};
+pub use crate::results::{PropertyViolation, SimulationExecutionResult, SimulationRunResult};
+
 use crate::{world_state::WorldState, Result};
 use aura_console_types::TraceEvent;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Result of a simulation run
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimulationResult {
-    /// Whether the simulation completed successfully
-    pub success: bool,
-    /// Final world state
-    pub final_state: WorldState,
-    /// All events generated during simulation
-    pub events: Vec<TraceEvent>,
-    /// Performance metrics
-    pub metrics: SimulationMetrics,
-    /// Error message if simulation failed
-    pub error: Option<String>,
-}
-
-/// Performance metrics for simulation runs
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimulationMetrics {
-    /// Total ticks executed
-    pub total_ticks: u64,
-    /// Total execution time in milliseconds
-    pub execution_time_ms: u64,
-    /// Number of messages processed
-    pub messages_processed: u64,
-    /// Number of protocol sessions completed
-    pub sessions_completed: u64,
-}
+// Duplicate SimulationResult and SimulationMetrics removed - using unified types from results and metrics modules
 
 /// Debug result from violation analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,7 +42,7 @@ pub struct ViolationDebugResult {
     /// Related participants
     pub participants: Vec<String>,
     /// Failure analysis result
-    pub failure_analysis: crate::failure_analyzer::FailureAnalysisResult,
+    pub failure_analysis: failure_analyzer::FailureAnalysisResult,
     /// Analysis metadata
     pub metadata: HashMap<String, String>,
 }
@@ -166,7 +144,7 @@ impl CheckpointSimulation {
     }
 
     /// Run simulation until completion
-    pub fn run_until_completion(&mut self) -> Result<SimulationResult> {
+    pub fn run_until_completion(&mut self) -> Result<SimulationExecutionResult> {
         let mut events = Vec::new();
         let start_time = std::time::Instant::now();
 
@@ -186,15 +164,18 @@ impl CheckpointSimulation {
 
         self.event_history.extend(events.clone());
 
-        Ok(SimulationResult {
+        Ok(SimulationExecutionResult {
             success: true,
             final_state: self.world_state.clone(),
             events,
-            metrics: SimulationMetrics {
-                total_ticks: self.world_state.current_tick,
-                execution_time_ms: start_time.elapsed().as_millis() as u64,
-                messages_processed: 0,
-                sessions_completed: self.world_state.protocols.completed_sessions.len() as u64,
+            metrics: {
+                let mut metrics = SimulationMetrics::new();
+                metrics.simulation.current_tick = self.world_state.current_tick;
+                metrics.simulation.total_duration_ms = start_time.elapsed().as_millis() as u64;
+                metrics.network.messages_sent = 0; // Default placeholder
+                metrics.protocol.completed_sessions =
+                    self.world_state.protocols.completed_sessions.len() as u64;
+                metrics
             },
             error: None,
         })
@@ -204,7 +185,7 @@ impl CheckpointSimulation {
     pub fn run_with_monitoring(
         &mut self,
         _monitor: &mut crate::testing::PropertyMonitor,
-    ) -> Result<SimulationResult> {
+    ) -> Result<SimulationExecutionResult> {
         self.run_until_completion()
     }
 

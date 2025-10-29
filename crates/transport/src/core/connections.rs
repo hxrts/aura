@@ -6,10 +6,9 @@
 //! - Message broadcasting
 //! - Connection state management
 
-use crate::{PresenceTicket, TransportError, TransportErrorBuilder, TransportResult};
+use crate::{PresenceTicket, TransportResult};
 use async_trait::async_trait;
 use std::time::Duration;
-use uuid::Uuid;
 
 /// Opaque connection handle
 ///
@@ -50,12 +49,14 @@ pub struct ConnectionBuilder {
 }
 
 impl ConnectionBuilder {
+    /// Create a new connection builder for the given peer
     pub fn new(peer_id: impl Into<String>) -> Self {
         ConnectionBuilder {
             peer_id: peer_id.into(),
         }
     }
 
+    /// Build a connection from the configured builder
     pub fn build(self) -> Connection {
         // Use deterministic ID based on peer_id for testing consistency
         let id = format!("conn_{}", self.peer_id);

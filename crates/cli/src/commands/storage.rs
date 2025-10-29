@@ -1,16 +1,11 @@
 // Capability-driven storage commands
 
-use crate::commands::common;
 use crate::config::Config;
-use anyhow::Context;
-use aura_agent::Agent;
-use aura_journal::capability::identity::IndividualId;
 use clap::Subcommand;
-use std::collections::BTreeSet;
 use std::path::PathBuf;
-use tokio::fs;
 use tracing::info;
 
+/// Storage management commands
 #[derive(Subcommand)]
 pub enum StorageCommand {
     /// Store data with capability protection
@@ -85,6 +80,7 @@ pub enum StorageCommand {
     },
 }
 
+/// Handle storage subcommands
 pub async fn handle_storage_command(
     command: StorageCommand,
     config: &Config,
@@ -131,90 +127,26 @@ pub async fn handle_storage_command(
 }
 
 async fn store_data(
-    config: &Config,
-    entry_id: &str,
-    file_path: &PathBuf,
-    scope: &str,
-    resource: Option<&str>,
-    content_type: &str,
-    acl: Option<&str>,
-    attributes: Option<&str>,
+    _config: &Config,
+    _entry_id: &str,
+    _file_path: &PathBuf,
+    _scope: &str,
+    _resource: Option<&str>,
+    _content_type: &str,
+    _acl: Option<&str>,
+    _attributes: Option<&str>,
 ) -> anyhow::Result<()> {
-    info!("Storing file {:?} as entry '{}'", file_path, entry_id);
-
-    let agent = common::create_agent(config).await?;
-
-    // Read file data
-    let data = fs::read(file_path).await.context("Failed to read file")?;
-
-    // Parse capability scope
-    let required_scope = common::parse_capability_scope(scope, resource)?;
-
-    // Parse ACL if provided
-    let acl_set = if let Some(acl_str) = acl {
-        let ids: BTreeSet<IndividualId> = acl_str
-            .split(',')
-            .map(|s| s.trim())
-            .map(|s| IndividualId::new(s))
-            .collect();
-        Some(ids)
-    } else {
-        None
-    };
-
-    // Parse attributes if provided (not used in simplified Agent trait)
-    let _attrs = if let Some(attr_str) = attributes {
-        common::parse_attributes(attr_str)?
-    } else {
-        std::collections::HashMap::new()
-    };
-
-    // Store data using the simplified Agent trait
-    let capabilities = vec![required_scope.clone()];
-    let data_id = agent.store_data(&data, capabilities).await?;
-
-    println!("[OK] Data stored successfully");
-    println!("  Data ID: {}", data_id);
-    println!("  Size: {} bytes", data.len());
-    println!("  Content Type: {}", content_type);
-    println!("  Scope: {}", required_scope);
-    if let Some(acl) = &acl_set {
-        println!("  ACL: {} members", acl.len());
-    }
-
-    Ok(())
+    // TODO: IndividualId and storage API refactoring required
+    Err(anyhow::anyhow!("Storage commands require API refactoring"))
 }
 
 async fn retrieve_data(
-    config: &Config,
-    entry_id: &str,
-    output: Option<&PathBuf>,
+    _config: &Config,
+    _entry_id: &str,
+    _output: Option<&PathBuf>,
 ) -> anyhow::Result<()> {
-    info!("Retrieving entry '{}'", entry_id);
-
-    let agent = common::create_agent(config).await?;
-
-    // Retrieve data using the Agent trait
-    let data = agent.retrieve_data(entry_id).await?;
-
-    if let Some(output_path) = output {
-        // Write to file
-        fs::write(output_path, &data)
-            .await
-            .context("Failed to write output file")?;
-
-        println!("[OK] Data retrieved and written to {:?}", output_path);
-        println!("  Entry ID: {}", entry_id);
-        println!("  Size: {} bytes", data.len());
-    } else {
-        // Write to stdout
-        use std::io::{self, Write};
-        io::stdout()
-            .write_all(&data)
-            .context("Failed to write to stdout")?;
-    }
-
-    Ok(())
+    // TODO: Agent API refactoring required
+    Err(anyhow::anyhow!("Storage retrieve requires API refactoring"))
 }
 
 async fn delete_data(_config: &Config, entry_id: &str) -> anyhow::Result<()> {
@@ -246,18 +178,9 @@ async fn show_metadata(_config: &Config, entry_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn show_stats(config: &Config) -> anyhow::Result<()> {
-    info!("Showing storage statistics");
-
-    let agent = common::create_agent(config).await?;
-
-    println!("Storage Statistics:");
-    println!("==================");
-    println!("Device ID: {}", agent.device_id());
-    println!("Account ID: {}", agent.account_id());
-    println!("\n[WARN] Detailed stats not yet implemented in Agent trait");
-
-    Ok(())
+async fn show_stats(_config: &Config) -> anyhow::Result<()> {
+    // TODO: Agent API refactoring required
+    Err(anyhow::anyhow!("Storage stats requires API refactoring"))
 }
 
 async fn audit_storage(_config: &Config, limit: usize) -> anyhow::Result<()> {

@@ -12,13 +12,16 @@ categories = ["cryptography", "authentication"]
 
 [dependencies]
 # Workspace crates
-aura-coordination = { path = "../coordination" }
+aura-types = { path = "../aura-types" }
+aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../journal" }
 aura-crypto = { path = "../crypto" }
 aura-transport = { path = "../transport" }
 aura-store = { path = "../store" }
 
 # Cryptography provided through aura-crypto
+frost-ed25519 = { workspace = true }
+blake3 = { workspace = true }
 qrcode = { version = "0.13", optional = true }
 
 # Serialization
@@ -84,3 +87,4 @@ real-android-keystore = []  # Enable real Android Keystore implementation
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3.8"
+tracing-subscriber = { workspace = true }

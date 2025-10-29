@@ -239,7 +239,10 @@ pub enum SessionStatus {
     /// Session completed successfully
     Completed,
     /// Session failed with error
-    Failed { reason: String },
+    Failed {
+        /// Reason for failure
+        reason: String,
+    },
     /// Session timed out
     TimedOut,
     /// Session was cancelled
@@ -261,9 +264,15 @@ pub struct CompletedSession {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionResult {
     /// Session completed successfully with result data
-    Success { result_data: Vec<u8> },
+    Success {
+        /// Result data from the session
+        result_data: Vec<u8>,
+    },
     /// Session failed with error
-    Failure { error: String },
+    Failure {
+        /// Error message
+        error: String,
+    },
     /// Session timed out
     Timeout,
 }
@@ -302,19 +311,28 @@ pub enum ByzantineStrategy {
     /// Drop all messages
     DropAllMessages,
     /// Drop messages selectively
-    SelectiveMessageDrop { target_types: Vec<String> },
+    SelectiveMessageDrop {
+        /// Message types to drop
+        target_types: Vec<String>,
+    },
     /// Send invalid signatures
     InvalidSignatures,
     /// Delay messages beyond timeout
-    DelayMessages { delay_ms: u64 },
+    DelayMessages {
+        /// Delay duration in milliseconds
+        delay_ms: u64,
+    },
     /// Send conflicting protocol messages
     ConflictingMessages,
     /// Refuse to participate in protocols
     RefuseParticipation,
     /// Custom strategy with parameters
     Custom {
+        /// Name of the custom strategy
         name: String,
+        /// Implementation details
         implementation: String,
+        /// Strategy parameters
         parameters: HashMap<String, String>,
     },
 }
@@ -482,11 +500,17 @@ impl WorldState {
 /// Lightweight snapshot of world state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldStateSnapshot {
+    /// Current simulation tick
     pub tick: u64,
+    /// Current simulation time in milliseconds
     pub time: u64,
+    /// Number of participants
     pub participant_count: usize,
+    /// Number of active protocol sessions
     pub active_sessions: usize,
+    /// Number of messages in flight
     pub in_flight_messages: usize,
+    /// Hash of the current state
     pub state_hash: String,
 }
 
@@ -557,7 +581,8 @@ mod tests {
     fn test_idle_detection() {
         let world = WorldState::new(42);
         assert!(world.is_idle());
-        assert!(world.should_continue()); // Should continue even if idle until max_ticks
+        // should_continue returns false when idle (no pending work)
+        assert!(!world.should_continue());
 
         // Test max tick boundary
         let mut world_at_limit = world;

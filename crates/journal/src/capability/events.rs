@@ -36,7 +36,9 @@ impl CapabilityDelegation {
         issued_by: DeviceId,
         effects: &aura_crypto::Effects,
     ) -> Self {
-        let capability_id = CapabilityId::from_chain(parent_id.as_ref(), &subject_id, &scope);
+        let scope_bytes = serde_json::to_vec(&scope).unwrap_or_default();
+        let capability_id =
+            CapabilityId::from_chain(parent_id.as_ref(), subject_id.as_bytes(), &scope_bytes);
         let issued_at = effects.now().unwrap_or(0);
 
         Self {

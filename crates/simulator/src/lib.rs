@@ -1,22 +1,6 @@
-#![allow(missing_docs, dead_code)]
-#![allow(clippy::disallowed_methods)]
-#![allow(clippy::unwrap_used)]
-#![allow(clippy::expect_used)]
-#![allow(clippy::result_large_err)]
-#![allow(clippy::large_enum_variant)]
-#![allow(clippy::redundant_closure)]
-#![allow(clippy::needless_pass_by_value)]
-#![allow(clippy::vec_init_then_push)]
-#![allow(clippy::single_match_else)]
-#![allow(clippy::unnecessary_cast)]
-#![allow(clippy::clone_on_copy)]
-#![allow(clippy::ptr_arg)]
-#![allow(clippy::format_in_format_args)]
-#![allow(clippy::field_reassign_with_default)]
-#![allow(clippy::default_constructed_unit_structs)]
-#![allow(clippy::only_used_in_recursion)]
-#![allow(clippy::empty_line_after_doc_comments)]
-#![allow(clippy::manual_async_fn)]
+// Note: This crate contains experimental and test code with intentional patterns
+// that may trigger certain clippy warnings. Specific allows are applied at the
+// item level where necessary for testing utilities and simulation code.
 
 //! Aura Simulation Engine - Unified Test Execution Framework
 //!
@@ -121,90 +105,116 @@
 //! assert_eq!(result.phase_results.len(), 2);
 //! ```
 
-// Core simulation modules
-pub mod logging;
+// ================================================================
+// UNIFIED ARCHITECTURE (Phases 0-5 Complete)
+// ================================================================
+
+// Shared types and interfaces (eliminates circular dependencies)
+pub mod types;
+
+// Core simulation engine (pure functional logic)
 pub mod simulation_engine;
 pub mod world_state;
 
-// Organized modules
+// Unified framework modules (infrastructure)
+pub mod config;
+pub mod metrics;
+pub mod results;
+pub mod state;
+pub mod utils;
+
+// Analysis and debugging tools (external observers)
 pub mod analysis;
 pub mod observability;
+
+// Scenario execution and testing
 pub mod scenario;
 pub mod testing;
 
-// Legacy modules (temporarily disabled due to dependencies)
-// pub mod adversary;  // Temporarily disabled due to journal dependency issues
-// pub mod builder;  // Temporarily disabled due to journal dependency issues
-// pub mod engine;  // Temporarily disabled due to transport dependency issues
-// pub mod network;  // Temporarily disabled due to journal dependency issues
-// pub mod quint;  // Temporarily disabled due to journal dependency issues
+// Legacy support
+pub mod logging;
 
-// Core simulation exports
-pub use simulation_engine::*;
-pub use world_state::*;
+// Quint integration
+pub mod quint;
 
-// Module exports (selective to avoid naming conflicts)
-pub use analysis::*;
-#[allow(ambiguous_glob_reexports)]
-pub use observability::*;
-#[allow(ambiguous_glob_reexports)]
-pub use scenario::*;
-pub use testing::*;
+// ================================================================
+// CLEAN ARCHITECTURE NOTES
+// ================================================================
+//
+// Legacy modules have been removed as part of the deduplication effort.
+// The following modules were identified as either:
+// - Superseded by unified framework modules
+// - Creating circular dependencies
+// - Having unresolved external dependencies
+//
+// All functionality has been consolidated into the unified architecture.
 
-use thiserror::Error;
+// ================================================================
+// CLEAN PUBLIC API (Explicit Exports - No Ambiguous Globs)
+// ================================================================
 
-/// Simulation framework error types
-///
-/// Comprehensive error handling for the deterministic simulation framework
-/// covering participant management, network simulation, and effect processing.
-#[derive(Error, Debug, Clone)]
-pub enum SimError {
-    /// Requested participant not found in simulation
-    #[error("Participant not found: {0}")]
-    ParticipantNotFound(String),
+// Core simulation functionality
+pub use simulation_engine::tick;
+pub use world_state::{
+    ByzantineStrategy, NetworkPartition, ParticipantState, QueuedProtocol, WorldState,
+    WorldStateSnapshot,
+};
 
-    /// Error in participant agent operation
-    #[error("Agent error: {0}")]
-    AgentError(String),
+// Unified framework (primary API)
+pub use types::{
+    current_unix_timestamp_millis,
+    // Common utilities
+    current_unix_timestamp_secs,
+    generate_checkpoint_id,
+    generate_random_uuid,
+    CheckpointManager,
 
-    /// Network simulation or transport error
-    #[error("Network error: {0}")]
-    NetworkError(String),
+    ConfigBuilder,
+    ConfigValidation,
 
-    /// General simulation runtime error
-    #[error("Runtime error: {0}")]
-    RuntimeError(String),
+    ExecutionTrace,
 
-    /// Error processing simulation effects
-    #[error("Effect processing error: {0}")]
-    EffectError(String),
+    MetricCategory,
 
-    /// Time simulation or scheduling error
-    #[error("Time error: {0}")]
-    TimeError(String),
+    MetricsCollector,
+    MetricsProvider,
+    PropertyCheckResult,
+    // Property types (moved from testing to eliminate circular deps)
+    PropertyViolation,
+    PropertyViolationType,
+    ResultExt,
+    // Configuration system
+    SimulationConfig,
+    // Core results and metrics
+    SimulationExecutionResult,
+    SimulationMetrics,
+    SimulationRunResult,
+    SimulationState,
+    // State management
+    StateManager,
+    UnifiedStateManager,
+    ValidationResult,
+    ViolationDetails,
+    ViolationDetectionReport,
+    ViolationSeverity,
+};
 
-    /// Checkpoint operation error
-    #[error("Checkpoint error: {0}")]
-    CheckpointError(String),
+// Analysis and debugging tools
+pub use analysis::{FailureAnalysisResult, FailureAnalyzer, FocusedTester, MinimalReproduction};
 
-    /// Scenario generation or processing error
-    #[error("Generation error: {0}")]
-    GenerationError(String),
+// Observability tools
+pub use observability::{PassiveTraceRecorder, TimeTravelDebugger};
 
-    /// Metadata management error
-    #[error("Metadata error: {0}")]
-    MetadataError(String),
+// Testing framework
+pub use testing::{FunctionalRunner, PropertyMonitor};
 
-    /// Property monitoring or analysis error
-    #[error("Property error: {0}")]
-    PropertyError(String),
+// Scenario execution
+// pub use scenario::{
+//     Scenario, ScenarioEngine, ChoreographyAction, NetworkConditions
+// };
 
-    /// Failure analysis error
-    #[error("Analysis error: {0}")]
-    AnalysisError(String),
-}
+// Error types and Result are provided by aura_types unified system
+pub use aura_types::AuraError;
 
-/// Result type alias for simulation operations
-///
-/// Provides a convenient Result<T> that defaults to SimError for error cases.
-pub type Result<T> = std::result::Result<T, SimError>;
+/// Result type alias for simulator operations
+pub type Result<T> = std::result::Result<T, AuraError>;

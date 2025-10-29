@@ -3,33 +3,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Deterministic capability identifier (BLAKE3 hash of parent chain)
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct CapabilityId(pub [u8; 32]);
+// Re-export CapabilityId from aura-types
+pub use aura_types::CapabilityId;
 
-impl CapabilityId {
-    /// Generate deterministic ID from parent chain
-    pub fn from_chain(
-        parent_id: Option<&CapabilityId>,
-        subject_id: &Subject,
-        scope: &CapabilityScope,
-    ) -> Self {
-        let mut hasher = aura_crypto::blake3_hasher();
-
-        if let Some(parent) = parent_id {
-            hasher.update(&parent.0);
-        }
-
-        hasher.update(subject_id.as_bytes());
-        hasher.update(&serde_json::to_vec(scope).unwrap_or_default());
-
-        CapabilityId(hasher.finalize().into())
-    }
-
-    pub fn as_hex(&self) -> String {
-        hex::encode(self.0)
-    }
-}
+// Import authorization types for interoperability
+use aura_authorization::{
+    Action as AuthzAction, Resource as AuthzResource, Subject as AuthzSubject,
+};
 
 /// Subject of a capability (who it's granted to)
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -42,6 +22,46 @@ impl Subject {
 
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
+    }
+
+    /// Convert to authorization crate Subject for interoperability
+    /// This is a best-effort conversion - journal's Subject is a string,
+    /// while authorization Subject is an enum
+    pub fn to_authz_subject(&self) -> Option<AuthzSubject> {
+        // Try to parse as DeviceId format
+        if let Ok(device_id) = self.0.parse::<aura_types::DeviceId>() {
+            return Some(AuthzSubject::Device(device_id));
+        }
+
+        // Try to parse as UUID (for guardian)
+        if let Ok(guardian_uuid) = self.0.parse::<uuid::Uuid>() {
+            return Some(AuthzSubject::Guardian(guardian_uuid));
+        }
+
+        // Could not convert to structured subject
+        None
+    }
+}
+
+impl From<AuthzSubject> for Subject {
+    /// Convert from authorization Subject to journal Subject
+    fn from(authz_subject: AuthzSubject) -> Self {
+        match authz_subject {
+            AuthzSubject::Device(device_id) => Subject::new(&device_id.to_string()),
+            AuthzSubject::Guardian(guardian_id) => Subject::new(&guardian_id.to_string()),
+            AuthzSubject::ThresholdGroup {
+                participants,
+                threshold,
+            } => {
+                // Create a deterministic string representation
+                let mut ids: Vec<String> = participants.iter().map(|id| id.to_string()).collect();
+                ids.sort();
+                Subject::new(&format!("threshold:{}:{}", threshold, ids.join(",")))
+            }
+            AuthzSubject::Session { session_id, issuer } => {
+                Subject::new(&format!("session:{}:{}", session_id, issuer))
+            }
+        }
     }
 }
 
@@ -69,6 +89,65 @@ impl CapabilityScope {
         }
     }
 
+    /// Convert to authorization Action for interoperability
+    pub fn to_authz_action(&self) -> AuthzAction {
+        match self.operation.as_str() {
+            "read" => AuthzAction::Read,
+            "write" => AuthzAction::Write,
+            "delete" => AuthzAction::Delete,
+            "execute" => AuthzAction::Execute,
+            "delegate" => AuthzAction::Delegate,
+            "revoke" => AuthzAction::Revoke,
+            "admin" => AuthzAction::Admin,
+            _ => AuthzAction::Custom(self.operation.clone()),
+        }
+    }
+
+    /// Convert to authorization Resource for interoperability
+    pub fn to_authz_resource(&self, account_id: aura_types::AccountId) -> AuthzResource {
+        match self.namespace.as_str() {
+            "storage" => {
+                if let Some(resource_id) = &self.resource {
+                    if let Ok(object_uuid) = resource_id.parse::<uuid::Uuid>() {
+                        return AuthzResource::StorageObject {
+                            object_id: object_uuid,
+                            owner: account_id,
+                        };
+                    }
+                }
+                AuthzResource::Account(account_id)
+            }
+            "session" | "protocol" => {
+                if let Some(session_str) = &self.resource {
+                    if let Ok(session_uuid) = session_str.parse::<uuid::Uuid>() {
+                        return AuthzResource::ProtocolSession {
+                            session_id: session_uuid,
+                            session_type: self
+                                .params
+                                .get("type")
+                                .cloned()
+                                .unwrap_or("unknown".to_string()),
+                        };
+                    }
+                }
+                AuthzResource::Account(account_id)
+            }
+            "capability" => {
+                if let Some(cap_id) = &self.resource {
+                    if let Ok(cap_uuid) = cap_id.parse::<uuid::Uuid>() {
+                        // Would need delegator info from context
+                        return AuthzResource::CapabilityDelegation {
+                            capability_id: cap_uuid,
+                            delegator: aura_types::DeviceId::new(), // Placeholder
+                        };
+                    }
+                }
+                AuthzResource::Account(account_id)
+            }
+            _ => AuthzResource::Account(account_id),
+        }
+    }
+
     /// Create scope with resource constraint
     pub fn with_resource(namespace: &str, operation: &str, resource: &str) -> Self {
         Self {
@@ -77,6 +156,27 @@ impl CapabilityScope {
             resource: Some(resource.to_string()),
             params: BTreeMap::new(),
         }
+    }
+
+    /// Convert to bytes for capability ID generation
+    pub fn as_bytes(&self) -> Vec<u8> {
+        // Use a deterministic serialization format
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(self.namespace.as_bytes());
+        bytes.push(0); // separator
+        bytes.extend_from_slice(self.operation.as_bytes());
+        bytes.push(0); // separator
+        if let Some(ref resource) = self.resource {
+            bytes.extend_from_slice(resource.as_bytes());
+        }
+        bytes.push(0); // separator
+        for (k, v) in &self.params {
+            bytes.extend_from_slice(k.as_bytes());
+            bytes.push(0);
+            bytes.extend_from_slice(v.as_bytes());
+            bytes.push(0);
+        }
+        bytes
     }
 
     /// Check if this scope subsumes another (is more general)

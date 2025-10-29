@@ -6,13 +6,12 @@
 
 use crate::quint::types::{
     QuintSpec, QuintInvariant, QuintTemporalProperty, QuintSafetyProperty, QuintError,
-    TemporalPropertyType, SafetyPropertyType, PropertyPriority, ViolationPattern,
+    TemporalPropertyType, PropertyPriority, ViolationPattern,
     ChaosScenario, ChaosType, NetworkChaosConditions, ChaosGenerationResult,
     ChaosGenerationStats, QuintEnhancedTemporalProperty
 };
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use glob::glob;
 
@@ -215,16 +214,17 @@ impl QuintBridge {
     ///
     /// This method analyzes the properties in the loaded specifications and generates
     /// corresponding chaos test scenarios that attempt to violate those properties.
-    pub fn generate_chaos_scenarios(&self) -> Result<ChaosGenerationResult, QuintBridgeError> {
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    pub fn generate_chaos_scenarios(&self) -> Result<ChaosGenerationResult> {
+        let start_time = crate::utils::time::current_unix_timestamp_millis();
         
         let mut chaos_scenarios = Vec::new();
         let mut targeted_properties = Vec::new();
         let mut patterns_detected = 0;
+        #[allow(unused_assignments)]
         let mut high_priority_scenarios = 0;
         let mut property_type_coverage: HashMap<String, usize> = HashMap::new();
         
-        for spec in &self.loaded_specs.values() {
+        for spec in self.loaded_specs.values() {
             // Generate scenarios from invariants
             for invariant in &spec.invariants {
                 let scenarios = self.generate_scenarios_from_invariant(spec, invariant)?;
@@ -260,7 +260,7 @@ impl QuintBridge {
                              scenario.chaos_type == ChaosType::ByzantineCoordination)
             .count();
         
-        let end_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let end_time = crate::utils::time::current_unix_timestamp_millis();
         let generation_time = end_time - start_time;
         
         Ok(ChaosGenerationResult {
@@ -278,7 +278,7 @@ impl QuintBridge {
     }
 
     /// Analyze property violation patterns for enhanced chaos generation
-    pub fn analyze_property_patterns(&self) -> Result<Vec<ViolationPattern>, QuintBridgeError> {
+    pub fn analyze_property_patterns(&self) -> Result<Vec<ViolationPattern>> {
         let mut patterns = Vec::new();
         
         for spec in self.loaded_specs.values() {
@@ -296,7 +296,7 @@ impl QuintBridge {
     }
 
     /// Enhanced temporal property analysis with structured types
-    pub fn analyze_temporal_properties(&self) -> Result<Vec<QuintEnhancedTemporalProperty>, QuintBridgeError> {
+    pub fn analyze_temporal_properties(&self) -> Result<Vec<QuintEnhancedTemporalProperty>> {
         let mut enhanced_properties = Vec::new();
         
         for spec in self.loaded_specs.values() {
@@ -321,7 +321,7 @@ impl QuintBridge {
     }
 
     /// Generate scenario variations for different failure modes
-    pub fn generate_scenario_variations(&self, base_scenario: &ChaosScenario) -> Result<Vec<ChaosScenario>, QuintBridgeError> {
+    pub fn generate_scenario_variations(&self, base_scenario: &ChaosScenario) -> Result<Vec<ChaosScenario>> {
         let mut variations = Vec::new();
         
         // Generate network-focused variation
@@ -414,6 +414,10 @@ impl QuintBridge {
             name: name.to_string(),
             file_path: file_path.to_path_buf(),
             module_name: name.to_string(),
+            version: "1.0".to_string(),
+            description: format!("Specification from {}", file_path.display()),
+            modules: vec![name.to_string()],
+            metadata: HashMap::new(),
             invariants,
             temporal_properties,
             safety_properties: Vec::new(), // Would be extracted from actual parsing
@@ -435,6 +439,8 @@ impl QuintBridge {
                 expression: expression_part.to_string(),
                 description: format!("Invariant from {}:{}", file_path.display(), line_num),
                 source_location: format!("{}:{}", file_path.display(), line_num),
+                enabled: true,
+                tags: vec!["parsed".to_string()],
             })
         } else {
             Err(QuintBridgeError::InvalidSpecFormat {
@@ -469,6 +475,8 @@ impl QuintBridge {
                 expression: expression_part.to_string(),
                 description: format!("Temporal property from {}:{}", file_path.display(), line_num),
                 source_location: format!("{}:{}", file_path.display(), line_num),
+                enabled: true,
+                tags: vec!["parsed".to_string()],
             })
         } else {
             // Handle properties without explicit names
@@ -478,6 +486,8 @@ impl QuintBridge {
                 expression: line.to_string(),
                 description: format!("Temporal property from {}:{}", file_path.display(), line_num),
                 source_location: format!("{}:{}", file_path.display(), line_num),
+                enabled: true,
+                tags: vec!["parsed".to_string()],
             })
         }
     }
@@ -487,7 +497,7 @@ impl QuintBridge {
         &self,
         spec: &QuintSpec,
         invariant: &QuintInvariant,
-    ) -> Result<Vec<ChaosScenario>, QuintBridgeError> {
+    ) -> Result<Vec<ChaosScenario>> {
         let mut scenarios = Vec::new();
         
         // Analyze invariant pattern to determine appropriate chaos strategies
@@ -506,7 +516,7 @@ impl QuintBridge {
         &self,
         spec: &QuintSpec,
         temporal_prop: &QuintTemporalProperty,
-    ) -> Result<Vec<ChaosScenario>, QuintBridgeError> {
+    ) -> Result<Vec<ChaosScenario>> {
         let mut scenarios = Vec::new();
         
         let property_type = self.determine_temporal_property_type(temporal_prop);
@@ -538,7 +548,7 @@ impl QuintBridge {
         &self,
         spec: &QuintSpec,
         safety_prop: &QuintSafetyProperty,
-    ) -> Result<Vec<ChaosScenario>, QuintBridgeError> {
+    ) -> Result<Vec<ChaosScenario>> {
         let mut scenarios = Vec::new();
         
         // Create direct violation scenario
@@ -554,7 +564,7 @@ impl QuintBridge {
     }
 
     /// Analyze invariant patterns to determine violation strategies
-    fn analyze_invariant_patterns(&self, invariant: &QuintInvariant) -> Result<Vec<ViolationPattern>, QuintBridgeError> {
+    fn analyze_invariant_patterns(&self, invariant: &QuintInvariant) -> Result<Vec<ViolationPattern>> {
         let mut patterns = Vec::new();
         
         // Pattern analysis based on invariant name and description
@@ -618,7 +628,7 @@ impl QuintBridge {
     }
 
     /// Enhance temporal property with structured analysis
-    fn enhance_temporal_property(&self, temporal_prop: &QuintTemporalProperty) -> Result<QuintEnhancedTemporalProperty, QuintBridgeError> {
+    fn enhance_temporal_property(&self, temporal_prop: &QuintTemporalProperty) -> Result<QuintEnhancedTemporalProperty> {
         let property_type = self.determine_temporal_property_type(temporal_prop);
         
         // Determine priority based on property name and type
@@ -651,7 +661,7 @@ impl QuintBridge {
         spec: &QuintSpec,
         invariant: &QuintInvariant,
         pattern: &ViolationPattern,
-    ) -> Result<ChaosScenario, QuintBridgeError> {
+    ) -> Result<ChaosScenario> {
         match pattern {
             ViolationPattern::KeyConsistency => self.create_key_consistency_violation_scenario(spec, invariant),
             ViolationPattern::ThresholdViolation => self.create_threshold_violation_scenario(spec, invariant),
@@ -668,7 +678,7 @@ impl QuintBridge {
         &self,
         spec: &QuintSpec,
         invariant: &QuintInvariant,
-    ) -> Result<ChaosScenario, QuintBridgeError> {
+    ) -> Result<ChaosScenario> {
         Ok(ChaosScenario {
             id: uuid::Uuid::new_v4().to_string(),
             name: format!("key_consistency_violation_{}", invariant.name),
@@ -683,7 +693,9 @@ impl QuintBridge {
                 partitions: None,
             },
             protocol_disruptions: vec!["interrupt_key_generation".to_string()],
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { 
+                property: invariant.name.clone() 
+            },
             parameters: [
                 ("target_invariant".to_string(), invariant.name.clone()),
                 ("violation_type".to_string(), "key_consistency".to_string()),
@@ -700,7 +712,7 @@ impl QuintBridge {
         &self,
         spec: &QuintSpec,
         invariant: &QuintInvariant,
-    ) -> Result<ChaosScenario, QuintBridgeError> {
+    ) -> Result<ChaosScenario> {
         Ok(ChaosScenario {
             id: uuid::Uuid::new_v4().to_string(),
             name: format!("general_violation_{}", invariant.name),
@@ -715,7 +727,9 @@ impl QuintBridge {
                 partitions: None,
             },
             protocol_disruptions: vec!["random_disruption".to_string()],
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { 
+                property: invariant.name.clone() 
+            },
             parameters: [
                 ("target_invariant".to_string(), invariant.name.clone()),
                 ("violation_type".to_string(), "general".to_string()),
@@ -729,7 +743,7 @@ impl QuintBridge {
         &self,
         spec: &QuintSpec,
         invariant: &QuintInvariant,
-    ) -> Result<ChaosScenario, QuintBridgeError> {
+    ) -> Result<ChaosScenario> {
         Ok(ChaosScenario {
             id: uuid::Uuid::new_v4().to_string(),
             name: format!("threshold_violation_{}", invariant.name),
@@ -744,7 +758,9 @@ impl QuintBridge {
                 partitions: None,
             },
             protocol_disruptions: vec!["threshold_manipulation".to_string()],
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { 
+                property: invariant.name.clone() 
+            },
             parameters: [
                 ("target_invariant".to_string(), invariant.name.clone()),
                 ("violation_type".to_string(), "threshold".to_string()),
@@ -754,23 +770,23 @@ impl QuintBridge {
     }
 
     // Placeholder implementations for other required methods
-    fn create_session_consistency_violation_scenario(&self, spec: &QuintSpec, invariant: &QuintInvariant) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_session_consistency_violation_scenario(&self, spec: &QuintSpec, invariant: &QuintInvariant) -> Result<ChaosScenario> {
         self.create_general_violation_scenario(spec, invariant)
     }
 
-    fn create_byzantine_resistance_violation_scenario(&self, spec: &QuintSpec, invariant: &QuintInvariant) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_byzantine_resistance_violation_scenario(&self, spec: &QuintSpec, invariant: &QuintInvariant) -> Result<ChaosScenario> {
         self.create_general_violation_scenario(spec, invariant)
     }
 
-    fn create_ledger_consistency_violation_scenario(&self, spec: &QuintSpec, invariant: &QuintInvariant) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_ledger_consistency_violation_scenario(&self, spec: &QuintSpec, invariant: &QuintInvariant) -> Result<ChaosScenario> {
         self.create_general_violation_scenario(spec, invariant)
     }
 
-    fn create_partition_tolerance_violation_scenario(&self, spec: &QuintSpec, invariant: &QuintInvariant) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_partition_tolerance_violation_scenario(&self, spec: &QuintSpec, invariant: &QuintInvariant) -> Result<ChaosScenario> {
         self.create_general_violation_scenario(spec, invariant)
     }
 
-    fn create_liveness_violation_scenario(&self, spec: &QuintSpec, temporal_prop: &QuintTemporalProperty) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_liveness_violation_scenario(&self, spec: &QuintSpec, temporal_prop: &QuintTemporalProperty) -> Result<ChaosScenario> {
         Ok(ChaosScenario {
             id: uuid::Uuid::new_v4().to_string(),
             name: format!("liveness_violation_{}", temporal_prop.name),
@@ -785,7 +801,9 @@ impl QuintBridge {
                 partitions: None,
             },
             protocol_disruptions: vec!["prevent_termination".to_string()],
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { 
+                property: temporal_prop.name.clone() 
+            },
             parameters: [
                 ("target_property".to_string(), temporal_prop.name.clone()),
                 ("violation_type".to_string(), "liveness".to_string()),
@@ -794,7 +812,7 @@ impl QuintBridge {
         })
     }
 
-    fn create_safety_violation_scenario(&self, spec: &QuintSpec, temporal_prop: &QuintTemporalProperty) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_safety_violation_scenario(&self, spec: &QuintSpec, temporal_prop: &QuintTemporalProperty) -> Result<ChaosScenario> {
         Ok(ChaosScenario {
             id: uuid::Uuid::new_v4().to_string(),
             name: format!("safety_violation_{}", temporal_prop.name),
@@ -809,7 +827,9 @@ impl QuintBridge {
                 partitions: None,
             },
             protocol_disruptions: vec!["safety_property_breach".to_string()],
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { 
+                property: temporal_prop.name.clone() 
+            },
             parameters: [
                 ("target_property".to_string(), temporal_prop.name.clone()),
                 ("violation_type".to_string(), "safety".to_string()),
@@ -819,16 +839,16 @@ impl QuintBridge {
     }
 
     // Placeholder for remaining temporal property methods
-    fn create_leads_to_violation_scenario(&self, spec: &QuintSpec, temporal_prop: &QuintTemporalProperty) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_leads_to_violation_scenario(&self, spec: &QuintSpec, temporal_prop: &QuintTemporalProperty) -> Result<ChaosScenario> {
         self.create_liveness_violation_scenario(spec, temporal_prop)
     }
 
-    fn create_until_violation_scenario(&self, spec: &QuintSpec, temporal_prop: &QuintTemporalProperty) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_until_violation_scenario(&self, spec: &QuintSpec, temporal_prop: &QuintTemporalProperty) -> Result<ChaosScenario> {
         self.create_safety_violation_scenario(spec, temporal_prop)
     }
 
     // Placeholder for safety property scenario methods
-    fn create_direct_safety_violation_scenario(&self, spec: &QuintSpec, safety_prop: &QuintSafetyProperty) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_direct_safety_violation_scenario(&self, spec: &QuintSpec, safety_prop: &QuintSafetyProperty) -> Result<ChaosScenario> {
         Ok(ChaosScenario {
             id: uuid::Uuid::new_v4().to_string(),
             name: format!("direct_safety_violation_{}", safety_prop.name),
@@ -843,7 +863,9 @@ impl QuintBridge {
                 partitions: None,
             },
             protocol_disruptions: vec!["direct_safety_breach".to_string()],
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { 
+                property: safety_prop.name.clone() 
+            },
             parameters: [
                 ("target_property".to_string(), safety_prop.name.clone()),
                 ("violation_type".to_string(), "direct_safety".to_string()),
@@ -852,11 +874,11 @@ impl QuintBridge {
         })
     }
 
-    fn create_byzantine_safety_violation_scenario(&self, spec: &QuintSpec, safety_prop: &QuintSafetyProperty) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_byzantine_safety_violation_scenario(&self, spec: &QuintSpec, safety_prop: &QuintSafetyProperty) -> Result<ChaosScenario> {
         self.create_direct_safety_violation_scenario(spec, safety_prop)
     }
 
-    fn create_network_safety_violation_scenario(&self, spec: &QuintSpec, safety_prop: &QuintSafetyProperty) -> Result<ChaosScenario, QuintBridgeError> {
+    fn create_network_safety_violation_scenario(&self, spec: &QuintSpec, safety_prop: &QuintSafetyProperty) -> Result<ChaosScenario> {
         self.create_direct_safety_violation_scenario(spec, safety_prop)
     }
 }

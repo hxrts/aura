@@ -4,7 +4,7 @@
 //! enabling visualization of property violations and their temporal relationships.
 
 use crate::property_monitor::{PropertyEvaluationResult, PropertyResults, StateHash};
-use aura_types::session_utils::{properties::PropertyId, trace::TraceId};
+use aura_types::session_utils::properties::PropertyId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -240,7 +240,7 @@ impl PropertyTimelineBuilder {
     }
 
     /// Build the final property timeline
-    pub fn build(mut self) -> PropertyTimeline {
+    pub fn build(self) -> PropertyTimeline {
         let summary = self.calculate_summary();
         let span = self.calculate_span();
 

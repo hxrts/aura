@@ -55,7 +55,7 @@ impl ReplCommandHandler {
     /// Get command suggestions for autocomplete
     /// Only includes UI commands - data commands are delegated to the current data source
     pub fn autocomplete(&self, partial: &str) -> Option<String> {
-        let commands = vec!["help", "clear"];
+        let commands = ["help", "clear"];
 
         let matches: Vec<&str> = commands
             .iter()

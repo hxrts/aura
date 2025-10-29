@@ -3,15 +3,13 @@
 //! Converts interactive command sequences from branches into reproducible TOML
 //! scenario files that can be loaded and re-run deterministically.
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use aura_console_types::{ConsoleCommand, EventType, TraceEvent};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::time::SystemTime;
-use toml;
-use uuid::Uuid;
 
-use crate::branch_manager::{BranchId, BranchMetadata, SimulationBranch};
+use crate::branch_manager::{BranchMetadata, SimulationBranch};
+use crate::simulation_wrapper::SimulationWrapper;
 
 /// Represents a scenario action derived from an interactive command
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +149,7 @@ pub struct ExportMetadata {
 }
 
 /// Command execution record for tracking during branch execution
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CommandRecord {
     /// The command that was executed
@@ -164,6 +163,7 @@ pub struct CommandRecord {
 }
 
 /// Scenario exporter that converts branch state to TOML scenarios
+#[derive(Debug)]
 pub struct ScenarioExporter {
     /// Command history tracking
     command_history: Vec<CommandRecord>,
@@ -171,6 +171,7 @@ pub struct ScenarioExporter {
     next_sequence: u64,
 }
 
+#[allow(dead_code)]
 impl ScenarioExporter {
     /// Create a new scenario exporter
     pub fn new() -> Self {
@@ -251,7 +252,7 @@ impl ScenarioExporter {
     /// Build setup configuration from simulation state
     fn build_setup_config(
         &self,
-        simulation: &aura_simulator::InstrumentedSimulation,
+        simulation: &SimulationWrapper,
         events: &[TraceEvent],
     ) -> Result<ScenarioSetup> {
         let participants = simulation.get_participants();
@@ -364,72 +365,67 @@ impl ScenarioExporter {
     ) -> Result<Option<ScenarioAction>> {
         let action = match command {
             ConsoleCommand::Step { count } => Some(ScenarioAction::Step {
-                count: count.unwrap_or(1),
+                count: *count,
                 at_tick,
-            }),
-            ConsoleCommand::StepUntil { condition } => Some(ScenarioAction::StepUntil {
-                condition: condition.clone(),
-                at_tick,
-                max_steps: Some(1000),
             }),
             ConsoleCommand::InitiateDkd {
                 participants,
-                app_id,
                 context,
             } => Some(ScenarioAction::InitiateDkd {
                 participants: participants.clone(),
-                app_id: app_id.clone(),
+                app_id: String::new(), // No app_id in current command
                 context: context.clone(),
                 at_tick,
             }),
-            ConsoleCommand::InitiateRecovery {
-                participants,
-                recovery_data,
-            } => Some(ScenarioAction::InitiateRecovery {
-                participants: participants.clone(),
-                recovery_data: recovery_data.clone(),
+            ConsoleCommand::InitiateRecovery { guardians } => {
+                Some(ScenarioAction::InitiateRecovery {
+                    participants: guardians.clone(),
+                    recovery_data: String::new(), // No recovery_data in current command
+                    at_tick,
+                })
+            }
+            ConsoleCommand::CreatePartition { devices } => Some(ScenarioAction::Partition {
+                participants: devices.clone(),
                 at_tick,
             }),
-            ConsoleCommand::Partition { participants } => Some(ScenarioAction::Partition {
-                participants: participants.clone(),
+            ConsoleCommand::SetDeviceOffline { device_id } => Some(ScenarioAction::Byzantine {
+                participant: device_id.clone(),
+                strategy: "offline".to_string(),
                 at_tick,
             }),
-            ConsoleCommand::Heal => Some(ScenarioAction::Heal { at_tick }),
-            ConsoleCommand::Delay { from, to, delay_ms } => Some(ScenarioAction::Delay {
-                from: from.clone(),
-                to: to.clone(),
-                delay_ms: *delay_ms,
-                at_tick,
-            }),
-            ConsoleCommand::Byzantine {
-                participant,
+            ConsoleCommand::EnableByzantine {
+                device_id,
                 strategy,
             } => Some(ScenarioAction::Byzantine {
-                participant: participant.clone(),
+                participant: device_id.clone(),
                 strategy: strategy.clone(),
                 at_tick,
             }),
-            ConsoleCommand::Inject {
-                participant,
-                event_type,
-            } => Some(ScenarioAction::Inject {
-                participant: participant.clone(),
-                event_type: event_type.clone(),
+            ConsoleCommand::InjectMessage { to, message } => Some(ScenarioAction::Inject {
+                participant: to.clone(),
+                event_type: message.clone(),
                 at_tick,
             }),
-            // Read-only commands don't generate actions
-            ConsoleCommand::Help
-            | ConsoleCommand::Status
-            | ConsoleCommand::Devices
-            | ConsoleCommand::State
-            | ConsoleCommand::Ledger
-            | ConsoleCommand::Branches
-            | ConsoleCommand::Events { .. } => None,
-
-            // Control commands that affect branch state but not scenario content
-            ConsoleCommand::Reset | ConsoleCommand::Fork { .. } | ConsoleCommand::Switch { .. } => {
-                None
-            }
+            // Read-only and control commands don't generate actions
+            ConsoleCommand::InitiateResharing { .. }
+            | ConsoleCommand::RunUntilIdle
+            | ConsoleCommand::SeekToTick { .. }
+            | ConsoleCommand::Checkpoint { .. }
+            | ConsoleCommand::RestoreCheckpoint { .. }
+            | ConsoleCommand::QueryState { .. }
+            | ConsoleCommand::GetTopology
+            | ConsoleCommand::GetLedger { .. }
+            | ConsoleCommand::GetViolations
+            | ConsoleCommand::ListBranches
+            | ConsoleCommand::CheckoutBranch { .. }
+            | ConsoleCommand::ForkBranch { .. }
+            | ConsoleCommand::DeleteBranch { .. }
+            | ConsoleCommand::ExportScenario { .. }
+            | ConsoleCommand::LoadScenario { .. }
+            | ConsoleCommand::LoadTrace { .. }
+            | ConsoleCommand::GetCausalityPath { .. }
+            | ConsoleCommand::GetEventsInRange { .. }
+            | ConsoleCommand::BroadcastMessage { .. } => None,
         };
 
         Ok(action)
@@ -517,7 +513,7 @@ impl ScenarioExporter {
 
         // Actions
         if !scenario.actions.is_empty() {
-            for (i, action) in scenario.actions.iter().enumerate() {
+            for action in scenario.actions.iter() {
                 toml_content.push_str(&format!("[[actions]]\n"));
                 self.serialize_action_to_toml(&mut toml_content, action)?;
                 toml_content.push('\n');
@@ -693,7 +689,7 @@ mod tests {
     fn test_command_recording() {
         let mut exporter = ScenarioExporter::new();
 
-        let command = ConsoleCommand::Step { count: Some(5) };
+        let command = ConsoleCommand::Step { count: 5 };
         exporter.record_command(command, 0);
 
         assert_eq!(exporter.history_length(), 1);
@@ -703,7 +699,7 @@ mod tests {
     fn test_command_to_action_conversion() {
         let exporter = ScenarioExporter::new();
 
-        let step_command = ConsoleCommand::Step { count: Some(3) };
+        let step_command = ConsoleCommand::Step { count: 3 };
         let action = exporter
             .convert_command_to_action(&step_command, 10)
             .unwrap();
@@ -721,9 +717,9 @@ mod tests {
     fn test_readonly_commands_no_action() {
         let exporter = ScenarioExporter::new();
 
-        let help_command = ConsoleCommand::Help;
+        let readonly_command = ConsoleCommand::GetTopology;
         let action = exporter
-            .convert_command_to_action(&help_command, 5)
+            .convert_command_to_action(&readonly_command, 5)
             .unwrap();
 
         assert!(

@@ -3,6 +3,8 @@
 //! This module provides utilities for reconstructing protocol state after crashes
 //! or restarts by analyzing journal evidence.
 
+#![allow(clippy::result_large_err)] // ErrorContext provides valuable debugging info
+
 use crate::{errors::SessionError, SessionProtocol};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

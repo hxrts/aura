@@ -8,7 +8,7 @@ use aura_transport::{
     BroadcastResult, Connection, ConnectionBuilder, PresenceTicket, Result, 
     Transport as AuraTransport,
 };
-use aura_coordination::Transport as CoordinationTransport;
+use aura_protocol::Transport as CoordinationTransport;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -156,7 +156,7 @@ impl AuraTransport for SimulatedTransport {
     }
 }
 
-/// Implementation of aura_coordination::Transport for simulator compatibility
+/// Implementation of aura_protocol::Transport for simulator compatibility
 #[async_trait]
 impl CoordinationTransport for SimulatedTransport {
     async fn send_message(&self, peer_id: &str, message: &[u8]) -> std::result::Result<(), String> {

@@ -7,8 +7,9 @@
 //! Reference: work/pre_ssb_storage_tests.md - Category 1.3
 
 use aura_crypto::Effects;
+use aura_crypto::{ed25519_sign, ed25519_verify, Ed25519SigningKey, Ed25519VerifyingKey};
 use aura_journal::capability::CapabilityId;
-use aura_crypto::{ed25519_sign, Ed25519SigningKey, ed25519_verify, Ed25519VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 

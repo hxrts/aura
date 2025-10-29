@@ -8,6 +8,7 @@
 
 use aura_journal::{types::*, AccountState};
 use aura_test_utils::*;
+use aura_types::Epoch;
 use proptest::prelude::*;
 use std::collections::BTreeMap;
 
@@ -40,7 +41,7 @@ fn merge_states(mut state_a: AccountState, state_b: &AccountState) -> AccountSta
     }
 
     // Merge session epoch (LWW: max)
-    state_a.session_epoch = SessionEpoch(std::cmp::max(
+    state_a.session_epoch = Epoch(std::cmp::max(
         state_a.session_epoch.0,
         state_b.session_epoch.0,
     ));
@@ -65,7 +66,7 @@ fn merge_states(mut state_a: AccountState, state_b: &AccountState) -> AccountSta
 /// Add a device to state (for property testing)
 fn add_device_to_state(state: &mut AccountState, seed: u64) {
     let effects = test_effects_deterministic(seed, 1000);
-    let device_metadata = test_device_with_name(&format!("Device {}", seed), &effects);
+    let device_metadata = test_device_with_id(seed as u16, &effects);
 
     state
         .devices
@@ -84,7 +85,7 @@ fn modify_state(state: &mut AccountState, seed: u64, ops: &[u8]) {
             }
             1 => {
                 // Bump epoch
-                state.session_epoch = SessionEpoch(state.session_epoch.0 + 1);
+                state.session_epoch = Epoch(state.session_epoch.0 + 1);
             }
             2 => {
                 // Add nonce
@@ -224,15 +225,15 @@ proptest! {
         clock_c in 0u64..100,
     ) {
         let mut state_a = test_account_with_seed(1000);
-        state_a.session_epoch = SessionEpoch(epoch_a);
+        state_a.session_epoch = Epoch(epoch_a);
         state_a.lamport_clock = clock_a;
 
         let mut state_b = test_account_with_seed(2000);
-        state_b.session_epoch = SessionEpoch(epoch_b);
+        state_b.session_epoch = Epoch(epoch_b);
         state_b.lamport_clock = clock_b;
 
         let mut state_c = test_account_with_seed(3000);
-        state_c.session_epoch = SessionEpoch(epoch_c);
+        state_c.session_epoch = Epoch(epoch_c);
         state_c.lamport_clock = clock_c;
 
         // Merge all three

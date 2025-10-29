@@ -4,8 +4,11 @@
 //! generating actionable insights and recommendations for developers to understand
 //! and resolve protocol failures.
 
+use crate::analysis::failure_analyzer::{CauseCategory, FailureComplexity};
+use crate::analysis::{
+    FailureAnalysisResult, FocusedTestResult, MinimalReproduction, ViolationDebugResult,
+};
 use crate::Result;
-use crate::{FailureAnalysisResult, FocusedTestResult, MinimalReproduction, ViolationDebugResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,7 +24,7 @@ pub struct DebugReporter {
     /// Generated reports
     generated_reports: Vec<DeveloperReport>,
     /// Report templates
-    report_templates: HashMap<ReportType, ReportTemplate>,
+    _report_templates: HashMap<ReportType, ReportTemplate>,
     /// Insight collection and ranking
     insight_collector: InsightCollector,
 }
@@ -1043,7 +1046,7 @@ pub struct TemplateSection {
 /// Insight collector for ranking debugging insights
 pub struct InsightCollector {
     /// Collected insights
-    insights: Vec<DebuggingInsight>,
+    _insights: Vec<DebuggingInsight>,
     /// Insight ranking criteria
     ranking_criteria: InsightRankingCriteria,
 }
@@ -1067,7 +1070,7 @@ impl DebugReporter {
         Ok(Self {
             config: ReporterConfig::default(),
             generated_reports: Vec::new(),
-            report_templates: Self::create_default_templates(),
+            _report_templates: Self::create_default_templates(),
             insight_collector: InsightCollector::new(),
         })
     }
@@ -1795,10 +1798,10 @@ impl DebugReporter {
 
     fn estimate_resolution_time(&self, failure_analysis: &FailureAnalysisResult) -> f64 {
         match failure_analysis.analysis_summary.failure_complexity {
-            crate::failure_analyzer::FailureComplexity::Simple => 2.0,
-            crate::failure_analyzer::FailureComplexity::Moderate => 8.0,
-            crate::failure_analyzer::FailureComplexity::Complex => 24.0,
-            crate::failure_analyzer::FailureComplexity::VeryComplex => 72.0,
+            FailureComplexity::Simple => 2.0,
+            FailureComplexity::Moderate => 8.0,
+            FailureComplexity::Complex => 24.0,
+            FailureComplexity::VeryComplex => 72.0,
         }
     }
 
@@ -1815,30 +1818,15 @@ impl DebugReporter {
         }
     }
 
-    fn map_cause_category(
-        &self,
-        cause: &crate::failure_analyzer::CauseCategory,
-    ) -> RootCauseCategory {
+    fn map_cause_category(&self, cause: &CauseCategory) -> RootCauseCategory {
         match cause {
-            crate::failure_analyzer::CauseCategory::ProtocolIssue => {
-                RootCauseCategory::ProtocolLogicError
-            }
-            crate::failure_analyzer::CauseCategory::TimingIssue => RootCauseCategory::TimingIssue,
-            crate::failure_analyzer::CauseCategory::NetworkConditions => {
-                RootCauseCategory::NetworkConfiguration
-            }
-            crate::failure_analyzer::CauseCategory::ByzantineBehavior => {
-                RootCauseCategory::ByzantineEdgeCase
-            }
-            crate::failure_analyzer::CauseCategory::ExternalFactors => {
-                RootCauseCategory::StateManagement
-            }
-            crate::failure_analyzer::CauseCategory::ResourceConstraints => {
-                RootCauseCategory::ResourceConstraint
-            }
-            crate::failure_analyzer::CauseCategory::ComplexInteraction => {
-                RootCauseCategory::ComplexInteraction
-            }
+            CauseCategory::ProtocolIssue => RootCauseCategory::ProtocolLogicError,
+            CauseCategory::TimingIssue => RootCauseCategory::TimingIssue,
+            CauseCategory::NetworkConditions => RootCauseCategory::NetworkConfiguration,
+            CauseCategory::ByzantineBehavior => RootCauseCategory::ByzantineEdgeCase,
+            CauseCategory::ExternalFactors => RootCauseCategory::StateManagement,
+            CauseCategory::ResourceConstraints => RootCauseCategory::ResourceConstraint,
+            CauseCategory::ComplexInteraction => RootCauseCategory::ComplexInteraction,
         }
     }
 
@@ -1884,7 +1872,7 @@ impl DebugReporter {
 impl InsightCollector {
     fn new() -> Self {
         Self {
-            insights: Vec::new(),
+            _insights: Vec::new(),
             ranking_criteria: InsightRankingCriteria {
                 confidence_weight: 0.3,
                 actionability_weight: 0.4,
@@ -1931,7 +1919,7 @@ mod tests {
 
     #[test]
     fn test_insight_ranking() {
-        let mut collector = InsightCollector::new();
+        let collector = InsightCollector::new();
 
         let mut insights = vec![
             DebuggingInsight {

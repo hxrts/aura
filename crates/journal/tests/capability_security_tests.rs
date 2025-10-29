@@ -9,24 +9,27 @@
 // - Privilege escalation: Cannot escalate privileges through delegation
 // - Capability forgery: Cannot forge capabilities without proper signatures
 
-use aura_crypto::Effects;
-use aura_journal::capability::{CapabilityGrant, CapabilityManager, Permission, StorageOperation};
-use aura_types::{DeviceId, DeviceIdExt};
 use aura_crypto::Ed25519SigningKey;
+use aura_crypto::Effects;
+use aura_journal::capability::{
+    CapabilityGrant, Permission, StorageOperation, UnifiedCapabilityManager,
+    UnifiedCapabilityToken, UnifiedConfig,
+};
+use aura_types::{DeviceId, DeviceIdExt};
 
 /// Test that only authorized devices can access resources
 #[test]
 fn test_authorization_enforcement() {
     let effects = Effects::for_test("authorization_enforcement");
-    let mut manager = CapabilityManager::new();
+    let mut manager = UnifiedCapabilityManager::new(UnifiedConfig::default());
 
     // Create devices
     let owner = DeviceId::new_with_effects(&effects);
     let authorized = DeviceId::new_with_effects(&effects);
     let unauthorized = DeviceId::new_with_effects(&effects);
 
-    let owner_key = SigningKey::from_bytes(&[1u8; 32]);
-    let authorized_key = SigningKey::from_bytes(&[2u8; 32]);
+    let owner_key = Ed25519SigningKey::from_bytes(&[1u8; 32]);
+    let authorized_key = Ed25519SigningKey::from_bytes(&[2u8; 32]);
 
     // Register owner as authority
     manager.register_authority(owner, owner_key.verifying_key());
@@ -111,15 +114,15 @@ fn test_authorization_enforcement() {
 #[test]
 fn test_capability_delegation() {
     let effects = Effects::for_test("capability_delegation");
-    let mut manager = CapabilityManager::new();
+    let mut manager = UnifiedCapabilityManager::new(UnifiedConfig::default());
 
     // Create delegation chain: owner -> delegate1 -> delegate2
     let owner = DeviceId::new_with_effects(&effects);
     let delegate1 = DeviceId::new_with_effects(&effects);
     let delegate2 = DeviceId::new_with_effects(&effects);
 
-    let owner_key = SigningKey::from_bytes(&[1u8; 32]);
-    let delegate1_key = SigningKey::from_bytes(&[2u8; 32]);
+    let owner_key = Ed25519SigningKey::from_bytes(&[1u8; 32]);
+    let delegate1_key = Ed25519SigningKey::from_bytes(&[2u8; 32]);
 
     // Register authorities
     manager.register_authority(owner, owner_key.verifying_key());
@@ -175,11 +178,11 @@ fn test_capability_delegation() {
 #[test]
 fn test_capability_expiration() {
     let effects = Effects::for_test("capability_expiration");
-    let mut manager = CapabilityManager::new();
+    let mut manager = UnifiedCapabilityManager::new(UnifiedConfig::default());
 
     let owner = DeviceId::new_with_effects(&effects);
     let device = DeviceId::new_with_effects(&effects);
-    let owner_key = SigningKey::from_bytes(&[1u8; 32]);
+    let owner_key = Ed25519SigningKey::from_bytes(&[1u8; 32]);
 
     manager.register_authority(owner, owner_key.verifying_key());
 
@@ -233,11 +236,11 @@ fn test_capability_expiration() {
 #[test]
 fn test_capability_revocation() {
     let effects = Effects::for_test("capability_revocation");
-    let mut manager = CapabilityManager::new();
+    let mut manager = UnifiedCapabilityManager::new(UnifiedConfig::default());
 
     let owner = DeviceId::new_with_effects(&effects);
     let device = DeviceId::new_with_effects(&effects);
-    let owner_key = SigningKey::from_bytes(&[1u8; 32]);
+    let owner_key = Ed25519SigningKey::from_bytes(&[1u8; 32]);
 
     manager.register_authority(owner, owner_key.verifying_key());
 

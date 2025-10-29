@@ -28,6 +28,7 @@ pub mod content;
 pub mod encoding;
 pub mod errors;
 pub mod identifiers;
+pub mod macros;
 pub mod protocols;
 pub mod relationships;
 pub mod serialization;
@@ -40,9 +41,8 @@ pub use capabilities::*;
 pub use content::*;
 pub use encoding::{FromBase64, FromHex, ToBase64, ToHex};
 pub use errors::{
-    AuraError, AgentError, CapabilityError, CryptoError, DataError, ErrorCode, ErrorContext,
-    ErrorSeverity, InfrastructureError, ProtocolError, SessionError,
-    SystemError,
+    AgentError, AuraError, CapabilityError, CryptoError, DataError, ErrorCode, ErrorContext,
+    ErrorSeverity, InfrastructureError, ProtocolError, SessionError, SystemError,
 };
 // Re-export Result from errors module separately to avoid naming conflicts
 pub use errors::Result as AuraResult;

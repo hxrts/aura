@@ -9,8 +9,9 @@
 
 use crate::config::Config;
 use anyhow::Context;
-use aura_agent::{Agent, AgentFactory, BootstrapConfig, ProductionFactory, StorageAgent};
-use aura_types::{AccountId, DeviceId};
+use aura_agent::traits::TransportAdapter;
+use aura_agent::{AgentFactory, ProductionFactory, ProductionStorage};
+use aura_transport::MemoryTransport;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -25,56 +26,44 @@ pub async fn load_config(config_path: &std::path::Path) -> anyhow::Result<Config
         ))
 }
 
-/// Create an agent instance from the configuration
+/// Create an agent core from the configuration
 /// This provides a consistent way to create production agents across CLI commands
-pub async fn create_agent(config: &Config) -> anyhow::Result<impl Agent + StorageAgent> {
+#[allow(dead_code)]
+pub async fn create_agent_core(
+    config: &Config,
+) -> anyhow::Result<aura_agent::AgentCore<TransportAdapter<MemoryTransport>, ProductionStorage>> {
     // Get device and account IDs from config
     let device_id = config.device_id;
     let account_id = config.account_id;
 
-    // Create production transport and storage
-    let transport = Arc::new(
-        ProductionFactory::create_transport(device_id, "127.0.0.1:0".to_string())
-            .await
-            .context("Failed to create transport")?,
-    );
+    // Create memory transport for testing
+    // For production, use NoiseTcpTransport from aura-transport
+    let inner_transport = Arc::new(MemoryTransport::default());
+    let transport = Arc::new(TransportAdapter::new(inner_transport, device_id));
 
-    let storage_path = config
-        .data_dir
-        .join("storage")
-        .join(account_id.0.to_string());
+    // Create production storage
+    let storage_path = config.data_dir.join("storage").join(account_id.to_string());
     let storage = Arc::new(
         ProductionFactory::create_storage(account_id, storage_path)
             .await
             .context("Failed to create storage")?,
     );
 
-    // Create production agent using factory
-    let uninit_agent = AgentFactory::create_production(device_id, account_id, transport, storage)
-        .await
+    // Create agent using factory
+    let agent = AgentFactory::create_with_dependencies(device_id, account_id, transport, storage)
         .context("Failed to create agent from configuration")?;
 
-    // Bootstrap the agent with default configuration
-    let bootstrap_config = BootstrapConfig {
-        threshold: 2,   // Default threshold for multi-device accounts
-        share_count: 3, // Default share count
-        parameters: std::collections::HashMap::new(),
-    };
-
-    let idle_agent = uninit_agent
-        .bootstrap(bootstrap_config)
-        .await
-        .context("Failed to bootstrap agent")?;
-
-    Ok(idle_agent)
+    Ok(agent)
 }
 
 /// Parse a device ID from string format
+#[allow(dead_code)]
 pub fn parse_device_id(device_id_str: &str) -> anyhow::Result<Uuid> {
     Uuid::parse_str(device_id_str).context("Invalid device ID format - expected UUID")
 }
 
 /// Parse operation scope from "namespace:operation" format
+#[allow(dead_code)]
 pub fn parse_operation_scope(scope: &str) -> anyhow::Result<(String, String)> {
     let parts: Vec<&str> = scope.split(':').collect();
     if parts.len() != 2 {
@@ -84,6 +73,7 @@ pub fn parse_operation_scope(scope: &str) -> anyhow::Result<(String, String)> {
 }
 
 /// Parse a peer list from comma-separated device IDs
+#[allow(dead_code)]
 pub fn parse_peer_list(peer_str: &str) -> Vec<Uuid> {
     peer_str
         .split(',')
@@ -92,6 +82,7 @@ pub fn parse_peer_list(peer_str: &str) -> Vec<Uuid> {
 }
 
 /// Parse capability scope with optional resource
+#[allow(dead_code)]
 pub fn parse_capability_scope(scope: &str, resource: Option<&str>) -> anyhow::Result<String> {
     if let Some(res) = resource {
         Ok(format!("{}:{}", scope, res))
@@ -101,6 +92,7 @@ pub fn parse_capability_scope(scope: &str, resource: Option<&str>) -> anyhow::Re
 }
 
 /// Parse attributes from key=value pairs
+#[allow(dead_code)]
 pub fn parse_attributes(
     attr_str: &str,
 ) -> anyhow::Result<std::collections::HashMap<String, String>> {

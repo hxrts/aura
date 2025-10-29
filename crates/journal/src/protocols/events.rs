@@ -14,22 +14,12 @@
 // - Presence
 
 use crate::types::*;
-use aura_crypto::Ed25519Signature;
-use aura_crypto::{signature_serde, MerkleProof};
-use aura_types::{AccountId, DeviceId, GuardianId};
+use aura_authentication::{EventAuthorization, ThresholdSig};
+use aura_authorization::CapabilityToken;
+use aura_crypto::MerkleProof;
+use aura_types::{AccountId, Cid, DeviceId, EventId, EventIdExt, GuardianId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-/// Event identifier
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EventId(pub Uuid);
-
-impl EventId {
-    /// Create a new event ID using injected effects (for production/testing)
-    pub fn new_with_effects(effects: &aura_crypto::Effects) -> Self {
-        EventId(effects.gen_uuid())
-    }
-}
 
 /// Protocol version for events
 pub const EVENT_VERSION: u16 = 1;
@@ -72,7 +62,7 @@ impl Event {
     ) -> Result<Self, String> {
         Ok(Event {
             version: EVENT_VERSION,
-            event_id: EventId(effects.gen_uuid()),
+            event_id: EventId::new_with_effects(effects),
             account_id,
             timestamp: effects.now().map_err(|e| format!("Time error: {}", e))?,
             nonce,
@@ -84,7 +74,7 @@ impl Event {
     }
 
     /// Compute hash of this event for causal chain
-    pub fn hash(&self) -> crate::Result<[u8; 32]> {
+    pub fn hash(&self) -> crate::error::Result<[u8; 32]> {
         // Serialize event to canonical form and hash
         let serialized = crate::serialization::serialize_cbor(self)?;
         Ok(aura_crypto::blake3_hash(&serialized))
@@ -94,7 +84,7 @@ impl Event {
     ///
     /// This computes the hash of the event content that should be signed.
     /// The authorization field is excluded to avoid circular dependency.
-    pub fn signable_hash(&self) -> crate::Result<[u8; 32]> {
+    pub fn signable_hash(&self) -> crate::error::Result<[u8; 32]> {
         // Create a struct with all fields except authorization
         use serde::Serialize;
 
@@ -146,27 +136,6 @@ impl Event {
         }
         Ok(())
     }
-}
-
-/// Authorization for an event
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EventAuthorization {
-    /// Threshold signature from M-of-N participants
-    ThresholdSignature(ThresholdSig),
-    /// Single device certificate signature
-    DeviceCertificate {
-        device_id: DeviceId,
-        #[serde(with = "signature_serde")]
-        signature: Ed25519Signature,
-    },
-    /// Guardian signature (for recovery approvals)
-    GuardianSignature {
-        guardian_id: GuardianId,
-        #[serde(with = "signature_serde")]
-        signature: Ed25519Signature,
-    },
-    /// Lifecycle-internal authorization used during protocol execution.
-    LifecycleInternal,
 }
 
 /// All event types in the Aura system
@@ -298,6 +267,14 @@ pub enum EventType {
     AbortSession(AbortSessionEvent),
     /// Clean up expired sessions
     CleanupExpiredSessions(CleanupExpiredSessionsEvent),
+
+    // ========== Storage Operations ==========
+    /// Store data with capability-based access control
+    StoreData(StoreDataEvent),
+    /// Retrieve data with capability verification
+    RetrieveData(RetrieveDataEvent),
+    /// Delete data with authorization check
+    DeleteData(DeleteDataEvent),
 }
 
 // ==================== Event Payload Structures ====================
@@ -717,8 +694,58 @@ impl RelationshipId {
 /// Get current unix timestamp in seconds using injected effects
 pub fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> crate::Result<u64> {
     effects.now().map_err(|e| {
-        crate::LedgerError::SerializationFailed(format!("Failed to get current timestamp: {}", e))
+        crate::AuraError::serialization_failed(format!("Failed to get current timestamp: {}", e))
     })
+}
+
+// ========== Storage Operations ==========
+
+/// Store data with capability-based access control
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreDataEvent {
+    /// Content identifier for the data being stored
+    pub blob_id: Cid,
+    /// Size of data in bytes
+    pub size_bytes: u64,
+    /// Required capabilities for access control
+    pub required_capabilities: Vec<String>, // Capability IDs as strings
+    /// Number of replicas to maintain  
+    pub replication_factor: u8,
+    /// Encryption key derivation specification
+    pub encryption_key_spec: KeyDerivationSpec,
+}
+
+/// Retrieve data with capability verification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetrieveDataEvent {
+    /// Content identifier for the data being retrieved
+    pub blob_id: Cid,
+    /// Device requesting the data
+    pub requester: DeviceId,
+    /// Capability proof for access authorization
+    pub capability_proof: CapabilityToken,
+}
+
+/// Delete data with authorization check
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteDataEvent {
+    /// Content identifier for the data being deleted
+    pub blob_id: Cid,
+    /// Device performing the deletion
+    pub deleted_by: DeviceId,
+    /// Optional reason for deletion
+    pub reason: Option<String>,
+}
+
+// Storage metadata types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyDerivationSpec {
+    /// Context for key derivation
+    pub context: String,
+    /// Algorithm used for key derivation
+    pub algorithm: String,
+    /// Additional parameters
+    pub params: std::collections::BTreeMap<String, String>,
 }
 
 /// Builder for Event that provides a fluent API for construction
@@ -791,7 +818,7 @@ impl EventBuilder {
     }
 
     /// Set authorization using threshold signature
-    pub fn with_threshold_signature(mut self, signature: crate::ThresholdSig) -> Self {
+    pub fn with_threshold_signature(mut self, signature: ThresholdSig) -> Self {
         self.authorization = Some(EventAuthorization::ThresholdSignature(signature));
         self
     }
@@ -924,7 +951,7 @@ impl EventBuilder {
             session_id,
             winner_device_id,
             granted_at_epoch: 0, // Will be set by protocol
-            threshold_signature: crate::ThresholdSig {
+            threshold_signature: ThresholdSig {
                 signature: aura_crypto::Ed25519Signature::from_bytes(&[0u8; 64]),
                 signers: Vec::new(),
                 signature_shares: Vec::new(),
@@ -977,7 +1004,6 @@ impl EventBuilder {
         new_group_public_key: &[u8],
         new_threshold: u16,
     ) -> Vec<u8> {
-
         // Create deterministic signing key for proof
         let mut seed = [0u8; 32];
         seed[..16].copy_from_slice(&session_id.as_bytes()[..16]);
@@ -1004,7 +1030,6 @@ impl EventBuilder {
         recovery_id: uuid::Uuid,
         new_device_id: DeviceId,
     ) -> Vec<u8> {
-
         // Create deterministic signing key for proof
         let mut seed = [0u8; 32];
         seed[..16].copy_from_slice(&recovery_id.as_bytes()[..16]);

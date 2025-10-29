@@ -6,31 +6,39 @@
 
 use super::{CapabilityError, Permission, Result};
 use aura_crypto::Effects;
-use aura_types::DeviceId;
 use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
+use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::num::NonZeroU16;
 
-/// Participant identifier for threshold signatures
+/// Threshold participant index identifier
+///
+/// This is a threshold scheme participant index (1-based), distinct from the
+/// general ParticipantId enum in aura-types which represents device/guardian identity.
+/// This type is specifically for indexing participants in threshold signature schemes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct ParticipantId(NonZeroU16);
+pub struct ThresholdParticipantId(NonZeroU16);
 
-impl ParticipantId {
+impl ThresholdParticipantId {
     pub fn new(id: NonZeroU16) -> Self {
         Self(id)
     }
-    
+
     pub fn as_u16(&self) -> u16 {
         self.0.get()
     }
 }
 
+// Re-export ParticipantId for backward compatibility (temporary)
+#[deprecated(since = "0.1.0", note = "Use ThresholdParticipantId instead")]
+pub type ParticipantId = ThresholdParticipantId;
+
 /// Threshold signature with signers
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThresholdSignature {
     pub signature: Ed25519Signature,
-    pub signers: Vec<ParticipantId>,
+    pub signers: Vec<ThresholdParticipantId>,
 }
 
 /// Public key package for threshold verification
@@ -54,18 +62,20 @@ impl ThresholdCapabilityId {
         issued_at: u64,
     ) -> Self {
         let mut hasher = aura_crypto::blake3_hasher();
-        hasher.update(&aura_crypto::ed25519_signature_to_bytes(&signature.signature));
+        hasher.update(&aura_crypto::ed25519_signature_to_bytes(
+            &signature.signature,
+        ));
         for signer in &signature.signers {
             hasher.update(&signer.as_u16().to_le_bytes());
         }
         hasher.update(device_id.0.as_bytes());
         hasher.update(&issued_at.to_le_bytes());
-        
+
         // Hash permissions deterministically
-        let permissions_bytes = bincode::serialize(permissions)
-            .expect("Permission serialization should never fail");
+        let permissions_bytes =
+            bincode::serialize(permissions).expect("Permission serialization should never fail");
         hasher.update(&permissions_bytes);
-        
+
         Self(hasher.finalize().into())
     }
 }
@@ -78,25 +88,25 @@ impl ThresholdCapabilityId {
 pub struct ThresholdCapability {
     /// Unique capability identifier
     pub id: ThresholdCapabilityId,
-    
+
     /// Target device for this capability
     pub device_id: DeviceId,
-    
+
     /// Granted permissions
     pub permissions: Vec<Permission>,
-    
+
     /// Threshold signature authorizing this capability
     pub authorization: ThresholdSignature,
-    
+
     /// Public key package for signature verification
     pub public_key_package: PublicKeyPackage,
-    
+
     /// Issuance timestamp
     pub issued_at: u64,
-    
+
     /// Optional expiration timestamp
     pub expires_at: Option<u64>,
-    
+
     /// Delegation chain (if this capability was delegated)
     pub delegation_chain: Vec<ThresholdCapabilityId>,
 }
@@ -149,10 +159,16 @@ impl ThresholdCapability {
     pub fn verify_signature(&self) -> Result<()> {
         // Create the signed payload
         let payload = self.create_signing_payload();
-        
+
         // Verify threshold signature
-        aura_crypto::ed25519_verify(&self.public_key_package.group_public, &payload, &self.authorization.signature)
-            .map_err(|e| CapabilityError::CryptoError(format!("Signature verification failed: {:?}", e)))?;
+        aura_crypto::ed25519_verify(
+            &self.public_key_package.group_public,
+            &payload,
+            &self.authorization.signature,
+        )
+        .map_err(|e| {
+            CapabilityError::CryptoError(format!("Signature verification failed: {:?}", e))
+        })?;
 
         // Verify threshold was met
         if self.authorization.signers.len() < self.public_key_package.threshold as usize {
@@ -165,9 +181,10 @@ impl ThresholdCapability {
         // In production, this would check against verifying shares
         for signer in &self.authorization.signers {
             if signer.as_u16() > self.public_key_package.total_participants {
-                return Err(CapabilityError::CryptoError(
-                    format!("Invalid signer: {:?}", signer),
-                ));
+                return Err(CapabilityError::CryptoError(format!(
+                    "Invalid signer: {:?}",
+                    signer
+                )));
             }
         }
 
@@ -185,9 +202,9 @@ impl ThresholdCapability {
 
     /// Check if capability grants specific permission
     pub fn grants_permission(&self, required: &Permission) -> bool {
-        self.permissions.iter().any(|granted| {
-            permission_satisfies(granted, required)
-        })
+        self.permissions
+            .iter()
+            .any(|granted| permission_satisfies(granted, required))
     }
 
     /// Get capability authority level (number of signers)
@@ -196,35 +213,35 @@ impl ThresholdCapability {
     }
 
     /// Check if capability was signed by specific participant
-    pub fn signed_by(&self, participant: &ParticipantId) -> bool {
+    pub fn signed_by(&self, participant: &ThresholdParticipantId) -> bool {
         self.authorization.signers.contains(participant)
     }
 
     /// Create signing payload for verification
     fn create_signing_payload(&self) -> Vec<u8> {
         let mut payload = Vec::new();
-        
+
         // Include device ID
         payload.extend_from_slice(self.device_id.0.as_bytes());
-        
+
         // Include permissions (deterministic serialization)
         let permissions_bytes = bincode::serialize(&self.permissions)
             .expect("Permission serialization should never fail");
         payload.extend_from_slice(&permissions_bytes);
-        
+
         // Include timestamp
         payload.extend_from_slice(&self.issued_at.to_le_bytes());
-        
+
         // Include expiration if present
         if let Some(expires_at) = self.expires_at {
             payload.extend_from_slice(&expires_at.to_le_bytes());
         }
-        
+
         // Include delegation chain
         for parent_id in &self.delegation_chain {
             payload.extend_from_slice(&parent_id.0);
         }
-        
+
         payload
     }
 }
@@ -241,9 +258,7 @@ fn permission_satisfies(granted: &Permission, required: &Permission) -> bool {
                 operation: required_op,
                 resource: required_res,
             },
-        ) => {
-            granted_op == required_op && resource_matches(granted_res, required_res)
-        }
+        ) => granted_op == required_op && resource_matches(granted_res, required_res),
         (
             Permission::Communication {
                 operation: granted_op,
@@ -253,9 +268,7 @@ fn permission_satisfies(granted: &Permission, required: &Permission) -> bool {
                 operation: required_op,
                 relationship: required_rel,
             },
-        ) => {
-            granted_op == required_op && resource_matches(granted_rel, required_rel)
-        }
+        ) => granted_op == required_op && resource_matches(granted_rel, required_rel),
         (
             Permission::Relay {
                 operation: granted_op,
@@ -265,9 +278,7 @@ fn permission_satisfies(granted: &Permission, required: &Permission) -> bool {
                 operation: required_op,
                 trust_level: required_trust,
             },
-        ) => {
-            granted_op == required_op && trust_level_sufficient(granted_trust, required_trust)
-        }
+        ) => granted_op == required_op && trust_level_sufficient(granted_trust, required_trust),
         _ => false,
     }
 }
@@ -277,12 +288,12 @@ fn resource_matches(granted: &str, required: &str) -> bool {
     if granted == "*" {
         return true;
     }
-    
+
     if granted.ends_with("/*") {
         let prefix = &granted[..granted.len() - 1]; // Remove "*", keep "/"
         return required.starts_with(prefix);
     }
-    
+
     granted == required
 }
 
@@ -290,10 +301,10 @@ fn resource_matches(granted: &str, required: &str) -> bool {
 fn trust_level_sufficient(granted: &str, required: &str) -> bool {
     // Define trust level hierarchy
     let trust_levels = ["basic", "elevated", "admin"];
-    
+
     let granted_level = trust_levels.iter().position(|&level| level == granted);
     let required_level = trust_levels.iter().position(|&level| level == required);
-    
+
     match (granted_level, required_level) {
         (Some(granted_idx), Some(required_idx)) => granted_idx >= required_idx,
         _ => granted == required, // Fallback to exact match for unknown levels
@@ -307,10 +318,10 @@ fn trust_level_sufficient(granted: &str, required: &str) -> bool {
 pub struct ThresholdCapabilityManager {
     /// Active capabilities indexed by device
     capabilities: std::collections::BTreeMap<DeviceId, Vec<ThresholdCapability>>,
-    
+
     /// Revoked capability IDs
     revoked: BTreeSet<ThresholdCapabilityId>,
-    
+
     /// Trusted public key packages for signature verification
     trusted_key_packages: std::collections::BTreeMap<String, PublicKeyPackage>,
 }
@@ -334,20 +345,20 @@ impl ThresholdCapabilityManager {
     pub fn grant_capability(&mut self, capability: ThresholdCapability) -> Result<()> {
         // Verify signature before storing
         capability.verify_signature()?;
-        
+
         // Check if capability is already revoked
         if self.revoked.contains(&capability.id) {
             return Err(CapabilityError::AuthorizationError(
                 "Cannot grant revoked capability".to_string(),
             ));
         }
-        
+
         // Store capability
         self.capabilities
             .entry(capability.device_id)
             .or_default()
             .push(capability);
-        
+
         Ok(())
     }
 
@@ -358,10 +369,9 @@ impl ThresholdCapabilityManager {
         permission: &Permission,
         current_time: u64,
     ) -> Result<&ThresholdCapability> {
-        let capabilities = self.capabilities.get(device_id)
-            .ok_or_else(|| CapabilityError::AuthorizationError(
-                "No capabilities found for device".to_string(),
-            ))?;
+        let capabilities = self.capabilities.get(device_id).ok_or_else(|| {
+            CapabilityError::AuthorizationError("No capabilities found for device".to_string())
+        })?;
 
         // Find valid capability that grants the permission
         for capability in capabilities {
@@ -369,12 +379,12 @@ impl ThresholdCapabilityManager {
             if capability.is_expired(current_time) {
                 continue;
             }
-            
+
             // Skip revoked capabilities
             if self.revoked.contains(&capability.id) {
                 continue;
             }
-            
+
             // Check if capability grants the permission
             if capability.grants_permission(permission) {
                 return Ok(capability);
@@ -402,9 +412,8 @@ impl ThresholdCapabilityManager {
     /// Clean up expired and revoked capabilities
     pub fn cleanup(&mut self, current_time: u64) {
         for capabilities in self.capabilities.values_mut() {
-            capabilities.retain(|cap| {
-                !cap.is_expired(current_time) && !self.revoked.contains(&cap.id)
-            });
+            capabilities
+                .retain(|cap| !cap.is_expired(current_time) && !self.revoked.contains(&cap.id));
         }
     }
 
@@ -413,7 +422,7 @@ impl ThresholdCapabilityManager {
         let total_capabilities = self.capabilities.values().map(|caps| caps.len()).sum();
         let revoked_count = self.revoked.len();
         let device_count = self.capabilities.len();
-        
+
         CapabilityStats {
             total_capabilities,
             revoked_count,
@@ -455,17 +464,17 @@ mod tests {
     fn mock_threshold_signature() -> ThresholdSignature {
         let signature = aura_crypto::Ed25519Signature::from_bytes(&[0u8; 64]);
         let signers = vec![
-            ParticipantId::new(NonZeroU16::new(1).unwrap()),
-            ParticipantId::new(NonZeroU16::new(2).unwrap()),
+            ThresholdParticipantId::new(NonZeroU16::new(1).unwrap()),
+            ThresholdParticipantId::new(NonZeroU16::new(2).unwrap()),
         ];
-        
+
         ThresholdSignature { signature, signers }
     }
 
     fn mock_public_key_package() -> PublicKeyPackage {
         let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public = signing_key.verifying_key();
-        
+
         PublicKeyPackage {
             group_public,
             threshold: 2,
@@ -533,12 +542,12 @@ mod tests {
             operation: super::super::StorageOperation::Read,
             resource: "test/*".to_string(),
         };
-        
+
         let required_match = Permission::Storage {
             operation: super::super::StorageOperation::Read,
             resource: "test/file.txt".to_string(),
         };
-        
+
         let required_no_match = Permission::Storage {
             operation: super::super::StorageOperation::Write,
             resource: "test/file.txt".to_string(),
@@ -573,7 +582,7 @@ mod tests {
 
     #[test]
     fn test_manager_operations() {
-        let mut manager = ThresholdCapabilityManager::new();
+        let manager = ThresholdCapabilityManager::new();
         let device_id = test_device_id();
         let permission = Permission::Storage {
             operation: super::super::StorageOperation::Read,
@@ -583,11 +592,13 @@ mod tests {
         let current_time = effects.now().unwrap();
 
         // Should fail initially (no capabilities)
-        assert!(manager.verify_permission(&device_id, &permission, current_time).is_err());
+        assert!(manager
+            .verify_permission(&device_id, &permission, current_time)
+            .is_err());
 
         // Grant capability (this would fail signature verification in practice)
         // For testing, we'll create a capability directly
-        let capability = ThresholdCapability::new(
+        let _capability = ThresholdCapability::new(
             device_id,
             vec![Permission::Storage {
                 operation: super::super::StorageOperation::Read,
@@ -596,7 +607,8 @@ mod tests {
             mock_threshold_signature(),
             mock_public_key_package(),
             &effects,
-        ).unwrap();
+        )
+        .unwrap();
 
         // We can't test grant_capability because it requires valid signatures,
         // but we can test the manager structure

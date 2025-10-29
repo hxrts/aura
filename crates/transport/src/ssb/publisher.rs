@@ -10,8 +10,8 @@
 //! 4. Create envelope with computed CID
 //! 5. Add to local CRDT (will gossip to neighbors)
 
-use crate::envelope::{Envelope, Header, HeaderBare, RoutingTag, ENVELOPE_SIZE};
-use crate::{TransportError, TransportErrorBuilder, TransportResult};
+use crate::infrastructure::envelope::{Envelope, Header, HeaderBare, RoutingTag, ENVELOPE_SIZE};
+use crate::{TransportErrorBuilder, TransportResult};
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +94,7 @@ impl SbbPublisher {
         nonce: &[u8; 24],
     ) -> TransportResult<Vec<u8>> {
         use chacha20poly1305::aead::{Aead, Nonce};
-        use chacha20poly1305::{AeadInPlace, KeyInit, XChaCha20Poly1305};
+        use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
 
         // Serialize payload
         let serialized = bincode::serialize(payload).map_err(|e| {
@@ -107,7 +107,7 @@ impl SbbPublisher {
         })?;
 
         // Convert nonce to correct type
-        let nonce_array = Nonce::<XChaCha20Poly1305>::from_slice(nonce);
+        let nonce_array: &Nonce<XChaCha20Poly1305> = nonce.into();
 
         // Encrypt the serialized payload
         let ciphertext = cipher
@@ -132,7 +132,7 @@ impl SbbPublisher {
         })?;
 
         // Convert nonce to correct type
-        let nonce_array = Nonce::<XChaCha20Poly1305>::from_slice(nonce);
+        let nonce_array: &Nonce<XChaCha20Poly1305> = nonce.into();
 
         // Decrypt the ciphertext
         let plaintext = cipher

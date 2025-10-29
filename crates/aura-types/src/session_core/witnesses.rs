@@ -69,7 +69,7 @@ impl RuntimeWitness for bool {
     }
 }
 
-/// RuntimeWitness implementation for Vec<T>
+/// RuntimeWitness implementation for `Vec<T>`
 impl<T: Send + Sync + 'static> RuntimeWitness for Vec<T> {
     type Evidence = Vec<T>;
     type Config = ();
@@ -83,7 +83,7 @@ impl<T: Send + Sync + 'static> RuntimeWitness for Vec<T> {
     }
 }
 
-/// RuntimeWitness implementation for Option<T>
+/// RuntimeWitness implementation for `Option<T>`
 impl<T: RuntimeWitness> RuntimeWitness for Option<T> {
     type Evidence = Option<T::Evidence>;
     type Config = T::Config;
@@ -100,7 +100,7 @@ impl<T: RuntimeWitness> RuntimeWitness for Option<T> {
     }
 }
 
-/// RuntimeWitness implementation for (T, U) tuple
+/// RuntimeWitness implementation for `(T, U)` tuple
 impl<T: RuntimeWitness, U: RuntimeWitness> RuntimeWitness for (T, U) {
     type Evidence = (T::Evidence, U::Evidence);
     type Config = (T::Config, U::Config);

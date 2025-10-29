@@ -1,160 +1,339 @@
-//! Test Key Utilities
+//! Key test helpers and utilities
 //!
-//! Factory functions for creating test keys and key shares.
-//! Consolidates FROST key generation and device key patterns.
+//! This module provides standardized helpers for creating and managing test keys
+//! and cryptographic material across the Aura test suite.
 
-use aura_crypto::Effects;
+use aura_types::DeviceId;
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use std::collections::BTreeMap;
+use sha2::{Digest, Sha256};
 
-// Re-export commonly used FROST types
-pub use frost_ed25519 as frost;
-
-/// Create a test signing key with deterministic effects
-///
-/// Standard pattern for creating signing keys in tests.
-///
-/// # Arguments
-/// * `effects` - Effects instance for deterministic key generation
-pub fn test_signing_key(effects: &Effects) -> SigningKey {
-    let key_bytes = effects.random_bytes::<32>();
-    SigningKey::from_bytes(&key_bytes)
+/// Key test fixture for consistent test key generation
+#[derive(Debug, Clone)]
+pub struct KeyTestFixture {
+    signing_key: SigningKey,
+    verifying_key: VerifyingKey,
+    key_id: String,
 }
 
-/// Create a test signing key from a specific seed
-///
-/// For tests that need a predictable key.
-///
-/// # Arguments
-/// * `seed` - Specific seed for key generation
-pub fn test_signing_key_from_seed(seed: u64) -> SigningKey {
-    let effects = Effects::deterministic(seed, 1000);
-    test_signing_key(&effects)
+impl KeyTestFixture {
+    /// Create a new key fixture with deterministic generation from a seed
+    pub fn from_seed(seed: &[u8; 32]) -> Self {
+        let signing_key = SigningKey::from_bytes(seed);
+        let verifying_key = signing_key.verifying_key();
+
+        // Generate key ID from the public key
+        let mut hasher = Sha256::new();
+        hasher.update(verifying_key.as_bytes());
+        let key_id = format!("key_{:x}", hasher.finalize());
+
+        Self {
+            signing_key,
+            verifying_key,
+            key_id,
+        }
+    }
+
+    /// Create a key fixture from a seed string
+    pub fn from_seed_string(seed: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(seed.as_bytes());
+        let digest = hasher.finalize();
+        #[allow(deprecated)]
+        let seed_bytes: [u8; 32] = digest.as_slice()[..32]
+            .try_into()
+            .unwrap_or_else(|_| [0u8; 32]);
+        Self::from_seed(&seed_bytes)
+    }
+
+    /// Create a random key fixture
+    pub fn random() -> Self {
+        let signing_key = SigningKey::generate(&mut rand::thread_rng());
+        let verifying_key = signing_key.verifying_key();
+
+        let mut hasher = Sha256::new();
+        hasher.update(verifying_key.as_bytes());
+        let key_id = format!("key_{:x}", hasher.finalize());
+
+        Self {
+            signing_key,
+            verifying_key,
+            key_id,
+        }
+    }
+
+    /// Get the signing key
+    pub fn signing_key(&self) -> &SigningKey {
+        &self.signing_key
+    }
+
+    /// Get the verifying key
+    pub fn verifying_key(&self) -> &VerifyingKey {
+        &self.verifying_key
+    }
+
+    /// Get the key ID
+    pub fn key_id(&self) -> &str {
+        &self.key_id
+    }
+
+    /// Sign a message with this key
+    pub fn sign(&self, message: &[u8]) -> ed25519_dalek::Signature {
+        use ed25519_dalek::Signer;
+        self.signing_key.sign(message)
+    }
+
+    /// Verify a signature with this key's verifying key
+    pub fn verify(&self, message: &[u8], signature: &ed25519_dalek::Signature) -> bool {
+        self.verifying_key.verify_strict(message, signature).is_ok()
+    }
 }
 
-/// Create a deterministic key pair
-///
-/// Returns both signing and verifying keys.
-///
-/// # Arguments
-/// * `effects` - Effects instance for deterministic generation
-pub fn test_key_pair(effects: &Effects) -> (SigningKey, VerifyingKey) {
-    let signing_key = test_signing_key(effects);
-    let verifying_key = signing_key.verifying_key();
-    (signing_key, verifying_key)
+/// Builder for creating multiple test keys with consistent configuration
+#[derive(Debug)]
+pub struct KeySetBuilder {
+    count: usize,
+    base_seed: Option<String>,
+    key_type: KeyType,
 }
 
-/// Generate FROST key shares for testing
-///
-/// This consolidates the key share generation pattern found in multiple test files.
-/// Creates threshold FROST key shares with deterministic generation.
-///
-/// # Arguments
-/// * `threshold` - M-of-N threshold value
-/// * `total` - Total number of participants  
-/// * `effects` - Effects instance for deterministic generation
-///
-/// # Returns
-/// * Tuple of (key packages by identifier, public key package)
-pub fn test_frost_key_shares(
-    threshold: u16,
-    total: u16,
-    effects: &Effects,
-) -> (
-    BTreeMap<frost::Identifier, frost::keys::KeyPackage>,
-    frost::keys::PublicKeyPackage,
-) {
-    let mut rng = effects.rng();
+/// Types of keys for different test scenarios
+#[derive(Debug, Clone, Copy)]
+pub enum KeyType {
+    /// Standard Ed25519 keys
+    Standard,
+    /// Device-specific keys (seeded with device ID)
+    DeviceSpecific,
+    /// Threshold keys (for FROST-based protocols)
+    Threshold,
+}
 
-    let (shares, pubkey_package) = frost::keys::generate_with_dealer(
-        total,
-        threshold,
-        frost::keys::IdentifierList::Default,
-        &mut rng,
-    )
-    .unwrap(); // Key generation should succeed
+impl KeySetBuilder {
+    /// Create a new key set builder
+    pub fn new(count: usize) -> Self {
+        Self {
+            count,
+            base_seed: None,
+            key_type: KeyType::Standard,
+        }
+    }
 
-    // Convert SecretShares to KeyPackages and then to BTreeMap
-    let key_packages: BTreeMap<frost::Identifier, frost::keys::KeyPackage> = shares
-        .into_iter()
-        .map(|(id, secret_share)| {
-            let key_package = frost::keys::KeyPackage::try_from(secret_share).unwrap(); // KeyPackage creation should succeed
-            (id, key_package)
+    /// Set a base seed for deterministic key generation
+    pub fn with_seed(mut self, seed: String) -> Self {
+        self.base_seed = Some(seed);
+        self
+    }
+
+    /// Set the key type
+    pub fn with_key_type(mut self, key_type: KeyType) -> Self {
+        self.key_type = key_type;
+        self
+    }
+
+    /// Build the set of keys
+    pub fn build(self) -> Vec<KeyTestFixture> {
+        (0..self.count)
+            .map(|i| {
+                let seed_str = if let Some(ref base) = self.base_seed {
+                    format!("{}-{}", base, i)
+                } else {
+                    format!("key-seed-{}", i)
+                };
+
+                match self.key_type {
+                    KeyType::Standard => KeyTestFixture::from_seed_string(&seed_str),
+                    KeyType::DeviceSpecific => {
+                        let enhanced_seed = format!("{}-device-specific", seed_str);
+                        KeyTestFixture::from_seed_string(&enhanced_seed)
+                    }
+                    KeyType::Threshold => {
+                        let enhanced_seed = format!("{}-threshold", seed_str);
+                        KeyTestFixture::from_seed_string(&enhanced_seed)
+                    }
+                }
+            })
+            .collect()
+    }
+}
+
+/// Common test key creation helpers
+pub mod helpers {
+    use super::*;
+
+    /// Create a single test key with default configuration
+    pub fn test_key() -> KeyTestFixture {
+        KeyTestFixture::from_seed_string("test-key-default")
+    }
+
+    /// Create N test keys with sequential seeding
+    pub fn test_keys(count: usize) -> Vec<KeyTestFixture> {
+        KeySetBuilder::new(count).build()
+    }
+
+    /// Create test keys with a specific base seed
+    pub fn test_keys_seeded(count: usize, base_seed: &str) -> Vec<KeyTestFixture> {
+        KeySetBuilder::new(count)
+            .with_seed(base_seed.to_string())
+            .build()
+    }
+
+    /// Create a key pair for two-party tests
+    pub fn test_key_pair() -> (KeyTestFixture, KeyTestFixture) {
+        (
+            KeyTestFixture::from_seed_string("key-pair-1"),
+            KeyTestFixture::from_seed_string("key-pair-2"),
+        )
+    }
+
+    /// Create three keys for three-party tests
+    pub fn test_key_trio() -> (KeyTestFixture, KeyTestFixture, KeyTestFixture) {
+        (
+            KeyTestFixture::from_seed_string("key-trio-1"),
+            KeyTestFixture::from_seed_string("key-trio-2"),
+            KeyTestFixture::from_seed_string("key-trio-3"),
+        )
+    }
+
+    /// Create device-specific keys (seeded with device ID)
+    pub fn test_keys_for_device(count: usize, device_id: DeviceId) -> Vec<KeyTestFixture> {
+        let base_seed = format!("device-{:?}", device_id);
+        KeySetBuilder::new(count)
+            .with_seed(base_seed)
+            .with_key_type(KeyType::DeviceSpecific)
+            .build()
+    }
+
+    /// Create threshold keys for FROST-based protocols
+    pub fn test_threshold_keys(
+        count: usize,
+        threshold: usize,
+        base_seed: &str,
+    ) -> Vec<KeyTestFixture> {
+        KeySetBuilder::new(count)
+            .with_seed(format!("{}-threshold-{}", base_seed, threshold))
+            .with_key_type(KeyType::Threshold)
+            .build()
+    }
+
+    /// Create a test message and return it with a signature from the key
+    pub fn test_signed_message(
+        key: &KeyTestFixture,
+        message: &str,
+    ) -> (Vec<u8>, ed25519_dalek::Signature) {
+        let msg_bytes = message.as_bytes().to_vec();
+        let signature = key.sign(&msg_bytes);
+        (msg_bytes, signature)
+    }
+
+    /// Verify signature consistency across multiple keys
+    pub fn verify_key_set_validity(keys: &[KeyTestFixture]) -> bool {
+        keys.iter().all(|key| {
+            let message = b"test message";
+            let signature = key.sign(message);
+            key.verify(message, &signature)
         })
-        .collect();
+    }
 
-    (key_packages, pubkey_package)
+    /// Get deterministic key count for common test scenarios
+    pub fn key_count_for_scenario(scenario: &str) -> usize {
+        match scenario {
+            "pair" => 2,
+            "trio" => 3,
+            "threshold-2-3" => 3,
+            "threshold-3-5" => 5,
+            "distributed-4" => 4,
+            _ => 1,
+        }
+    }
+
+    /// Create FROST key shares for threshold signature testing
+    ///
+    /// Returns key shares and public key package for the given threshold and total.
+    /// Uses the provided effects for deterministic key generation.
+    pub fn test_frost_key_shares(
+        threshold: u16,
+        total: u16,
+        effects: &aura_crypto::Effects,
+    ) -> (
+        std::collections::BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::KeyPackage>,
+        frost_ed25519::keys::PublicKeyPackage,
+    ) {
+        use std::collections::BTreeMap;
+
+        // Use the effects RNG directly
+        let mut rng = effects.rng();
+
+        // Generate key shares using FROST DKG
+        let (secret_shares, pubkey_package) = frost_ed25519::keys::generate_with_dealer(
+            total,
+            threshold,
+            frost_ed25519::keys::IdentifierList::Default,
+            &mut rng,
+        )
+        .expect("Failed to generate FROST keys");
+
+        // Convert secret shares to key packages
+        let key_packages: BTreeMap<_, _> = secret_shares
+            .into_iter()
+            .map(|(id, secret_share)| {
+                let key_package = frost_ed25519::keys::KeyPackage::try_from(secret_share)
+                    .expect("Failed to convert secret share to key package");
+                (id, key_package)
+            })
+            .collect();
+
+        (key_packages, pubkey_package)
+    }
 }
 
-/// Generate FROST key shares with default identifiers
-///
-/// Creates key shares using FROST's default identifier assignment.
-///
-/// # Arguments
-/// * `threshold` - M-of-N threshold value
-/// * `total` - Total number of participants
-/// * `effects` - Effects instance for deterministic generation
-pub fn test_frost_key_shares_default(
-    threshold: u16,
-    total: u16,
-    effects: &Effects,
-) -> (
-    BTreeMap<frost::Identifier, frost::keys::KeyPackage>,
-    frost::keys::PublicKeyPackage,
-) {
-    let mut rng = effects.rng();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let (shares, pubkey_package) = frost::keys::generate_with_dealer(
-        total,
-        threshold,
-        frost::keys::IdentifierList::Default,
-        &mut rng,
-    )
-    .unwrap(); // Key generation should succeed
+    #[test]
+    fn test_key_fixture_creation() {
+        let key = KeyTestFixture::from_seed_string("test-seed");
+        assert!(!key.key_id().is_empty());
+    }
 
-    // Convert SecretShares to KeyPackages - this matches existing pattern
-    let key_packages: BTreeMap<frost::Identifier, frost::keys::KeyPackage> = shares
-        .into_iter()
-        .map(|(id, secret_share)| {
-            let key_package = frost::keys::KeyPackage::try_from(secret_share).unwrap(); // KeyPackage creation should succeed
-            (id, key_package)
-        })
-        .collect();
+    #[test]
+    fn test_key_signing_and_verification() {
+        let key = KeyTestFixture::from_seed_string("test-seed");
+        let message = b"test message";
+        let signature = key.sign(message);
+        assert!(key.verify(message, &signature));
+    }
 
-    (key_packages, pubkey_package)
-}
+    #[test]
+    fn test_key_set_builder() {
+        let keys = KeySetBuilder::new(3).build();
+        assert_eq!(keys.len(), 3);
+        assert!(helpers::verify_key_set_validity(&keys));
+    }
 
-/// Create a single FROST key package for testing
-///
-/// For tests that only need one participant's key package.
-/// Gets the first participant from the generated key shares.
-///
-/// # Arguments
-/// * `threshold` - M-of-N threshold value
-/// * `total` - Total number of participants
-/// * `effects` - Effects instance for deterministic generation
-pub fn test_frost_single_key_package(
-    threshold: u16,
-    total: u16,
-    effects: &Effects,
-) -> (frost::keys::KeyPackage, frost::keys::PublicKeyPackage) {
-    let (key_packages, pubkey_package) = test_frost_key_shares(threshold, total, effects);
+    #[test]
+    fn test_seeded_key_generation_deterministic() {
+        let keys1 = helpers::test_keys_seeded(3, "base-seed");
+        let keys2 = helpers::test_keys_seeded(3, "base-seed");
 
-    let key_package = key_packages
-        .values()
-        .next()
-        .unwrap() // Should have at least one key package
-        .clone();
+        for (k1, k2) in keys1.iter().zip(keys2.iter()) {
+            assert_eq!(k1.verifying_key().as_bytes(), k2.verifying_key().as_bytes());
+        }
+    }
 
-    (key_package, pubkey_package)
-}
+    #[test]
+    fn test_key_helpers() {
+        let (k1, k2) = helpers::test_key_pair();
+        assert_ne!(k1.verifying_key().as_bytes(), k2.verifying_key().as_bytes());
 
-/// Create device key for capability testing
-///
-/// This matches the create_test_device_key pattern found in capability tests.
-///
-/// # Arguments
-/// * `effects` - Effects instance for deterministic generation
-pub fn test_device_key(effects: &Effects) -> SigningKey {
-    test_signing_key(effects)
+        let (k1, k2, k3) = helpers::test_key_trio();
+        assert_ne!(k1.verifying_key().as_bytes(), k2.verifying_key().as_bytes());
+        assert_ne!(k2.verifying_key().as_bytes(), k3.verifying_key().as_bytes());
+    }
+
+    #[test]
+    fn test_signed_message() {
+        let key = KeyTestFixture::from_seed_string("test-key");
+        let (msg, sig) = helpers::test_signed_message(&key, "test message");
+        assert!(key.verify(&msg, &sig));
+    }
 }

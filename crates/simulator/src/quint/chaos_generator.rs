@@ -5,7 +5,7 @@
 //! test scenarios that attempt to violate specific properties.
 
 use crate::quint::properties::{VerifiableProperty, PropertyType, PropertyPriority};
-use crate::scenario::types::{Scenario, ScenarioSetup, ByzantineConditions, ByzantineStrategy, NetworkConditions, ProtocolType, ScenarioAssertion, ExpectedOutcome as ScenarioExpectedOutcome};
+use crate::scenario::types::{Scenario, ScenarioSetup, ByzantineConditions, NetworkConditions, ScenarioAssertion, ExpectedOutcome as ScenarioExpectedOutcome};
 use thiserror::Error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -362,7 +362,7 @@ impl ChaosGenerator {
             scenario.byzantine = Some(ByzantineConditions {
                 count: byzantine_count,
                 participants: (0..byzantine_count).collect(),
-                strategies: vec![ByzantineStrategy {
+                strategies: vec![crate::scenario::types::LegacyByzantineStrategy {
                     strategy_type: self.select_byzantine_strategy(&chaos_type, property),
                     description: Some(format!("Chaos testing strategy for {}", chaos_type.to_string())),
                     abort_after: None,
@@ -636,6 +636,8 @@ impl ChaosGenerator {
                 participants: 3,
                 threshold: 2,
                 seed: 42,
+                network_conditions: None,
+                byzantine_conditions: None,
             },
             network: None,
             byzantine: None,
@@ -657,6 +659,8 @@ impl ChaosGenerator {
                 participants: 5,
                 threshold: 3,
                 seed: 42,
+                network_conditions: None,
+                byzantine_conditions: None,
             },
             network: Some(NetworkConditions {
                 latency_range: [100, 1000],

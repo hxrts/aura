@@ -3,9 +3,9 @@
 //! This module provides a fallback in-memory implementation for platforms
 //! that don't have native secure storage support.
 
-use super::{DeviceAttestation, SecurityLevel, SecureStorage};
-use aura_coordination::KeyShare;
-use aura_types::{AuraError, Result};
+use super::{DeviceAttestation, SecureStorage, SecurityLevel};
+use aura_protocol::KeyShare;
+use aura_types::{AuraError, AuraResult as Result};
 use std::collections::HashMap;
 
 /// In-memory storage implementation (NOT SECURE - for testing/unsupported platforms only)
@@ -27,7 +27,7 @@ impl SecureStorage for InMemoryStorage {
     fn store_key_share(&self, key_id: &str, key_share: &KeyShare) -> Result<()> {
         let serialized = bincode::serialize(key_share)
             .map_err(|e| AuraError::secure_storage_error(format!("Serialization error: {}", e)))?;
-        
+
         let mut storage = self.storage.write().unwrap();
         storage.insert(format!("keyshare_{}", key_id), serialized);
         Ok(())
@@ -35,14 +35,15 @@ impl SecureStorage for InMemoryStorage {
 
     fn load_key_share(&self, key_id: &str) -> Result<Option<KeyShare>> {
         let storage = self.storage.read().unwrap();
-        
+
         match storage.get(&format!("keyshare_{}", key_id)) {
             Some(data) => {
-                let key_share = bincode::deserialize(data)
-                    .map_err(|e| AuraError::secure_storage_error(format!("Deserialization error: {}", e)))?;
+                let key_share = bincode::deserialize(data).map_err(|e| {
+                    AuraError::secure_storage_error(format!("Deserialization error: {}", e))
+                })?;
                 Ok(Some(key_share))
             }
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 

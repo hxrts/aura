@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 /// # Ok::<(), aura_types::SerializationError>(())
 /// ```
 pub fn to_cbor_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    serde_cbor::to_vec(value).map_err(|e| SerializationError::from(e))
+    serde_cbor::to_vec(value).map_err(SerializationError::from)
 }
 
 /// Deserialize a value from CBOR bytes
@@ -50,7 +50,7 @@ pub fn to_cbor_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>> {
 /// # Ok::<(), aura_types::SerializationError>(())
 /// ```
 pub fn from_cbor_bytes<T: for<'de> Deserialize<'de>>(data: &[u8]) -> Result<T> {
-    serde_cbor::from_slice(data).map_err(|e| SerializationError::from(e))
+    serde_cbor::from_slice(data).map_err(SerializationError::from)
 }
 
 /// Serialize to CBOR and compute canonical bytes

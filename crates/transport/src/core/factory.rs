@@ -5,22 +5,28 @@
 
 use crate::{
     adapters::{
-        https_relay::HttpsRelayTransport, memory::MemoryTransport, noise_tcp::NoiseTcpTransport,
-        simple_tcp::SimpleTcpTransport,
+        https_relay::HttpsRelayTransport,
+        memory::MemoryTransport,
+        noise_tcp::{NoiseTcpTransport, NoiseTcpTransportBuilder},
+        simple_tcp::{SimpleTcpTransport, SimpleTcpTransportBuilder},
     },
-    ConnectionManager, CapabilityTransportAdapter, TransportError, TransportErrorBuilder, TransportResult,
+    CapabilityTransportAdapter, ConnectionManager, TransportError, TransportErrorBuilder,
+    TransportResult,
 };
 use aura_crypto::{DeviceKeyManager, Effects};
-use aura_journal::capability::identity::IndividualId;
-use aura_types::DeviceId;
+use aura_types::{DeviceId, DeviceIdExt, IndividualId};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Enum for different transport implementations
 pub enum AnyTransport {
+    /// In-memory transport for testing and local dev
     Memory(MemoryTransport),
+    /// HTTPS relay transport for production
     HttpsRelay(HttpsRelayTransport),
+    /// Noise protocol over TCP transport
     NoiseTcp(NoiseTcpTransport),
+    /// Simple TCP transport without encryption
     SimpleTcp(SimpleTcpTransport),
 }
 
@@ -113,36 +119,49 @@ pub enum TransportConfig {
 
     /// HTTPS relay transport configuration
     HttpsRelay {
+        /// The relay server URL
         relay_url: String,
+        /// Connection timeout in seconds
         timeout_seconds: u64,
+        /// Maximum number of connection retries
         max_retries: u32,
     },
 
     /// Direct P2P transport with Noise protocol
     NoiseTcp {
+        /// Address to listen on for incoming connections
         listen_address: String,
+        /// Connection timeout in seconds
         connection_timeout_seconds: u64,
     },
 
     /// Simple TCP transport (without encryption, for testing)
     SimpleTcp {
+        /// Address to listen on for incoming connections
         listen_address: String,
+        /// Connection timeout in seconds
         connection_timeout_seconds: u64,
     },
 
     /// Future: QUIC transport configuration
     #[serde(skip)]
     Quic {
+        /// Address to bind the QUIC endpoint
         bind_address: String,
+        /// Optional path to TLS certificate
         certificate_path: Option<String>,
+        /// Optional path to private key
         private_key_path: Option<String>,
     },
 
     /// Future: WebRTC transport configuration
     #[serde(skip)]
     WebRtc {
+        /// List of ICE server URLs
         ice_servers: Vec<String>,
+        /// Optional TURN server username
         turn_username: Option<String>,
+        /// Optional TURN server password
         turn_password: Option<String>,
     },
 }
@@ -295,11 +314,11 @@ impl TransportFactory {
     /// # Returns
     /// * `Ok(CapabilityTransportAdapter<AnyTransport>)` - Ready-to-use capability transport
     /// * `Err(TransportError)` - Configuration or creation error
-    pub fn create_transport(
+    pub async fn create_transport(
         transport_config: &TransportConfig,
         capability_config: CapabilityConfig,
     ) -> TransportResult<CapabilityTransportAdapter<AnyTransport>> {
-        Self::create_capability_transport(transport_config, capability_config)
+        Self::create_capability_transport(transport_config, capability_config).await
     }
 
     /// Get available transport types
@@ -407,6 +426,40 @@ impl TransportFactory {
                 Err(TransportErrorBuilder::transport(
                     "WebRTC transport not yet implemented".to_string(),
                 ))
+            }
+
+            TransportConfig::NoiseTcp {
+                listen_address,
+                connection_timeout_seconds,
+            } => {
+                if listen_address.is_empty() {
+                    return Err(TransportErrorBuilder::transport(
+                        "Noise TCP transport requires listen address".to_string(),
+                    ));
+                }
+                if *connection_timeout_seconds == 0 {
+                    return Err(TransportErrorBuilder::transport(
+                        "Noise TCP transport requires positive timeout".to_string(),
+                    ));
+                }
+                Ok(())
+            }
+
+            TransportConfig::SimpleTcp {
+                listen_address,
+                connection_timeout_seconds,
+            } => {
+                if listen_address.is_empty() {
+                    return Err(TransportErrorBuilder::transport(
+                        "Simple TCP transport requires listen address".to_string(),
+                    ));
+                }
+                if *connection_timeout_seconds == 0 {
+                    return Err(TransportErrorBuilder::transport(
+                        "Simple TCP transport requires positive timeout".to_string(),
+                    ));
+                }
+                Ok(())
             }
         }
     }
@@ -624,13 +677,13 @@ mod tests {
         assert!(!TransportFactory::is_transport_implemented("webrtc"));
     }
 
-    #[test]
-    fn test_raw_transport_creation() {
+    #[tokio::test]
+    async fn test_raw_transport_creation() {
         // Test memory transport creation
         let memory_config = TransportConfig::Memory {
             device_id: Some(DeviceId(Uuid::new_v4())),
         };
-        let transport = TransportFactory::create_raw_transport(&memory_config);
+        let transport = TransportFactory::create_raw_transport(&memory_config).await;
         assert!(transport.is_ok());
 
         // Test HTTPS relay transport (now implemented)
@@ -639,7 +692,7 @@ mod tests {
             timeout_seconds: 30,
             max_retries: 3,
         };
-        let transport = TransportFactory::create_raw_transport(&https_config);
+        let transport = TransportFactory::create_raw_transport(&https_config).await;
         assert!(transport.is_ok());
     }
 }

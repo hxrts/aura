@@ -38,7 +38,12 @@ pub enum SerializationError {
 
     /// Type mismatch during deserialization
     #[error("Type mismatch: expected {expected}, got {actual}")]
-    TypeMismatch { expected: String, actual: String },
+    TypeMismatch {
+        /// Expected type name
+        expected: String,
+        /// Actual type name
+        actual: String,
+    },
 
     /// Invalid data format
     #[error("Invalid data format: {0}")]

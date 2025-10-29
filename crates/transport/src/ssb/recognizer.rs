@@ -10,8 +10,8 @@
 //! 4. Verify authentication and check for replay
 //! 5. Return recognized payload or None
 
-use crate::envelope::{Envelope, RoutingTag};
 use crate::error::TransportResult;
+use crate::infrastructure::envelope::{Envelope, RoutingTag};
 use crate::ssb::publisher::{EnvelopePayload, SbbPublisher};
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -6,8 +6,8 @@
 
 use super::CapabilityId;
 use aura_crypto::Effects;
-use aura_types::DeviceId;
 use aura_crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
+use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 
 /// Permission enum with three scopes: Storage, Communication, and Relay

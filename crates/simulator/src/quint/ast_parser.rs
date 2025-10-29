@@ -4,7 +4,7 @@
 //! property and specification information for the simulation framework.
 
 use crate::quint::cli_runner::{QuintParseOutput, QuintModule, QuintDefinition};
-use crate::quint::types::{QuintSpec, QuintInvariant, QuintTemporalProperty, TemporalPropertyType};
+use crate::quint::types::{QuintSpec, QuintInvariant, QuintTemporalProperty};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -52,7 +52,7 @@ pub enum PropertyType {
 /// AST parser for Quint specifications
 pub struct QuintAstParser {
     /// Enable strict parsing (fail on unrecognized constructs)
-    strict_mode: bool,
+    _strict_mode: bool,
     /// Custom annotation prefixes to recognize
     annotation_prefixes: Vec<String>,
 }
@@ -61,7 +61,7 @@ impl QuintAstParser {
     /// Create a new AST parser
     pub fn new(strict_mode: bool) -> Self {
         Self {
-            strict_mode,
+            _strict_mode: strict_mode,
             annotation_prefixes: vec![
                 "property".to_string(),
                 "invariant".to_string(),
@@ -103,13 +103,17 @@ impl QuintAstParser {
 
         Ok(QuintSpec {
             name: spec_name,
+            file_path: std::path::PathBuf::from("ast_parser"),
+            module_name: "main".to_string(),
             version: "1.0".to_string(),
             description: "Parsed from Quint CLI output".to_string(),
             modules: vec![], // We're storing parsed modules separately for now
+            metadata: HashMap::new(),
             invariants,
             temporal_properties,
             safety_properties: vec![], // Could be extracted similarly
-            metadata: HashMap::new(),
+            state_variables: Vec::new(),
+            actions: Vec::new(),
         })
     }
 
@@ -139,7 +143,7 @@ impl QuintAstParser {
                 Ok(ParsedQuintDefinition {
                     name: name.clone(),
                     kind: "definition".to_string(),
-                    expression,
+                    expression: expression.clone(),
                     return_type: Some(def_type.clone()),
                     parameters: self.extract_parameters(&expression),
                     annotations,
@@ -294,6 +298,7 @@ impl QuintAstParser {
             name: def.name.clone(),
             description,
             expression: def.expression.clone(),
+            source_location: "ast_parser".to_string(),
             enabled: true,
             tags,
         })
@@ -302,10 +307,10 @@ impl QuintAstParser {
     /// Convert parsed definition to QuintTemporalProperty
     fn definition_to_temporal_property(&self, def: &ParsedQuintDefinition) -> AstParseResult<QuintTemporalProperty> {
         let property_type = match def.property_type {
-            Some(PropertyType::Always) => TemporalPropertyType::Always,
-            Some(PropertyType::Eventually) => TemporalPropertyType::Eventually,
-            Some(PropertyType::Until) => TemporalPropertyType::Until,
-            _ => TemporalPropertyType::Always, // Default
+            Some(PropertyType::Always) => "Always".to_string(),
+            Some(PropertyType::Eventually) => "Eventually".to_string(),
+            Some(PropertyType::Until) => "Until".to_string(),
+            _ => "Always".to_string(), // Default
         };
 
         let description = def.annotations
@@ -323,6 +328,7 @@ impl QuintAstParser {
             description,
             property_type,
             expression: def.expression.clone(),
+            source_location: "ast_parser".to_string(),
             enabled: true,
             tags,
         })

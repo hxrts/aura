@@ -10,7 +10,7 @@ use wasm_core::{console_log, initialize_wasm, LiveNetworkHandler, WebSocketClien
 
 // pub use client::LiveNetworkClient;
 
-// Initialize WASM using foundation
+/// Initialize WASM using foundation
 #[wasm_bindgen(start)]
 pub fn main() {
     initialize_wasm();
@@ -20,6 +20,7 @@ pub fn main() {
 #[wasm_bindgen]
 pub struct LiveClient {
     websocket: WebSocketClientJs,
+    #[allow(dead_code)]
     handler: LiveNetworkHandler,
 }
 
@@ -28,7 +29,8 @@ impl LiveClient {
     /// Create new live network client
     #[wasm_bindgen(constructor)]
     pub fn new(url: &str) -> Result<LiveClient, wasm_bindgen::JsValue> {
-        let websocket = WebSocketClientJs::new("live", url).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let websocket =
+            WebSocketClientJs::new("live", url).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let handler = LiveNetworkHandler::new();
 
         Ok(LiveClient { websocket, handler })
@@ -37,17 +39,23 @@ impl LiveClient {
     /// Connect to live network node
     pub fn connect(&mut self) -> Result<(), wasm_bindgen::JsValue> {
         console_log!("Connecting live network client using unified foundation");
-        self.websocket.connect().map_err(|e| JsValue::from_str(&e.to_string()))
+        self.websocket
+            .connect()
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Send command to live network node
     pub fn send(&self, message: &str) -> Result<(), wasm_bindgen::JsValue> {
-        self.websocket.send(message).map_err(|e| JsValue::from_str(&e.to_string()))
+        self.websocket
+            .send(message)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Close connection
     pub fn close(&mut self) -> Result<(), wasm_bindgen::JsValue> {
-        self.websocket.close().map_err(|e| JsValue::from_str(&e.to_string()))
+        self.websocket
+            .close()
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Check connection status
@@ -65,7 +73,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_live_client_creation() {
-        console_log!("Testing live network client with unified foundation");
+        wasm_core::console_log!("Testing live network client with unified foundation");
         let client = LiveClient::new("ws://localhost:8080");
         assert!(client.is_ok());
     }

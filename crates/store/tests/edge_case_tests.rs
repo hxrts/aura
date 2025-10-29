@@ -9,6 +9,7 @@
 //! Reference: work/ssb_storage.md Phase 5.3
 
 use aura_crypto::{Effects, KeyRotationCoordinator};
+use aura_authorization::{Action, CapabilityToken, Resource, Subject};
 use aura_store::{
     manifest::{Permission, ResourceScope, SignatureShare, StorageOperation, ThresholdSignature},
     social_storage::{
@@ -118,25 +119,19 @@ fn test_capability_revocation_race() {
     let effects = Effects::deterministic(33333, 3000000);
     let mut manager = CapabilityManager::new();
 
-    let device_id = DeviceId::new_with_effects(&aura_crypto::Effects::test());
-    let signature = ThresholdSignature {
-        threshold: 1,
-        signature_shares: vec![SignatureShare {
-            device_id: DeviceId::new_with_effects(&aura_crypto::Effects::test()),
-            share: vec![0; 32],
-        }],
-    };
-
+    let device_id = DeviceId::new_with_effects(&effects);
+    let account_id = AccountId::new_with_effects(&effects);
+    let signing_key = aura_crypto::generate_ed25519_key();
     let now = effects.now().unwrap();
 
     // Grant capability through the proper API
     let _token = manager
         .grant_capability(
-            device_id.clone(),
+            device_id,
             StorageOperation::Write,
             ResourceScope::AllOwnedObjects,
-            signature,
-            now,
+            account_id,
+            &signing_key,
         )
         .expect("Failed to grant capability");
 
@@ -240,14 +235,9 @@ fn test_rapid_capability_expiration_renewal() {
     let effects = Effects::deterministic(55555, 5000000);
     let mut manager = CapabilityManager::new();
 
-    let device_id = DeviceId::new_with_effects(&aura_crypto::Effects::test());
-    let signature = ThresholdSignature {
-        threshold: 1,
-        signature_shares: vec![SignatureShare {
-            device_id: DeviceId::new_with_effects(&aura_crypto::Effects::test()),
-            share: vec![0; 32],
-        }],
-    };
+    let device_id = DeviceId::new_with_effects(&effects);
+    let account_id = AccountId::new_with_effects(&effects);
+    let signing_key = aura_crypto::generate_ed25519_key();
 
     let base_time = effects.now().unwrap();
 
@@ -259,11 +249,11 @@ fn test_rapid_capability_expiration_renewal() {
         // Grant capability with expiration through the API
         let _token = manager
             .grant_capability(
-                device_id.clone(),
+                device_id,
                 StorageOperation::Read,
                 ResourceScope::AllOwnedObjects,
-                signature.clone(),
-                now,
+                account_id,
+                &signing_key,
             )
             .expect("Failed to grant capability");
 

@@ -6,8 +6,8 @@
 // applies it to the AccountState, handling all 32 event types.
 
 use super::state::AccountState;
+use crate::error::{AuraError, Result as AuraResult};
 use crate::protocols::*;
-use crate::LedgerError;
 
 impl AccountState {
     /// Apply an event to the account state
@@ -16,24 +16,20 @@ impl AccountState {
     /// Each event type updates the relevant part of the account state.
     ///
     /// Reference: 080 spec Part 3: CRDT Choreography & State Management
-    pub fn apply_event(
-        &mut self,
-        event: &Event,
-        effects: &aura_crypto::Effects,
-    ) -> Result<(), LedgerError> {
+    pub fn apply_event(&mut self, event: &Event, effects: &aura_crypto::Effects) -> AuraResult<()> {
         // Validate event version
         event
             .validate_version()
-            .map_err(LedgerError::InvalidEvent)?;
+            .map_err(AuraError::protocol_invalid_instruction)?;
 
         // Validate nonce to prevent replay attacks
         self.validate_nonce(event.nonce)
-            .map_err(LedgerError::InvalidEvent)?;
+            .map_err(AuraError::protocol_invalid_instruction)?;
 
         // Validate parent hash for causal ordering
         event
             .validate_parent(self.last_event_hash)
-            .map_err(LedgerError::InvalidEvent)?;
+            .map_err(AuraError::protocol_invalid_instruction)?;
 
         // Advance Lamport clock on every event (Lamport rule: max(local, received) + 1)
         self.advance_lamport_clock(event.epoch_at_write, effects);
@@ -52,7 +48,7 @@ impl AccountState {
         &self,
         event: &crate::capability::events::CapabilityDelegation,
         effects: &aura_crypto::Effects,
-    ) -> Result<(), LedgerError> {
+    ) -> AuraResult<()> {
         use crate::capability::types::{CapabilityResult, CapabilityScope, Subject};
 
         // Convert issuing device to subject
@@ -71,15 +67,15 @@ impl AccountState {
 
         match result {
             CapabilityResult::Granted => Ok(()),
-            CapabilityResult::Revoked => Err(LedgerError::CapabilityError(format!(
+            CapabilityResult::Revoked => Err(AuraError::capability_system_error(format!(
                 "Issuer {} capability was revoked",
                 event.issued_by.0
             ))),
-            CapabilityResult::Expired => Err(LedgerError::CapabilityError(format!(
+            CapabilityResult::Expired => Err(AuraError::capability_system_error(format!(
                 "Issuer {} capability has expired",
                 event.issued_by.0
             ))),
-            CapabilityResult::NotFound => Err(LedgerError::CapabilityError(format!(
+            CapabilityResult::NotFound => Err(AuraError::capability_system_error(format!(
                 "Issuer {} does not have delegation authority",
                 event.issued_by.0
             ))),
@@ -91,7 +87,7 @@ impl AccountState {
         &self,
         event: &crate::capability::events::CapabilityRevocation,
         effects: &aura_crypto::Effects,
-    ) -> Result<(), LedgerError> {
+    ) -> AuraResult<()> {
         use crate::capability::types::{CapabilityResult, CapabilityScope, Subject};
 
         // Convert issuing device to subject
@@ -105,15 +101,15 @@ impl AccountState {
 
         match result {
             CapabilityResult::Granted => Ok(()),
-            CapabilityResult::Revoked => Err(LedgerError::CapabilityError(format!(
+            CapabilityResult::Revoked => Err(AuraError::capability_system_error(format!(
                 "Issuer {} capability was revoked",
                 event.issued_by.0
             ))),
-            CapabilityResult::Expired => Err(LedgerError::CapabilityError(format!(
+            CapabilityResult::Expired => Err(AuraError::capability_system_error(format!(
                 "Issuer {} capability has expired",
                 event.issued_by.0
             ))),
-            CapabilityResult::NotFound => Err(LedgerError::CapabilityError(format!(
+            CapabilityResult::NotFound => Err(AuraError::capability_system_error(format!(
                 "Issuer {} does not have revocation authority",
                 event.issued_by.0
             ))),
@@ -124,6 +120,6 @@ impl AccountState {
 /// Get current Unix timestamp in seconds using injected effects
 pub fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> crate::Result<u64> {
     effects.now().map_err(|e| {
-        LedgerError::SerializationFailed(format!("Failed to get current timestamp: {}", e))
+        AuraError::serialization_failed(format!("Failed to get current timestamp: {}", e))
     })
 }

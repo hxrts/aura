@@ -5,14 +5,12 @@
 //! tracking, and optimized evaluation strategies.
 
 use super::types::{
-    QuintValue, QuintError, ValidationResult, PropertyEvaluationResult, SimulationState,
-    QuintInvariant, QuintTemporalProperty, QuintSafetyProperty, TemporalPropertyType,
-    PropertyPriority, SafetyPropertyType, ViolationPattern
+    QuintValue, ValidationResult, PropertyEvaluationResult, SimulationState, PropertyPriority
 };
-use super::properties::{VerifiableProperty, PropertyType, PropertyError};
-use crate::world_state::{WorldState, NetworkFabric, ProtocolExecutionState, ByzantineAdversaryState, SimulationConfiguration, NetworkFailureConfig};
-use std::collections::{HashMap, VecDeque, HashSet};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use super::properties::{VerifiableProperty, PropertyType};
+use crate::world_state::{WorldState, NetworkFailureConfig};
+use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 use thiserror::Error;
 use serde::{Deserialize, Serialize};
 
@@ -245,7 +243,7 @@ impl EvaluationCache {
 
         let entry = CacheEntry {
             result,
-            cached_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
+            cached_at: crate::utils::time::current_unix_timestamp_millis(),
             state_hash,
             access_count: self.access_counter,
         };
@@ -417,9 +415,10 @@ impl PropertyEvaluator {
     /// Evaluate a single property
     pub fn evaluate_property(&mut self, property_id: &str, world_state: &WorldState) -> Result<PropertyEvaluationResult, EvaluationError> {
         let property = self.properties.get(property_id)
-            .ok_or_else(|| EvaluationError::EvaluationFailed(format!("Property not found: {}", property_id)))?;
+            .ok_or_else(|| EvaluationError::EvaluationFailed(format!("Property not found: {}", property_id)))?
+            .clone();
 
-        self.evaluate_single_property(property, world_state)
+        self.evaluate_single_property(&property, world_state)
     }
 
     /// Get evaluation statistics
@@ -716,7 +715,7 @@ impl PropertyEvaluator {
     }
 
     /// Evaluate security property
-    fn evaluate_security_property(&self, property: &VerifiableProperty, world_state: &WorldState) -> Result<bool, EvaluationError> {
+    fn evaluate_security_property(&self, property: &VerifiableProperty, _world_state: &WorldState) -> Result<bool, EvaluationError> {
         let expression = &property.expression.to_lowercase();
         
         if expression.contains("auth") {
@@ -788,7 +787,7 @@ impl<'a> WorldStateAdapter<'a> {
         extracted_variables.insert("participant_count".to_string(), 
             QuintValue::Int(world_state.participants.len() as i64));
         extracted_variables.insert("byzantine_count".to_string(), 
-            QuintValue::Int(world_state.byzantine.active_attackers.len() as i64));
+            QuintValue::Int(world_state.byzantine.byzantine_participants.len() as i64));
         
         Self {
             world_state,

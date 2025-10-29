@@ -45,3 +45,4 @@ hex = { workspace = true }
 aura-test-utils = { path = "../test-utils" }
 tokio-test = "0.4"
 proptest = { workspace = true }
+serde_json = { workspace = true }

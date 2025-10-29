@@ -176,6 +176,7 @@ mod tests {
 
         // Bincode should be more compact than JSON in most cases
         let bincode_bytes = to_bincode_bytes(&data)?;
+        #[allow(clippy::expect_used)] // Test code - panics are expected on failure
         let json_bytes = serde_json::to_vec(&data).expect("JSON serialization");
 
         assert!(bincode_bytes.len() < json_bytes.len());

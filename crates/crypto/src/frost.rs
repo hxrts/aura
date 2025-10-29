@@ -139,7 +139,7 @@ impl<'de> Deserialize<'de> for FrostKeyShare {
             }
         }
 
-        const FIELDS: &'static [&'static str] = &["identifier", "signing_share", "verifying_key"];
+        const FIELDS: &[&str] = &["identifier", "signing_share", "verifying_key"];
         deserializer.deserialize_struct("FrostKeyShare", FIELDS, FrostKeyShareVisitor)
     }
 }

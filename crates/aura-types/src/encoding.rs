@@ -118,6 +118,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::expect_used)] // Test code - panics are expected on failure
     fn test_hex_roundtrip() {
         let bytes = vec![1, 2, 3, 255, 254, 253];
         let hex = bytes.to_hex();
@@ -126,6 +127,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::expect_used)] // Test code - panics are expected on failure
     fn test_base64_roundtrip() {
         let bytes = vec![1, 2, 3, 255, 254, 253];
         let b64 = bytes.to_base64();

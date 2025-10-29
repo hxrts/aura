@@ -4,8 +4,8 @@
 //! enabling property-specific attack implementations that target formal verification
 //! properties with sophisticated adversarial behaviors.
 
-use crate::{SimError, Result};
-use crate::quint::types::{ViolationPattern, ChaosScenario, ChaosType, QuintInvariant, QuintTemporalProperty, QuintSafetyProperty};
+use crate::Result;
+use crate::quint::types::{ViolationPattern, ChaosScenario, ChaosType};
 use crate::scenario::types::ByzantineStrategy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -24,7 +24,7 @@ pub mod scenarios;
 /// Account status command
 pub mod status;
 
-// Storage management commands
+/// Storage management commands
 pub mod storage;
 
 /// Threshold signature testing commands

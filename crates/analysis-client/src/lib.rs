@@ -5,17 +5,32 @@
 //! and interactive trace analysis capabilities.
 
 use wasm_bindgen::prelude::*;
-use web_sys::console;
 
 // Console logging macros for WASM
+/// Logs a message to the browser console
 #[macro_export]
 macro_rules! console_log {
-    ($($t:tt)*) => (web_sys::console::log_1(&format!($($t)*).into()))
+    ($($t:tt)*) => {
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&format!($($t)*).into());
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = format!($($t)*); // Suppress unused variable warnings
+        }
+    }
 }
 
+/// Logs an error message to the browser console
 #[macro_export]
 macro_rules! console_error {
-    ($($t:tt)*) => (web_sys::console::error_1(&format!($($t)*).into()))
+    ($($t:tt)*) => {
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::error_1(&format!($($t)*).into());
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = format!($($t)*); // Suppress unused variable warnings
+        }
+    }
 }
 
 mod analyzer;
@@ -24,7 +39,7 @@ mod property_causality;
 mod property_monitor;
 mod property_timeline;
 mod query;
-mod violation_analyzer;
+mod violation;
 
 pub use analyzer::AnalysisEngine;
 pub use property_causality::{
@@ -33,12 +48,12 @@ pub use property_causality::{
 };
 pub use property_monitor::{PropertyMonitor, WasmPropertyMonitor};
 pub use property_timeline::{PropertyTimeline, WasmPropertyTimeline, WasmPropertyTimelineBuilder};
-pub use violation_analyzer::{
+pub use violation::{
     DebuggingGuide, ImpactAssessment, RemediationStrategy, SeverityLevel, ViolationAnalysis,
     ViolationAnalyzer, ViolationClassification, ViolationType, WasmViolationAnalyzer,
 };
 
-// Initialize WASM
+/// Initialize WASM module
 #[wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();
@@ -49,6 +64,7 @@ pub fn main() {
 #[wasm_bindgen]
 pub struct AnalysisClient {
     websocket_url: Option<String>,
+    #[allow(dead_code)]
     engine: AnalysisEngine,
     property_monitor: Option<WasmPropertyMonitor>,
     causality_analyzer: Option<PropertyCausalityAnalyzer>,
@@ -112,7 +128,7 @@ impl AnalysisClient {
     }
 
     /// Process trace data with the analysis engine
-    pub fn process_trace_data(&mut self, trace_data: &str) -> Result<(), JsValue> {
+    pub fn process_trace_data(&mut self, _trace_data: &str) -> Result<(), JsValue> {
         // This method allows processing trace data without exposing the engine directly
         // since we can't return mutable references from wasm_bindgen functions
         // The actual implementation would depend on AnalysisEngine's API
@@ -303,13 +319,14 @@ impl AnalysisClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::console_log;
     use wasm_bindgen_test::*;
 
     wasm_bindgen_test_configure!(run_in_browser);
 
     #[wasm_bindgen_test]
     fn test_analysis_client_creation() {
-        console_log!("Testing analysis client with unified foundation");
+        crate::console_log!("Testing analysis client with unified foundation");
         let client = AnalysisClient::new();
         assert!(!client.is_connected());
     }

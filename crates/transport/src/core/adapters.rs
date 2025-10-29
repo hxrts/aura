@@ -6,14 +6,11 @@
 //! - Session-typed transport for compile-time safety (when enabled)
 
 use crate::{
-    ConnectionManager, TransportError, TransportErrorBuilder, TransportResult,
-    Connection, BroadcastResult,
+    Connection, ConnectionManager, TransportError, TransportErrorBuilder, TransportResult,
 };
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -23,10 +20,10 @@ use aura_crypto::{DeviceKeyManager, Effects};
 use aura_journal::capability::{
     authority_graph::AuthorityGraph,
     events::{CapabilityDelegation, CapabilityRevocation},
-    identity::IndividualId,
+    identity::IndividualIdCapabilityExt,
     types::{CapabilityResult, CapabilityScope},
 };
-use aura_types::DeviceId;
+use aura_types::{DeviceId, IndividualId};
 
 /// Capability-authenticated message for transport
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,11 +52,19 @@ pub enum MessageContent {
     /// Capability revocation event
     CapabilityRevocation(CapabilityRevocation),
     /// General data with capability requirements
-    Data { data: Vec<u8>, context: String },
+    Data {
+        /// The data payload
+        data: Vec<u8>,
+        /// Context information for the data
+        context: String,
+    },
     /// Delivery confirmation for a message
     DeliveryConfirmation {
+        /// The message ID being confirmed
         original_message_id: Uuid,
+        /// The individual confirming the message
         confirmed_by: IndividualId,
+        /// Timestamp of the confirmation
         timestamp: u64,
     },
 }
@@ -240,23 +245,20 @@ impl<T: ConnectionManager> CapabilityTransportAdapter<T> {
             graph.evaluate_capability(&sender_subject, &message.required_scope, &self.effects);
 
         if !matches!(result, CapabilityResult::Granted) {
-            return Err(
-                TransportErrorBuilder::insufficient_capability(format!(
-                    "Sender {} lacks required capability {}:{}",
-                    message.sender.0,
-                    message.required_scope.namespace,
-                    message.required_scope.operation
-                ))
-                .into(),
-            );
+            return Err(TransportErrorBuilder::insufficient_capability(format!(
+                "Sender {} lacks required capability {}:{}",
+                message.sender.0,
+                message.required_scope.namespace,
+                message.required_scope.operation
+            ))
+            .into());
         }
 
         let message_id = message.message_id;
 
         // Serialize message for transport
-        let message_bytes = bincode::serialize(&message).map_err(|e| {
-            TransportErrorBuilder::transport(format!("Serialization error: {}", e))
-        })?;
+        let message_bytes = bincode::serialize(&message)
+            .map_err(|e| TransportErrorBuilder::transport(format!("Serialization error: {}", e)))?;
 
         // Send to recipients via underlying transport
         if let Some(recipients) = &message.recipients {
@@ -320,19 +322,14 @@ impl<T: ConnectionManager> CapabilityTransportAdapter<T> {
                 &message.content,
                 message.timestamp,
             ))
-            .map_err(|e| {
-                TransportErrorBuilder::transport(format!("Serialization error: {}", e))
-            })?;
+            .map_err(|e| TransportErrorBuilder::transport(format!("Serialization error: {}", e)))?;
 
             // Use actual device key manager for signing
             let device_key_manager = self.device_key_manager.read().await;
             device_key_manager
                 .sign_message(&signable_content)
                 .map_err(|e| {
-                    TransportErrorBuilder::transport(format!(
-                        "Device key signing failed: {:?}",
-                        e
-                    ))
+                    TransportErrorBuilder::transport(format!("Device key signing failed: {:?}", e))
                 })
         })?;
 
@@ -380,7 +377,7 @@ impl TransportAdapterFactory {
     }
 }
 
-// Type alias for convenience with MemoryTransport
+/// Type alias for convenience with MemoryTransport
 pub type CapabilityTransport = CapabilityTransportAdapter<crate::MemoryTransport>;
 
 #[cfg(test)]

@@ -4,12 +4,12 @@
 //! of distributed protocols.
 
 use crate::{
-    Effect, EffectSink, Interceptors, ParticipantId, Result, SideEffectRuntime, SimError,
+    Effect, EffectSink, Interceptors, ParticipantId, Result, SideEffectRuntime, AuraError,
     SimulatedNetwork, 
     // SimulatedParticipant,  // Temporarily disabled
     Tick,
 };
-use aura_coordination::execution::SimulationScheduler;
+use aura_protocol::execution::SimulationScheduler;
 use aura_crypto::Effects;
 use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
 use aura_journal::{AccountLedger, AccountState, DeviceMetadata, DeviceType, SessionEpoch};
@@ -299,7 +299,7 @@ impl Simulation {
     pub fn remove_participant(&mut self, id: ParticipantId) -> Result<()> {
         self.participants
             .shift_remove(&id)
-            .ok_or(SimError::ParticipantNotFound(id))?;
+            .ok_or(AuraError::device_not_found(id))?;
         self.runtime.unregister_participant(id);
         Ok(())
     }
@@ -309,7 +309,7 @@ impl Simulation {
         self.participants
             .get(&id)
             .cloned()
-            .ok_or(SimError::ParticipantNotFound(id))
+            .ok_or(AuraError::device_not_found(id))
     }
 
     /// Get all participant IDs
@@ -411,7 +411,7 @@ impl Simulation {
                 scheduler.waiting_context_count(),
                 scheduler.active_context_count()
             );
-            return Err(SimError::RuntimeError(
+            return Err(AuraError::configuration_error(
                 "Simulation did not converge after max ticks".to_string(),
             ));
         }
@@ -454,14 +454,14 @@ impl Simulation {
     pub fn advance_time(&self, seconds: u64) -> Result<()> {
         self.effects
             .advance_time(seconds)
-            .map_err(|e| SimError::TimeError(e.to_string()))
+            .map_err(|e| AuraError::TimeError(e.to_string()))
     }
 
     /// Get current timestamp
     pub fn current_timestamp(&self) -> Result<u64> {
         self.effects
             .now()
-            .map_err(|e| SimError::TimeError(e.to_string()))
+            .map_err(|e| AuraError::TimeError(e.to_string()))
     }
 
     /// Generate a deterministic UUID using seeded randomness

@@ -1,5 +1,6 @@
 //! Unified error handling for the Aura platform
 #![allow(missing_docs)] // Allow missing docs for repetitive error struct fields
+#![allow(clippy::result_large_err)] // ErrorContext provides valuable debugging info
 //!
 //! This crate provides a centralized, structured error hierarchy for all Aura components.
 //! It consolidates the previously fragmented error types across multiple crates into
@@ -894,6 +895,7 @@ pub enum CapabilityError {
 
 /// Session type and state machine errors
 #[derive(Error, Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::result_large_err)] // ErrorContext provides valuable debugging info
 pub enum SessionError {
     /// Invalid state transition attempted
     #[error("Invalid state transition: {message}")]

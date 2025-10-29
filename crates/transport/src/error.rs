@@ -1,13 +1,20 @@
-//! Transport errors - using unified error system
+//! Transport errors using unified error system
+//!
+//! This module provides transport-specific error constructors that wrap
+//! the unified Aura error system. All transport errors are instances of
+//! `AuraError` with transport-specific error codes and messages.
 
 // Re-export unified error system
-pub use aura_types::Result as TransportResult;
 pub use aura_types::{AuraError, ErrorCode, ErrorSeverity};
+pub use aura_types::{AuraResult as TransportResult, AuraResult};
 
-// Type aliases for backward compatibility
+/// Type alias for transport errors (AuraError)
 pub type TransportError = AuraError;
 
-// Transport-specific error constructors
+/// Builder providing transport-specific error constructors
+///
+/// This struct provides static methods for creating transport-specific errors
+/// with appropriate error codes and severity levels.
 pub struct TransportErrorBuilder;
 
 impl TransportErrorBuilder {
@@ -81,5 +88,35 @@ impl TransportErrorBuilder {
     /// Create a not authorized error
     pub fn not_authorized(message: impl Into<String>) -> AuraError {
         AuraError::insufficient_permissions(message)
+    }
+
+    /// Create an authentication error
+    pub fn authentication(message: impl Into<String>) -> AuraError {
+        AuraError::transport_connection_failed(format!("Authentication error: {}", message.into()))
+    }
+
+    /// Create a connection error
+    pub fn connection(message: impl Into<String>) -> AuraError {
+        AuraError::transport_connection_failed(message)
+    }
+
+    /// Create an authentication failed error
+    pub fn authentication_failed(message: impl Into<String>) -> AuraError {
+        AuraError::transport_failed(format!("Authentication failed: {}", message.into()))
+    }
+
+    /// Create a configuration error
+    pub fn configuration_error(message: impl Into<String>) -> AuraError {
+        AuraError::configuration_error(message)
+    }
+
+    /// Create an IO error
+    pub fn io_error(message: impl Into<String>) -> AuraError {
+        AuraError::transport_failed(format!("IO error: {}", message.into()))
+    }
+
+    /// Create an invalid peer ID error
+    pub fn invalid_peer_id(message: impl Into<String>) -> AuraError {
+        AuraError::transport_failed(format!("Invalid peer ID: {}", message.into()))
     }
 }

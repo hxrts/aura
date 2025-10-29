@@ -3,16 +3,16 @@
 //! Manages multiple simulation branches, allowing clients to fork simulations,
 //! switch between branches, and maintain isolated execution contexts.
 
+use crate::simulation_wrapper::SimulationWrapper;
 use anyhow::{anyhow, Result};
 use aura_console_types::{BranchInfo, ConsoleCommand, SimulationInfo, TraceEvent};
-use crate::simulation_wrapper::SimulationWrapper;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::scenario_export::{CommandRecord, ScenarioExporter};
+use crate::scenario_export::ScenarioExporter;
 
 /// Unique branch identifier
 pub type BranchId = Uuid;
@@ -21,6 +21,7 @@ pub type BranchId = Uuid;
 pub type SimulationId = Uuid;
 
 /// Branch management system for simulation instances
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct BranchManager {
     /// Active simulation branches
@@ -49,6 +50,7 @@ pub struct SimulationBranch {
 }
 
 /// Branch metadata and relationship information
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct BranchMetadata {
     /// Branch identifier
@@ -158,7 +160,7 @@ impl BranchManager {
                 .get(&parent_branch_id)
                 .ok_or_else(|| anyhow!("Parent branch not found: {}", parent_branch_id))?;
 
-            let parent_sim = parent_branch.simulation.lock().unwrap();
+            let _parent_sim = parent_branch.simulation.lock().unwrap();
 
             // Create a new simulation with the same state
             // For now, we'll create a new simulation with the same seed

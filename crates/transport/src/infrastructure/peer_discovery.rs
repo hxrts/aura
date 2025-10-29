@@ -8,61 +8,101 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Unique identifier for a peer in the network
 pub type PeerId = Vec<u8>;
+
+/// Unique identifier for an account
 pub type AccountId = Vec<u8>;
 
+/// Information about a peer in the network
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerInfo {
+    /// Unique peer identifier
     pub peer_id: PeerId,
+    /// Account ID associated with this peer
     pub account_id: AccountId,
+    /// Timestamp when peer was last seen
     pub last_seen: u64,
+    /// Peer's capabilities
     pub capabilities: PeerCapabilities,
+    /// Peer's performance metrics
     pub metrics: PeerMetrics,
 }
 
+/// Capabilities advertised by a peer
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerCapabilities {
+    /// Whether peer offers storage capabilities
     pub storage_available: bool,
+    /// Storage capacity in bytes
     pub storage_capacity_bytes: u64,
+    /// Whether peer can act as a relay
     pub relay_available: bool,
+    /// Whether peer is available for communication
     pub communication_available: bool,
 }
 
+/// Performance metrics for a peer
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PeerMetrics {
+    /// Reliability score (0-100)
     pub reliability_score: u32,
+    /// Average latency in milliseconds
     pub average_latency_ms: u32,
+    /// Trust level assigned to this peer
     pub trust_level: TrustLevel,
 }
 
+/// Trust level assigned to a peer
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TrustLevel {
+    /// Trust level unknown or not yet established
     Unknown = 0,
+    /// Low trust level
     LowTrust = 1,
+    /// Medium trust level
     MediumTrust = 2,
+    /// High trust level
     HighTrust = 3,
 }
 
+/// Criteria for selecting peers based on use case
 #[derive(Debug, Clone)]
 pub enum SelectionCriteria {
+    /// Select peers suitable for storage
     Storage {
+        /// Minimum storage capacity in bytes
         min_capacity_bytes: u64,
+        /// Minimum reliability score
         min_reliability: u32,
+        /// Minimum trust level
         min_trust: TrustLevel,
     },
+    /// Select peers suitable for communication
     Communication {
+        /// Maximum acceptable latency in milliseconds
         max_latency_ms: u32,
+        /// Whether peer must be currently online
         require_online: bool,
     },
+    /// Select peers suitable as relays
     Relay {
+        /// Minimum trust level
         min_trust: TrustLevel,
+        /// Whether high capacity is required
         require_high_capacity: bool,
     },
 }
 
+/// Trait for peer discovery functionality
 pub trait PeerDiscovery {
+    /// Discover peers matching the given criteria
     fn discover_peers(&self, criteria: &SelectionCriteria) -> Vec<PeerInfo>;
+
+    /// Get information about a specific peer
     fn get_peer_info(&self, peer_id: &PeerId) -> Option<PeerInfo>;
+
+    /// Update metrics for a peer
     fn update_peer_metrics(&mut self, peer_id: &PeerId, metrics: PeerMetrics);
 }
 
@@ -75,6 +115,7 @@ pub struct UnifiedPeerCache {
 }
 
 impl UnifiedPeerCache {
+    /// Create a new empty peer cache
     pub fn new() -> Self {
         Self {
             peers: BTreeMap::new(),
@@ -83,24 +124,29 @@ impl UnifiedPeerCache {
         }
     }
 
+    /// Add a peer to the cache
     pub fn add_peer(&mut self, peer_info: PeerInfo) {
         self.peers.insert(peer_info.peer_id.clone(), peer_info);
     }
 
+    /// Mark a peer as an SSB (Social Bulletin Board) peer
     pub fn mark_ssb_peer(&mut self, peer_id: PeerId) {
         self.ssb_peers.insert(peer_id);
     }
 
+    /// Mark a peer as a storage replica
     pub fn mark_storage_replica(&mut self, peer_id: PeerId) {
         self.storage_replicas.insert(peer_id);
     }
 
+    /// Remove a peer from the cache
     pub fn remove_peer(&mut self, peer_id: &PeerId) {
         self.peers.remove(peer_id);
         self.ssb_peers.remove(peer_id);
         self.storage_replicas.remove(peer_id);
     }
 
+    /// Get all peers marked as SSB peers
     pub fn get_ssb_peers(&self) -> Vec<PeerInfo> {
         self.ssb_peers
             .iter()
@@ -108,6 +154,7 @@ impl UnifiedPeerCache {
             .collect()
     }
 
+    /// Get all peers marked as storage replicas
     pub fn get_storage_replicas(&self) -> Vec<PeerInfo> {
         self.storage_replicas
             .iter()

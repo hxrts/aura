@@ -199,7 +199,7 @@ smoke-test:
         all_running=true
         for i in 1 2 3; do
             if [ -f ".aura-test/agent_${i}.pid" ]; then
-                local pid=$(cat ".aura-test/agent_${i}.pid")
+                pid=$(cat ".aura-test/agent_${i}.pid")
                 if kill -0 ${pid} 2>/dev/null; then
                     echo "   [OK] Device ${i} agent still running"
                 else
@@ -643,10 +643,10 @@ test-quint-pipeline:
     mkdir -p .aura-test
 
     echo "1. Converting Quint specification to JSON..."
-    echo "   Input: crates/simulator/tests/quint_specs/dkd_minimal.qnt"
+    echo "   Input: specs/quint/protocol_dkd.qnt"
     echo "   Output: /tmp/quint_pipeline_test.json"
     echo ""
-    just quint-parse crates/simulator/tests/quint_specs/dkd_minimal.qnt /tmp/quint_pipeline_test.json
+    just quint-parse specs/quint/protocol_dkd.qnt /tmp/quint_pipeline_test.json
     echo ""
 
     echo "2. Verifying JSON output structure..."
@@ -680,7 +680,7 @@ test-quint-pipeline:
         echo "   Created: $(stat -f%Sm /tmp/dkd_spec.json 2>/dev/null || stat -c%y /tmp/dkd_spec.json)"
     else
         echo "   [INFO] No existing DKD spec JSON found - creating one"
-        just quint-parse crates/simulator/tests/quint_specs/dkd_minimal.qnt /tmp/dkd_spec.json
+        just quint-parse specs/quint/protocol_dkd.qnt /tmp/dkd_spec.json
     fi
     echo ""
 

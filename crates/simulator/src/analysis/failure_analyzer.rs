@@ -4,10 +4,12 @@
 //! identify causal chains, critical time windows, and key events leading to
 //! property violations in distributed protocol executions.
 
-use crate::{ExecutionTrace, PropertyViolation, Result, SimulationResult, SimulationState};
+use crate::metrics::{MetricsCollector, MetricsProvider};
+use crate::{
+    ExecutionTrace, PropertyViolation, Result, SimulationExecutionResult, SimulationState,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Advanced failure analyzer for property violations
 ///
@@ -21,8 +23,8 @@ pub struct FailureAnalyzer {
     causal_analyzer: CausalAnalyzer,
     /// Event significance scoring system
     event_scorer: EventSignificanceScorer,
-    /// Analysis statistics
-    analysis_stats: AnalysisStatistics,
+    /// Metrics collector for analysis statistics
+    metrics: MetricsCollector,
 }
 
 /// Configuration for failure analysis
@@ -58,7 +60,7 @@ pub struct CausalAnalyzer {
     /// Dependency graph between events
     dependency_graph: HashMap<String, Vec<CausalDependency>>,
     /// Event timeline for temporal analysis
-    event_timeline: VecDeque<AnalyzedEvent>,
+    _event_timeline: VecDeque<AnalyzedEvent>,
     /// Configuration for causal analysis
     config: CausalAnalysisConfig,
 }
@@ -180,9 +182,9 @@ pub struct EventSignificanceScorer {
     /// Scoring weights for different event types
     type_weights: HashMap<EventType, f64>,
     /// Scoring rules for pattern detection
-    pattern_rules: Vec<SignificanceRule>,
+    _pattern_rules: Vec<SignificanceRule>,
     /// Historical scoring data
-    historical_scores: HashMap<String, f64>,
+    _historical_scores: HashMap<String, f64>,
 }
 
 /// Rule for calculating event significance
@@ -417,21 +419,6 @@ pub struct AnalysisMetrics {
     pub memory_usage_mb: f64,
 }
 
-/// Analysis statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnalysisStatistics {
-    /// Total analyses performed
-    pub total_analyses: usize,
-    /// Total analysis time
-    pub total_time_ms: u64,
-    /// Average analysis time
-    pub average_time_ms: f64,
-    /// Success rate of pattern detection
-    pub pattern_detection_rate: f64,
-    /// Causal chain accuracy
-    pub causal_accuracy: f64,
-}
-
 impl FailureAnalyzer {
     /// Create a new failure analyzer
     pub fn new() -> Self {
@@ -439,7 +426,7 @@ impl FailureAnalyzer {
             config: AnalysisConfig::default(),
             causal_analyzer: CausalAnalyzer::new(),
             event_scorer: EventSignificanceScorer::new(),
-            analysis_stats: AnalysisStatistics::new(),
+            metrics: MetricsCollector::new(),
         }
     }
 
@@ -449,7 +436,7 @@ impl FailureAnalyzer {
             config,
             causal_analyzer: CausalAnalyzer::new(),
             event_scorer: EventSignificanceScorer::new(),
-            analysis_stats: AnalysisStatistics::new(),
+            metrics: MetricsCollector::new(),
         }
     }
 
@@ -458,12 +445,9 @@ impl FailureAnalyzer {
         &mut self,
         violation: &PropertyViolation,
         execution_trace: &ExecutionTrace,
-        _simulation_result: &SimulationResult,
+        _simulation_result: &SimulationExecutionResult,
     ) -> Result<FailureAnalysisResult> {
-        let start_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let start_time = crate::utils::time::current_unix_timestamp_millis();
         let analysis_id = format!(
             "analysis_{}_{}",
             violation.property_name, violation.detected_at
@@ -500,17 +484,14 @@ impl FailureAnalyzer {
             &detected_patterns,
         )?;
 
-        let end_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let end_time = crate::utils::time::current_unix_timestamp_millis();
 
-        // Update statistics
-        self.analysis_stats.total_analyses += 1;
+        // Update metrics
+        self.metrics.counter("total_analyses", 1);
         let analysis_time = end_time - start_time;
-        self.analysis_stats.total_time_ms += analysis_time;
-        self.analysis_stats.average_time_ms =
-            self.analysis_stats.total_time_ms as f64 / self.analysis_stats.total_analyses as f64;
+        self.metrics.counter("analysis_time_ms", analysis_time);
+        self.metrics
+            .gauge("analysis_duration_ms", analysis_time as f64);
 
         Ok(FailureAnalysisResult {
             analysis_id,
@@ -591,9 +572,9 @@ impl FailureAnalyzer {
         Ok(key_events)
     }
 
-    /// Get analysis statistics
-    pub fn get_analysis_statistics(&self) -> &AnalysisStatistics {
-        &self.analysis_stats
+    /// Get analysis metrics
+    pub fn get_metrics_snapshot(&self) -> crate::metrics::MetricsSnapshot {
+        self.metrics.snapshot()
     }
 
     // Private implementation methods
@@ -1106,7 +1087,7 @@ impl CausalAnalyzer {
     pub fn new() -> Self {
         Self {
             dependency_graph: HashMap::new(),
-            event_timeline: VecDeque::new(),
+            _event_timeline: VecDeque::new(),
             config: CausalAnalysisConfig::default(),
         }
     }
@@ -1310,8 +1291,8 @@ impl EventSignificanceScorer {
 
         Self {
             type_weights,
-            pattern_rules: Vec::new(),
-            historical_scores: HashMap::new(),
+            _pattern_rules: Vec::new(),
+            _historical_scores: HashMap::new(),
         }
     }
 
@@ -1352,18 +1333,6 @@ impl EventSignificanceScorer {
     }
 }
 
-impl AnalysisStatistics {
-    fn new() -> Self {
-        Self {
-            total_analyses: 0,
-            total_time_ms: 0,
-            average_time_ms: 0.0,
-            pattern_detection_rate: 0.0,
-            causal_accuracy: 0.0,
-        }
-    }
-}
-
 impl Default for FailureAnalyzer {
     fn default() -> Self {
         Self::new()
@@ -1373,12 +1342,13 @@ impl Default for FailureAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::property_monitor::{PropertyViolationType, ViolationDetails, ViolationSeverity};
+    use crate::testing::{PropertyViolationType, ViolationDetails, ViolationSeverity};
 
     #[test]
     fn test_failure_analyzer_creation() {
         let analyzer = FailureAnalyzer::new();
-        assert_eq!(analyzer.analysis_stats.total_analyses, 0);
+        let metrics = analyzer.get_metrics_snapshot();
+        assert_eq!(metrics.get_counter("total_analyses").unwrap_or(0), 0);
     }
 
     #[test]

@@ -139,6 +139,7 @@ mod tests {
 
         // Postcard should be more compact than bincode/CBOR
         let postcard_bytes = to_postcard_bytes(&data)?;
+        #[allow(clippy::expect_used)] // Test code - panics are expected on failure
         let json_bytes = serde_json::to_vec(&data).expect("JSON serialization");
 
         assert!(postcard_bytes.len() < json_bytes.len());

@@ -8,6 +8,7 @@
 
 use aura_journal::{types::*, AccountState};
 use aura_test_utils::*;
+use aura_types::Epoch;
 use std::collections::BTreeMap;
 
 /// Merge two account states (simulates CRDT merge behavior)
@@ -46,7 +47,7 @@ fn merge_states(mut state_a: AccountState, state_b: &AccountState) -> AccountSta
     }
 
     // Merge session epoch (LWW: max)
-    state_a.session_epoch = SessionEpoch(std::cmp::max(
+    state_a.session_epoch = Epoch(std::cmp::max(
         state_a.session_epoch.0,
         state_b.session_epoch.0,
     ));
@@ -213,11 +214,11 @@ mod tests {
     fn test_epoch_increment_convergence() {
         // Device A bumps epoch to 5
         let mut state_a = test_account_with_seed(400);
-        state_a.session_epoch = SessionEpoch(5);
+        state_a.session_epoch = Epoch(5);
 
         // Device B bumps epoch to 6
         let mut state_b = test_account_with_seed(400); // Same base
-        state_b.session_epoch = SessionEpoch(6);
+        state_b.session_epoch = Epoch(6);
 
         // Merge both directions
         let merged_a_to_b = merge_states(state_a.clone(), &state_b);
@@ -235,7 +236,7 @@ mod tests {
 
         // Test with same epochs (idempotence)
         let mut state_c = test_account_with_seed(400);
-        state_c.session_epoch = SessionEpoch(5);
+        state_c.session_epoch = Epoch(5);
 
         let merged_c_to_a = merge_states(state_c.clone(), &state_a);
         assert_eq!(
@@ -343,7 +344,7 @@ mod tests {
             },
         );
         state.validate_nonce(100).unwrap();
-        state.session_epoch = SessionEpoch(5);
+        state.session_epoch = Epoch(5);
         state.lamport_clock = 10;
 
         // Merge state with itself: state ∪ state

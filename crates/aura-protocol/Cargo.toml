@@ -1,0 +1,69 @@
+# Protocol coordination - manages distributed protocols (DKD, Resharing, Locking, Recovery)
+[package]
+name = "aura-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+dev-console = ["postcard"]
+
+[dependencies]
+# Workspace crates
+aura-crypto = { path = "../crypto" }
+aura-journal = { path = "../journal" }
+aura-types = { path = "../aura-types" }
+aura-protocol-types = { path = "../aura-protocol-types" }
+aura-authentication = { path = "../aura-authentication" }
+aura-authorization = { path = "../aura-authorization" }
+aura-messages = { path = "../aura-messages" }
+# session_types removed during refactor - implementation moved to local modules
+# protocol-core merged into this crate
+# aura-session-types = { path = "../session-types" }  # Moved to local session_types module
+# Transport dependency removed to break circular dependency
+# Transport implements traits defined in coordination
+# aura-transport = { path = "../transport" }
+
+# Curve operations
+curve25519-dalek = { workspace = true }
+ed25519-dalek = { workspace = true }
+
+# FROST threshold signatures
+frost-ed25519 = { workspace = true }
+sha2 = { workspace = true }
+
+# Cryptography provided through aura-crypto
+blake3 = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_cbor = { workspace = true }
+bincode = "1.3"
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = "0.1"
+dyn-clone = "1.0"
+
+# Utilities
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+hex = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+
+# Dev console integration (optional)
+postcard = { version = "1.0", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"

@@ -3,8 +3,8 @@
 //! This module provides real-time property monitoring capabilities using the Quint API
 //! for formal verification of system properties during simulation trace analysis.
 
-use aura_types::session_utils::{properties::PropertyId, trace::TraceId};
-use quint_api::{PropertySpec, PropertySuite, QuintResult, QuintRunner, VerificationResult};
+use aura_types::session_utils::properties::PropertyId;
+use quint_api::{PropertySpec, QuintResult, QuintRunner, VerificationResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -104,6 +104,7 @@ impl ViolationTracker {
     }
 
     /// Mark a violation as resolved
+    #[allow(dead_code)]
     pub fn resolve_violation(&mut self, property_id: PropertyId, tick: u64) {
         if let Some(violations) = self.violations.get_mut(&property_id) {
             for violation in violations.iter_mut() {
@@ -209,11 +210,13 @@ impl<K: Clone + std::hash::Hash + Eq, V> LruCache<K, V> {
     }
 
     /// Get the number of entries in the cache
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if the cache is empty
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -381,7 +384,7 @@ impl PropertyMonitor {
     /// Convert Quint verification result to our format
     fn convert_verification_result(&self, result: VerificationResult) -> PropertyEvaluationResult {
         let duration_ms = result.duration.as_millis() as u64;
-        
+
         if result.success {
             PropertyEvaluationResult {
                 holds: true,
@@ -397,7 +400,7 @@ impl PropertyMonitor {
                     vec![
                         "Review the counterexample trace".to_string(),
                         "Check state invariants".to_string(),
-                    ]
+                    ],
                 )
             } else {
                 (
@@ -405,10 +408,10 @@ impl PropertyMonitor {
                     vec![
                         "Check property specification syntax".to_string(),
                         "Verify Quint installation".to_string(),
-                    ]
+                    ],
                 )
             };
-            
+
             PropertyEvaluationResult {
                 holds: false,
                 evaluation_time_ms: duration_ms,

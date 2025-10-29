@@ -1,128 +1,39 @@
 # Aura Agent Examples
 
-This directory contains examples demonstrating the refactored agent architecture with clean separation of concerns and service delegation patterns.
+Working examples demonstrating available agent functionality.
 
 ## Running Examples
-
-All examples can be run with:
 
 ```bash
 cargo run --example <example_name>
 ```
 
-## Examples Overview
+## Available Examples
 
-### [`basic_agent.rs`](basic_agent.rs)
-Demonstrates basic usage of the refactored DeviceAgent with clean 3-line service delegation methods.
+### [`agent_basic.rs`](agent_basic.rs)
+Basic agent functionality using core available types.
 
-**Key concepts:**
-- Creating agents with default services
-- Simple identity derivation (was 50+ lines, now 3 lines)
-- Account bootstrap with service delegation
-- Session statistics retrieval
+- Device/Account ID creation
+- DerivedIdentity construction  
+- DeviceAttestation creation
+- JSON serialization
 
-**Run with:**
-```bash
-cargo run --example basic_agent
-```
+### [`agent_state.rs`](agent_state.rs)
+Agent state management with compile-time safety.
 
-### [`capability_demo.rs`](capability_demo.rs)
-Shows the different agent types and their capability-driven architecture patterns.
+- State transitions (Uninitialized → Idle → Coordinating)
+- State-based operation safety
+- Identity derivation in correct state
+- Mock agent implementation
 
-**Key concepts:**
-- `CapabilityAgent` - Pure capability-driven with no external dependencies
-- `IntegratedAgent` - Full system integration with transport and storage
-- Direct service layer usage for custom integrations
+### [`storage_secure.rs`](storage_secure.rs)
+Secure storage interfaces and platform implementations.
 
-**Run with:**
-```bash
-cargo run --example capability_demo
-```
+- Multiple security levels (StrongBox, TEE, Software)
+- Key share and secure data operations
+- Platform-specific security features
+- Device attestation with security capabilities
 
-### [`service_delegation.rs`](service_delegation.rs)
-Demonstrates the service delegation pattern that enables 3-line methods and clean separation of concerns.
+## Note
 
-**Key concepts:**
-- Before vs After comparison (50+ lines → 3 lines)
-- Service composition and dependency injection
-- Error handling through service boundaries
-- Independent service usage
-
-**Run with:**
-```bash
-cargo run --example service_delegation
-```
-
-## Legacy Examples (Moved from src/)
-
-The following examples were moved from the main source code to keep production code clean:
-
-### [`refactoring_comparison.rs`](refactoring_comparison.rs)
-Shows the detailed before/after comparison of the DeviceAgent refactoring, demonstrating how complex 50+ line methods were simplified to 3-line service delegation calls.
-
-### [`enhanced_security_demo.rs`](enhanced_security_demo.rs)
-Demonstrates enhanced security features with verification and replay protection that were part of the exploration phase.
-
-### [`state_management_demo.rs`](state_management_demo.rs)
-Shows proper CRDT event sourcing patterns that were developed during the state management improvements phase.
-
-### [`transport_demo.rs`](transport_demo.rs)
-Demonstrates transport layer replacement patterns and P2P networking concepts.
-
-## Architecture Benefits Demonstrated
-
-The examples showcase the key benefits of the refactored architecture:
-
-### **Clean Separation of Concerns**
-- **Core agents** contain only business logic (3-line methods)
-- **Services** handle complex operations and domain logic
-- **Infrastructure** manages platform-specific code
-- **Clear boundaries** between each layer
-
-### **Testability**
-- Services can be mocked independently
-- Clean dependency injection through `ServiceRegistry`
-- No layer violations or complex interdependencies
-- Each service has a single responsibility
-
-### **Maintainability**
-- Small, focused files (no more 1,800-line monoliths)
-- Clear ownership of functionality by domain
-- Easy to locate and modify specific features
-- Consistent naming and organization patterns
-
-### **Extensibility**
-- New protocols easily added to `protocols/` directory
-- Platform support added to `infrastructure/` without core changes
-- Service implementations can be swapped or enhanced
-- Clean APIs for integration with external systems
-
-## Agent Types Comparison
-
-| Agent Type | Dependencies | Use Cases | Example |
-|------------|-------------|-----------|---------|
-| **CapabilityAgent** | None (pure) | Testing, embedded, libraries | `basic_agent.rs` |
-| **IntegratedAgent** | Transport + Storage | Full applications | `capability_demo.rs` |
-| **DeviceAgent** (Refactored) | Services | High-level APIs | `service_delegation.rs` |
-
-## Service Layer Architecture
-
-```
-Application Layer    → core/ (DeviceAgent, CapabilityAgent, IntegratedAgent)
-                      ↓ (3-line delegation methods)
-Business Logic Layer → services/ (IdentityService, AccountService, etc.)
-                      ↓ (service calls)
-Protocol Layer       → protocols/ (DKD, Recovery, Guardian management)
-                      ↓ (protocol calls)
-Infrastructure Layer → infrastructure/ (Storage, Transport, Security)
-```
-
-## Next Steps
-
-1. **Try the examples** to understand the architecture
-2. **Read the service layer code** in `src/services/`
-3. **Explore the infrastructure** in `src/infrastructure/`
-4. **Look at protocol implementations** in `src/protocols/`
-5. **Check the error handling** in `src/error/`
-
-For more information, see the main crate documentation and the individual module documentation.
+These examples use only the working types and avoid the coordination crate (which has compilation errors). They demonstrate the available agent functionality that can be used for development and testing.

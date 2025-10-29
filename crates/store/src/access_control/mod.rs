@@ -71,5 +71,8 @@
 pub mod capability;
 pub mod capability_checker;
 
-pub use capability::{CapabilityError, CapabilityManager, CapabilityToken};
+pub use aura_types::CapabilityError;
+pub use capability::CapabilityManager;
 pub use capability_checker::CapabilityChecker;
+// Re-export CapabilityToken from authorization crate
+pub use aura_authorization::CapabilityToken;

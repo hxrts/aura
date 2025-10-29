@@ -47,6 +47,11 @@ impl CapabilityId {
         hex::encode(self.0)
     }
 
+    /// Get as hex string (alias for to_hex)
+    pub fn as_hex(&self) -> String {
+        self.to_hex()
+    }
+
     /// Create from hex string
     pub fn from_hex(hex_str: &str) -> Result<Self, hex::FromHexError> {
         let bytes = hex::decode(hex_str)?;
@@ -65,6 +70,27 @@ impl CapabilityId {
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(blake3::hash(uuid::Uuid::new_v4().as_bytes()).as_bytes());
         Self(bytes)
+    }
+
+    /// Generate a deterministic capability ID from a parent chain
+    ///
+    /// Creates a capability ID based on a parent capability, subject identifier,
+    /// and scope. This allows for deterministic derivation of child capabilities.
+    pub fn from_chain(
+        parent_id: Option<&CapabilityId>,
+        subject_id: &[u8],
+        scope_data: &[u8],
+    ) -> Self {
+        let mut hasher = blake3::Hasher::new();
+
+        if let Some(parent) = parent_id {
+            hasher.update(&parent.0);
+        }
+
+        hasher.update(subject_id);
+        hasher.update(scope_data);
+
+        Self(hasher.finalize().into())
     }
 }
 

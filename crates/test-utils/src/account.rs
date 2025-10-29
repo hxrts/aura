@@ -3,11 +3,30 @@
 //! Factory functions for creating test AccountState instances.
 //! Consolidates the account creation pattern found in 18 test files.
 
-use crate::device::test_device_with_effects;
 use aura_crypto::Effects;
-use aura_journal::AccountState;
-use aura_types::{AccountId, AccountIdExt};
+use aura_journal::{AccountState, DeviceMetadata, DeviceType};
+use aura_types::{AccountId, AccountIdExt, DeviceId};
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use uuid::Uuid;
+
+/// Helper function to create test device metadata with effects
+fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
+    let device_key_bytes = effects.random_bytes::<32>();
+    let device_signing_key = SigningKey::from_bytes(&device_key_bytes);
+    let device_public_key = device_signing_key.verifying_key();
+
+    DeviceMetadata {
+        device_id: DeviceId(Uuid::new_v4()),
+        device_name: "Test Device".to_string(),
+        device_type: DeviceType::Native,
+        public_key: device_public_key,
+        added_at: effects.now().unwrap(),
+        last_seen: effects.now().unwrap(),
+        dkd_commitment_proofs: Default::default(),
+        next_nonce: 0,
+        used_nonces: Default::default(),
+    }
+}
 
 /// Create a test account with given effects
 ///
@@ -74,13 +93,21 @@ pub fn test_account_with_threshold(effects: &Effects, threshold: u16, total: u16
 
     let device_metadata = test_device_with_effects(effects);
 
-    AccountState::new(
+    let mut state = AccountState::new(
         AccountId::new_with_effects(effects),
         group_public_key,
         device_metadata,
         threshold,
         total,
-    )
+    );
+
+    // Add remaining devices to match total
+    for _ in 1..total {
+        let additional_device = test_device_with_effects(effects);
+        state.add_device(additional_device, effects).ok();
+    }
+
+    state
 }
 
 /// Create a test account with specific account ID

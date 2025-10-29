@@ -3,9 +3,9 @@
 //! This module provides a powerful standalone tool for debugging simulation
 //! failures through checkpoint restoration and trace replay capabilities.
 
+use crate::observability::checkpoint_manager::CheckpointInfo;
 use crate::{
-    testing::PropertyViolation, tick, CheckpointInfo, CheckpointManager, PassiveTraceRecorder,
-    Result, SimError, WorldState,
+    testing::PropertyViolation, tick, AuraError, PassiveTraceRecorder, Result, WorldState,
 };
 use aura_console_types::{TraceEvent, TraceMetadata};
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ use uuid::Uuid;
 /// pure tick() function and pre-recorded traces.
 pub struct TimeTravelDebugger {
     /// Checkpoint manager for loading world states
-    checkpoint_manager: CheckpointManager,
+    checkpoint_manager: crate::observability::checkpoint_manager::CheckpointManager,
     /// Current world state being debugged
     current_world: Option<WorldState>,
     /// Trace recorder for current debugging session
@@ -131,7 +131,8 @@ impl Default for ReplayConfig {
 impl TimeTravelDebugger {
     /// Create a new time travel debugger
     pub fn new<P: AsRef<Path>>(checkpoint_dir: P) -> Result<Self> {
-        let checkpoint_manager = CheckpointManager::new(checkpoint_dir)?;
+        let checkpoint_manager =
+            crate::observability::checkpoint_manager::CheckpointManager::new(checkpoint_dir)?;
 
         Ok(Self {
             checkpoint_manager,
@@ -160,7 +161,7 @@ impl TimeTravelDebugger {
             .checkpoint_manager
             .get_info(checkpoint_id)
             .ok_or_else(|| {
-                SimError::RuntimeError(format!("Checkpoint {} not found", checkpoint_id))
+                AuraError::configuration_error(format!("Checkpoint {} not found", checkpoint_id))
             })?;
 
         // Create session info
@@ -219,10 +220,9 @@ impl TimeTravelDebugger {
     pub fn replay_to_tick(&mut self, target_tick: u64) -> Result<ReplayResult> {
         let start_time = std::time::Instant::now();
         let start_tick = {
-            let world = self
-                .current_world
-                .as_ref()
-                .ok_or_else(|| SimError::RuntimeError("No debugging session active".to_string()))?;
+            let world = self.current_world.as_ref().ok_or_else(|| {
+                AuraError::configuration_error("No debugging session active".to_string())
+            })?;
             world.current_tick
         };
 
@@ -279,38 +279,20 @@ impl TimeTravelDebugger {
                         {
                             let violation = PropertyViolation {
                                 property_name: property.clone(),
-                                property_type: crate::testing::PropertyViolationType::Invariant,
-                                violation_state: crate::testing::SimulationState {
+                                property_type: crate::results::PropertyViolationType::Invariant,
+                                violation_state: crate::results::SimulationStateSnapshot {
                                     tick: event.tick,
                                     time: 0, // TraceEvent doesn't have time field, default to 0
-                                    variables: std::collections::HashMap::new(),
-                                    participants: Vec::new(),
-                                    protocol_state: crate::testing::ProtocolMonitoringState {
-                                        active_sessions: Vec::new(),
-                                        completed_sessions: Vec::new(),
-                                        queued_protocols: Vec::new(),
-                                    },
-                                    network_state: crate::testing::NetworkStateSnapshot {
-                                        partitions: Vec::new(),
-                                        message_stats: crate::testing::MessageDeliveryStats {
-                                            messages_sent: 0,
-                                            messages_delivered: 0,
-                                            messages_dropped: 0,
-                                            average_latency_ms: 0.0,
-                                        },
-                                        failure_conditions:
-                                            crate::testing::NetworkFailureConditions {
-                                                drop_rate: 0.0,
-                                                latency_range_ms: (0, 100),
-                                                partitions_active: false,
-                                            },
-                                    },
+                                    participant_count: 0, // TODO: Extract from event data
+                                    active_sessions: 0, // TODO: Extract from event data
+                                    completed_sessions: 0, // TODO: Extract from event data
+                                    state_hash: "placeholder".to_string(), // TODO: Generate proper hash
                                 },
-                                violation_details: crate::testing::ViolationDetails {
+                                violation_details: crate::results::ViolationDetails {
                                     description: violation_details.clone(),
                                     evidence: Vec::new(),
                                     potential_causes: Vec::new(),
-                                    severity: crate::testing::ViolationSeverity::Medium,
+                                    severity: crate::results::ViolationSeverity::Medium,
                                     remediation_suggestions: Vec::new(),
                                 },
                                 confidence: 1.0,
@@ -388,10 +370,9 @@ impl TimeTravelDebugger {
 
     /// Step forward one tick in debugging mode
     pub fn step_forward(&mut self) -> Result<Vec<TraceEvent>> {
-        let world = self
-            .current_world
-            .as_mut()
-            .ok_or_else(|| SimError::RuntimeError("No debugging session active".to_string()))?;
+        let world = self.current_world.as_mut().ok_or_else(|| {
+            AuraError::configuration_error("No debugging session active".to_string())
+        })?;
 
         println!(
             "Stepping from tick {} to {}",
@@ -455,7 +436,7 @@ impl TimeTravelDebugger {
         range: u64,
     ) -> Result<EventAnalysis> {
         if !self.trace_recorder.metadata().total_ticks > 0 {
-            return Err(SimError::RuntimeError(
+            return Err(AuraError::configuration_error(
                 "No trace data available for analysis".to_string(),
             ));
         }
@@ -511,7 +492,7 @@ impl TimeTravelDebugger {
         let session = self
             .session_info
             .as_ref()
-            .ok_or_else(|| SimError::RuntimeError("No active session".to_string()))?;
+            .ok_or_else(|| AuraError::configuration_error("No active session".to_string()))?;
 
         let report = DebuggingReport {
             session: session.clone(),
@@ -530,11 +511,13 @@ impl TimeTravelDebugger {
                 .as_secs(),
         };
 
-        let json = serde_json::to_string_pretty(&report)
-            .map_err(|e| SimError::RuntimeError(format!("Failed to serialize report: {}", e)))?;
+        let json = serde_json::to_string_pretty(&report).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to serialize report: {}", e))
+        })?;
 
-        fs::write(path, json)
-            .map_err(|e| SimError::RuntimeError(format!("Failed to write report: {}", e)))?;
+        fs::write(path, json).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to write report: {}", e))
+        })?;
 
         Ok(())
     }
@@ -685,7 +668,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_test_world_state() -> WorldState {
-        crate::test_utils::two_party_world_state()
+        crate::testing::test_utils::two_party_world_state()
     }
 
     #[test]
@@ -700,7 +683,9 @@ mod tests {
     #[test]
     fn test_session_start() {
         let temp_dir = TempDir::new().unwrap();
-        let mut checkpoint_manager = CheckpointManager::new(temp_dir.path()).unwrap();
+        let mut checkpoint_manager =
+            crate::observability::checkpoint_manager::CheckpointManager::new(temp_dir.path())
+                .unwrap();
 
         // Create a checkpoint first
         let world_state = create_test_world_state();
@@ -725,7 +710,9 @@ mod tests {
     #[test]
     fn test_step_forward() {
         let temp_dir = TempDir::new().unwrap();
-        let mut checkpoint_manager = CheckpointManager::new(temp_dir.path()).unwrap();
+        let mut checkpoint_manager =
+            crate::observability::checkpoint_manager::CheckpointManager::new(temp_dir.path())
+                .unwrap();
 
         let world_state = create_test_world_state();
         let checkpoint_id = checkpoint_manager.save(&world_state, None).unwrap();
@@ -746,7 +733,9 @@ mod tests {
     #[test]
     fn test_replay_to_tick() {
         let temp_dir = TempDir::new().unwrap();
-        let mut checkpoint_manager = CheckpointManager::new(temp_dir.path()).unwrap();
+        let mut checkpoint_manager =
+            crate::observability::checkpoint_manager::CheckpointManager::new(temp_dir.path())
+                .unwrap();
 
         let world_state = create_test_world_state();
         let checkpoint_id = checkpoint_manager.save(&world_state, None).unwrap();
@@ -769,7 +758,9 @@ mod tests {
     #[test]
     fn test_checkpoint_finding() {
         let temp_dir = TempDir::new().unwrap();
-        let mut checkpoint_manager = CheckpointManager::new(temp_dir.path()).unwrap();
+        let mut checkpoint_manager =
+            crate::observability::checkpoint_manager::CheckpointManager::new(temp_dir.path())
+                .unwrap();
 
         // Create checkpoints at different ticks
         let mut world_state = create_test_world_state();

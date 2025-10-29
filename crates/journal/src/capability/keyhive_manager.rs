@@ -11,8 +11,8 @@ use super::{
 };
 use aura_crypto::Effects;
 // Group integration via traits to avoid circular dependencies
-use aura_types::DeviceId;
 use aura_crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
+use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tracing::{debug, info, warn};

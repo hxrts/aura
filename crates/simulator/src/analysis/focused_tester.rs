@@ -4,14 +4,29 @@
 //! targeted test variations around failure points, enabling systematic exploration
 //! of failure conditions and environmental variations.
 
-use crate::scenario::{ByzantineConditions, LegacyByzantineStrategy, NetworkConditions};
-use crate::{
-    CheckpointSimulation, DebugSession, FailureAnalysisResult, KeyEvent, PropertyMonitor,
-    PropertyViolation, Result, Scenario, SimError, SimulationResult,
-};
+use crate::analysis::{failure_analyzer::KeyEvent, CheckpointSimulation};
+use crate::metrics::{MetricsCollector, MetricsProvider};
+use crate::observability::DebugSession;
+use crate::results::SimulationExecutionResult;
+use crate::scenario::Scenario;
+use crate::{AuraError, FailureAnalysisResult, PropertyMonitor, PropertyViolation, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Placeholder for missing types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ByzantineConditions {
+    pub strategy: String,
+    pub target_participants: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkConditions {
+    pub latency_ms: u64,
+    pub drop_rate: f64,
+    pub partition_groups: Vec<Vec<String>>,
+}
 
 /// Focused tester for systematic failure point exploration
 ///
@@ -24,13 +39,13 @@ pub struct FocusedTester {
     /// Test suite generator
     test_generator: TestVariationGenerator,
     /// Environmental variation engine
-    env_variation_engine: EnvironmentalVariationEngine,
+    _env_variation_engine: EnvironmentalVariationEngine,
     /// Test execution engine
-    execution_engine: TestExecutionEngine,
+    _execution_engine: TestExecutionEngine,
     /// Results from focused testing
     test_results: Vec<FocusedTestResult>,
-    /// Testing statistics
-    testing_stats: FocusedTestingStatistics,
+    /// Testing metrics
+    metrics: MetricsCollector,
 }
 
 /// Configuration for focused testing
@@ -93,9 +108,9 @@ pub struct TestVariationGenerator {
     /// Base scenario for variations
     base_scenario: Option<Scenario>,
     /// Variation patterns
-    variation_patterns: HashMap<VariationStrategy, VariationPattern>,
-    /// Generation statistics
-    generation_stats: GenerationStatistics,
+    _variation_patterns: HashMap<VariationStrategy, VariationPattern>,
+    /// Generation metrics
+    metrics: MetricsCollector,
 }
 
 /// Pattern for generating variations
@@ -138,9 +153,9 @@ pub enum VariationMethod {
 /// Environmental variation engine
 pub struct EnvironmentalVariationEngine {
     /// Available environmental factors
-    environmental_factors: Vec<EnvironmentalFactor>,
+    _environmental_factors: Vec<EnvironmentalFactor>,
     /// Variation generators
-    variation_generators: HashMap<String, Box<dyn VariationGenerator>>,
+    _variation_generators: HashMap<String, Box<dyn VariationGenerator>>,
 }
 
 /// Environmental factor that can be varied
@@ -212,11 +227,11 @@ pub trait VariationGenerator: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct TestExecutionEngine {
     /// Execution configuration
-    config: ExecutionConfig,
+    _config: ExecutionConfig,
     /// Active test executions
-    active_executions: HashMap<String, TestExecution>,
+    _active_executions: HashMap<String, TestExecution>,
     /// Execution results
-    execution_results: Vec<TestExecutionResult>,
+    _execution_results: Vec<TestExecutionResult>,
 }
 
 /// Configuration for test execution
@@ -321,7 +336,7 @@ pub struct TestExecutionResult {
     /// Final execution status
     pub final_status: ExecutionStatus,
     /// Simulation result
-    pub simulation_result: Option<SimulationResult>,
+    pub simulation_result: Option<SimulationExecutionResult>,
     /// Detected violations
     pub violations: Vec<PropertyViolation>,
     /// Execution time
@@ -390,40 +405,6 @@ pub struct TestPerformanceMetrics {
     pub cpu_utilization: f64,
 }
 
-/// Statistics for focused testing
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FocusedTestingStatistics {
-    /// Total test variations generated
-    pub total_variations_generated: usize,
-    /// Total tests executed
-    pub total_tests_executed: usize,
-    /// Successful reproductions
-    pub successful_reproductions: usize,
-    /// Failed reproductions
-    pub failed_reproductions: usize,
-    /// Total testing time
-    pub total_testing_time_ms: u64,
-    /// Average test execution time
-    pub average_execution_time_ms: f64,
-    /// Reproduction success rate
-    pub reproduction_success_rate: f64,
-    /// Insights discovered
-    pub insights_discovered: usize,
-}
-
-/// Statistics for test generation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerationStatistics {
-    /// Total variations generated
-    pub total_generated: usize,
-    /// Variations by strategy
-    pub by_strategy: HashMap<VariationStrategy, usize>,
-    /// Generation time
-    pub generation_time_ms: u64,
-    /// Unique parameter combinations
-    pub unique_combinations: usize,
-}
-
 /// Result of generating focused tests around failure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FocusedTestGeneration {
@@ -431,8 +412,8 @@ pub struct FocusedTestGeneration {
     pub test_variations: Vec<TestVariation>,
     /// Generation strategy used
     pub strategy: GenerationStrategy,
-    /// Generation statistics
-    pub generation_stats: GenerationStatistics,
+    /// Generation metrics snapshot
+    pub generation_metrics: crate::metrics::MetricsSnapshot,
     /// Estimated testing effort
     pub estimated_effort: TestingEffort,
 }
@@ -495,10 +476,10 @@ impl FocusedTester {
         Self {
             config: FocusedTestConfig::default(),
             test_generator: TestVariationGenerator::new(),
-            env_variation_engine: EnvironmentalVariationEngine::new(),
-            execution_engine: TestExecutionEngine::new(),
+            _env_variation_engine: EnvironmentalVariationEngine::new(),
+            _execution_engine: TestExecutionEngine::new(),
             test_results: Vec::new(),
-            testing_stats: FocusedTestingStatistics::new(),
+            metrics: MetricsCollector::new(),
         }
     }
 
@@ -507,10 +488,10 @@ impl FocusedTester {
         Self {
             config,
             test_generator: TestVariationGenerator::new(),
-            env_variation_engine: EnvironmentalVariationEngine::new(),
-            execution_engine: TestExecutionEngine::new(),
+            _env_variation_engine: EnvironmentalVariationEngine::new(),
+            _execution_engine: TestExecutionEngine::new(),
             test_results: Vec::new(),
-            testing_stats: FocusedTestingStatistics::new(),
+            metrics: MetricsCollector::new(),
         }
     }
 
@@ -556,13 +537,17 @@ impl FocusedTester {
             .as_millis() as u64;
 
         // Update generation statistics
-        self.test_generator.generation_stats.total_generated += test_variations.len();
-        self.test_generator.generation_stats.generation_time_ms += end_time - start_time;
+        self.test_generator
+            .metrics
+            .counter("total_generated", test_variations.len() as u64);
+        self.test_generator
+            .metrics
+            .counter("generation_time_ms", end_time - start_time);
 
         Ok(FocusedTestGeneration {
             test_variations,
             strategy,
-            generation_stats: self.test_generator.generation_stats.clone(),
+            generation_metrics: self.test_generator.metrics.snapshot(),
             estimated_effort,
         })
     }
@@ -598,31 +583,37 @@ impl FocusedTester {
                 },
             };
 
-            // Update statistics before moving
-            self.testing_stats.total_tests_executed += 1;
+            // Update metrics before moving
+            self.metrics.counter("total_tests_executed", 1);
             if focused_result.failure_reproduced {
-                self.testing_stats.successful_reproductions += 1;
+                self.metrics.counter("successful_reproductions", 1);
             } else {
-                self.testing_stats.failed_reproductions += 1;
+                self.metrics.counter("failed_reproductions", 1);
             }
 
             results.push(focused_result);
         }
 
-        // Update overall statistics
-        self.testing_stats.total_testing_time_ms += results
+        // Update overall metrics
+        let total_time: u64 = results
             .iter()
             .map(|r| r.execution_result.execution_time_ms)
-            .sum::<u64>();
+            .sum();
+        self.metrics.counter("total_testing_time_ms", total_time);
 
-        if self.testing_stats.total_tests_executed > 0 {
-            self.testing_stats.average_execution_time_ms = self.testing_stats.total_testing_time_ms
-                as f64
-                / self.testing_stats.total_tests_executed as f64;
+        // Update derived metrics
+        let snapshot = self.metrics.snapshot();
+        if let Some(total_tests) = snapshot.get_counter("total_tests_executed") {
+            if total_tests > 0 {
+                let avg_time = total_time as f64 / total_tests as f64;
+                self.metrics.gauge("average_execution_time_ms", avg_time);
 
-            self.testing_stats.reproduction_success_rate =
-                self.testing_stats.successful_reproductions as f64
-                    / self.testing_stats.total_tests_executed as f64;
+                if let Some(successes) = snapshot.get_counter("successful_reproductions") {
+                    let success_rate = successes as f64 / total_tests as f64;
+                    self.metrics
+                        .gauge("reproduction_success_rate", success_rate);
+                }
+            }
         }
 
         self.test_results.extend(results.clone());
@@ -630,8 +621,8 @@ impl FocusedTester {
     }
 
     /// Get focused testing statistics
-    pub fn get_testing_statistics(&self) -> &FocusedTestingStatistics {
-        &self.testing_stats
+    pub fn get_metrics_snapshot(&self) -> crate::metrics::MetricsSnapshot {
+        self.metrics.snapshot()
     }
 
     /// Get all test results
@@ -875,11 +866,10 @@ impl FocusedTester {
 
     /// Apply variation to create modified scenario
     fn apply_variation_to_scenario(&self, test_variation: &TestVariation) -> Result<Scenario> {
-        let base_scenario = self
-            .test_generator
-            .base_scenario
-            .as_ref()
-            .ok_or_else(|| SimError::AnalysisError("No base scenario set".to_string()))?;
+        let base_scenario =
+            self.test_generator.base_scenario.as_ref().ok_or_else(|| {
+                AuraError::configuration_error("No base scenario set".to_string())
+            })?;
 
         let mut modified_scenario = base_scenario.clone();
 
@@ -889,11 +879,12 @@ impl FocusedTester {
                 "network_latency_ms" => {
                     let latency: u64 = param_value.parse().unwrap_or(100);
                     if modified_scenario.setup.network_conditions.is_none() {
-                        modified_scenario.setup.network_conditions = Some(NetworkConditions {
-                            latency_range: [latency, latency + 50],
-                            drop_rate: 0.0,
-                            partitions: vec![],
-                        });
+                        modified_scenario.setup.network_conditions =
+                            Some(crate::scenario::types::NetworkConditions {
+                                latency_range: [latency, latency + 50],
+                                drop_rate: 0.0,
+                                partitions: vec![],
+                            });
                     } else {
                         modified_scenario
                             .setup
@@ -906,11 +897,12 @@ impl FocusedTester {
                 "network_drop_rate" => {
                     let drop_rate: f64 = param_value.parse().unwrap_or(0.0);
                     if modified_scenario.setup.network_conditions.is_none() {
-                        modified_scenario.setup.network_conditions = Some(NetworkConditions {
-                            latency_range: [100, 150],
-                            drop_rate,
-                            partitions: vec![],
-                        });
+                        modified_scenario.setup.network_conditions =
+                            Some(crate::scenario::types::NetworkConditions {
+                                latency_range: [100, 150],
+                                drop_rate,
+                                partitions: vec![],
+                            });
                     } else {
                         modified_scenario
                             .setup
@@ -931,15 +923,16 @@ impl FocusedTester {
                 "byzantine_count" => {
                     let byzantine_count: usize = param_value.parse().unwrap_or(0);
                     if byzantine_count > 0 {
-                        modified_scenario.setup.byzantine_conditions = Some(ByzantineConditions {
-                            count: byzantine_count,
-                            participants: (0..byzantine_count).collect(),
-                            strategies: vec![LegacyByzantineStrategy {
-                                strategy_type: "drop_all_messages".to_string(),
-                                description: Some("Drop all messages strategy".to_string()),
-                                abort_after: None,
-                            }],
-                        });
+                        modified_scenario.setup.byzantine_conditions =
+                            Some(crate::scenario::types::ByzantineConditions {
+                                count: byzantine_count,
+                                participants: (0..byzantine_count).collect(),
+                                strategies: vec![crate::scenario::types::LegacyByzantineStrategy {
+                                    strategy_type: "drop_all_messages".to_string(),
+                                    description: Some("Drop all messages strategy".to_string()),
+                                    abort_after: None,
+                                }],
+                            });
                     } else {
                         modified_scenario.setup.byzantine_conditions = None;
                     }
@@ -1034,8 +1027,8 @@ impl TestVariationGenerator {
     fn new() -> Self {
         Self {
             base_scenario: None,
-            variation_patterns: HashMap::new(),
-            generation_stats: GenerationStatistics::new(),
+            _variation_patterns: HashMap::new(),
+            metrics: MetricsCollector::new(),
         }
     }
 
@@ -1047,8 +1040,8 @@ impl TestVariationGenerator {
 impl EnvironmentalVariationEngine {
     fn new() -> Self {
         Self {
-            environmental_factors: Vec::new(),
-            variation_generators: HashMap::new(),
+            _environmental_factors: Vec::new(),
+            _variation_generators: HashMap::new(),
         }
     }
 }
@@ -1056,40 +1049,14 @@ impl EnvironmentalVariationEngine {
 impl TestExecutionEngine {
     fn new() -> Self {
         Self {
-            config: ExecutionConfig {
+            _config: ExecutionConfig {
                 parallel_execution: true,
                 test_timeout_ms: 30000,
                 retry_count: 1,
                 detailed_logging: false,
             },
-            active_executions: HashMap::new(),
-            execution_results: Vec::new(),
-        }
-    }
-}
-
-impl FocusedTestingStatistics {
-    fn new() -> Self {
-        Self {
-            total_variations_generated: 0,
-            total_tests_executed: 0,
-            successful_reproductions: 0,
-            failed_reproductions: 0,
-            total_testing_time_ms: 0,
-            average_execution_time_ms: 0.0,
-            reproduction_success_rate: 0.0,
-            insights_discovered: 0,
-        }
-    }
-}
-
-impl GenerationStatistics {
-    fn new() -> Self {
-        Self {
-            total_generated: 0,
-            by_strategy: HashMap::new(),
-            generation_time_ms: 0,
-            unique_combinations: 0,
+            _active_executions: HashMap::new(),
+            _execution_results: Vec::new(),
         }
     }
 }
@@ -1103,11 +1070,13 @@ impl Default for FocusedTester {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn test_focused_tester_creation() {
         let tester = FocusedTester::new();
-        assert_eq!(tester.testing_stats.total_tests_executed, 0);
+        let metrics = tester.get_metrics_snapshot();
+        assert_eq!(metrics.get_counter("total_tests_executed").unwrap_or(0), 0);
         assert_eq!(tester.test_results.len(), 0);
     }
 
@@ -1147,7 +1116,7 @@ mod tests {
         FailureAnalysisResult {
             analysis_id: "test_analysis".to_string(),
             analyzed_violation: create_mock_violation(),
-            critical_window: crate::failure_analyzer::CriticalWindow {
+            critical_window: crate::analysis::failure_analyzer::CriticalWindow {
                 start_tick: 50,
                 end_tick: 100,
                 events_in_window: Vec::new(),
@@ -1157,14 +1126,14 @@ mod tests {
             causal_chains: Vec::new(),
             key_events: Vec::new(),
             detected_patterns: Vec::new(),
-            analysis_summary: crate::failure_analyzer::AnalysisSummary {
-                primary_cause: crate::failure_analyzer::CauseCategory::NetworkConditions,
+            analysis_summary: crate::analysis::failure_analyzer::AnalysisSummary {
+                primary_cause: crate::analysis::failure_analyzer::CauseCategory::NetworkConditions,
                 contributing_factors: Vec::new(),
                 reproduction_likelihood: 0.7,
                 mitigation_strategies: Vec::new(),
-                failure_complexity: crate::failure_analyzer::FailureComplexity::Moderate,
+                failure_complexity: crate::analysis::failure_analyzer::FailureComplexity::Moderate,
             },
-            analysis_metrics: crate::failure_analyzer::AnalysisMetrics {
+            analysis_metrics: crate::analysis::failure_analyzer::AnalysisMetrics {
                 analysis_time_ms: 1000,
                 events_analyzed: 10,
                 causal_chains_explored: 2,
@@ -1176,19 +1145,22 @@ mod tests {
     fn create_mock_scenario() -> Scenario {
         Scenario {
             name: "mock_scenario".to_string(),
-            description: Some("Mock scenario for testing".to_string()),
+            description: "Mock scenario for testing".to_string(),
             setup: crate::scenario::types::ScenarioSetup {
-                participant_count: 3,
+                participants: 3,
                 threshold: 2,
-                protocol: crate::scenario::types::ProtocolType::Dkd,
+                seed: 42,
                 network_conditions: None,
                 byzantine_conditions: None,
-                timeout_ms: Some(30000),
-                max_ticks: Some(1000),
             },
-            actions: Vec::new(),
+            network: None,
+            byzantine: None,
+            phases: None,
+            protocols: None,
             assertions: Vec::new(),
+            expected_outcome: crate::scenario::types::ExpectedOutcome::Success,
             extends: None,
+            quint_source: None,
         }
     }
 
@@ -1199,7 +1171,7 @@ mod tests {
             created_at: 0,
             simulation_id: Uuid::new_v4(),
             checkpoints: Vec::new(),
-            current_position: crate::time_travel_debugger::SessionPosition {
+            current_position: crate::observability::time_travel_debugger::SessionPosition {
                 current_checkpoint: None,
                 current_tick: 0,
                 current_time: 0,
@@ -1207,12 +1179,12 @@ mod tests {
             },
             detected_violations: Vec::new(),
             failure_analyses: Vec::new(),
-            metadata: crate::time_travel_debugger::SessionMetadata {
+            metadata: crate::observability::time_travel_debugger::SessionMetadata {
                 trigger_violation: None,
                 target_scenario: None,
                 objectives: Vec::new(),
                 tags: Vec::new(),
-                priority: crate::time_travel_debugger::DebugPriority::Normal,
+                priority: crate::observability::time_travel_debugger::DebugPriority::Normal,
             },
             navigation_path: Vec::new(),
         }
@@ -1221,38 +1193,37 @@ mod tests {
     fn create_mock_violation() -> PropertyViolation {
         PropertyViolation {
             property_name: "test_property".to_string(),
-            property_type: crate::property_monitor::PropertyViolationType::Invariant,
-            violation_state: crate::property_monitor::SimulationState {
+            property_type: crate::testing::PropertyViolationType::Invariant,
+            violation_state: crate::testing::SimulationState {
                 tick: 100,
                 time: 10000,
                 variables: HashMap::new(),
-                protocol_state: crate::property_monitor::ProtocolExecutionState {
+                participants: Vec::new(),
+                protocol_state: crate::testing::ProtocolExecutionState {
                     active_sessions: Vec::new(),
                     completed_sessions: Vec::new(),
-                    current_phase: "test".to_string(),
-                    protocol_variables: HashMap::new(),
+                    queued_protocols: Vec::new(),
                 },
-                participant_states: HashMap::new(),
-                network_state: crate::property_monitor::NetworkStateSnapshot {
+                network_state: crate::testing::NetworkStateSnapshot {
                     partitions: Vec::new(),
-                    message_stats: crate::property_monitor::MessageDeliveryStats {
+                    message_stats: crate::testing::MessageDeliveryStats {
                         messages_sent: 0,
                         messages_delivered: 0,
                         messages_dropped: 0,
                         average_latency_ms: 0.0,
                     },
-                    failure_conditions: crate::property_monitor::NetworkFailureConditions {
+                    failure_conditions: crate::testing::NetworkFailureConditions {
                         drop_rate: 0.0,
                         latency_range_ms: (0, 100),
                         partitions_active: false,
                     },
                 },
             },
-            violation_details: crate::property_monitor::ViolationDetails {
+            violation_details: crate::testing::ViolationDetails {
                 description: "Test violation".to_string(),
                 evidence: Vec::new(),
                 potential_causes: Vec::new(),
-                severity: crate::property_monitor::ViolationSeverity::High,
+                severity: crate::testing::ViolationSeverity::High,
                 remediation_suggestions: Vec::new(),
             },
             confidence: 0.9,

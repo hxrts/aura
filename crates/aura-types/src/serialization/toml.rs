@@ -32,14 +32,14 @@ use serde::{Deserialize, Serialize};
 /// # Ok::<(), aura_types::SerializationError>(())
 /// ```
 pub fn to_toml_string<T: Serialize>(value: &T) -> Result<String> {
-    ::toml::to_string(value).map_err(|e| SerializationError::from(e))
+    ::toml::to_string(value).map_err(SerializationError::from)
 }
 
 /// Serialize a value to a pretty-printed TOML string
 ///
 /// Produces human-readable output with proper formatting.
 pub fn to_toml_pretty<T: Serialize>(value: &T) -> Result<String> {
-    ::toml::to_string_pretty(value).map_err(|e| SerializationError::from(e))
+    ::toml::to_string_pretty(value).map_err(SerializationError::from)
 }
 
 /// Deserialize a value from a TOML string
@@ -62,7 +62,7 @@ pub fn to_toml_pretty<T: Serialize>(value: &T) -> Result<String> {
 /// # Ok::<(), aura_types::SerializationError>(())
 /// ```
 pub fn from_toml_str<T: for<'de> Deserialize<'de>>(toml: &str) -> Result<T> {
-    ::toml::from_str(toml).map_err(|e| SerializationError::from(e))
+    ::toml::from_str(toml).map_err(SerializationError::from)
 }
 
 /// Serialize to TOML and return as bytes
@@ -89,7 +89,7 @@ pub fn toml_size<T: Serialize>(value: &T) -> Result<usize> {
 
 /// Parse a TOML value directly
 pub fn parse_toml_value(toml: &str) -> Result<::toml::Value> {
-    ::toml::from_str(toml).map_err(|e| SerializationError::from(e))
+    ::toml::from_str(toml).map_err(SerializationError::from)
 }
 
 #[cfg(test)]
@@ -128,7 +128,7 @@ mod tests {
         let config: TestConfig = from_toml_str(toml)?;
         assert_eq!(config.name, "test");
         assert_eq!(config.value, 42);
-        assert_eq!(config.enabled, true);
+        assert!(config.enabled);
         Ok(())
     }
 

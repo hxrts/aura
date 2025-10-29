@@ -9,7 +9,7 @@ use std::fmt;
 /// Unified chunk identifier using content addressing
 ///
 /// This consolidates the different ChunkId definitions across crates
-/// and standardizes on Vec<u8> for content addressing compatibility.
+/// and standardizes on `Vec<u8>` for content addressing compatibility.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ChunkId(pub Vec<u8>);
 

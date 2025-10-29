@@ -1,5 +1,7 @@
 //! Common cryptographic utilities for Aura
 #![allow(clippy::result_large_err)]
+#![allow(clippy::disallowed_types)] // Crypto crate needs OsRng for actual cryptographic operations
+#![allow(clippy::expect_used)] // Crypto operations sometimes need expect for invariants
 
 /// AES-GCM encryption for content and chunk encryption
 pub mod content_encryption;

@@ -6,7 +6,7 @@
 
 use crate::testing::PropertyViolation;
 use crate::world_state::WorldState;
-use crate::{Result, SimError};
+use crate::{AuraError, Result};
 use aura_console_types::trace::CheckpointRef;
 use aura_console_types::{
     NetworkTopology, ParticipantInfo, SimulationTrace, TraceEvent, TraceMetadata,
@@ -131,37 +131,20 @@ impl PassiveTraceRecorder {
             } => {
                 let violation = PropertyViolation {
                     property_name: property.clone(),
-                    property_type: crate::testing::PropertyViolationType::Safety,
-                    violation_state: crate::testing::SimulationState {
+                    property_type: crate::results::PropertyViolationType::Safety,
+                    violation_state: crate::results::SimulationStateSnapshot {
                         tick: event.tick,
                         time: event.tick * 100, // Convert tick to time estimate
-                        variables: std::collections::HashMap::new(),
-                        participants: vec![],
-                        protocol_state: crate::testing::ProtocolMonitoringState {
-                            active_sessions: vec![],
-                            completed_sessions: vec![],
-                            queued_protocols: vec![],
-                        },
-                        network_state: crate::testing::NetworkStateSnapshot {
-                            partitions: vec![],
-                            message_stats: crate::testing::MessageDeliveryStats {
-                                messages_sent: 0,
-                                messages_delivered: 0,
-                                messages_dropped: 0,
-                                average_latency_ms: 0.0,
-                            },
-                            failure_conditions: crate::testing::NetworkFailureConditions {
-                                drop_rate: 0.0,
-                                latency_range_ms: (0, 0),
-                                partitions_active: false,
-                            },
-                        },
+                        participant_count: 0,   // TODO: Extract from event data
+                        active_sessions: 0,     // TODO: Extract from event data
+                        completed_sessions: 0,  // TODO: Extract from event data
+                        state_hash: "placeholder".to_string(), // TODO: Generate proper hash
                     },
-                    violation_details: crate::testing::ViolationDetails {
+                    violation_details: crate::results::ViolationDetails {
                         description: violation_details.clone(),
                         evidence: vec![format!("Participant: {}", event.participant)],
                         potential_causes: vec![],
-                        severity: crate::testing::ViolationSeverity::Medium,
+                        severity: crate::results::ViolationSeverity::Medium,
                         remediation_suggestions: vec![],
                     },
                     confidence: 0.8,
@@ -271,7 +254,7 @@ impl PassiveTraceRecorder {
     /// Get events by participant (requires indexing)
     pub fn get_events_by_participant(&self, participant: &str) -> Result<Vec<&TraceEvent>> {
         if !self.auto_index {
-            return Err(SimError::RuntimeError(
+            return Err(AuraError::configuration_error(
                 "Indexing disabled - call build_indices() first".to_string(),
             ));
         }
@@ -286,7 +269,7 @@ impl PassiveTraceRecorder {
     /// Get events in tick range (requires indexing)
     pub fn get_events_in_range(&self, start_tick: u64, end_tick: u64) -> Result<Vec<&TraceEvent>> {
         if !self.auto_index {
-            return Err(SimError::RuntimeError(
+            return Err(AuraError::configuration_error(
                 "Indexing disabled - call build_indices() first".to_string(),
             ));
         }
@@ -305,7 +288,7 @@ impl PassiveTraceRecorder {
     /// Get events at specific tick (requires indexing)
     pub fn get_events_at_tick(&self, tick: u64) -> Result<Vec<&TraceEvent>> {
         if !self.auto_index {
-            return Err(SimError::RuntimeError(
+            return Err(AuraError::configuration_error(
                 "Indexing disabled - call build_indices() first".to_string(),
             ));
         }
@@ -454,22 +437,26 @@ impl PassiveTraceRecorder {
                 .as_secs(),
         };
 
-        let json = serde_json::to_string_pretty(&session)
-            .map_err(|e| SimError::RuntimeError(format!("Failed to serialize session: {}", e)))?;
+        let json = serde_json::to_string_pretty(&session).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to serialize session: {}", e))
+        })?;
 
-        fs::write(path, json)
-            .map_err(|e| SimError::RuntimeError(format!("Failed to write session file: {}", e)))?;
+        fs::write(path, json).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to write session file: {}", e))
+        })?;
 
         Ok(())
     }
 
     /// Load recorded session from file
     pub fn load_session<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let json = fs::read_to_string(path)
-            .map_err(|e| SimError::RuntimeError(format!("Failed to read session file: {}", e)))?;
+        let json = fs::read_to_string(path).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to read session file: {}", e))
+        })?;
 
-        let session: RecordedSession = serde_json::from_str(&json)
-            .map_err(|e| SimError::RuntimeError(format!("Failed to deserialize session: {}", e)))?;
+        let session: RecordedSession = serde_json::from_str(&json).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to deserialize session: {}", e))
+        })?;
 
         let mut recorder = Self::with_metadata(session.metadata);
         recorder.events = session.events;
@@ -577,6 +564,7 @@ mod tests {
             violation_state: crate::testing::SimulationState {
                 tick: 10,
                 time: 1000,
+                variables: std::collections::HashMap::new(),
                 participants: vec![],
                 protocol_state: crate::testing::ProtocolExecutionState {
                     active_sessions: vec![],
@@ -586,15 +574,15 @@ mod tests {
                 network_state: crate::testing::NetworkStateSnapshot {
                     partitions: vec![],
                     message_stats: crate::testing::MessageDeliveryStats {
-                        total_sent: 0,
-                        total_delivered: 0,
-                        total_dropped: 0,
+                        messages_sent: 0,
+                        messages_delivered: 0,
+                        messages_dropped: 0,
                         average_latency_ms: 0.0,
                     },
                     failure_conditions: crate::testing::NetworkFailureConditions {
                         drop_rate: 0.0,
-                        latency_range: (0, 0),
-                        partition_count: 0,
+                        latency_range_ms: (0, 0),
+                        partitions_active: false,
                     },
                 },
             },

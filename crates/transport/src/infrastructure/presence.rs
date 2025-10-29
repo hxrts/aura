@@ -6,10 +6,10 @@
 // They are signed with the account's threshold key and include the session epoch to enable
 // automatic revocation when the account configuration changes.
 
-use crate::{TransportError, TransportErrorBuilder, TransportResult};
-use aura_crypto::signature_serde;
+use crate::{TransportErrorBuilder, TransportResult};
+use aura_crypto::{signature_serde, Ed25519Signature};
 use aura_journal::serialization::{from_cbor_bytes, to_cbor_bytes};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 // Removed current_timestamp import - will use effects when integrated
@@ -48,7 +48,7 @@ pub struct PresenceTicket {
     /// Threshold signature over the ticket
     /// Signed by M-of-N devices using FROST
     #[serde(with = "signature_serde")]
-    pub signature: Signature,
+    pub signature: Ed25519Signature,
 }
 
 impl PresenceTicket {
@@ -75,7 +75,7 @@ impl PresenceTicket {
             expires_at: now + ttl_seconds,
             capabilities: vec!["read".to_string(), "write".to_string()],
             // Signature must be filled in by caller
-            signature: Signature::from_bytes(&[0u8; 64]),
+            signature: Ed25519Signature::default(),
         })
     }
 
@@ -130,7 +130,7 @@ impl PresenceTicket {
         // Verify signature
         let hash = self.compute_signable_hash();
         group_public_key
-            .verify(&hash, &self.signature)
+            .verify(&hash, &self.signature.0)
             .map_err(|_| TransportErrorBuilder::invalid_presence_ticket())?;
 
         Ok(())
@@ -224,14 +224,25 @@ mod tests {
 
     #[test]
     fn test_ticket_serialization() {
+        // Test serialization of all fields including signature
         let ticket = PresenceTicket::new(Uuid::new_v4(), Uuid::new_v4(), 1, 3600).unwrap();
 
-        let bytes = ticket.to_bytes().unwrap();
-        let restored = PresenceTicket::from_bytes(&bytes).unwrap();
+        // Test direct serde_cbor serialization/deserialization to match production usage
+        let cbor_bytes = serde_cbor::to_vec(&ticket).expect("CBOR serialization should work");
+        let restored: PresenceTicket =
+            serde_cbor::from_slice(&cbor_bytes).expect("CBOR deserialization should work");
 
         assert_eq!(ticket.device_id, restored.device_id);
         assert_eq!(ticket.account_id, restored.account_id);
         assert_eq!(ticket.session_epoch, restored.session_epoch);
+        assert_eq!(ticket.issued_at, restored.issued_at);
+        assert_eq!(ticket.expires_at, restored.expires_at);
+        assert_eq!(ticket.capabilities, restored.capabilities);
+        // Signature comparison now works with Default implementation
+        assert_eq!(
+            ticket.signature.0.to_bytes(),
+            restored.signature.0.to_bytes()
+        );
     }
 
     #[test]
@@ -245,7 +256,7 @@ mod tests {
 
         // Sign the ticket
         let hash = ticket.compute_signable_hash();
-        ticket.signature = signing_key.sign(&hash);
+        ticket.signature = Ed25519Signature(signing_key.sign(&hash));
 
         // Verification should succeed
         let result = ticket.verify(&verifying_key, 1);
@@ -262,7 +273,7 @@ mod tests {
         let mut ticket = PresenceTicket::new(Uuid::new_v4(), Uuid::new_v4(), 1, 3600).unwrap();
 
         let hash = ticket.compute_signable_hash();
-        ticket.signature = signing_key.sign(&hash);
+        ticket.signature = Ed25519Signature(signing_key.sign(&hash));
 
         // Verification with wrong epoch should fail
         let result = ticket.verify(&verifying_key, 2);
@@ -286,7 +297,7 @@ mod tests {
         ticket.expires_at = now - 100;
 
         let hash = ticket.compute_signable_hash();
-        ticket.signature = signing_key.sign(&hash);
+        ticket.signature = Ed25519Signature(signing_key.sign(&hash));
 
         // Verification should fail (expired)
         let result = ticket.verify(&verifying_key, 1);
@@ -303,7 +314,7 @@ mod tests {
 
         // Sign with key1
         let hash = ticket.compute_signable_hash();
-        ticket.signature = signing_key1.sign(&hash);
+        ticket.signature = Ed25519Signature(signing_key1.sign(&hash));
 
         // Try to verify with key2 - should fail
         let result = ticket.verify(&verifying_key2, 1);

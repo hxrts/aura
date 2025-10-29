@@ -1,9 +1,9 @@
 // Account state managed by the CRDT
 
 use crate::types::*;
+use aura_crypto::Ed25519VerifyingKey;
 use aura_crypto::MerkleProof;
 use aura_types::{AccountId, DeviceId, GuardianId};
-use aura_crypto::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -193,7 +193,7 @@ impl AccountState {
         effects: &aura_crypto::Effects,
     ) -> crate::Result<()> {
         if self.removed_devices.contains(&device.device_id) {
-            return Err(crate::LedgerError::InvalidEvent(
+            return Err(crate::AuraError::protocol_invalid_instruction(
                 "Cannot re-add a removed device".to_string(),
             ));
         }
@@ -210,7 +210,7 @@ impl AccountState {
         effects: &aura_crypto::Effects,
     ) -> crate::Result<()> {
         if !self.devices.contains_key(&device_id) {
-            return Err(crate::LedgerError::DeviceNotFound(device_id.to_string()));
+            return Err(crate::AuraError::device_not_found(device_id.to_string()));
         }
 
         self.devices.remove(&device_id);
@@ -227,8 +227,8 @@ impl AccountState {
         effects: &aura_crypto::Effects,
     ) -> crate::Result<()> {
         if self.removed_guardians.contains(&guardian.guardian_id) {
-            return Err(crate::LedgerError::InvalidEvent(
-                "Cannot re-add a removed guardian".to_string(),
+            return Err(crate::AuraError::protocol_invalid_instruction(
+                "Cannot re-add a removed guardian",
             ));
         }
 
@@ -244,8 +244,8 @@ impl AccountState {
         effects: &aura_crypto::Effects,
     ) -> crate::Result<()> {
         if !self.guardians.contains_key(&guardian_id) {
-            return Err(crate::LedgerError::GuardianNotFound(format!(
-                "{:?}",
+            return Err(crate::AuraError::authority_not_found(format!(
+                "Guardian not found: {:?}",
                 guardian_id
             )));
         }

@@ -4,17 +4,129 @@
 //! into formats compatible with Quint formal verification, enabling
 //! trace-based property verification and temporal analysis.
 
-use crate::{SimError, Result};
+use crate::{AuraError, Result};
 use crate::quint::types::{
-    QuintValue, QuintSpec, QuintInvariant, QuintTemporalProperty, 
+    QuintValue, QuintSpec, QuintInvariant, QuintTemporalProperty,
     PropertyEvaluationResult, ValidationResult
 };
-use crate::property_monitor::{
-    ExecutionTrace, SimulationState, PropertyViolation, ViolationDetectionReport
+use crate::testing::{
+    ExecutionTrace, PropertyViolation, ViolationDetectionReport
 };
+use crate::types::SimulationState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+/// ITF (Intermediate Trace Format) expression types for Quint integration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ItfExpression {
+    /// Boolean value
+    Bool(bool),
+    /// Numeric value
+    Number(serde_json::Number),
+    /// Big integer value
+    BigInt { value: String },
+    /// String value
+    String(String),
+    /// List of expressions
+    List(Vec<ItfExpression>),
+    /// Set of expressions
+    Set { elements: Vec<ItfExpression> },
+    /// Tuple of expressions
+    Tuple { elements: Vec<ItfExpression> },
+    /// Map with key-value pairs
+    Map { pairs: Vec<(ItfExpression, ItfExpression)> },
+    /// Record with named fields
+    Record(HashMap<String, ItfExpression>),
+}
+
+/// ITF trace state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItfState {
+    /// Metadata for this state
+    pub meta: Option<HashMap<String, serde_json::Value>>,
+    /// State variables
+    pub variables: HashMap<String, ItfExpression>,
+}
+
+/// ITF trace metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItfMetadata {
+    /// Format version
+    pub format_version: Option<String>,
+    /// Source of the trace
+    pub source: Option<String>,
+    /// Creation timestamp
+    pub created_at: Option<String>,
+    /// Additional metadata
+    pub additional: HashMap<String, serde_json::Value>,
+}
+
+/// Complete ITF trace
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItfTrace {
+    /// Trace metadata
+    pub meta: Option<ItfMetadata>,
+    /// Trace parameters
+    pub params: Option<HashMap<String, ItfExpression>>,
+    /// Variable names
+    pub vars: Vec<String>,
+    /// Trace states
+    pub states: Vec<ItfState>,
+    /// Loop index for cyclic traces
+    pub loop_index: Option<usize>,
+}
+
+/// ITF trace converter for Quint integration
+pub struct ItfTraceConverter {
+    /// Configuration for conversion
+    _config: TraceConversionConfig,
+}
+
+impl ItfTraceConverter {
+    /// Create a new ITF trace converter
+    pub fn new() -> Self {
+        Self {
+            _config: TraceConversionConfig::default(),
+        }
+    }
+
+    /// Validate an ITF trace
+    pub fn validate_itf_trace(&self, trace: &ItfTrace) -> Result<()> {
+        // Basic validation
+        if trace.vars.is_empty() {
+            return Err(AuraError::configuration_error("ITF trace must have variables".to_string()));
+        }
+        
+        for state in &trace.states {
+            for var in &trace.vars {
+                if !state.variables.contains_key(var) {
+                    return Err(AuraError::configuration_error(
+                        format!("State missing variable: {}", var)
+                    ));
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Serialize ITF trace to JSON
+    pub fn serialize_itf_to_json(&self, trace: &ItfTrace, pretty: bool) -> Result<String> {
+        let result = if pretty {
+            serde_json::to_string_pretty(trace)
+        } else {
+            serde_json::to_string(trace)
+        };
+        result.map_err(|e| AuraError::configuration_error(format!("JSON serialization failed: {}", e)))
+    }
+
+    /// Parse ITF trace from JSON
+    pub fn parse_itf_from_json(&self, json: &str) -> Result<ItfTrace> {
+        serde_json::from_str(json)
+            .map_err(|e| AuraError::configuration_error(format!("JSON parsing failed: {}", e)))
+    }
+}
 
 /// Converts simulation execution traces to Quint-compatible formats
 ///
@@ -238,7 +350,7 @@ impl TraceConverter {
 
     /// Convert simulation execution trace to Quint format
     pub fn convert_trace(&mut self, execution_trace: &ExecutionTrace) -> Result<TraceConversionResult> {
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let start_time = crate::utils::time::current_unix_timestamp_millis();
         
         // Generate unique trace ID
         let trace_id = format!("trace_{}", start_time);
@@ -267,12 +379,12 @@ impl TraceConverter {
         let mut quint_events = Vec::new();
 
         // Apply sampling if needed
-        let states_to_process = if execution_trace.length() > self.config.max_trace_length {
+        let states_to_process = if execution_trace.len() > self.config.max_trace_length {
             warnings.push(format!("Trace length {} exceeds maximum {}, applying sampling", 
-                                execution_trace.length(), self.config.max_trace_length));
+                                execution_trace.len(), self.config.max_trace_length));
             self.sample_states(execution_trace)?
         } else {
-            execution_trace.get_all_states()
+            execution_trace.get_all_states().iter().cloned().collect()
         };
 
         // Convert each state
@@ -316,14 +428,14 @@ impl TraceConverter {
         let quint_trace = QuintTrace {
             trace_id: trace_id.clone(),
             states: quint_states,
-            events: quint_events,
+            events: quint_events.clone(),
             metadata,
         };
 
         // Cache the result
         self.conversion_cache.insert(trace_id, quint_trace.clone());
 
-        let end_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let end_time = crate::utils::time::current_unix_timestamp_millis();
         let conversion_time = end_time - start_time;
 
         // Update statistics
@@ -447,9 +559,10 @@ impl TraceConverter {
         let sample_size = (all_states.len() as f64 * self.config.sampling_rate) as usize;
         let step_size = all_states.len() / sample_size.max(1);
 
-        let sampled = all_states.into_iter()
+        let sampled = all_states.iter()
             .step_by(step_size.max(1))
             .take(sample_size)
+            .cloned()
             .collect();
 
         Ok(sampled)
@@ -461,7 +574,7 @@ impl TraceConverter {
         
         // Convert basic state variables
         for (key, value) in &sim_state.variables {
-            variables.insert(key.clone(), value.clone());
+            variables.insert(key.clone(), QuintValue::String(value.clone()));
         }
 
         // Convert protocol state
@@ -471,8 +584,13 @@ impl TraceConverter {
                     .map(|session| QuintValue::String(session.session_id.clone()))
                     .collect()
             ),
-            current_phase: QuintValue::String(sim_state.protocol_state.current_phase.clone()),
-            variables: sim_state.protocol_state.protocol_variables.clone(),
+            current_phase: QuintValue::String(
+                sim_state.protocol_state.active_sessions
+                    .first()
+                    .map(|s| s.current_phase.clone())
+                    .unwrap_or("idle".to_string())
+            ),
+            variables: HashMap::new(), // Protocol variables not available in current structure
         };
 
         // Convert network state
@@ -488,9 +606,7 @@ impl TraceConverter {
         let network_state = QuintNetworkState {
             partitions: QuintValue::List(
                 sim_state.network_state.partitions.iter()
-                    .map(|partition| QuintValue::List(
-                        partition.iter().map(|p| QuintValue::String(p.clone())).collect()
-                    ))
+                    .map(|partition| QuintValue::String(partition.clone()))
                     .collect()
             ),
             message_stats,
@@ -564,13 +680,13 @@ impl TraceConverter {
 
     /// Verify an invariant across all states in the trace
     fn verify_invariant_on_trace(&self, trace: &QuintTrace, invariant: &QuintInvariant) -> Result<PropertyEvaluationResult> {
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let start_time = crate::utils::time::current_unix_timestamp_millis();
         
         // Check invariant at each state
         for state in &trace.states {
             let holds = self.evaluate_invariant_at_state(invariant, state)?;
             if !holds {
-                let end_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+                let end_time = crate::utils::time::current_unix_timestamp_millis();
                 return Ok(PropertyEvaluationResult {
                     property_name: invariant.name.clone(),
                     holds: false,
@@ -581,7 +697,7 @@ impl TraceConverter {
             }
         }
 
-        let end_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let end_time = crate::utils::time::current_unix_timestamp_millis();
         Ok(PropertyEvaluationResult {
             property_name: invariant.name.clone(),
             holds: true,
@@ -593,12 +709,12 @@ impl TraceConverter {
 
     /// Verify a temporal property across the trace
     fn verify_temporal_property_on_trace(&self, trace: &QuintTrace, property: &QuintTemporalProperty) -> Result<PropertyEvaluationResult> {
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let start_time = crate::utils::time::current_unix_timestamp_millis();
         
         // Simplified temporal property evaluation
         let holds = self.evaluate_temporal_property_on_trace(property, trace)?;
         
-        let end_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let end_time = crate::utils::time::current_unix_timestamp_millis();
         Ok(PropertyEvaluationResult {
             property_name: property.name.clone(),
             holds,
@@ -620,12 +736,6 @@ impl TraceConverter {
     }
 }
 
-impl ExecutionTrace {
-    /// Get all states from the execution trace
-    pub fn get_all_states(&self) -> Vec<SimulationState> {
-        self.states.iter().cloned().collect()
-    }
-}
 
 impl ConversionStatistics {
     fn new() -> Self {
@@ -696,7 +806,7 @@ impl ItfExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::property_monitor::{SimulationState, ProtocolExecutionState, ParticipantStateSnapshot, NetworkStateSnapshot, MessageDeliveryStats, NetworkFailureConditions, SessionInfo};
+    use crate::types::{ProtocolExecutionState, ParticipantStateSnapshot, NetworkStateSnapshot, MessageDeliveryStats, NetworkFailureConditions, SessionInfo, PropertyViolationType, SimulationStateSnapshot, ViolationDetails, ViolationSeverity};
     use std::collections::HashSet;
 
     #[test]
@@ -717,10 +827,9 @@ mod tests {
             protocol_state: ProtocolExecutionState {
                 active_sessions: Vec::new(),
                 completed_sessions: Vec::new(),
-                current_phase: "test".to_string(),
-                protocol_variables: HashMap::new(),
+                queued_protocols: Vec::new(),
             },
-            participant_states: HashMap::new(),
+            participants: Vec::new(),
             network_state: NetworkStateSnapshot {
                 partitions: Vec::new(),
                 message_stats: MessageDeliveryStats {
@@ -790,38 +899,19 @@ mod tests {
         // Create a mock violation
         let violation = PropertyViolation {
             property_name: "test_property".to_string(),
-            property_type: crate::property_monitor::PropertyViolationType::Invariant,
-            violation_state: SimulationState {
+            property_type: PropertyViolationType::Invariant,
+            violation_state: SimulationStateSnapshot {
                 tick: 1,
                 time: 1000,
-                variables: HashMap::new(),
-                protocol_state: ProtocolExecutionState {
-                    active_sessions: Vec::new(),
-                    completed_sessions: Vec::new(),
-                    current_phase: "test".to_string(),
-                    protocol_variables: HashMap::new(),
-                },
-                participant_states: HashMap::new(),
-                network_state: NetworkStateSnapshot {
-                    partitions: Vec::new(),
-                    message_stats: MessageDeliveryStats {
-                        messages_sent: 0,
-                        messages_delivered: 0,
-                        messages_dropped: 0,
-                        average_latency_ms: 0.0,
-                    },
-                    failure_conditions: NetworkFailureConditions {
-                        drop_rate: 0.0,
-                        latency_range_ms: (0, 100),
-                        partitions_active: false,
-                    },
-                },
+                participant_count: 0,
+                active_sessions: 0,
+                completed_sessions: 0,
             },
-            violation_details: crate::property_monitor::ViolationDetails {
+            violation_details: ViolationDetails {
                 description: "Test violation".to_string(),
                 evidence: Vec::new(),
                 potential_causes: Vec::new(),
-                severity: crate::property_monitor::ViolationSeverity::Medium,
+                severity: ViolationSeverity::Medium,
                 remediation_suggestions: Vec::new(),
             },
             confidence: 0.9,
@@ -850,8 +940,7 @@ mod tests {
         assert!(!converter.config.include_detailed_state);
         assert_eq!(converter.config.sampling_rate, 0.5);
     }
-}
-    
+
     #[test]
     fn test_itf_comprehensive_features() {
         let mut converter = ItfTraceConverter::new();
@@ -865,8 +954,8 @@ mod tests {
                 additional: HashMap::new(),
             }),
             params: None,
-            vars: vec\!["x".to_string(), "y".to_string()],
-            states: vec\![
+            vars: vec!["x".to_string(), "y".to_string()],
+            states: vec![
                 ItfState {
                     meta: None,
                     variables: {
@@ -881,14 +970,14 @@ mod tests {
         };
         
         // Test validation
-        assert\!(converter.validate_itf_trace(&test_trace).is_ok());
+        assert!(converter.validate_itf_trace(&test_trace).is_ok());
         
         // Test JSON serialization
         let json = converter.serialize_itf_to_json(&test_trace, true).unwrap();
-        assert\!(json.contains("#bigint"));
+        assert!(json.contains("#bigint"));
         
         // Test parsing back
         let parsed = converter.parse_itf_from_json(&json).unwrap();
-        assert_eq\!(parsed.vars.len(), 2);
+        assert_eq!(parsed.vars.len(), 2);
     }
 }

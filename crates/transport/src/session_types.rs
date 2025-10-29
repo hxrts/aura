@@ -3,34 +3,40 @@
 //! This module defines session types for the Transport layer, providing compile-time safety
 //! for connection management, message exchange, and presence-based authentication.
 
-use session_types::{ChoreographicProtocol, RuntimeWitness, SessionState, WitnessedTransition};
+use aura_types::session_core::{ChoreographicProtocol, RuntimeWitness, SessionState};
+use aura_types::DeviceId;
 use std::collections::BTreeMap;
 use std::fmt;
 use uuid::Uuid;
 
 // Import types from main transport module
-use crate::{
-    BroadcastResult, Connection, PresenceTicket, TransportError, TransportErrorBuilder,
-    TransportResult,
-};
+use crate::{Connection, PresenceTicket, TransportError};
 
-// Import the trait from coordination to implement it
-use aura_coordination::local_runtime::TransportSession;
-use aura_types::{DeviceId, DeviceIdExt};
+// Import the trait from protocol-types to implement it
+use aura_protocol_types::TransportSession;
 
 // ========== Transport Protocol Core ==========
 
 /// Core transport protocol data without session state
+///
+/// Contains the essential state for managing transport connections, presence authentication,
+/// and message delivery across peers.
 #[derive(Clone)]
 pub struct TransportProtocolCore {
+    /// Identifier for this device
     pub device_id: DeviceId,
+    /// Active connections to peer devices
     pub active_connections: BTreeMap<String, Connection>,
+    /// Presence tickets for authenticated sessions
     pub presence_tickets: BTreeMap<String, PresenceTicket>,
+    /// Pending broadcast operations
     pub pending_broadcasts: Vec<BroadcastContext>,
+    /// Queue of messages awaiting delivery
     pub message_queue: Vec<MessageContext>,
 }
 
 impl TransportProtocolCore {
+    /// Create a new transport protocol core for the given device
     pub fn new(device_id: DeviceId) -> Self {
         Self {
             device_id,
@@ -55,26 +61,41 @@ impl fmt::Debug for TransportProtocolCore {
 }
 
 /// Broadcast operation context
+///
+/// Tracks a broadcast message being sent to multiple peers,
+/// including delivery status to each recipient.
 #[derive(Debug, Clone)]
 pub struct BroadcastContext {
+    /// Unique identifier for this broadcast operation
     pub broadcast_id: Uuid,
+    /// Peer identifiers that should receive this broadcast
     pub target_peers: Vec<String>,
+    /// Serialized message content to broadcast
     pub message: Vec<u8>,
+    /// Delivery confirmation status per peer (peer_id -> delivered)
     pub delivery_confirmations: BTreeMap<String, bool>,
 }
 
 /// Message context information
+///
+/// Contains metadata about a message queued for delivery to a peer.
 #[derive(Debug, Clone)]
 pub struct MessageContext {
+    /// Unique identifier for this message
     pub message_id: Uuid,
+    /// Target peer identifier
     pub peer_id: String,
+    /// Serialized message content
     pub content: Vec<u8>,
+    /// Timestamp when message was created
     pub timestamp: u64,
 }
 
 // ========== Transport Session States ==========
 
-/// Session states for transport protocols
+/// Transport disconnected state
+///
+/// Initial state indicating no active transport connection.
 #[derive(Debug, Clone)]
 pub struct TransportDisconnected;
 
@@ -84,6 +105,9 @@ impl SessionState for TransportDisconnected {
     const CAN_TERMINATE: bool = false;
 }
 
+/// Connection handshaking state
+///
+/// Transient state during connection establishment with a peer.
 #[derive(Debug, Clone)]
 pub struct ConnectionHandshaking;
 
@@ -93,6 +117,9 @@ impl SessionState for ConnectionHandshaking {
     const CAN_TERMINATE: bool = false;
 }
 
+/// Transport connected state
+///
+/// Active state with an established connection to a peer.
 #[derive(Debug, Clone)]
 pub struct TransportConnected;
 
@@ -102,6 +129,9 @@ impl SessionState for TransportConnected {
     const CAN_TERMINATE: bool = false;
 }
 
+/// Connection failed state
+///
+/// Terminal state indicating connection establishment or operation failed.
 #[derive(Debug, Clone)]
 pub struct ConnectionFailed;
 
@@ -191,10 +221,16 @@ impl TransportSession for TransportSessionState {
 // ========== Runtime Witnesses ==========
 
 /// Witness that connection handshake has completed successfully
+///
+/// Represents evidence that a peer connection handshake succeeded,
+/// including the peer identifier, established connection, and timestamp.
 #[derive(Debug, Clone)]
 pub struct HandshakeCompleted {
+    /// Peer identifier for the completed handshake
     pub peer_id: String,
+    /// The established connection to the peer
     pub connection: Connection,
+    /// Timestamp when the connection was established
     pub established_at: u64,
 }
 
@@ -217,10 +253,16 @@ impl RuntimeWitness for HandshakeCompleted {
 }
 
 /// Witness for connection failure
+///
+/// Represents evidence that a connection attempt to a peer failed,
+/// including the peer identifier, error details, and failure timestamp.
 #[derive(Debug, Clone)]
 pub struct ConnectionFailure {
+    /// Peer identifier for the failed connection
     pub peer_id: String,
+    /// Error message describing the failure reason
     pub error: String,
+    /// Timestamp when the failure occurred
     pub failed_at: u64,
 }
 
@@ -322,6 +364,7 @@ impl TransportConnectedOps {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_types::DeviceIdExt;
 
     #[test]
     fn test_transport_session_creation() {

@@ -12,11 +12,14 @@ aura-agent = { path = "../agent" }
 aura-journal = { path = "../journal" }
 aura-transport = { path = "../transport" }
 aura-crypto = { path = "../crypto" }
-aura-coordination = { path = "../coordination" }
+aura-protocol = { path = "../aura-protocol" }
 aura-console-types = { path = "../console-types" }
+aura-types = { path = "../aura-types" }
 quint_api = { path = "../quint-api" }
 
-# Cryptography provided through aura-crypto
+# Cryptography
+blake3 = { workspace = true }
+ed25519-dalek = { workspace = true }
 
 # Core dependencies
 uuid = { version = "1.6", features = ["v4", "v5", "serde"] }

@@ -42,7 +42,7 @@ mod tests {
         let data = b"hello world";
         let hash = blake3_hash(data);
         assert_eq!(hash.len(), 32);
-        
+
         // Hash should be deterministic
         let hash2 = blake3_hash(data);
         assert_eq!(hash, hash2);

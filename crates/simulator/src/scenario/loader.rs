@@ -8,7 +8,7 @@ use crate::{
         ByzantineConfig, ChoreographyAction, ExpectedOutcome, NetworkConfig, ParticipantConfig,
         PropertyCheck, ScenarioPhaseWithActions, ScenarioSetupConfig, UnifiedScenario,
     },
-    Result, SimError,
+    AuraError, Result,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -224,8 +224,9 @@ impl UnifiedScenarioLoader {
         let path = file_path.as_ref();
 
         // Read TOML file
-        let content = fs::read_to_string(path)
-            .map_err(|e| SimError::RuntimeError(format!("Failed to read scenario file: {}", e)))?;
+        let content = fs::read_to_string(path).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to read scenario file: {}", e))
+        })?;
 
         // Parse TOML
         let toml_scenario: UnifiedScenarioFile = toml::from_str(&content).map_err(|e| {
@@ -234,7 +235,7 @@ impl UnifiedScenarioLoader {
             eprintln!("  Error: {:#}", e);
             eprintln!("  Content length: {} bytes", content.len());
             eprintln!("  Full content:\n{}", content);
-            SimError::RuntimeError(format!("Failed to parse TOML: {}", e))
+            AuraError::configuration_error(format!("Failed to parse TOML: {}", e))
         })?;
 
         // Cache for inheritance resolution
@@ -264,12 +265,14 @@ impl UnifiedScenarioLoader {
         let mut scenarios = Vec::new();
 
         // Find all TOML files
-        let entries = fs::read_dir(dir)
-            .map_err(|e| SimError::RuntimeError(format!("Failed to read directory: {}", e)))?;
+        let entries = fs::read_dir(dir).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to read directory: {}", e))
+        })?;
 
         for entry in entries {
-            let entry = entry
-                .map_err(|e| SimError::RuntimeError(format!("Directory entry error: {}", e)))?;
+            let entry = entry.map_err(|e| {
+                AuraError::configuration_error(format!("Directory entry error: {}", e))
+            })?;
             let path = entry.path();
 
             if path.extension().and_then(|s| s.to_str()) == Some("toml") {
@@ -298,12 +301,12 @@ impl UnifiedScenarioLoader {
             // Load parent scenario
             let parent_path = self.base_dir.join(extends);
             let parent_content = fs::read_to_string(&parent_path).map_err(|e| {
-                SimError::RuntimeError(format!("Failed to read parent scenario: {}", e))
+                AuraError::configuration_error(format!("Failed to read parent scenario: {}", e))
             })?;
 
             let parent_scenario: UnifiedScenarioFile =
                 toml::from_str(&parent_content).map_err(|e| {
-                    SimError::RuntimeError(format!("Failed to parse parent TOML: {}", e))
+                    AuraError::configuration_error(format!("Failed to parse parent TOML: {}", e))
                 })?;
 
             // Apply inheritance
@@ -358,7 +361,7 @@ impl UnifiedScenarioLoader {
     fn validate_scenario(&self, scenario: &UnifiedScenarioFile) -> Result<()> {
         // Check required fields
         if scenario.phases.is_empty() {
-            return Err(SimError::RuntimeError(
+            return Err(AuraError::configuration_error(
                 "Scenario must have at least one phase".to_string(),
             ));
         }
@@ -366,14 +369,14 @@ impl UnifiedScenarioLoader {
         // Validate setup
         if let Some(participants) = scenario.setup.participants {
             if participants == 0 {
-                return Err(SimError::RuntimeError(
+                return Err(AuraError::configuration_error(
                     "Must have at least 1 participant".to_string(),
                 ));
             }
 
             if let Some(threshold) = scenario.setup.threshold {
                 if threshold > participants {
-                    return Err(SimError::RuntimeError(
+                    return Err(AuraError::configuration_error(
                         "Threshold cannot exceed participant count".to_string(),
                     ));
                 }
@@ -383,7 +386,7 @@ impl UnifiedScenarioLoader {
         // Validate phases
         for phase in &scenario.phases {
             if phase.actions.is_empty() {
-                return Err(SimError::RuntimeError(format!(
+                return Err(AuraError::configuration_error(format!(
                     "Phase '{}' must have at least one action",
                     phase.name
                 )));
@@ -395,7 +398,7 @@ impl UnifiedScenarioLoader {
             "success" | "failure" | "timeout" | "byzantine_detected" => {}
             outcome if outcome.starts_with("property_violation:") => {}
             _ => {
-                return Err(SimError::RuntimeError(format!(
+                return Err(AuraError::configuration_error(format!(
                     "Invalid expected outcome: {}",
                     scenario.expected_outcome
                 )))
@@ -494,7 +497,7 @@ impl UnifiedScenarioLoader {
                 ExpectedOutcome::PropertyViolation { property }
             }
             _ => {
-                return Err(SimError::RuntimeError(format!(
+                return Err(AuraError::configuration_error(format!(
                     "Invalid expected outcome: {}",
                     toml_scenario.expected_outcome
                 )))
@@ -663,8 +666,9 @@ check_in_phases = ["network_failure"]
 expected_outcome = "success"
 "#;
 
-        fs::write(output_path, sample)
-            .map_err(|e| SimError::RuntimeError(format!("Failed to write sample file: {}", e)))?;
+        fs::write(output_path, sample).map_err(|e| {
+            AuraError::configuration_error(format!("Failed to write sample file: {}", e))
+        })?;
 
         Ok(())
     }

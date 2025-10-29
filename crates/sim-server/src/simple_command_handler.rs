@@ -1,5 +1,7 @@
 //! Simplified command handler for basic console functionality
 
+#![allow(dead_code)]
+
 use anyhow::{anyhow, Result};
 use aura_console_types::{ConsoleCommand, ConsoleResponse};
 use std::sync::{Arc, Mutex};

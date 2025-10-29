@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// # Ok::<(), aura_types::SerializationError>(())
 /// ```
 pub fn to_json_string<T: Serialize>(value: &T) -> Result<String> {
-    serde_json::to_string(value).map_err(|e| SerializationError::from(e))
+    serde_json::to_string(value).map_err(SerializationError::from)
 }
 
 /// Serialize a value to a pretty-printed JSON string
@@ -41,7 +41,7 @@ pub fn to_json_string<T: Serialize>(value: &T) -> Result<String> {
 /// # Ok::<(), aura_serialization::SerializationError>(())
 /// ```
 pub fn to_json_pretty<T: Serialize>(value: &T) -> Result<String> {
-    serde_json::to_string_pretty(value).map_err(|e| SerializationError::from(e))
+    serde_json::to_string_pretty(value).map_err(SerializationError::from)
 }
 
 /// Deserialize a value from a JSON string
@@ -61,27 +61,27 @@ pub fn to_json_pretty<T: Serialize>(value: &T) -> Result<String> {
 /// # Ok::<(), aura_types::SerializationError>(())
 /// ```
 pub fn from_json_str<'a, T: Deserialize<'a>>(json: &'a str) -> Result<T> {
-    serde_json::from_str(json).map_err(|e| SerializationError::from(e))
+    serde_json::from_str(json).map_err(SerializationError::from)
 }
 
 /// Deserialize a value from a JSON byte slice
 pub fn from_json_slice<'a, T: Deserialize<'a>>(json: &'a [u8]) -> Result<T> {
-    serde_json::from_slice(json).map_err(|e| SerializationError::from(e))
+    serde_json::from_slice(json).map_err(SerializationError::from)
 }
 
 /// Serialize to JSON and return as bytes
 pub fn to_json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    serde_json::to_vec(value).map_err(|e| SerializationError::from(e))
+    serde_json::to_vec(value).map_err(SerializationError::from)
 }
 
 /// Serialize to pretty-printed JSON and return as bytes
 pub fn to_json_bytes_pretty<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    serde_json::to_vec_pretty(value).map_err(|e| SerializationError::from(e))
+    serde_json::to_vec_pretty(value).map_err(SerializationError::from)
 }
 
 /// Deserialize a value from JSON bytes
 pub fn from_json_bytes<'a, T: Deserialize<'a>>(json: &'a [u8]) -> Result<T> {
-    serde_json::from_slice(json).map_err(|e| SerializationError::from(e))
+    serde_json::from_slice(json).map_err(SerializationError::from)
 }
 
 /// Get the size of a value when serialized to JSON (compact format)

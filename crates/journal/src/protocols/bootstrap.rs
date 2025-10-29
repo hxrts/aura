@@ -2,11 +2,11 @@
 
 use crate::capability::{
     events::CapabilityDelegation,
-    identity::{IdentityCapabilityManager, IndividualId, ThresholdCapabilityAuth},
+    identity::{IdentityCapabilityManager, IndividualIdCapabilityExt, ThresholdCapabilityAuth},
     types::CapabilityScope,
 };
-use crate::ThresholdSig;
-use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
+use aura_authentication::ThresholdSig;
+use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt, IndividualId, IndividualIdExt};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tracing::{debug, info};
@@ -132,14 +132,14 @@ impl BootstrapManager {
 
         // Validate parameters
         if participants < 2 {
-            return Err(crate::LedgerError::InvalidEvent(
-                "Minimum 2 participants required".to_string(),
+            return Err(crate::AuraError::protocol_invalid_instruction(
+                "Minimum 2 participants required",
             ));
         }
 
         if threshold > participants {
-            return Err(crate::LedgerError::InvalidEvent(
-                "Threshold cannot exceed participant count".to_string(),
+            return Err(crate::AuraError::protocol_invalid_instruction(
+                "Threshold cannot exceed participant count",
             ));
         }
 
@@ -183,7 +183,10 @@ impl BootstrapManager {
             account_state
                 .add_device(device.clone(), effects)
                 .map_err(|e| {
-                    crate::LedgerError::InvalidEvent(format!("Failed to add device: {:?}", e))
+                    crate::AuraError::protocol_invalid_instruction(format!(
+                        "Failed to add device: {:?}",
+                        e
+                    ))
                 })?;
         }
 
@@ -197,7 +200,10 @@ impl BootstrapManager {
                 &mut rng,
             )
             .map_err(|e| {
-                crate::LedgerError::InvalidEvent(format!("FROST key generation failed: {}", e))
+                crate::AuraError::protocol_invalid_instruction(format!(
+                    "FROST key generation failed: {}",
+                    e
+                ))
             })?
         };
 
@@ -207,7 +213,10 @@ impl BootstrapManager {
         {
             let key_package =
                 frost_ed25519::keys::KeyPackage::try_from(secret_share).map_err(|e| {
-                    crate::LedgerError::InvalidEvent(format!("Key package creation failed: {}", e))
+                    crate::AuraError::protocol_invalid_instruction(format!(
+                        "Key package creation failed: {}",
+                        e
+                    ))
                 })?;
 
             // FROST identifiers serialize to a [u8; 2] containing the u16
@@ -224,7 +233,9 @@ impl BootstrapManager {
         // Update account state with FROST group key
         let frost_vk = pubkey_package.verifying_key();
         let group_public_key = aura_crypto::Ed25519VerifyingKey::from_bytes(&frost_vk.serialize())
-            .map_err(|e| crate::LedgerError::InvalidEvent(format!("Invalid group key: {}", e)))?;
+            .map_err(|e| {
+                crate::AuraError::protocol_invalid_instruction(format!("Invalid group key: {}", e))
+            })?;
 
         account_state.group_public_key = group_public_key;
         for device in account_state.devices.values_mut() {
@@ -249,19 +260,25 @@ impl BootstrapManager {
 
         // Create ledger and add genesis session
         let mut ledger = crate::AccountLedger::new(account_state).map_err(|e| {
-            crate::LedgerError::InvalidEvent(format!("Ledger creation failed: {}", e))
+            crate::AuraError::protocol_invalid_instruction(format!("Ledger creation failed: {}", e))
         })?;
 
         ledger.add_session(genesis_session, effects);
         ledger
             .update_session_status(genesis_session_id, crate::SessionStatus::Active, effects)
             .map_err(|e| {
-                crate::LedgerError::InvalidEvent(format!("Session update failed: {}", e))
+                crate::AuraError::protocol_invalid_instruction(format!(
+                    "Session update failed: {}",
+                    e
+                ))
             })?;
         ledger
             .complete_session(genesis_session_id, crate::SessionOutcome::Success, effects)
             .map_err(|e| {
-                crate::LedgerError::InvalidEvent(format!("Session completion failed: {}", e))
+                crate::AuraError::protocol_invalid_instruction(format!(
+                    "Session completion failed: {}",
+                    e
+                ))
             })?;
 
         // Bootstrap capabilities
@@ -396,10 +413,8 @@ impl BootstrapManager {
         let signers: Vec<u8> = (0..config.initial_devices.len() as u8).collect();
 
         // Create signature shares for each signer using real signature
-        let signature_shares: Vec<Vec<u8>> = signers
-            .iter()
-            .map(|_| real_signature.to_vec())
-            .collect();
+        let signature_shares: Vec<Vec<u8>> =
+            signers.iter().map(|_| real_signature.to_vec()).collect();
 
         Ok(ThresholdSig {
             signature: real_signature,
@@ -416,7 +431,6 @@ impl BootstrapManager {
         config: &BootstrapConfig,
         effects: &aura_crypto::Effects,
     ) -> crate::Result<aura_crypto::Ed25519Signature> {
-
         // Create deterministic signing key for bootstrap
         let seed = effects.random_bytes::<32>();
         let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&seed);
@@ -614,7 +628,6 @@ pub mod validation {
 
 /// Generate a deterministic test signature for non-production use
 fn generate_test_signature(effects: &aura_crypto::Effects) -> aura_crypto::Ed25519Signature {
-
     // Generate a deterministic test key from effects
     let mut rng = effects.rng();
     let key_material: [u8; 32] = rand::Rng::gen(&mut rng);
@@ -628,7 +641,6 @@ fn generate_test_signature(effects: &aura_crypto::Effects) -> aura_crypto::Ed255
 fn generate_frost_test_group_key(
     effects: &aura_crypto::Effects,
 ) -> crate::Result<aura_crypto::Ed25519VerifyingKey> {
-
     // Generate a deterministic key from effects that simulates FROST group key generation
     let mut rng = effects.rng();
     let group_key_material: [u8; 32] = rand::Rng::gen(&mut rng);

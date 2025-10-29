@@ -1,8 +1,9 @@
 //! Agent trait definitions for the unified agent implementation
 
-use crate::{DerivedIdentity, Result};
+use crate::{AgentError, DerivedIdentity, Result, StorageStats};
 use async_trait::async_trait;
 use aura_types::{AccountId, DeviceId};
+use serde::{Deserialize, Serialize};
 
 /// Core Agent trait that defines the public-facing API
 ///
@@ -43,9 +44,9 @@ pub trait CoordinatingAgent: Agent {
     async fn check_protocol_status(&self) -> Result<crate::ProtocolStatus>;
 
     /// Get detailed status of all active sessions
-    async fn get_detailed_session_status(&self) -> Result<Vec<aura_coordination::SessionStatusInfo>>;
+    async fn get_detailed_session_status(&self) -> Result<Vec<aura_protocol::SessionStatusInfo>>;
 
-    /// Check if any sessions are in a failed state that requires intervention  
+    /// Check if any sessions are in a failed state that requires intervention
     async fn has_failed_sessions(&self) -> Result<bool>;
 
     /// Get the time remaining before any active sessions timeout
@@ -174,4 +175,139 @@ pub trait StorageAgent: Send + Sync {
 
     /// Test access to data using device credentials (simulates cross-device access)
     async fn test_access_with_device(&self, data_id: &str, device_id: DeviceId) -> Result<bool>;
+}
+
+/// Transport layer trait for network communication
+///
+/// This is a simplified adapter over the `aura-transport` crate's Transport trait,
+/// providing a cleaner API for the agent layer.
+#[async_trait]
+pub trait Transport: Send + Sync + 'static {
+    /// Get the device ID for this transport
+    fn device_id(&self) -> DeviceId;
+
+    /// Send a message to a peer
+    async fn send_message(&self, peer_id: DeviceId, message: &[u8]) -> Result<()>;
+
+    /// Receive messages (non-blocking, with default timeout)
+    async fn receive_messages(&self) -> Result<Vec<(DeviceId, Vec<u8>)>>;
+
+    /// Connect to a peer
+    async fn connect(&self, peer_id: DeviceId, endpoint: &str) -> Result<()>;
+
+    /// Disconnect from a peer
+    async fn disconnect(&self, peer_id: DeviceId) -> Result<()>;
+
+    /// Get list of connected peers
+    async fn get_connected_peers(&self) -> Result<Vec<DeviceId>>;
+
+    /// Check if connected to a peer
+    async fn is_connected(&self, peer_id: DeviceId) -> Result<bool>;
+}
+
+/// Adapter to use transport crate implementations with agent Transport trait
+///
+/// This allows us to use `aura-transport` implementations (like NoiseTcpTransport)
+/// with the agent's Transport trait API.
+pub struct TransportAdapter<T: aura_transport::Transport + 'static> {
+    inner: std::sync::Arc<T>,
+    device_id: DeviceId,
+    receive_timeout: std::time::Duration,
+}
+
+impl<T: aura_transport::Transport + 'static> TransportAdapter<T> {
+    /// Create a new transport adapter
+    pub fn new(transport: std::sync::Arc<T>, device_id: DeviceId) -> Self {
+        Self {
+            inner: transport,
+            device_id,
+            receive_timeout: std::time::Duration::from_millis(100),
+        }
+    }
+
+    /// Set the receive timeout
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.receive_timeout = timeout;
+        self
+    }
+}
+
+#[async_trait]
+impl<T: aura_transport::Transport + 'static> Transport for TransportAdapter<T> {
+    fn device_id(&self) -> DeviceId {
+        self.device_id
+    }
+
+    async fn send_message(&self, peer_id: DeviceId, message: &[u8]) -> Result<()> {
+        self.inner
+            .send_to_peer(peer_id, message)
+            .await
+            .map_err(|e| AgentError::transport_failed(format!("Transport error: {}", e)))
+    }
+
+    async fn receive_messages(&self) -> Result<Vec<(DeviceId, Vec<u8>)>> {
+        // Collect messages with timeout
+        let mut messages = Vec::new();
+        loop {
+            match self.inner.receive_message(self.receive_timeout).await {
+                Ok(Some((device_id, msg))) => {
+                    messages.push((device_id, msg));
+                }
+                Ok(None) | Err(_) => break,
+            }
+        }
+        Ok(messages)
+    }
+
+    async fn connect(&self, peer_id: DeviceId, _endpoint: &str) -> Result<()> {
+        self.inner
+            .connect_to_peer(peer_id)
+            .await
+            .map(|_| ())
+            .map_err(|e| AgentError::transport_connection_failed(format!("Connect error: {}", e)))
+    }
+
+    async fn disconnect(&self, peer_id: DeviceId) -> Result<()> {
+        self.inner
+            .disconnect_from_peer(peer_id)
+            .await
+            .map_err(|e| AgentError::transport_failed(format!("Disconnect error: {}", e)))
+    }
+
+    async fn get_connected_peers(&self) -> Result<Vec<DeviceId>> {
+        // Transport crate doesn't have this directly, we'll collect from connections
+        let connections = self.inner.get_connections();
+        // This needs the connection type to expose device_id - for now return empty
+        // TODO: Enhance transport crate's Connection trait to expose peer DeviceId
+        Ok(Vec::new())
+    }
+
+    async fn is_connected(&self, peer_id: DeviceId) -> Result<bool> {
+        Ok(self.inner.is_peer_reachable(peer_id).await)
+    }
+}
+
+/// Storage layer trait for persistence
+#[async_trait]
+pub trait Storage: Send + Sync + 'static {
+    /// Get the account ID for this storage
+    fn account_id(&self) -> AccountId;
+
+    /// Store data with a given key
+    async fn store(&self, key: &str, data: &[u8]) -> Result<()>;
+
+    /// Retrieve data by key
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>>;
+
+    /// Delete data by key
+    async fn delete(&self, key: &str) -> Result<()>;
+
+    /// List all keys
+    async fn list_keys(&self) -> Result<Vec<String>>;
+
+    /// Check if a key exists
+    async fn exists(&self, key: &str) -> Result<bool>;
+
+    /// Get storage statistics
+    async fn stats(&self) -> Result<StorageStats>;
 }

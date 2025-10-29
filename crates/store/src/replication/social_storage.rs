@@ -9,10 +9,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub type AccountId = Vec<u8>;
-pub type DeviceId = Vec<u8>;
-pub type PeerId = Vec<u8>;
-
 /// Trust level for storage relationships
 ///
 /// Represents the minimum trust level required for storage relationships.

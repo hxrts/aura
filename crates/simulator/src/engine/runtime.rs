@@ -7,7 +7,7 @@
 //!
 //! The runtime never fabricates effects - it only processes what participants produce.
 
-use crate::{Effect, Envelope, ParticipantId, Result, SimError, SimulatedNetwork, Tick};
+use crate::{Effect, Envelope, ParticipantId, Result, AuraError, SimulatedNetwork, Tick};
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -81,7 +81,7 @@ impl SideEffectRuntime {
             while let Ok(effect) = self
                 .effect_sources
                 .get_mut(&participant)
-                .ok_or(SimError::ParticipantNotFound(participant))?
+                .ok_or(AuraError::device_not_found(participant))?
                 .try_recv()
             {
                 self.process_effect(participant, effect)?;
@@ -99,7 +99,7 @@ impl SideEffectRuntime {
                 // Forward to network
                 self.network
                     .enqueue_message(envelope)
-                    .map_err(|e| SimError::NetworkError(e.to_string()))?;
+                    .map_err(|e| AuraError::NetworkError(e.to_string()))?;
             }
 
             Effect::WriteToLocalLedger {
@@ -120,7 +120,7 @@ impl SideEffectRuntime {
                 let _storage = self
                     .participant_storage
                     .get(&participant)
-                    .ok_or(SimError::ParticipantNotFound(participant))?;
+                    .ok_or(AuraError::device_not_found(participant))?;
 
                 // In a full implementation, we'd send the value back to the participant
                 // For now, storage reads are synchronous within the participant
@@ -135,7 +135,7 @@ impl SideEffectRuntime {
                 let storage = self
                     .participant_storage
                     .get_mut(&participant)
-                    .ok_or(SimError::ParticipantNotFound(participant))?;
+                    .ok_or(AuraError::device_not_found(participant))?;
 
                 storage.insert(key, value);
             }
@@ -221,7 +221,7 @@ impl EffectSink {
     pub fn emit(&self, effect: Effect) -> Result<()> {
         self.sender
             .send(effect)
-            .map_err(|e| SimError::EffectError(format!("Failed to send effect: {}", e)))
+            .map_err(|e| AuraError::EffectError(format!("Failed to send effect: {}", e)))
     }
 
     /// Get participant ID

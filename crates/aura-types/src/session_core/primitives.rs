@@ -3,6 +3,8 @@
 //! This module defines the fundamental abstractions for session types in Aura's
 //! choreographic programming model.
 
+#![allow(clippy::result_large_err)] // ErrorContext provides valuable debugging info
+
 use crate::{errors::SessionError, RuntimeWitness};
 use serde::{Deserialize, Serialize};
 use std::fmt;

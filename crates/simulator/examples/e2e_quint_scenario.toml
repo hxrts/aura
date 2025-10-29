@@ -26,7 +26,7 @@ description = "Initialize DKD session with threshold participants"
 
   [[phases.actions]]
   type = "run_choreography"
-  choreography_type = "dkd_init"
+  choreography = "dkd"
   participants = ["participant_0", "participant_1", "participant_2"]
   
     [phases.actions.parameters]
@@ -48,29 +48,9 @@ name = "protocol_execution"
 description = "Execute DKD protocol steps"
 
   [[phases.actions]]
-  type = "run_choreography"
-  choreography_type = "dkd_advance"
-  participants = ["participant_0", "participant_1"]
-  
-    [phases.actions.parameters]
-    new_state = "commitment"
-
-  [[phases.actions]]
-  type = "wait_ticks"
-  ticks = 3
-
-  [[phases.actions]]
   type = "verify_property"
   property = "sessionLimit"
   expected = true
-
-  [[phases.actions]]
-  type = "run_choreography"
-  choreography_type = "dkd_advance"
-  participants = ["participant_1", "participant_2"]
-  
-    [phases.actions.parameters]
-    new_state = "complete"
 
   [[phases.actions]]
   type = "wait_ticks"

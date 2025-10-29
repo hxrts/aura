@@ -1,53 +1,100 @@
+//! SSB Gossip Protocol Implementation
+//!
+//! Implements the gossip protocol for SSB envelope distribution with:
+//! - Active neighbor management with trust-based selection
+//! - Rate limiting and exponential backoff for failed merges
+//! - Peer discovery through neighbor lists
+//! - Envelope expiry and garbage collection
+
 use std::collections::BTreeMap;
 
-use crate::envelope::{Cid, Envelope};
 use crate::error::{TransportErrorBuilder, TransportResult};
+use crate::infrastructure::envelope::{Cid, Envelope};
 
+/// Peer identifier (device ID)
 pub type PeerId = Vec<u8>;
+
+/// Account identifier
 pub type AccountId = Vec<u8>;
 
+/// Trust level for peer relationships
+///
+/// Determines how much we trust a peer for gossip operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustLevel {
+    /// Direct relationship (highest trust)
     Direct,
+    /// One degree of separation
     OneDegree,
+    /// Two degrees of separation (lowest trust)
     TwoDegree,
 }
 
+/// Authentication information for a peer
+///
+/// Contains verified device and account identifiers with trust level.
 #[derive(Debug, Clone)]
 pub struct PeerAuthentication {
+    /// Device identifier for this peer
     pub device_id: Vec<u8>,
+    /// Account this device belongs to
     pub account_id: AccountId,
+    /// Last successful authentication timestamp
     pub last_authenticated: u64,
+    /// Trust level for this peer
     pub trust_level: TrustLevel,
 }
 
+/// Permissions granted to a peer
+///
+/// Controls what operations this peer can perform through our node.
 #[derive(Debug, Clone)]
 pub struct PeerPermissions {
+    /// Relay operation permissions
     pub relay_permissions: Vec<String>,
+    /// Communication operation permissions
     pub communication_permissions: Vec<String>,
+    /// Storage operation permissions
     pub storage_permissions: Vec<String>,
+    /// Granted capability tokens
     pub granted_capabilities: Vec<Vec<u8>>,
+    /// Last permission update timestamp
     pub last_permission_update: u64,
 }
 
+/// Information about an active gossip neighbor
+///
+/// Active neighbors are peers we actively exchange envelopes with.
 #[derive(Debug, Clone)]
 pub struct NeighborInfo {
+    /// Peer identifier
     pub peer_id: PeerId,
+    /// Authentication information
     pub authentication: PeerAuthentication,
+    /// Granted permissions
     pub permissions: PeerPermissions,
+    /// When this neighbor was added
     pub added_at: u64,
 }
 
+/// History of merge operations with a peer
+///
+/// Tracks success/failure for rate limiting and backoff.
 #[derive(Debug, Clone)]
 pub struct MergeHistory {
+    /// Last successful merge timestamp
     pub last_merge_at: u64,
+    /// Total number of successful merges
     pub merge_count: u64,
+    /// Number of consecutive failures
     pub consecutive_failures: u32,
+    /// Timestamp until which peer is backed off
     pub backoff_until: u64,
 }
 
 impl MergeHistory {
-    pub fn new(now: u64) -> Self {
+    /// Create new merge history
+    pub fn new(_now: u64) -> Self {
         Self {
             last_merge_at: 0,
             merge_count: 0,
@@ -56,6 +103,7 @@ impl MergeHistory {
         }
     }
 
+    /// Record a successful merge
     pub fn record_success(&mut self, now: u64) {
         self.last_merge_at = now;
         self.merge_count += 1;
@@ -63,28 +111,35 @@ impl MergeHistory {
         self.backoff_until = now;
     }
 
+    /// Record a failed merge with exponential backoff
     pub fn record_failure(&mut self, now: u64) {
         self.consecutive_failures += 1;
         let backoff_ms = 1000u64 * 2u64.pow(self.consecutive_failures.min(10));
         self.backoff_until = now + backoff_ms;
     }
 
+    /// Check if merge is allowed (not in backoff period)
     pub fn can_merge(&self, now: u64) -> bool {
         now >= self.backoff_until
     }
 }
 
+/// Rate limiter for merge operations
+///
+/// Prevents excessive merge attempts by enforcing minimum intervals.
 pub struct RateLimiter {
     min_merge_interval_ms: u64,
 }
 
 impl RateLimiter {
+    /// Create new rate limiter with minimum merge interval
     pub fn new(min_merge_interval_ms: u64) -> Self {
         Self {
             min_merge_interval_ms,
         }
     }
 
+    /// Check if merge is allowed under rate limit
     pub fn check_rate_limit(&self, history: &MergeHistory, now: u64) -> bool {
         if !history.can_merge(now) {
             return false;
@@ -94,14 +149,26 @@ impl RateLimiter {
     }
 }
 
+/// Metadata about a locally stored envelope
 #[derive(Debug, Clone)]
 pub struct EnvelopeMetadata {
+    /// Content identifier for this envelope
     pub cid: Cid,
+    /// When envelope was added to local store
     pub added_at: u64,
+    /// Epoch at which this envelope expires
     pub expires_at_epoch: u64,
+    /// Size in bytes
     pub size_bytes: usize,
 }
 
+/// SSB Gossip protocol implementation
+///
+/// Manages:
+/// - Active neighbors for envelope exchange
+/// - Known peers for potential promotion to neighbors
+/// - Local envelope storage with expiry
+/// - Rate limiting and backoff for merge operations
 pub struct SbbGossip {
     active_neighbors: BTreeMap<PeerId, NeighborInfo>,
     known_peers: BTreeMap<PeerId, PeerAuthentication>,
@@ -112,6 +179,11 @@ pub struct SbbGossip {
 }
 
 impl SbbGossip {
+    /// Create new SSB gossip instance
+    ///
+    /// # Arguments
+    /// * `max_active_neighbors` - Maximum number of active gossip neighbors
+    /// * `min_merge_interval_ms` - Minimum milliseconds between merge attempts
     pub fn new(max_active_neighbors: usize, min_merge_interval_ms: u64) -> Self {
         Self {
             active_neighbors: BTreeMap::new(),
@@ -123,6 +195,9 @@ impl SbbGossip {
         }
     }
 
+    /// Add a peer as an active gossip neighbor
+    ///
+    /// Initializes merge history for this neighbor.
     pub fn add_active_neighbor(&mut self, neighbor: NeighborInfo, now: u64) {
         let peer_id = neighbor.peer_id.clone();
         self.active_neighbors.insert(peer_id.clone(), neighbor);
@@ -131,18 +206,28 @@ impl SbbGossip {
             .or_insert_with(|| MergeHistory::new(now));
     }
 
+    /// Remove a peer from active neighbors
     pub fn remove_active_neighbor(&mut self, peer_id: &PeerId) {
         self.active_neighbors.remove(peer_id);
     }
 
+    /// Add a peer to known peers list
+    ///
+    /// Known peers can be promoted to active neighbors later.
     pub fn add_known_peer(&mut self, peer_id: PeerId, auth: PeerAuthentication) {
         self.known_peers.insert(peer_id, auth);
     }
 
+    /// Publish an envelope to active neighbors
+    ///
+    /// Adds envelope to local storage and initiates eager push to neighbors
+    /// that are within rate limits.
+    ///
+    /// Returns list of peers the envelope was pushed to.
     pub fn publish_envelope(
         &mut self,
         cid: Cid,
-        envelope: &Envelope,
+        _envelope: &Envelope,
         expires_at_epoch: u64,
         now: u64,
     ) -> TransportResult<Vec<PeerId>> {
@@ -175,6 +260,9 @@ impl SbbGossip {
         Ok(pushed_to)
     }
 
+    /// Initiate a merge operation with a neighbor
+    ///
+    /// Checks rate limits and backoff before allowing merge.
     pub fn initiate_merge_with_neighbor(
         &mut self,
         peer_id: &PeerId,
@@ -200,6 +288,9 @@ impl SbbGossip {
         Ok(())
     }
 
+    /// Record successful merge with a neighbor
+    ///
+    /// Resets consecutive failure count and updates history.
     pub fn record_merge_success(&mut self, peer_id: &PeerId, now: u64) {
         self.merge_history
             .entry(peer_id.clone())
@@ -207,6 +298,9 @@ impl SbbGossip {
             .record_success(now);
     }
 
+    /// Record failed merge with a neighbor
+    ///
+    /// Applies exponential backoff and demotes neighbor after 3+ failures.
     pub fn record_merge_failure(&mut self, peer_id: &PeerId, now: u64) {
         self.merge_history
             .entry(peer_id.clone())
@@ -231,6 +325,9 @@ impl SbbGossip {
         }
     }
 
+    /// Promote a known peer to active neighbor
+    ///
+    /// Fails if maximum active neighbors limit is reached.
     pub fn promote_known_peer_to_neighbor(
         &mut self,
         peer_id: &PeerId,
@@ -260,6 +357,9 @@ impl SbbGossip {
         Ok(())
     }
 
+    /// Discover new peers from a neighbor's peer list
+    ///
+    /// Adds unknown peers to known peers list.
     pub fn discover_peers_from_neighbor(
         &mut self,
         neighbor_peers: Vec<(PeerId, PeerAuthentication)>,
@@ -273,6 +373,10 @@ impl SbbGossip {
         }
     }
 
+    /// Garbage collect expired envelopes
+    ///
+    /// Removes envelopes past their expiry epoch.
+    /// Returns list of removed envelope CIDs.
     pub fn gc_expired_envelopes(&mut self, current_epoch: u64) -> Vec<Cid> {
         let mut expired = Vec::new();
 
@@ -288,18 +392,22 @@ impl SbbGossip {
         expired
     }
 
+    /// Get number of active neighbors
     pub fn get_active_neighbor_count(&self) -> usize {
         self.active_neighbors.len()
     }
 
+    /// Get number of known peers
     pub fn get_known_peer_count(&self) -> usize {
         self.known_peers.len()
     }
 
+    /// Get number of locally stored envelopes
     pub fn get_envelope_count(&self) -> usize {
         self.local_envelopes.len()
     }
 
+    /// Get merge history for a peer
     pub fn get_merge_history(&self, peer_id: &PeerId) -> Option<&MergeHistory> {
         self.merge_history.get(peer_id)
     }
@@ -342,7 +450,7 @@ mod tests {
     }
 
     fn create_test_envelope() -> Envelope {
-        use crate::envelope::{Header, HeaderBare, RoutingTag};
+        use crate::infrastructure::envelope::{Header, HeaderBare, RoutingTag};
         let header_bare = HeaderBare {
             version: 1,
             epoch: 100,
@@ -387,10 +495,11 @@ mod tests {
         gossip.record_merge_success(&peer_id, 1000);
 
         let result = gossip.initiate_merge_with_neighbor(&peer_id, 1500);
-        assert!(matches!(
-            result,
-            Err(TransportErrorBuilder::transport("Rate limit exceeded"))
-        ));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Rate limit exceeded"));
 
         assert!(gossip.initiate_merge_with_neighbor(&peer_id, 2000).is_ok());
     }
@@ -470,10 +579,11 @@ mod tests {
 
         let result =
             gossip.promote_known_peer_to_neighbor(&peer_id, create_test_permissions(), 1000);
-        assert!(matches!(
-            result,
-            Err(TransportErrorBuilder::transport("No active neighbors"))
-        ));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No active neighbors"));
     }
 
     #[test]

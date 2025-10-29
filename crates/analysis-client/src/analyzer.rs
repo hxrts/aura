@@ -2,12 +2,11 @@
 
 use aura_console_types::{SimulationTrace, TraceEvent};
 use serde_wasm_bindgen::{from_value, to_value};
-use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 use crate::{
     causality::CausalityGraph,
-    console_error, console_log,
+    console_log,
     query::{EventFilter, TraceIndex},
 };
 
@@ -383,7 +382,7 @@ mod tests {
             checkpoints: vec![],
             participants: std::collections::HashMap::new(),
             network_topology: aura_console_types::NetworkTopology {
-                nodes: HashMap::new(),
+                nodes: std::collections::HashMap::new(),
                 edges: vec![],
                 partitions: vec![],
             },

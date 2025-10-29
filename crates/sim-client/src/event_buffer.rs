@@ -184,12 +184,12 @@ impl EventBuffer {
     /// Get the tick range of buffered events
     pub fn get_tick_range(&self) -> Option<(u64, u64)> {
         if self.events.is_empty() {
-            None
-        } else {
-            let min_tick = self.events.iter().map(|e| e.tick).min().unwrap();
-            let max_tick = self.events.iter().map(|e| e.tick).max().unwrap();
-            Some((min_tick, max_tick))
+            return None;
         }
+
+        let min_tick = self.events.iter().map(|e| e.tick).min()?;
+        let max_tick = self.events.iter().map(|e| e.tick).max()?;
+        Some((min_tick, max_tick))
     }
 }
 

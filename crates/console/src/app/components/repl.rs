@@ -43,9 +43,6 @@ pub fn Repl() -> impl IntoView {
     let execute_command = {
         let handler = handler.clone();
         let data_source_manager = data_source_manager.clone();
-        let set_history = set_history.clone();
-        let set_history_index = set_history_index.clone();
-        let set_current_command = set_current_command.clone();
 
         move |cmd: String| {
             if cmd.trim().is_empty() {

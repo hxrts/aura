@@ -29,7 +29,7 @@
 //! ```
 
 use crate::{Ed25519Signature, Ed25519VerifyingKey};
-use serde::{Deserialize, Deserializer, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Serde module for Ed25519 signatures
 ///
@@ -38,15 +38,18 @@ use serde::{Deserialize, Deserializer, Serializer};
 pub mod signature_serde {
     use super::*;
 
-    /// Serialize an Ed25519 signature to bytes
+    /// Serialize an Ed25519 signature to a sequence of bytes (CBOR compatible)
     pub fn serialize<S>(sig: &Ed25519Signature, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.serialize_bytes(&crate::ed25519_signature_to_bytes(sig))
+        // Use a sequence instead of bytes for CBOR compatibility
+        let bytes = crate::ed25519_signature_to_bytes(sig);
+        let seq: Vec<u8> = bytes.to_vec();
+        seq.serialize(serializer)
     }
 
-    /// Deserialize an Ed25519 signature from bytes
+    /// Deserialize an Ed25519 signature from a sequence of bytes
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Ed25519Signature, D::Error>
     where
         D: Deserializer<'de>,
@@ -94,6 +97,7 @@ mod tests {
     use super::*;
     use crate::Effects;
     use serde::{Deserialize, Serialize};
+    use serde_json;
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct SignatureContainer {
@@ -109,8 +113,8 @@ mod tests {
 
     #[test]
     fn test_signature_serde() {
-        let effects = Effects::test();
-        let (sk, pk) = crate::ed25519_keypair(&effects);
+        let sk = crate::generate_ed25519_key();
+        let _pk = crate::ed25519_verifying_key(&sk);
 
         // Sign some data
         let data = b"test data";
@@ -126,8 +130,8 @@ mod tests {
 
     #[test]
     fn test_verifying_key_serde() {
-        let effects = Effects::test();
-        let (_sk, pk) = crate::ed25519_keypair(&effects);
+        let sk = crate::generate_ed25519_key();
+        let pk = crate::ed25519_verifying_key(&sk);
 
         // Serialize and deserialize
         let container = KeyContainer { key: pk.clone() };
@@ -139,8 +143,8 @@ mod tests {
 
     #[test]
     fn test_cbor_signature_serde() {
-        let effects = Effects::test();
-        let (sk, _pk) = crate::ed25519_keypair(&effects);
+        let sk = crate::generate_ed25519_key();
+        let _pk = crate::ed25519_verifying_key(&sk);
 
         // Sign some data
         let data = b"test data";

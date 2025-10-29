@@ -105,6 +105,12 @@ impl From<EventId> for Uuid {
     }
 }
 
+/// Extension trait for EventId with Effects support
+pub trait EventIdExt {
+    /// Create a new event ID using Effects for deterministic randomness
+    fn new_with_effects(effects: &impl EffectsLike) -> Self;
+}
+
 /// Event nonce for ordering and uniqueness
 ///
 /// Provides ordering guarantees for events within sessions.
@@ -453,5 +459,30 @@ impl AccountIdExt for AccountId {
         // Create a deterministic UUID from the string
         let namespace = Uuid::NAMESPACE_DNS;
         AccountId(Uuid::new_v5(&namespace, id_str.as_bytes()))
+    }
+}
+
+impl EventIdExt for EventId {
+    fn new_with_effects(effects: &impl EffectsLike) -> Self {
+        EventId(effects.gen_uuid())
+    }
+}
+
+/// Extension trait for IndividualId with additional utility methods
+pub trait IndividualIdExt {
+    /// Create from device ID (device-specific identity)
+    fn from_device(device_id: &DeviceId) -> Self;
+    /// Create from DKD context (derived identity)
+    fn from_dkd_context(context: &str, fingerprint: &[u8; 32]) -> Self;
+}
+
+impl IndividualIdExt for IndividualId {
+    fn from_device(device_id: &DeviceId) -> Self {
+        Self(format!("device:{}", device_id.0))
+    }
+
+    fn from_dkd_context(context: &str, fingerprint: &[u8; 32]) -> Self {
+        let fingerprint_hex = hex::encode(fingerprint);
+        Self(format!("dkd:{}:{}", context, fingerprint_hex))
     }
 }

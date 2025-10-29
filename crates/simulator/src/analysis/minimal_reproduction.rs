@@ -4,10 +4,9 @@
 //! that reproduce failures. It systematically varies scenario parameters to find
 //! the simplest configuration that still triggers property violations.
 
-use crate::{
-    CheckpointSimulation, FailureAnalysisResult, PropertyMonitor, PropertyViolation, Result,
-    Scenario, SimError, SimulationResult,
-};
+use crate::analysis::{CheckpointSimulation, FailureAnalysisResult};
+use crate::scenario::Scenario;
+use crate::{AuraError, PropertyMonitor, PropertyViolation, Result, SimulationExecutionResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -298,7 +297,7 @@ pub struct ReproductionAttempt {
     /// Execution time (ms)
     pub execution_time_ms: u64,
     /// Simulation result
-    pub simulation_result: Option<SimulationResult>,
+    pub simulation_result: Option<SimulationExecutionResult>,
     /// Failure details if reproduction failed
     pub failure_details: Option<String>,
 }
@@ -323,17 +322,17 @@ pub struct ReproductionAnalysisStats {
 /// Binary search variation strategy
 pub struct BinarySearchStrategy {
     /// Current search parameters
-    search_parameters: Vec<String>,
+    _search_parameters: Vec<String>,
     /// Parameter importance ranking
-    parameter_importance: HashMap<String, f64>,
+    _parameter_importance: HashMap<String, f64>,
 }
 
 /// Greedy reduction strategy
 pub struct GreedyReductionStrategy {
     /// Parameters ordered by reduction impact
-    impact_ordered_parameters: Vec<(String, f64)>,
+    _impact_ordered_parameters: Vec<(String, f64)>,
     /// Reduction thresholds
-    reduction_thresholds: HashMap<String, f64>,
+    _reduction_thresholds: HashMap<String, f64>,
 }
 
 impl MinimalReproductionFinder {
@@ -458,7 +457,7 @@ impl MinimalReproductionFinder {
                     },
                 }
             } else {
-                return Err(SimError::AnalysisError(
+                return Err(AuraError::configuration_error(
                     "No minimal reproduction found".to_string(),
                 ));
             };
@@ -721,8 +720,8 @@ impl MinimalReproductionFinder {
 impl BinarySearchStrategy {
     fn new() -> Self {
         Self {
-            search_parameters: Vec::new(),
-            parameter_importance: HashMap::new(),
+            _search_parameters: Vec::new(),
+            _parameter_importance: HashMap::new(),
         }
     }
 }
@@ -770,8 +769,8 @@ impl ParameterVariationStrategy for BinarySearchStrategy {
 impl GreedyReductionStrategy {
     fn new() -> Self {
         Self {
-            impact_ordered_parameters: Vec::new(),
-            reduction_thresholds: HashMap::new(),
+            _impact_ordered_parameters: Vec::new(),
+            _reduction_thresholds: HashMap::new(),
         }
     }
 }
@@ -917,36 +916,46 @@ mod tests {
         Scenario {
             name: "test_scenario".to_string(),
             description: "Test scenario for minimal reproduction".to_string(),
-            tags: vec!["test".to_string()],
             setup: ScenarioSetup {
-                network: NetworkSetup {
-                    participant_count: 3,
-                    latency_ms: (10, 100),
-                    drop_rate: Some(0.1),
-                    partitions: None,
-                },
-                byzantine: Some(ByzantineSetup {
-                    byzantine_count: 1,
-                    strategies: vec!["message_delay".to_string()],
-                    parameters: None,
+                participants: 3,
+                threshold: 2,
+                seed: 42,
+                network_conditions: Some(NetworkConditions {
+                    latency_range: [10, 100],
+                    drop_rate: 0.1,
+                    partitions: vec![],
                 }),
-                participants: None,
+                byzantine_conditions: Some(ByzantineConditions {
+                    count: 1,
+                    participants: vec![],
+                    strategies: vec![LegacyByzantineStrategy {
+                        strategy_type: "message_delay".to_string(),
+                        description: None,
+                        abort_after: None,
+                    }],
+                }),
             },
-            execution: ScenarioExecution {
-                protocols: vec![ProtocolExecution {
-                    protocol_type: ProtocolType::Dkd,
-                    participants: None,
-                    parameters: None,
-                }],
-                environment: None,
-                assertions: vec![AssertionType::AllParticipantsDeriveSameKey],
-            },
-            metadata: ScenarioMetadata {
-                created_at: "2025-01-01T00:00:00Z".to_string(),
-                version: "1.0".to_string(),
-                author: "test".to_string(),
-                extends: None,
-            },
+            network: None,
+            byzantine: None,
+            phases: None,
+            protocols: Some(vec![ProtocolExecution {
+                protocol_type: ProtocolType::Dkd,
+                timeout_epochs: None,
+                context: None,
+                parameters: None,
+                new_threshold: None,
+                guardian_devices: None,
+            }]),
+            assertions: vec![ScenarioAssertion {
+                assertion_type: "all_participants_derive_same_key".to_string(),
+                honest_participants: None,
+                expected_detected: None,
+                expected_property: None,
+                timeout_multiplier: None,
+            }],
+            expected_outcome: ExpectedOutcome::Success,
+            extends: None,
+            quint_source: None,
         }
     }
 }

@@ -88,7 +88,6 @@ impl From<[u8; 32]> for RelationshipId {
     }
 }
 
-
 impl From<RelationshipId> for [u8; 32] {
     fn from(relationship_id: RelationshipId) -> Self {
         relationship_id.0

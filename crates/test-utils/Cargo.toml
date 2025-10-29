@@ -11,12 +11,27 @@ workspace = true
 
 [dependencies]
 # Workspace crates
+aura-agent = { path = "../agent" }
 aura-crypto = { path = "../crypto" }
 aura-journal = { path = "../journal" }
+aura-transport = { path = "../transport" }
 aura-types = { path = "../aura-types" }
+
+# Async runtime
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 
 # Cryptography provided through aura-crypto
 ed25519-dalek = { workspace = true }
+frost-ed25519 = { workspace = true }
+blake3 = { workspace = true }
+sha2 = { workspace = true }
+
+# Randomness
+rand = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }

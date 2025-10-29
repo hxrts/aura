@@ -13,10 +13,9 @@ use aura_simulator::{
         ParticipantStateSnapshot, PropertyMonitor, ProtocolExecutionState, QuintInvariant,
         SessionInfo, SimulationState,
     },
-    Result, SimError,
+    AuraError, Result,
 };
-use std::fs;
-use tempfile::TempDir;
+use std::{collections::HashMap, fs};
 
 #[test]
 fn test_dkd_quint_spec_e2e() -> Result<()> {
@@ -25,11 +24,11 @@ fn test_dkd_quint_spec_e2e() -> Result<()> {
 
     // Load the DKD Quint specification JSON
     let spec_json = fs::read_to_string("/tmp/dkd_spec.json")
-        .map_err(|e| SimError::PropertyError(format!("Failed to read DKD spec: {}", e)))?;
+        .map_err(|e| AuraError::configuration_error(format!("Failed to read DKD spec: {}", e)))?;
 
     // Verify it's valid JSON
     let spec: serde_json::Value = serde_json::from_str(&spec_json)
-        .map_err(|e| SimError::PropertyError(format!("Invalid JSON: {}", e)))?;
+        .map_err(|e| AuraError::configuration_error(format!("Invalid JSON: {}", e)))?;
 
     println!("[OK] Loaded DKD Quint specification");
     println!(
@@ -43,7 +42,7 @@ fn test_dkd_quint_spec_e2e() -> Result<()> {
 
     println!(
         "[stats] Created property monitor with {} invariants",
-        monitor.get_statistics().total_evaluations
+        monitor.get_metrics_snapshot().metrics.property_monitoring.total_evaluations
     );
 
     // Create simulation states representing DKD protocol execution
@@ -71,8 +70,8 @@ fn test_dkd_quint_spec_e2e() -> Result<()> {
                     violation.property_name, violation.violation_details.description
                 );
             }
-            return Err(SimError::PropertyError(
-                "DKD protocol property violations detected".to_string(),
+            return Err(AuraError::protocol_execution_failed(
+                "DKD protocol property violations detected",
             ));
         }
 
@@ -116,6 +115,7 @@ fn create_dkd_init_state() -> SimulationState {
     SimulationState {
         tick: 0,
         time: 0,
+        variables: HashMap::new(),
         participants: vec![
             ParticipantStateSnapshot {
                 id: "alice".to_string(),
@@ -149,6 +149,7 @@ fn create_dkd_commit_state() -> SimulationState {
     SimulationState {
         tick: 5,
         time: 500,
+        variables: HashMap::new(),
         participants: vec![
             ParticipantStateSnapshot {
                 id: "alice".to_string(),
@@ -192,6 +193,7 @@ fn create_dkd_reveal_state() -> SimulationState {
     SimulationState {
         tick: 10,
         time: 1000,
+        variables: HashMap::new(),
         participants: vec![
             ParticipantStateSnapshot {
                 id: "alice".to_string(),
@@ -235,6 +237,7 @@ fn create_dkd_derive_state() -> SimulationState {
     SimulationState {
         tick: 15,
         time: 1500,
+        variables: HashMap::new(),
         participants: vec![
             ParticipantStateSnapshot {
                 id: "alice".to_string(),
@@ -278,6 +281,7 @@ fn create_dkd_complete_state() -> SimulationState {
     SimulationState {
         tick: 20,
         time: 2000,
+        variables: HashMap::new(),
         participants: vec![
             ParticipantStateSnapshot {
                 id: "alice".to_string(),
@@ -321,15 +325,15 @@ fn create_default_network_state() -> NetworkStateSnapshot {
     NetworkStateSnapshot {
         partitions: vec![],
         message_stats: MessageDeliveryStats {
-            total_sent: 0,
-            total_delivered: 0,
-            total_dropped: 0,
+            messages_sent: 0,
+            messages_delivered: 0,
+            messages_dropped: 0,
             average_latency_ms: 10.0,
         },
         failure_conditions: NetworkFailureConditions {
             drop_rate: 0.0,
-            latency_range: (5, 20),
-            partition_count: 0,
+            latency_range_ms: (5, 20),
+            partitions_active: false,
         },
     }
 }
@@ -355,6 +359,7 @@ fn test_dkd_byzantine_scenario() -> Result<()> {
     let byzantine_state = SimulationState {
         tick: 10,
         time: 1000,
+        variables: HashMap::new(),
         participants: vec![
             ParticipantStateSnapshot {
                 id: "alice".to_string(),
@@ -393,7 +398,7 @@ fn test_dkd_byzantine_scenario() -> Result<()> {
         network_state: create_default_network_state(),
     };
 
-    let check_result = monitor.check_properties(&byzantine_state)?;
+    let _check_result = monitor.check_properties(&byzantine_state)?;
 
     println!("[OK] Byzantine scenario handled correctly");
     println!("   Protocol maintains safety despite Byzantine participant");
