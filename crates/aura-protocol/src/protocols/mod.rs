@@ -33,7 +33,6 @@ pub mod storage_lifecycle;
 // ========== Supporting Modules ==========
 pub mod base;
 pub mod capability_helper;
-pub mod frost_helpers;
 pub mod protocol_traits;
 pub mod traits;
 pub mod wrapper;
@@ -65,7 +64,6 @@ pub type StorageLifecycleError = aura_types::AuraError;
 
 // ========== Supporting Exports ==========
 pub use capability_helper::CapabilityProofBuilder;
-pub use frost_helpers::FrostKeyManager;
 pub use traits::*;
 pub use wrapper::{ProtocolWrapper, ProtocolWrapperBuilder, ProtocolWrapperError};
 
