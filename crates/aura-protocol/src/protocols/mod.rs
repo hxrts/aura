@@ -44,9 +44,7 @@ pub mod rendezvous;
 // ========== Protocol Lifecycle Exports ==========
 pub use counter_lifecycle::CounterLifecycle;
 pub use dkd_lifecycle::DkdLifecycle;
-pub use frost_lifecycle::{
-    FrostDkgLifecycle, FrostDkgResult, FrostSigningLifecycle, FrostSigningResult,
-};
+pub use frost_lifecycle::FrostSigningLifecycle;
 pub use group_lifecycle::GroupLifecycle;
 pub use locking_lifecycle::LockingLifecycle;
 pub use recovery_lifecycle::RecoveryLifecycle;
