@@ -39,15 +39,6 @@
 //! - `helpers.rs` - Shared test utility functions (~157 lines)
 //!   - Event creation helpers
 
-// Core network command dispatcher and enum
-// mod network_impl; // Commented out - module does not exist
-
-// Extracted operation modules
-pub mod capability_ops;
-pub mod group_ops;
-pub mod peer_ops;
-pub mod status_ops;
-
 // Test helper utilities
 pub mod helpers;
 

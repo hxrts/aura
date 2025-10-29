@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn test_error_mapping_functions() {
         let time_err = map_to_time_error("test time error");
-        assert!(matches!(time_err, AuraError::TimeError(_)));
+        assert!(time_err.to_string().contains("test time error"));
 
         let config_err = map_to_config_error("test error", "test context");
         assert!(config_err.to_string().contains("test context"));

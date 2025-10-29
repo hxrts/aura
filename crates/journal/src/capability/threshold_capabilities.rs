@@ -30,10 +30,6 @@ impl ThresholdParticipantId {
     }
 }
 
-// Re-export ParticipantId for backward compatibility (temporary)
-#[deprecated(since = "0.1.0", note = "Use ThresholdParticipantId instead")]
-pub type ParticipantId = ThresholdParticipantId;
-
 /// Threshold signature with signers
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThresholdSignature {

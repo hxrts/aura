@@ -6,7 +6,6 @@
 pub mod agent;
 pub mod context;
 pub mod context_safe;
-pub mod frost;
 pub mod frost_safe;
 pub mod local_transitions;
 pub mod session_errors;
@@ -16,7 +15,6 @@ pub mod wrapper;
 pub use agent::*;
 pub use context::*;
 pub use context_safe::*;
-pub use frost::*;
 pub use frost_safe::*;
 pub use local_transitions::*;
 pub use session_errors::{AgentSessionError, ContextSessionError, FrostSessionError};

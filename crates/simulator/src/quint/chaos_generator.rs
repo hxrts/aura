@@ -421,7 +421,7 @@ impl ChaosGenerator {
     }
     
     /// Create chaos-specific parameters
-    fn create_chaos_params(&self, chaos_type: &ChaosType, _property: &VerifiableProperty) -> HashMap<String, String> {
+    fn _create_chaos_params(&self, chaos_type: &ChaosType, _property: &VerifiableProperty) -> HashMap<String, String> {
         let mut params = HashMap::new();
         
         match chaos_type {

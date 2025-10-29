@@ -405,7 +405,7 @@ impl PropertyMonitor {
         })
     }
 
-    fn calculate_detection_confidence(&self) -> f64 {
+    fn _calculate_detection_confidence(&self) -> f64 {
         // Simple confidence calculation based on number of properties and trace quality
         let property_count =
             self.invariants.len() + self.temporal_properties.len() + self.safety_properties.len();
@@ -418,7 +418,7 @@ impl PropertyMonitor {
         (property_count as f64 / 10.0).min(1.0) * trace_quality
     }
 
-    fn collect_monitoring_metadata(&self) -> HashMap<String, String> {
+    fn _collect_monitoring_metadata(&self) -> HashMap<String, String> {
         let mut metadata = HashMap::new();
         metadata.insert(
             "total_properties".to_string(),

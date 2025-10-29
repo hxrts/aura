@@ -976,7 +976,7 @@ mod tests {
                 partitions: None,
             },
             protocol_disruptions: Vec::new(),
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { property: "test_property".to_string() },
             parameters: HashMap::new(),
         };
 
@@ -1005,7 +1005,7 @@ mod tests {
                 partitions: None,
             },
             protocol_disruptions: Vec::new(),
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { property: "test_property".to_string() },
             parameters: HashMap::new(),
         };
 
@@ -1034,7 +1034,7 @@ mod tests {
                 partitions: None,
             },
             protocol_disruptions: Vec::new(),
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { property: "test_property".to_string() },
             parameters: HashMap::new(),
         };
 
@@ -1064,7 +1064,7 @@ mod tests {
                 partitions: None,
             },
             protocol_disruptions: Vec::new(),
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation,
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { property: "test_property".to_string() },
             parameters: HashMap::new(),
         };
 

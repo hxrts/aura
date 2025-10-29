@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 //! Unit Tests: CRDT Merge Correctness
 //!
 //! Tests that CRDT merge operations work correctly for the account ledger.

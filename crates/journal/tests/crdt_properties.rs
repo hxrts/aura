@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 //! Property Tests: CRDT Convergence
 //!
 //! Tests fundamental CRDT properties that must hold for ledger merges.

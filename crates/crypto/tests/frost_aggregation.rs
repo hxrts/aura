@@ -1,4 +1,3 @@
-#![allow(warnings, clippy::all)]
 //! Unit Tests: FROST Signature Aggregation
 //!
 //! Tests FROST threshold signatures for multi-device coordination.

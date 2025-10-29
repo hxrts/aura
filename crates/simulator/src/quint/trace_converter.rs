@@ -906,6 +906,7 @@ mod tests {
                 participant_count: 0,
                 active_sessions: 0,
                 completed_sessions: 0,
+                state_hash: "test_state".to_string(),
             },
             violation_details: ViolationDetails {
                 description: "Test violation".to_string(),

@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 // Key Derivation Security Tests
 //
 // Tests security properties of the key derivation system:

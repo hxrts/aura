@@ -5,9 +5,9 @@
 //! tracking, and optimized evaluation strategies.
 
 use super::types::{
-    QuintValue, ValidationResult, PropertyEvaluationResult, SimulationState, PropertyPriority
+    QuintValue, ValidationResult, PropertyEvaluationResult, SimulationState
 };
-use super::properties::{VerifiableProperty, PropertyType};
+use super::properties::{VerifiableProperty, PropertyType, PropertyPriority};
 use crate::world_state::{WorldState, NetworkFailureConfig};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
@@ -194,9 +194,9 @@ struct CacheEntry {
     /// The evaluation result
     result: PropertyEvaluationResult,
     /// When this result was cached
-    cached_at: u64,
+    _cached_at: u64,
     /// State hash when this result was computed
-    state_hash: u64,
+    _state_hash: u64,
     /// Access count for LRU eviction
     access_count: u64,
 }
@@ -243,8 +243,8 @@ impl EvaluationCache {
 
         let entry = CacheEntry {
             result,
-            cached_at: crate::utils::time::current_unix_timestamp_millis(),
-            state_hash,
+            _cached_at: crate::utils::time::current_unix_timestamp_millis(),
+            _state_hash: state_hash,
             access_count: self.access_counter,
         };
 

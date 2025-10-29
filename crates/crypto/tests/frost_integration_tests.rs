@@ -3,7 +3,6 @@
 //! This test suite validates the complete FROST threshold signature implementation
 //! across crypto, coordination, agent, and journal layers.
 
-#![allow(warnings, clippy::all)]
 #![allow(clippy::expect_used, clippy::unwrap_used)] // Test code
 
 use aura_crypto::{

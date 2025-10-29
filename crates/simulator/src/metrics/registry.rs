@@ -171,6 +171,10 @@ impl GlobalMetrics {
     pub fn timer<S: Into<String>>(name: S, duration_ms: u64) {
         Self::default_collector().timer(&name.into(), duration_ms);
     }
+
+    pub fn timer_start<S: Into<String>>(name: S) -> crate::metrics::collector::TimerGuard {
+        Self::default_collector().timer_start(&name.into())
+    }
 }
 
 impl Default for MetricRegistry {

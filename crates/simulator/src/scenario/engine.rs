@@ -943,8 +943,8 @@ impl ChoreographyActionRegistry {
         Self {
             choreographies: HashMap::new(),
             protocols: HashMap::new(),
-            network_conditions: HashMap::new(),
-            byzantine_behaviors: HashMap::new(),
+            _network_conditions: HashMap::new(),
+            _byzantine_behaviors: HashMap::new(),
         }
     }
 

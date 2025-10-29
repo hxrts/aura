@@ -2,6 +2,7 @@
 
 use super::*;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// Metrics collector implementation
 #[derive(Debug, Clone)]
@@ -33,6 +34,30 @@ impl MetricsSnapshot {
                 MetricValue::Counter(value) => Some(*value),
                 _ => None,
             })
+    }
+}
+
+/// Timer guard that records duration when dropped
+pub struct TimerGuard {
+    name: String,
+    start_time: Instant,
+    collector: MetricsCollector,
+}
+
+impl TimerGuard {
+    fn new(name: String, collector: MetricsCollector) -> Self {
+        Self {
+            name,
+            start_time: Instant::now(),
+            collector,
+        }
+    }
+}
+
+impl Drop for TimerGuard {
+    fn drop(&mut self) {
+        let duration_ms = self.start_time.elapsed().as_millis() as u64;
+        self.collector.timer(&self.name, duration_ms);
     }
 }
 
@@ -104,6 +129,11 @@ impl MetricsCollector {
         } else {
             None
         }
+    }
+
+    /// Start a timer that will record duration when dropped
+    pub fn timer_start(&self, name: &str) -> TimerGuard {
+        TimerGuard::new(name.to_string(), self.clone())
     }
 }
 

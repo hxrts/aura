@@ -692,11 +692,7 @@ impl RelationshipId {
 }
 
 /// Get current unix timestamp in seconds using injected effects
-pub fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> crate::Result<u64> {
-    effects.now().map_err(|e| {
-        crate::AuraError::serialization_failed(format!("Failed to get current timestamp: {}", e))
-    })
-}
+
 
 // ========== Storage Operations ==========
 
@@ -709,7 +705,7 @@ pub struct StoreDataEvent {
     pub size_bytes: u64,
     /// Required capabilities for access control
     pub required_capabilities: Vec<String>, // Capability IDs as strings
-    /// Number of replicas to maintain  
+    /// Number of replicas to maintain
     pub replication_factor: u8,
     /// Encryption key derivation specification
     pub encryption_key_spec: KeyDerivationSpec,

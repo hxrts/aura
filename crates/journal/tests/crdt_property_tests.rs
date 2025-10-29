@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 // DISABLED: This test uses an outdated journal API that has been refactored
 // TODO: Update tests to use the new Event/AccountLedger system
 #![cfg(disabled)]

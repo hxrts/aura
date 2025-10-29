@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 //! Integration Tests: Capability Grant and Revoke
 //!
 //! Tests the full lifecycle of capability management including grant, use, and revocation.

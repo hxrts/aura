@@ -544,8 +544,9 @@ impl AccountState {
 }
 
 /// Get current Unix timestamp in seconds using injected effects
-pub fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> u64 {
-    effects.now().unwrap_or(0)
+/// Wrapper that returns 0 on error (for state management where timestamp is not critical)
+fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> u64 {
+    aura_crypto::current_timestamp_with_effects(effects).unwrap_or(0)
 }
 
 mod verifying_key_serde {

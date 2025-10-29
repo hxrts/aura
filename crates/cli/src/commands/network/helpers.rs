@@ -2,8 +2,6 @@
 //!
 //! Provides utility functions for creating test events and managing test data.
 
-#![allow(dead_code)]
-
 use aura_authentication::EventAuthorization;
 use aura_crypto::Effects;
 use aura_journal::{Event, EventType};

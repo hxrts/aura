@@ -88,8 +88,6 @@
 //! }
 //! ```
 
-#![allow(missing_docs, dead_code, unused_imports, unused_variables, clippy::all)]
-
 // Re-export commonly used types and traits for convenience
 use serde::{Deserialize, Serialize};
 pub use tokio::sync::RwLock;

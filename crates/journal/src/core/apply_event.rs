@@ -118,8 +118,4 @@ impl AccountState {
 }
 
 /// Get current Unix timestamp in seconds using injected effects
-pub fn current_timestamp_with_effects(effects: &aura_crypto::Effects) -> crate::Result<u64> {
-    effects.now().map_err(|e| {
-        AuraError::serialization_failed(format!("Failed to get current timestamp: {}", e))
-    })
-}
+// Use aura_crypto::current_timestamp_with_effects directly

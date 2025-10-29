@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 // Replay and Freshness Protection Tests
 //
 // Tests security properties related to replay attacks and message freshness:

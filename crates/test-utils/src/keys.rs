@@ -38,7 +38,7 @@ impl KeyTestFixture {
         let mut hasher = Sha256::new();
         hasher.update(seed.as_bytes());
         let digest = hasher.finalize();
-        #[allow(deprecated)]
+
         let seed_bytes: [u8; 32] = digest.as_slice()[..32]
             .try_into()
             .unwrap_or_else(|_| [0u8; 32]);

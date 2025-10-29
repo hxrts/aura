@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 //! Unit Tests: Injected Effects
 //!
 //! Tests that the Effects system provides deterministic time and randomness for testing.

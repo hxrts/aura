@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 //! Unit Tests: Capability Token Creation and Verification
 //!
 //! Tests basic capability token functionality that both SSB and Storage depend on.

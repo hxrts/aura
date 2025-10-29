@@ -7,17 +7,10 @@
 //! - Transport and Storage trait abstractions
 //! - Security validation and reporting
 
-use crate::transport_adapter::TransportAdapterFactory;
-use aura_crypto::Effects as CoreEffects;
 use aura_journal::{
-    capability::unified_manager::{UnifiedCapabilityManager, VerificationContext},
     capability::{Permission, StorageOperation},
-    AccountLedger, AccountState, DeviceMetadata, DeviceType, Result as JournalResult,
 };
-use aura_protocol::{
-    local_runtime::LocalSessionRuntime, SessionStatusInfo, Transport as CoordinationTransport,
-};
-use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt, GuardianId, SessionStatus};
+use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

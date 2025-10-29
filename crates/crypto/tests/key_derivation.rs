@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 //! Unit Tests: Separated Key Derivation
 //!
 //! Tests key derivation with separated identity and permission contexts.

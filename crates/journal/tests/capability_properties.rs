@@ -1,4 +1,4 @@
-#![allow(warnings, clippy::all)]
+
 //! Property Tests: Capability Token Invariants
 //!
 //! Tests fundamental properties that must hold for ALL capability tokens.
