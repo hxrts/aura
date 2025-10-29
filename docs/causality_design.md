@@ -56,7 +56,7 @@ Layer 2 is the choreographic language. It provides protocol specification, sessi
 
 The VM executes compiled protocols with deterministic semantics. Each protocol runs in an isolated environment with explicit resource tracking. The execution trace is recorded for verification and debugging.
 
-Execution begins when the runtime loads a protocol by its EntityId. The protocol specifies inputs, outputs, and constraints. The runtime resolves dependencies, allocates resources, and begins instruction dispatch. Effects are routed to registered handlers. Results are content-addressed and stored.
+Execution begins when the runtime loads a protocol by its `EntityId`. The protocol specifies inputs, outputs, and constraints. The runtime resolves dependencies, allocates resources, and begins instruction dispatch. Effects are routed to registered handlers. Results are content-addressed and stored.
 
 The register file contains 32 general-purpose registers following RISC conventions. Each register tracks whether it contains a valid linear resource. Instructions validate resource linearity before execution. Violations cause immediate failure with detailed error reporting.
 
@@ -147,7 +147,7 @@ impl HashFunction for Sha256Hasher {
         hasher.update(data);
         hasher.finalize().into()
     }
-    
+
     fn name(&self) -> &'static str {
         "sha256"
     }
@@ -162,7 +162,7 @@ impl EntityId {
     pub fn from_ssz<T: SimpleSerialize>(value: &T, hasher: &dyn HashFunction) -> Self {
         let ssz_bytes = value.serialize();
         let hash = hasher.hash(&ssz_bytes);
-        EntityId { 
+        EntityId {
             hash,
             hash_fn: hasher.name(),
         }
@@ -188,11 +188,11 @@ Each entry pairs a transform EntityId with a native function. The native functio
 
 Recognition happens during compilation. The compiler checks each transform against the registry. When a match is found the compiler emits a native call instruction instead of interpretable code. The native function is invoked directly at runtime.
 
-Cryptographic operations are primary candidates. HMAC-SHA256 has an optimized native implementation. Ed25519 signing and verification use ed25519-dalek. Scalar operations use curve25519-dalek. These are orders of magnitude faster than interpretation.
+Cryptographic operations are primary candidates. HMAC-SHA256 has an optimized native implementation. Ed25519 signing and verification use ed25519-dalek, scalar operations use curve25519-dalek, which are orders of magnitude faster than interpretation.
 
 The registry is extensible. Platform-specific optimizations can be added without changing protocol code. New native implementations are registered at initialization. The VM automatically uses them when available.
 
-Verification of isomorphisms is critical. Property-based testing runs both implementations on thousands of random inputs and checks equivalence. For cryptographic operations formal verification proves mathematical equivalence. Failed verification prevents registration.
+Verification of isomorphisms is critical. Ideally, property-based testing runs both implementations on thousands of random inputs and checks equivalence. For cryptographic operations, formal verification can prove mathematical equivalence. Failed verification prevents registration.
 
 ## Implementation Strategy
 
@@ -242,9 +242,9 @@ Expected duration is five weeks. The result is a working choreographic language 
 
 Implement platform effect handlers. Create secure storage handlers for macOS Keychain, Linux Secret Service, and Android Keystore. Implement network handlers using Aura transport. Add crypto handlers for FROST operations. Create randomness and time handlers.
 
-Build the type bridge between Aura and VM types. Implement ToCausality for DeviceId, KeyShare, AccountId, and Journal events. Implement FromCausality for all result types. Add serialization using SSZ. Validate round-trip conversion.
+Build the type bridge between Aura and VM types. Implement `ToCausality` for DeviceId, KeyShare, AccountId, and Journal events. Implement `FromCausality` for all result types. Add serialization using SSZ. Validate round-trip conversion.
 
-Create the protocol API layer. Implement derive_key for DKD. Implement frost_sign for threshold signatures. Implement recover_shares for recovery protocol. Implement sync_journal for CRDT synchronization. Each method creates an intent, compiles it, executes with handlers, and converts results.
+Create the protocol API layer. Implement `derive_key` for DKD. Implement `frost_sign` for threshold signatures. Implement `recover_shares` for recovery protocol. Implement `sync_journal` for CRDT synchronization. Each method creates an intent, compiles it, executes with handlers, and converts results.
 
 Write protocol definitions in the choreographic language. Define DKD as a pure transform. Define FROST as a multi-round distributed protocol. Define recovery as a request-response protocol. Define Journal sync as a bidirectional exchange.
 
@@ -254,7 +254,7 @@ Expected duration is four weeks. The result is full integration with Aura enabli
 
 ### Phase 5: Optimization and Polish
 
-Implement protocol caching. Cache compiled protocols by EntityId. Share cached protocols across devices. Implement cache invalidation on updates. Measure cache hit rates.
+Implement protocol caching. Cache compiled protocols by `EntityId`. Share cached protocols across devices. Implement cache invalidation on updates. Measure cache hit rates.
 
 Add execution optimizations. Implement instruction fusion for common patterns. Add constant folding and dead code elimination. Optimize register allocation. Measure performance improvements.
 

@@ -541,6 +541,79 @@ impl AccountState {
     }
 
     // Lamport clock methods moved earlier in file (lines 271-285)
+
+    /// Validate that a capability delegation is authorized
+    pub fn validate_capability_delegation(
+        &self,
+        event: &crate::capability::events::CapabilityDelegation,
+        effects: &aura_crypto::Effects,
+    ) -> crate::Result<()> {
+        use crate::capability::types::{CapabilityResult, CapabilityScope, Subject};
+
+        // Convert issuing device to subject
+        let issuer_subject = Subject::new(&event.issued_by.0.to_string());
+
+        // For root authorities, only threshold signature authorization is allowed
+        if event.parent_id.is_none() {
+            return Ok(()); // Root authority creation is always allowed with threshold signature
+        }
+
+        // For derived capabilities, check that issuer has delegation authority
+        let delegation_scope = CapabilityScope::simple("capability", "delegate");
+        let result =
+            self.authority_graph
+                .evaluate_capability(&issuer_subject, &delegation_scope, effects);
+
+        match result {
+            CapabilityResult::Granted => Ok(()),
+            CapabilityResult::Revoked => Err(crate::AuraError::capability_system_error(format!(
+                "Issuer {} capability was revoked",
+                event.issued_by.0
+            ))),
+            CapabilityResult::Expired => Err(crate::AuraError::capability_system_error(format!(
+                "Issuer {} capability has expired",
+                event.issued_by.0
+            ))),
+            CapabilityResult::NotFound => Err(crate::AuraError::capability_system_error(format!(
+                "Issuer {} does not have delegation authority",
+                event.issued_by.0
+            ))),
+        }
+    }
+
+    /// Validate that a capability revocation is authorized
+    pub fn validate_capability_revocation(
+        &self,
+        event: &crate::capability::events::CapabilityRevocation,
+        effects: &aura_crypto::Effects,
+    ) -> crate::Result<()> {
+        use crate::capability::types::{CapabilityResult, CapabilityScope, Subject};
+
+        // Convert issuing device to subject
+        let issuer_subject = Subject::new(&event.issued_by.0.to_string());
+
+        // Check that issuer has revocation authority
+        let revocation_scope = CapabilityScope::simple("capability", "revoke");
+        let result =
+            self.authority_graph
+                .evaluate_capability(&issuer_subject, &revocation_scope, effects);
+
+        match result {
+            CapabilityResult::Granted => Ok(()),
+            CapabilityResult::Revoked => Err(crate::AuraError::capability_system_error(format!(
+                "Issuer {} capability was revoked",
+                event.issued_by.0
+            ))),
+            CapabilityResult::Expired => Err(crate::AuraError::capability_system_error(format!(
+                "Issuer {} capability has expired",
+                event.issued_by.0
+            ))),
+            CapabilityResult::NotFound => Err(crate::AuraError::capability_system_error(format!(
+                "Issuer {} does not have revocation authority",
+                event.issued_by.0
+            ))),
+        }
+    }
 }
 
 /// Get current Unix timestamp in seconds using injected effects

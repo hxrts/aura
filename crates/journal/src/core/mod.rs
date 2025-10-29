@@ -13,6 +13,5 @@ pub mod ledger;
 pub mod state;
 
 pub use appliable::Appliable;
-pub use apply_event::current_timestamp_with_effects;
 pub use ledger::{AccountLedger, CompactionProposal, CompactionStats};
 pub use state::AccountState;
