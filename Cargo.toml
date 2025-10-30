@@ -1,7 +1,7 @@
 # Top-level workspace for Aura - threshold identity and encrypted storage platform
 [workspace]
 resolver = "2"
-exclude = ["ext/*"]  # ext/* are external dependencies
+exclude = ["ext/*", "vendored/*"]  # ext/* are external dependencies, vendored/* are vendored forks
 # Note: ext/quint/evaluator still shows profile warnings due to path dependency in quint-api
 members = [
     "crates/agent",
