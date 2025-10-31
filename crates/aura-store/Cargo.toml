@@ -12,9 +12,9 @@ workspace = true
 
 [dependencies]
 # Workspace crates
-aura-journal = { path = "../journal" }
-# aura-transport = { path = "../transport" }  # Temporarily disabled due to coordination dependencies
-aura-crypto = { path = "../crypto" }
+aura-journal = { path = "../aura-journal" }
+# aura-transport = { path = "../aura-transport" }  # Temporarily disabled due to coordination dependencies
+aura-crypto = { path = "../aura-crypto" }
 aura-types = { path = "../aura-types" }
 aura-protocol-types = { path = "../aura-protocol-types" }
 aura-authorization = { path = "../aura-authorization" }

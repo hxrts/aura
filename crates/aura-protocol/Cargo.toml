@@ -16,8 +16,8 @@ dev-console = ["postcard"]
 
 [dependencies]
 # Workspace crates
-aura-crypto = { path = "../crypto" }
-aura-journal = { path = "../journal" }
+aura-crypto = { path = "../aura-crypto" }
+aura-journal = { path = "../aura-journal" }
 aura-types = { path = "../aura-types" }
 aura-protocol-types = { path = "../aura-protocol-types" }
 aura-authentication = { path = "../aura-authentication" }
@@ -28,7 +28,7 @@ aura-messages = { path = "../aura-messages" }
 # aura-session-types = { path = "../session-types" }  # Moved to local session_types module
 # Transport dependency removed to break circular dependency
 # Transport implements traits defined in coordination
-# aura-transport = { path = "../transport" }
+# aura-transport = { path = "../aura-transport" }
 
 # Curve operations
 curve25519-dalek = { workspace = true }

@@ -34,7 +34,7 @@ js-sys = "0.3"
 log = "0.4"
 wasm-logger = "0.2"
 console_error_panic_hook = "0.1"
-wasm_core = { path = "../wasm-core", features = ["leptos"] }
+wasm_core = { path = "../aura-wasm", features = ["leptos"] }
 aura-console-types = { path = "../console-types" }
 
 # Note: Profile settings moved to workspace root Cargo.toml

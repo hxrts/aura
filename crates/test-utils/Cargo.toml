@@ -12,9 +12,9 @@ workspace = true
 [dependencies]
 # Workspace crates
 aura-agent = { path = "../agent" }
-aura-crypto = { path = "../crypto" }
-aura-journal = { path = "../journal" }
-aura-transport = { path = "../transport" }
+aura-crypto = { path = "../aura-crypto" }
+aura-journal = { path = "../aura-journal" }
+aura-transport = { path = "../aura-transport" }
 aura-types = { path = "../aura-types" }
 
 # Async runtime

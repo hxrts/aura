@@ -12,7 +12,7 @@ workspace = true
 [dependencies]
 # Workspace crates
 aura-types = { path = "../aura-types" }
-aura-crypto = { path = "../crypto" }
+aura-crypto = { path = "../aura-crypto" }
 aura-authentication = { path = "../aura-authentication" }
 
 # Serialization

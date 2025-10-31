@@ -13,7 +13,7 @@ workspace = true
 # Internal crates
 aura-console-types = { path = "../console-types" }
 aura-types = { path = "../aura-types" }
-wasm_core = { path = "../wasm-core" }
+wasm_core = { path = "../aura-wasm" }
 quint_api = { path = "../quint-api" }
 
 # WASM and web APIs

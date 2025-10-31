@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 # Internal crates
 aura-types = { path = "../aura-types" }
-aura-crypto = { path = "../crypto" }
+aura-crypto = { path = "../aura-crypto" }
 aura-protocol-types = { path = "../aura-protocol-types" }
 aura-authentication = { path = "../aura-authentication" }
 

@@ -14,10 +14,10 @@ categories = ["cryptography", "authentication"]
 # Workspace crates
 aura-types = { path = "../aura-types" }
 aura-protocol = { path = "../aura-protocol" }
-aura-journal = { path = "../journal" }
-aura-crypto = { path = "../crypto" }
-aura-transport = { path = "../transport" }
-aura-store = { path = "../store" }
+aura-journal = { path = "../aura-journal" }
+aura-crypto = { path = "../aura-crypto" }
+aura-transport = { path = "../aura-transport" }
+aura-store = { path = "../aura-store" }
 
 # Cryptography provided through aura-crypto
 frost-ed25519 = { workspace = true }

@@ -9,9 +9,9 @@ workspace = true
 [dependencies]
 # Internal crates
 aura-agent = { path = "../agent" }
-aura-journal = { path = "../journal" }
-aura-transport = { path = "../transport" }
-aura-crypto = { path = "../crypto" }
+aura-journal = { path = "../aura-journal" }
+aura-transport = { path = "../aura-transport" }
+aura-crypto = { path = "../aura-crypto" }
 aura-protocol = { path = "../aura-protocol" }
 aura-console-types = { path = "../console-types" }
 aura-types = { path = "../aura-types" }
