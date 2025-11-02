@@ -9,6 +9,7 @@ use aura_types::AccountId;
 
 /// Create a DKD initiation event for testing
 /// Create a DKD (Deterministic Key Derivation) event
+#[allow(dead_code)]
 pub fn create_dkd_event(
     effects: &Effects,
     account_id: AccountId,
@@ -48,6 +49,7 @@ pub fn create_dkd_event(
 
 /// Create an epoch tick event for testing
 /// Create an epoch transition event
+#[allow(dead_code)]
 pub fn create_epoch_event(
     effects: &Effects,
     account_id: AccountId,
@@ -82,6 +84,7 @@ pub fn create_epoch_event(
 
 /// Create a device add event for testing
 /// Create a device management event
+#[allow(dead_code)]
 pub fn create_device_event(
     effects: &Effects,
     account_id: AccountId,
@@ -121,6 +124,7 @@ pub fn create_device_event(
 
 /// Create a conflict event for testing CRDT conflict resolution
 /// Create a conflict resolution event
+#[allow(dead_code)]
 pub fn create_conflict_event(
     effects: &Effects,
     account_id: AccountId,

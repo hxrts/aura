@@ -13,8 +13,12 @@ use clap::{Args, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
+
+fn current_unix_timestamp() -> u64 {
+    aura_types::time_utils::current_unix_timestamp()
+}
 
 /// Scenario management commands
 #[derive(Debug, Args)]
@@ -900,12 +904,6 @@ impl ScenarioManager {
         args: &RunArgs,
     ) -> Result<HashMap<String, ScenarioExecutionResult>> {
         // In a real implementation, this would use async/await or threading
-
-fn current_unix_timestamp() -> u64 {
-    aura_types::time_utils::current_unix_timestamp()
-}
-
-
         // For now, we'll simulate parallel execution
         let mut results = HashMap::new();
 
@@ -1055,7 +1053,7 @@ fn current_unix_timestamp() -> u64 {
         let report = serde_json::json!({
             "metrics": self.metrics,
             "results": self.execution_results,
-            "generated_at": SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
+            "generated_at": aura_types::time_utils::current_unix_timestamp_millis()
         });
 
         Ok(serde_json::to_string_pretty(&report)?)
@@ -1138,10 +1136,7 @@ Generated at: {}
                 ))
                 .collect::<Vec<_>>()
                 .join("\n"),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
+            aura_types::time_utils::current_unix_timestamp()
         );
 
         Ok(markdown)

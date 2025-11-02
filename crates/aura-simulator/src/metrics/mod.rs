@@ -37,12 +37,17 @@ pub trait MetricsProvider {
 
 /// Timer guard that records duration when dropped
 pub struct TimerGuard {
+    /// Name of the metric to record
     metric_name: String,
+    /// Time when timer was started
     start_time: SystemTime,
+    /// Metrics collector to record to
     metrics: Arc<MetricsCollector>,
 }
 
 impl TimerGuard {
+    /// Create a new timer guard that will record elapsed time when dropped
+    #[allow(clippy::disallowed_methods)]
     pub fn new(name: String, metrics: Arc<MetricsCollector>) -> Self {
         Self {
             metric_name: name,
@@ -62,8 +67,7 @@ impl Drop for TimerGuard {
 }
 
 /// Central metrics registry for simulation components
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SimulationMetrics {
     /// Core simulation metrics
     pub simulation: SimulationCoreMetrics,
@@ -80,8 +84,7 @@ pub struct SimulationMetrics {
 }
 
 /// Core simulation execution metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SimulationCoreMetrics {
     /// Current simulation tick
     pub current_tick: u64,
@@ -159,8 +162,7 @@ pub struct NetworkMetrics {
 }
 
 /// Protocol execution metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProtocolMetrics {
     /// Active protocol sessions
     pub active_sessions: usize,
@@ -175,8 +177,6 @@ pub struct ProtocolMetrics {
     /// Byzantine attack events
     pub byzantine_events: u64,
 }
-
-
 
 impl Default for PropertyMonitoringMetrics {
     fn default() -> Self {
@@ -219,7 +219,6 @@ impl Default for NetworkMetrics {
         }
     }
 }
-
 
 impl SimulationMetrics {
     /// Create new metrics instance
@@ -359,15 +358,25 @@ impl SimulationMetrics {
 /// Summary of key metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricsSummary {
+    /// Total simulation ticks executed
     pub total_ticks: u64,
+    /// Total events processed
     pub total_events: u64,
+    /// Total property evaluations performed
     pub total_evaluations: u64,
+    /// Total violations detected
     pub violations_detected: u64,
+    /// Total messages sent
     pub messages_sent: u64,
+    /// Total messages dropped
     pub messages_dropped: u64,
+    /// Total completed protocol sessions
     pub completed_sessions: u64,
+    /// Total failed protocol sessions
     pub failed_sessions: u64,
+    /// Peak memory usage in megabytes
     pub peak_memory_mb: u64,
+    /// Average CPU utilization percentage
     pub average_cpu_utilization: f64,
 }
 

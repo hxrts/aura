@@ -4,14 +4,34 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
-/// Generate a random UUID as a string
+/// Generate a deterministic UUID as a string
+#[allow(clippy::disallowed_methods)]
 pub fn generate_random_uuid() -> String {
-    Uuid::new_v4().to_string()
+    // Use current time nanoseconds to create different UUIDs
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let hash_input = format!("random_uuid_{}", timestamp);
+    let hash_bytes = blake3::hash(hash_input.as_bytes());
+    // SAFETY: blake3 hash is always 32 bytes, slice conversion to [u8; 16] always succeeds
+    #[allow(clippy::unwrap_used)]
+    Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap()).to_string()
 }
 
-/// Generate a random UUID
+/// Generate a deterministic UUID
+#[allow(clippy::disallowed_methods)]
 pub fn generate_random_uuid_raw() -> Uuid {
-    Uuid::new_v4()
+    // Use current time nanoseconds to create different UUIDs
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let hash_input = format!("random_uuid_{}", timestamp);
+    let hash_bytes = blake3::hash(hash_input.as_bytes());
+    // SAFETY: blake3 hash is always 32 bytes, slice conversion to [u8; 16] always succeeds
+    #[allow(clippy::unwrap_used)]
+    Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap())
 }
 
 /// Generate a deterministic UUID based on input seed

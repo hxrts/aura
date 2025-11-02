@@ -261,6 +261,7 @@ mod tests {
 
     #[test]
     fn test_scope_matches() {
+        let effects = aura_crypto::Effects::test();
         let dkd_scope1 = SessionScope::Dkd {
             app_id: "app1".to_string(),
             context: "ctx1".to_string(),
@@ -278,10 +279,10 @@ mod tests {
         assert!(!scope_matches(&dkd_scope1, &dkd_scope3));
 
         let recovery_scope1 = SessionScope::Recovery {
-            recovery_id: aura_protocol::test_utils::generate_test_uuid(),
+            recovery_id: effects.gen_uuid(),
         };
         let _recovery_scope2 = SessionScope::Recovery {
-            recovery_id: aura_protocol::test_utils::generate_test_uuid(),
+            recovery_id: effects.gen_uuid(),
         };
 
         // Different recovery IDs should not match

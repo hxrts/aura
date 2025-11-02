@@ -332,6 +332,7 @@ impl ScenarioEngine {
     }
 
     /// Create and start a new debugging scenario
+    #[allow(clippy::disallowed_methods)]
     pub fn start_scenario(
         &mut self,
         setup: DebuggingScenarioSetup,
@@ -410,6 +411,8 @@ impl ScenarioEngine {
             initial_setup: setup,
             expected_outcomes: Vec::new(),
             failure_conditions: Vec::new(),
+            // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+            #[allow(clippy::unwrap_used)]
             started_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -444,6 +447,7 @@ impl ScenarioEngine {
     }
 
     /// Execute a scenario for a specified number of ticks
+    #[allow(clippy::disallowed_methods)]
     pub fn run_scenario(
         &mut self,
         scenario_id: &str,
@@ -606,10 +610,13 @@ impl ScenarioEngine {
             self.time_travel_debugger = Some(debugger);
         }
 
+        // SAFETY: we just created time_travel_debugger above if it was None
+        #[allow(clippy::unwrap_used)]
         Ok(self.time_travel_debugger.as_mut().unwrap())
     }
 
     /// Export comprehensive scenario report
+    #[allow(clippy::disallowed_methods)]
     pub fn export_scenario_report(&self, scenario_id: &str) -> Result<ScenarioReport> {
         let scenario = self.active_scenarios.get(scenario_id).ok_or_else(|| {
             AuraError::configuration_error(format!("Scenario {} not found", scenario_id))
@@ -626,6 +633,8 @@ impl ScenarioEngine {
             },
             config_used: self.config.clone(),
             checkpoints_available: self.checkpoint_manager.list_checkpoints().len(),
+            // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+            #[allow(clippy::unwrap_used)]
             generated_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

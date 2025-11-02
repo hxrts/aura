@@ -76,10 +76,13 @@ impl StateDiffCalculator {
             operations,
             metadata: {
                 let mut meta = HashMap::new();
-                meta.insert("tick_delta".to_string(), (to.tick - from.tick).to_string());
+                meta.insert(
+                    "tick_delta".to_string(),
+                    to.tick.saturating_sub(from.tick).to_string(),
+                );
                 meta.insert(
                     "time_delta".to_string(),
-                    (to.timestamp - from.timestamp).to_string(),
+                    to.timestamp.saturating_sub(from.timestamp).to_string(),
                 );
                 meta
             },

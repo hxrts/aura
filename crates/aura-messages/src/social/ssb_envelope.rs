@@ -9,9 +9,9 @@
 //! - CBOR canonical encoding (sorted keys, fixed integer sizes)
 //! - Header integrity verification without full ciphertext
 
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use hmac::{Hmac, Mac};
 
 /// Fixed envelope size in bytes
 pub const ENVELOPE_SIZE: usize = 2048;
@@ -57,7 +57,7 @@ impl Cid {
         let mut combined = Vec::with_capacity(64);
         combined.extend_from_slice(&header_hash);
         combined.extend_from_slice(&ciphertext_hash);
-        
+
         let mut hasher = Sha256::new();
         hasher.update(&combined);
         let result = hasher.finalize();

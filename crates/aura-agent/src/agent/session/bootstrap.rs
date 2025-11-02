@@ -55,16 +55,17 @@ impl<S: Storage> AgentProtocol<S, Uninitialized> {
         // Create metadata for FROST DKG protocol
         let mut metadata = HashMap::new();
         metadata.insert("threshold".to_string(), config.threshold.to_string());
-        metadata.insert("participants".to_string(), 
-            serde_json::to_string(&participants).unwrap_or_default());
+        metadata.insert(
+            "participants".to_string(),
+            serde_json::to_string(&participants).unwrap_or_default(),
+        );
         metadata.insert("share_count".to_string(), config.share_count.to_string());
 
         // Start FROST DKG protocol session
-        let session_id = self.inner.start_protocol_session(
-            "frost_dkg",
-            participants.clone(),
-            metadata,
-        ).await?;
+        let session_id = self
+            .inner
+            .start_protocol_session("frost_dkg", participants.clone(), metadata)
+            .await?;
 
         tracing::info!(
             session_id = %session_id,
@@ -76,7 +77,7 @@ impl<S: Storage> AgentProtocol<S, Uninitialized> {
         // Step 2: Wait for FROST DKG completion by monitoring session status
         let frost_keys = loop {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            
+
             let sessions = self.inner.get_active_sessions().await?;
             if let Some(session) = sessions.iter().find(|s| s.session_id == session_id) {
                 // Since SessionInfo doesn't have status, check if session is complete by other means
@@ -87,7 +88,7 @@ impl<S: Storage> AgentProtocol<S, Uninitialized> {
                             session_id = %session_id,
                             "FROST DKG session completed successfully"
                         );
-                        
+
                         // For now, generate placeholder FROST keys since the runtime doesn't return them directly
                         // In a real implementation, this would be retrieved from storage or a different mechanism
                         let placeholder_frost_keys = serde_json::to_vec(&serde_json::json!({
@@ -99,7 +100,9 @@ impl<S: Storage> AgentProtocol<S, Uninitialized> {
                         break placeholder_frost_keys;
                     }
                     "failed" => {
-                        let error_msg = session.metadata.get("error")
+                        let error_msg = session
+                            .metadata
+                            .get("error")
                             .unwrap_or(&"Unknown error".to_string())
                             .clone();
                         return Err(crate::error::AuraError::coordination_failed(format!(
@@ -114,7 +117,7 @@ impl<S: Storage> AgentProtocol<S, Uninitialized> {
                 }
             } else {
                 return Err(crate::error::AuraError::coordination_failed(
-                    "FROST DKG session not found"
+                    "FROST DKG session not found",
                 ));
             }
         };

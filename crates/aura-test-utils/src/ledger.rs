@@ -29,7 +29,7 @@ impl LedgerTestFixture {
         let group_public_key = signing_key.verifying_key();
 
         let device_metadata = DeviceMetadata {
-            device_id: DeviceId(Uuid::new_v4()),
+            device_id: DeviceId(effects.gen_uuid()),
             device_name: "Test Device".to_string(),
             device_type: DeviceType::Native,
             public_key: group_public_key,
@@ -55,7 +55,10 @@ impl LedgerTestFixture {
 
     /// Create a random ledger fixture
     pub fn random() -> Self {
-        let account_id = AccountId(Uuid::new_v4());
+        let hash_input = "ledger-fixture-random";
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let account_id = AccountId(uuid);
         Self::new(account_id)
     }
 
@@ -163,13 +166,21 @@ impl LedgerBuilder {
 
     /// Build the ledger fixture
     pub async fn build(self) -> Result<LedgerTestFixture, Box<dyn std::error::Error>> {
-        let account_id = self.account_id.unwrap_or_else(|| AccountId(Uuid::new_v4()));
+        let account_id = self.account_id.unwrap_or_else(|| {
+            let hash_input = "ledger-builder-account";
+            let hash_bytes = blake3::hash(hash_input.as_bytes());
+            let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+            AccountId(uuid)
+        });
 
         let mut fixture = LedgerTestFixture::new(account_id);
 
         // Add devices to the ledger
         for i in 0..self.device_count {
-            let device_id = DeviceId(Uuid::new_v4());
+            let hash_input = format!("ledger-builder-device-{}", i);
+            let hash_bytes = blake3::hash(hash_input.as_bytes());
+            let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+            let device_id = DeviceId(uuid);
             let device_type = match i {
                 0 => DeviceType::Native,
                 _ => DeviceType::Browser,
@@ -228,7 +239,10 @@ pub mod ledger_helpers {
     /// Create a two-device ledger
     pub async fn test_ledger_pair(
     ) -> Result<(LedgerTestFixture, LedgerTestFixture), Box<dyn std::error::Error>> {
-        let account_id = AccountId(Uuid::new_v4());
+        let hash_input = "ledger-pair";
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let account_id = AccountId(uuid);
         let ledger1 = LedgerBuilder::new()
             .with_account_id(account_id)
             .with_devices(2)
@@ -244,7 +258,10 @@ pub mod ledger_helpers {
     pub async fn test_ledger_trio(
     ) -> Result<(LedgerTestFixture, LedgerTestFixture, LedgerTestFixture), Box<dyn std::error::Error>>
     {
-        let account_id = AccountId(Uuid::new_v4());
+        let hash_input = "ledger-trio";
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let account_id = AccountId(uuid);
         let _ledger = LedgerBuilder::new()
             .with_account_id(account_id)
             .with_devices(3)

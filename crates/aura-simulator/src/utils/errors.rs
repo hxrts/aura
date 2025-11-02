@@ -30,7 +30,13 @@ pub fn map_to_parsing_error<E: Display>(error: E, context: &str) -> AuraError {
 
 /// Create a timeout error with context
 pub fn timeout_error(context: &str, timeout_ms: u64) -> AuraError {
-    AuraError::protocol_timeout(format!("Timeout after {}ms in {}", timeout_ms, context))
+    // Create a specific timeout error instead of using protocol_timeout
+    AuraError::Protocol(aura_types::ProtocolError::Timeout {
+        protocol: context.to_string(),
+        timeout_ms,
+        phase: None,
+        context: format!("Operation timed out after {}ms", timeout_ms),
+    })
 }
 
 /// Create a capacity exceeded error

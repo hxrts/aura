@@ -40,7 +40,10 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
     let init_result = bootstrap_manager
         .initialize_account(participants, threshold, &effects)
         .map_err(|e| {
-            aura_types::AuraError::bootstrap_required(format!("Account initialization failed: {}", e))
+            aura_types::AuraError::bootstrap_required(format!(
+                "Account initialization failed: {}",
+                e
+            ))
         })?;
 
     info!("Account initialization complete, persisting to disk");

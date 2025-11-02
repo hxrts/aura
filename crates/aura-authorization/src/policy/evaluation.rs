@@ -204,8 +204,9 @@ mod tests {
 
     #[test]
     fn test_explicit_denial() {
+        let effects = aura_crypto::Effects::for_test("test_explicit_denial");
         let subject = Subject::Session {
-            session_id: aura_protocol::test_utils::generate_test_uuid(),
+            session_id: effects.gen_uuid(),
             issuer: aura_types::DeviceId::new(),
         };
         let action = Action::Admin;

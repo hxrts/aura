@@ -94,36 +94,12 @@ pub async fn handle_node_command(cmd: NodeCommand, config: &crate::config::Confi
 }
 
 /// Create an integrated agent from configuration
+#[allow(dead_code)]
 async fn create_integrated_agent(
-    config: &crate::config::Config,
+    _config: &crate::config::Config,
 ) -> Result<Arc<dyn aura_agent::Agent>> {
-    // use crate::commands::common::create_agent_core;
-    use aura_agent::{AgentProtocol, BootstrapConfig};
-
-    info!("Creating integrated agent for device {}", config.device_id);
-
-    // Create agent core
-    // let agent_core = create_agent_core(config).await?;
-
-    // Create uninitialized agent protocol
-    let uninitialized_agent = AgentProtocol::new(agent_core);
-
-    // Bootstrap agent to idle state
-    let bootstrap_config = BootstrapConfig {
-        threshold: 2,
-        share_count: 3,
-        parameters: serde_json::Value::Null,
-    };
-
-    let idle_agent = uninitialized_agent
-        .bootstrap(bootstrap_config)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to bootstrap agent: {}", e))?;
-
-    info!("Agent created and bootstrapped successfully");
-
-    // Wrap agent in Arc and type-erase to Agent trait object
-    Ok(Arc::new(idle_agent) as Arc<dyn aura_agent::Agent>)
+    // TODO: Implement once agent creation is available
+    anyhow::bail!("Agent creation not yet implemented")
 }
 
 /// Set up graceful shutdown handling

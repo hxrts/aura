@@ -25,7 +25,9 @@ pub type CheckpointId = String;
 
 /// State management trait for all state types
 pub trait StateManager: Clone {
+    /// Snapshot type produced by this state manager
     type Snapshot: StateSnapshot;
+    /// Error type for state operations
     type Error;
 
     /// Create a snapshot of the current state
@@ -66,6 +68,7 @@ pub trait StateSnapshot: Clone + Serialize + for<'de> Deserialize<'de> {
 
 /// Trait for checkpoint management
 pub trait CheckpointManager<State: StateManager> {
+    /// Error type for checkpoint operations
     type Error;
 
     /// Create a checkpoint with optional label
@@ -111,6 +114,7 @@ pub struct CheckpointInfo {
 
 /// State difference calculation trait
 pub trait StateDiff<T> {
+    /// Type representing the difference between two states
     type Diff: Serialize + for<'de> Deserialize<'de>;
 
     /// Calculate difference between two states
@@ -171,12 +175,25 @@ impl UnifiedSnapshot {
         data: &T,
         metadata: HashMap<String, String>,
     ) -> Result<Self, serde_json::Error> {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("System time before UNIX epoch")
-            .as_secs();
+        // Generate deterministic timestamp and ID from state type and tick
+        let hash_input = format!("{}-{}", state_type, tick);
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        // SAFETY: blake3 hash is always 32 bytes, slice conversion to [u8; 8] always succeeds
+        #[allow(clippy::expect_used)]
+        let timestamp = u64::from_le_bytes(
+            hash_bytes.as_bytes()[..8]
+                .try_into()
+                .expect("blake3 hash is always 32 bytes, taking first 8 always succeeds"),
+        );
 
-        let id = uuid::Uuid::new_v4().to_string();
+        // SAFETY: blake3 hash is always 32 bytes, slice conversion to [u8; 16] always succeeds
+        #[allow(clippy::expect_used)]
+        let id = uuid::Uuid::from_bytes(
+            hash_bytes.as_bytes()[8..24]
+                .try_into()
+                .expect("blake3 hash is always 32 bytes, taking 8..24 always succeeds"),
+        )
+        .to_string();
         let serialized_data = serde_json::to_value(data)?;
 
         // Calculate hash
@@ -219,21 +236,42 @@ impl UnifiedSnapshot {
 /// Error types for state management
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
+    /// Requested snapshot does not exist
     #[error("Snapshot not found: {id}")]
-    SnapshotNotFound { id: String },
+    SnapshotNotFound {
+        /// Snapshot identifier
+        id: String,
+    },
 
+    /// Requested checkpoint does not exist
     #[error("Checkpoint not found: {id}")]
-    CheckpointNotFound { id: String },
+    CheckpointNotFound {
+        /// Checkpoint identifier
+        id: String,
+    },
 
+    /// State validation failed
     #[error("Invalid state: {reason}")]
-    InvalidState { reason: String },
+    InvalidState {
+        /// Reason for validation failure
+        reason: String,
+    },
 
+    /// Serialization or deserialization failed
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    /// Storage operation failed
     #[error("Storage error: {reason}")]
-    Storage { reason: String },
+    Storage {
+        /// Reason for storage failure
+        reason: String,
+    },
 
+    /// Storage capacity exceeded
     #[error("Capacity exceeded: {message}")]
-    CapacityExceeded { message: String },
+    CapacityExceeded {
+        /// Details about capacity violation
+        message: String,
+    },
 }

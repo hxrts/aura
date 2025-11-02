@@ -28,32 +28,46 @@ pub type AstParseResult<T> = Result<T, AstParseError>;
 /// Enhanced Quint definition with parsed metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsedQuintDefinition {
+    /// Definition name identifier
     pub name: String,
+    /// Definition kind (definition, value, assumption, import)
     pub kind: String,
+    /// Expression body or source code
     pub expression: String,
+    /// Optional return type annotation
     pub return_type: Option<String>,
+    /// Parameter names extracted from expression
     pub parameters: Vec<String>,
+    /// Parsed annotations from comments
     pub annotations: HashMap<String, String>,
+    /// Whether this definition is a property check
     pub is_property: bool,
+    /// Optional property type classification
     pub property_type: Option<PropertyType>,
 }
 
 /// Property type classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PropertyType {
+    /// State invariant that must hold in all reachable states
     Invariant,
+    /// Safety property ensuring nothing bad happens
     Safety,
+    /// Liveness property ensuring something good eventually happens
     Liveness,
+    /// Temporal property expressing eventual occurrence
     Eventually,
+    /// Temporal property expressing continuous truth
     Always,
+    /// Temporal property expressing conditional eventual occurrence
     Until,
 }
 
 /// AST parser for Quint specifications
 pub struct QuintAstParser {
-    /// Enable strict parsing (fail on unrecognized constructs)
+    /// Enable strict parsing mode (fail on unrecognized constructs)
     _strict_mode: bool,
-    /// Custom annotation prefixes to recognize
+    /// Custom annotation prefixes recognized in comments
     annotation_prefixes: Vec<String>,
 }
 
@@ -368,7 +382,9 @@ impl QuintAstParser {
 /// Parsed Quint module with enhanced metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsedQuintModule {
+    /// Module name identifier
     pub name: String,
+    /// Parsed definitions with extracted metadata
     pub definitions: Vec<ParsedQuintDefinition>,
 }
 

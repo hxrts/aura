@@ -7,7 +7,6 @@ use aura_crypto::Effects;
 use aura_journal::{AccountState, DeviceMetadata, DeviceType};
 use aura_types::{AccountId, AccountIdExt, DeviceId};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use uuid::Uuid;
 
 /// Helper function to create test device metadata with effects
 fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
@@ -16,7 +15,7 @@ fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
     let device_public_key = device_signing_key.verifying_key();
 
     DeviceMetadata {
-        device_id: DeviceId(Uuid::new_v4()),
+        device_id: DeviceId(effects.gen_uuid()),
         device_name: "Test Device".to_string(),
         device_type: DeviceType::Native,
         public_key: device_public_key,

@@ -68,8 +68,7 @@ pub struct PropertyStatus {
 }
 
 /// Severity level of a property violation
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum ViolationSeverity {
     /// Low severity - minor protocol deviation
     Low,
@@ -81,7 +80,6 @@ pub enum ViolationSeverity {
     /// Critical severity - system integrity at risk
     Critical,
 }
-
 
 /// Summary statistics for the property timeline
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -427,7 +425,6 @@ pub struct WasmPropertyTimelineBuilder {
     inner: PropertyTimelineBuilder,
 }
 
-
 #[wasm_bindgen]
 impl WasmPropertyTimelineBuilder {
     /// Create a new timeline builder
@@ -463,7 +460,10 @@ mod tests {
     wasm_bindgen_test_configure!(run_in_browser);
 
     fn create_test_results(holds: bool, description: Option<String>) -> PropertyResults {
-        let property_id = uuid::Uuid::from_bytes([0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef]);
+        let property_id = uuid::Uuid::from_bytes([
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab,
+            0xcd, 0xef,
+        ]);
         let mut results = HashMap::new();
 
         results.insert(

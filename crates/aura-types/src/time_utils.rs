@@ -6,7 +6,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Get current Unix timestamp in seconds
-/// 
+///
 /// TODO: Replace with injected time source in production
 #[allow(clippy::disallowed_methods)]
 pub fn current_unix_timestamp() -> u64 {
@@ -17,7 +17,7 @@ pub fn current_unix_timestamp() -> u64 {
 }
 
 /// Get current Unix timestamp in milliseconds
-/// 
+///
 /// TODO: Replace with injected time source in production  
 #[allow(clippy::disallowed_methods)]
 pub fn current_unix_timestamp_millis() -> u64 {
@@ -28,7 +28,7 @@ pub fn current_unix_timestamp_millis() -> u64 {
 }
 
 /// Get current SystemTime
-/// 
+///
 /// TODO: Replace with injected time source in production
 #[allow(clippy::disallowed_methods)]
 pub fn current_system_time() -> SystemTime {

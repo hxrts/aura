@@ -114,7 +114,7 @@ impl AuraProtocolHandler for DkdProtocolHandler {
             app_id,
             context,
             threshold,
-            started_at: current_timestamp,
+            started_at: current_timestamp
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),

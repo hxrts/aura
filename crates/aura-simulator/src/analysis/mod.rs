@@ -144,6 +144,7 @@ impl CheckpointSimulation {
     }
 
     /// Run simulation until completion
+    #[allow(clippy::disallowed_methods)]
     pub fn run_until_completion(&mut self) -> Result<SimulationExecutionResult> {
         let mut events = Vec::new();
         let start_time = std::time::Instant::now();

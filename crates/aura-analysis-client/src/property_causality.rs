@@ -797,9 +797,10 @@ impl PropertyCausalityAnalyzer {
     fn determine_criticality_reason(&self, event: &TraceEvent) -> CriticalityReason {
         // Determine why this event was critical based on its type
         match &event.event_type {
-            EventType::MessageDropped { reason: aura_console_types::trace::DropReason::NetworkPartition, .. } => {
-                CriticalityReason::NetworkPartition
-            }
+            EventType::MessageDropped {
+                reason: aura_console_types::trace::DropReason::NetworkPartition,
+                ..
+            } => CriticalityReason::NetworkPartition,
             EventType::MessageDropped { .. } => CriticalityReason::StateCorruption,
             EventType::CrdtMerge { .. } => CriticalityReason::StateCorruption,
             EventType::ProtocolStateTransition { .. } => CriticalityReason::SessionTypeViolation,

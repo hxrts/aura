@@ -9,12 +9,11 @@ use aura_authorization::{Action, CapabilityToken, Resource, Subject};
 use aura_crypto::Effects;
 use aura_journal::serialization::Serializable;
 use aura_store::{
-    manifest::{Permission, ResourceScope, SignatureShare, StorageOperation, ThresholdSignature},
     social_storage::{
         SocialStoragePeerDiscovery, StorageCapabilityAnnouncement, StorageMetrics, StoragePeer,
         StorageRequirements, TrustLevel,
     },
-    CapabilityManager, *,
+    CapabilityManager,
 };
 use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
 
@@ -152,11 +151,11 @@ fn test_capability_expiration_deterministic() {
     token.set_expiration(now + 1000);
 
     // Fast-forward time
-    let future_time = now + 2000;
+    let _future_time = now + 2000;
 
     // TODO: The current CapabilityToken API doesn't have an is_expired method
     // This test needs to be updated to work with the current API
-    // assert!(token.is_expired(future_time));
+    // assert!(token.is_expired(_future_time));
 
     // For now, just check that expiration was set
     assert!(token.expires_at.is_some());

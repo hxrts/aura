@@ -466,7 +466,6 @@ pub struct WasmPropertyMonitor {
     inner: Option<PropertyMonitor>,
 }
 
-
 #[wasm_bindgen]
 impl WasmPropertyMonitor {
     /// Create a new property monitor (async initialization handled internally)
@@ -554,7 +553,10 @@ mod tests {
     #[test]
     fn test_violation_tracker() {
         let mut tracker = ViolationTracker::new();
-        let property_id = uuid::Uuid::from_bytes([0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef]);
+        let property_id = uuid::Uuid::from_bytes([
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab,
+            0xcd, 0xef,
+        ]);
 
         tracker.record_violation(
             property_id,

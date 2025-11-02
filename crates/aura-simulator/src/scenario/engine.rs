@@ -9,230 +9,267 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use uuid::Uuid;
 
 /// Unified scenario engine that serves as the canonical entry point for all tests
 pub struct UnifiedScenarioEngine {
     /// Base directory for artifacts and debugging data
     base_dir: PathBuf,
-    /// Debugging tools integration
+    /// Debugging tools integration for scenario analysis
     _debug_engine: crate::observability::ScenarioEngine,
-    /// Choreography action registry
+    /// Registry of choreography and protocol executors
     choreography_registry: ChoreographyActionRegistry,
-    /// Configuration for scenario execution
+    /// Configuration for scenario execution behavior
     config: UnifiedEngineConfig,
-    /// Active debugging tools
+    /// Optional passive trace recorder for event capture
     trace_recorder: Option<PassiveTraceRecorder>,
+    /// Optional checkpoint manager for state snapshots
     checkpoint_manager: Option<crate::observability::checkpoint_manager::CheckpointManager>,
+    /// Optional time travel debugger for replay
     _time_travel_debugger: Option<TimeTravelDebugger>,
 }
 
-/// Configuration for the unified engine
+/// Configuration for the unified engine behavior
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedEngineConfig {
-    /// Enable debugging tools and trace recording
+    /// Enable debugging tools and trace recording for detailed analysis
     pub enable_debugging: bool,
-    /// Auto-checkpoint interval in ticks
+    /// Auto-checkpoint interval in ticks for state snapshots
     pub auto_checkpoint_interval: Option<u64>,
-    /// Maximum execution time before timeout
+    /// Maximum execution time before timeout occurs
     pub max_execution_time: Duration,
-    /// Enable verbose logging
+    /// Enable verbose logging to console during execution
     pub verbose: bool,
-    /// Export detailed reports after execution
+    /// Export detailed reports after scenario execution
     pub export_reports: bool,
-    /// Base name for generated artifacts
+    /// Base name prefix for generated artifact files
     pub artifact_prefix: String,
 }
 
 /// Extended scenario definition with choreography actions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedScenario {
-    /// Basic scenario metadata
+    /// Unique name identifying this scenario
     pub name: String,
+    /// Human-readable description of what this scenario tests
     pub description: String,
 
-    /// Setup configuration
+    /// Initial setup configuration for the scenario
     pub setup: ScenarioSetupConfig,
 
-    /// Phases with choreography actions
+    /// Execution phases with choreography actions
     pub phases: Vec<ScenarioPhaseWithActions>,
 
-    /// Network conditions
+    /// Optional network conditions to simulate
     pub network: Option<NetworkConfig>,
 
-    /// Byzantine behavior configuration
+    /// Optional Byzantine behavior configuration
     pub byzantine: Option<ByzantineConfig>,
 
-    /// Properties to check during execution
+    /// Properties to check during and after execution
     pub properties: Vec<PropertyCheck>,
 
-    /// Expected final outcome
+    /// Expected final outcome of the scenario
     pub expected_outcome: ExpectedOutcome,
 
-    /// Scenario inheritance
+    /// Optional base scenario to inherit configuration from
     pub extends: Option<String>,
 }
 
-/// Setup configuration for scenarios
+/// Setup configuration for scenario initialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioSetupConfig {
-    /// Number of participants
+    /// Number of participants in the scenario
     pub participants: usize,
-    /// Threshold for protocols
+    /// Threshold for quorum-based protocols
     pub threshold: usize,
-    /// Random seed for reproducibility
+    /// Random seed for deterministic reproducibility
     pub seed: u64,
-    /// Participant roles and configurations
+    /// Optional custom configurations for individual participants
     pub participant_configs: Option<HashMap<String, ParticipantConfig>>,
 }
 
-/// Configuration for individual participants
+/// Configuration for individual participant setup
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParticipantConfig {
-    /// Device ID for this participant
+    /// Unique device identifier for this participant
     pub device_id: String,
-    /// Account ID
+    /// Account identifier this participant belongs to
     pub account_id: String,
-    /// Whether this participant is byzantine
+    /// Whether this participant exhibits Byzantine behavior
     pub is_byzantine: bool,
-    /// Role in the scenario (optional)
+    /// Optional role identifier for scenario-specific behavior
     pub role: Option<String>,
 }
 
-/// Scenario phase with choreography actions
+/// Scenario phase with choreography actions to execute
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioPhaseWithActions {
-    /// Phase name
+    /// Unique name identifying this phase
     pub name: String,
-    /// Description of what this phase tests
+    /// Optional human-readable description of what this phase tests
     pub description: Option<String>,
-    /// Actions to execute in this phase
+    /// Ordered list of actions to execute in this phase
     pub actions: Vec<ChoreographyAction>,
-    /// Checkpoints to create during this phase
+    /// Optional checkpoint labels to create during this phase
     pub checkpoints: Option<Vec<String>>,
-    /// Properties to verify after this phase
+    /// Optional property names to verify after this phase completes
     pub verify_properties: Option<Vec<String>>,
-    /// Maximum time to spend in this phase
+    /// Optional maximum execution time before phase timeout
     pub timeout: Option<Duration>,
 }
 
-/// Choreography action that can be invoked declaratively
+/// Choreography action that can be invoked declaratively in scenarios
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ChoreographyAction {
-    /// Run a specific choreography
+    /// Run a specific choreography with given participants
     #[serde(rename = "run_choreography")]
     RunChoreography {
+        /// Type of choreography to execute
         choreography_type: String,
+        /// Optional list of participant identifiers
         participants: Option<Vec<String>>,
+        /// Configuration parameters for the choreography
         parameters: HashMap<String, toml::Value>,
     },
 
-    /// Execute a protocol
+    /// Execute a protocol with specified participants
     #[serde(rename = "execute_protocol")]
     ExecuteProtocol {
+        /// Type of protocol to execute
         protocol_type: String,
+        /// List of participant identifiers
         participants: Vec<String>,
+        /// Optional timeout in simulation ticks
         timeout_ticks: Option<u64>,
+        /// Optional protocol-specific parameters
         parameters: Option<HashMap<String, toml::Value>>,
     },
 
-    /// Apply network conditions
+    /// Apply network conditions to participants
     #[serde(rename = "apply_network_condition")]
     ApplyNetworkCondition {
+        /// Type of network condition to apply
         condition_type: String,
+        /// Participants affected by this condition
         participants: Vec<String>,
+        /// Optional duration in simulation ticks
         duration_ticks: Option<u64>,
+        /// Condition-specific parameters
         parameters: HashMap<String, toml::Value>,
     },
 
-    /// Inject Byzantine behavior
+    /// Inject Byzantine behavior into a participant
     #[serde(rename = "inject_byzantine")]
     InjectByzantine {
+        /// Participant identifier to make Byzantine
         participant: String,
+        /// Type of Byzantine behavior to inject
         behavior_type: String,
+        /// Behavior-specific parameters
         parameters: HashMap<String, toml::Value>,
     },
 
-    /// Wait for a specific number of ticks
+    /// Wait for a specific number of simulation ticks
     #[serde(rename = "wait_ticks")]
-    WaitTicks { ticks: u64 },
+    WaitTicks {
+        /// Number of ticks to wait
+        ticks: u64,
+    },
 
-    /// Create a checkpoint
+    /// Create a checkpoint with given label
     #[serde(rename = "create_checkpoint")]
-    CreateCheckpoint { label: String },
+    CreateCheckpoint {
+        /// Label for the checkpoint
+        label: String,
+    },
 
-    /// Verify a property
+    /// Verify that a property holds
     #[serde(rename = "verify_property")]
-    VerifyProperty { property: String, expected: bool },
+    VerifyProperty {
+        /// Property name to verify
+        property: String,
+        /// Expected result of the property check
+        expected: bool,
+    },
 
     /// Custom action with arbitrary parameters
     #[serde(rename = "custom")]
     Custom {
+        /// Name of the custom action
         action_name: String,
+        /// Custom action parameters
         parameters: HashMap<String, toml::Value>,
     },
 }
 
-/// Network configuration
+/// Network conditions configuration for simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
-    /// Latency range in milliseconds
+    /// Optional latency range in milliseconds [min, max]
     pub latency_range: Option<[u64; 2]>,
-    /// Message drop rate (0.0 to 1.0)
+    /// Optional message drop rate (0.0 to 1.0)
     pub drop_rate: Option<f64>,
-    /// Network partitions
+    /// Optional network partitions as groups of participant identifiers
     pub partitions: Option<Vec<Vec<String>>>,
 }
 
-/// Byzantine behavior configuration
+/// Byzantine behavior configuration for scenarios
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ByzantineConfig {
-    /// Number of byzantine participants
+    /// Number of Byzantine participants to create
     pub count: usize,
-    /// Specific participants to make byzantine
+    /// Optional specific participant identifiers to make Byzantine
     pub participants: Option<Vec<String>>,
-    /// Default byzantine strategies
+    /// Optional default Byzantine strategies to apply
     pub default_strategies: Option<Vec<String>>,
 }
 
-/// Property check configuration
+/// Property check configuration for verification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PropertyCheck {
-    /// Property name
+    /// Unique name identifying this property
     pub name: String,
-    /// Property implementation type
+    /// Type of property checker implementation to use
     pub property_type: String,
-    /// Parameters for the property checker
+    /// Optional parameters for the property checker
     pub parameters: Option<HashMap<String, toml::Value>>,
-    /// When to check this property (phase names)
+    /// Optional phase names when this property should be checked
     pub check_in_phases: Option<Vec<String>>,
 }
 
-/// Expected outcome of scenario execution
+/// Expected outcome of scenario execution for validation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExpectedOutcome {
+    /// Scenario should complete successfully
     #[serde(rename = "success")]
     Success,
+    /// Scenario should fail
     #[serde(rename = "failure")]
     Failure,
+    /// Specific property should be violated
     #[serde(rename = "property_violation")]
-    PropertyViolation { property: String },
+    PropertyViolation {
+        /// Name of the property that should be violated
+        property: String,
+    },
+    /// Scenario should timeout
     #[serde(rename = "timeout")]
     Timeout,
+    /// Byzantine behavior should be detected
     #[serde(rename = "byzantine_detected")]
     ByzantineDetected,
 }
 
-/// Registry for choreography actions
+/// Registry for choreography actions and their executors
 pub struct ChoreographyActionRegistry {
-    /// Registered choreography executors
+    /// Map of choreography type names to their executors
     choreographies: HashMap<String, Box<dyn ChoreographyExecutor>>,
-    /// Registered protocol executors
+    /// Map of protocol type names to their executors
     protocols: HashMap<String, Box<dyn ProtocolExecutor>>,
-    /// Registered network condition handlers
+    /// Map of network condition types to their handlers
     _network_conditions: HashMap<String, Box<dyn NetworkConditionHandler>>,
-    /// Registered byzantine behavior injectors
+    /// Map of Byzantine behavior types to their injectors
     _byzantine_behaviors: HashMap<String, Box<dyn ByzantineBehaviorInjector>>,
 }
 
@@ -295,103 +332,103 @@ pub trait ByzantineBehaviorInjector: Send + Sync {
 /// Result of choreography execution
 #[derive(Debug, Clone)]
 pub struct ChoreographyResult {
-    /// Whether choreography completed successfully
+    /// Whether choreography completed successfully without errors
     pub success: bool,
-    /// Events generated during choreography
+    /// Number of events generated during choreography execution
     pub events_generated: usize,
-    /// Execution time
+    /// Total execution time for the choreography
     pub execution_time: Duration,
-    /// Any additional data produced
+    /// Additional data produced by the choreography
     pub data: HashMap<String, String>,
 }
 
 /// Result of protocol execution
 #[derive(Debug, Clone)]
 pub struct ProtocolResult {
-    /// Whether protocol completed successfully
+    /// Whether protocol completed successfully without errors
     pub success: bool,
-    /// Final state of the protocol
+    /// Final state of the protocol after execution
     pub final_state: String,
-    /// Execution time
+    /// Total execution time for the protocol
     pub execution_time: Duration,
-    /// Protocol-specific output data
+    /// Protocol-specific output data as bytes
     pub output_data: Vec<u8>,
 }
 
-/// Result of unified scenario execution
+/// Complete result of unified scenario execution
 #[derive(Debug, Clone)]
 pub struct UnifiedScenarioResult {
-    /// Scenario name
+    /// Name of the executed scenario
     pub scenario_name: String,
-    /// Overall success status
+    /// Overall success status of the scenario
     pub success: bool,
-    /// Results from each phase
+    /// Results from each phase execution
     pub phase_results: Vec<PhaseResult>,
-    /// Property check results
+    /// Results from property verification checks
     pub property_results: Vec<PropertyResult>,
-    /// Total execution time
+    /// Total execution time for entire scenario
     pub execution_time: Duration,
-    /// Debugging artifacts generated
+    /// List of debugging artifact file paths generated
     pub artifacts: Vec<String>,
-    /// Final world state summary
+    /// Summary of final world state after scenario completion
     pub final_state: WorldStateSummary,
 }
 
-/// Result of executing a single phase
+/// Result of executing a single scenario phase
 #[derive(Debug, Clone)]
 pub struct PhaseResult {
-    /// Phase name
+    /// Name of the executed phase
     pub phase_name: String,
-    /// Whether phase completed successfully
+    /// Whether phase completed successfully without errors
     pub success: bool,
-    /// Results from individual actions
+    /// Results from individual action executions
     pub action_results: Vec<ActionResult>,
-    /// Phase execution time
+    /// Total execution time for this phase
     pub execution_time: Duration,
-    /// Checkpoints created in this phase
+    /// List of checkpoint labels created during this phase
     pub checkpoints_created: Vec<String>,
 }
 
-/// Result of executing a single action
+/// Result of executing a single choreography action
 #[derive(Debug, Clone)]
 pub struct ActionResult {
-    /// Action type
+    /// Type of action that was executed
     pub action_type: String,
-    /// Whether action completed successfully
+    /// Whether action completed successfully without errors
     pub success: bool,
-    /// Action execution time
+    /// Total execution time for this action
     pub execution_time: Duration,
-    /// Events generated by this action
+    /// Number of simulation events generated by this action
     pub events_generated: usize,
-    /// Error message if action failed
+    /// Optional error message if action failed
     pub error_message: Option<String>,
 }
 
-/// Result of property verification
+/// Result of property verification check
 #[derive(Debug, Clone)]
 pub struct PropertyResult {
-    /// Property name
+    /// Name of the property that was checked
     pub property_name: String,
-    /// Whether property holds
+    /// Whether the property holds in the current state
     pub holds: bool,
-    /// Violation details if property doesn't hold
+    /// Optional violation details if property doesn't hold
     pub violation_details: Option<String>,
-    /// When property was checked
+    /// Simulation tick when property was checked
     pub checked_at_tick: u64,
 }
 
-/// Summary of world state
+/// Summary of simulation world state
 #[derive(Debug, Clone)]
 pub struct WorldStateSummary {
-    /// Current tick
+    /// Current simulation tick
     pub current_tick: u64,
-    /// Number of participants
+    /// Total number of participants in the simulation
     pub participant_count: usize,
-    /// Number of active protocols
+    /// Number of currently active protocol sessions
     pub active_protocols: usize,
-    /// Number of byzantine participants
+    /// Number of Byzantine participants
     pub byzantine_count: usize,
-    /// Network partition status
+    /// Number of active network partitions
     pub network_partitions: usize,
 }
 
@@ -458,6 +495,7 @@ impl UnifiedScenarioEngine {
     }
 
     /// Execute a unified scenario
+    #[allow(clippy::disallowed_methods)]
     pub fn execute_scenario(
         &mut self,
         scenario: &UnifiedScenario,
@@ -618,6 +656,7 @@ impl UnifiedScenarioEngine {
         Ok(world)
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn apply_network_configuration(
         &self,
         world_state: &mut WorldState,
@@ -627,7 +666,7 @@ impl UnifiedScenarioEngine {
         if let Some(partitions) = &network.partitions {
             for partition in partitions {
                 let network_partition = crate::NetworkPartition {
-                    id: Uuid::new_v4().to_string(),
+                    id: uuid::Uuid::from_u128(42 + partition.len() as u128).to_string(), // Fixed UUID for deterministic testing
                     participants: partition.clone(),
                     started_at: world_state.current_time,
                     duration: None, // Persistent partition
@@ -688,6 +727,7 @@ impl UnifiedScenarioEngine {
         Ok(())
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn execute_phase(
         &mut self,
         world_state: &mut WorldState,
@@ -740,6 +780,7 @@ impl UnifiedScenarioEngine {
         })
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn execute_action(
         &mut self,
         world_state: &mut WorldState,

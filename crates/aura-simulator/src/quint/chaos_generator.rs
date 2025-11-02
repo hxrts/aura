@@ -115,6 +115,7 @@ impl Default for ChaosGenerationConfig {
                 ChaosType::NetworkPartition,
                 ChaosType::TimingAttack,
                 ChaosType::ConsensusDisruption,
+                ChaosType::StateCorruption,
             ],
             min_property_priority: PropertyPriority::Medium,
             include_satisfied_properties: true,
@@ -352,10 +353,7 @@ impl ChaosGenerator {
 
         let scenario_name = format!(
             "Chaos Test: {} - {} (n={}, byzantine={})",
-            property.name,
-            chaos_type,
-            network_size,
-            byzantine_count
+            property.name, chaos_type, network_size, byzantine_count
         );
 
         // Create scenario based on template
@@ -363,8 +361,7 @@ impl ChaosGenerator {
         scenario.name = scenario_name.clone();
         scenario.description = format!(
             "Generated chaos scenario to test property '{}' using {} chaos",
-            property.name,
-            chaos_type
+            property.name, chaos_type
         );
 
         // Configure participants
@@ -378,10 +375,7 @@ impl ChaosGenerator {
                 participants: (0..byzantine_count).collect(),
                 strategies: vec![crate::scenario::types::LegacyByzantineStrategy {
                     strategy_type: self.select_byzantine_strategy(&chaos_type, property),
-                    description: Some(format!(
-                        "Chaos testing strategy for {}",
-                        chaos_type
-                    )),
+                    description: Some(format!("Chaos testing strategy for {}", chaos_type)),
                     abort_after: None,
                 }],
             });
@@ -400,7 +394,7 @@ impl ChaosGenerator {
         let generation_metadata = GenerationMetadata {
             source_property: property.id.clone(),
             template_name: format!("{:?}", chaos_type),
-            generated_at: chrono::Utc::now().to_rfc3339(),
+            generated_at: "2022-01-01T00:00:00Z".to_string(), // Fixed timestamp for deterministic testing
             generation_params: vec![
                 ("network_size".to_string(), network_size.to_string()),
                 ("byzantine_ratio".to_string(), byzantine_ratio.to_string()),

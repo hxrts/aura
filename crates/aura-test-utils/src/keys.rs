@@ -3,6 +3,7 @@
 //! This module provides standardized helpers for creating and managing test keys
 //! and cryptographic material across the Aura test suite.
 
+use aura_crypto::Effects;
 use aura_types::DeviceId;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
@@ -39,15 +40,16 @@ impl KeyTestFixture {
         hasher.update(seed.as_bytes());
         let digest = hasher.finalize();
 
-        let seed_bytes: [u8; 32] = digest.as_slice()[..32]
-            .try_into()
-            .unwrap_or([0u8; 32]);
+        let seed_bytes: [u8; 32] = digest[..32].try_into().unwrap_or([0u8; 32]);
         Self::from_seed(&seed_bytes)
     }
 
     /// Create a random key fixture
     pub fn random() -> Self {
-        let signing_key = SigningKey::generate(&mut rand::thread_rng());
+        // Use deterministic key generation from fixed seed
+        let effects = Effects::for_test("key_fixture_random");
+        let key_bytes = effects.random_bytes::<32>();
+        let signing_key = SigningKey::from_bytes(&key_bytes);
         let verifying_key = signing_key.verifying_key();
 
         let mut hasher = Sha256::new();

@@ -175,7 +175,9 @@ impl ExecutionTrace {
 }
 
 /// Common result type aliases for consistency
+/// Error type used throughout the simulation crate
 pub type SimulationError = crate::AuraError;
+/// Result type alias using SimulationError
 pub type Result<T> = std::result::Result<T, SimulationError>;
 
 // Export utility types for common use

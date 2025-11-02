@@ -7,7 +7,7 @@
 
 use aura_agent::device_secure_store::{DeviceAttestation, PlatformSecureStorage, SecureStorage};
 use aura_crypto::Effects;
-use aura_protocol::types::{KeyShare, ParticipantId};
+use aura_crypto::KeyShare;
 use aura_types::{AccountId, DeviceId};
 use frost_ed25519 as frost;
 use std::process::Command;
@@ -44,13 +44,8 @@ fn create_test_key_share() -> KeyShare {
     let key_package =
         frost::keys::KeyPackage::try_from(secret_share).expect("Should convert to KeyPackage");
 
-    // Convert frost::Identifier to ParticipantId
-    let frost_id_bytes = key_package.identifier().serialize();
-    let id_u16 = u16::from_be_bytes([frost_id_bytes[0], frost_id_bytes[1]]);
-    let participant_id = ParticipantId::from_u16_unchecked(id_u16);
-
     KeyShare {
-        participant_id,
+        participant_id: 1, // Use u16 directly for FROST participant ID
         share: key_package,
         threshold: 2,
         total_participants: 2,

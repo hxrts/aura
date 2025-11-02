@@ -210,12 +210,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_coordination_transport_adapter() {
-        let device_id = DeviceId::from(Uuid::new_v4());
-        let peer_device_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::from(uuid::Uuid::new_v4());
+        let peer_device_id = DeviceId::from(uuid::Uuid::new_v4());
         let peer_id = "test_peer";
 
         // Create memory transport for testing
-        let transport = Arc::new(MemoryTransport::new());
+        let transport = Arc::new(MemoryTransport::new(device_id));
 
         // Create coordination adapter
         let adapter = CoordinationTransportAdapter::new(transport.clone(), device_id);
@@ -230,12 +230,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_broadcast_message() {
-        let device_id = DeviceId::from(Uuid::new_v4());
-        let peer1_id = DeviceId::from(Uuid::new_v4());
-        let peer2_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::from(uuid::Uuid::new_v4());
+        let peer1_id = DeviceId::from(uuid::Uuid::new_v4());
+        let peer2_id = DeviceId::from(uuid::Uuid::new_v4());
 
         // Create memory transport
-        let transport = Arc::new(MemoryTransport::new());
+        let transport = Arc::new(MemoryTransport::new(device_id));
 
         // Create coordination adapter
         let adapter = CoordinationTransportAdapter::new(transport.clone(), device_id);
@@ -255,8 +255,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_factory_methods() {
-        let device_id = DeviceId::from(Uuid::new_v4());
-        let transport = Arc::new(MemoryTransport::new());
+        let device_id = DeviceId::from(uuid::Uuid::new_v4());
+        let transport = Arc::new(MemoryTransport::new(device_id));
 
         // Test basic factory method
         let _adapter =
@@ -264,8 +264,8 @@ mod tests {
 
         // Test factory method with mappings
         let mut mappings = HashMap::new();
-        mappings.insert("peer1".to_string(), DeviceId::from(Uuid::new_v4()));
-        mappings.insert("peer2".to_string(), DeviceId::from(Uuid::new_v4()));
+        mappings.insert("peer1".to_string(), DeviceId::from(uuid::Uuid::new_v4()));
+        mappings.insert("peer2".to_string(), DeviceId::from(uuid::Uuid::new_v4()));
 
         let adapter = TransportAdapterFactory::create_coordination_adapter_with_mappings(
             transport,

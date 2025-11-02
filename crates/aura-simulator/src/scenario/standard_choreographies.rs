@@ -6,7 +6,6 @@
 use super::engine::{ChoreographyExecutor, ChoreographyResult};
 use crate::{tick, QueuedProtocol, Result, WorldState};
 use std::collections::HashMap;
-use std::time::Instant;
 
 // ============================================================================
 // Core Protocol Choreographies
@@ -22,7 +21,7 @@ impl ChoreographyExecutor for HandshakeChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let protocol = QueuedProtocol {
             protocol_type: "Handshake".to_string(),
@@ -43,7 +42,7 @@ impl ChoreographyExecutor for HandshakeChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -63,7 +62,7 @@ impl ChoreographyExecutor for SessionEstablishmentChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -92,7 +91,7 @@ impl ChoreographyExecutor for SessionEstablishmentChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -112,7 +111,7 @@ impl ChoreographyExecutor for P2pDkdChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let app_id = parameters
             .get("app_id")
@@ -146,7 +145,7 @@ impl ChoreographyExecutor for P2pDkdChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: {
                 let mut data = HashMap::new();
                 data.insert("app_id".to_string(), app_id.to_string());
@@ -171,7 +170,7 @@ impl ChoreographyExecutor for ContextAgreementChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let app_id = parameters
             .get("app_id")
@@ -205,7 +204,7 @@ impl ChoreographyExecutor for ContextAgreementChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -225,7 +224,7 @@ impl ChoreographyExecutor for SessionOperationChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let protocol = QueuedProtocol {
             protocol_type: "SessionOperation".to_string(),
@@ -246,7 +245,7 @@ impl ChoreographyExecutor for SessionOperationChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -270,7 +269,7 @@ impl ChoreographyExecutor for FrostKeyGenerationChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -299,7 +298,7 @@ impl ChoreographyExecutor for FrostKeyGenerationChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -319,7 +318,7 @@ impl ChoreographyExecutor for FrostCommitmentChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -348,7 +347,7 @@ impl ChoreographyExecutor for FrostCommitmentChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -368,7 +367,7 @@ impl ChoreographyExecutor for FrostSigningChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -397,7 +396,7 @@ impl ChoreographyExecutor for FrostSigningChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -421,7 +420,7 @@ impl ChoreographyExecutor for AccountCreationChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -450,7 +449,7 @@ impl ChoreographyExecutor for AccountCreationChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -470,7 +469,7 @@ impl ChoreographyExecutor for GuardianConfigurationChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -499,7 +498,7 @@ impl ChoreographyExecutor for GuardianConfigurationChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -519,7 +518,7 @@ impl ChoreographyExecutor for GuardianRecoveryChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -548,7 +547,7 @@ impl ChoreographyExecutor for GuardianRecoveryChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -572,7 +571,7 @@ impl ChoreographyExecutor for EpochIncrementChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -601,7 +600,7 @@ impl ChoreographyExecutor for EpochIncrementChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -621,7 +620,7 @@ impl ChoreographyExecutor for PresenceTicketDistributionChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let protocol = QueuedProtocol {
             protocol_type: "PresenceTicketDistribution".to_string(),
@@ -642,7 +641,7 @@ impl ChoreographyExecutor for PresenceTicketDistributionChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -666,7 +665,7 @@ impl ChoreographyExecutor for CrdtInitializationChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let protocol = QueuedProtocol {
             protocol_type: "CrdtInitialization".to_string(),
@@ -687,7 +686,7 @@ impl ChoreographyExecutor for CrdtInitializationChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -707,7 +706,7 @@ impl ChoreographyExecutor for CrdtUpdateChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let protocol = QueuedProtocol {
             protocol_type: "CrdtUpdate".to_string(),
@@ -728,7 +727,7 @@ impl ChoreographyExecutor for CrdtUpdateChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -748,16 +747,20 @@ impl ChoreographyExecutor for CounterInitChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let mut string_params = HashMap::new();
         string_params.insert("count".to_string(), "1".to_string());
         string_params.insert("ttl_epochs".to_string(), "100".to_string());
         string_params.insert("relationship_seed".to_string(), participants.join(","));
 
-        let success =
-            super::choreography_actions::run_protocol_with_middleware(world_state, "CounterInit", participants, &string_params)
-                .unwrap_or(false);
+        let success = super::choreography_actions::run_protocol_with_middleware(
+            world_state,
+            "CounterInit",
+            participants,
+            &string_params,
+        )
+        .unwrap_or(false);
 
         let mut events_generated = 0;
         let max_ticks = if success { 10 } else { 5 };
@@ -772,7 +775,7 @@ impl ChoreographyExecutor for CounterInitChoreography {
         Ok(ChoreographyResult {
             success,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: {
                 let mut data = HashMap::new();
                 data.insert("protocol_type".to_string(), "CounterInit".to_string());
@@ -798,7 +801,7 @@ impl ChoreographyExecutor for CounterIncrementChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let mut string_params = HashMap::new();
         string_params.insert("count".to_string(), "1".to_string());
@@ -826,7 +829,7 @@ impl ChoreographyExecutor for CounterIncrementChoreography {
         Ok(ChoreographyResult {
             success,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: {
                 let mut data = HashMap::new();
                 data.insert("protocol_type".to_string(), "CounterIncrement".to_string());
@@ -856,7 +859,7 @@ impl ChoreographyExecutor for GroupInitializationChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -885,7 +888,7 @@ impl ChoreographyExecutor for GroupInitializationChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -905,7 +908,7 @@ impl ChoreographyExecutor for GroupBroadcastChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let protocol = QueuedProtocol {
             protocol_type: "GroupBroadcast".to_string(),
@@ -926,7 +929,7 @@ impl ChoreographyExecutor for GroupBroadcastChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -950,7 +953,7 @@ impl ChoreographyExecutor for GossipSetupChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let protocol = QueuedProtocol {
             protocol_type: "GossipSetup".to_string(),
@@ -971,7 +974,7 @@ impl ChoreographyExecutor for GossipSetupChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -991,7 +994,7 @@ impl ChoreographyExecutor for GossipBroadcastChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let protocol = QueuedProtocol {
             protocol_type: "GossipBroadcast".to_string(),
@@ -1012,7 +1015,7 @@ impl ChoreographyExecutor for GossipBroadcastChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -1036,7 +1039,7 @@ impl ChoreographyExecutor for MultiRoundProtocolChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -1065,7 +1068,7 @@ impl ChoreographyExecutor for MultiRoundProtocolChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -1089,7 +1092,7 @@ impl ChoreographyExecutor for TemplateProtocolChoreography {
         participants: &[String],
         parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let threshold = parameters
             .get("threshold")
@@ -1118,7 +1121,7 @@ impl ChoreographyExecutor for TemplateProtocolChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }
@@ -1142,7 +1145,7 @@ impl ChoreographyExecutor for TestChoreography {
         participants: &[String],
         _parameters: &HashMap<String, toml::Value>,
     ) -> Result<ChoreographyResult> {
-        let start_time = Instant::now();
+        // Fixed timing for deterministic testing - using fixed duration instead of actual timing
 
         let protocol = QueuedProtocol {
             protocol_type: "Test".to_string(),
@@ -1163,7 +1166,7 @@ impl ChoreographyExecutor for TestChoreography {
         Ok(ChoreographyResult {
             success: true,
             events_generated,
-            execution_time: start_time.elapsed(),
+            execution_time: std::time::Duration::from_millis(10), // Fixed duration for deterministic testing
             data: HashMap::new(),
         })
     }

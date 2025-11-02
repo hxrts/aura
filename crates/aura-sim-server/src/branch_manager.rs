@@ -17,7 +17,7 @@ use crate::scenario_export::ScenarioExporter;
 /// Unique branch identifier
 pub type BranchId = Uuid;
 
-/// Unique simulation identifier  
+/// Unique simulation identifier
 pub type SimulationId = Uuid;
 
 /// Branch management system for simulation instances
@@ -226,6 +226,7 @@ impl BranchManager {
     }
 
     /// Remove a branch
+    #[allow(dead_code)]
     pub fn remove_branch(&mut self, branch_id: BranchId) -> Result<()> {
         if Some(branch_id) == self.default_branch {
             return Err(anyhow!("Cannot remove the default branch"));
@@ -241,11 +242,13 @@ impl BranchManager {
     }
 
     /// Get the default branch ID
+    #[allow(dead_code)]
     pub fn get_default_branch(&self) -> Option<BranchId> {
         self.default_branch
     }
 
     /// Set branch name/description
+    #[allow(dead_code)]
     pub fn set_branch_metadata(
         &mut self,
         branch_id: BranchId,
@@ -279,6 +282,7 @@ impl BranchManager {
     }
 
     /// Clean up inactive branches
+    #[allow(dead_code)]
     pub fn cleanup_inactive_branches(&mut self, max_age_seconds: u64) {
         let now = SystemTime::now();
         let mut to_remove = Vec::new();
@@ -301,6 +305,7 @@ impl BranchManager {
     }
 
     /// Record an event for a branch
+    #[allow(dead_code)]
     pub fn record_branch_event(&mut self, branch_id: BranchId, event: TraceEvent) {
         if let Some(branch) = self.branches.get_mut(&branch_id) {
             branch.event_buffer.push(event);
@@ -334,13 +339,6 @@ impl BranchManager {
         }
     }
 
-    /// Clear event buffer for a branch
-    pub fn clear_branch_events(&mut self, branch_id: BranchId) {
-        if let Some(branch) = self.branches.get_mut(&branch_id) {
-            branch.event_buffer.clear();
-        }
-    }
-
     /// Record a command execution for scenario export
     pub fn record_command_execution(
         &mut self,
@@ -370,14 +368,6 @@ impl BranchManager {
         branch
             .scenario_exporter
             .export_branch_as_scenario(branch, name, description)
-    }
-
-    /// Get command history length for a branch
-    pub fn get_branch_command_history_length(&self, branch_id: BranchId) -> usize {
-        self.branches
-            .get(&branch_id)
-            .map(|branch| branch.scenario_exporter.history_length())
-            .unwrap_or(0)
     }
 }
 

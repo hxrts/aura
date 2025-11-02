@@ -19,22 +19,22 @@ use std::time::Duration;
 /// TOML file structure for unified scenarios
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedScenarioFile {
-    /// Scenario metadata
+    /// Scenario metadata including name, description, and tags
     pub metadata: ScenarioMetadata,
-    /// Setup configuration
+    /// Setup configuration for participants and thresholds
     pub setup: TomlScenarioSetup,
-    /// Network configuration
+    /// Optional network configuration for latency, drops, and partitions
     pub network: Option<TomlNetworkConfig>,
-    /// Byzantine configuration
+    /// Optional byzantine behavior configuration
     pub byzantine: Option<TomlByzantineConfig>,
-    /// Scenario phases with actions
+    /// Scenario phases with choreographed actions
     pub phases: Vec<TomlScenarioPhase>,
-    /// Properties to check
+    /// Optional property checks to verify during execution
     pub properties: Option<Vec<TomlPropertyCheck>>,
-    /// Expected outcome
+    /// Expected final outcome of the scenario
     #[serde(default = "default_expected_outcome")]
     pub expected_outcome: String,
-    /// Inheritance
+    /// Optional parent scenario file for inheritance
     pub extends: Option<String>,
 }
 
@@ -45,80 +45,80 @@ fn default_expected_outcome() -> String {
 /// Scenario metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioMetadata {
-    /// Scenario name
+    /// Human-readable scenario name
     pub name: String,
-    /// Description
+    /// Detailed description of what the scenario tests
     pub description: String,
-    /// Version of scenario format
+    /// Version identifier for the scenario format
     pub version: Option<String>,
-    /// Author information
+    /// Optional author or team attribution
     pub author: Option<String>,
-    /// Tags for categorization
+    /// Optional tags for categorization and filtering
     pub tags: Option<Vec<String>>,
 }
 
 /// TOML setup configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TomlScenarioSetup {
-    /// Number of participants
+    /// Optional total number of participants in the scenario
     pub participants: Option<usize>,
-    /// Threshold for protocols
+    /// Optional threshold required for protocol completion
     pub threshold: Option<usize>,
-    /// Random seed
+    /// Optional random seed for deterministic reproduction
     pub seed: Option<u64>,
-    /// Specific participant configurations
+    /// Optional map of specific participant configurations by ID
     pub participant_configs: Option<HashMap<String, TomlParticipantConfig>>,
 }
 
 /// TOML participant configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TomlParticipantConfig {
-    /// Device ID
+    /// Unique device identifier for this participant
     pub device_id: String,
-    /// Account ID
+    /// Account identifier this participant belongs to
     pub account_id: String,
-    /// Byzantine flag
+    /// Whether this participant exhibits byzantine behavior
     pub is_byzantine: Option<bool>,
-    /// Role designation
+    /// Optional role designation for the participant
     pub role: Option<String>,
 }
 
 /// TOML network configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TomlNetworkConfig {
-    /// Latency range in milliseconds
+    /// Optional latency range in milliseconds [min, max]
     pub latency_range: Option<[u64; 2]>,
-    /// Message drop rate
+    /// Optional message drop rate (0.0 to 1.0)
     pub drop_rate: Option<f64>,
-    /// Network partitions
+    /// Optional network partitions as lists of participant groups
     pub partitions: Option<Vec<Vec<String>>>,
 }
 
 /// TOML byzantine configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TomlByzantineConfig {
-    /// Number of byzantine participants
+    /// Optional number of byzantine participants to create
     pub count: Option<usize>,
-    /// Specific participants
+    /// Optional specific participant IDs to make byzantine
     pub participants: Option<Vec<String>>,
-    /// Default strategies
+    /// Optional default byzantine behavior strategies
     pub default_strategies: Option<Vec<String>>,
 }
 
 /// TOML scenario phase
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TomlScenarioPhase {
-    /// Phase name
+    /// Unique name identifying this phase
     pub name: String,
-    /// Description
+    /// Optional description of phase objectives
     pub description: Option<String>,
-    /// Actions in this phase
+    /// Choreographed actions to execute in sequence
     pub actions: Vec<TomlChoreographyAction>,
-    /// Checkpoints to create
+    /// Optional checkpoint labels to create during this phase
     pub checkpoints: Option<Vec<String>>,
-    /// Properties to verify
+    /// Optional property names to verify during this phase
     pub verify_properties: Option<Vec<String>>,
-    /// Phase timeout
+    /// Optional phase timeout in seconds
     pub timeout_seconds: Option<u64>,
 }
 
@@ -129,11 +129,17 @@ pub enum TomlChoreographyAction {
     /// Run choreography action
     #[serde(rename = "run_choreography")]
     RunChoreography {
+        /// Choreography type identifier
         choreography: String,
+        /// Optional specific participants involved
         participants: Option<Vec<String>>,
+        /// Optional threshold for choreography completion
         threshold: Option<usize>,
+        /// Optional application identifier for DKD
         app_id: Option<String>,
+        /// Optional context string for DKD
         context: Option<String>,
+        /// Additional choreography-specific parameters
         #[serde(flatten)]
         extra_params: HashMap<String, toml::Value>,
     },
@@ -141,9 +147,13 @@ pub enum TomlChoreographyAction {
     /// Execute protocol action
     #[serde(rename = "execute_protocol")]
     ExecuteProtocol {
+        /// Protocol type identifier
         protocol: String,
+        /// Participants involved in protocol execution
         participants: Vec<String>,
+        /// Optional timeout in ticks
         timeout_ticks: Option<u64>,
+        /// Additional protocol-specific parameters
         #[serde(flatten)]
         extra_params: HashMap<String, toml::Value>,
     },
@@ -151,9 +161,13 @@ pub enum TomlChoreographyAction {
     /// Apply network condition
     #[serde(rename = "apply_network_condition")]
     ApplyNetworkCondition {
+        /// Network condition type
         condition: String,
+        /// Participants affected by condition
         participants: Vec<String>,
+        /// Optional duration in ticks
         duration_ticks: Option<u64>,
+        /// Additional condition-specific parameters
         #[serde(flatten)]
         extra_params: HashMap<String, toml::Value>,
     },
@@ -161,45 +175,59 @@ pub enum TomlChoreographyAction {
     /// Inject byzantine behavior
     #[serde(rename = "inject_byzantine")]
     InjectByzantine {
+        /// Participant to inject behavior into
         participant: String,
+        /// Byzantine behavior type
         behavior: String,
+        /// Additional behavior-specific parameters
         #[serde(flatten)]
         extra_params: HashMap<String, toml::Value>,
     },
 
     /// Wait for ticks
     #[serde(rename = "wait_ticks")]
-    WaitTicks { ticks: u64 },
+    WaitTicks {
+        /// Number of ticks to wait
+        ticks: u64,
+    },
 
     /// Create checkpoint
     #[serde(rename = "create_checkpoint")]
-    CreateCheckpoint { label: String },
+    CreateCheckpoint {
+        /// Checkpoint label for identification
+        label: String,
+    },
 
     /// Verify property
     #[serde(rename = "verify_property")]
-    VerifyProperty { property: String, expected: bool },
+    VerifyProperty {
+        /// Property name to verify
+        property: String,
+        /// Expected verification result
+        expected: bool,
+    },
 }
 
 /// TOML property check
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TomlPropertyCheck {
-    /// Property name
+    /// Unique property name identifier
     pub name: String,
-    /// Property type
+    /// Property type classification
     pub property_type: String,
-    /// Parameters
+    /// Optional property-specific parameters
     pub parameters: Option<HashMap<String, toml::Value>>,
-    /// Phases to check in
+    /// Optional list of phase names to check this property in
     pub check_in_phases: Option<Vec<String>>,
 }
 
 /// Unified scenario loader
 pub struct UnifiedScenarioLoader {
-    /// Base directory for scenario files
+    /// Base directory for locating scenario files
     base_dir: PathBuf,
-    /// Scenario cache for inheritance resolution
+    /// Cache of loaded scenarios for inheritance resolution
     scenario_cache: HashMap<String, UnifiedScenarioFile>,
-    /// Enable validation
+    /// Whether to perform validation during loading
     enable_validation: bool,
 }
 
@@ -595,6 +623,7 @@ impl UnifiedScenarioLoader {
     }
 
     /// Generate a sample TOML scenario file
+    #[allow(clippy::disallowed_methods)]
     pub fn generate_sample_toml<P: AsRef<Path>>(&self, output_path: P) -> Result<()> {
         let sample = r#"[metadata]
 name = "dkd_basic_test"

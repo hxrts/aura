@@ -1,6 +1,6 @@
 //! Core agent logic and AgentCore implementation
 //!
-//! This module provides the fundamental AgentCore struct and its methods for:
+//! This module provides the AgentCore struct and its methods for:
 //! - Device and account identification
 //! - Key share and ledger management
 //! - Protocol handler with middleware stack
@@ -144,10 +144,7 @@ impl<S: Storage> AgentCore<S> {
 
         // Get session info to find participants
         let session_info = handler.get_session_info(session_id).await.map_err(|e| {
-            aura_types::AuraError::coordination_failed(format!(
-                "Failed to get session info: {}",
-                e
-            ))
+            aura_types::AuraError::coordination_failed(format!("Failed to get session info: {}", e))
         })?;
 
         // Collect messages from all participants

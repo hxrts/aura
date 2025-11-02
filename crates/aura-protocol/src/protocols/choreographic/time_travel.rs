@@ -409,7 +409,7 @@ mod tests {
                 &HashMap::new(),
                 HashMap::new(),
                 vec![],
-                i,
+                i.try_into().unwrap(),
             );
         }
 
@@ -432,7 +432,7 @@ mod tests {
                 &HashMap::new(),
                 HashMap::new(),
                 vec![],
-                i,
+                i.try_into().unwrap(),
             );
         }
 

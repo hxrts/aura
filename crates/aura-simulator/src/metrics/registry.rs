@@ -115,6 +115,19 @@ impl GlobalMetrics {
             .clone()
     }
 
+    /// Reset global registry for testing - replaces the registry contents
+    #[cfg(test)]
+    pub fn reset_for_testing() {
+        let registry = Self::registry();
+        #[allow(clippy::expect_used)]
+        let mut registry_lock = registry
+            .lock()
+            .expect("Global registry mutex should not be poisoned");
+
+        // Replace the contents with a fresh registry
+        *registry_lock = MetricRegistry::new();
+    }
+
     /// Get the global registry
     pub fn registry() -> Arc<Mutex<MetricRegistry>> {
         Self::init()
@@ -123,6 +136,8 @@ impl GlobalMetrics {
     /// Get the default global collector
     pub fn default_collector() -> Arc<MetricsCollector> {
         let registry = Self::registry();
+        // A poisoned mutex indicates a panic during updates, which is unrecoverable
+        #[allow(clippy::expect_used)]
         let registry_lock = registry
             .lock()
             .expect("Global registry mutex should not be poisoned");
@@ -132,6 +147,8 @@ impl GlobalMetrics {
     /// Register a named collector globally
     pub fn register<S: Into<String>>(name: S, collector: MetricsCollector) {
         let registry = Self::registry();
+        // A poisoned mutex indicates a panic during updates, which is unrecoverable
+        #[allow(clippy::expect_used)]
         let mut registry_lock = registry
             .lock()
             .expect("Global registry mutex should not be poisoned");
@@ -141,6 +158,8 @@ impl GlobalMetrics {
     /// Get a named collector from global registry
     pub fn get<S: AsRef<str>>(name: S) -> Option<Arc<MetricsCollector>> {
         let registry = Self::registry();
+        // A poisoned mutex indicates a panic during updates, which is unrecoverable
+        #[allow(clippy::expect_used)]
         let registry_lock = registry
             .lock()
             .expect("Global registry mutex should not be poisoned");
@@ -150,6 +169,8 @@ impl GlobalMetrics {
     /// Get global snapshot
     pub fn snapshot() -> GlobalMetricsSnapshot {
         let registry = Self::registry();
+        // A poisoned mutex indicates a panic during updates, which is unrecoverable
+        #[allow(clippy::expect_used)]
         let registry_lock = registry
             .lock()
             .expect("Global registry mutex should not be poisoned");
@@ -159,29 +180,35 @@ impl GlobalMetrics {
     /// Reset all global metrics
     pub fn reset_all() {
         let registry = Self::registry();
+        // A poisoned mutex indicates a panic during updates, which is unrecoverable
+        #[allow(clippy::expect_used)]
         let registry_lock = registry
             .lock()
             .expect("Global registry mutex should not be poisoned");
         registry_lock.reset_all();
     }
 
-    /// Convenience methods for default collector
+    /// Record a counter metric on the default collector
     pub fn counter<S: Into<String>>(name: S, value: u64) {
         Self::default_collector().counter(&name.into(), value);
     }
 
+    /// Record a gauge metric on the default collector
     pub fn gauge<S: Into<String>>(name: S, value: f64) {
         Self::default_collector().gauge(&name.into(), value);
     }
 
+    /// Record a histogram metric on the default collector
     pub fn histogram<S: Into<String>>(name: S, value: f64) {
         Self::default_collector().histogram(&name.into(), value);
     }
 
+    /// Record a timer metric on the default collector
     pub fn timer<S: Into<String>>(name: S, duration_ms: u64) {
         Self::default_collector().timer(&name.into(), duration_ms);
     }
 
+    /// Start a timer that records duration when dropped
     pub fn timer_start<S: Into<String>>(name: S) -> crate::metrics::collector::TimerGuard {
         Self::default_collector().timer_start(&name.into())
     }
@@ -193,7 +220,7 @@ impl Default for MetricRegistry {
     }
 }
 
-/// Convenience macros for global metrics
+/// Record a counter metric on the global default collector
 #[macro_export]
 macro_rules! global_counter {
     ($name:expr, $value:expr) => {
@@ -201,6 +228,7 @@ macro_rules! global_counter {
     };
 }
 
+/// Record a gauge metric on the global default collector
 #[macro_export]
 macro_rules! global_gauge {
     ($name:expr, $value:expr) => {
@@ -208,6 +236,7 @@ macro_rules! global_gauge {
     };
 }
 
+/// Record a histogram metric on the global default collector
 #[macro_export]
 macro_rules! global_histogram {
     ($name:expr, $value:expr) => {
@@ -215,6 +244,7 @@ macro_rules! global_histogram {
     };
 }
 
+/// Record a timer metric on the global default collector
 #[macro_export]
 macro_rules! global_timer {
     ($name:expr, $duration:expr) => {
@@ -222,6 +252,7 @@ macro_rules! global_timer {
     };
 }
 
+/// Time a block of code and record the duration as a metric
 #[macro_export]
 macro_rules! global_time_block {
     ($name:expr, $block:block) => {{
@@ -233,6 +264,10 @@ macro_rules! global_time_block {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Test synchronization mutex to ensure only one global metrics test runs at a time
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_metric_registry_basic() {
@@ -282,7 +317,9 @@ mod tests {
 
     #[test]
     fn test_global_metrics_basic() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         // Reset to clean state
+        GlobalMetrics::reset_for_testing();
         GlobalMetrics::reset_all();
 
         GlobalMetrics::counter("global_counter", 42);
@@ -300,6 +337,8 @@ mod tests {
 
     #[test]
     fn test_global_metrics_named_collectors() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        GlobalMetrics::reset_for_testing();
         GlobalMetrics::reset_all();
 
         let test_collector = MetricsCollector::new();
@@ -316,6 +355,8 @@ mod tests {
 
     #[test]
     fn test_global_metric_macros() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        GlobalMetrics::reset_for_testing();
         GlobalMetrics::reset_all();
 
         global_counter!("macro_counter", 123);

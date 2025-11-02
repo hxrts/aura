@@ -15,6 +15,7 @@ pub mod effects;
 pub mod error_recovery;
 pub mod event_watcher;
 pub mod handler;
+pub mod ledger_integration;
 pub mod observability;
 pub mod session;
 pub mod stack;

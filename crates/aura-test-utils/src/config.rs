@@ -176,7 +176,7 @@ impl ProtocolTestConfig {
 
     /// Set message loss rate
     pub fn with_message_loss(mut self, rate: f64) -> Self {
-        self.message_loss_rate = rate.max(0.0).min(1.0);
+        self.message_loss_rate = rate.clamp(0.0, 1.0);
         self
     }
 

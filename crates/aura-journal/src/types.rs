@@ -389,7 +389,7 @@ pub struct StorageMetadata {
     /// Number of replicas to maintain
     pub replication_factor: u8,
     /// Encryption key derivation spec
-    pub encryption_key_spec: crate::protocols::events::KeyDerivationSpec,
+    pub encryption_key_spec: KeyDerivationSpec,
     /// When the blob was stored
     pub stored_at: u64,
     /// Device that initiated storage
@@ -493,4 +493,15 @@ pub enum AccessResult {
     Denied { reason: String },
     /// Access failed due to technical error
     Failed { error: String },
+}
+
+/// Key derivation specification for encryption
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyDerivationSpec {
+    /// Context for key derivation
+    pub context: String,
+    /// Algorithm used for key derivation
+    pub algorithm: String,
+    /// Additional parameters
+    pub params: std::collections::BTreeMap<String, String>,
 }

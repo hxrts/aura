@@ -254,7 +254,7 @@ mod tests {
 
         let delegator = Subject::Device(aura_types::DeviceId::new_with_effects(&effects));
         let delegatee = Subject::Device(aura_types::DeviceId::new_with_effects(&effects));
-        let capability_id = aura_protocol::test_utils::generate_test_uuid();
+        let capability_id = effects.gen_uuid();
 
         // Add root authority
         graph.add_root_authority(delegator.clone());
@@ -281,7 +281,7 @@ mod tests {
         let mut graph = AuthorityGraph::new();
 
         let subject = Subject::Device(aura_types::DeviceId::new_with_effects(&effects));
-        let capability_id = aura_protocol::test_utils::generate_test_uuid();
+        let capability_id = effects.gen_uuid();
 
         graph.add_subject(subject.clone()).unwrap();
 
@@ -307,7 +307,7 @@ mod tests {
     fn test_subject_key_generation() {
         let effects = Effects::test();
         let device_id = aura_types::DeviceId::new_with_effects(&effects);
-        let guardian_id = aura_protocol::test_utils::generate_test_uuid();
+        let guardian_id = effects.gen_uuid();
 
         let device_subject = Subject::Device(device_id);
         let guardian_subject = Subject::Guardian(guardian_id);

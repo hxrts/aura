@@ -39,7 +39,7 @@ pub struct StateCheckpoint {
 ///
 /// This runner demonstrates the clean separation of concerns:
 /// - WorldState contains only data
-/// - tick() function contains only transition logic  
+/// - tick() function contains only transition logic
 /// - Runner contains only execution harness logic
 pub struct FunctionalRunner {
     /// Current world state
@@ -195,8 +195,9 @@ impl FunctionalRunner {
     }
 
     /// Run simulation until completion or stopping condition
+    // SAFETY: timing measurement for simulation diagnostics
+    #[allow(clippy::disallowed_methods)]
     pub fn run_until_complete(&mut self) -> Result<SimulationRunResult> {
-        #[allow(clippy::disallowed_methods)]
         let start_time = std::time::SystemTime::now();
         let mut _total_events = 0;
 
@@ -234,6 +235,8 @@ impl FunctionalRunner {
     }
 
     /// Run simulation until idle (no more work to do)
+    // SAFETY: timing measurement for simulation diagnostics
+    #[allow(clippy::disallowed_methods)]
     pub fn run_until_idle(&mut self) -> Result<SimulationRunResult> {
         let start_time = std::time::SystemTime::now();
 
@@ -251,6 +254,8 @@ impl FunctionalRunner {
     }
 
     /// Run simulation for a specific number of ticks
+    // SAFETY: timing measurement for simulation diagnostics
+    #[allow(clippy::disallowed_methods)]
     pub fn run_for_ticks(&mut self, tick_count: u64) -> Result<SimulationRunResult> {
         let start_time = std::time::SystemTime::now();
         let target_tick = self.world.current_tick + tick_count;
@@ -299,7 +304,7 @@ impl FunctionalRunner {
 
     /// Create a checkpoint of current state
     pub fn create_checkpoint(&mut self, label: Option<String>) -> Result<String> {
-        let checkpoint_id = uuid::Uuid::new_v4().to_string();
+        let checkpoint_id = uuid::Uuid::from_u128(400 + self.checkpoints.len() as u128).to_string(); // Fixed UUID for deterministic testing
 
         let checkpoint = StateCheckpoint {
             id: checkpoint_id.clone(),
@@ -564,7 +569,10 @@ mod tests {
 
         assert_eq!(result.final_tick, 5);
         assert!(matches!(result.stop_reason, StopReason::ManualStop));
-        assert!(result.success);
+        assert!(matches!(
+            result.status,
+            crate::results::ExecutionStatus::Success
+        ));
     }
 
     /// TODO: Update test to match current statistics implementation
@@ -584,10 +592,10 @@ mod tests {
         runner.step_exactly(3).unwrap();
         runner.create_checkpoint(Some("test".to_string())).unwrap();
 
-        let stats = runner.get_statistics();
-        assert_eq!(stats.current_tick, 3);
-        assert_eq!(stats.participant_count, 1);
-        assert_eq!(stats.checkpoints_created, 1);
+        let stats = runner.get_statistics_summary();
+        assert_eq!(stats.total_ticks, 3);
+        assert_eq!(stats.completed_sessions, 0);
+        assert_eq!(stats.failed_sessions, 0);
         assert!(stats.total_events > 0);
     }
 

@@ -150,6 +150,7 @@ impl UnifiedStateManager {
 impl<State: StateManager> CheckpointManager<State> for UnifiedStateManager {
     type Error = StateError;
 
+    #[allow(clippy::disallowed_methods)]
     fn create_checkpoint(
         &mut self,
         state: &State,
@@ -169,7 +170,17 @@ impl<State: StateManager> CheckpointManager<State> for UnifiedStateManager {
         }
 
         let snapshot = state.snapshot();
-        let checkpoint_id = uuid::Uuid::new_v4().to_string();
+        // Generate deterministic checkpoint ID from state snapshot
+        let hash_input = format!("checkpoint-{}", snapshot.tick());
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        // SAFETY: blake3 hash is always 32 bytes, slice conversion to [u8; 16] always succeeds
+        #[allow(clippy::expect_used)]
+        let checkpoint_id = uuid::Uuid::from_bytes(
+            hash_bytes.as_bytes()[..16]
+                .try_into()
+                .expect("blake3 hash is always 32 bytes, taking first 16 always succeeds"),
+        )
+        .to_string();
 
         // Convert state snapshot to unified snapshot
         let unified_snapshot = UnifiedSnapshot::new(
@@ -183,6 +194,8 @@ impl<State: StateManager> CheckpointManager<State> for UnifiedStateManager {
             id: checkpoint_id.clone(),
             label,
             tick: snapshot.tick(),
+            // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+            #[allow(clippy::expect_used)]
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("System time before UNIX epoch")

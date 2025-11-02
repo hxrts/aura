@@ -45,6 +45,7 @@ pub struct TimerGuard {
 }
 
 impl TimerGuard {
+    #[allow(clippy::disallowed_methods)]
     fn new(name: String, collector: MetricsCollector) -> Self {
         Self {
             name,
@@ -90,6 +91,8 @@ impl MetricsCollector {
 
     /// Get a snapshot of current metrics
     pub fn snapshot(&self) -> MetricsSnapshot {
+        // A poisoned mutex indicates a panic during updates, which is unrecoverable
+        #[allow(clippy::expect_used)]
         let metrics = self
             .metrics
             .lock()
@@ -112,6 +115,8 @@ impl MetricsCollector {
     /// Reset all metrics
     pub fn reset(&self) {
         if self.enabled {
+            // A poisoned mutex indicates a panic during updates, which is unrecoverable
+            #[allow(clippy::expect_used)]
             let mut metrics = self
                 .metrics
                 .lock()
@@ -122,6 +127,8 @@ impl MetricsCollector {
 
     /// Get current metrics summary
     pub fn summary(&self) -> MetricsSummary {
+        // A poisoned mutex indicates a panic during updates, which is unrecoverable
+        #[allow(clippy::expect_used)]
         self.metrics
             .lock()
             .expect("Metrics mutex should not be poisoned")
@@ -134,6 +141,8 @@ impl MetricsCollector {
         F: FnOnce(&mut SimulationMetrics) -> R,
     {
         if self.enabled {
+            // A poisoned mutex indicates a panic during updates, which is unrecoverable
+            #[allow(clippy::expect_used)]
             let mut metrics = self
                 .metrics
                 .lock()
@@ -178,14 +187,12 @@ impl MetricsProvider for MetricsCollector {
 
         self.with_metrics(|metrics| {
             // For histogram, we'll append to existing values or create new
-            if let Some(existing) = metrics.custom.get_mut(name) {
-                if let MetricValue::Histogram(ref mut values) = existing {
-                    values.push(value);
-                    return;
-                }
+            if let Some(MetricValue::Histogram(ref mut values)) = metrics.custom.get_mut(name) {
+                values.push(value);
+            } else {
+                // Create new histogram with single value
+                metrics.add_custom_metric(name.to_string(), MetricValue::Histogram(vec![value]));
             }
-            // Create new histogram with single value
-            metrics.add_custom_metric(name.to_string(), MetricValue::Histogram(vec![value]));
         });
     }
 

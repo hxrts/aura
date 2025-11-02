@@ -106,6 +106,7 @@ impl CheckpointManager {
     }
 
     /// Save a world state as a checkpoint
+    #[allow(clippy::disallowed_methods)]
     pub fn save(&mut self, world_state: &WorldState, label: Option<String>) -> Result<String> {
         let checkpoint_id = Uuid::new_v4().to_string();
         let file_name = format!("checkpoint_{}.json", checkpoint_id);
@@ -128,6 +129,8 @@ impl CheckpointManager {
             tick: world_state.current_tick,
             time: world_state.current_time,
             file_path: file_path.clone(),
+            // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+            #[allow(clippy::unwrap_used)]
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

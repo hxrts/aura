@@ -1083,12 +1083,15 @@ impl DebugReporter {
     }
 
     /// Generate comprehensive developer report
+    #[allow(clippy::disallowed_methods)]
     pub fn generate_developer_report(
         &mut self,
         violation_debug_result: &ViolationDebugResult,
         minimal_reproduction: Option<&MinimalReproduction>,
         focused_test_results: Option<&[FocusedTestResult]>,
     ) -> Result<DeveloperReport> {
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::expect_used)]
         let start_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("System time before UNIX epoch")
@@ -1130,6 +1133,8 @@ impl DebugReporter {
         let related_resources = self.find_related_resources(violation_debug_result)?;
 
         // Create report metadata
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::unwrap_used)]
         let end_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1427,37 +1432,34 @@ impl DebugReporter {
         &self,
         debug_result: &ViolationDebugResult,
     ) -> Result<Vec<VisualizationElement>> {
-        let mut visualizations = Vec::new();
-
-        // Timeline visualization
-        visualizations.push(VisualizationElement {
-            element_id: "violation_timeline".to_string(),
-            visualization_type: VisualizationType::Timeline,
-            title: "Violation Timeline".to_string(),
-            data: VisualizationData::Timeline(self.create_timeline_data(debug_result)?),
-            display_options: DisplayOptions {
-                width: Some(800),
-                height: Some(400),
-                show_title: true,
-                show_legend: true,
-                custom_style: HashMap::new(),
+        let visualizations = vec![
+            VisualizationElement {
+                element_id: "violation_timeline".to_string(),
+                visualization_type: VisualizationType::Timeline,
+                title: "Violation Timeline".to_string(),
+                data: VisualizationData::Timeline(self.create_timeline_data(debug_result)?),
+                display_options: DisplayOptions {
+                    width: Some(800),
+                    height: Some(400),
+                    show_title: true,
+                    show_legend: true,
+                    custom_style: HashMap::new(),
+                },
             },
-        });
-
-        // Causal chain diagram
-        visualizations.push(VisualizationElement {
-            element_id: "causal_chains".to_string(),
-            visualization_type: VisualizationType::CausalChain,
-            title: "Causal Chain Analysis".to_string(),
-            data: VisualizationData::Diagram(self.create_causal_diagram(debug_result)?),
-            display_options: DisplayOptions {
-                width: Some(1000),
-                height: Some(600),
-                show_title: true,
-                show_legend: true,
-                custom_style: HashMap::new(),
+            VisualizationElement {
+                element_id: "causal_chains".to_string(),
+                visualization_type: VisualizationType::CausalChain,
+                title: "Causal Chain Analysis".to_string(),
+                data: VisualizationData::Diagram(self.create_causal_diagram(debug_result)?),
+                display_options: DisplayOptions {
+                    width: Some(1000),
+                    height: Some(600),
+                    show_title: true,
+                    show_legend: true,
+                    custom_style: HashMap::new(),
+                },
             },
-        });
+        ];
 
         Ok(visualizations)
     }
@@ -1467,25 +1469,22 @@ impl DebugReporter {
         &self,
         _debug_result: &ViolationDebugResult,
     ) -> Result<Vec<RelatedResource>> {
-        let mut resources = Vec::new();
-
-        // Add related scenarios
-        resources.push(RelatedResource {
-            resource_type: ResourceType::Scenario,
-            title: "Similar Byzantine Scenario".to_string(),
-            description: "Related scenario that tests similar conditions".to_string(),
-            location: "scenarios/byzantine/similar_test.toml".to_string(),
-            relevance: 0.8,
-        });
-
-        // Add documentation
-        resources.push(RelatedResource {
-            resource_type: ResourceType::Documentation,
-            title: "Protocol Implementation Guide".to_string(),
-            description: "Documentation for the affected protocol".to_string(),
-            location: "docs/protocols/implementation.md".to_string(),
-            relevance: 0.7,
-        });
+        let resources = vec![
+            RelatedResource {
+                resource_type: ResourceType::Scenario,
+                title: "Similar Byzantine Scenario".to_string(),
+                description: "Related scenario that tests similar conditions".to_string(),
+                location: "scenarios/byzantine/similar_test.toml".to_string(),
+                relevance: 0.8,
+            },
+            RelatedResource {
+                resource_type: ResourceType::Documentation,
+                title: "Protocol Implementation Guide".to_string(),
+                description: "Documentation for the affected protocol".to_string(),
+                location: "docs/protocols/implementation.md".to_string(),
+                relevance: 0.7,
+            },
+        ];
 
         Ok(resources)
     }
@@ -1882,11 +1881,13 @@ impl InsightCollector {
         }
     }
 
-    fn rank_insights(&self, insights: &mut Vec<DebuggingInsight>) {
+    fn rank_insights(&self, insights: &mut [DebuggingInsight]) {
         insights.sort_by(|a, b| {
             let score_a = self.calculate_insight_score(a);
             let score_b = self.calculate_insight_score(b);
-            score_b.partial_cmp(&score_a).unwrap()
+            score_b
+                .partial_cmp(&score_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 
@@ -1900,6 +1901,8 @@ impl InsightCollector {
 
 impl Default for DebugReporter {
     fn default() -> Self {
+        // SAFETY: DebugReporter::new() only fails if directory creation fails
+        #[allow(clippy::unwrap_used)]
         Self::new().unwrap()
     }
 }
@@ -1969,30 +1972,13 @@ mod tests {
         crate::testing::PropertyViolation {
             property_name: "test_property".to_string(),
             property_type: crate::testing::PropertyViolationType::Invariant,
-            violation_state: crate::testing::SimulationState {
+            violation_state: crate::results::SimulationStateSnapshot {
                 tick: 100,
                 time: 10000,
-                variables: HashMap::new(),
-                protocol_state: crate::testing::ProtocolExecutionState {
-                    active_sessions: Vec::new(),
-                    completed_sessions: Vec::new(),
-                    queued_protocols: Vec::new(),
-                },
-                participants: Vec::new(),
-                network_state: crate::testing::NetworkStateSnapshot {
-                    partitions: Vec::new(),
-                    message_stats: crate::testing::MessageDeliveryStats {
-                        messages_sent: 0,
-                        messages_delivered: 0,
-                        messages_dropped: 0,
-                        average_latency_ms: 0.0,
-                    },
-                    failure_conditions: crate::testing::NetworkFailureConditions {
-                        drop_rate: 0.0,
-                        latency_range_ms: (0, 100),
-                        partitions_active: false,
-                    },
-                },
+                participant_count: 0,
+                active_sessions: 0,
+                completed_sessions: 0,
+                state_hash: "test_hash".to_string(),
             },
             violation_details: crate::testing::ViolationDetails {
                 description: "Test violation".to_string(),

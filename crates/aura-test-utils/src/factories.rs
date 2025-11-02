@@ -140,7 +140,11 @@ impl AccountStateFactory {
 
     /// Create a random account state factory
     pub fn random() -> Self {
-        Self::new(AccountId(Uuid::new_v4()))
+        // Deterministic UUID generation
+        let hash_input = "random-account-factory";
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        Self::new(AccountId(uuid))
     }
 
     /// Add a device to the account state
@@ -229,8 +233,12 @@ pub struct MultiDeviceScenarioFactory {
 impl MultiDeviceScenarioFactory {
     /// Create a new multi-device scenario factory
     pub fn new(device_count: usize, threshold: u16) -> Self {
+        // Deterministic UUID generation
+        let hash_input = format!("scenario-factory-{}-{}", device_count, threshold);
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
         Self {
-            account_id: AccountId(Uuid::new_v4()),
+            account_id: AccountId(uuid),
             base_seed: 42,
             device_count,
             threshold,

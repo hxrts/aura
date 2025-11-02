@@ -17,7 +17,11 @@ pub struct DeviceTestFixture {
 impl DeviceTestFixture {
     /// Create a new device test fixture with a specific index
     pub fn new(index: usize) -> Self {
-        let device_id = DeviceId(Uuid::new_v4());
+        // Deterministic UUID based on index
+        let hash_input = format!("device-fixture-{}", index);
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let device_id = DeviceId(uuid);
         Self {
             device_id,
             index,
@@ -37,7 +41,11 @@ impl DeviceTestFixture {
 
     /// Create a device fixture with a custom label
     pub fn with_label(index: usize, label: String) -> Self {
-        let device_id = DeviceId(Uuid::new_v4());
+        // Deterministic UUID based on index
+        let hash_input = format!("device-fixture-{}", index);
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let device_id = DeviceId(uuid);
         Self {
             device_id,
             index,
@@ -113,7 +121,11 @@ impl DeviceSetBuilder {
                     let uuid_bytes: [u8; 16] = hash_bytes.as_bytes()[..16].try_into().unwrap();
                     DeviceId(Uuid::from_bytes(uuid_bytes))
                 } else {
-                    DeviceId(Uuid::new_v4())
+                    // Deterministic generation based on index
+                    let hash_input = format!("device-set-{}", i);
+                    let hash_bytes = blake3::hash(hash_input.as_bytes());
+                    let uuid_bytes: [u8; 16] = hash_bytes.as_bytes()[..16].try_into().unwrap();
+                    DeviceId(Uuid::from_bytes(uuid_bytes))
                 };
 
                 DeviceTestFixture {

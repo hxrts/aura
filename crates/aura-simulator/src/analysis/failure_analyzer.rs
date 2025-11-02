@@ -564,6 +564,8 @@ impl FailureAnalyzer {
         }
 
         // Sort by impact score
+        // SAFETY: impact_score is a valid f64, partial_cmp returns Some for valid floats
+        #[allow(clippy::unwrap_used)]
         key_events.sort_by(|a, b| b.impact_score.partial_cmp(&a.impact_score).unwrap());
 
         // Limit to reasonable number
@@ -1126,6 +1128,8 @@ impl CausalAnalyzer {
         }
 
         // Sort chains by strength
+        // SAFETY: chain_strength is a valid f64, partial_cmp returns Some for valid floats
+        #[allow(clippy::unwrap_used)]
         causal_chains.sort_by(|a, b| b.chain_strength.partial_cmp(&a.chain_strength).unwrap());
 
         Ok(causal_chains)
@@ -1180,6 +1184,8 @@ impl CausalAnalyzer {
         for _ in 0..self.config.max_chain_depth {
             if let Some(dependencies) = self.dependency_graph.get(&current_event.event_id) {
                 // Find the strongest dependency
+                // SAFETY: strength is a valid f64, partial_cmp returns Some for valid floats
+                #[allow(clippy::unwrap_used)]
                 if let Some(strongest_dep) = dependencies
                     .iter()
                     .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap())
@@ -1419,30 +1425,13 @@ mod tests {
         PropertyViolation {
             property_name: "test_property".to_string(),
             property_type: PropertyViolationType::Invariant,
-            violation_state: crate::testing::SimulationState {
+            violation_state: crate::results::SimulationStateSnapshot {
                 tick: 100,
                 time: 10000,
-                variables: HashMap::new(),
-                protocol_state: crate::testing::ProtocolExecutionState {
-                    active_sessions: Vec::new(),
-                    completed_sessions: Vec::new(),
-                    queued_protocols: Vec::new(),
-                },
-                participants: Vec::new(),
-                network_state: crate::testing::NetworkStateSnapshot {
-                    partitions: Vec::new(),
-                    message_stats: crate::testing::MessageDeliveryStats {
-                        messages_sent: 0,
-                        messages_delivered: 0,
-                        messages_dropped: 0,
-                        average_latency_ms: 0.0,
-                    },
-                    failure_conditions: crate::testing::NetworkFailureConditions {
-                        drop_rate: 0.0,
-                        latency_range_ms: (0, 100),
-                        partitions_active: false,
-                    },
-                },
+                participant_count: 0,
+                active_sessions: 0,
+                completed_sessions: 0,
+                state_hash: "test_hash".to_string(),
             },
             violation_details: ViolationDetails {
                 description: "Test violation".to_string(),

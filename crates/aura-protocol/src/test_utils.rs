@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 /// Simple in-memory transport for testing choreographic protocols
 #[derive(Debug, Default, Clone)]
 pub struct MemoryTransport {
+    #[allow(clippy::type_complexity)]
     messages: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
 }
 

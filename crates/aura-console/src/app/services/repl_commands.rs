@@ -223,16 +223,13 @@ Type 'choreo help' for this help."#
         let participants = args[1];
 
         // In a real implementation, this would interface with the simulator
-        let mock_id = format!(
-            "{:x}",
-            {
-                #[allow(clippy::disallowed_methods)]
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-            }
-        );
+        let mock_id = format!("{:x}", {
+            #[allow(clippy::disallowed_methods)]
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        });
         format!(
             "Starting {} choreography with participants: {}\nProtocol ID: {}",
             name, participants, mock_id
@@ -306,7 +303,8 @@ Type 'choreo help' for this help."#
     }
 
     fn cmd_choreo_timeline(&self, args: &[&str]) -> String {
-        let protocol_id = args.first()
+        let protocol_id = args
+            .first()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "all".to_string());
         format!("Timeline for protocol {}:\n  0ms: ProtocolStarted\n  50ms: MessageSent\n  150ms: MessageReceived", protocol_id)

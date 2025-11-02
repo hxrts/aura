@@ -39,7 +39,7 @@ pub enum PropertyError {
 pub enum PropertyType {
     /// Safety properties - something bad never happens
     Safety,
-    /// Liveness properties - something good eventually happens  
+    /// Liveness properties - something good eventually happens
     Liveness,
     /// Invariant properties - always holds in reachable states
     Invariant,
@@ -446,6 +446,8 @@ impl PropertyMonitor {
     /// 1. Convert simulation state to Quint-compatible format
     /// 2. Evaluate each property expression using Quint evaluator
     /// 3. Record results and violations
+    // SAFETY: timing measurement for property validation
+    #[allow(clippy::disallowed_methods)]
     pub fn evaluate_properties(&mut self, _state: &dyn SimulationState) -> ValidationResult {
         let start_time = Instant::now();
         let mut validation_result = ValidationResult::new();

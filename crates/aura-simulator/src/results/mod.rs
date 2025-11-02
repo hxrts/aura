@@ -40,8 +40,7 @@ pub struct SimulationResult<T> {
 }
 
 /// Performance metrics for operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PerformanceMetrics {
     /// Duration of the operation in milliseconds
     pub duration_ms: u64,
@@ -324,7 +323,6 @@ impl<T> SimulationResult<T> {
         }
     }
 }
-
 
 impl PerformanceMetrics {
     /// Create new performance metrics with duration

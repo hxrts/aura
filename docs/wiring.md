@@ -21,6 +21,7 @@ graph TD
     %% Protocol Infrastructure
     journal[aura-journal]
     protocol[aura-protocol]
+    coordination[aura-coordination]
     
     %% Storage & Transport
     transport[aura-transport]
@@ -70,8 +71,14 @@ graph TD
     protocol --> authz
     protocol --> messages
     protocol -.-> transport
+    coordination --> crypto
+    coordination --> journal
+    coordination --> types
+    coordination --> protocol
+    transport --> coordination
     agent --> types
     agent --> protocol
+    agent --> coordination
     agent --> journal
     agent --> crypto
     agent --> transport
@@ -94,6 +101,7 @@ graph TD
     simulator --> transport
     simulator --> crypto
     simulator --> protocol
+    simulator --> coordination
     simulator --> console_types
     simulator --> types
     simulator --> aura_quint_api
@@ -121,10 +129,7 @@ graph TD
     classDef sim fill:#e0f2f1
     classDef wasm fill:#e8eaf6
     
-    class types,console_types,messages foundation
-    class crypto crypto
-    class auth,authz auth
-    class journal,protocol protocol
+    class journal,protocol,coordination protocol
     class transport,store storage
     class agent app
     class test_utils,cli dev
@@ -152,6 +157,7 @@ graph TD
     %% Protocol Infrastructure
     journal[aura-journal]
     protocol[aura-protocol]
+    coordination[aura-coordination]
     
     %% Storage & Transport
     transport[aura-transport]
@@ -210,6 +216,7 @@ graph TD
     simulator --> transport
     simulator --> crypto
     simulator --> protocol
+    simulator --> coordination
     simulator --> types
     
     %% Styling
@@ -225,7 +232,7 @@ graph TD
     class types,messages foundation
     class crypto crypto
     class auth,authz auth
-    class journal,protocol protocol
+    class journal,protocol,coordination protocol
     class transport,store storage
     class agent app
     class cli dev
@@ -248,7 +255,8 @@ graph TD
 
 ### Protocol Infrastructure Layer (Green)
 - **aura-journal**: CRDT-based state management and event ledger
-- **aura-protocol**: Choreographic protocol implementations
+- **aura-protocol**: Defines choreographic protocol abstractions and implementations.
+- **aura-coordination**: Handles the orchestration and execution of distributed protocols.
 
 ### Storage & Transport Layer (Yellow)
 - **aura-transport**: P2P communication abstractions
@@ -382,7 +390,9 @@ graph TD
 ---
 
 ### aura-protocol
-**Purpose**: Choreographic protocol implementations with middleware architecture
+**Purpose**: Defines choreographic protocol abstractions and implementations with a middleware architecture. This crate provides the building blocks for distributed protocols, which are then orchestrated by `aura-coordination`.
+
+**Naming Note**: Other documents may refer to this crate as `protocol-core`. The name should be standardized to `aura-protocol` in the future.
 
 **Key Exports**:
 - **Middleware**: `AuraProtocolHandler`, `EffectsMiddleware`, `TracingMiddleware`
@@ -396,9 +406,17 @@ graph TD
 
 **Dependencies**: `aura-crypto`, `aura-journal`, `aura-types`, `aura-authentication`, `aura-authorization`, `aura-messages`, `aura-transport` (optional)
 
-**Type Consolidation Notes**:
-- Uses canonical `ProtocolType` from aura-types (supports all 6 variants including Counter and Compaction)
-- Middleware-specific `ProtocolError` in handler.rs separated from aura-types high-level protocol errors
+---
+
+### aura-coordination
+**Purpose**: Handles the orchestration and execution of distributed protocols. Contains the `LocalSessionRuntime` and `LifecycleScheduler` which manage the state and progression of choreographic protocols.
+
+**Key Exports**:
+- **Runtime**: `LocalSessionRuntime`, `LifecycleScheduler`
+- **Protocol Lifecycles**: Implementations for DKD, Resharing, Recovery, etc.
+- **Session Types**: Compile-time safety for protocol states.
+
+**Dependencies**: `aura-types`, `aura-crypto`, `aura-journal`, `aura-protocol`
 
 ---
 

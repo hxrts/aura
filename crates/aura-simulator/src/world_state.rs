@@ -336,8 +336,19 @@ pub struct SimulationConfiguration {
 impl WorldState {
     /// Create a new empty world state
     pub fn new(seed: u64) -> Self {
+        // Generate deterministic simulation_id from seed
+        let hash_input = format!("simulation-{}", seed);
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        // SAFETY: blake3 hash is always 32 bytes, slice conversion to [u8; 16] always succeeds
+        #[allow(clippy::expect_used)]
+        let simulation_id = Uuid::from_bytes(
+            hash_bytes.as_bytes()[..16]
+                .try_into()
+                .expect("blake3 hash is always 32 bytes, taking first 16 always succeeds"),
+        );
+
         Self {
-            simulation_id: Uuid::new_v4(),
+            simulation_id,
             current_tick: 0,
             current_time: 0,
             seed,

@@ -338,9 +338,10 @@ pub struct GreedyReductionStrategy {
 impl MinimalReproductionFinder {
     /// Create a new minimal reproduction finder
     pub fn new() -> Result<Self> {
-        let mut strategies: Vec<Box<dyn ParameterVariationStrategy>> = Vec::new();
-        strategies.push(Box::new(BinarySearchStrategy::new()));
-        strategies.push(Box::new(GreedyReductionStrategy::new()));
+        let strategies: Vec<Box<dyn ParameterVariationStrategy>> = vec![
+            Box::new(BinarySearchStrategy::new()),
+            Box::new(GreedyReductionStrategy::new()),
+        ];
 
         Ok(Self {
             config: ReproductionConfig::default(),
@@ -358,12 +359,15 @@ impl MinimalReproductionFinder {
     }
 
     /// Find minimal reproduction for a failure
+    #[allow(clippy::disallowed_methods)]
     pub fn find_minimal_reproduction(
         &mut self,
         original_violation: &PropertyViolation,
         original_scenario: &Scenario,
         failure_analysis: &FailureAnalysisResult,
     ) -> Result<MinimalReproduction> {
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::unwrap_used)]
         let start_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -381,6 +385,8 @@ impl MinimalReproductionFinder {
         }
 
         // Sort variations by expected complexity (simplest first)
+        // SAFETY: expected_complexity is a valid f64, partial_cmp returns Some for valid floats
+        #[allow(clippy::unwrap_used)]
         all_variations.sort_by(|a, b| {
             a.expected_complexity
                 .partial_cmp(&b.expected_complexity)
@@ -404,6 +410,8 @@ impl MinimalReproductionFinder {
                 let complexity_reduction =
                     (original_complexity - variation.expected_complexity) / original_complexity;
 
+                // SAFETY: we only access unwrap when best_reproduction is Some (checked by is_none)
+                #[allow(clippy::unwrap_used)]
                 if complexity_reduction >= self.config.min_complexity_reduction
                     && (best_reproduction.is_none()
                         || variation.expected_complexity < best_reproduction.as_ref().unwrap().1)
@@ -421,6 +429,8 @@ impl MinimalReproductionFinder {
         }
 
         // Generate minimal reproduction result
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::unwrap_used)]
         let end_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -476,11 +486,14 @@ impl MinimalReproductionFinder {
     }
 
     /// Execute a reproduction attempt
+    #[allow(clippy::disallowed_methods)]
     pub fn execute_reproduction_attempt(
         &mut self,
         variation: &ScenarioVariation,
         target_violation: &PropertyViolation,
     ) -> Result<ReproductionAttempt> {
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::unwrap_used)]
         let start_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -493,6 +506,8 @@ impl MinimalReproductionFinder {
 
         // Execute simulation with monitoring
         let simulation_result = simulation.run_with_monitoring(&mut property_monitor);
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::unwrap_used)]
         let execution_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -828,6 +843,8 @@ impl ReproductionAnalysisStats {
 
 impl Default for MinimalReproductionFinder {
     fn default() -> Self {
+        // SAFETY: MinimalReproductionFinder::new() only fails if directory creation fails
+        #[allow(clippy::unwrap_used)]
         Self::new().unwrap()
     }
 }

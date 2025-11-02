@@ -233,6 +233,7 @@ pub enum DiffType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::StateSnapshot;
 
     #[test]
     fn test_snapshot_builder() {

@@ -33,16 +33,24 @@ impl<S: Storage> AgentProtocol<S, Idle> {
 
         // Create metadata for recovery protocol
         let metadata = [
-            ("guardian_threshold".to_string(), guardian_threshold.to_string()),
+            (
+                "guardian_threshold".to_string(),
+                guardian_threshold.to_string(),
+            ),
             ("cooldown_seconds".to_string(), cooldown_seconds.to_string()),
-        ].into_iter().collect();
+        ]
+        .into_iter()
+        .collect();
 
         // Start recovery protocol session
-        let _session_id = self.inner.start_protocol_session(
-            "recovery",
-            vec![], // participants determined by protocol
-            metadata,
-        ).await?;
+        let _session_id = self
+            .inner
+            .start_protocol_session(
+                "recovery",
+                vec![], // participants determined by protocol
+                metadata,
+            )
+            .await?;
 
         // Transition to coordinating state
         Ok(self.transition_to())
@@ -66,15 +74,16 @@ impl<S: Storage> AgentProtocol<S, Idle> {
         // Create metadata for resharing protocol
         let mut metadata = HashMap::new();
         metadata.insert("new_threshold".to_string(), new_threshold.to_string());
-        metadata.insert("new_participants".to_string(), 
-            serde_json::to_string(&new_participants).unwrap_or_default());
+        metadata.insert(
+            "new_participants".to_string(),
+            serde_json::to_string(&new_participants).unwrap_or_default(),
+        );
 
         // Start resharing protocol session
-        let _session_id = self.inner.start_protocol_session(
-            "resharing",
-            new_participants.clone(),
-            metadata,
-        ).await?;
+        let _session_id = self
+            .inner
+            .start_protocol_session("resharing", new_participants.clone(), metadata)
+            .await?;
 
         // Transition to coordinating state
         Ok(self.transition_to())

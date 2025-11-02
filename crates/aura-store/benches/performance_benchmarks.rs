@@ -8,9 +8,9 @@
 //!
 //! Reference: work/ssb_storage.md Phase 5.4
 
-use aura_crypto::Effects;
+use aura_crypto::{generate_ed25519_key, Effects};
 use aura_store::{
-    manifest::{object_manifest::ThresholdSignature, ResourceScope, StorageOperation},
+    manifest::{ResourceScope, StorageOperation},
     social_storage::{
         SocialStoragePeerDiscovery, StorageCapabilityAnnouncement, StorageMetrics, StoragePeer,
         StorageRequirements, TrustLevel,
@@ -226,7 +226,8 @@ fn bench_capability_verification() {
     let mut manager = CapabilityManager::new();
 
     let device_id = aura_types::DeviceId::new_with_effects(&effects);
-    let signature = ThresholdSignature::placeholder();
+    let account_id = aura_types::AccountId::new_with_effects(&effects);
+    let signing_key = generate_ed25519_key();
 
     let now = effects.now().unwrap();
 
@@ -237,8 +238,8 @@ fn bench_capability_verification() {
                 device_id.clone(),
                 StorageOperation::Read,
                 ResourceScope::AllOwnedObjects,
-                signature.clone(),
-                now,
+                account_id,
+                &signing_key,
             )
             .expect("Failed to grant capability");
     }

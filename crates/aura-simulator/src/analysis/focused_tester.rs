@@ -503,6 +503,8 @@ impl FocusedTester {
         debug_session: &DebugSession,
     ) -> Result<FocusedTestGeneration> {
         #[allow(clippy::disallowed_methods)]
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::unwrap_used)]
         let start_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -532,6 +534,9 @@ impl FocusedTester {
         // Calculate estimated effort
         let estimated_effort = self.calculate_testing_effort(&test_variations)?;
 
+        #[allow(clippy::disallowed_methods)]
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::unwrap_used)]
         let end_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -835,6 +840,9 @@ impl FocusedTester {
         test_variation: &TestVariation,
         _property_monitor: Option<&mut PropertyMonitor>,
     ) -> Result<TestExecutionResult> {
+        #[allow(clippy::disallowed_methods)]
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::unwrap_used)]
         let start_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -850,6 +858,9 @@ impl FocusedTester {
         // Run simulation
         let simulation_result = simulation.run_until_completion()?;
 
+        #[allow(clippy::disallowed_methods)]
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::unwrap_used)]
         let end_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -887,12 +898,16 @@ impl FocusedTester {
                                 partitions: vec![],
                             });
                     } else {
-                        modified_scenario
-                            .setup
-                            .network_conditions
-                            .as_mut()
-                            .unwrap()
-                            .latency_range = [latency, latency + 50];
+                        // SAFETY: we just checked network_conditions is Some in the else branch
+                        #[allow(clippy::unwrap_used)]
+                        {
+                            modified_scenario
+                                .setup
+                                .network_conditions
+                                .as_mut()
+                                .unwrap()
+                                .latency_range = [latency, latency + 50];
+                        }
                     }
                 }
                 "network_drop_rate" => {
@@ -905,12 +920,16 @@ impl FocusedTester {
                                 partitions: vec![],
                             });
                     } else {
-                        modified_scenario
-                            .setup
-                            .network_conditions
-                            .as_mut()
-                            .unwrap()
-                            .drop_rate = drop_rate;
+                        // SAFETY: we just checked network_conditions is Some in the else branch
+                        #[allow(clippy::unwrap_used)]
+                        {
+                            modified_scenario
+                                .setup
+                                .network_conditions
+                                .as_mut()
+                                .unwrap()
+                                .drop_rate = drop_rate;
+                        }
                     }
                 }
                 "participant_count" => {
@@ -1170,7 +1189,7 @@ mod tests {
             session_id: "mock_session".to_string(),
             session_name: "Mock Debug Session".to_string(),
             created_at: 0,
-            simulation_id: Uuid::new_v4(),
+            simulation_id: uuid::Uuid::from_u128(300), // Fixed UUID for deterministic testing
             checkpoints: Vec::new(),
             current_position: crate::observability::time_travel_debugger::SessionPosition {
                 current_checkpoint: None,
@@ -1194,37 +1213,20 @@ mod tests {
     fn create_mock_violation() -> PropertyViolation {
         PropertyViolation {
             property_name: "test_property".to_string(),
-            property_type: crate::testing::PropertyViolationType::Invariant,
-            violation_state: crate::testing::SimulationState {
+            property_type: crate::results::PropertyViolationType::Invariant,
+            violation_state: crate::results::SimulationStateSnapshot {
                 tick: 100,
                 time: 10000,
-                variables: HashMap::new(),
-                participants: Vec::new(),
-                protocol_state: crate::testing::ProtocolExecutionState {
-                    active_sessions: Vec::new(),
-                    completed_sessions: Vec::new(),
-                    queued_protocols: Vec::new(),
-                },
-                network_state: crate::testing::NetworkStateSnapshot {
-                    partitions: Vec::new(),
-                    message_stats: crate::testing::MessageDeliveryStats {
-                        messages_sent: 0,
-                        messages_delivered: 0,
-                        messages_dropped: 0,
-                        average_latency_ms: 0.0,
-                    },
-                    failure_conditions: crate::testing::NetworkFailureConditions {
-                        drop_rate: 0.0,
-                        latency_range_ms: (0, 100),
-                        partitions_active: false,
-                    },
-                },
+                participant_count: 3,
+                active_sessions: 0,
+                completed_sessions: 0,
+                state_hash: "mock_hash".to_string(),
             },
-            violation_details: crate::testing::ViolationDetails {
+            violation_details: crate::results::ViolationDetails {
                 description: "Test violation".to_string(),
                 evidence: Vec::new(),
                 potential_causes: Vec::new(),
-                severity: crate::testing::ViolationSeverity::High,
+                severity: crate::results::ViolationSeverity::High,
                 remediation_suggestions: Vec::new(),
             },
             confidence: 0.9,

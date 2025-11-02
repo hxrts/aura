@@ -142,7 +142,8 @@ impl TraceIndex {
     /// Query events by participant
     pub fn query_by_participant(&self, participant: &str) -> Vec<TraceEvent> {
         self.by_participant
-            .get(participant).cloned()
+            .get(participant)
+            .cloned()
             .unwrap_or_default()
     }
 

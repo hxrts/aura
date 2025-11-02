@@ -3,8 +3,8 @@
 //! This module defines the type-safe state machine for agent protocols.
 
 use crate::agent::core::AgentCore;
-use aura_protocol::middleware::handler::SessionInfo;
 use crate::Storage;
+use aura_protocol::middleware::handler::SessionInfo;
 use aura_types::{AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 

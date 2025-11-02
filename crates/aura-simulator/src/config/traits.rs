@@ -330,12 +330,15 @@ impl ConfigDefaults for SimulationConfig {
         }
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn production_defaults() -> Self {
         Self {
             simulation: SimulationCoreConfig {
                 max_ticks: 100000,
                 max_time_ms: 600000, // 10 minutes
                 tick_duration_ms: 100,
+                // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+                #[allow(clippy::expect_used)]
                 seed: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .expect("System time before UNIX epoch")

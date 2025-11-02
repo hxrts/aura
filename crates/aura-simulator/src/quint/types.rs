@@ -11,18 +11,23 @@ use thiserror::Error;
 /// Errors that can occur during Quint operations
 #[derive(Error, Debug, Clone)]
 pub enum QuintError {
+    /// Failed to parse Quint specification file
     #[error("Parse error: {0}")]
     ParseError(String),
 
+    /// Invalid property expression in specification
     #[error("Invalid property expression: {0}")]
     InvalidProperty(String),
 
+    /// Type checking failed for Quint specification
     #[error("Type checking error: {0}")]
     TypeCheck(String),
 
+    /// Error during property evaluation against simulation state
     #[error("Evaluation error: {0}")]
     Evaluation(String),
 
+    /// Attempted to use unsupported Quint feature
     #[error("Unsupported feature: {0}")]
     UnsupportedFeature(String),
 }

@@ -10,9 +10,9 @@
 use crate::effects::ProtocolTimeSource;
 use crate::types::*;
 use aura_crypto::Effects;
-use ed25519_dalek::Signer;
 use aura_journal::{AccountLedger, Event};
 use aura_types::{DeviceId, GuardianId};
+use ed25519_dalek::Signer;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -124,19 +124,27 @@ impl BaseContext {
     }
 
     /// Sign an event with this device's key
-    pub fn sign_event(&self, event: &Event) -> Result<aura_crypto::Ed25519Signature, ProtocolError> {
+    pub fn sign_event(
+        &self,
+        event: &Event,
+    ) -> Result<aura_crypto::Ed25519Signature, ProtocolError> {
         let event_hash = event.signable_hash().map_err(|e| ProtocolError {
             session_id: self.session_id,
             error_type: ProtocolErrorType::Other,
             message: format!("Failed to hash event for signing: {:?}", e),
         })?;
 
-        let signature = self.device_key.try_sign(&event_hash).map_err(|e| ProtocolError {
-            error_type: ProtocolErrorType::Other,
-            message: format!("Failed to sign event: {:?}", e),
-            session_id: Uuid::new_v4(),
-        })?;
-        Ok(aura_crypto::Ed25519Signature::from_bytes(&signature.to_bytes()))
+        let signature = self
+            .device_key
+            .try_sign(&event_hash)
+            .map_err(|e| ProtocolError {
+                error_type: ProtocolErrorType::Other,
+                message: format!("Failed to sign event: {:?}", e),
+                session_id: Uuid::new_v4(),
+            })?;
+        Ok(aura_crypto::Ed25519Signature::from_bytes(
+            &signature.to_bytes(),
+        ))
     }
 
     /// Get key share (requires crypto service integration)

@@ -11,7 +11,7 @@ use crate::quint::types::{
 use crate::testing::{ExecutionTrace, PropertyViolation, ViolationDetectionReport};
 use crate::types::SimulationState;
 use crate::{AuraError, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 
 /// ITF (Intermediate Trace Format) expression types for Quint integration
@@ -22,7 +22,8 @@ pub enum ItfExpression {
     Bool(bool),
     /// Numeric value
     Number(serde_json::Number),
-    /// Big integer value
+    /// Big integer value (serialized with #bigint marker)
+    #[serde(serialize_with = "serialize_bigint")]
     BigInt { value: String },
     /// String value
     String(String),
@@ -38,6 +39,17 @@ pub enum ItfExpression {
     },
     /// Record with named fields
     Record(HashMap<String, ItfExpression>),
+}
+
+/// Custom serializer for BigInt expressions that includes the #bigint marker
+fn serialize_bigint<S>(value: &String, serializer: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    use serde::ser::SerializeMap;
+    let mut map = serializer.serialize_map(Some(1))?;
+    map.serialize_entry("#bigint", value)?;
+    map.end()
 }
 
 /// ITF trace state
@@ -918,10 +930,9 @@ mod tests {
     use super::*;
     use crate::types::{
         MessageDeliveryStats, NetworkFailureConditions, NetworkStateSnapshot,
-        ParticipantStateSnapshot, PropertyViolationType, ProtocolExecutionState, SessionInfo,
-        SimulationStateSnapshot, ViolationDetails, ViolationSeverity,
+        PropertyViolationType, ProtocolExecutionState, SimulationStateSnapshot, ViolationDetails,
+        ViolationSeverity,
     };
-    use std::collections::HashSet;
 
     #[test]
     fn test_trace_converter_creation() {

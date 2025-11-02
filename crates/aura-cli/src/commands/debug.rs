@@ -16,8 +16,6 @@ fn current_unix_timestamp() -> u64 {
     aura_types::time_utils::current_unix_timestamp()
 }
 
-
-
 /// Debug command arguments
 #[derive(Debug, Args)]
 pub struct DebugArgs {

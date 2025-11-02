@@ -760,6 +760,8 @@ impl QuintBridge {
     }
 
     /// Create key consistency violation scenario
+    // SAFETY: generating unique IDs for Quint events
+    #[allow(clippy::disallowed_methods)]
     fn create_key_consistency_violation_scenario(
         &self,
         spec: &QuintSpec,
@@ -803,6 +805,8 @@ impl QuintBridge {
     // (For brevity, I'll implement just a couple key ones)
 
     /// Create general violation scenario
+    // SAFETY: generating unique IDs for Quint events
+    #[allow(clippy::disallowed_methods)]
     fn create_general_violation_scenario(
         &self,
         spec: &QuintSpec,
@@ -837,6 +841,8 @@ impl QuintBridge {
     }
 
     /// Create threshold violation scenario
+    // SAFETY: generating unique IDs for Quint events
+    #[allow(clippy::disallowed_methods)]
     fn create_threshold_violation_scenario(
         &self,
         spec: &QuintSpec,
@@ -909,6 +915,8 @@ impl QuintBridge {
         self.create_general_violation_scenario(spec, invariant)
     }
 
+    // SAFETY: generating unique IDs for Quint events
+    #[allow(clippy::disallowed_methods)]
     fn create_liveness_violation_scenario(
         &self,
         spec: &QuintSpec,
@@ -945,6 +953,8 @@ impl QuintBridge {
         })
     }
 
+    // SAFETY: generating unique IDs for Quint events
+    #[allow(clippy::disallowed_methods)]
     fn create_safety_violation_scenario(
         &self,
         spec: &QuintSpec,
@@ -999,6 +1009,8 @@ impl QuintBridge {
     }
 
     // Placeholder for safety property scenario methods
+    // SAFETY: generating unique IDs for Quint events
+    #[allow(clippy::disallowed_methods)]
     fn create_direct_safety_violation_scenario(
         &self,
         spec: &QuintSpec,

@@ -36,15 +36,20 @@ pub type QuintCliResult<T> = Result<T, QuintCliError>;
 /// Quint CLI parse output structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintParseOutput {
+    /// Parsed module definitions from the specification
     pub modules: Vec<QuintModule>,
+    /// Non-fatal warnings encountered during parsing
     pub warnings: Vec<String>,
+    /// Fatal errors that prevented successful parsing
     pub errors: Vec<String>,
 }
 
 /// Quint module definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintModule {
+    /// Module name as defined in the Quint specification
     pub name: String,
+    /// Function, operator, and property definitions within the module
     pub definitions: Vec<QuintDefinition>,
 }
 
@@ -52,47 +57,76 @@ pub struct QuintModule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum QuintDefinition {
+    /// Function or operator definition
     #[serde(rename = "def")]
     Definition {
+        /// Definition name
         name: String,
+        /// Type signature
         #[serde(rename = "type")]
         def_type: String,
+        /// Optional function body expression
         body: Option<String>,
     },
+    /// Value binding
     #[serde(rename = "val")]
     Value {
+        /// Value name
         name: String,
+        /// Value type
         #[serde(rename = "type")]
         val_type: String,
+        /// Bound expression
         expr: String,
     },
+    /// Assumption or constraint
     #[serde(rename = "assume")]
-    Assumption { name: Option<String>, expr: String },
+    Assumption {
+        /// Optional assumption name
+        name: Option<String>,
+        /// Assumption expression
+        expr: String,
+    },
+    /// Module import statement
     #[serde(rename = "import")]
-    Import { name: String, from: String },
+    Import {
+        /// Imported module name
+        name: String,
+        /// Source module path
+        from: String,
+    },
 }
 
 /// Quint verification result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintVerificationResult {
-    pub outcome: String, // "ok", "error", "violation"
+    /// Verification outcome: "ok", "error", or "violation"
+    pub outcome: String,
+    /// Property violations discovered during verification
     pub violations: Vec<QuintViolation>,
+    /// Verification statistics and metrics
     pub statistics: QuintStatistics,
 }
 
 /// Property violation details
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintViolation {
+    /// Name of the violated property
     pub property: String,
+    /// Human-readable description of the violation
     pub description: String,
+    /// Optional counterexample trace leading to the violation
     pub trace: Option<Vec<serde_json::Value>>,
 }
 
 /// Verification statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintStatistics {
+    /// Number of unique states explored during verification
     pub states_explored: u64,
+    /// Number of state transitions explored during verification
     pub transitions_explored: u64,
+    /// Total verification time in milliseconds
     pub time_ms: u64,
 }
 

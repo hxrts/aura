@@ -405,7 +405,7 @@ mod tests {
             participants: participants
                 .iter()
                 .map(|&id| BridgedRole {
-                    device_id: id,
+                    device_id: id.into(),
                     role_index: 0,
                 })
                 .collect(),
@@ -432,11 +432,11 @@ mod tests {
         // Record message send
         let send_event = ChoreoEvent::MessageSent {
             from: BridgedRole {
-                device_id: device1,
+                device_id: device1.into(),
                 role_index: 0,
             },
             to: BridgedRole {
-                device_id: device2,
+                device_id: device2.into(),
                 role_index: 1,
             },
             message_type: "CommitmentShare".to_string(),
@@ -474,7 +474,7 @@ mod tests {
                 participants: participants
                     .iter()
                     .map(|&id| BridgedRole {
-                        device_id: id,
+                        device_id: id.into(),
                         role_index: 0,
                     })
                     .collect(),

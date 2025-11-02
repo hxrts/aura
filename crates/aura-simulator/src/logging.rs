@@ -11,45 +11,77 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-// Define minimal trace types for simulation
+/// Log severity levels for simulation events
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LogLevel {
+    /// Critical errors that prevent operation
     Error,
+    /// Warning messages for potential issues
     Warning,
+    /// Informational messages about normal operation
     Info,
+    /// Detailed debugging information
     Debug,
 }
 
+/// Value types that can be logged in structured fields
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LogValue {
+    /// String value
     String(String),
+    /// Integer value
     Number(i64),
+    /// Boolean value
     Boolean(bool),
 }
 
+/// Represents a logical span of execution for tracing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuraSpan {
+    /// Unique identifier for this span instance
     pub id: Uuid,
+    /// Span identifier for correlation
     pub span_id: Uuid,
+    /// Parent span identifier if nested
     pub parent_id: Option<Uuid>,
+    /// Human-readable span name
     pub name: String,
+    /// Start time in simulation ticks
     pub start_time: u64,
+    /// Device that owns this span
     pub device_id: DeviceId,
+    /// Protocol context
     pub protocol: String,
+    /// Associated session if any
     pub session_id: Option<Uuid>,
+    /// Operation being performed
     pub operation: String,
 }
 
+/// Outcome of a span execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SpanOutcome {
+    /// Span completed successfully
     Success,
+    /// Span failed with error message
     Failure(String),
 }
 
+/// Trait for capturing simulation log events and spans
 pub trait LogSink {
-    fn log_event(&self, level: LogLevel, span: &AuraSpan, message: String, fields: BTreeMap<String, LogValue>);
+    /// Record a log event within a span
+    fn log_event(
+        &self,
+        level: LogLevel,
+        span: &AuraSpan,
+        message: String,
+        fields: BTreeMap<String, LogValue>,
+    );
+    /// Enter a new span
     fn enter_span(&self, span: AuraSpan);
+    /// Exit a span with outcome
     fn exit_span(&self, span_id: Uuid, outcome: SpanOutcome);
+    /// Check if logging at this level is enabled
     fn is_enabled(&self, level: LogLevel) -> bool;
 }
 
@@ -111,28 +143,28 @@ pub struct ByzantinePattern {
     pub confidence: f64,
 }
 
-/// Export format for traces
+/// Supported trace export formats
 #[derive(Debug, Clone)]
 pub enum TraceFormat {
-    /// JSON format for easy parsing
+    /// Standard JSON format for easy parsing
     Json,
-    /// Chrome DevTools tracing format
+    /// Chrome DevTools tracing format for performance analysis
     ChromeDevTools,
-    /// OpenTelemetry format
+    /// OpenTelemetry format for compatibility with observability tools
     OpenTelemetry,
-    /// Custom Aura format with full context
+    /// Custom Aura format with full simulation context
     AuraTrace,
 }
 
-/// Simulation log sink that captures all events deterministically
+/// Log sink that captures all events deterministically for simulation replay
 pub struct SimulationLogSink {
-    /// All logged events
+    /// All logged events in chronological order
     events: Arc<Mutex<Vec<SimulationLogEvent>>>,
-    /// All span events
+    /// All span lifecycle events
     spans: Arc<Mutex<Vec<SimulationSpanEvent>>>,
-    /// Current simulation tick
+    /// Current simulation tick for timestamp correlation
     current_tick: Arc<AtomicU64>,
-    /// Active spans
+    /// Currently active spans for hierarchy tracking
     active_spans: Arc<Mutex<BTreeMap<Uuid, AuraSpan>>>,
 }
 

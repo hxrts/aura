@@ -142,7 +142,7 @@ pub fn assert_device_metadata_valid(account_state: &AccountState, device_id: Dev
 ///
 /// Useful for testing asynchronous operations that eventually reach a desired state.
 /// This is a placeholder - actual implementation would need runtime/async support.
-#[allow(dead_code)]
+#[allow(dead_code, clippy::disallowed_methods)]
 pub fn assert_eventually<F, T>(
     mut condition: F,
     timeout_ms: u64,

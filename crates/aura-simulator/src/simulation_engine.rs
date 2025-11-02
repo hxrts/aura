@@ -90,6 +90,8 @@ fn process_network_messages(
             .deliver_at
             .is_some_and(|deliver_time| deliver_time <= current_time)
         {
+            // SAFETY: Safe because we just checked front() in the while condition
+            #[allow(clippy::expect_used)]
             let message = world
                 .network
                 .in_flight_messages
@@ -244,13 +246,14 @@ fn execute_queued_protocols(
     // Find protocols ready to execute
     while let Some(protocol) = world.protocols.execution_queue.front() {
         if protocol.scheduled_time <= current_time {
-            ready_protocols.push(
-                world
-                    .protocols
-                    .execution_queue
-                    .pop_front()
-                    .expect("Protocol should exist as we just checked front()"),
-            );
+            // SAFETY: Safe because we just checked front() in the while condition
+            #[allow(clippy::expect_used)]
+            let protocol = world
+                .protocols
+                .execution_queue
+                .pop_front()
+                .expect("Protocol should exist as we just checked front()");
+            ready_protocols.push(protocol);
         } else {
             break;
         }
@@ -271,7 +274,26 @@ fn start_protocol_session(
     events: &mut Vec<TraceEvent>,
     next_event_id: &mut impl FnMut() -> u64,
 ) -> Result<()> {
-    let session_id = Uuid::new_v4().to_string();
+    // Use deterministic session ID generation from protocol and participants
+    let participants_str = queued_protocol
+        .participants
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let hash_input = format!(
+        "session-{}-{}",
+        queued_protocol.protocol_type, participants_str
+    );
+    let hash_bytes = blake3::hash(hash_input.as_bytes());
+    // SAFETY: blake3 hash is always 32 bytes, slice conversion to [u8; 16] always succeeds
+    #[allow(clippy::expect_used)]
+    let uuid = Uuid::from_bytes(
+        hash_bytes.as_bytes()[..16]
+            .try_into()
+            .expect("blake3 hash is always 32 bytes, taking first 16 always succeeds"),
+    );
+    let session_id = uuid.to_string();
     let coordinator = queued_protocol
         .participants
         .first()

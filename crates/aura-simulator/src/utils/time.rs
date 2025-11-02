@@ -3,7 +3,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Get current Unix timestamp in seconds
+#[allow(clippy::disallowed_methods)]
 pub fn current_unix_timestamp_secs() -> u64 {
+    // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+    #[allow(clippy::expect_used)]
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("System time before UNIX epoch")
@@ -11,7 +14,9 @@ pub fn current_unix_timestamp_secs() -> u64 {
 }
 
 /// Get current Unix timestamp in milliseconds
+#[allow(clippy::disallowed_methods, clippy::expect_used)]
 pub fn current_unix_timestamp_millis() -> u64 {
+    // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("System time before UNIX epoch")
@@ -19,7 +24,9 @@ pub fn current_unix_timestamp_millis() -> u64 {
 }
 
 /// Get current Unix timestamp in microseconds
+#[allow(clippy::disallowed_methods, clippy::expect_used)]
 pub fn current_unix_timestamp_micros() -> u64 {
+    // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("System time before UNIX epoch")

@@ -149,6 +149,7 @@ impl TimeTravelDebugger {
     }
 
     /// Start a debugging session from a checkpoint
+    #[allow(clippy::disallowed_methods)]
     pub fn start_session(
         &mut self,
         checkpoint_id: &str,
@@ -171,6 +172,8 @@ impl TimeTravelDebugger {
             starting_checkpoint: checkpoint_id.to_string(),
             target_tick,
             failure_description: None,
+            // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+            #[allow(clippy::unwrap_used)]
             started_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -217,6 +220,7 @@ impl TimeTravelDebugger {
     }
 
     /// Replay from current checkpoint to target tick
+    #[allow(clippy::disallowed_methods)]
     pub fn replay_to_tick(&mut self, target_tick: u64) -> Result<ReplayResult> {
         let start_time = std::time::Instant::now();
         let start_tick = {
@@ -234,6 +238,8 @@ impl TimeTravelDebugger {
         // Replay loop using pure tick() function
         loop {
             let current_tick = {
+                // SAFETY: current_world is Some after start_debugging_from_checkpoint
+                #[allow(clippy::unwrap_used)]
                 let world = self.current_world.as_ref().unwrap();
                 world.current_tick
             };
@@ -258,6 +264,8 @@ impl TimeTravelDebugger {
 
             // Execute one tick using pure function
             let tick_result = {
+                // SAFETY: current_world is Some after start_debugging_from_checkpoint
+                #[allow(clippy::unwrap_used)]
                 let world = self.current_world.as_mut().unwrap();
                 tick(world)
             };
@@ -488,6 +496,7 @@ impl TimeTravelDebugger {
     }
 
     /// Export debugging report
+    #[allow(clippy::disallowed_methods)]
     pub fn export_report<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let session = self
             .session_info
@@ -525,6 +534,7 @@ impl TimeTravelDebugger {
     // Private helper methods
 
     /// Calculate performance metrics for replay
+    #[allow(clippy::disallowed_methods)]
     fn calculate_metrics(
         &self,
         start_time: std::time::Instant,

@@ -137,7 +137,17 @@ impl EnhancedCheckpointManager {
         context: HashMap<String, String>,
         tags: Vec<String>,
     ) -> Result<CheckpointId, StateError> {
-        let checkpoint_id = uuid::Uuid::new_v4().to_string();
+        // Generate deterministic checkpoint ID from snapshot info
+        let hash_input = format!("checkpoint-{}-{}", snapshot.tick, snapshot.timestamp);
+        let hash_bytes = blake3::hash(hash_input.as_bytes());
+        // SAFETY: blake3 hash is always 32 bytes, slice conversion to [u8; 16] always succeeds
+        #[allow(clippy::expect_used)]
+        let checkpoint_id = uuid::Uuid::from_bytes(
+            hash_bytes.as_bytes()[..16]
+                .try_into()
+                .expect("blake3 hash is always 32 bytes, taking first 16 always succeeds"),
+        )
+        .to_string();
 
         let basic_info = CheckpointInfo {
             id: checkpoint_id.clone(),
@@ -280,7 +290,10 @@ impl EnhancedCheckpointManager {
     }
 
     /// Clean up old checkpoints based on strategy
+    #[allow(clippy::disallowed_methods)]
     fn cleanup_old_checkpoints(&mut self) -> Result<(), StateError> {
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::expect_used)]
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("System time before UNIX epoch")
@@ -306,15 +319,18 @@ impl EnhancedCheckpointManager {
 
     /// Helper methods
     fn matches_reason_type(&self, reason: &CheckpointCreationReason, reason_type: &str) -> bool {
-        match (reason, reason_type) {
-            (CheckpointCreationReason::Manual { .. }, "manual") => true,
-            (CheckpointCreationReason::Automatic { .. }, "automatic") => true,
-            (CheckpointCreationReason::BeforeEvent { .. }, "before_event") => true,
-            (CheckpointCreationReason::AfterEvent { .. }, "after_event") => true,
-            (CheckpointCreationReason::BeforeRiskyOperation { .. }, "before_risky") => true,
-            (CheckpointCreationReason::Emergency { .. }, "emergency") => true,
-            _ => false,
-        }
+        matches!(
+            (reason, reason_type),
+            (CheckpointCreationReason::Manual { .. }, "manual")
+                | (CheckpointCreationReason::Automatic { .. }, "automatic")
+                | (CheckpointCreationReason::BeforeEvent { .. }, "before_event")
+                | (CheckpointCreationReason::AfterEvent { .. }, "after_event")
+                | (
+                    CheckpointCreationReason::BeforeRiskyOperation { .. },
+                    "before_risky"
+                )
+                | (CheckpointCreationReason::Emergency { .. }, "emergency")
+        )
     }
 
     fn reason_type_name(&self, reason: &CheckpointCreationReason) -> String {
@@ -328,7 +344,10 @@ impl EnhancedCheckpointManager {
         }
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn get_oldest_checkpoint_age(&self) -> Option<u64> {
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::expect_used)]
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("System time before UNIX epoch")
@@ -340,7 +359,10 @@ impl EnhancedCheckpointManager {
             .min()
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn get_newest_checkpoint_age(&self) -> Option<u64> {
+        // SAFETY: SystemTime::now() will not be before UNIX_EPOCH on modern systems
+        #[allow(clippy::expect_used)]
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("System time before UNIX epoch")

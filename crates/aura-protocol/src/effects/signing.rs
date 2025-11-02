@@ -24,7 +24,9 @@ impl EventSigner {
     /// Computes the event hash and signs it with the device key
     pub fn sign_event(&self, event: &Event) -> Result<Signature, LedgerError> {
         let event_hash = event.hash()?;
-        self.signing_key.try_sign(&event_hash).map_err(|e| LedgerError::from(format!("Signing failed: {:?}", e)))
+        self.signing_key
+            .try_sign(&event_hash)
+            .map_err(|e| LedgerError::from(format!("Signing failed: {:?}", e)))
     }
 
     /// Get the public key for this signer
@@ -36,7 +38,8 @@ impl EventSigner {
 impl SigningEffects for EventSigner {
     fn sign_event(&self, event: &Event, key: &SigningKey) -> Result<Signature, LedgerError> {
         let event_hash = event.hash()?;
-        key.try_sign(&event_hash).map_err(|e| LedgerError::from(format!("Signing failed: {:?}", e)))
+        key.try_sign(&event_hash)
+            .map_err(|e| LedgerError::from(format!("Signing failed: {:?}", e)))
     }
 
     fn verify_signature(

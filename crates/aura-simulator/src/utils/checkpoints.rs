@@ -22,8 +22,7 @@ pub struct CheckpointMetadata {
 }
 
 /// Reason why a checkpoint was created
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum CheckpointReason {
     /// Manual checkpoint requested by user
     Manual,
@@ -43,7 +42,6 @@ pub enum CheckpointReason {
     /// Checkpoint for debugging purposes
     Debug,
 }
-
 
 impl CheckpointReason {
     /// Get a human-readable description of the checkpoint reason

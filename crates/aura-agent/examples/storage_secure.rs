@@ -4,6 +4,7 @@
 //! platform-specific implementations available in the agent crate.
 
 use aura_agent::{DeviceAttestation, SecureStorage, SecurityLevel};
+use aura_crypto::KeyShare;
 use aura_types::{AuraResult as Result, DeviceId};
 use std::collections::HashMap;
 
@@ -27,13 +28,13 @@ impl MockSecureStorage {
 }
 
 impl SecureStorage for MockSecureStorage {
-    fn store_key_share(&self, key_id: &str, _key_share: &aura_protocol::KeyShare) -> Result<()> {
+    fn store_key_share(&self, key_id: &str, _key_share: &KeyShare) -> Result<()> {
         println!("Storing key share: {}", key_id);
         // In real implementation, would serialize and encrypt the key_share
         Ok(())
     }
 
-    fn load_key_share(&self, key_id: &str) -> Result<Option<aura_protocol::KeyShare>> {
+    fn load_key_share(&self, key_id: &str) -> Result<Option<KeyShare>> {
         println!("Loading key share: {}", key_id);
         // In real implementation, would decrypt and deserialize
         Ok(None) // Mock returns None

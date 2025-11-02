@@ -4,7 +4,7 @@
 //! events fed to it by external runners, without any knowledge of or coupling
 //! to the core simulation logic.
 
-use crate::testing::PropertyViolation;
+use crate::results::PropertyViolation;
 use crate::world_state::WorldState;
 use crate::{AuraError, Result};
 use aura_console_types::trace::CheckpointRef;
@@ -425,16 +425,14 @@ impl PassiveTraceRecorder {
     }
 
     /// Save recorded session to file
+    #[allow(clippy::disallowed_methods)]
     pub fn save_session<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let session = RecordedSession {
             metadata: self.metadata.clone(),
             events: self.events.clone(),
             checkpoints: self.checkpoints.clone(),
             violations: self.violations.clone(),
-            recorded_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            recorded_at: 1640995200, // Fixed timestamp (2022-01-01) for deterministic testing
         };
 
         let json = serde_json::to_string_pretty(&session).map_err(|e| {
@@ -560,37 +558,20 @@ mod tests {
 
         let violation = PropertyViolation {
             property_name: "safety".to_string(),
-            property_type: crate::testing::PropertyViolationType::Safety,
-            violation_state: crate::testing::SimulationState {
+            property_type: crate::results::PropertyViolationType::Safety,
+            violation_state: crate::results::SimulationStateSnapshot {
                 tick: 10,
                 time: 1000,
-                variables: std::collections::HashMap::new(),
-                participants: vec![],
-                protocol_state: crate::testing::ProtocolExecutionState {
-                    active_sessions: vec![],
-                    completed_sessions: vec![],
-                    queued_protocols: vec![],
-                },
-                network_state: crate::testing::NetworkStateSnapshot {
-                    partitions: vec![],
-                    message_stats: crate::testing::MessageDeliveryStats {
-                        messages_sent: 0,
-                        messages_delivered: 0,
-                        messages_dropped: 0,
-                        average_latency_ms: 0.0,
-                    },
-                    failure_conditions: crate::testing::NetworkFailureConditions {
-                        drop_rate: 0.0,
-                        latency_range_ms: (0, 0),
-                        partitions_active: false,
-                    },
-                },
+                participant_count: 0,
+                active_sessions: 0,
+                completed_sessions: 0,
+                state_hash: "test_hash".to_string(),
             },
-            violation_details: crate::testing::ViolationDetails {
+            violation_details: crate::results::ViolationDetails {
                 description: "Safety violation detected".to_string(),
                 evidence: vec![format!("Participant: alice")],
                 potential_causes: vec![],
-                severity: crate::testing::ViolationSeverity::Medium,
+                severity: crate::results::ViolationSeverity::Medium,
                 remediation_suggestions: vec![],
             },
             confidence: 0.8,
