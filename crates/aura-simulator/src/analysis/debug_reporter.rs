@@ -1091,7 +1091,7 @@ impl DebugReporter {
     ) -> Result<DeveloperReport> {
         let start_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time before UNIX epoch")
             .as_millis() as u64;
         let report_id = format!(
             "report_{}_{}",

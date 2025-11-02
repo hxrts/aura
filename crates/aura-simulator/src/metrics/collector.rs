@@ -90,7 +90,11 @@ impl MetricsCollector {
 
     /// Get a snapshot of current metrics
     pub fn snapshot(&self) -> MetricsSnapshot {
-        let metrics = self.metrics.lock().unwrap().clone();
+        let metrics = self
+            .metrics
+            .lock()
+            .expect("Metrics mutex should not be poisoned")
+            .clone();
         let mut metadata = HashMap::new();
         metadata.insert("collector_enabled".to_string(), self.enabled.to_string());
         metadata.insert(
@@ -108,14 +112,20 @@ impl MetricsCollector {
     /// Reset all metrics
     pub fn reset(&self) {
         if self.enabled {
-            let mut metrics = self.metrics.lock().unwrap();
+            let mut metrics = self
+                .metrics
+                .lock()
+                .expect("Metrics mutex should not be poisoned");
             *metrics = SimulationMetrics::new();
         }
     }
 
     /// Get current metrics summary
     pub fn summary(&self) -> MetricsSummary {
-        self.metrics.lock().unwrap().summary()
+        self.metrics
+            .lock()
+            .expect("Metrics mutex should not be poisoned")
+            .summary()
     }
 
     /// Execute a closure with mutable access to metrics (if enabled)
@@ -124,7 +134,10 @@ impl MetricsCollector {
         F: FnOnce(&mut SimulationMetrics) -> R,
     {
         if self.enabled {
-            let mut metrics = self.metrics.lock().unwrap();
+            let mut metrics = self
+                .metrics
+                .lock()
+                .expect("Metrics mutex should not be poisoned");
             Some(f(&mut metrics))
         } else {
             None

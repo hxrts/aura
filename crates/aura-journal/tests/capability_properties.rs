@@ -167,7 +167,7 @@ fn arb_capability_id() -> impl Strategy<Value = CapabilityId> {
             &format!("subsystem_{}", seed1),
             &format!("action_{}", seed2),
         );
-        CapabilityId::from_chain(None, subject.as_bytes(), &scope.as_bytes())
+        CapabilityId::from_chain(None, &subject.as_bytes(), &scope.as_bytes())
     })
 }
 
@@ -277,7 +277,7 @@ proptest! {
         for (idx, seed) in delegator_seeds.iter().enumerate() {
             let subject = Subject::new(&format!("delegator_{}", seed));
             let scope = CapabilityScope::simple("storage", &format!("level_{}", idx));
-            let cap = CapabilityId::from_chain(parent, subject.as_bytes(), &scope.as_bytes());
+            let cap = CapabilityId::from_chain(parent, &subject.as_bytes(), &scope.as_bytes());
 
             delegation_chain.push(cap.clone());
             parent = delegation_chain.last();

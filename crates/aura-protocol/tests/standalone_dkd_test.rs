@@ -28,7 +28,7 @@ async fn test_basic_hash_derivation() {
     let derived_key = hasher.finalize();
 
     assert_eq!(derived_key.len(), 32);
-    println!("Derived key: {:?}", hex::encode(&derived_key));
+    println!("Derived key: {:?}", hex::encode(derived_key));
 }
 
 #[tokio::test]
@@ -75,8 +75,8 @@ async fn test_participant_ordering() {
     assert_ne!(key1, key2, "Participant order should affect derivation");
 
     // But if we sort participants first, we get consistent results
-    let mut participants1 = vec!["device1", "device2"];
-    let mut participants2 = vec!["device2", "device1"];
+    let mut participants1 = ["device1", "device2"];
+    let mut participants2 = ["device2", "device1"];
 
     participants1.sort();
     participants2.sort();
@@ -96,7 +96,7 @@ async fn test_participant_ordering() {
 #[tokio::test]
 async fn test_threshold_simulation() {
     // Simulate threshold-based key derivation
-    let participants = vec!["device1", "device2", "device3"];
+    let participants = ["device1", "device2", "device3"];
     let threshold = 2;
 
     // In a real threshold scheme, any 2 of 3 participants could derive the key

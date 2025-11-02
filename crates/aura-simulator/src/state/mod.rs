@@ -173,7 +173,7 @@ impl UnifiedSnapshot {
     ) -> Result<Self, serde_json::Error> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("System time before UNIX epoch")
             .as_secs();
 
         let id = uuid::Uuid::new_v4().to_string();

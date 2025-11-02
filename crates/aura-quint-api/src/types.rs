@@ -4,92 +4,92 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
-/// Result of property verification using native Rust evaluator
+/// Result of property verification using native Rust evaluator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerificationResult {
-    /// Whether verification succeeded
+    /// Whether verification succeeded.
     pub success: bool,
-    /// Time taken for verification
+    /// Time taken for verification.
     pub duration: Duration,
-    /// Results for individual properties
+    /// Results for individual properties.
     pub properties: HashMap<String, serde_json::Value>,
-    /// Counterexample if verification failed
+    /// Counterexample if verification failed.
     pub counterexample: Option<serde_json::Value>,
-    /// Verification statistics
+    /// Verification statistics.
     pub statistics: serde_json::Value,
 }
 
-/// Details about successful verification
+/// Details about successful verification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerificationDetails {
-    /// Number of states explored
+    /// Number of states explored.
     pub states_explored: Option<u64>,
-    /// Maximum depth reached
+    /// Maximum depth reached.
     pub max_depth: Option<u32>,
-    /// Verification strategy used
+    /// Verification strategy used.
     pub strategy: Option<String>,
-    /// Additional metadata
+    /// Additional metadata.
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-/// Counterexample showing property violation
+/// Counterexample showing property violation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CounterExample {
-    /// Execution trace leading to violation
+    /// Execution trace leading to violation.
     pub trace: ExecutionTrace,
-    /// State where violation occurred
+    /// State where violation occurred.
     pub violation_state: StateSnapshot,
-    /// Description of the violation
+    /// Description of the violation.
     pub violation_description: String,
 }
 
-/// Execution trace in the verification model
+/// Execution trace in the verification model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionTrace {
-    /// Sequence of steps in the trace
+    /// Sequence of steps in the trace.
     pub steps: Vec<TraceStep>,
-    /// Total length of the trace
+    /// Total length of the trace.
     pub length: usize,
-    /// Whether this is a complete trace
+    /// Whether this is a complete trace.
     pub is_complete: bool,
 }
 
-/// Individual step in an execution trace
+/// Individual step in an execution trace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceStep {
-    /// Step number (0-indexed)
+    /// Step number (0-indexed).
     pub step_number: usize,
-    /// Action taken in this step
+    /// Action taken in this step.
     pub action: String,
-    /// State before the action
+    /// State before the action.
     pub pre_state: StateSnapshot,
-    /// State after the action
+    /// State after the action.
     pub post_state: StateSnapshot,
-    /// Additional step metadata
+    /// Additional step metadata.
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-/// Snapshot of system state at a point in time
+/// Snapshot of system state at a point in time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateSnapshot {
-    /// Variable bindings in this state
+    /// Variable bindings in this state.
     pub variables: HashMap<String, serde_json::Value>,
-    /// Additional state metadata
+    /// Additional state metadata.
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-/// Configuration for Quint verification
+/// Configuration for Quint verification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerificationConfig {
-    /// Maximum number of steps to explore
+    /// Maximum number of steps to explore.
     pub max_steps: Option<u32>,
-    /// Timeout in milliseconds
+    /// Timeout in milliseconds.
     pub timeout_ms: Option<u64>,
-    /// Random seed for reproducible verification
+    /// Random seed for reproducible verification.
     pub random_seed: Option<u32>,
-    /// Verification strategy
+    /// Verification strategy.
     pub strategy: VerificationStrategy,
-    /// Additional options
+    /// Additional options.
     pub options: HashMap<String, serde_json::Value>,
 }
 
@@ -105,96 +105,99 @@ impl Default for VerificationConfig {
     }
 }
 
-/// Verification strategy for property checking
+/// Verification strategy for property checking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VerificationStrategy {
-    /// Breadth-first search
+    /// Breadth-first search.
     Bfs,
-    /// Depth-first search
+    /// Depth-first search.
     Dfs,
-    /// Random exploration
+    /// Random exploration.
     Random,
-    /// Bounded model checking
+    /// Bounded model checking.
     Bmc,
-    /// Custom strategy with parameters
+    /// Custom strategy with parameters.
     Custom {
-        /// Strategy name
+        /// Strategy name.
         name: String,
-        /// Strategy parameters
+        /// Strategy parameters.
         params: HashMap<String, serde_json::Value>,
     },
 }
 
-/// Specification module information
+/// Specification module information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleInfo {
-    /// Module name
+    /// Module name.
     pub name: String,
-    /// Module file path
+    /// Module file path.
     pub file_path: String,
-    /// Module dependencies
+    /// Module dependencies.
     pub dependencies: Vec<String>,
-    /// Exported definitions
+    /// Exported definitions.
     pub exports: Vec<String>,
-    /// Module metadata
+    /// Module metadata.
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-/// Type information for Quint expressions
+/// Type information for Quint expressions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum QuintType {
-    /// Boolean type
+    /// Boolean type.
     Bool,
-    /// Integer type
+    /// Integer type.
     Int,
-    /// String type
+    /// String type.
     Str,
-    /// Set type
+    /// Set type.
     Set(Box<QuintType>),
-    /// Record type
+    /// Record type.
     Record(HashMap<String, QuintType>),
-    /// Function type
+    /// Function type.
     Function {
-        /// Parameter types
+        /// Parameter types.
         params: Vec<QuintType>,
-        /// Return type
+        /// Return type.
         result: Box<QuintType>,
     },
-    /// Union type
+    /// Union type.
     Union(Vec<QuintType>),
-    /// Custom type
+    /// Custom type.
     Custom {
-        /// Type name
+        /// Type name.
         name: String,
-        /// Type parameters
+        /// Type parameters.
         params: Vec<QuintType>,
     },
 }
 
-/// Status of the Quint bridge connection
+/// Status of the Quint bridge connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BridgeStatus {
-    /// Bridge is disconnected
+    /// Bridge is disconnected.
     Disconnected,
-    /// Bridge is connecting
+    /// Bridge is connecting.
     Connecting,
-    /// Bridge is connected and ready
+    /// Bridge is connected and ready.
     Connected,
-    /// Bridge encountered an error
-    Error { message: String },
+    /// Bridge encountered an error.
+    Error {
+        /// Error message.
+        message: String,
+    },
 }
 
-/// Statistics about bridge usage
+/// Statistics about bridge usage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeStats {
-    /// Total number of verification requests
+    /// Total number of verification requests.
     pub total_verifications: u64,
-    /// Number of successful verifications
+    /// Number of successful verifications.
     pub successful_verifications: u64,
-    /// Number of failed verifications
+    /// Number of failed verifications.
     pub failed_verifications: u64,
-    /// Average verification time (in milliseconds)
+    /// Average verification time (in milliseconds).
     pub avg_verification_time_ms: f64,
-    /// Total time spent in verification (in milliseconds)
+    /// Total time spent in verification (in milliseconds).
     pub total_verification_time_ms: u64,
 }

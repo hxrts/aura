@@ -90,7 +90,11 @@ fn process_network_messages(
             .deliver_at
             .is_some_and(|deliver_time| deliver_time <= current_time)
         {
-            let message = world.network.in_flight_messages.pop_front().unwrap();
+            let message = world
+                .network
+                .in_flight_messages
+                .pop_front()
+                .expect("Message should exist as we just checked front()");
 
             if message.will_drop {
                 dropped_messages.push(message);
@@ -240,7 +244,13 @@ fn execute_queued_protocols(
     // Find protocols ready to execute
     while let Some(protocol) = world.protocols.execution_queue.front() {
         if protocol.scheduled_time <= current_time {
-            ready_protocols.push(world.protocols.execution_queue.pop_front().unwrap());
+            ready_protocols.push(
+                world
+                    .protocols
+                    .execution_queue
+                    .pop_front()
+                    .expect("Protocol should exist as we just checked front()"),
+            );
         } else {
             break;
         }

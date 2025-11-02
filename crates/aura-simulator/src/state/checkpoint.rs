@@ -283,7 +283,7 @@ impl EnhancedCheckpointManager {
     fn cleanup_old_checkpoints(&mut self) -> Result<(), StateError> {
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("System time before UNIX epoch")
             .as_secs();
 
         // Remove checkpoints older than max age (but keep minimum)
@@ -331,7 +331,7 @@ impl EnhancedCheckpointManager {
     fn get_oldest_checkpoint_age(&self) -> Option<u64> {
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("System time before UNIX epoch")
             .as_secs();
 
         self.checkpoints
@@ -343,7 +343,7 @@ impl EnhancedCheckpointManager {
     fn get_newest_checkpoint_age(&self) -> Option<u64> {
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("System time before UNIX epoch")
             .as_secs();
 
         self.checkpoints

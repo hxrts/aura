@@ -316,7 +316,7 @@ fn test_peer_discovery_no_suitable_peers() {
             announcement: StorageCapabilityAnnouncement::new(
                 100_000_000, // Only 100MB
                 TrustLevel::Low,
-                1 * 1024 * 1024,
+                1024 * 1024,
             ),
             relationship_established_at: 1000,
             trust_score: 0.5,

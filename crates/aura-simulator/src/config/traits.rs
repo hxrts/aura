@@ -338,7 +338,7 @@ impl ConfigDefaults for SimulationConfig {
                 tick_duration_ms: 100,
                 seed: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("System time before UNIX epoch")
                     .as_secs(),
                 scenario_name: None,
                 debug_logging: false,

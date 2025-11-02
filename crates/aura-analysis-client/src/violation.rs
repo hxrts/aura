@@ -1982,7 +1982,10 @@ mod tests {
     #[test]
     fn test_violation_classification() {
         let mut analyzer = ViolationAnalyzer::new();
-        let property_id = PropertyId::new_v4();
+        let property_id = uuid::Uuid::from_bytes([
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab,
+            0xcd, 0xef,
+        ]);
         let violation = create_test_violation();
 
         let analysis = analyzer.analyze_violation(property_id, violation, None);
@@ -1992,7 +1995,7 @@ mod tests {
             analysis.classification.violation_type,
             ViolationType::SafetyViolation
         );
-        assert!(analysis.metadata.computation_time_ms >= 0);
+        // computation_time_ms is u64, so it's always >= 0
     }
 
     #[test]
@@ -2009,7 +2012,10 @@ mod tests {
     #[test]
     fn test_similarity_analysis() {
         let mut analyzer = ViolationAnalyzer::new();
-        let property_id = PropertyId::new_v4();
+        let property_id = uuid::Uuid::from_bytes([
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab,
+            0xcd, 0xef,
+        ]);
         let violation1 = create_test_violation();
         let violation2 = create_test_violation();
 
@@ -2023,7 +2029,10 @@ mod tests {
     #[test]
     fn test_violation_classification_types() {
         let mut analyzer = ViolationAnalyzer::new();
-        let property_id = PropertyId::new_v4();
+        let property_id = uuid::Uuid::from_bytes([
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab,
+            0xcd, 0xef,
+        ]);
 
         // Test different violation types based on description
         let test_cases = vec![
@@ -2065,7 +2074,10 @@ mod tests {
     #[test]
     fn test_severity_assessment() {
         let mut analyzer = ViolationAnalyzer::new();
-        let property_id = PropertyId::new_v4();
+        let property_id = uuid::Uuid::from_bytes([
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab,
+            0xcd, 0xef,
+        ]);
 
         let test_cases = vec![
             ("critical system failure", SeverityLevel::Critical),

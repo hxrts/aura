@@ -9,32 +9,44 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-/// Connection states for reactive UI
+/// Connection states for reactive UI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConnectionState {
+    /// Not connected.
     Disconnected,
+    /// Connection in progress.
     Connecting,
+    /// Connected and ready.
     Connected,
+    /// Attempting to reconnect.
     Reconnecting,
+    /// Connection error.
     Error(String),
 }
 
-/// Reactive WebSocket client for Leptos applications
+/// Reactive WebSocket client for Leptos applications.
 #[cfg(feature = "leptos")]
 #[allow(dead_code)]
 pub struct ReactiveWebSocketClient {
+    /// The underlying unified client.
     client: Rc<RefCell<UnifiedWebSocketClient>>,
+    /// Signal for connection state.
     connection_state: WriteSignal<ConnectionState>,
+    /// Signal for incoming messages.
     messages: WriteSignal<VecDeque<MessageEnvelope>>,
+    /// Signal for responses.
     responses: WriteSignal<VecDeque<serde_json::Value>>,
+    /// Whether to automatically reconnect on failure.
     auto_reconnect: bool,
+    /// Current number of reconnection attempts.
     reconnect_attempts: u32,
+    /// Maximum number of reconnection attempts.
     max_reconnect_attempts: u32,
 }
 
 #[cfg(feature = "leptos")]
 impl ReactiveWebSocketClient {
-    /// Create a new reactive WebSocket client
+    /// Creates a new reactive WebSocket client.
     pub fn new(
         mode: &str,
         url: String,
@@ -61,7 +73,7 @@ impl ReactiveWebSocketClient {
         })
     }
 
-    /// Connect with event handlers set up
+    /// Connects with event handlers set up.
     pub fn connect(&mut self) -> WasmResult<()> {
         self.connection_state.set(ConnectionState::Connecting);
 
@@ -73,33 +85,33 @@ impl ReactiveWebSocketClient {
         Ok(())
     }
 
-    /// Send a message
+    /// Sends a message.
     pub fn send_message(&self, envelope: &MessageEnvelope) -> WasmResult<()> {
         let json = envelope.to_json()?;
         self.client.borrow().send(&json)
     }
 
-    /// Send a typed message
+    /// Sends a typed message.
     pub fn send_typed<T: Serialize>(&self, message_type: &str, payload: &T) -> WasmResult<()> {
         let payload_json = serde_json::to_value(payload).map_err(WasmError::from)?;
         let envelope = MessageEnvelope::new(message_type, payload_json);
         self.send_message(&envelope)
     }
 
-    /// Disconnect
+    /// Disconnects from the server.
     pub fn disconnect(&mut self) -> WasmResult<()> {
         self.client.borrow_mut().close()?;
         self.connection_state.set(ConnectionState::Disconnected);
         Ok(())
     }
 
-    /// Check if connected
+    /// Checks if currently connected.
     pub fn is_connected(&self) -> bool {
         self.client.borrow().is_connected_status()
     }
 }
 
-/// Hook for using reactive WebSocket in Leptos components
+/// Hook for using reactive WebSocket in Leptos components.
 #[cfg(feature = "leptos")]
 #[allow(clippy::type_complexity)]
 pub fn use_reactive_websocket(

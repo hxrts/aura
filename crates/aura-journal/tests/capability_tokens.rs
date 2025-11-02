@@ -248,15 +248,15 @@ mod tests {
         // Create delegation chain A → B → C
         let subject_a = Subject::new("delegator_a");
         let scope_a = CapabilityScope::simple("storage", "admin").as_bytes();
-        let cap_a = CapabilityId::from_chain(None, subject_a.as_bytes(), &scope_a);
+        let cap_a = CapabilityId::from_chain(None, &subject_a.as_bytes(), &scope_a);
 
         let subject_b = Subject::new("delegator_b");
         let scope_b = CapabilityScope::simple("storage", "write").as_bytes();
-        let cap_b = CapabilityId::from_chain(Some(&cap_a), subject_b.as_bytes(), &scope_b);
+        let cap_b = CapabilityId::from_chain(Some(&cap_a), &subject_b.as_bytes(), &scope_b);
 
         let subject_c = Subject::new("delegator_c");
         let scope_c = CapabilityScope::simple("storage", "read").as_bytes();
-        let cap_c = CapabilityId::from_chain(Some(&cap_b), subject_c.as_bytes(), &scope_c);
+        let cap_c = CapabilityId::from_chain(Some(&cap_b), &subject_c.as_bytes(), &scope_c);
 
         let delegation_chain = vec![cap_a.clone(), cap_b.clone(), cap_c.clone()];
 

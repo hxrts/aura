@@ -175,8 +175,8 @@ async fn handle_websocket_connection(socket: WebSocket, state: ServerState) {
         streaming_events: false,
         metadata: ClientMetadata {
             user_agent: None,
-            connected_at: current_timestamp,
-            last_activity: current_timestamp,
+            connected_at: std::time::SystemTime::now(),
+            last_activity: std::time::SystemTime::now(),
         },
     };
 

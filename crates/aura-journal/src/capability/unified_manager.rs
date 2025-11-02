@@ -594,7 +594,7 @@ impl Default for UnifiedCapabilityManager {
 #[cfg(test)]
 mod tests {
     use super::super::threshold_capabilities::{
-        ParticipantId, PublicKeyPackage, ThresholdCapability, ThresholdSignature,
+        PublicKeyPackage, ThresholdCapability, ThresholdSignature, ThresholdParticipantId,
     };
     use super::*;
     use aura_crypto::{Ed25519Signature, Ed25519SigningKey};
@@ -606,7 +606,7 @@ mod tests {
     }
 
     fn test_device_id() -> DeviceId {
-        DeviceId(Uuid::new_v4())
+        DeviceId::new()  // Uses DeviceId::new() which is deterministic in tests
     }
 
     fn mock_threshold_capability(device_id: DeviceId, admin: bool) -> ThresholdCapability {
@@ -628,8 +628,8 @@ mod tests {
         let authorization = ThresholdSignature {
             signature: aura_crypto::Ed25519Signature::from_bytes(&[0u8; 64]),
             signers: vec![
-                ParticipantId::new(NonZeroU16::new(1).unwrap()),
-                ParticipantId::new(NonZeroU16::new(2).unwrap()),
+                ThresholdParticipantId::new(NonZeroU16::new(1).unwrap()),
+                ThresholdParticipantId::new(NonZeroU16::new(2).unwrap()),
             ],
         };
 

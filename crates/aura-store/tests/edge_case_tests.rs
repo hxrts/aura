@@ -157,7 +157,7 @@ fn test_capability_revocation_race() {
 
     // Operations in flight should detect revocation on next check
     // This tests that revocation is checked atomically
-    let _future_time = now + 100;
+    let _ = now + 100;
     // Note: Skipping verification result check as the API may have changed
     // The test demonstrates the revocation flow
 }
@@ -277,14 +277,13 @@ fn test_rapid_capability_expiration_renewal() {
     }
 
     // All capabilities should now be expired (if they had expiration set)
-    let _future_time = base_time + 10 * 100;
+    let _ = base_time + 10 * 100;
     // Note: cleanup_expired_tokens method may not exist in current API
 
     // Capabilities were granted but without expiration through current API
     // This test demonstrates rapid capability grant/verify cycles work
     let capabilities = manager.list_device_capabilities(&device_id);
-    assert!(!capabilities.is_empty()); // Capabilities exist
-    assert!(capabilities.len() > 0); // Multiple capabilities granted
+    assert!(!capabilities.is_empty()); // Capabilities exist and multiple granted
 }
 
 /// Test storage quota exceeded during multi-chunk upload

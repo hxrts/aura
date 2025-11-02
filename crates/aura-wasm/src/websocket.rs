@@ -9,14 +9,14 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
-/// Client mode determines message handling behavior
+/// Client mode determines message handling behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientMode {
-    /// Simulation server communication
+    /// Communication with simulation server.
     Simulation,
-    /// Live network node communication
+    /// Communication with live network nodes.
     LiveNetwork,
-    /// Trace analysis engine
+    /// Trace analysis engine communication.
     Analysis,
 }
 
@@ -34,27 +34,29 @@ impl std::fmt::Display for ClientMode {
     }
 }
 
-/// Trait for mode-specific message handling
+/// Trait for mode-specific message handling.
 pub trait ClientHandler {
-    /// Handle incoming WebSocket message
+    /// Handles incoming WebSocket message.
     fn handle_message(&mut self, data: &str) -> WasmResult<()>;
 
-    /// Handle WebSocket connection established
+    /// Handles WebSocket connection established.
     fn handle_connected(&mut self) -> WasmResult<()>;
 
-    /// Handle WebSocket connection closed
+    /// Handles WebSocket connection closed.
     fn handle_disconnected(&mut self, code: u16, reason: &str) -> WasmResult<()>;
 
-    /// Handle WebSocket error
+    /// Handles WebSocket error.
     fn handle_error(&mut self, error: &str) -> WasmResult<()>;
 }
 
-/// Default handler that logs messages
+/// Default handler that logs messages.
 pub struct DefaultHandler {
+    /// Client mode for logging context.
     mode: ClientMode,
 }
 
 impl DefaultHandler {
+    /// Creates a new default handler for the given mode.
     pub fn new(mode: ClientMode) -> Self {
         Self { mode }
     }
@@ -82,16 +84,20 @@ impl ClientHandler for DefaultHandler {
     }
 }
 
-/// Unified WebSocket client for all WASM clients
+/// Unified WebSocket client for all WASM clients.
 pub struct UnifiedWebSocketClient {
+    /// The underlying WebSocket connection.
     websocket: Option<WebSocket>,
+    /// Client operating mode.
     mode: ClientMode,
+    /// Server URL.
     url: String,
+    /// Connection status flag.
     is_connected: bool,
 }
 
 impl UnifiedWebSocketClient {
-    /// Create new WebSocket client for specified mode
+    /// Creates a new WebSocket client for the specified mode.
     pub fn new(mode: ClientMode, url: impl Into<String>) -> Self {
         UnifiedWebSocketClient {
             websocket: None,
@@ -101,7 +107,7 @@ impl UnifiedWebSocketClient {
         }
     }
 
-    /// Connect to WebSocket server and set up event handlers
+    /// Connects to the WebSocket server and sets up event handlers.
     pub fn connect(&mut self, handler: Rc<RefCell<dyn ClientHandler>>) -> WasmResult<()> {
         console_log!("[{}] Connecting to {}", self.mode, self.url);
 
@@ -173,7 +179,7 @@ impl UnifiedWebSocketClient {
         Ok(())
     }
 
-    /// Send message through WebSocket
+    /// Sends a message through the WebSocket.
     pub fn send(&self, message: &str) -> WasmResult<()> {
         match &self.websocket {
             Some(ws) => {
@@ -186,7 +192,7 @@ impl UnifiedWebSocketClient {
         }
     }
 
-    /// Close WebSocket connection
+    /// Closes the WebSocket connection.
     pub fn close(&mut self) -> WasmResult<()> {
         if let Some(ws) = &self.websocket {
             ws.close()
@@ -197,7 +203,7 @@ impl UnifiedWebSocketClient {
         Ok(())
     }
 
-    /// Get connection status
+    /// Returns the current connection status.
     pub fn is_connected_status(&self) -> bool {
         self.is_connected
             && self
@@ -207,27 +213,29 @@ impl UnifiedWebSocketClient {
                 .unwrap_or(false)
     }
 
-    /// Get client mode
+    /// Returns the client mode.
     pub fn mode(&self) -> ClientMode {
         self.mode
     }
 
-    /// Get client URL
+    /// Returns the client URL.
     pub fn url(&self) -> &str {
         &self.url
     }
 }
 
-/// JavaScript-bindable wrapper for WebSocket client
+/// JavaScript-bindable wrapper for WebSocket client.
 #[wasm_bindgen]
 pub struct WebSocketClientJs {
+    /// The underlying unified client.
     client: Rc<RefCell<UnifiedWebSocketClient>>,
+    /// The message handler.
     handler: Rc<RefCell<DefaultHandler>>,
 }
 
 #[wasm_bindgen]
 impl WebSocketClientJs {
-    /// Create new WebSocket client wrapper
+    /// Creates a new WebSocket client wrapper.
     #[wasm_bindgen(constructor)]
     pub fn new(mode_str: &str, url: &str) -> WasmResult<WebSocketClientJs> {
         let mode = match mode_str {
@@ -248,50 +256,55 @@ impl WebSocketClientJs {
         })
     }
 
-    /// Connect to WebSocket server
+    /// Connects to the WebSocket server.
     pub fn connect(&self) -> WasmResult<()> {
         let mut client = self.client.borrow_mut();
         client.connect(self.handler.clone() as Rc<RefCell<dyn ClientHandler>>)
     }
 
-    /// Send message through WebSocket
+    /// Sends a message through the WebSocket.
     pub fn send(&self, message: &str) -> WasmResult<()> {
         let client = self.client.borrow();
         client.send(message)
     }
 
-    /// Close WebSocket connection
+    /// Closes the WebSocket connection.
     pub fn close(&self) -> WasmResult<()> {
         let mut client = self.client.borrow_mut();
         client.close()
     }
 
-    /// Get connection status
+    /// Returns the connection status.
     pub fn is_connected(&self) -> bool {
         self.client.borrow().is_connected_status()
     }
 
-    /// Get client mode as string
+    /// Returns the client mode as a string.
     pub fn mode_name(&self) -> String {
         self.client.borrow().mode().to_string()
     }
 
-    /// Get client URL
+    /// Returns the client URL.
     pub fn get_url(&self) -> String {
         self.client.borrow().url().to_string()
     }
 }
 
-/// Generic message envelope for all client modes
+/// Generic message envelope for all client modes.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MessageEnvelope {
+    /// Type of the message.
     pub message_type: String,
+    /// Message payload.
     pub payload: serde_json::Value,
+    /// Optional timestamp.
     pub timestamp: Option<u64>,
+    /// Optional client identifier.
     pub client_id: Option<String>,
 }
 
 impl MessageEnvelope {
+    /// Creates a new message envelope.
     pub fn new(message_type: impl Into<String>, payload: serde_json::Value) -> Self {
         Self {
             message_type: message_type.into(),
@@ -301,19 +314,23 @@ impl MessageEnvelope {
         }
     }
 
+    /// Serializes the envelope to JSON.
     pub fn to_json(&self) -> WasmResult<String> {
         serde_json::to_string(self).map_err(WasmError::from)
     }
 
+    /// Deserializes an envelope from JSON.
     pub fn from_json(data: &str) -> WasmResult<Self> {
         serde_json::from_str(data).map_err(WasmError::from)
     }
 
+    /// Sets the timestamp on the envelope.
     pub fn with_timestamp(mut self, timestamp: u64) -> Self {
         self.timestamp = Some(timestamp);
         self
     }
 
+    /// Sets the client ID on the envelope.
     pub fn with_client_id(mut self, client_id: impl Into<String>) -> Self {
         self.client_id = Some(client_id.into());
         self

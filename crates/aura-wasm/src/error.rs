@@ -6,21 +6,27 @@ use wasm_bindgen::prelude::*;
 /// Unified error type for all WASM operations
 #[derive(Error, Debug)]
 pub enum WasmError {
+    /// WebSocket connection or communication error.
     #[error("WebSocket error: {0}")]
     WebSocket(String),
 
+    /// JSON serialization or deserialization error.
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    /// JavaScript interop error.
     #[error("JavaScript error: {0}")]
     JavaScript(String),
 
+    /// Client message handler error.
     #[error("Client handler error: {0}")]
     Handler(String),
 
+    /// Network communication error.
     #[error("Network error: {0}")]
     Network(String),
 
+    /// Protocol violation or error.
     #[error("Protocol error: {0}")]
     Protocol(String),
 }

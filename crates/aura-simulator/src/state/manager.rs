@@ -185,7 +185,7 @@ impl<State: StateManager> CheckpointManager<State> for UnifiedStateManager {
             tick: snapshot.tick(),
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("System time before UNIX epoch")
                 .as_secs(),
             size_bytes: unified_snapshot.size_bytes,
             content_hash: unified_snapshot.content_hash,

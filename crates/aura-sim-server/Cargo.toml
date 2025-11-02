@@ -14,6 +14,7 @@ path = "src/main.rs"
 # Internal crates
 aura-console-types = { path = "../aura-console-types" }
 aura-simulator = { path = "../aura-simulator" }
+aura-types = { path = "../aura-types" }
 # aura-protocol = { path = "../aura-protocol" } # Temporarily disabled due to compilation errors in protocol crate
 
 # WebSocket and HTTP server

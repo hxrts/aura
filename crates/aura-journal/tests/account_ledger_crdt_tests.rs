@@ -572,9 +572,10 @@ mod crdt_merge_simulation_tests {
             public_key: group_public_key,
             added_at: 1000,
             last_seen: 1000,
-            dkd_commitment_proofs: BTreeMap::new(),
+            dkd_commitment_proofs: std::collections::BTreeMap::new(),
             next_nonce: 0,
-            used_nonces: BTreeSet::new(),
+            used_nonces: std::collections::BTreeSet::new(),
+            key_share_epoch: 0,
         };
 
         // Create three ledgers

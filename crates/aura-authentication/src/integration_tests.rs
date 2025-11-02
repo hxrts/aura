@@ -44,7 +44,7 @@ mod tests {
 
     #[test]
     fn test_guardian_authentication_flow() {
-        let effects = Effects::test();
+        let _effects = Effects::test();
         let guardian_id = GuardianId::new();
         let account_id = AccountId::new();
 

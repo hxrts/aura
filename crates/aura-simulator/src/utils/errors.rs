@@ -192,7 +192,7 @@ macro_rules! validation_error {
         $crate::utils::errors::validation_error($field, "", $message)
     };
     ($field:expr, $value:expr, $expected:expr) => {
-        crate::utils::errors::validation_error($field, $value, $expected)
+        $crate::utils::errors::validation_error($field, $value, $expected)
     };
 }
 

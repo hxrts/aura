@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_verify_threshold_signature_sufficient_signers() {
-        let effects = Effects::test();
+        let _effects = Effects::test();
 
         // Create a test signature
         let signing_key = aura_crypto::generate_ed25519_key();
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_verify_threshold_signature_insufficient_signers() {
-        let effects = Effects::test();
+        let _effects = Effects::test();
 
         let signing_key = aura_crypto::generate_ed25519_key();
         let verifying_key = aura_crypto::ed25519_verifying_key(&signing_key);

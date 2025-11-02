@@ -4,7 +4,7 @@
 //! including key generation, signing, verification, and testing.
 
 use aura_crypto::{frost::FrostKeyShare, Effects};
-// use aura_protocol::{LocalSessionRuntime, SessionCommand, SessionResponse};
+use aura_protocol::{LocalSessionRuntime, SessionCommand, SessionResponse};
 use aura_types::{AccountId, AccountIdExt, AuraError, DeviceId, DeviceIdExt};
 use anyhow::anyhow;
 use clap::Args;

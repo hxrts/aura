@@ -292,7 +292,7 @@ where
 mod tests {
     use super::*;
     use aura_transport::handlers::InMemoryHandler;
-    use aura_types::{DeviceId, DeviceIdExt};
+    use aura_types::DeviceId;
 
     #[tokio::test]
     async fn test_recovery_strategy_calculation() {

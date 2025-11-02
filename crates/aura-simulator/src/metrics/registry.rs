@@ -123,35 +123,45 @@ impl GlobalMetrics {
     /// Get the default global collector
     pub fn default_collector() -> Arc<MetricsCollector> {
         let registry = Self::registry();
-        let registry_lock = registry.lock().unwrap();
+        let registry_lock = registry
+            .lock()
+            .expect("Global registry mutex should not be poisoned");
         registry_lock.default_collector()
     }
 
     /// Register a named collector globally
     pub fn register<S: Into<String>>(name: S, collector: MetricsCollector) {
         let registry = Self::registry();
-        let mut registry_lock = registry.lock().unwrap();
+        let mut registry_lock = registry
+            .lock()
+            .expect("Global registry mutex should not be poisoned");
         registry_lock.register_collector(name, collector);
     }
 
     /// Get a named collector from global registry
     pub fn get<S: AsRef<str>>(name: S) -> Option<Arc<MetricsCollector>> {
         let registry = Self::registry();
-        let registry_lock = registry.lock().unwrap();
+        let registry_lock = registry
+            .lock()
+            .expect("Global registry mutex should not be poisoned");
         registry_lock.get_collector(name)
     }
 
     /// Get global snapshot
     pub fn snapshot() -> GlobalMetricsSnapshot {
         let registry = Self::registry();
-        let registry_lock = registry.lock().unwrap();
+        let registry_lock = registry
+            .lock()
+            .expect("Global registry mutex should not be poisoned");
         registry_lock.global_snapshot()
     }
 
     /// Reset all global metrics
     pub fn reset_all() {
         let registry = Self::registry();
-        let registry_lock = registry.lock().unwrap();
+        let registry_lock = registry
+            .lock()
+            .expect("Global registry mutex should not be poisoned");
         registry_lock.reset_all();
     }
 

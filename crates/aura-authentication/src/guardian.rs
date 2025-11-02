@@ -103,8 +103,8 @@ mod tests {
 
     #[test]
     fn test_verify_guardian_signature_success() {
-        let effects = Effects::test();
-        let guardian_id = Uuid::new_v4();
+        let _effects = Effects::test();
+        let guardian_id = aura_protocol::test_utils::generate_test_uuid();
 
         // Generate a key pair for testing
         let signing_key = aura_crypto::generate_ed25519_key();
@@ -120,8 +120,8 @@ mod tests {
 
     #[test]
     fn test_verify_guardian_signature_invalid() {
-        let effects = Effects::test();
-        let guardian_id = Uuid::new_v4();
+        let _effects = Effects::test();
+        let guardian_id = aura_protocol::test_utils::generate_test_uuid();
 
         // Generate two different key pairs
         let signing_key1 = aura_crypto::generate_ed25519_key();
@@ -143,8 +143,8 @@ mod tests {
 
     #[test]
     fn test_verify_recovery_approval() {
-        let effects = Effects::test();
-        let guardian_id = Uuid::new_v4();
+        let _effects = Effects::test();
+        let guardian_id = aura_protocol::test_utils::generate_test_uuid();
         let recovery_request_hash = [42u8; 32];
 
         // Generate a key pair for testing

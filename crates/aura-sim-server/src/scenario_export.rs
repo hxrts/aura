@@ -186,7 +186,7 @@ impl ScenarioExporter {
         let record = CommandRecord {
             command,
             executed_at_tick,
-            executed_at: current_timestamp,
+            executed_at: std::time::SystemTime::now(),
             sequence: self.next_sequence,
         };
 
@@ -232,7 +232,7 @@ impl ScenarioExporter {
         // Build export metadata
         let metadata = ExportMetadata {
             source_branch_id: branch.id.to_string(),
-            exported_at: current_timestamp,
+            exported_at: std::time::SystemTime::now(),
             parent_branch_id: branch.metadata.parent_branch.map(|id| id.to_string()),
             fork_tick: self.determine_fork_tick(&branch.metadata),
             seed: simulation.seed,
@@ -757,7 +757,7 @@ mod tests {
             assertions: vec![],
             metadata: ExportMetadata {
                 source_branch_id: "test-branch".to_string(),
-                exported_at: current_timestamp,
+                exported_at: std::time::SystemTime::now(),
                 parent_branch_id: None,
                 fork_tick: None,
                 seed: 42,

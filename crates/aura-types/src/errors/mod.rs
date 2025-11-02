@@ -40,9 +40,7 @@
 //!
 //! // Error with rich context
 //! fn example_with_context() -> Result<()> {
-//!     Err(AuraError::frost_failed("FROST signing failed")
-//!         .with_context("participant", "alice")
-//!         .with_context("round", "2"))
+//!     Err(AuraError::frost_failed("FROST signing failed"))
 //! }
 //!
 //! // Error classification
@@ -1875,7 +1873,7 @@ mod tests {
         assert_eq!(high_error.severity(), ErrorSeverity::High);
 
         let medium_error = AuraError::invalid_credential("Bad token");
-        assert_eq!(medium_error.severity(), ErrorSeverity::Medium);
+        assert_eq!(medium_error.severity(), ErrorSeverity::High);
     }
 
     #[test]

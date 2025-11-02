@@ -200,18 +200,17 @@ fn verify_capability_validity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::CapabilityScope;
     use uuid::Uuid;
 
     #[test]
     fn test_explicit_denial() {
         let subject = Subject::Session {
-            session_id: Uuid::new_v4(),
+            session_id: aura_protocol::test_utils::generate_test_uuid(),
             issuer: aura_types::DeviceId::new(),
         };
         let action = Action::Admin;
         let resource = Resource::Account(aura_types::AccountId::new());
-        #[allow(clippy::disallowed_method)]
+        #[allow(clippy::disallowed_methods)]
         let context = PolicyContext {
             current_time: SystemTime::now(),
             authority_graph: AuthorityGraph::new(),
@@ -228,7 +227,7 @@ mod tests {
         let subject = Subject::Device(aura_types::DeviceId::new());
         let action = Action::Read;
         let resource = Resource::Account(aura_types::AccountId::new());
-        #[allow(clippy::disallowed_method)]
+        #[allow(clippy::disallowed_methods)]
         let context = PolicyContext {
             current_time: SystemTime::now(),
             authority_graph: AuthorityGraph::new(),

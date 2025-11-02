@@ -364,7 +364,7 @@ mod tests {
             context: std::collections::HashMap::new(),
             timestamp: SystemTime::UNIX_EPOCH,
         };
-        #[allow(clippy::disallowed_method)]
+        #[allow(clippy::disallowed_methods)]
         let policy_context = PolicyContext {
             current_time: SystemTime::now(),
             authority_graph: crate::policy::AuthorityGraph::new(),

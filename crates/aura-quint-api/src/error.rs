@@ -5,57 +5,70 @@ use thiserror::Error;
 /// Result type for Quint API operations
 pub type QuintResult<T> = Result<T, QuintError>;
 
-/// Errors that can occur when interacting with Quint
+/// Errors that can occur when interacting with Quint.
 #[derive(Error, Debug)]
 pub enum QuintError {
-    /// Quint parser not available or parsing failed
+    /// Quint parser not available or parsing failed.
     #[error("Parse error: {0}")]
     ParseError(String),
 
-    /// Quint evaluation error
+    /// Quint evaluation error.
     #[error("Evaluation error: {0}")]
     EvaluationError(String),
 
-    /// Property specification error
+    /// Property specification error.
     #[error("Property specification error: {0}")]
     PropertySpecError(String),
 
-    /// Property parsing error
+    /// Property parsing error.
     #[error("Property parsing failed: {message} at {location}")]
-    PropertyParseError { message: String, location: String },
+    PropertyParseError {
+        /// Error message.
+        message: String,
+        /// Location in the source where error occurred.
+        location: String,
+    },
 
-    /// Verification error
+    /// Verification error.
     #[error("Verification failed: {0}")]
     VerificationError(String),
 
-    /// Verification timeout
+    /// Verification timeout.
     #[error("Verification timed out after {timeout_ms}ms")]
-    VerificationTimeout { timeout_ms: u64 },
+    VerificationTimeout {
+        /// Timeout duration in milliseconds.
+        timeout_ms: u64,
+    },
 
-    /// Process execution error
+    /// Process execution error.
     #[error("Process execution failed: {command} - {message}")]
-    ProcessExecutionError { command: String, message: String },
+    ProcessExecutionError {
+        /// Command that failed.
+        command: String,
+        /// Error message.
+        message: String,
+    },
 
-    /// JSON serialization/deserialization error
+    /// JSON serialization/deserialization error.
     #[error("JSON error: {0}")]
     JsonError(String),
 
-    /// I/O error
+    /// I/O error.
     #[error("I/O error: {0}")]
     IoError(String),
 
-    /// Internal error
+    /// Internal error.
     #[error("Internal error: {0}")]
     InternalError(String),
 }
 
 impl QuintError {
-    /// Create a property specification error
+    /// Creates a property specification error.
     pub fn property_spec_error(message: impl Into<String>) -> Self {
         Self::PropertySpecError(message.into())
     }
 
-    /// Create a property parsing error
+    /// Creates a property parsing error.
     pub fn property_parse_error(message: impl Into<String>, location: impl Into<String>) -> Self {
         Self::PropertyParseError {
             message: message.into(),
@@ -63,12 +76,12 @@ impl QuintError {
         }
     }
 
-    /// Create a verification error
+    /// Creates a verification error.
     pub fn verification_error(message: impl Into<String>) -> Self {
         Self::VerificationError(message.into())
     }
 
-    /// Create a process execution error
+    /// Creates a process execution error.
     pub fn process_execution_error(command: impl Into<String>, message: impl Into<String>) -> Self {
         Self::ProcessExecutionError {
             command: command.into(),
@@ -76,7 +89,7 @@ impl QuintError {
         }
     }
 
-    /// Create an internal error
+    /// Creates an internal error.
     pub fn internal_error(message: impl Into<String>) -> Self {
         Self::InternalError(message.into())
     }

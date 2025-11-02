@@ -119,8 +119,8 @@ impl BranchManager {
             name: name.clone(),
             parent_branch,
             simulation_id,
-            created_at: current_timestamp,
-            last_activity: current_timestamp,
+            created_at: std::time::SystemTime::now(),
+            last_activity: std::time::SystemTime::now(),
             description: None,
             auto_cleanup: false,
         };

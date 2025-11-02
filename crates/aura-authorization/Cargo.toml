@@ -27,3 +27,4 @@ time = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
+aura-protocol = { path = "../aura-protocol" }
