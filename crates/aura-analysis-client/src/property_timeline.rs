@@ -69,10 +69,12 @@ pub struct PropertyStatus {
 
 /// Severity level of a property violation
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ViolationSeverity {
     /// Low severity - minor protocol deviation
     Low,
     /// Medium severity - notable protocol violation
+    #[default]
     Medium,
     /// High severity - critical safety violation
     High,
@@ -80,11 +82,6 @@ pub enum ViolationSeverity {
     Critical,
 }
 
-impl Default for ViolationSeverity {
-    fn default() -> Self {
-        ViolationSeverity::Medium
-    }
-}
 
 /// Summary statistics for the property timeline
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,8 +261,8 @@ impl PropertyTimelineBuilder {
             };
         }
 
-        let start_tick = *ticks.iter().min().unwrap();
-        let end_tick = *ticks.iter().max().unwrap();
+        let start_tick = ticks.iter().min().copied().unwrap_or(0);
+        let end_tick = ticks.iter().max().copied().unwrap_or(0);
         let duration = end_tick.saturating_sub(start_tick) + 1;
 
         TimelineSpan {
@@ -425,18 +422,18 @@ impl WasmPropertyTimeline {
 
 /// Builder for WASM usage
 #[wasm_bindgen]
+#[derive(Default)]
 pub struct WasmPropertyTimelineBuilder {
     inner: PropertyTimelineBuilder,
 }
+
 
 #[wasm_bindgen]
 impl WasmPropertyTimelineBuilder {
     /// Create a new timeline builder
     #[wasm_bindgen(constructor)]
     pub fn new() -> WasmPropertyTimelineBuilder {
-        WasmPropertyTimelineBuilder {
-            inner: PropertyTimelineBuilder::new(),
-        }
+        WasmPropertyTimelineBuilder::default()
     }
 
     /// Add property results for a tick (results should be JSON)

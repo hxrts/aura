@@ -1,0 +1,254 @@
+# Choreographic Integration Scenario
+# Demonstrates complex multi-protocol choreographic workflows
+
+[metadata]
+name = "choreographic_integration"
+description = "Multi-protocol choreographic integration with DKD, FROST, and failure recovery"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["integration", "choreography", "multi-protocol", "visualization"]
+
+[setup]
+participants = 4
+threshold = 3
+seed = 99999
+enable_tracing = true
+enable_choreography_recording = true
+
+[simulation]
+use_simulation_handler = true
+record_choreo_events = true
+deterministic_timing = true
+message_delay_ms = 20
+simulate_failures = true
+failure_rate = 0.05  # 5% failure rate for stress testing
+
+[network]
+latency_range = [15, 50]
+drop_rate = 0.01
+partitions_enabled = false
+
+# Phase 1: Account initialization with DKD
+[[phases]]
+name = "account_setup"
+description = "Initialize threshold account with DKD"
+timeout_seconds = 5
+actions = [
+    { type = "setup_choreography", protocol = "AccountInitProtocol", participants = ["alice", "bob", "carol", "david"] },
+    { 
+        type = "run_choreography", 
+        choreography = "dkd", 
+        participants = ["alice", "bob", "carol", "david"],
+        parameters = {
+            app_id = "integration_test",
+            context = "root_key",
+            threshold = 3
+        }
+    }
+]
+
+# Phase 2: Derive application-specific keys
+[[phases]]
+name = "app_key_derivation"
+description = "Derive keys for multiple applications"
+timeout_seconds = 8
+actions = [
+    { 
+        type = "run_choreography", 
+        choreography = "dkd", 
+        participants = ["alice", "bob", "carol", "david"],
+        parameters = {
+            app_id = "messaging_app",
+            context = "encryption_keys",
+            threshold = 3
+        }
+    },
+    { 
+        type = "run_choreography", 
+        choreography = "dkd", 
+        participants = ["alice", "bob", "carol", "david"],
+        parameters = {
+            app_id = "storage_app",
+            context = "access_keys",
+            threshold = 3
+        }
+    }
+]
+
+# Phase 3: Sign a multi-party transaction
+[[phases]]
+name = "transaction_signing"
+description = "Sign transaction using FROST"
+timeout_seconds = 6
+actions = [
+    { 
+        type = "run_choreography", 
+        choreography = "frost_signing", 
+        participants = ["alice", "bob", "carol", "david"],
+        parameters = {
+            message = "Authorize storage quota increase to 100GB",
+            required_signers = 3
+        }
+    }
+]
+
+# Phase 4: Simulate coordinator failure and recovery
+[[phases]]
+name = "failure_recovery_test"
+description = "Test coordinator failure recovery mechanism"
+timeout_seconds = 15
+actions = [
+    # Start a new signing round
+    { 
+        type = "run_choreography", 
+        choreography = "frost_signing", 
+        participants = ["alice", "bob", "carol", "david"],
+        parameters = {
+            message = "Critical update transaction",
+            required_signers = 3
+        },
+        inject_failure = {
+            participant = "coordinator",
+            at_progress = 0.5,
+            failure_type = "crash"
+        }
+    },
+    # Recovery should kick in automatically
+    { type = "wait_for_recovery", timeout_ms = 5000 },
+    { type = "verify_property", property = "recovery_successful", expected = true },
+    { type = "verify_property", property = "transaction_signed_after_recovery", expected = true }
+]
+
+# Phase 5: Parallel protocol execution
+[[phases]]
+name = "parallel_protocols"
+description = "Execute multiple protocols in parallel"
+timeout_seconds = 10
+actions = [
+    { 
+        type = "parallel", 
+        actions = [
+            { 
+                type = "run_choreography", 
+                choreography = "dkd", 
+                participants = ["alice", "bob"],
+                parameters = { app_id = "app1", context = "ctx1", threshold = 2 }
+            },
+            { 
+                type = "run_choreography", 
+                choreography = "dkd", 
+                participants = ["carol", "david"],
+                parameters = { app_id = "app2", context = "ctx2", threshold = 2 }
+            }
+        ]
+    }
+]
+
+# Phase 6: Visualization and analysis
+[[phases]]
+name = "analysis"
+description = "Export traces and analyze execution"
+timeout_seconds = 3
+actions = [
+    { type = "export_choreo_trace", format = "console", output = "integration_trace.json" },
+    { type = "generate_timeline", output = "integration_timeline.html" },
+    { type = "verify_all_properties" }
+]
+
+[[properties]]
+name = "all_protocols_complete"
+description = "All choreographic protocols complete successfully"
+property_type = "liveness"
+
+[[properties]]
+name = "recovery_successful"
+description = "Failure recovery completed successfully"
+property_type = "liveness"
+
+[[properties]]
+name = "transaction_signed_after_recovery"
+description = "Transaction signed after coordinator recovery"
+property_type = "liveness"
+
+[[properties]]
+name = "no_data_races"
+description = "No data races in parallel execution"
+property_type = "safety"
+
+[[properties]]
+name = "session_consistency"
+description = "Session state remains consistent"
+property_type = "safety"
+
+# Complex invariants
+[[invariants]]
+name = "causal_consistency"
+description = "All events respect causal ordering"
+expression = "happens_before_preserved"
+
+[[invariants]]
+name = "threshold_maintained"
+description = "Threshold security maintained throughout"
+expression = "active_participants >= threshold"
+
+[[invariants]]
+name = "choreographic_isolation"
+description = "Parallel choreographies don't interfere"
+expression = "no_cross_protocol_messages"
+
+# Network stress conditions
+[[network_conditions]]
+name = "variable_latency"
+description = "Highly variable network latency"
+latency_ms = 50
+jitter_ms = 40
+drop_rate = 0.02
+
+# Byzantine scenarios for integration testing
+[[byzantine_behaviors]]
+name = "flaky_participant"
+description = "Participant intermittently fails"
+enabled = true
+participants = ["david"]
+behavior = "intermittent_failure"
+failure_probability = 0.3
+recovery_time_ms = 1000
+
+# Advanced visualization
+[visualization]
+# Show all message flows
+highlight_messages = ["all"]
+show_phase_transitions = true
+show_parallel_execution = true
+animate_coordinator_election = true
+animate_failure_recovery = true
+show_session_epochs = true
+
+# Timeline configuration
+timeline_grouping = "by_protocol"
+timeline_zoom_level = "auto"
+show_causality_arrows = true
+
+# Network view configuration
+network_layout = "force_directed"
+show_message_queues = true
+animate_message_flow = true
+
+# Export options
+export_formats = ["console_json", "graphviz_dot", "mermaid"]
+include_performance_metrics = true
+
+# Debugging features
+[debugging]
+enable_time_travel = true
+checkpoint_interval_ms = 50
+max_checkpoints = 100
+enable_step_through = true
+breakpoint_on_failure = true
+
+# Performance monitoring
+[monitoring]
+track_message_latency = true
+track_protocol_duration = true
+track_memory_usage = false
+export_metrics = true

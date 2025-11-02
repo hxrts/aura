@@ -4,15 +4,13 @@
 //! into formats compatible with Quint formal verification, enabling
 //! trace-based property verification and temporal analysis.
 
-use crate::{AuraError, Result};
 use crate::quint::types::{
-    QuintValue, QuintSpec, QuintInvariant, QuintTemporalProperty,
-    PropertyEvaluationResult, ValidationResult
+    PropertyEvaluationResult, QuintInvariant, QuintSpec, QuintTemporalProperty, QuintValue,
+    ValidationResult,
 };
-use crate::testing::{
-    ExecutionTrace, PropertyViolation, ViolationDetectionReport
-};
+use crate::testing::{ExecutionTrace, PropertyViolation, ViolationDetectionReport};
 use crate::types::SimulationState;
+use crate::{AuraError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -35,7 +33,9 @@ pub enum ItfExpression {
     /// Tuple of expressions
     Tuple { elements: Vec<ItfExpression> },
     /// Map with key-value pairs
-    Map { pairs: Vec<(ItfExpression, ItfExpression)> },
+    Map {
+        pairs: Vec<(ItfExpression, ItfExpression)>,
+    },
     /// Record with named fields
     Record(HashMap<String, ItfExpression>),
 }
@@ -83,6 +83,12 @@ pub struct ItfTraceConverter {
     _config: TraceConversionConfig,
 }
 
+impl Default for ItfTraceConverter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ItfTraceConverter {
     /// Create a new ITF trace converter
     pub fn new() -> Self {
@@ -95,19 +101,22 @@ impl ItfTraceConverter {
     pub fn validate_itf_trace(&self, trace: &ItfTrace) -> Result<()> {
         // Basic validation
         if trace.vars.is_empty() {
-            return Err(AuraError::configuration_error("ITF trace must have variables".to_string()));
+            return Err(AuraError::configuration_error(
+                "ITF trace must have variables".to_string(),
+            ));
         }
-        
+
         for state in &trace.states {
             for var in &trace.vars {
                 if !state.variables.contains_key(var) {
-                    return Err(AuraError::configuration_error(
-                        format!("State missing variable: {}", var)
-                    ));
+                    return Err(AuraError::configuration_error(format!(
+                        "State missing variable: {}",
+                        var
+                    )));
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -118,7 +127,9 @@ impl ItfTraceConverter {
         } else {
             serde_json::to_string(trace)
         };
-        result.map_err(|e| AuraError::configuration_error(format!("JSON serialization failed: {}", e)))
+        result.map_err(|e| {
+            AuraError::configuration_error(format!("JSON serialization failed: {}", e))
+        })
     }
 
     /// Parse ITF trace from JSON
@@ -349,18 +360,22 @@ impl TraceConverter {
     }
 
     /// Convert simulation execution trace to Quint format
-    pub fn convert_trace(&mut self, execution_trace: &ExecutionTrace) -> Result<TraceConversionResult> {
+    pub fn convert_trace(
+        &mut self,
+        execution_trace: &ExecutionTrace,
+    ) -> Result<TraceConversionResult> {
         let start_time = crate::utils::time::current_unix_timestamp_millis();
-        
+
         // Generate unique trace ID
         let trace_id = format!("trace_{}", start_time);
-        
+
         // Check cache first
         if let Some(cached_trace) = self.conversion_cache.get(&trace_id) {
-            self.conversion_stats.cache_hit_rate = 
-                (self.conversion_stats.cache_hit_rate * (self.conversion_stats.traces_converted as f64) + 1.0) 
+            self.conversion_stats.cache_hit_rate = (self.conversion_stats.cache_hit_rate
+                * (self.conversion_stats.traces_converted as f64)
+                + 1.0)
                 / ((self.conversion_stats.traces_converted + 1) as f64);
-            
+
             return Ok(TraceConversionResult {
                 quint_trace: cached_trace.clone(),
                 conversion_metrics: ConversionPerformanceMetrics {
@@ -380,8 +395,11 @@ impl TraceConverter {
 
         // Apply sampling if needed
         let states_to_process = if execution_trace.len() > self.config.max_trace_length {
-            warnings.push(format!("Trace length {} exceeds maximum {}, applying sampling", 
-                                execution_trace.len(), self.config.max_trace_length));
+            warnings.push(format!(
+                "Trace length {} exceeds maximum {}, applying sampling",
+                execution_trace.len(),
+                self.config.max_trace_length
+            ));
             self.sample_states(execution_trace)?
         } else {
             execution_trace.get_all_states().iter().cloned().collect()
@@ -390,7 +408,7 @@ impl TraceConverter {
         // Convert each state
         for (index, sim_state) in states_to_process.iter().enumerate() {
             let quint_state = self.convert_simulation_state(sim_state, index as u64)?;
-            
+
             // Apply compression if enabled
             if self.config.compress_repeated_states && !quint_states.is_empty() {
                 let last_state = quint_states.last().unwrap();
@@ -398,13 +416,14 @@ impl TraceConverter {
                     continue; // Skip repeated state
                 }
             }
-            
+
             quint_states.push(quint_state);
         }
 
         // Generate events between states
         for i in 0..quint_states.len().saturating_sub(1) {
-            let event = self.generate_transition_event(&quint_states[i], &quint_states[i + 1], i)?;
+            let event =
+                self.generate_transition_event(&quint_states[i], &quint_states[i + 1], i)?;
             quint_events.push(event);
         }
 
@@ -414,7 +433,8 @@ impl TraceConverter {
         // Create trace metadata
         let metadata = QuintTraceMetadata {
             created_at: start_time,
-            duration: if let (Some(first), Some(last)) = (quint_states.first(), quint_states.last()) {
+            duration: if let (Some(first), Some(last)) = (quint_states.first(), quint_states.last())
+            {
                 last.time - first.time
             } else {
                 0
@@ -441,8 +461,9 @@ impl TraceConverter {
         // Update statistics
         self.conversion_stats.traces_converted += 1;
         self.conversion_stats.total_conversion_time_ms += conversion_time;
-        self.conversion_stats.average_conversion_time_ms = 
-            self.conversion_stats.total_conversion_time_ms as f64 / self.conversion_stats.traces_converted as f64;
+        self.conversion_stats.average_conversion_time_ms =
+            self.conversion_stats.total_conversion_time_ms as f64
+                / self.conversion_stats.traces_converted as f64;
         self.conversion_stats.total_states_converted += quint_trace.states.len() as u64;
         self.conversion_stats.total_events_converted += quint_trace.events.len() as u64;
 
@@ -460,22 +481,33 @@ impl TraceConverter {
     }
 
     /// Extract trace fragment around a property violation
-    pub fn extract_violation_fragment(&self, 
-                                     quint_trace: &QuintTrace, 
-                                     violation: &PropertyViolation,
-                                     context_window: usize) -> Result<TraceFragment> {
+    pub fn extract_violation_fragment(
+        &self,
+        quint_trace: &QuintTrace,
+        violation: &PropertyViolation,
+        context_window: usize,
+    ) -> Result<TraceFragment> {
         // Find the state corresponding to the violation
-        let violation_position = quint_trace.states.iter()
+        let violation_position = quint_trace
+            .states
+            .iter()
             .position(|state| state.time == violation.violation_state.time)
             .unwrap_or(quint_trace.states.len() / 2); // Default to middle if not found
 
         let start_position = violation_position.saturating_sub(context_window);
-        let end_position = std::cmp::min(violation_position + context_window, quint_trace.states.len());
+        let end_position = std::cmp::min(
+            violation_position + context_window,
+            quint_trace.states.len(),
+        );
 
         let fragment_states = quint_trace.states[start_position..end_position].to_vec();
-        let fragment_events = quint_trace.events.iter()
+        let fragment_events = quint_trace
+            .events
+            .iter()
             .filter(|event| {
-                let event_step = event.parameters.get("step")
+                let event_step = event
+                    .parameters
+                    .get("step")
                     .and_then(|v| v.as_int())
                     .unwrap_or(0) as usize;
                 event_step >= start_position && event_step < end_position
@@ -484,7 +516,10 @@ impl TraceConverter {
             .collect();
 
         Ok(TraceFragment {
-            fragment_id: format!("violation_{}_{}", violation.property_name, violation.detected_at),
+            fragment_id: format!(
+                "violation_{}_{}",
+                violation.property_name, violation.detected_at
+            ),
             start_position,
             end_position,
             states: fragment_states,
@@ -494,9 +529,11 @@ impl TraceConverter {
     }
 
     /// Extract multiple fragments for comprehensive analysis
-    pub fn extract_analysis_fragments(&self, 
-                                     quint_trace: &QuintTrace,
-                                     violation_report: &ViolationDetectionReport) -> Result<Vec<TraceFragment>> {
+    pub fn extract_analysis_fragments(
+        &self,
+        quint_trace: &QuintTrace,
+        violation_report: &ViolationDetectionReport,
+    ) -> Result<Vec<TraceFragment>> {
         let mut fragments = Vec::new();
 
         for violation in &violation_report.violations {
@@ -521,9 +558,11 @@ impl TraceConverter {
     }
 
     /// Verify trace against Quint properties
-    pub fn verify_trace_properties(&self, 
-                                  quint_trace: &QuintTrace,
-                                  spec: &QuintSpec) -> Result<ValidationResult> {
+    pub fn verify_trace_properties(
+        &self,
+        quint_trace: &QuintTrace,
+        spec: &QuintSpec,
+    ) -> Result<ValidationResult> {
         let mut validation_result = ValidationResult::new();
 
         // Verify invariants at each state
@@ -559,7 +598,8 @@ impl TraceConverter {
         let sample_size = (all_states.len() as f64 * self.config.sampling_rate) as usize;
         let step_size = all_states.len() / sample_size.max(1);
 
-        let sampled = all_states.iter()
+        let sampled = all_states
+            .iter()
             .step_by(step_size.max(1))
             .take(sample_size)
             .cloned()
@@ -569,9 +609,13 @@ impl TraceConverter {
     }
 
     /// Convert simulation state to Quint trace state
-    fn convert_simulation_state(&self, sim_state: &SimulationState, step: u64) -> Result<QuintTraceState> {
+    fn convert_simulation_state(
+        &self,
+        sim_state: &SimulationState,
+        step: u64,
+    ) -> Result<QuintTraceState> {
         let mut variables = HashMap::new();
-        
+
         // Convert basic state variables
         for (key, value) in &sim_state.variables {
             variables.insert(key.clone(), QuintValue::String(value.clone()));
@@ -580,34 +624,57 @@ impl TraceConverter {
         // Convert protocol state
         let protocol_state = QuintProtocolState {
             active_sessions: QuintValue::List(
-                sim_state.protocol_state.active_sessions.iter()
+                sim_state
+                    .protocol_state
+                    .active_sessions
+                    .iter()
                     .map(|session| QuintValue::String(session.session_id.clone()))
-                    .collect()
+                    .collect(),
             ),
             current_phase: QuintValue::String(
-                sim_state.protocol_state.active_sessions
+                sim_state
+                    .protocol_state
+                    .active_sessions
                     .first()
                     .map(|s| s.current_phase.clone())
-                    .unwrap_or("idle".to_string())
+                    .unwrap_or("idle".to_string()),
             ),
             variables: HashMap::new(), // Protocol variables not available in current structure
         };
 
         // Convert network state
         let mut message_stats = HashMap::new();
-        message_stats.insert("sent".to_string(), QuintValue::Int(sim_state.network_state.message_stats.messages_sent as i64));
-        message_stats.insert("delivered".to_string(), QuintValue::Int(sim_state.network_state.message_stats.messages_delivered as i64));
-        message_stats.insert("dropped".to_string(), QuintValue::Int(sim_state.network_state.message_stats.messages_dropped as i64));
+        message_stats.insert(
+            "sent".to_string(),
+            QuintValue::Int(sim_state.network_state.message_stats.messages_sent as i64),
+        );
+        message_stats.insert(
+            "delivered".to_string(),
+            QuintValue::Int(sim_state.network_state.message_stats.messages_delivered as i64),
+        );
+        message_stats.insert(
+            "dropped".to_string(),
+            QuintValue::Int(sim_state.network_state.message_stats.messages_dropped as i64),
+        );
 
         let mut failure_conditions = HashMap::new();
-        failure_conditions.insert("drop_rate".to_string(), QuintValue::Int((sim_state.network_state.failure_conditions.drop_rate * 100.0) as i64));
-        failure_conditions.insert("partitions_active".to_string(), QuintValue::Bool(sim_state.network_state.failure_conditions.partitions_active));
+        failure_conditions.insert(
+            "drop_rate".to_string(),
+            QuintValue::Int((sim_state.network_state.failure_conditions.drop_rate * 100.0) as i64),
+        );
+        failure_conditions.insert(
+            "partitions_active".to_string(),
+            QuintValue::Bool(sim_state.network_state.failure_conditions.partitions_active),
+        );
 
         let network_state = QuintNetworkState {
             partitions: QuintValue::List(
-                sim_state.network_state.partitions.iter()
+                sim_state
+                    .network_state
+                    .partitions
+                    .iter()
                     .map(|partition| QuintValue::String(partition.clone()))
-                    .collect()
+                    .collect(),
             ),
             message_stats,
             failure_conditions,
@@ -623,14 +690,22 @@ impl TraceConverter {
     }
 
     /// Generate transition event between two states
-    fn generate_transition_event(&self, 
-                               from_state: &QuintTraceState, 
-                               to_state: &QuintTraceState,
-                               index: usize) -> Result<QuintTraceEvent> {
+    fn generate_transition_event(
+        &self,
+        from_state: &QuintTraceState,
+        to_state: &QuintTraceState,
+        index: usize,
+    ) -> Result<QuintTraceEvent> {
         let mut parameters = HashMap::new();
-        parameters.insert("from_step".to_string(), QuintValue::Int(from_state.step as i64));
+        parameters.insert(
+            "from_step".to_string(),
+            QuintValue::Int(from_state.step as i64),
+        );
         parameters.insert("to_step".to_string(), QuintValue::Int(to_state.step as i64));
-        parameters.insert("time_delta".to_string(), QuintValue::Int((to_state.time - from_state.time) as i64));
+        parameters.insert(
+            "time_delta".to_string(),
+            QuintValue::Int((to_state.time - from_state.time) as i64),
+        );
 
         Ok(QuintTraceEvent {
             event_id: format!("transition_{}", index),
@@ -643,15 +718,23 @@ impl TraceConverter {
     }
 
     /// Check if two states differ significantly
-    fn states_differ_significantly(&self, state1: &QuintTraceState, state2: &QuintTraceState) -> bool {
+    fn states_differ_significantly(
+        &self,
+        state1: &QuintTraceState,
+        state2: &QuintTraceState,
+    ) -> bool {
         // Simple implementation - in reality would check specific variable changes
-        state1.step != state2.step || 
-        state1.protocol_state.current_phase != state2.protocol_state.current_phase ||
-        state1.variables.len() != state2.variables.len()
+        state1.step != state2.step
+            || state1.protocol_state.current_phase != state2.protocol_state.current_phase
+            || state1.variables.len() != state2.variables.len()
     }
 
     /// Calculate quality metrics for a converted trace
-    fn calculate_quality_metrics(&self, states: &[QuintTraceState], events: &[QuintTraceEvent]) -> TraceQualityMetrics {
+    fn calculate_quality_metrics(
+        &self,
+        states: &[QuintTraceState],
+        events: &[QuintTraceEvent],
+    ) -> TraceQualityMetrics {
         TraceQualityMetrics {
             state_completeness: if states.is_empty() { 0.0 } else { 1.0 },
             event_coverage: if events.is_empty() { 0.0 } else { 1.0 },
@@ -679,9 +762,13 @@ impl TraceConverter {
     }
 
     /// Verify an invariant across all states in the trace
-    fn verify_invariant_on_trace(&self, trace: &QuintTrace, invariant: &QuintInvariant) -> Result<PropertyEvaluationResult> {
+    fn verify_invariant_on_trace(
+        &self,
+        trace: &QuintTrace,
+        invariant: &QuintInvariant,
+    ) -> Result<PropertyEvaluationResult> {
         let start_time = crate::utils::time::current_unix_timestamp_millis();
-        
+
         // Check invariant at each state
         for state in &trace.states {
             let holds = self.evaluate_invariant_at_state(invariant, state)?;
@@ -690,7 +777,10 @@ impl TraceConverter {
                 return Ok(PropertyEvaluationResult {
                     property_name: invariant.name.clone(),
                     holds: false,
-                    details: format!("Invariant '{}' violated at step {}", invariant.name, state.step),
+                    details: format!(
+                        "Invariant '{}' violated at step {}",
+                        invariant.name, state.step
+                    ),
                     witness: None,
                     evaluation_time_ms: end_time - start_time,
                 });
@@ -708,34 +798,52 @@ impl TraceConverter {
     }
 
     /// Verify a temporal property across the trace
-    fn verify_temporal_property_on_trace(&self, trace: &QuintTrace, property: &QuintTemporalProperty) -> Result<PropertyEvaluationResult> {
+    fn verify_temporal_property_on_trace(
+        &self,
+        trace: &QuintTrace,
+        property: &QuintTemporalProperty,
+    ) -> Result<PropertyEvaluationResult> {
         let start_time = crate::utils::time::current_unix_timestamp_millis();
-        
+
         // Simplified temporal property evaluation
         let holds = self.evaluate_temporal_property_on_trace(property, trace)?;
-        
+
         let end_time = crate::utils::time::current_unix_timestamp_millis();
         Ok(PropertyEvaluationResult {
             property_name: property.name.clone(),
             holds,
-            details: format!("Temporal property '{}' evaluation: {}", property.name, holds),
-            witness: if holds { Some("Property satisfied by trace".to_string()) } else { None },
+            details: format!(
+                "Temporal property '{}' evaluation: {}",
+                property.name, holds
+            ),
+            witness: if holds {
+                Some("Property satisfied by trace".to_string())
+            } else {
+                None
+            },
             evaluation_time_ms: end_time - start_time,
         })
     }
 
     // Simplified evaluation methods (placeholders for actual Quint integration)
-    fn evaluate_invariant_at_state(&self, _invariant: &QuintInvariant, _state: &QuintTraceState) -> Result<bool> {
+    fn evaluate_invariant_at_state(
+        &self,
+        _invariant: &QuintInvariant,
+        _state: &QuintTraceState,
+    ) -> Result<bool> {
         // Placeholder - would integrate with actual Quint evaluator
         Ok(true)
     }
 
-    fn evaluate_temporal_property_on_trace(&self, _property: &QuintTemporalProperty, _trace: &QuintTrace) -> Result<bool> {
+    fn evaluate_temporal_property_on_trace(
+        &self,
+        _property: &QuintTemporalProperty,
+        _trace: &QuintTrace,
+    ) -> Result<bool> {
         // Placeholder - would implement temporal logic evaluation
         Ok(true)
     }
 }
-
 
 impl ConversionStatistics {
     fn new() -> Self {
@@ -763,40 +871,42 @@ impl ItfExpression {
         if value >= i32::MIN as i64 && value <= i32::MAX as i64 {
             ItfExpression::Number(serde_json::Number::from(value))
         } else {
-            ItfExpression::BigInt { value: value.to_string() }
+            ItfExpression::BigInt {
+                value: value.to_string(),
+            }
         }
     }
-    
+
     /// Create an ITF string expression
     pub fn string(value: impl Into<String>) -> Self {
         ItfExpression::String(value.into())
     }
-    
+
     /// Create an ITF boolean expression
     pub fn bool(value: bool) -> Self {
         ItfExpression::Bool(value)
     }
-    
+
     /// Create an ITF list expression
     pub fn list(elements: Vec<ItfExpression>) -> Self {
         ItfExpression::List(elements)
     }
-    
+
     /// Create an ITF set expression
     pub fn set(elements: Vec<ItfExpression>) -> Self {
         ItfExpression::Set { elements }
     }
-    
+
     /// Create an ITF tuple expression
     pub fn tuple(elements: Vec<ItfExpression>) -> Self {
         ItfExpression::Tuple { elements }
     }
-    
+
     /// Create an ITF map expression
     pub fn map(pairs: Vec<(ItfExpression, ItfExpression)>) -> Self {
         ItfExpression::Map { pairs }
     }
-    
+
     /// Create an ITF record expression
     pub fn record(fields: HashMap<String, ItfExpression>) -> Self {
         ItfExpression::Record(fields)
@@ -806,7 +916,11 @@ impl ItfExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ProtocolExecutionState, ParticipantStateSnapshot, NetworkStateSnapshot, MessageDeliveryStats, NetworkFailureConditions, SessionInfo, PropertyViolationType, SimulationStateSnapshot, ViolationDetails, ViolationSeverity};
+    use crate::types::{
+        MessageDeliveryStats, NetworkFailureConditions, NetworkStateSnapshot,
+        ParticipantStateSnapshot, PropertyViolationType, ProtocolExecutionState, SessionInfo,
+        SimulationStateSnapshot, ViolationDetails, ViolationSeverity,
+    };
     use std::collections::HashSet;
 
     #[test]
@@ -819,7 +933,7 @@ mod tests {
     fn test_convert_simple_trace() {
         let mut converter = TraceConverter::new();
         let mut execution_trace = ExecutionTrace::new(10);
-        
+
         let state = SimulationState {
             tick: 1,
             time: 1000,
@@ -847,10 +961,10 @@ mod tests {
         };
 
         execution_trace.add_state(state);
-        
+
         let result = converter.convert_trace(&execution_trace);
         assert!(result.is_ok());
-        
+
         let conversion_result = result.unwrap();
         assert_eq!(conversion_result.quint_trace.states.len(), 1);
         assert_eq!(conversion_result.quint_trace.events.len(), 0); // No transitions with single state
@@ -859,27 +973,25 @@ mod tests {
     #[test]
     fn test_trace_fragment_extraction() {
         let converter = TraceConverter::new();
-        
+
         // Create a simple QuintTrace
         let quint_trace = QuintTrace {
             trace_id: "test_trace".to_string(),
-            states: vec![
-                QuintTraceState {
-                    step: 0,
-                    time: 1000,
+            states: vec![QuintTraceState {
+                step: 0,
+                time: 1000,
+                variables: HashMap::new(),
+                protocol_state: QuintProtocolState {
+                    active_sessions: QuintValue::List(Vec::new()),
+                    current_phase: QuintValue::String("phase1".to_string()),
                     variables: HashMap::new(),
-                    protocol_state: QuintProtocolState {
-                        active_sessions: QuintValue::List(Vec::new()),
-                        current_phase: QuintValue::String("phase1".to_string()),
-                        variables: HashMap::new(),
-                    },
-                    network_state: QuintNetworkState {
-                        partitions: QuintValue::List(Vec::new()),
-                        message_stats: HashMap::new(),
-                        failure_conditions: HashMap::new(),
-                    },
                 },
-            ],
+                network_state: QuintNetworkState {
+                    partitions: QuintValue::List(Vec::new()),
+                    message_stats: HashMap::new(),
+                    failure_conditions: HashMap::new(),
+                },
+            }],
             events: Vec::new(),
             metadata: QuintTraceMetadata {
                 created_at: 0,
@@ -921,7 +1033,7 @@ mod tests {
 
         let fragment = converter.extract_violation_fragment(&quint_trace, &violation, 5);
         assert!(fragment.is_ok());
-        
+
         let fragment = fragment.unwrap();
         assert_eq!(fragment.states.len(), 1);
         assert!(fragment.extraction_reason.contains("test_property"));
@@ -945,7 +1057,7 @@ mod tests {
     #[test]
     fn test_itf_comprehensive_features() {
         let mut converter = ItfTraceConverter::new();
-        
+
         // Test complete ITF functionality
         let test_trace = ItfTrace {
             meta: Some(ItfMetadata {
@@ -956,27 +1068,30 @@ mod tests {
             }),
             params: None,
             vars: vec!["x".to_string(), "y".to_string()],
-            states: vec![
-                ItfState {
-                    meta: None,
-                    variables: {
-                        let mut vars = HashMap::new();
-                        vars.insert("x".to_string(), ItfExpression::BigInt { value: "123456789".to_string() });
-                        vars.insert("y".to_string(), ItfExpression::Bool(true));
-                        vars
-                    },
+            states: vec![ItfState {
+                meta: None,
+                variables: {
+                    let mut vars = HashMap::new();
+                    vars.insert(
+                        "x".to_string(),
+                        ItfExpression::BigInt {
+                            value: "123456789".to_string(),
+                        },
+                    );
+                    vars.insert("y".to_string(), ItfExpression::Bool(true));
+                    vars
                 },
-            ],
+            }],
             loop_index: None,
         };
-        
+
         // Test validation
         assert!(converter.validate_itf_trace(&test_trace).is_ok());
-        
+
         // Test JSON serialization
         let json = converter.serialize_itf_to_json(&test_trace, true).unwrap();
         assert!(json.contains("#bigint"));
-        
+
         // Test parsing back
         let parsed = converter.parse_itf_from_json(&json).unwrap();
         assert_eq!(parsed.vars.len(), 2);

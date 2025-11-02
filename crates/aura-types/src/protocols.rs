@@ -23,6 +23,8 @@ pub enum ProtocolType {
     Locking,
     /// Lock acquisition protocol
     LockAcquisition,
+    /// Ledger compaction protocol for state optimization
+    Compaction,
 }
 
 impl fmt::Display for ProtocolType {
@@ -34,6 +36,7 @@ impl fmt::Display for ProtocolType {
             ProtocolType::Recovery => write!(f, "recovery"),
             ProtocolType::Locking => write!(f, "locking"),
             ProtocolType::LockAcquisition => write!(f, "lock-acquisition"),
+            ProtocolType::Compaction => write!(f, "compaction"),
         }
     }
 }
@@ -48,6 +51,7 @@ impl ProtocolType {
             ProtocolType::Recovery,
             ProtocolType::Locking,
             ProtocolType::LockAcquisition,
+            ProtocolType::Compaction,
         ]
     }
 
@@ -70,6 +74,7 @@ impl ProtocolType {
                 | ProtocolType::Counter
                 | ProtocolType::Resharing
                 | ProtocolType::Recovery
+                | ProtocolType::Compaction
         )
     }
 
@@ -82,6 +87,7 @@ impl ProtocolType {
             ProtocolType::Recovery => ProtocolDuration::Long,
             ProtocolType::Locking => ProtocolDuration::Short,
             ProtocolType::LockAcquisition => ProtocolDuration::Short,
+            ProtocolType::Compaction => ProtocolDuration::Medium,
         }
     }
 }
@@ -101,6 +107,8 @@ pub enum OperationType {
     Locking,
     /// Counter reservation operation
     Counter,
+    /// Ledger compaction operation
+    Compaction,
 }
 
 impl fmt::Display for OperationType {
@@ -111,6 +119,7 @@ impl fmt::Display for OperationType {
             OperationType::Resharing => write!(f, "resharing"),
             OperationType::Recovery => write!(f, "recovery"),
             OperationType::Locking => write!(f, "locking"),
+            OperationType::Compaction => write!(f, "compaction"),
         }
     }
 }
@@ -124,6 +133,7 @@ impl From<ProtocolType> for OperationType {
             ProtocolType::Recovery => OperationType::Recovery,
             ProtocolType::Locking => OperationType::Locking,
             ProtocolType::LockAcquisition => OperationType::Locking, // Maps to locking
+            ProtocolType::Compaction => OperationType::Compaction,
         }
     }
 }

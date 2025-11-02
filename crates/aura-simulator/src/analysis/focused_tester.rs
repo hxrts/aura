@@ -502,6 +502,7 @@ impl FocusedTester {
         base_scenario: &Scenario,
         debug_session: &DebugSession,
     ) -> Result<FocusedTestGeneration> {
+        #[allow(clippy::disallowed_methods)]
         let start_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

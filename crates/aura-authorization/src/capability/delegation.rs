@@ -2,17 +2,17 @@
 
 use super::token::{CapabilityCondition, CapabilityToken};
 use crate::{Action, AuthorizationError, Result, Subject};
+use aura_types::CapabilityId;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// A capability delegation record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapabilityDelegation {
     /// Unique identifier for this delegation
-    pub delegation_id: Uuid,
+    pub delegation_id: CapabilityId,
 
     /// The original capability being delegated
-    pub parent_capability_id: Uuid,
+    pub parent_capability_id: CapabilityId,
 
     /// Who is delegating the capability
     pub delegator: Subject,
@@ -87,7 +87,7 @@ pub fn delegate_capability(
     delegated_capability.issuer_signature = aura_crypto::Ed25519Signature::default();
 
     // Create the delegation record
-    let delegation_id = Uuid::new_v4();
+    let delegation_id = CapabilityId::random();
     let current_time = current_timestamp();
 
     let delegation = CapabilityDelegation {
@@ -249,8 +249,9 @@ fn verify_capability_reduction(
 
 /// Get current timestamp (placeholder implementation)
 fn current_timestamp() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    #[allow(clippy::disallowed_methods)]
+    let now = std::time::SystemTime::now();
+    now.duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
 }

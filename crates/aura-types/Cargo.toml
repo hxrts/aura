@@ -30,6 +30,9 @@ base64 = { workspace = true }
 # Cryptographic hashing
 blake3 = { workspace = true }
 
+# FROST threshold cryptography (for ParticipantId conversion)
+frost-ed25519 = { workspace = true }
+
 # Time utilities
 chrono = { version = "0.4", features = ["serde"] }
 time = { workspace = true }
@@ -39,4 +42,6 @@ time = { workspace = true }
 postcard-support = ["postcard"]
 
 [dev-dependencies]
-# None needed - this is a pure types crate
+# For testing DKD functionality
+sha2 = { workspace = true }
+tokio = { workspace = true }

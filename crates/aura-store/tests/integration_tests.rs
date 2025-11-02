@@ -5,9 +5,9 @@
 //!
 //! Reference: work/ssb_storage.md Phase 5.2
 
+use aura_authorization::{Action, CapabilityToken, Resource, Subject};
 use aura_crypto::Effects;
 use aura_journal::serialization::Serializable;
-use aura_authorization::{Action, CapabilityToken, Resource, Subject};
 use aura_store::{
     manifest::{Permission, ResourceScope, SignatureShare, StorageOperation, ThresholdSignature},
     social_storage::{
@@ -157,7 +157,7 @@ fn test_capability_expiration_deterministic() {
     // TODO: The current CapabilityToken API doesn't have an is_expired method
     // This test needs to be updated to work with the current API
     // assert!(token.is_expired(future_time));
-    
+
     // For now, just check that expiration was set
     assert!(token.expires_at.is_some());
 }

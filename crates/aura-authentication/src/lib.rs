@@ -18,6 +18,10 @@ pub mod guardian;
 pub mod session;
 pub mod threshold;
 
+// Integration tests
+#[cfg(test)]
+mod integration_tests;
+
 // Re-export commonly used types
 pub use device::verify_device_signature;
 pub use guardian::verify_guardian_signature;
@@ -71,6 +75,9 @@ pub struct AuthenticationContext {
 
     /// Threshold configurations indexed by AccountId
     threshold_configs: std::collections::HashMap<aura_types::AccountId, ThresholdConfig>,
+
+    /// Group public keys for threshold verification indexed by AccountId
+    group_keys: std::collections::HashMap<aura_types::AccountId, aura_crypto::Ed25519VerifyingKey>,
 }
 
 /// Threshold signature configuration
@@ -90,6 +97,7 @@ impl AuthenticationContext {
             device_keys: std::collections::HashMap::new(),
             guardian_keys: std::collections::HashMap::new(),
             threshold_configs: std::collections::HashMap::new(),
+            group_keys: std::collections::HashMap::new(),
         }
     }
 
@@ -132,6 +140,50 @@ impl AuthenticationContext {
         config: ThresholdConfig,
     ) {
         self.threshold_configs.insert(account_id, config);
+    }
+
+    /// Get the guardian public key
+    pub fn get_guardian_public_key(
+        &self,
+        guardian_id: &aura_types::GuardianId,
+    ) -> Result<&aura_crypto::Ed25519VerifyingKey> {
+        self.guardian_keys.get(guardian_id).ok_or_else(|| {
+            AuthenticationError::InvalidGuardianSignature(format!(
+                "Unknown guardian: {}",
+                guardian_id
+            ))
+        })
+    }
+
+    /// Add a guardian public key
+    pub fn add_guardian_key(
+        &mut self,
+        guardian_id: aura_types::GuardianId,
+        public_key: aura_crypto::Ed25519VerifyingKey,
+    ) {
+        self.guardian_keys.insert(guardian_id, public_key);
+    }
+
+    /// Get the group public key for threshold verification
+    pub fn get_group_public_key(
+        &self,
+        account_id: &aura_types::AccountId,
+    ) -> Result<&aura_crypto::Ed25519VerifyingKey> {
+        self.group_keys.get(account_id).ok_or_else(|| {
+            AuthenticationError::InvalidThresholdSignature(format!(
+                "No group key for account: {}",
+                account_id
+            ))
+        })
+    }
+
+    /// Add a group public key for threshold verification
+    pub fn add_group_key(
+        &mut self,
+        account_id: aura_types::AccountId,
+        group_key: aura_crypto::Ed25519VerifyingKey,
+    ) {
+        self.group_keys.insert(account_id, group_key);
     }
 
     /// Verify device authentication

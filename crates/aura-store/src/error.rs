@@ -15,7 +15,7 @@ impl StoreErrorBuilder {
         AuraError::Infrastructure(
             aura_types::errors::InfrastructureError::StorageQuotaExceeded {
                 message: format!("Storage quota exceeded: used {}, limit {}", used, limit),
-                context: ErrorContext::new().with_code(ErrorCode::InfraStorageQuotaExceeded),
+                context: "".to_string(),
             },
         )
     }

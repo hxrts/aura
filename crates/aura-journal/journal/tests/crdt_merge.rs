@@ -94,6 +94,7 @@ mod tests {
                 dkd_commitment_proofs: BTreeMap::new(),
                 next_nonce: 0,
                 used_nonces: BTreeSet::new(),
+                key_share_epoch: 0,
             },
         );
 
@@ -115,6 +116,7 @@ mod tests {
                 dkd_commitment_proofs: BTreeMap::new(),
                 next_nonce: 0,
                 used_nonces: BTreeSet::new(),
+                key_share_epoch: 0,
             },
         );
 
@@ -170,6 +172,7 @@ mod tests {
                 dkd_commitment_proofs: BTreeMap::new(),
                 next_nonce: 0,
                 used_nonces: BTreeSet::new(),
+                key_share_epoch: 0,
             },
         );
 
@@ -341,6 +344,7 @@ mod tests {
                 dkd_commitment_proofs: BTreeMap::new(),
                 next_nonce: 0,
                 used_nonces: BTreeSet::new(),
+                key_share_epoch: 0,
             },
         );
         state.validate_nonce(100).unwrap();

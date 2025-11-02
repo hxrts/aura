@@ -4,9 +4,9 @@
 //! enabling property-specific attack implementations that target formal verification
 //! properties with sophisticated adversarial behaviors.
 
-use crate::Result;
-use crate::quint::types::{ViolationPattern, ChaosScenario, ChaosType};
+use crate::quint::types::{ChaosScenario, ChaosType, ViolationPattern};
 use crate::scenario::types::ByzantineStrategy;
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -405,17 +405,21 @@ impl ByzantineMapper {
             property_attacks: HashMap::new(),
             adaptive_strategies: Vec::new(),
         };
-        
+
         mapper.initialize_default_mappings();
         mapper
     }
 
     /// Map Quint adversary models to Byzantine device strategies
-    pub fn map_adversary_models(&self, chaos_scenario: &ChaosScenario) -> Result<ByzantineMappingResult> {
+    pub fn map_adversary_models(
+        &self,
+        chaos_scenario: &ChaosScenario,
+    ) -> Result<ByzantineMappingResult> {
         let strategies = self.select_strategies_for_scenario(chaos_scenario)?;
         let coordination_plan = self.create_coordination_plan(chaos_scenario, &strategies)?;
         let effectiveness_assessment = self.assess_effectiveness(chaos_scenario, &strategies)?;
-        let adaptation_recommendations = self.generate_adaptation_recommendations(chaos_scenario, &strategies)?;
+        let adaptation_recommendations =
+            self.generate_adaptation_recommendations(chaos_scenario, &strategies)?;
 
         Ok(ByzantineMappingResult {
             strategies,
@@ -431,7 +435,9 @@ impl ByzantineMapper {
         property_name: String,
         strategy: EnhancedByzantineStrategy,
     ) -> Result<()> {
-        let attack = self.property_attacks.entry(property_name.clone())
+        let attack = self
+            .property_attacks
+            .entry(property_name.clone())
             .or_insert_with(|| PropertySpecificAttack {
                 property_name: property_name.clone(),
                 specialized_strategies: Vec::new(),
@@ -462,7 +468,9 @@ impl ByzantineMapper {
         );
 
         // Strategy configuration
-        let strategy_names: Vec<String> = mapping_result.strategies.iter()
+        let strategy_names: Vec<String> = mapping_result
+            .strategies
+            .iter()
             .map(|s| s.enhanced_name.clone())
             .collect();
         parameters.insert("strategies".to_string(), strategy_names.join(","));
@@ -470,8 +478,11 @@ impl ByzantineMapper {
         // Coordination configuration
         if mapping_result.coordination_plan.role_assignments.len() > 1 {
             parameters.insert("coordination".to_string(), "true".to_string());
-            
-            let leader_count = mapping_result.coordination_plan.role_assignments.values()
+
+            let leader_count = mapping_result
+                .coordination_plan
+                .role_assignments
+                .values()
                 .filter(|role| **role == ByzantineRole::Leader)
                 .count();
             parameters.insert("leader_count".to_string(), leader_count.to_string());
@@ -481,9 +492,13 @@ impl ByzantineMapper {
         if let Some(strategy) = mapping_result.strategies.first() {
             parameters.insert(
                 "initial_delay_ms".to_string(),
-                strategy.attack_parameters.timing.initial_delay_ms.to_string(),
+                strategy
+                    .attack_parameters
+                    .timing
+                    .initial_delay_ms
+                    .to_string(),
             );
-            
+
             if let Some(duration) = strategy.attack_parameters.timing.duration_ms {
                 parameters.insert("duration_ms".to_string(), duration.to_string());
             }
@@ -492,7 +507,10 @@ impl ByzantineMapper {
         // Effectiveness parameters
         parameters.insert(
             "expected_effectiveness".to_string(),
-            mapping_result.effectiveness_assessment.overall_score.to_string(),
+            mapping_result
+                .effectiveness_assessment
+                .overall_score
+                .to_string(),
         );
 
         Ok(parameters)
@@ -541,33 +559,50 @@ impl ByzantineMapper {
         );
 
         // Initialize adaptive strategies
-        self.adaptive_strategies.push(self.create_learning_adversary());
-        self.adaptive_strategies.push(self.create_reactive_adversary());
+        self.adaptive_strategies
+            .push(self.create_learning_adversary());
+        self.adaptive_strategies
+            .push(self.create_reactive_adversary());
     }
 
     /// Select appropriate strategies for a given chaos scenario
-    fn select_strategies_for_scenario(&self, chaos_scenario: &ChaosScenario) -> Result<Vec<EnhancedByzantineStrategy>> {
+    fn select_strategies_for_scenario(
+        &self,
+        chaos_scenario: &ChaosScenario,
+    ) -> Result<Vec<EnhancedByzantineStrategy>> {
         let mut selected_strategies = Vec::new();
 
         // Select strategies based on chaos type
         match chaos_scenario.chaos_type {
             ChaosType::KeyInconsistency => {
-                if let Some(strategies) = self.pattern_strategies.get(&ViolationPattern::KeyConsistency) {
+                if let Some(strategies) = self
+                    .pattern_strategies
+                    .get(&ViolationPattern::KeyConsistency)
+                {
                     selected_strategies.extend(strategies.clone());
                 }
             }
             ChaosType::ThresholdAttack => {
-                if let Some(strategies) = self.pattern_strategies.get(&ViolationPattern::ThresholdViolation) {
+                if let Some(strategies) = self
+                    .pattern_strategies
+                    .get(&ViolationPattern::ThresholdViolation)
+                {
                     selected_strategies.extend(strategies.clone());
                 }
             }
             ChaosType::SessionDisruption => {
-                if let Some(strategies) = self.pattern_strategies.get(&ViolationPattern::SessionConsistency) {
+                if let Some(strategies) = self
+                    .pattern_strategies
+                    .get(&ViolationPattern::SessionConsistency)
+                {
                     selected_strategies.extend(strategies.clone());
                 }
             }
             ChaosType::ByzantineCoordination => {
-                if let Some(strategies) = self.pattern_strategies.get(&ViolationPattern::ByzantineResistance) {
+                if let Some(strategies) = self
+                    .pattern_strategies
+                    .get(&ViolationPattern::ByzantineResistance)
+                {
                     selected_strategies.extend(strategies.clone());
                 }
             }
@@ -595,7 +630,7 @@ impl ByzantineMapper {
         strategies: &[EnhancedByzantineStrategy],
     ) -> Result<CoordinationPlan> {
         let mut role_assignments = HashMap::new();
-        
+
         // Assign roles based on strategy count and capabilities
         for (i, strategy) in strategies.iter().enumerate() {
             let participant_id = format!("participant_{}", i);
@@ -611,7 +646,11 @@ impl ByzantineMapper {
 
         let communication_protocol = CommunicationProtocol {
             channels: vec!["direct_message".to_string(), "broadcast".to_string()],
-            message_types: vec!["coordinate".to_string(), "sync".to_string(), "status".to_string()],
+            message_types: vec![
+                "coordinate".to_string(),
+                "sync".to_string(),
+                "status".to_string(),
+            ],
             covert_communication: chaos_scenario.chaos_type == ChaosType::ByzantineCoordination,
         };
 
@@ -649,22 +688,33 @@ impl ByzantineMapper {
 
         // Calculate overall effectiveness based on strategy alignment
         for strategy in strategies {
-            overall_score = overall_score.saturating_add(
-                self.calculate_strategy_effectiveness(strategy, chaos_scenario)
-            );
+            overall_score = overall_score
+                .saturating_add(self.calculate_strategy_effectiveness(strategy, chaos_scenario));
         }
         overall_score = (overall_score / strategies.len().max(1) as u8).min(100);
 
         // Assess property-specific effectiveness
         property_scores.insert("safety".to_string(), self.assess_safety_impact(strategies));
-        property_scores.insert("liveness".to_string(), self.assess_liveness_impact(strategies));
-        property_scores.insert("consistency".to_string(), self.assess_consistency_impact(strategies));
+        property_scores.insert(
+            "liveness".to_string(),
+            self.assess_liveness_impact(strategies),
+        );
+        property_scores.insert(
+            "consistency".to_string(),
+            self.assess_consistency_impact(strategies),
+        );
 
         // Identify limiting factors
         if chaos_scenario.byzantine_participants < 2 {
-            limiting_factors.push("Insufficient Byzantine participants for coordination".to_string());
+            limiting_factors
+                .push("Insufficient Byzantine participants for coordination".to_string());
         }
-        if chaos_scenario.network_conditions.message_drop_rate.unwrap_or(0.0) > 0.5 {
+        if chaos_scenario
+            .network_conditions
+            .message_drop_rate
+            .unwrap_or(0.0)
+            > 0.5
+        {
             limiting_factors.push("High network loss may interfere with attacks".to_string());
         }
 
@@ -685,24 +735,27 @@ impl ByzantineMapper {
         let mut recommendations = Vec::new();
 
         // Analyze strategy diversity
-        let strategy_types: std::collections::HashSet<_> = strategies.iter()
-            .map(|s| &s.enhanced_name)
-            .collect();
+        let strategy_types: std::collections::HashSet<_> =
+            strategies.iter().map(|s| &s.enhanced_name).collect();
 
         if strategy_types.len() < strategies.len() {
-            recommendations.push("Consider diversifying attack strategies for better coverage".to_string());
+            recommendations
+                .push("Consider diversifying attack strategies for better coverage".to_string());
         }
 
         // Check coordination capabilities
-        let coordinated_count = strategies.iter()
+        let coordinated_count = strategies
+            .iter()
             .filter(|s| s.attack_parameters.coordination.coordinate)
             .count();
 
         if coordinated_count > 1 {
-            recommendations.push("Ensure Byzantine participants can communicate for coordination".to_string());
+            recommendations
+                .push("Ensure Byzantine participants can communicate for coordination".to_string());
         }
 
-        recommendations.push("Monitor attack effectiveness and adapt strategies if needed".to_string());
+        recommendations
+            .push("Monitor attack effectiveness and adapt strategies if needed".to_string());
 
         Ok(recommendations)
     }
@@ -717,7 +770,10 @@ impl ByzantineMapper {
                 timing: AttackTiming {
                     initial_delay_ms: 100,
                     duration_ms: Some(5000),
-                    phase_probabilities: [("key_generation".to_string(), 1.0)].iter().cloned().collect(),
+                    phase_probabilities: [("key_generation".to_string(), 1.0)]
+                        .iter()
+                        .cloned()
+                        .collect(),
                     attack_pattern: AttackPattern::Continuous,
                 },
                 target_selection: TargetSelection {
@@ -749,7 +805,10 @@ impl ByzantineMapper {
                     packet_loss_rate: Some(0.1),
                     benefits_from_partitions: false,
                 },
-                optimal_protocol_states: vec!["key_generation".to_string(), "commitment".to_string()],
+                optimal_protocol_states: vec![
+                    "key_generation".to_string(),
+                    "commitment".to_string(),
+                ],
                 participant_configurations: ParticipantConfigurations {
                     optimal_byzantine_count: 1,
                     minimum_threshold: 1,
@@ -791,14 +850,18 @@ impl ByzantineMapper {
         strategy.enhanced_name = "coalition_attack".to_string();
         strategy.attack_parameters.coordination.coordinate = true;
         strategy.attack_parameters.coordination.coordination_type = CoordinationType::Advanced;
-        strategy.effectiveness_conditions.participant_configurations.optimal_byzantine_count = 3;
+        strategy
+            .effectiveness_conditions
+            .participant_configurations
+            .optimal_byzantine_count = 3;
         strategy
     }
 
     fn create_session_hijacking_strategy(&self) -> EnhancedByzantineStrategy {
         let mut strategy = self.create_key_corruption_strategy();
         strategy.enhanced_name = "session_hijacking_attack".to_string();
-        strategy.attack_parameters.target_selection.target_phases = vec!["session_establishment".to_string()];
+        strategy.attack_parameters.target_selection.target_phases =
+            vec!["session_establishment".to_string()];
         strategy
     }
 
@@ -836,13 +899,11 @@ impl ByzantineMapper {
     fn create_learning_adversary(&self) -> AdaptiveByzantineStrategy {
         AdaptiveByzantineStrategy {
             name: "learning_adversary".to_string(),
-            adaptations: vec![
-                StrategyAdaptation {
-                    trigger: AdaptationTrigger::LowSuccessRate(0.3),
-                    new_strategy: "escalated_attack".to_string(),
-                    adaptation_duration_ms: Some(10000),
-                },
-            ],
+            adaptations: vec![StrategyAdaptation {
+                trigger: AdaptationTrigger::LowSuccessRate(0.3),
+                new_strategy: "escalated_attack".to_string(),
+                adaptation_duration_ms: Some(10000),
+            }],
             learning: LearningCapabilities {
                 learns_from_failures: true,
                 learns_from_successes: true,
@@ -850,8 +911,14 @@ impl ByzantineMapper {
                 learning_rate: 0.1,
             },
             state_tracking: StateTracking {
-                tracked_states: vec!["protocol_phase".to_string(), "participant_status".to_string()],
-                monitored_behaviors: vec!["response_times".to_string(), "message_patterns".to_string()],
+                tracked_states: vec![
+                    "protocol_phase".to_string(),
+                    "participant_status".to_string(),
+                ],
+                monitored_behaviors: vec![
+                    "response_times".to_string(),
+                    "message_patterns".to_string(),
+                ],
                 observed_metrics: vec!["success_rate".to_string(), "detection_rate".to_string()],
             },
         }
@@ -860,13 +927,11 @@ impl ByzantineMapper {
     fn create_reactive_adversary(&self) -> AdaptiveByzantineStrategy {
         AdaptiveByzantineStrategy {
             name: "reactive_adversary".to_string(),
-            adaptations: vec![
-                StrategyAdaptation {
-                    trigger: AdaptationTrigger::CountermeasureDetected,
-                    new_strategy: "stealth_mode".to_string(),
-                    adaptation_duration_ms: Some(5000),
-                },
-            ],
+            adaptations: vec![StrategyAdaptation {
+                trigger: AdaptationTrigger::CountermeasureDetected,
+                new_strategy: "stealth_mode".to_string(),
+                adaptation_duration_ms: Some(5000),
+            }],
             learning: LearningCapabilities {
                 learns_from_failures: true,
                 learns_from_successes: false,
@@ -882,19 +947,34 @@ impl ByzantineMapper {
     }
 
     // Helper methods for effectiveness assessment
-    fn calculate_strategy_effectiveness(&self, strategy: &EnhancedByzantineStrategy, scenario: &ChaosScenario) -> u8 {
+    fn calculate_strategy_effectiveness(
+        &self,
+        strategy: &EnhancedByzantineStrategy,
+        scenario: &ChaosScenario,
+    ) -> u8 {
         let mut score = 50u8; // Base score
 
         // Adjust based on chaos type alignment
         match scenario.chaos_type {
             ChaosType::KeyInconsistency if strategy.enhanced_name.contains("key") => score += 30,
-            ChaosType::ThresholdAttack if strategy.enhanced_name.contains("threshold") => score += 30,
-            ChaosType::ByzantineCoordination if strategy.attack_parameters.coordination.coordinate => score += 25,
+            ChaosType::ThresholdAttack if strategy.enhanced_name.contains("threshold") => {
+                score += 30
+            }
+            ChaosType::ByzantineCoordination
+                if strategy.attack_parameters.coordination.coordinate =>
+            {
+                score += 25
+            }
             _ => score += 10,
         }
 
         // Adjust based on participant count
-        if scenario.byzantine_participants >= strategy.effectiveness_conditions.participant_configurations.optimal_byzantine_count {
+        if scenario.byzantine_participants
+            >= strategy
+                .effectiveness_conditions
+                .participant_configurations
+                .optimal_byzantine_count
+        {
             score += 15;
         }
 
@@ -902,7 +982,8 @@ impl ByzantineMapper {
     }
 
     fn assess_safety_impact(&self, strategies: &[EnhancedByzantineStrategy]) -> u8 {
-        strategies.iter()
+        strategies
+            .iter()
             .map(|s| match s.property_impact.safety_impact {
                 ImpactLevel::Critical => 100,
                 ImpactLevel::High => 80,
@@ -915,7 +996,8 @@ impl ByzantineMapper {
     }
 
     fn assess_liveness_impact(&self, strategies: &[EnhancedByzantineStrategy]) -> u8 {
-        strategies.iter()
+        strategies
+            .iter()
             .map(|s| match s.property_impact.liveness_impact {
                 ImpactLevel::Critical => 100,
                 ImpactLevel::High => 80,
@@ -928,7 +1010,8 @@ impl ByzantineMapper {
     }
 
     fn assess_consistency_impact(&self, strategies: &[EnhancedByzantineStrategy]) -> u8 {
-        strategies.iter()
+        strategies
+            .iter()
             .map(|s| match s.property_impact.consistency_impact {
                 ImpactLevel::Critical => 100,
                 ImpactLevel::High => 80,
@@ -976,14 +1059,16 @@ mod tests {
                 partitions: None,
             },
             protocol_disruptions: Vec::new(),
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { property: "test_property".to_string() },
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation {
+                property: "test_property".to_string(),
+            },
             parameters: HashMap::new(),
         };
 
         let strategies = mapper.select_strategies_for_scenario(&scenario).unwrap();
         assert!(!strategies.is_empty());
         assert!(strategies.len() <= scenario.byzantine_participants);
-        
+
         // Should select key-related strategies
         assert!(strategies.iter().any(|s| s.enhanced_name.contains("key")));
     }
@@ -1005,15 +1090,22 @@ mod tests {
                 partitions: None,
             },
             protocol_disruptions: Vec::new(),
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { property: "test_property".to_string() },
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation {
+                property: "test_property".to_string(),
+            },
             parameters: HashMap::new(),
         };
 
         let strategies = mapper.select_strategies_for_scenario(&scenario).unwrap();
-        let plan = mapper.create_coordination_plan(&scenario, &strategies).unwrap();
+        let plan = mapper
+            .create_coordination_plan(&scenario, &strategies)
+            .unwrap();
 
         assert_eq!(plan.role_assignments.len(), strategies.len());
-        assert!(plan.role_assignments.values().any(|role| *role == ByzantineRole::Leader));
+        assert!(plan
+            .role_assignments
+            .values()
+            .any(|role| *role == ByzantineRole::Leader));
         assert!(!plan.synchronization_schedule.is_empty());
     }
 
@@ -1034,7 +1126,9 @@ mod tests {
                 partitions: None,
             },
             protocol_disruptions: Vec::new(),
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { property: "test_property".to_string() },
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation {
+                property: "test_property".to_string(),
+            },
             parameters: HashMap::new(),
         };
 
@@ -1064,12 +1158,16 @@ mod tests {
                 partitions: None,
             },
             protocol_disruptions: Vec::new(),
-            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation { property: "test_property".to_string() },
+            expected_outcome: crate::scenario::types::ExpectedOutcome::PropertyViolation {
+                property: "test_property".to_string(),
+            },
             parameters: HashMap::new(),
         };
 
         let mapping_result = mapper.map_adversary_models(&scenario).unwrap();
-        let parameters = mapper.generate_scenario_parameters(&scenario, &mapping_result).unwrap();
+        let parameters = mapper
+            .generate_scenario_parameters(&scenario, &mapping_result)
+            .unwrap();
 
         assert!(parameters.contains_key("byzantine_count"));
         assert!(parameters.contains_key("strategies"));

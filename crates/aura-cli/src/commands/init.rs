@@ -40,14 +40,14 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
     let init_result = bootstrap_manager
         .initialize_account(participants, threshold, &effects)
         .map_err(|e| {
-            aura_types::AuraError::bootstrap_failed(format!("Account initialization failed: {}", e))
+            aura_types::AuraError::bootstrap_required(format!("Account initialization failed: {}", e))
         })?;
 
     info!("Account initialization complete, persisting to disk");
 
     // Validate we have enough device IDs for all participants
     if init_result.device_ids.len() != participants as usize {
-        return Err(aura_types::AuraError::bootstrap_failed(format!(
+        return Err(aura_types::AuraError::bootstrap_required(format!(
             "Device ID mismatch: expected {} device IDs but got {}. This indicates a bootstrap failure.",
             participants, init_result.device_ids.len()
         )));
@@ -57,7 +57,7 @@ pub async fn run(participants: u16, threshold: u16, output_dir: &str) -> Result<
     use std::collections::HashSet;
     let unique_device_ids: HashSet<_> = init_result.device_ids.iter().collect();
     if unique_device_ids.len() != init_result.device_ids.len() {
-        return Err(aura_types::AuraError::bootstrap_failed(
+        return Err(aura_types::AuraError::bootstrap_required(
             "Device ID collision detected: duplicate device IDs generated during bootstrap. This is a critical error.".to_string()
         ));
     }

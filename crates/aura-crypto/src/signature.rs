@@ -128,6 +128,79 @@ pub fn ed25519_signature_from_bytes(bytes: &[u8; 64]) -> Result<Ed25519Signature
     Ok(Ed25519Signature(Signature::from_bytes(bytes)))
 }
 
+// ========== Threshold Signatures ==========
+
+/// Threshold signature produced by M-of-N participants
+///
+/// This represents a signature created using FROST threshold cryptography,
+/// where multiple participants collaborate to create a single signature
+/// without any individual participant having access to the full private key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThresholdSignature {
+    /// The aggregated Ed25519 signature
+    #[serde(with = "crate::serde::signature_serde")]
+    pub signature: Ed25519Signature,
+    /// Participant IDs who contributed to this signature
+    pub signers: Vec<u16>, // Using u16 to avoid circular dependency with ParticipantId
+}
+
+impl ThresholdSignature {
+    /// Create a placeholder threshold signature for testing purposes
+    ///
+    /// **WARNING: This creates a fake signature with no cryptographic security.**
+    /// Use only for testing. For production, use FROST aggregation.
+    pub fn placeholder() -> Self {
+        Self {
+            signature: Ed25519Signature::default(),
+            signers: vec![1, 2],
+        }
+    }
+
+    /// Create a real threshold signature from FROST aggregation
+    ///
+    /// This method should be used in production to create actual cryptographically
+    /// secure threshold signatures from FROST protocol outputs.
+    ///
+    /// # Arguments
+    ///
+    /// * `signature` - The aggregated ed25519 signature from FROST
+    /// * `signers` - The participant IDs who contributed to the signature
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // After running FROST threshold signing protocol:
+    /// let aggregated_signature = frost_session.aggregate_signature()?;
+    /// let signer_ids = frost_session.get_signers();
+    /// let threshold_sig = ThresholdSignature::from_frost(aggregated_signature, signer_ids);
+    /// ```
+    pub fn from_frost(signature: Ed25519Signature, signers: Vec<u16>) -> Self {
+        Self { signature, signers }
+    }
+
+    /// Verify the threshold signature against provided data and public key
+    ///
+    /// This uses standard ed25519 verification on the aggregated signature.
+    pub fn verify(&self, data: &[u8], public_key: &Ed25519VerifyingKey) -> bool {
+        ed25519_verify(public_key, data, &self.signature).is_ok()
+    }
+
+    /// Get the number of signers
+    pub fn signer_count(&self) -> usize {
+        self.signers.len()
+    }
+
+    /// Get the signature bytes
+    pub fn signature_bytes(&self) -> [u8; 64] {
+        ed25519_signature_to_bytes(&self.signature)
+    }
+
+    /// Get the list of signer IDs
+    pub fn signer_ids(&self) -> &[u16] {
+        &self.signers
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

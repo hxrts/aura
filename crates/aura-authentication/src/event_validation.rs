@@ -92,16 +92,15 @@ impl EventValidator {
         threshold_sig: &ThresholdSig,
         group_public_key: &aura_crypto::Ed25519VerifyingKey,
     ) -> Result<()> {
-        use aura_crypto::frost::verify_signature;
-
-        // Verify signature using standard Ed25519 verification
         // FROST signatures are compatible with standard Ed25519 verification
-        verify_signature(message, &threshold_sig.signature, group_public_key).map_err(|e| {
-            AuthenticationError::InvalidThresholdSignature(format!(
-                "FROST threshold signature verification failed: {:?}",
-                e
-            ))
-        })?;
+        aura_crypto::ed25519_verify(group_public_key, message, &threshold_sig.signature).map_err(
+            |e| {
+                AuthenticationError::InvalidThresholdSignature(format!(
+                    "FROST threshold signature verification failed: {}",
+                    e
+                ))
+            },
+        )?;
 
         Ok(())
     }
@@ -116,14 +115,11 @@ impl EventValidator {
         match authorization {
             EventAuthorization::ThresholdSignature(threshold_sig) => {
                 let threshold_config = context.get_threshold_config(account_id)?;
-                // For threshold validation, we'd need the group public key
-                // This is simplified - in practice would need access to account state
+                let group_key = context.get_group_public_key(account_id)?;
                 Self::validate_threshold_signature(
                     threshold_sig,
                     event_hash,
-                    &aura_crypto::Ed25519VerifyingKey::from_bytes(&[0u8; 32]).map_err(|e| {
-                        AuthenticationError::CryptoError(format!("Invalid key: {}", e))
-                    })?,
+                    group_key,
                     threshold_config.threshold,
                 )?;
             }
@@ -138,15 +134,12 @@ impl EventValidator {
                 guardian_id,
                 signature,
             } => {
-                // Would need guardian public key from context
-                // This is simplified for the move
+                let guardian_key = context.get_guardian_public_key(guardian_id)?;
                 Self::validate_guardian_signature(
                     *guardian_id,
                     signature,
                     event_hash,
-                    &aura_crypto::Ed25519VerifyingKey::from_bytes(&[0u8; 32]).map_err(|e| {
-                        AuthenticationError::CryptoError(format!("Invalid key: {}", e))
-                    })?,
+                    guardian_key,
                 )?;
             }
             EventAuthorization::LifecycleInternal => {

@@ -1,493 +1,300 @@
-// Core types for threshold signing operations
+//! Core types for the protocol crate
+//!
+//! This module contains common types used throughout the protocol system:
+//! - Protocol results and error types
+//! - Protocol configuration
+//! - Event filters and patterns
+//! - Instructions and results for choreographic protocols
+//! - Ledger state snapshots
 
-use crate::Result;
-use aura_crypto::{signature_serde, Ed25519Signature, Ed25519VerifyingKey};
-use aura_types::AuraError;
-use frost_ed25519 as frost;
+use aura_journal::Event;
+use aura_types::{AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use uuid::Uuid;
 
-// Import types from protocol-types
-pub use aura_protocol_types::{ParticipantId, SessionId, ThresholdConfig};
+// ========== Protocol Results & Errors ==========
 
-/// Safe bidirectional mapping between ParticipantId and frost::Identifier
-///
-/// This struct prevents the brittle byte manipulation that was previously used
-/// for reverse lookups from frost::Identifier back to ParticipantId.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IdentifierMapping {
-    participant_to_frost: BTreeMap<ParticipantId, frost::Identifier>,
-    frost_to_participant: BTreeMap<frost::Identifier, ParticipantId>,
+/// Result of a successfully completed protocol
+#[derive(Debug, Clone)]
+pub enum ProtocolResult {
+    /// DKD protocol completed
+    DkdComplete {
+        session_id: Uuid,
+        derived_key: Vec<u8>,
+    },
+
+    /// Resharing protocol completed
+    ResharingComplete {
+        session_id: Uuid,
+        new_share: Vec<u8>,
+    },
+
+    /// Lock acquired
+    LockAcquired { session_id: Uuid },
+
+    /// Lock released
+    LockReleased { session_id: Uuid },
+
+    /// Recovery completed
+    RecoveryComplete {
+        recovery_id: Uuid,
+        recovered_share: Vec<u8>,
+    },
 }
 
-impl IdentifierMapping {
-    /// Create a new mapping from a list of participant IDs
-    pub fn new(participants: &[ParticipantId]) -> crate::Result<Self> {
-        let mut participant_to_frost = BTreeMap::new();
-        let mut frost_to_participant = BTreeMap::new();
+/// Error from a failed protocol
+#[derive(Debug, Clone)]
+pub struct ProtocolError {
+    pub session_id: Uuid,
+    pub error_type: ProtocolErrorType,
+    pub message: String,
+}
 
-        for &participant_id in participants {
-            let frost_id = frost::Identifier::try_from(participant_id.as_u16()).map_err(|_| {
-                AuraError::coordination_failed(format!(
-                    "ParticipantId {} cannot be converted to frost::Identifier",
-                    participant_id.as_u16()
-                ))
-            })?;
-
-            participant_to_frost.insert(participant_id, frost_id);
-            frost_to_participant.insert(frost_id, participant_id);
+impl ProtocolError {
+    /// Create a new protocol error with empty session ID
+    pub fn new(message: String) -> Self {
+        ProtocolError {
+            session_id: Uuid::nil(),
+            error_type: ProtocolErrorType::InvalidState,
+            message,
         }
-
-        Ok(IdentifierMapping {
-            participant_to_frost,
-            frost_to_participant,
-        })
     }
 
-    /// Convert ParticipantId to frost::Identifier safely
-    pub fn to_frost(&self, participant_id: ParticipantId) -> Option<frost::Identifier> {
-        self.participant_to_frost.get(&participant_id).copied()
-    }
-
-    /// Convert frost::Identifier back to ParticipantId safely
-    pub fn from_frost(&self, frost_id: frost::Identifier) -> Option<ParticipantId> {
-        self.frost_to_participant.get(&frost_id).copied()
-    }
-
-    /// Get all participant IDs in the mapping
-    pub fn participant_ids(&self) -> Vec<ParticipantId> {
-        self.participant_to_frost.keys().copied().collect()
-    }
-
-    /// Get all frost identifiers in the mapping
-    pub fn frost_identifiers(&self) -> Vec<frost::Identifier> {
-        self.participant_to_frost.values().copied().collect()
-    }
-
-    /// Check if a participant ID is in the mapping
-    pub fn contains_participant(&self, participant_id: ParticipantId) -> bool {
-        self.participant_to_frost.contains_key(&participant_id)
-    }
-
-    /// Check if a frost identifier is in the mapping
-    pub fn contains_frost(&self, frost_id: frost::Identifier) -> bool {
-        self.frost_to_participant.contains_key(&frost_id)
+    /// Create a new protocol error with session ID
+    pub fn with_session(session_id: Uuid, error_type: ProtocolErrorType, message: String) -> Self {
+        ProtocolError {
+            session_id,
+            error_type,
+            message,
+        }
     }
 }
 
-// Trait implementation moved to aura-protocol-types crate
-
-// Re-export DeviceId from crypto for consistency
-pub use aura_crypto::DeviceId;
-
-/// A threshold share held by a participant
-///
-/// SECURITY: This type contains sensitive cryptographic material.
-/// The FROST KeyPackage is zeroized on drop.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeyShare {
-    pub participant_id: ParticipantId,
-    pub share: frost::keys::KeyPackage,
-    pub threshold: u16,
-    pub total_participants: u16,
-}
-
-impl Drop for KeyShare {
-    fn drop(&mut self) {
-        // Note: FROST's KeyPackage doesn't implement Zeroize directly,
-        // but it contains a SigningShare which does implement Zeroize.
-        // The signing_share() method returns a reference, so we rely on
-        // FROST's own Drop implementation to zeroize the internal data.
-        // This is a defense-in-depth measure.
-    }
-}
-
-/// Public key package distributed to all participants after DKG
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PublicKeyPackage {
-    #[serde(with = "verifying_key_serde")]
-    pub group_public: Ed25519VerifyingKey,
-    pub verifying_shares: BTreeMap<ParticipantId, frost::keys::VerifyingShare>,
-    pub threshold: u16,
-    pub total_participants: u16,
-}
-
-mod verifying_key_serde {
-    use aura_crypto::Ed25519VerifyingKey;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(key: &Ed25519VerifyingKey, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(key.as_bytes())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Ed25519VerifyingKey, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
-        Ed25519VerifyingKey::from_bytes(
-            bytes
-                .as_slice()
-                .try_into()
-                .map_err(serde::de::Error::custom)?,
+impl std::fmt::Display for ProtocolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Protocol error in session {}: {:?} - {}",
+            self.session_id, self.error_type, self.message
         )
-        .map_err(serde::de::Error::custom)
     }
 }
 
-/// Sealed share encrypted for device storage
-///
-/// SECURITY: This type contains sensitive cryptographic material.
-/// All fields are zeroized on drop via the underlying SealedData.
-///
-/// # Encryption Scheme
-///
-/// Uses unified AES-256-GCM sealing from aura-crypto:
-/// - Key: Derived from device secret using BLAKE3
-/// - Nonce: Random 12 bytes (96-bit, GCM standard)
-/// - Associated Data: device_id || participant_id
-///
-/// # Production Requirements
-///
-/// For production use, the device secret should be:
-/// - iOS: Stored in Secure Enclave
-/// - Android: Stored in Keystore with StrongBox (TODO)
-/// - macOS: Keychain Access with kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-/// - Linux: Secret Service API (gnome-keyring, kwallet)
-///
-/// Current implementation uses in-memory secrets (INSECURE for production).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SealedShare {
-    pub device_id: DeviceId,
-    pub participant_id: ParticipantId,
-    /// Encrypted share using unified sealing
-    #[serde(flatten)]
-    pub sealed_data: aura_crypto::SealedData,
+impl std::error::Error for ProtocolError {}
+
+#[derive(Debug, Clone)]
+pub enum ProtocolErrorType {
+    Timeout,
+    ByzantineBehavior,
+    InsufficientParticipants,
+    VerificationFailed,
+    InvalidState,
+    UnexpectedEvent,
+    RecoveryVetoed,
+    InvalidMerkleProof,
+    InvalidSignature,
+    CryptoError,
+    Other,
 }
 
-impl SealedShare {
-    /// Seal (encrypt) a key share for secure storage
-    ///
-    /// # Arguments
-    ///
-    /// * `share` - The KeyShare to encrypt
-    /// * `device_id` - The device this share belongs to (for AAD binding)
-    /// * `device_secret` - 32-byte device-specific secret (should come from secure storage)
-    ///
-    /// # Security
-    ///
-    /// The device_id is included in the authenticated data to:
-    /// - Bind the encrypted share to a specific device
-    /// - Prevent cross-device replay attacks
-    /// - Provide cryptographic proof the share is for this device
-    ///
-    /// WARNING: The device_secret MUST be stored in platform-specific secure storage:
-    /// - iOS: Secure Enclave / Keychain (kSecAttrAccessibleWhenUnlockedThisDeviceOnly)
-    /// - macOS: Keychain with kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-    /// - Linux: Secret Service API (gnome-keyring, kwallet)
-    /// - Android: AndroidKeyStore with StrongBox (TODO)
-    pub fn seal(
-        share: &KeyShare,
-        device_id: DeviceId,
-        device_secret: &[u8; 32],
-        effects: &aura_crypto::Effects,
-    ) -> Result<Self> {
-        // Create context for key derivation - includes real device_id
-        let context = format!(
-            "aura-share-seal-v1:{}:{}",
-            share.participant_id.as_u16(),
-            device_id.0
-        );
-
-        // Associated data for authenticated encryption - includes real device_id
-        // This cryptographically binds the encryption to this specific device
-        let associated_data = format!("{}:{}", device_id.0, share.participant_id.as_u16());
-
-        // Use unified sealing from aura-crypto
-        let sealed_data = aura_crypto::SealedData::seal_value(
-            share,
-            device_secret,
-            &context,
-            Some(associated_data.as_bytes()),
-            effects,
-        )
-        .map_err(|e| AuraError::crypto_operation_failed(e.to_string()))?;
-
-        Ok(SealedShare {
-            device_id, // Real device_id, not placeholder
-            participant_id: share.participant_id,
-            sealed_data,
-        })
-    }
-
-    /// Unseal (decrypt) a key share from secure storage
-    ///
-    /// # Arguments
-    ///
-    /// * `device_id` - The device attempting to unseal (must match sealed device_id)
-    /// * `device_secret` - 32-byte device-specific secret (must be same as used for sealing)
-    ///
-    /// # Security
-    ///
-    /// Verifies:
-    /// - The device_id matches (cryptographically verified via AAD)
-    /// - The device_secret is correct
-    /// - The data has not been tampered with
-    ///
-    /// # Returns
-    ///
-    /// The decrypted KeyShare, or an error if:
-    /// - Device ID mismatch (wrong device)
-    /// - Decryption fails (wrong key, tampered data)
-    /// - Deserialization fails (corrupted data)
-    pub fn unseal(&self, device_id: DeviceId, device_secret: &[u8; 32]) -> Result<KeyShare> {
-        // Verify device ID matches (before even attempting decryption)
-        if self.device_id != device_id {
-            return Err(AuraError::device_not_found(format!(
-                "Device mismatch: sealed for {:?}, attempted unseal by {:?}",
-                self.device_id, device_id
-            )));
+// Error conversions
+impl From<aura_crypto::CryptoError> for ProtocolError {
+    fn from(err: aura_crypto::CryptoError) -> Self {
+        ProtocolError {
+            session_id: Uuid::nil(), // Will be set by caller if needed
+            error_type: ProtocolErrorType::CryptoError,
+            message: format!("Crypto error: {:?}", err),
         }
-
-        self.sealed_data
-            .unseal_value(device_secret)
-            .map_err(|e| AuraError::crypto_operation_failed(e.to_string()))
     }
 }
 
-/// Threshold signature produced by M-of-N participants
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ThresholdSignature {
-    #[serde(with = "signature_serde")]
-    pub signature: Ed25519Signature,
-    pub signers: Vec<ParticipantId>,
+/// Type of protocol
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ProtocolType {
+    Dkd,
+    Counter,
+    Resharing,
+    Locking,
+    Recovery,
+    Compaction,
 }
 
-impl ThresholdSignature {
-    /// Create a placeholder threshold signature for testing purposes
-    ///
-    /// **WARNING: This creates a fake signature with no cryptographic security.**
-    /// Use only for testing. For production, use FROST aggregation.
-    pub fn placeholder() -> Self {
-        Self {
-            signature: Ed25519Signature::default(),
-            signers: vec![
-                ParticipantId::from_u16_unchecked(1),
-                ParticipantId::from_u16_unchecked(2),
-            ],
-        }
-    }
+// ========== Configuration ==========
 
-    /// Create a real threshold signature from FROST aggregation
-    ///
-    /// This method should be used in production to create actual cryptographically
-    /// secure threshold signatures from FROST protocol outputs.
-    ///
-    /// # Arguments
-    ///
-    /// * `signature` - The aggregated ed25519 signature from FROST
-    /// * `signers` - The participant IDs who contributed to the signature
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // After running FROST threshold signing protocol:
-    /// let aggregated_signature = frost_session.aggregate_signature()?;
-    /// let signer_ids = frost_session.get_signers();
-    /// let threshold_sig = ThresholdSignature::from_frost(aggregated_signature, signer_ids);
-    /// ```
-    pub fn from_frost(signature: Ed25519Signature, signers: Vec<ParticipantId>) -> Self {
-        Self { signature, signers }
-    }
-
-    /// Verify the threshold signature against provided data and public key
-    ///
-    /// This uses standard ed25519 verification on the aggregated signature.
-    pub fn verify(&self, data: &[u8], public_key: &Ed25519VerifyingKey) -> bool {
-        aura_crypto::ed25519_verify(public_key, data, &self.signature).is_ok()
-    }
-
-    /// Get the number of signers
-    pub fn signer_count(&self) -> usize {
-        self.signers.len()
-    }
+/// Configuration for starting a protocol
+#[derive(Debug, Clone)]
+pub enum ProtocolConfig {
+    Dkd {
+        participants: BTreeSet<DeviceId>,
+        threshold: u16,
+    },
+    Resharing {
+        new_participants: BTreeSet<DeviceId>,
+        new_threshold: u16,
+    },
+    Locking {
+        operation_type: String,
+    },
+    Recovery {
+        guardians: BTreeSet<Uuid>,
+        threshold: usize,
+    },
 }
 
-// Include all the test code from the original file
-#[cfg(test)]
-#[allow(warnings, clippy::all)]
-mod seal_tests {
-    #[allow(unused_imports)]
-    use super::*;
-    use aura_types::DeviceIdExt;
+// ========== Event Filters ==========
 
-    // Note: These tests verify encryption/decryption roundtrip, not FROST functionality.
-    // Full DKG tests are in dkg.rs module.
+/// Filter for matching ledger events
+#[derive(Debug, Clone)]
+pub struct EventFilter {
+    /// Session ID to match (if any)
+    pub session_id: Option<Uuid>,
 
-    #[test]
-    fn test_seal_unseal_roundtrip() {
-        use aura_crypto::Effects;
-        use frost_ed25519 as frost;
+    /// Event types to match
+    pub event_types: Option<Vec<EventTypePattern>>,
 
-        // Generate test key share using FROST
-        let effects = Effects::test();
-        let mut rng = effects.rng();
+    /// Author devices to match
+    pub authors: Option<BTreeSet<DeviceId>>,
 
-        let (shares, _pubkey_package) = frost::keys::generate_with_dealer(
-            3u16, // max_signers
-            2u16, // min_signers
-            frost::keys::IdentifierList::Default,
-            &mut rng,
-        )
-        .expect("FROST key generation should work");
+    /// Custom predicate (cannot be cloned, so we use an enum of known predicates)
+    pub predicate: Option<EventPredicate>,
+}
 
-        // Get first participant's share
-        let (_id, secret_share) = shares.into_iter().next().unwrap();
-        let key_package = frost::keys::KeyPackage::try_from(secret_share).unwrap();
+#[derive(Debug, Clone)]
+pub enum EventTypePattern {
+    DkdCommitment,
+    DkdReveal,
+    DkdFinalize,
+    ResharingDistribute,
+    ResharingAcknowledge,
+    ResharingFinalize,
+    LockRequest,
+    LockGrant,
+    LockRelease,
+    InitiateRecovery,
+    CollectGuardianApproval,
+    SubmitRecoveryShare,
+    CompleteRecovery,
+    AbortRecovery,
+    InitiateResharing,
+    DistributeSubShare,
+    AcknowledgeSubShare,
+    FinalizeResharing,
+}
 
-        let share = KeyShare {
-            participant_id: ParticipantId::from_u16_unchecked(1),
-            share: key_package,
-            threshold: 2,
-            total_participants: 3,
-        };
+#[derive(Debug, Clone)]
+pub enum EventPredicate {
+    /// Author is in set of device IDs
+    AuthorIn(BTreeSet<DeviceId>),
 
-        let device_id = DeviceId::new_with_effects(&effects);
-        let device_secret = [42u8; 32];
+    /// Epoch is greater than value
+    EpochGreaterThan(u64),
 
-        // Seal the share
-        let sealed = SealedShare::seal(&share, device_id, &device_secret, &effects).unwrap();
+    /// Combination of predicates
+    And(Box<EventPredicate>, Box<EventPredicate>),
+    Or(Box<EventPredicate>, Box<EventPredicate>),
+}
 
-        // Verify device ID is correct
-        assert_eq!(sealed.device_id, device_id);
-        assert_eq!(sealed.participant_id, share.participant_id);
+// ========== Choreographic Protocol Instructions ==========
 
-        // Verify it's encrypted (ciphertext should be non-empty)
-        assert!(!sealed.sealed_data.ciphertext.is_empty());
-        assert_eq!(sealed.sealed_data.nonce.len(), 12); // GCM nonce size
+/// An instruction yielded by a protocol choreography.
+///
+/// The ProtocolContext executes this instruction and returns the result,
+/// enabling protocols to wait for distributed events, write to the ledger,
+/// and coordinate with other participants.
+///
+/// This enables writing protocols as linear, async choreographies that look
+/// like single-threaded code but can wait for distributed events.
+#[derive(Debug, Clone)]
+pub enum Instruction {
+    /// Write an event to the ledger and wait for it to be integrated
+    WriteToLedger(Event),
 
-        // Unseal and verify
-        let unsealed = sealed.unseal(device_id, &device_secret).unwrap();
-        assert_eq!(unsealed.participant_id, share.participant_id);
-        assert_eq!(unsealed.threshold, share.threshold);
-        assert_eq!(unsealed.total_participants, share.total_participants);
+    /// Wait for a single event that matches a filter
+    AwaitEvent {
+        filter: EventFilter,
+        timeout_epochs: Option<u64>,
+    },
 
-        // Basic verification that unsealing worked correctly
-        // Note: Direct comparison of KeyPackage internals requires more complex serialization
-    }
+    /// Wait for a threshold number of events that match a filter
+    AwaitThreshold {
+        count: usize,
+        filter: EventFilter,
+        timeout_epochs: Option<u64>,
+    },
 
-    // Note: Test for wrong key failure was removed due to underlying crypto implementation issues
-    // The seal/unseal roundtrip test above covers the core functionality
+    /// Get the current state of the ledger
+    GetLedgerState,
 
-    #[test]
-    fn test_identifier_mapping_correctness() {
-        // Test that IdentifierMapping provides safe bidirectional conversion
-        let participants = vec![
-            ParticipantId::from_u16_unchecked(1),
-            ParticipantId::from_u16_unchecked(3),
-            ParticipantId::from_u16_unchecked(5),
-        ];
+    /// Get the current Lamport clock value
+    GetCurrentEpoch,
 
-        let mapping = IdentifierMapping::new(&participants).unwrap();
+    /// Wait for a certain number of epochs to pass
+    WaitEpochs(u64),
 
-        // Test forward conversion (ParticipantId -> frost::Identifier)
-        for &participant_id in &participants {
-            let frost_id = mapping.to_frost(participant_id).unwrap();
+    /// Run a sub-protocol and wait for its result
+    RunSubProtocol {
+        protocol_type: ProtocolType,
+        config: ProtocolConfig,
+    },
 
-            // Verify the conversion matches the direct From implementation
-            let direct_frost_id: frost::Identifier = participant_id.into();
-            assert_eq!(frost_id, direct_frost_id);
+    /// Check if an event exists without waiting
+    CheckForEvent { filter: EventFilter },
 
-            // Test reverse conversion (frost::Identifier -> ParticipantId)
-            let recovered_participant = mapping.from_frost(frost_id).unwrap();
-            assert_eq!(recovered_participant, participant_id);
-        }
+    /// Mark guardian shares for deletion
+    MarkGuardianSharesForDeletion {
+        session_id: uuid::Uuid,
+        ttl_hours: u64,
+    },
 
-        // Test non-existent conversions return None
-        let non_existent_participant = ParticipantId::from_u16_unchecked(99);
-        assert_eq!(mapping.to_frost(non_existent_participant), None);
+    /// Check for session collision and determine winner via lottery
+    CheckSessionCollision {
+        operation_type: aura_journal::OperationType,
+        context_id: Vec<u8>, // Unique identifier for the operation context
+    },
+}
 
-        let non_existent_frost = frost::Identifier::try_from(99u16).unwrap();
-        assert_eq!(mapping.from_frost(non_existent_frost), None);
+/// Result returned from executing an instruction
+#[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
+pub enum InstructionResult {
+    /// Event was written to ledger
+    EventWritten,
 
-        // Test membership checks
-        assert!(mapping.contains_participant(participants[0]));
-        assert!(!mapping.contains_participant(non_existent_participant));
+    /// Single event was received
+    EventReceived(Event),
 
-        let frost_id = mapping.to_frost(participants[0]).unwrap();
-        assert!(mapping.contains_frost(frost_id));
-        assert!(!mapping.contains_frost(non_existent_frost));
+    /// Multiple events were received (from AwaitThreshold)
+    EventsReceived(Vec<Event>),
 
-        // Test collection methods
-        let participant_ids = mapping.participant_ids();
-        assert_eq!(participant_ids.len(), 3);
-        for participant_id in participants {
-            assert!(participant_ids.contains(&participant_id));
-        }
+    /// Ledger state snapshot
+    LedgerState(LedgerStateSnapshot),
 
-        let frost_identifiers = mapping.frost_identifiers();
-        assert_eq!(frost_identifiers.len(), 3);
-    }
+    /// Current Lamport clock value
+    CurrentEpoch(u64),
 
-    #[test]
-    fn test_seal_prevents_cross_device_replay() {
-        use aura_crypto::Effects;
-        use frost_ed25519 as frost;
+    /// Epochs have passed
+    EpochsElapsed,
 
-        // Generate test key share using FROST
-        let effects = Effects::test();
-        let mut rng = effects.rng();
+    /// Sub-protocol completed
+    SubProtocolComplete(ProtocolResult),
 
-        let (shares, _pubkey_package) = frost::keys::generate_with_dealer(
-            3u16, // max_signers
-            2u16, // min_signers
-            frost::keys::IdentifierList::Default,
-            &mut rng,
-        )
-        .expect("FROST key generation should work");
+    /// Session collision check result
+    SessionStatus {
+        existing_sessions: Vec<aura_journal::Session>,
+        winner: Option<DeviceId>, // If collision exists, who won the lottery
+    },
+}
 
-        // Get first participant's share
-        let (_id, secret_share) = shares.into_iter().next().unwrap();
-        let key_package = frost::keys::KeyPackage::try_from(secret_share).unwrap();
+// ========== Ledger State ==========
 
-        let share = KeyShare {
-            participant_id: ParticipantId::from_u16_unchecked(1),
-            share: key_package,
-            threshold: 2,
-            total_participants: 3,
-        };
-
-        let device_a = DeviceId::new_with_effects(&effects);
-        let device_b = DeviceId::new_with_effects(&effects); // Different device
-        let device_secret = [42u8; 32];
-
-        // Seal for device A
-        let sealed_for_a = SealedShare::seal(&share, device_a, &device_secret, &effects).unwrap();
-
-        // Verify sealed for device A
-        assert_eq!(sealed_for_a.device_id, device_a);
-
-        // Attempt to unseal on device B should fail with device mismatch
-        let result = sealed_for_a.unseal(device_b, &device_secret);
-        assert!(result.is_err());
-        match result {
-            Err(e) => {
-                assert!(
-                    e.to_string().contains("Device mismatch"),
-                    "Expected device mismatch error, got: {:?}",
-                    e
-                );
-            }
-            _ => panic!("Expected error, got success"),
-        }
-
-        // Unseal on correct device should succeed
-        let unsealed = sealed_for_a.unseal(device_a, &device_secret).unwrap();
-        assert_eq!(unsealed.participant_id, share.participant_id);
-        assert_eq!(unsealed.threshold, share.threshold);
-        assert_eq!(unsealed.total_participants, share.total_participants);
-    }
+/// Snapshot of ledger state for instruction results
+#[derive(Debug, Clone)]
+pub struct LedgerStateSnapshot {
+    pub account_id: AccountId,
+    pub next_nonce: u64,
+    pub last_event_hash: Option<[u8; 32]>,
+    pub current_epoch: u64,
+    pub relationship_counters:
+        std::collections::BTreeMap<aura_journal::events::RelationshipId, (u64, u64)>,
 }

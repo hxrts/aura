@@ -4,26 +4,29 @@
 //! specifications. Provides categorization, monitoring, and verification
 //! capabilities for different types of properties.
 
-use crate::quint::types::{QuintInvariant, QuintTemporalProperty, ValidationResult, PropertyEvaluationResult, SimulationState};
+use crate::quint::types::{
+    PropertyEvaluationResult, QuintInvariant, QuintTemporalProperty, SimulationState,
+    ValidationResult,
+};
+use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use thiserror::Error;
-use serde::{Deserialize, Serialize};
 
 /// Errors that can occur during property operations
 #[derive(Error, Debug, Clone)]
 pub enum PropertyError {
     #[error("Property evaluation failed: {0}")]
     EvaluationFailed(String),
-    
+
     #[error("Unsupported property type: {0}")]
     UnsupportedType(String),
-    
+
     #[error("Property not found: {0}")]
     PropertyNotFound(String),
-    
+
     #[error("Invalid property expression: {0}")]
     InvalidExpression(String),
-    
+
     #[error("Evaluation timeout: {0}")]
     EvaluationTimeout(String),
 }
@@ -156,7 +159,7 @@ impl PropertyExtractor {
             categorization_rules: Self::default_categorization_rules(),
         }
     }
-    
+
     /// Create property extractor with custom configuration
     pub fn with_config(config: PropertyExtractionConfig) -> Self {
         Self {
@@ -165,7 +168,7 @@ impl PropertyExtractor {
             categorization_rules: Self::default_categorization_rules(),
         }
     }
-    
+
     /// Extract verifiable properties from Quint invariants and temporal properties
     ///
     /// # Arguments
@@ -180,7 +183,7 @@ impl PropertyExtractor {
         temporal_properties: &[QuintTemporalProperty],
     ) -> Result<Vec<VerifiableProperty>, PropertyError> {
         self.properties.clear();
-        
+
         // Extract invariants
         for invariant in invariants {
             let property = self.convert_invariant_to_property(invariant)?;
@@ -188,7 +191,7 @@ impl PropertyExtractor {
                 self.properties.insert(property.id.clone(), property);
             }
         }
-        
+
         // Extract temporal properties
         for temporal in temporal_properties {
             let property = self.convert_temporal_to_property(temporal)?;
@@ -196,25 +199,25 @@ impl PropertyExtractor {
                 self.properties.insert(property.id.clone(), property);
             }
         }
-        
+
         let mut result: Vec<VerifiableProperty> = self.properties.values().cloned().collect();
-        
+
         // Sort by priority (highest first)
         result.sort_by(|a, b| b.priority.cmp(&a.priority));
-        
+
         // Apply max properties limit
         if self.config.max_properties > 0 && result.len() > self.config.max_properties {
             result.truncate(self.config.max_properties);
         }
-        
+
         Ok(result)
     }
-    
+
     /// Get property by ID
     pub fn get_property(&self, id: &str) -> Option<&VerifiableProperty> {
         self.properties.get(id)
     }
-    
+
     /// Get all properties of a specific type
     pub fn get_properties_by_type(&self, property_type: PropertyType) -> Vec<&VerifiableProperty> {
         self.properties
@@ -222,7 +225,7 @@ impl PropertyExtractor {
             .filter(|p| p.property_type == property_type)
             .collect()
     }
-    
+
     /// Get all properties with a specific tag
     pub fn get_properties_by_tag(&self, tag: &str) -> Vec<&VerifiableProperty> {
         self.properties
@@ -230,7 +233,7 @@ impl PropertyExtractor {
             .filter(|p| p.tags.contains(&tag.to_string()))
             .collect()
     }
-    
+
     /// Get properties suitable for continuous monitoring
     pub fn get_monitoring_properties(&self) -> Vec<&VerifiableProperty> {
         self.properties
@@ -238,16 +241,20 @@ impl PropertyExtractor {
             .filter(|p| p.continuous_monitoring)
             .collect()
     }
-    
+
     /// Convert Quint invariant to VerifiableProperty
     fn convert_invariant_to_property(
         &self,
         invariant: &QuintInvariant,
     ) -> Result<VerifiableProperty, PropertyError> {
         let id = format!("inv_{}", invariant.name);
-        let (property_type, priority, tags) = self.categorize_property(&invariant.name, &invariant.expression);
-        let continuous_monitoring = matches!(property_type, PropertyType::Invariant | PropertyType::Safety);
-        
+        let (property_type, priority, tags) =
+            self.categorize_property(&invariant.name, &invariant.expression);
+        let continuous_monitoring = matches!(
+            property_type,
+            PropertyType::Invariant | PropertyType::Safety
+        );
+
         Ok(VerifiableProperty {
             id,
             name: invariant.name.clone(),
@@ -260,15 +267,16 @@ impl PropertyExtractor {
             continuous_monitoring,
         })
     }
-    
+
     /// Convert Quint temporal property to VerifiableProperty
     fn convert_temporal_to_property(
         &self,
         temporal: &QuintTemporalProperty,
     ) -> Result<VerifiableProperty, PropertyError> {
         let id = format!("temp_{}", temporal.name);
-        let (_original_property_type, priority, tags) = self.categorize_property(&temporal.name, &temporal.expression);
-        
+        let (_original_property_type, priority, tags) =
+            self.categorize_property(&temporal.name, &temporal.expression);
+
         // Override property type for temporal properties
         let property_type = if temporal.expression.contains("eventually") {
             PropertyType::Liveness
@@ -277,9 +285,9 @@ impl PropertyExtractor {
         } else {
             PropertyType::Temporal
         };
-        
+
         let continuous_monitoring = matches!(property_type, PropertyType::Safety);
-        
+
         Ok(VerifiableProperty {
             id,
             name: temporal.name.clone(),
@@ -292,43 +300,57 @@ impl PropertyExtractor {
             continuous_monitoring,
         })
     }
-    
+
     /// Categorize property based on name and expression patterns
-    fn categorize_property(&self, name: &str, expression: &str) -> (PropertyType, PropertyPriority, Vec<String>) {
+    fn categorize_property(
+        &self,
+        name: &str,
+        expression: &str,
+    ) -> (PropertyType, PropertyPriority, Vec<String>) {
         for rule in &self.categorization_rules {
             if name.contains(&rule.pattern) || expression.contains(&rule.pattern) {
-                return (rule.property_type.clone(), rule.priority.clone(), rule.tags.clone());
+                return (
+                    rule.property_type.clone(),
+                    rule.priority.clone(),
+                    rule.tags.clone(),
+                );
             }
         }
-        
+
         // Default categorization
-        (PropertyType::Invariant, PropertyPriority::Medium, vec!["uncategorized".to_string()])
+        (
+            PropertyType::Invariant,
+            PropertyPriority::Medium,
+            vec!["uncategorized".to_string()],
+        )
     }
-    
+
     /// Check if property should be included based on configuration
     fn should_include_property(&self, property: &VerifiableProperty) -> bool {
         // Check property type filter
         if !self.config.enabled_types.contains(&property.property_type) {
             return false;
         }
-        
+
         // Check priority filter
         if property.priority < self.config.min_priority {
             return false;
         }
-        
+
         // Check tag filter
         if !self.config.filter_tags.is_empty() {
-            let has_matching_tag = property.tags.iter()
+            let has_matching_tag = property
+                .tags
+                .iter()
                 .any(|tag| self.config.filter_tags.contains(tag));
             if !has_matching_tag {
                 return false;
             }
         }
-        
+
         true
     }
-    
+
     /// Default categorization rules for property classification
     fn default_categorization_rules() -> Vec<CategorizationRule> {
         vec![
@@ -411,13 +433,13 @@ impl PropertyMonitor {
             verbose: false,
         }
     }
-    
+
     /// Enable verbose logging
     pub fn with_verbose(mut self, verbose: bool) -> Self {
         self.verbose = verbose;
         self
     }
-    
+
     /// Evaluate all monitored properties against current simulation state
     ///
     /// This is a placeholder implementation. In production, this would:
@@ -427,14 +449,14 @@ impl PropertyMonitor {
     pub fn evaluate_properties(&mut self, _state: &dyn SimulationState) -> ValidationResult {
         let start_time = Instant::now();
         let mut validation_result = ValidationResult::new();
-        
+
         for property in &self.monitored_properties {
             let eval_start = Instant::now();
-            
+
             // Placeholder evaluation - in production would use actual Quint evaluator
             let holds = self.evaluate_single_property(property, _state);
             let eval_time = eval_start.elapsed().as_millis() as u64;
-            
+
             let result = PropertyEvaluationResult {
                 property_name: property.name.clone(),
                 holds,
@@ -442,27 +464,29 @@ impl PropertyMonitor {
                 witness: None,
                 evaluation_time_ms: eval_time,
             };
-            
+
             if self.verbose {
-                println!("Property '{}': {} ({}ms)", 
-                        property.name, 
-                        if holds { "HOLDS" } else { "VIOLATED" },
-                        eval_time);
+                println!(
+                    "Property '{}': {} ({}ms)",
+                    property.name,
+                    if holds { "HOLDS" } else { "VIOLATED" },
+                    eval_time
+                );
             }
-            
+
             self.evaluation_results.push(result.clone());
             validation_result.add_result(result);
         }
-        
+
         validation_result.total_time_ms = start_time.elapsed().as_millis() as u64;
         validation_result
     }
-    
+
     /// Get all evaluation results
     pub fn get_results(&self) -> &[PropertyEvaluationResult] {
         &self.evaluation_results
     }
-    
+
     /// Get results for a specific property
     pub fn get_property_results(&self, property_name: &str) -> Vec<&PropertyEvaluationResult> {
         self.evaluation_results
@@ -470,14 +494,18 @@ impl PropertyMonitor {
             .filter(|r| r.property_name == property_name)
             .collect()
     }
-    
+
     /// Clear all evaluation results
     pub fn clear_results(&mut self) {
         self.evaluation_results.clear();
     }
-    
+
     /// Placeholder for single property evaluation
-    fn evaluate_single_property(&self, property: &VerifiableProperty, _state: &dyn SimulationState) -> bool {
+    fn evaluate_single_property(
+        &self,
+        property: &VerifiableProperty,
+        _state: &dyn SimulationState,
+    ) -> bool {
         // Placeholder logic - in production would use Quint evaluator
         match property.property_type {
             PropertyType::Safety | PropertyType::Invariant => {
@@ -512,12 +540,12 @@ impl PropertyMonitor {
 mod tests {
     use super::*;
     use crate::quint::types::{QuintInvariant, QuintTemporalProperty};
-    
+
     #[test]
     fn test_property_extractor_creation() {
         let extractor = PropertyExtractor::new();
         assert_eq!(extractor.properties.len(), 0);
-        
+
         let config = PropertyExtractionConfig {
             enabled_types: vec![PropertyType::Safety],
             min_priority: PropertyPriority::High,
@@ -525,16 +553,16 @@ mod tests {
             max_properties: 5,
             filter_tags: vec!["test".to_string()],
         };
-        
+
         let extractor = PropertyExtractor::with_config(config);
         assert_eq!(extractor.config.enabled_types.len(), 1);
         assert_eq!(extractor.config.max_properties, 5);
     }
-    
+
     #[test]
     fn test_property_extraction() {
         let mut extractor = PropertyExtractor::new();
-        
+
         let invariants = vec![
             QuintInvariant {
                 name: "safety_property".to_string(),
@@ -553,54 +581,50 @@ mod tests {
                 tags: vec!["consensus".to_string()],
             },
         ];
-        
-        let temporal_properties = vec![
-            QuintTemporalProperty {
-                name: "liveness_property".to_string(),
-                property_type: "LTL".to_string(),
-                expression: "eventually complete".to_string(),
-                description: "Protocol eventually completes".to_string(),
-                source_location: "test.qnt:20".to_string(),
-                enabled: true,
-                tags: vec!["liveness".to_string()],
-            },
-        ];
-        
+
+        let temporal_properties = vec![QuintTemporalProperty {
+            name: "liveness_property".to_string(),
+            property_type: "LTL".to_string(),
+            expression: "eventually complete".to_string(),
+            description: "Protocol eventually completes".to_string(),
+            source_location: "test.qnt:20".to_string(),
+            enabled: true,
+            tags: vec!["liveness".to_string()],
+        }];
+
         let result = extractor.extract_properties(&invariants, &temporal_properties);
         assert!(result.is_ok());
-        
+
         let properties = result.unwrap();
         assert_eq!(properties.len(), 3);
-        
+
         // Check that properties are sorted by priority
         assert!(properties[0].priority >= properties[1].priority);
     }
-    
+
     #[test]
     fn test_property_categorization() {
         let mut extractor = PropertyExtractor::new();
-        
-        let invariants = vec![
-            QuintInvariant {
-                name: "crypto_safety".to_string(),
-                expression: "valid_signatures".to_string(),
-                description: "All signatures are valid".to_string(),
-                source_location: "test.qnt:5".to_string(),
-                enabled: true,
-                tags: vec!["crypto".to_string(), "safety".to_string()],
-            },
-        ];
-        
+
+        let invariants = vec![QuintInvariant {
+            name: "crypto_safety".to_string(),
+            expression: "valid_signatures".to_string(),
+            description: "All signatures are valid".to_string(),
+            source_location: "test.qnt:5".to_string(),
+            enabled: true,
+            tags: vec!["crypto".to_string(), "safety".to_string()],
+        }];
+
         let properties = extractor.extract_properties(&invariants, &[]).unwrap();
         assert_eq!(properties.len(), 1);
-        
+
         let property = &properties[0];
         assert_eq!(property.property_type, PropertyType::Security);
         assert_eq!(property.priority, PropertyPriority::Critical);
         assert!(property.tags.contains(&"security".to_string()));
         assert!(property.tags.contains(&"crypto".to_string()));
     }
-    
+
     #[test]
     fn test_property_monitor() {
         let property = VerifiableProperty {
@@ -614,25 +638,33 @@ mod tests {
             tags: vec!["test".to_string()],
             continuous_monitoring: true,
         };
-        
+
         let mut monitor = PropertyMonitor::new(vec![property]).with_verbose(true);
-        
+
         // Create a dummy simulation state for testing
         struct DummyState;
         impl SimulationState for DummyState {
-            fn get_variable(&self, _name: &str) -> Option<crate::quint::types::QuintValue> { None }
-            fn get_all_variables(&self) -> std::collections::HashMap<String, crate::quint::types::QuintValue> { 
+            fn get_variable(&self, _name: &str) -> Option<crate::quint::types::QuintValue> {
+                None
+            }
+            fn get_all_variables(
+                &self,
+            ) -> std::collections::HashMap<String, crate::quint::types::QuintValue> {
                 std::collections::HashMap::new()
             }
-            fn get_current_time(&self) -> u64 { 0 }
-            fn get_metadata(&self) -> std::collections::HashMap<String, crate::quint::types::QuintValue> { 
-                std::collections::HashMap::new() 
+            fn get_current_time(&self) -> u64 {
+                0
+            }
+            fn get_metadata(
+                &self,
+            ) -> std::collections::HashMap<String, crate::quint::types::QuintValue> {
+                std::collections::HashMap::new()
             }
         }
-        
+
         let dummy_state = DummyState;
         let result = monitor.evaluate_properties(&dummy_state);
-        
+
         assert_eq!(result.total_properties, 1);
         assert_eq!(result.satisfied_properties, 1);
         assert_eq!(result.violated_properties, 0);

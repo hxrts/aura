@@ -67,7 +67,7 @@ impl StateDiffCalculator {
         let operations = comprehensive_diff
             .changes
             .into_iter()
-            .map(|change| DiffOperation::from_diff_entry(change))
+            .map(DiffOperation::from_diff_entry)
             .collect();
 
         Ok(IncrementalDiff {
@@ -275,7 +275,7 @@ impl StateDiffCalculator {
             removed_count,
             modified_count,
             affected_root_paths: affected_paths.into_iter().collect(),
-            has_significant_changes: changes.len() > 0,
+            has_significant_changes: !changes.is_empty(),
         }
     }
 

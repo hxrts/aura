@@ -97,7 +97,7 @@ impl ViolationTracker {
 
         self.violations
             .entry(property_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(violation);
 
         self.total_violations += 1;
@@ -461,16 +461,18 @@ impl PropertyMonitor {
 
 /// WASM-bindgen exports for browser usage
 #[wasm_bindgen]
+#[derive(Default)]
 pub struct WasmPropertyMonitor {
     inner: Option<PropertyMonitor>,
 }
+
 
 #[wasm_bindgen]
 impl WasmPropertyMonitor {
     /// Create a new property monitor (async initialization handled internally)
     #[wasm_bindgen(constructor)]
     pub fn new() -> WasmPropertyMonitor {
-        WasmPropertyMonitor { inner: None }
+        WasmPropertyMonitor::default()
     }
 
     /// Initialize the property monitor (must be called before use)

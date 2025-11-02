@@ -1469,6 +1469,7 @@ pub async fn test_message_exchange(
             &messaging_channels
         {
             // Generate test message
+            #[allow(clippy::disallowed_methods)]
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

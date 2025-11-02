@@ -105,7 +105,7 @@ impl CausalityGraph {
         for event in events {
             participant_events
                 .entry(event.participant.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(event);
         }
 
@@ -118,7 +118,7 @@ impl CausalityGraph {
                 let next_node = event_to_node[&window[1].event_id];
 
                 // Only add program order if there's no existing causal edge
-                if !graph.find_edge(prev_node, next_node).is_some() {
+                if graph.find_edge(prev_node, next_node).is_none() {
                     graph.add_edge(prev_node, next_node, CausalityEdge::ProgramOrder);
                 }
             }

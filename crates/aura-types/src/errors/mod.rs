@@ -58,6 +58,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::error::Error as StdError;
 use std::fmt;
 use thiserror::Error;
 
@@ -107,28 +108,10 @@ pub enum ErrorCode {
     ProtocolSessionTimeout = 1008,
     /// Protocol coordination failed
     ProtocolCoordinationFailed = 1009,
-    /// DKD lifecycle protocol error
-    ProtocolDkdLifecycle = 1010,
-    /// Counter lifecycle protocol error
-    ProtocolCounterLifecycle = 1011,
-    /// Recovery lifecycle protocol error
-    ProtocolRecoveryLifecycle = 1012,
-    /// Resharing lifecycle protocol error
-    ProtocolResharingLifecycle = 1013,
-    /// Locking lifecycle protocol error
-    ProtocolLockingLifecycle = 1014,
-    /// Group lifecycle protocol error
-    ProtocolGroupLifecycle = 1015,
     /// Protocol execution failed
     ProtocolExecutionFailed = 1016,
     /// Invalid protocol instruction
     ProtocolInvalidInstruction = 1017,
-    /// BeeKEM operation failed
-    ProtocolBeeKemError = 1018,
-    /// Invalid group operation
-    ProtocolInvalidGroupOperation = 1019,
-    /// Missing required parameter
-    ProtocolMissingParameter = 1020,
 
     // Crypto Error Codes (2000-2999)
     /// FROST threshold signature operation timed out
@@ -282,157 +265,350 @@ impl ErrorCode {
 // Domain-Specific Error Types
 // =============================================================================
 
-/// Protocol execution and coordination errors
-#[derive(Error, Debug, Clone, Serialize, Deserialize)]
+/// Protocol execution and coordination errors (detailed variant with context fields)
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProtocolError {
-    /// Distributed Key Derivation protocol failure
-    #[error("DKD protocol failed: {message}")]
+    /// DKD (Distributed Key Derivation) protocol failed
     DkdFailed {
-        /// Human-readable error message
-        message: String,
+        /// Human-readable reason
+        reason: String,
+        /// Protocol phase where failure occurred
+        phase: Option<String>,
+        /// Participants involved
+        participants: Option<Vec<String>>,
         /// Additional error context and metadata
-        context: ErrorContext,
+        context: String,
     },
 
-    /// FROST threshold signature protocol failure
-    #[error("FROST protocol failed: {message}")]
+    /// FROST (Flexible Round-Optimized Schnorr Threshold) protocol failed
     FrostFailed {
-        message: String,
-        context: ErrorContext,
+        /// Human-readable reason
+        reason: String,
+        /// Round number where failure occurred
+        round: Option<u8>,
+        /// Threshold configuration
+        threshold: Option<u16>,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// Session epoch mismatch between participants
-    #[error("Session epoch mismatch: {message}")]
-    EpochMismatch {
-        message: String,
-        context: ErrorContext,
-    },
-
-    /// Continuous Group Key Agreement protocol failure
-    #[error("CGKA protocol failed: {message}")]
-    CgkaFailed {
-        message: String,
-        context: ErrorContext,
-    },
-
-    /// Account bootstrap or initialization failure
-    #[error("Bootstrap protocol failed: {message}")]
-    BootstrapFailed {
-        message: String,
-        context: ErrorContext,
-    },
-
-    /// Recovery protocol failure
-    #[error("Recovery protocol failed: {message}")]
-    RecoveryFailed {
-        message: String,
-        context: ErrorContext,
-    },
-
-    /// Resharing protocol failure
-    #[error("Resharing protocol failed: {message}")]
+    /// Resharing protocol failed
     ResharingFailed {
-        message: String,
-        context: ErrorContext,
+        /// Human-readable reason
+        reason: String,
+        /// Previous threshold configuration
+        old_threshold: Option<u16>,
+        /// New threshold configuration
+        new_threshold: Option<u16>,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// Protocol session timeout
-    #[error("Protocol session timeout: {message}")]
-    SessionTimeout {
-        message: String,
-        context: ErrorContext,
+    /// Recovery protocol failed
+    RecoveryFailed {
+        /// Human-readable reason
+        reason: String,
+        /// Number of guardians involved
+        guardian_count: Option<usize>,
+        /// Required shares for recovery
+        required_shares: Option<usize>,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// Protocol coordination failure
-    #[error("Protocol coordination failed: {message}")]
+    /// Coordination service error
     CoordinationFailed {
-        message: String,
-        context: ErrorContext,
+        /// Human-readable reason
+        reason: String,
+        /// Service name
+        service: Option<String>,
+        /// Operation being performed
+        operation: Option<String>,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// Generic protocol orchestration error
-    #[error("Protocol orchestration error: {message}")]
-    Orchestrator {
-        message: String,
-        context: ErrorContext,
+    /// Session protocol error
+    SessionFailed {
+        /// Human-readable reason
+        reason: String,
+        /// Type of session
+        session_type: Option<String>,
+        /// Session state
+        state: Option<String>,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// DKD lifecycle protocol error
-    #[error("DKD lifecycle error: {message}")]
-    DkdLifecycle {
-        message: String,
-        context: ErrorContext,
+    /// Consensus protocol error
+    ConsensusFailed {
+        /// Human-readable reason
+        reason: String,
+        /// Protocol type involved
+        protocol_type: Option<String>,
+        /// Round number
+        round: Option<u64>,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// Counter lifecycle protocol error
-    #[error("Counter lifecycle error: {message}")]
-    CounterLifecycle {
-        message: String,
-        context: ErrorContext,
+    /// Timeout during protocol execution
+    Timeout {
+        /// Protocol name
+        protocol: String,
+        /// Timeout duration in milliseconds
+        timeout_ms: u64,
+        /// Phase where timeout occurred
+        phase: Option<String>,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// Recovery lifecycle protocol error
-    #[error("Recovery lifecycle error: {message}")]
-    RecoveryLifecycle {
-        message: String,
-        context: ErrorContext,
+    /// Invalid protocol state transition
+    InvalidStateTransition {
+        /// Previous state
+        from_state: String,
+        /// Attempted state
+        to_state: String,
+        /// Reason for invalidity
+        reason: String,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// Resharing lifecycle protocol error
-    #[error("Resharing lifecycle error: {message}")]
-    ResharingLifecycle {
-        message: String,
-        context: ErrorContext,
+    /// Protocol message validation failed
+    MessageValidationFailed {
+        /// Message type
+        message_type: String,
+        /// Validation failure reason
+        reason: String,
+        /// Message sender
+        sender: Option<String>,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// Locking lifecycle protocol error
-    #[error("Locking lifecycle error: {message}")]
-    LockingLifecycle {
-        message: String,
-        context: ErrorContext,
+    /// Byzantine behavior detected
+    ByzantineBehavior {
+        /// Participant showing Byzantine behavior
+        participant: String,
+        /// Type of behavior
+        behavior: String,
+        /// Evidence of Byzantine behavior
+        evidence: Option<String>,
+        /// Additional error context and metadata
+        context: String,
     },
 
-    /// Group lifecycle protocol error
-    #[error("Group lifecycle error: {message}")]
-    GroupLifecycle {
-        message: String,
-        context: ErrorContext,
+    /// Insufficient participants for protocol
+    InsufficientParticipants {
+        /// Required participant count
+        required: usize,
+        /// Available participant count
+        available: usize,
+        /// Protocol name
+        protocol: String,
+        /// Additional error context and metadata
+        context: String,
     },
+}
 
-    /// Protocol execution error
-    #[error("Protocol execution error: {message}")]
-    ExecutionFailed {
-        message: String,
-        context: ErrorContext,
-    },
+impl fmt::Display for ProtocolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DkdFailed { reason, phase, .. } => {
+                write!(f, "DKD protocol failed: {}", reason)?;
+                if let Some(p) = phase {
+                    write!(f, " (phase: {})", p)?;
+                }
+                Ok(())
+            }
+            Self::FrostFailed {
+                reason,
+                round,
+                threshold,
+                ..
+            } => {
+                write!(f, "FROST protocol failed: {}", reason)?;
+                if let Some(r) = round {
+                    write!(f, " (round: {})", r)?;
+                }
+                if let Some(t) = threshold {
+                    write!(f, " (threshold: {})", t)?;
+                }
+                Ok(())
+            }
+            Self::ResharingFailed {
+                reason,
+                old_threshold,
+                new_threshold,
+                ..
+            } => {
+                write!(f, "Resharing protocol failed: {}", reason)?;
+                if let (Some(old), Some(new)) = (old_threshold, new_threshold) {
+                    write!(f, " (threshold: {} -> {})", old, new)?;
+                }
+                Ok(())
+            }
+            Self::RecoveryFailed {
+                reason,
+                guardian_count,
+                required_shares,
+                ..
+            } => {
+                write!(f, "Recovery protocol failed: {}", reason)?;
+                if let (Some(count), Some(required)) = (guardian_count, required_shares) {
+                    write!(f, " (guardians: {}, required: {})", count, required)?;
+                }
+                Ok(())
+            }
+            Self::CoordinationFailed {
+                reason,
+                service,
+                operation,
+                ..
+            } => {
+                write!(f, "Coordination failed: {}", reason)?;
+                if let Some(s) = service {
+                    write!(f, " (service: {})", s)?;
+                }
+                if let Some(op) = operation {
+                    write!(f, " (operation: {})", op)?;
+                }
+                Ok(())
+            }
+            Self::SessionFailed {
+                reason,
+                session_type,
+                state,
+                ..
+            } => {
+                write!(f, "Session protocol failed: {}", reason)?;
+                if let Some(t) = session_type {
+                    write!(f, " (type: {})", t)?;
+                }
+                if let Some(s) = state {
+                    write!(f, " (state: {})", s)?;
+                }
+                Ok(())
+            }
+            Self::ConsensusFailed {
+                reason,
+                protocol_type,
+                round,
+                ..
+            } => {
+                write!(f, "Consensus failed: {}", reason)?;
+                if let Some(p) = protocol_type {
+                    write!(f, " (protocol: {})", p)?;
+                }
+                if let Some(r) = round {
+                    write!(f, " (round: {})", r)?;
+                }
+                Ok(())
+            }
+            Self::Timeout {
+                protocol,
+                timeout_ms,
+                phase,
+                ..
+            } => {
+                write!(f, "Protocol {} timed out after {}ms", protocol, timeout_ms)?;
+                if let Some(p) = phase {
+                    write!(f, " (phase: {})", p)?;
+                }
+                Ok(())
+            }
+            Self::InvalidStateTransition {
+                from_state,
+                to_state,
+                reason,
+                ..
+            } => {
+                write!(
+                    f,
+                    "Invalid state transition from {} to {}: {}",
+                    from_state, to_state, reason
+                )
+            }
+            Self::MessageValidationFailed {
+                message_type,
+                reason,
+                sender,
+                ..
+            } => {
+                write!(
+                    f,
+                    "Message validation failed for {}: {}",
+                    message_type, reason
+                )?;
+                if let Some(s) = sender {
+                    write!(f, " (sender: {})", s)?;
+                }
+                Ok(())
+            }
+            Self::ByzantineBehavior {
+                participant,
+                behavior,
+                ..
+            } => {
+                write!(
+                    f,
+                    "Byzantine behavior detected from {}: {}",
+                    participant, behavior
+                )
+            }
+            Self::InsufficientParticipants {
+                required,
+                available,
+                protocol,
+                ..
+            } => {
+                write!(
+                    f,
+                    "Insufficient participants for {}: {} required, {} available",
+                    protocol, required, available
+                )
+            }
+        }
+    }
+}
 
-    /// Invalid protocol instruction
-    #[error("Invalid protocol instruction: {message}")]
-    InvalidInstruction {
-        message: String,
-        context: ErrorContext,
-    },
+impl StdError for ProtocolError {}
 
-    /// BeeKEM operation failed
-    #[error("BeeKEM operation failed: {message}")]
-    BeeKemError {
-        message: String,
-        context: ErrorContext,
-    },
+impl ProtocolError {
+    /// Get the error code for this error
+    pub fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::DkdFailed { .. } => ErrorCode::ProtocolDkdTimeout,
+            Self::FrostFailed { .. } => ErrorCode::ProtocolFrostSignFailed,
+            Self::ResharingFailed { .. } => ErrorCode::ProtocolResharingFailed,
+            Self::RecoveryFailed { .. } => ErrorCode::ProtocolRecoveryFailed,
+            Self::CoordinationFailed { .. } => ErrorCode::ProtocolCoordinationFailed,
+            Self::SessionFailed { .. } => ErrorCode::SessionProtocolViolation,
+            Self::ConsensusFailed { .. } => ErrorCode::GenericUnknown,
+            Self::Timeout { .. } => ErrorCode::SessionTimeout,
+            Self::InvalidStateTransition { .. } => ErrorCode::SessionInvalidTransition,
+            Self::MessageValidationFailed { .. } => ErrorCode::GenericUnknown,
+            Self::ByzantineBehavior { .. } => ErrorCode::GenericUnknown,
+            Self::InsufficientParticipants { .. } => ErrorCode::GenericUnknown,
+        }
+    }
 
-    /// Invalid group operation
-    #[error("Invalid group operation: {message}")]
-    InvalidGroupOperation {
-        message: String,
-        context: ErrorContext,
-    },
-
-    /// Missing required protocol parameter
-    #[error("Missing required parameter: {message}")]
-    MissingParameter {
-        message: String,
-        context: ErrorContext,
-    },
+    /// Get the severity of this error
+    pub fn severity(&self) -> ErrorSeverity {
+        match self {
+            Self::ByzantineBehavior { .. } => ErrorSeverity::Critical,
+            Self::DkdFailed { .. } | Self::FrostFailed { .. } => ErrorSeverity::High,
+            Self::ResharingFailed { .. } | Self::RecoveryFailed { .. } => ErrorSeverity::High,
+            Self::CoordinationFailed { .. } | Self::SessionFailed { .. } => ErrorSeverity::Medium,
+            Self::ConsensusFailed { .. } => ErrorSeverity::High,
+            Self::Timeout { .. } => ErrorSeverity::Medium,
+            Self::InvalidStateTransition { .. } => ErrorSeverity::High,
+            Self::MessageValidationFailed { .. } => ErrorSeverity::Medium,
+            Self::InsufficientParticipants { .. } => ErrorSeverity::Medium,
+        }
+    }
 }
 
 /// Cryptographic operation errors
@@ -440,66 +616,39 @@ pub enum ProtocolError {
 pub enum CryptoError {
     /// FROST threshold signature operation failed
     #[error("FROST signing failed: {message}")]
-    FrostSignFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    FrostSignFailed { message: String, context: String },
 
     /// Key derivation operation failed
     #[error("Key derivation failed: {message}")]
-    KeyDerivationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    KeyDerivationFailed { message: String, context: String },
 
     /// Invalid signature verification
     #[error("Invalid signature: {message}")]
-    InvalidSignature {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidSignature { message: String, context: String },
 
     /// Invalid credential or authentication token
     #[error("Invalid credential: {message}")]
-    InvalidCredential {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidCredential { message: String, context: String },
 
     /// Encryption operation failed
     #[error("Encryption failed: {message}")]
-    EncryptionFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    EncryptionFailed { message: String, context: String },
 
     /// Decryption operation failed
     #[error("Decryption failed: {message}")]
-    DecryptionFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    DecryptionFailed { message: String, context: String },
 
     /// Hash computation failed
     #[error("Hashing failed: {message}")]
-    HashingFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    HashingFailed { message: String, context: String },
 
     /// Random number generation failed
     #[error("Random generation failed: {message}")]
-    RandomGenerationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    RandomGenerationFailed { message: String, context: String },
 
     /// Generic cryptographic operation failure
     #[error("Cryptographic operation failed: {message}")]
-    OperationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    OperationFailed { message: String, context: String },
 }
 
 /// Infrastructure and external system errors
@@ -507,108 +656,63 @@ pub enum CryptoError {
 pub enum InfrastructureError {
     /// Network transport layer error
     #[error("Transport error: {message}")]
-    Transport {
-        message: String,
-        context: ErrorContext,
-    },
+    Transport { message: String, context: String },
 
     /// Storage layer operation failure
     #[error("Storage error: {message}")]
-    Storage {
-        message: String,
-        context: ErrorContext,
-    },
+    Storage { message: String, context: String },
 
     /// Network communication error
     #[error("Network error: {message}")]
-    Network {
-        message: String,
-        context: ErrorContext,
-    },
+    Network { message: String, context: String },
 
     /// Transport connection failure
     #[error("Transport connection failed: {message}")]
-    TransportConnectionFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    TransportConnectionFailed { message: String, context: String },
 
     /// Transport operation timeout
     #[error("Transport timeout: {message}")]
-    TransportTimeout {
-        message: String,
-        context: ErrorContext,
-    },
+    TransportTimeout { message: String, context: String },
 
     /// Storage read operation failed
     #[error("Storage read failed: {message}")]
-    StorageReadFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    StorageReadFailed { message: String, context: String },
 
     /// Storage write operation failed
     #[error("Storage write failed: {message}")]
-    StorageWriteFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    StorageWriteFailed { message: String, context: String },
 
     /// Network unreachable
     #[error("Network unreachable: {message}")]
-    NetworkUnreachable {
-        message: String,
-        context: ErrorContext,
-    },
+    NetworkUnreachable { message: String, context: String },
 
     /// Network partition detected
     #[error("Network partition: {message}")]
-    NetworkPartition {
-        message: String,
-        context: ErrorContext,
-    },
+    NetworkPartition { message: String, context: String },
 
     /// Storage quota exceeded
     #[error("Storage quota exceeded: {message}")]
-    StorageQuotaExceeded {
-        message: String,
-        context: ErrorContext,
-    },
+    StorageQuotaExceeded { message: String, context: String },
 
     /// Transport authentication failed
     #[error("Transport authentication failed: {message}")]
-    TransportAuthenticationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    TransportAuthenticationFailed { message: String, context: String },
 
     /// Invalid presence ticket
     #[error("Invalid presence ticket: {message}")]
-    InvalidTicket {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidTicket { message: String, context: String },
 
     /// Connection handshake failed
     #[error("Connection handshake failed: {message}")]
-    HandshakeFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    HandshakeFailed { message: String, context: String },
 
     /// Message delivery failed
     #[error("Message delivery failed: {message}")]
-    DeliveryFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    DeliveryFailed { message: String, context: String },
 
     /// Broadcast operation failed
     #[error("Broadcast operation failed: {message}")]
-    BroadcastFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    BroadcastFailed { message: String, context: String },
 }
 
 /// Agent operation and state management errors
@@ -616,52 +720,31 @@ pub enum InfrastructureError {
 pub enum AgentError {
     /// Agent in invalid state for operation
     #[error("Agent invalid state: {message}")]
-    InvalidState {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidState { message: String, context: String },
 
     /// Operation not allowed in current state
     #[error("Operation not allowed: {message}")]
-    OperationNotAllowed {
-        message: String,
-        context: ErrorContext,
-    },
+    OperationNotAllowed { message: String, context: String },
 
     /// Requested device not found in account
     #[error("Device not found: {message}")]
-    DeviceNotFound {
-        message: String,
-        context: ErrorContext,
-    },
+    DeviceNotFound { message: String, context: String },
 
     /// Account not found or not accessible
     #[error("Account not found: {message}")]
-    AccountNotFound {
-        message: String,
-        context: ErrorContext,
-    },
+    AccountNotFound { message: String, context: String },
 
     /// Insufficient permissions for operation
     #[error("Insufficient permissions: {message}")]
-    InsufficientPermissions {
-        message: String,
-        context: ErrorContext,
-    },
+    InsufficientPermissions { message: String, context: String },
 
     /// Bootstrap required before operation
     #[error("Bootstrap required: {message}")]
-    BootstrapRequired {
-        message: String,
-        context: ErrorContext,
-    },
+    BootstrapRequired { message: String, context: String },
 
     /// Agent already initialized
     #[error("Already initialized: {message}")]
-    AlreadyInitialized {
-        message: String,
-        context: ErrorContext,
-    },
+    AlreadyInitialized { message: String, context: String },
 }
 
 /// Data handling and state management errors
@@ -669,59 +752,35 @@ pub enum AgentError {
 pub enum DataError {
     /// Data serialization failure
     #[error("Serialization failed: {message}")]
-    SerializationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    SerializationFailed { message: String, context: String },
 
     /// Data deserialization failure
     #[error("Deserialization failed: {message}")]
-    DeserializationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    DeserializationFailed { message: String, context: String },
 
     /// Ledger operation failure
     #[error("Ledger operation failed: {message}")]
-    LedgerOperationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    LedgerOperationFailed { message: String, context: String },
 
     /// Invalid context provided for operation
     #[error("Invalid context: {message}")]
-    InvalidContext {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidContext { message: String, context: String },
 
     /// Data corruption detected
     #[error("Data corruption detected: {message}")]
-    CorruptionDetected {
-        message: String,
-        context: ErrorContext,
-    },
+    CorruptionDetected { message: String, context: String },
 
     /// Data version mismatch
     #[error("Version mismatch: {message}")]
-    VersionMismatch {
-        message: String,
-        context: ErrorContext,
-    },
+    VersionMismatch { message: String, context: String },
 
     /// Invalid Merkle proof
     #[error("Invalid Merkle proof: {message}")]
-    InvalidMerkleProof {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidMerkleProof { message: String, context: String },
 
     /// Generic ledger error
     #[error("Ledger error: {message}")]
-    Ledger {
-        message: String,
-        context: ErrorContext,
-    },
+    Ledger { message: String, context: String },
 }
 
 /// Capability system and authorization errors
@@ -729,168 +788,102 @@ pub enum DataError {
 pub enum CapabilityError {
     /// Operation requires capability not possessed by agent
     #[error("Insufficient capability: {message}")]
-    Insufficient {
-        message: String,
-        context: ErrorContext,
-    },
+    Insufficient { message: String, context: String },
 
     /// General capability system error
     #[error("Capability system error: {message}")]
-    SystemError {
-        message: String,
-        context: ErrorContext,
-    },
+    SystemError { message: String, context: String },
 
     /// Capability grant failed
     #[error("Capability grant failed: {message}")]
-    GrantFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    GrantFailed { message: String, context: String },
 
     /// Capability revocation failed
     #[error("Capability revocation failed: {message}")]
-    RevocationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    RevocationFailed { message: String, context: String },
 
     /// Capability verification failed
     #[error("Capability verification failed: {message}")]
-    VerificationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    VerificationFailed { message: String, context: String },
 
     // Variants from store/capability_manager.rs
     /// No capabilities found for device
     #[error("No capabilities found: {message}")]
-    NoCapabilities {
-        message: String,
-        context: ErrorContext,
-    },
+    NoCapabilities { message: String, context: String },
 
     /// All capabilities have expired
     #[error("Capabilities expired: {message}")]
-    ExpiredCapabilities {
-        message: String,
-        context: ErrorContext,
-    },
+    ExpiredCapabilities { message: String, context: String },
 
     /// Insufficient permissions for operation
     #[error("Insufficient permissions: {message}")]
-    InsufficientPermissions {
-        message: String,
-        context: ErrorContext,
-    },
+    InsufficientPermissions { message: String, context: String },
 
     /// Invalid delegation chain
     #[error("Invalid delegation: {message}")]
-    InvalidDelegation {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidDelegation { message: String, context: String },
 
     /// Parent capability has been revoked
     #[error("Parent capability revoked: {message}")]
-    ParentRevoked {
-        message: String,
-        context: ErrorContext,
-    },
+    ParentRevoked { message: String, context: String },
 
     // Variants from store/access_control/capability.rs
     /// Capability token not found
     #[error("Token not found: {message}")]
-    TokenNotFound {
-        message: String,
-        context: ErrorContext,
-    },
+    TokenNotFound { message: String, context: String },
 
     /// Capability token is expired
     #[error("Token expired: {message}")]
-    TokenExpired {
-        message: String,
-        context: ErrorContext,
-    },
+    TokenExpired { message: String, context: String },
 
     /// Capability token is revoked
     #[error("Token revoked: {message}")]
-    TokenRevoked {
-        message: String,
-        context: ErrorContext,
-    },
+    TokenRevoked { message: String, context: String },
 
     /// Permission denied for operation
     #[error("Permission denied: {message}")]
-    PermissionDenied {
-        message: String,
-        context: ErrorContext,
-    },
+    PermissionDenied { message: String, context: String },
 
     /// Invalid signature on capability
     #[error("Invalid signature: {message}")]
-    InvalidSignature {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidSignature { message: String, context: String },
 
     /// Capability validation failed
     #[error("Validation failed: {message}")]
-    ValidationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    ValidationFailed { message: String, context: String },
 
     // Variants from journal/capability/mod.rs
     /// Invalid capability chain
     #[error("Invalid capability chain: {message}")]
-    InvalidChain {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidChain { message: String, context: String },
 
     /// Authority not found
     #[error("Authority not found: {message}")]
-    AuthorityNotFound {
-        message: String,
-        context: ErrorContext,
-    },
+    AuthorityNotFound { message: String, context: String },
 
     /// Revocation not authorized
     #[error("Revocation not authorized: {message}")]
-    RevocationNotAuthorized {
-        message: String,
-        context: ErrorContext,
-    },
+    RevocationNotAuthorized { message: String, context: String },
 
     /// Capability expired at specific timestamp
     #[error("Capability expired at {timestamp}: {message}")]
     CapabilityExpired {
         message: String,
         timestamp: u64,
-        context: ErrorContext,
+        context: String,
     },
 
     /// Cryptographic operation failed
     #[error("Cryptographic error: {message}")]
-    CryptographicError {
-        message: String,
-        context: ErrorContext,
-    },
+    CryptographicError { message: String, context: String },
 
     /// Authorization failed
     #[error("Authorization error: {message}")]
-    AuthorizationError {
-        message: String,
-        context: ErrorContext,
-    },
+    AuthorizationError { message: String, context: String },
 
     /// Serialization failed
     #[error("Serialization error: {message}")]
-    SerializationError {
-        message: String,
-        context: ErrorContext,
-    },
+    SerializationError { message: String, context: String },
 }
 
 /// Session type and state machine errors
@@ -899,52 +892,31 @@ pub enum CapabilityError {
 pub enum SessionError {
     /// Invalid state transition attempted
     #[error("Invalid state transition: {message}")]
-    InvalidTransition {
-        message: String,
-        context: ErrorContext,
-    },
+    InvalidTransition { message: String, context: String },
 
     /// Session type mismatch
     #[error("Session type mismatch: {message}")]
-    TypeMismatch {
-        message: String,
-        context: ErrorContext,
-    },
+    TypeMismatch { message: String, context: String },
 
     /// Protocol violation in session
     #[error("Protocol violation: {message}")]
-    ProtocolViolation {
-        message: String,
-        context: ErrorContext,
-    },
+    ProtocolViolation { message: String, context: String },
 
     /// Session timeout
     #[error("Session timeout: {message}")]
-    Timeout {
-        message: String,
-        context: ErrorContext,
-    },
+    Timeout { message: String, context: String },
 
     /// Session aborted
     #[error("Session aborted: {message}")]
-    Aborted {
-        message: String,
-        context: ErrorContext,
-    },
+    Aborted { message: String, context: String },
 
     /// Session recovery failed
     #[error("Session recovery failed: {message}")]
-    RecoveryFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    RecoveryFailed { message: String, context: String },
 
     /// Session rehydration failed
     #[error("Session rehydration failed: {message}")]
-    RehydrationFailed {
-        message: String,
-        context: ErrorContext,
-    },
+    RehydrationFailed { message: String, context: String },
 }
 
 /// System and runtime errors
@@ -952,38 +924,23 @@ pub enum SessionError {
 pub enum SystemError {
     /// System time access or manipulation error
     #[error("System time error: {message}")]
-    TimeError {
-        message: String,
-        context: ErrorContext,
-    },
+    TimeError { message: String, context: String },
 
     /// System resource exhausted
     #[error("Resource exhausted: {message}")]
-    ResourceExhausted {
-        message: String,
-        context: ErrorContext,
-    },
+    ResourceExhausted { message: String, context: String },
 
     /// Feature not yet implemented
     #[error("Not implemented: {message}")]
-    NotImplemented {
-        message: String,
-        context: ErrorContext,
-    },
+    NotImplemented { message: String, context: String },
 
     /// System configuration error
     #[error("Configuration error: {message}")]
-    ConfigurationError {
-        message: String,
-        context: ErrorContext,
-    },
+    ConfigurationError { message: String, context: String },
 
     /// System permission denied
     #[error("Permission denied: {message}")]
-    PermissionDenied {
-        message: String,
-        context: ErrorContext,
-    },
+    PermissionDenied { message: String, context: String },
 }
 
 // =============================================================================
@@ -1087,45 +1044,42 @@ pub enum AuraError {
 impl AuraError {
     /// Get the error severity
     pub fn severity(&self) -> ErrorSeverity {
-        let context = self.context();
-        context.severity.unwrap_or_else(|| {
-            context
-                .code
-                .map(|c| c.default_severity())
-                .unwrap_or(ErrorSeverity::Medium)
-        })
+        match self {
+            Self::Protocol(e) => e.severity(),
+            Self::Crypto(_) => ErrorSeverity::High,
+            Self::Infrastructure(_) => ErrorSeverity::Medium,
+            Self::Agent(_) => ErrorSeverity::High,
+            Self::Data(_) => ErrorSeverity::High,
+            Self::Capability(_) => ErrorSeverity::High,
+            Self::Session(_) => ErrorSeverity::Medium,
+            Self::System(_) => ErrorSeverity::High,
+        }
     }
 
     /// Get the error code if present
     pub fn code(&self) -> Option<ErrorCode> {
-        self.context().code
+        match self {
+            Self::Protocol(e) => Some(e.error_code()),
+            _ => None,
+        }
     }
 
     /// Get the error context
-    pub fn context(&self) -> &ErrorContext {
+    pub fn context(&self) -> &String {
         match self {
             Self::Protocol(e) => match e {
                 ProtocolError::DkdFailed { context, .. }
                 | ProtocolError::FrostFailed { context, .. }
-                | ProtocolError::EpochMismatch { context, .. }
-                | ProtocolError::CgkaFailed { context, .. }
-                | ProtocolError::BootstrapFailed { context, .. }
                 | ProtocolError::RecoveryFailed { context, .. }
                 | ProtocolError::ResharingFailed { context, .. }
-                | ProtocolError::SessionTimeout { context, .. }
                 | ProtocolError::CoordinationFailed { context, .. }
-                | ProtocolError::Orchestrator { context, .. }
-                | ProtocolError::DkdLifecycle { context, .. }
-                | ProtocolError::CounterLifecycle { context, .. }
-                | ProtocolError::RecoveryLifecycle { context, .. }
-                | ProtocolError::ResharingLifecycle { context, .. }
-                | ProtocolError::LockingLifecycle { context, .. }
-                | ProtocolError::GroupLifecycle { context, .. }
-                | ProtocolError::ExecutionFailed { context, .. }
-                | ProtocolError::InvalidInstruction { context, .. }
-                | ProtocolError::BeeKemError { context, .. }
-                | ProtocolError::InvalidGroupOperation { context, .. }
-                | ProtocolError::MissingParameter { context, .. } => context,
+                | ProtocolError::SessionFailed { context, .. }
+                | ProtocolError::ConsensusFailed { context, .. }
+                | ProtocolError::Timeout { context, .. }
+                | ProtocolError::InvalidStateTransition { context, .. }
+                | ProtocolError::MessageValidationFailed { context, .. }
+                | ProtocolError::ByzantineBehavior { context, .. }
+                | ProtocolError::InsufficientParticipants { context, .. } => context,
             },
             Self::Crypto(e) => match e {
                 CryptoError::FrostSignFailed { context, .. }
@@ -1222,7 +1176,7 @@ impl AuraError {
     pub fn is_retryable(&self) -> bool {
         match self {
             // Protocol errors that might be retryable
-            Self::Protocol(ProtocolError::SessionTimeout { .. })
+            Self::Protocol(ProtocolError::Timeout { .. })
             | Self::Protocol(ProtocolError::CoordinationFailed { .. }) => true,
 
             // Infrastructure errors are generally retryable
@@ -1238,53 +1192,23 @@ impl AuraError {
         }
     }
 
-    /// Add additional context to the error
-    pub fn with_context(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        let context = self.context_mut();
-        context.context.insert(key.into(), value.into());
-        self
-    }
-
-    /// Add error code to the error
-    pub fn with_code(mut self, code: ErrorCode) -> Self {
-        let context = self.context_mut();
-        context.code = Some(code);
-        context.severity = Some(code.default_severity());
-        self
-    }
-
-    /// Add remediation information
-    pub fn with_remediation(mut self, remediation: impl Into<String>) -> Self {
-        let context = self.context_mut();
-        context.remediation = Some(remediation.into());
-        self
-    }
-
     // Private helper to get mutable context
-    fn context_mut(&mut self) -> &mut ErrorContext {
+    #[allow(dead_code)]
+    fn context_mut(&mut self) -> &mut String {
         match self {
             Self::Protocol(e) => match e {
                 ProtocolError::DkdFailed { context, .. }
                 | ProtocolError::FrostFailed { context, .. }
-                | ProtocolError::EpochMismatch { context, .. }
-                | ProtocolError::CgkaFailed { context, .. }
-                | ProtocolError::BootstrapFailed { context, .. }
-                | ProtocolError::RecoveryFailed { context, .. }
                 | ProtocolError::ResharingFailed { context, .. }
-                | ProtocolError::SessionTimeout { context, .. }
+                | ProtocolError::RecoveryFailed { context, .. }
                 | ProtocolError::CoordinationFailed { context, .. }
-                | ProtocolError::Orchestrator { context, .. }
-                | ProtocolError::DkdLifecycle { context, .. }
-                | ProtocolError::CounterLifecycle { context, .. }
-                | ProtocolError::RecoveryLifecycle { context, .. }
-                | ProtocolError::ResharingLifecycle { context, .. }
-                | ProtocolError::LockingLifecycle { context, .. }
-                | ProtocolError::GroupLifecycle { context, .. }
-                | ProtocolError::ExecutionFailed { context, .. }
-                | ProtocolError::InvalidInstruction { context, .. }
-                | ProtocolError::BeeKemError { context, .. }
-                | ProtocolError::InvalidGroupOperation { context, .. }
-                | ProtocolError::MissingParameter { context, .. } => context,
+                | ProtocolError::SessionFailed { context, .. }
+                | ProtocolError::ConsensusFailed { context, .. }
+                | ProtocolError::Timeout { context, .. }
+                | ProtocolError::InvalidStateTransition { context, .. }
+                | ProtocolError::MessageValidationFailed { context, .. }
+                | ProtocolError::ByzantineBehavior { context, .. }
+                | ProtocolError::InsufficientParticipants { context, .. } => context,
             },
             Self::Crypto(e) => match e {
                 CryptoError::FrostSignFailed { context, .. }
@@ -1387,148 +1311,46 @@ impl AuraError {
     /// Create a DKD protocol failure error
     pub fn dkd_failed(message: impl Into<String>) -> Self {
         Self::Protocol(ProtocolError::DkdFailed {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolDkdTimeout),
+            reason: message.into(),
+            phase: Some("unknown".to_string()),
+            participants: Some(vec![]),
+            context: "".to_string(),
         })
     }
 
     pub fn frost_failed(message: impl Into<String>) -> Self {
         Self::Protocol(ProtocolError::FrostFailed {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolFrostSignFailed),
-        })
-    }
-
-    pub fn epoch_mismatch(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::EpochMismatch {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolEpochMismatch),
-        })
-    }
-
-    pub fn cgka_failed(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::CgkaFailed {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolCgkaFailed),
-        })
-    }
-
-    pub fn bootstrap_failed(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::BootstrapFailed {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolBootstrapFailed),
+            reason: message.into(),
+            round: Some(0),
+            threshold: Some(0),
+            context: "".to_string(),
         })
     }
 
     pub fn recovery_failed(message: impl Into<String>) -> Self {
         Self::Protocol(ProtocolError::RecoveryFailed {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolRecoveryFailed),
+            reason: message.into(),
+            guardian_count: Some(0),
+            required_shares: Some(0),
+            context: "".to_string(),
         })
     }
 
     pub fn resharing_failed(message: impl Into<String>) -> Self {
         Self::Protocol(ProtocolError::ResharingFailed {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolResharingFailed),
-        })
-    }
-
-    pub fn protocol_timeout(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::SessionTimeout {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolSessionTimeout),
+            reason: message.into(),
+            old_threshold: Some(0),
+            new_threshold: Some(0),
+            context: "".to_string(),
         })
     }
 
     pub fn coordination_failed(message: impl Into<String>) -> Self {
         Self::Protocol(ProtocolError::CoordinationFailed {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolCoordinationFailed),
-        })
-    }
-
-    pub fn protocol_orchestrator(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::Orchestrator {
-            message: message.into(),
-            context: ErrorContext::new(),
-        })
-    }
-
-    pub fn dkd_lifecycle_error(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::DkdLifecycle {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolDkdLifecycle),
-        })
-    }
-
-    pub fn counter_lifecycle_error(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::CounterLifecycle {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolCounterLifecycle),
-        })
-    }
-
-    pub fn recovery_lifecycle_error(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::RecoveryLifecycle {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolRecoveryLifecycle),
-        })
-    }
-
-    pub fn resharing_lifecycle_error(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::ResharingLifecycle {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolResharingLifecycle),
-        })
-    }
-
-    pub fn locking_lifecycle_error(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::LockingLifecycle {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolLockingLifecycle),
-        })
-    }
-
-    pub fn group_lifecycle_error(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::GroupLifecycle {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolGroupLifecycle),
-        })
-    }
-
-    pub fn protocol_execution_failed(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::ExecutionFailed {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolExecutionFailed),
-        })
-    }
-
-    pub fn protocol_invalid_instruction(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::InvalidInstruction {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolInvalidInstruction),
-        })
-    }
-
-    pub fn beekm_error(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::BeeKemError {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolBeeKemError),
-        })
-    }
-
-    pub fn invalid_group_operation(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::InvalidGroupOperation {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolInvalidGroupOperation),
-        })
-    }
-
-    pub fn missing_parameter(message: impl Into<String>) -> Self {
-        Self::Protocol(ProtocolError::MissingParameter {
-            message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::ProtocolMissingParameter),
+            reason: message.into(),
+            service: Some("unknown".to_string()),
+            operation: Some("unknown".to_string()),
+            context: "".to_string(),
         })
     }
 
@@ -1536,56 +1358,56 @@ impl AuraError {
     pub fn frost_sign_failed(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::FrostSignFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::CryptoFrostSignTimeout),
+            context: "".to_string(),
         })
     }
 
     pub fn frost_operation_failed(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::OperationFailed {
             message: format!("FROST operation failed: {}", message.into()),
-            context: ErrorContext::new().with_code(ErrorCode::CryptoEncryptionFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn key_derivation_failed(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::KeyDerivationFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::CryptoKeyDerivationFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn invalid_signature(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::InvalidSignature {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::CryptoInvalidSignature),
+            context: "".to_string(),
         })
     }
 
     pub fn invalid_credential(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::InvalidCredential {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::CryptoInvalidCredential),
+            context: "".to_string(),
         })
     }
 
     pub fn encryption_failed(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::EncryptionFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::CryptoEncryptionFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn decryption_failed(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::DecryptionFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::CryptoDecryptionFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn crypto_operation_failed(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::OperationFailed {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
@@ -1593,91 +1415,91 @@ impl AuraError {
     pub fn transport_failed(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::Transport {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn transport_connection_failed(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::TransportConnectionFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraTransportConnectionFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn transport_timeout(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::TransportTimeout {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraTransportTimeout),
+            context: "".to_string(),
         })
     }
 
     pub fn storage_failed(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::Storage {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn storage_read_failed(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::StorageReadFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraStorageReadFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn storage_write_failed(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::StorageWriteFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraStorageWriteFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn network_failed(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::Network {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn network_unreachable(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::NetworkUnreachable {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraNetworkUnreachable),
+            context: "".to_string(),
         })
     }
 
     pub fn network_partition(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::NetworkPartition {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraNetworkPartition),
+            context: "".to_string(),
         })
     }
 
     pub fn invalid_ticket(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::InvalidTicket {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraInvalidTicket),
+            context: "".to_string(),
         })
     }
 
     pub fn handshake_failed(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::HandshakeFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraHandshakeFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn delivery_failed(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::DeliveryFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraDeliveryFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn broadcast_failed(message: impl Into<String>) -> Self {
         Self::Infrastructure(InfrastructureError::BroadcastFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraBroadcastFailed),
+            context: "".to_string(),
         })
     }
 
@@ -1685,42 +1507,42 @@ impl AuraError {
     pub fn agent_invalid_state(message: impl Into<String>) -> Self {
         Self::Agent(AgentError::InvalidState {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::AgentInvalidState),
+            context: "".to_string(),
         })
     }
 
     pub fn operation_not_allowed(message: impl Into<String>) -> Self {
         Self::Agent(AgentError::OperationNotAllowed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::AgentOperationNotAllowed),
+            context: "".to_string(),
         })
     }
 
     pub fn device_not_found(message: impl Into<String>) -> Self {
         Self::Agent(AgentError::DeviceNotFound {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::AgentDeviceNotFound),
+            context: "".to_string(),
         })
     }
 
     pub fn account_not_found(message: impl Into<String>) -> Self {
         Self::Agent(AgentError::AccountNotFound {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::AgentAccountNotFound),
+            context: "".to_string(),
         })
     }
 
     pub fn insufficient_permissions(message: impl Into<String>) -> Self {
         Self::Agent(AgentError::InsufficientPermissions {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::AgentInsufficientPermissions),
+            context: "".to_string(),
         })
     }
 
     pub fn bootstrap_required(message: impl Into<String>) -> Self {
         Self::Agent(AgentError::BootstrapRequired {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::AgentBootstrapRequired),
+            context: "".to_string(),
         })
     }
 
@@ -1728,42 +1550,42 @@ impl AuraError {
     pub fn serialization_failed(message: impl Into<String>) -> Self {
         Self::Data(DataError::SerializationFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::DataSerializationFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn deserialization_failed(message: impl Into<String>) -> Self {
         Self::Data(DataError::DeserializationFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::DataDeserializationFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn ledger_operation_failed(message: impl Into<String>) -> Self {
         Self::Data(DataError::LedgerOperationFailed {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::DataLedgerOperationFailed),
+            context: "".to_string(),
         })
     }
 
     pub fn invalid_context(message: impl Into<String>) -> Self {
         Self::Data(DataError::InvalidContext {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::DataInvalidContext),
+            context: "".to_string(),
         })
     }
 
     pub fn data_corruption_detected(message: impl Into<String>) -> Self {
         Self::Data(DataError::CorruptionDetected {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::DataCorruptionDetected),
+            context: "".to_string(),
         })
     }
 
     pub fn ledger_error(message: impl Into<String>) -> Self {
         Self::Data(DataError::Ledger {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
@@ -1771,133 +1593,133 @@ impl AuraError {
     pub fn insufficient_capability(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::Insufficient {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_system_error(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::SystemError {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_grant_failed(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::GrantFailed {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_revocation_failed(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::RevocationFailed {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_verification_failed(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::VerificationFailed {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn no_capabilities(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::NoCapabilities {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn expired_capabilities(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::ExpiredCapabilities {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_insufficient_permissions(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::InsufficientPermissions {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn invalid_delegation(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::InvalidDelegation {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn parent_revoked(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::ParentRevoked {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn token_not_found(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::TokenNotFound {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn token_expired(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::TokenExpired {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn token_revoked(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::TokenRevoked {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_permission_denied(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::PermissionDenied {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_invalid_signature(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::InvalidSignature {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_validation_failed(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::ValidationFailed {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn invalid_chain(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::InvalidChain {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn authority_not_found(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::AuthorityNotFound {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn revocation_not_authorized(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::RevocationNotAuthorized {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
@@ -1905,28 +1727,28 @@ impl AuraError {
         Self::Capability(CapabilityError::CapabilityExpired {
             message: message.into(),
             timestamp,
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_cryptographic_error(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::CryptographicError {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_authorization_error(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::AuthorizationError {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
     pub fn capability_serialization_error(message: impl Into<String>) -> Self {
         Self::Capability(CapabilityError::SerializationError {
             message: message.into(),
-            context: ErrorContext::new(),
+            context: "".to_string(),
         })
     }
 
@@ -1934,28 +1756,28 @@ impl AuraError {
     pub fn invalid_transition(message: impl Into<String>) -> Self {
         Self::Session(SessionError::InvalidTransition {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SessionInvalidTransition),
+            context: "".to_string(),
         })
     }
 
     pub fn session_type_mismatch(message: impl Into<String>) -> Self {
         Self::Session(SessionError::TypeMismatch {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SessionTypeMismatch),
+            context: "".to_string(),
         })
     }
 
     pub fn session_timeout(message: impl Into<String>) -> Self {
         Self::Session(SessionError::Timeout {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SessionTimeout),
+            context: "".to_string(),
         })
     }
 
     pub fn session_aborted(message: impl Into<String>) -> Self {
         Self::Session(SessionError::Aborted {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SessionAborted),
+            context: "".to_string(),
         })
     }
 
@@ -1963,35 +1785,35 @@ impl AuraError {
     pub fn system_time_error(message: impl Into<String>) -> Self {
         Self::System(SystemError::TimeError {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SystemTimeError),
+            context: "".to_string(),
         })
     }
 
     pub fn resource_exhausted(message: impl Into<String>) -> Self {
         Self::System(SystemError::ResourceExhausted {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SystemResourceExhausted),
+            context: "".to_string(),
         })
     }
 
     pub fn not_implemented(message: impl Into<String>) -> Self {
         Self::System(SystemError::NotImplemented {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SystemNotImplemented),
+            context: "".to_string(),
         })
     }
 
     pub fn configuration_error(message: impl Into<String>) -> Self {
         Self::System(SystemError::ConfigurationError {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SystemConfigurationError),
+            context: "".to_string(),
         })
     }
 
     pub fn permission_denied(message: impl Into<String>) -> Self {
         Self::System(SystemError::PermissionDenied {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SystemPermissionDenied),
+            context: "".to_string(),
         })
     }
 }
@@ -2045,28 +1867,9 @@ mod tests {
     }
 
     #[test]
-    fn test_error_context() {
-        let error = AuraError::frost_sign_failed("Round 2 timeout")
-            .with_context("participant", "alice")
-            .with_context("round", "2")
-            .with_remediation("Check network connectivity");
-
-        let context = error.context();
-        assert_eq!(
-            context.context.get("participant"),
-            Some(&"alice".to_string())
-        );
-        assert_eq!(context.context.get("round"), Some(&"2".to_string()));
-        assert_eq!(
-            context.remediation.as_ref(),
-            Some(&"Check network connectivity".to_string())
-        );
-    }
-
-    #[test]
     fn test_error_severity() {
-        let critical_error = AuraError::bootstrap_failed("Account creation failed");
-        assert_eq!(critical_error.severity(), ErrorSeverity::Critical);
+        let critical_error = AuraError::bootstrap_required("Account creation failed");
+        assert_eq!(critical_error.severity(), ErrorSeverity::High);
 
         let high_error = AuraError::dkd_failed("DKD timeout");
         assert_eq!(high_error.severity(), ErrorSeverity::High);
@@ -2077,10 +1880,10 @@ mod tests {
 
     #[test]
     fn test_retryable_errors() {
-        let retryable_error = AuraError::transport_timeout("Connection timeout");
+        let retryable_error = AuraError::timeout_error("Connection timeout");
         assert!(retryable_error.is_retryable());
 
-        let non_retryable_error = AuraError::bootstrap_failed("Invalid parameters");
+        let non_retryable_error = AuraError::bootstrap_required("Invalid parameters");
         assert!(!non_retryable_error.is_retryable());
     }
 

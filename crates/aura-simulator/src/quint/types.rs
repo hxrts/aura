@@ -3,26 +3,26 @@
 //! Data structures for representing Quint formal specifications, invariants,
 //! and temporal properties within the Aura simulation framework.
 
-use std::path::PathBuf;
-use std::collections::HashMap;
-use thiserror::Error;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use thiserror::Error;
 
 /// Errors that can occur during Quint operations
 #[derive(Error, Debug, Clone)]
 pub enum QuintError {
     #[error("Parse error: {0}")]
     ParseError(String),
-    
+
     #[error("Invalid property expression: {0}")]
     InvalidProperty(String),
-    
+
     #[error("Type checking error: {0}")]
     TypeCheck(String),
-    
+
     #[error("Evaluation error: {0}")]
     Evaluation(String),
-    
+
     #[error("Unsupported feature: {0}")]
     UnsupportedFeature(String),
 }
@@ -187,7 +187,7 @@ impl ValidationResult {
             total_time_ms: 0,
         }
     }
-    
+
     /// Add a property evaluation result
     pub fn add_result(&mut self, result: PropertyEvaluationResult) {
         self.total_properties += 1;
@@ -199,12 +199,12 @@ impl ValidationResult {
         self.total_time_ms += result.evaluation_time_ms;
         self.individual_results.push(result);
     }
-    
+
     /// Check if all properties are satisfied
     pub fn all_satisfied(&self) -> bool {
         self.violated_properties == 0 && self.total_properties > 0
     }
-    
+
     /// Get satisfaction rate as a percentage
     pub fn satisfaction_rate(&self) -> f64 {
         if self.total_properties == 0 {
@@ -212,7 +212,7 @@ impl ValidationResult {
         }
         (self.satisfied_properties as f64 / self.total_properties as f64) * 100.0
     }
-    
+
     /// Get list of violated property names
     pub fn violated_property_names(&self) -> Vec<String> {
         self.individual_results
@@ -255,13 +255,13 @@ impl Default for QuintEvaluationConfig {
 pub trait SimulationState {
     /// Get the value of a state variable by name
     fn get_variable(&self, name: &str) -> Option<QuintValue>;
-    
+
     /// Get all state variables as a map
     fn get_all_variables(&self) -> std::collections::HashMap<String, QuintValue>;
-    
+
     /// Get the current time/step in the simulation
     fn get_current_time(&self) -> u64;
-    
+
     /// Get simulation metadata (participant count, etc.)
     fn get_metadata(&self) -> std::collections::HashMap<String, QuintValue>;
 }
@@ -356,7 +356,7 @@ impl QuintValue {
             _ => None,
         }
     }
-    
+
     /// Convert to integer if possible
     pub fn as_int(&self) -> Option<i64> {
         match self {
@@ -364,7 +364,7 @@ impl QuintValue {
             _ => None,
         }
     }
-    
+
     /// Convert to string if possible
     pub fn as_string(&self) -> Option<&str> {
         match self {
@@ -372,7 +372,7 @@ impl QuintValue {
             _ => None,
         }
     }
-    
+
     /// Get type name as string
     pub fn type_name(&self) -> &'static str {
         match self {

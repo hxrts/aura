@@ -256,4 +256,3 @@ impl From<ContentSize> for u64 {
 }
 
 // Add hex dependency for chunk ID hex encoding
-use hex;

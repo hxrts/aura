@@ -172,7 +172,7 @@ impl<T> SimulationResultExt<T> for SimulationResult<T> {
             } else {
                 format!("{}: {}", self.message, self.errors.join(", "))
             };
-            Err(crate::AuraError::protocol_execution_failed(error_msg))
+            Err(crate::AuraError::coordination_failed(error_msg))
         }
     }
 }

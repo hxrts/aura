@@ -133,8 +133,12 @@ pub type SessionEpoch = Epoch;
 /// Represents the current state of a protocol session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SessionStatus {
+    /// Session is initializing (before active execution)
+    Initializing,
     /// Session is currently active and executing
     Active,
+    /// Session is waiting for responses from participants
+    Waiting,
     /// Session completed successfully
     Completed,
     /// Session failed with an error
@@ -143,16 +147,21 @@ pub enum SessionStatus {
     Expired,
     /// Session timed out during execution
     TimedOut,
+    /// Session was cancelled
+    Cancelled,
 }
 
 impl fmt::Display for SessionStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            SessionStatus::Initializing => write!(f, "initializing"),
             SessionStatus::Active => write!(f, "active"),
+            SessionStatus::Waiting => write!(f, "waiting"),
             SessionStatus::Completed => write!(f, "completed"),
             SessionStatus::Failed => write!(f, "failed"),
             SessionStatus::Expired => write!(f, "expired"),
             SessionStatus::TimedOut => write!(f, "timed-out"),
+            SessionStatus::Cancelled => write!(f, "cancelled"),
         }
     }
 }

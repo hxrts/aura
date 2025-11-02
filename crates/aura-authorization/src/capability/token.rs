@@ -1,14 +1,21 @@
 //! Capability tokens for access control
+//!
+//! This module provides authorization-specific capability tokens with rich metadata
+//! for enforcement and delegation. These are built on top of the canonical
+//! CapabilityToken in aura-types, adding authorization-layer concerns.
 
 use crate::{Action, AuthorizationError, Resource, Result, Subject};
+use aura_types::CapabilityId;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// A capability token that grants specific permissions to a subject
+///
+/// This is an authorization-layer wrapper around the canonical aura-types::CapabilityToken,
+/// providing authorization-specific features like delegation depth, conditions, and issuer signatures.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapabilityToken {
     /// Unique identifier for this capability
-    pub id: Uuid,
+    pub id: CapabilityId,
 
     /// Subject this capability is granted to
     pub subject: Subject,
@@ -56,7 +63,9 @@ pub enum CapabilityCondition {
     UsageLimit { max_uses: u32, current_uses: u32 },
 
     /// Only valid when combined with other capabilities
-    RequiresCombination { required_capabilities: Vec<Uuid> },
+    RequiresCombination {
+        required_capabilities: Vec<CapabilityId>,
+    },
 
     /// Custom condition with arbitrary data
     Custom {
@@ -76,7 +85,7 @@ impl CapabilityToken {
         delegation_depth: u8,
     ) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: CapabilityId::random(),
             subject,
             resource,
             actions,
@@ -209,7 +218,7 @@ impl CapabilityToken {
 /// Capability token without signature for signing/verification
 #[derive(Serialize)]
 struct UnsignedCapabilityToken {
-    pub id: Uuid,
+    pub id: CapabilityId,
     pub subject: Subject,
     pub resource: Resource,
     pub actions: Vec<Action>,
@@ -222,6 +231,7 @@ struct UnsignedCapabilityToken {
 }
 
 /// Get current timestamp (placeholder implementation)
+#[allow(clippy::disallowed_methods)]
 fn current_timestamp() -> u64 {
     // In a real implementation, this would use proper time
     std::time::SystemTime::now()

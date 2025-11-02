@@ -3,8 +3,8 @@
 //! Parses Quint CLI output and AST structures to extract meaningful
 //! property and specification information for the simulation framework.
 
-use crate::quint::cli_runner::{QuintParseOutput, QuintModule, QuintDefinition};
-use crate::quint::types::{QuintSpec, QuintInvariant, QuintTemporalProperty};
+use crate::quint::cli_runner::{QuintDefinition, QuintModule, QuintParseOutput};
+use crate::quint::types::{QuintInvariant, QuintSpec, QuintTemporalProperty};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -73,14 +73,18 @@ impl QuintAstParser {
     }
 
     /// Parse a complete Quint specification from CLI output
-    pub fn parse_specification(&self, parse_output: QuintParseOutput, spec_name: String) -> AstParseResult<QuintSpec> {
+    pub fn parse_specification(
+        &self,
+        parse_output: QuintParseOutput,
+        spec_name: String,
+    ) -> AstParseResult<QuintSpec> {
         let mut invariants = Vec::new();
         let mut temporal_properties = Vec::new();
         let mut modules = Vec::new();
 
         for module in parse_output.modules {
             let parsed_module = self.parse_module(&module)?;
-            
+
             // Extract properties from the module
             for def in &parsed_module.definitions {
                 if def.is_property {
@@ -88,7 +92,9 @@ impl QuintAstParser {
                         Some(PropertyType::Invariant) => {
                             invariants.push(self.definition_to_invariant(def)?);
                         }
-                        Some(PropertyType::Always) | Some(PropertyType::Eventually) | Some(PropertyType::Until) => {
+                        Some(PropertyType::Always)
+                        | Some(PropertyType::Eventually)
+                        | Some(PropertyType::Until) => {
                             temporal_properties.push(self.definition_to_temporal_property(def)?);
                         }
                         _ => {
@@ -133,9 +139,16 @@ impl QuintAstParser {
     }
 
     /// Parse a single definition and classify it
-    fn parse_definition(&self, definition: &QuintDefinition) -> AstParseResult<ParsedQuintDefinition> {
+    fn parse_definition(
+        &self,
+        definition: &QuintDefinition,
+    ) -> AstParseResult<ParsedQuintDefinition> {
         match definition {
-            QuintDefinition::Definition { name, def_type, body } => {
+            QuintDefinition::Definition {
+                name,
+                def_type,
+                body,
+            } => {
                 let expression = body.clone().unwrap_or_default();
                 let (is_property, property_type) = self.classify_property(name, &expression);
                 let annotations = self.extract_annotations(&expression);
@@ -151,7 +164,11 @@ impl QuintAstParser {
                     property_type,
                 })
             }
-            QuintDefinition::Value { name, val_type, expr } => {
+            QuintDefinition::Value {
+                name,
+                val_type,
+                expr,
+            } => {
                 let (is_property, property_type) = self.classify_property(name, expr);
                 let annotations = self.extract_annotations(expr);
 
@@ -167,7 +184,9 @@ impl QuintAstParser {
                 })
             }
             QuintDefinition::Assumption { name, expr } => {
-                let assumption_name = name.clone().unwrap_or_else(|| "unnamed_assumption".to_string());
+                let assumption_name = name
+                    .clone()
+                    .unwrap_or_else(|| "unnamed_assumption".to_string());
                 let annotations = self.extract_annotations(expr);
 
                 Ok(ParsedQuintDefinition {
@@ -181,18 +200,16 @@ impl QuintAstParser {
                     property_type: Some(PropertyType::Invariant),
                 })
             }
-            QuintDefinition::Import { name, from } => {
-                Ok(ParsedQuintDefinition {
-                    name: name.clone(),
-                    kind: "import".to_string(),
-                    expression: format!("from {}", from),
-                    return_type: None,
-                    parameters: vec![],
-                    annotations: HashMap::new(),
-                    is_property: false,
-                    property_type: None,
-                })
-            }
+            QuintDefinition::Import { name, from } => Ok(ParsedQuintDefinition {
+                name: name.clone(),
+                kind: "import".to_string(),
+                expression: format!("from {}", from),
+                return_type: None,
+                parameters: vec![],
+                annotations: HashMap::new(),
+                is_property: false,
+                property_type: None,
+            }),
         }
     }
 
@@ -202,7 +219,7 @@ impl QuintAstParser {
         if name.starts_with("inv_") || name.contains("invariant") {
             return (true, Some(PropertyType::Invariant));
         }
-        
+
         if name.starts_with("safety_") || name.contains("safety") {
             return (true, Some(PropertyType::Safety));
         }
@@ -225,9 +242,12 @@ impl QuintAstParser {
         }
 
         // Check for boolean-valued expressions that could be invariants
-        if expression.contains("==") || expression.contains("!=") || 
-           expression.contains("and") || expression.contains("or") ||
-           expression.contains("implies") {
+        if expression.contains("==")
+            || expression.contains("!=")
+            || expression.contains("and")
+            || expression.contains("or")
+            || expression.contains("implies")
+        {
             return (true, Some(PropertyType::Invariant));
         }
 
@@ -237,12 +257,12 @@ impl QuintAstParser {
     /// Extract annotations from expression comments
     fn extract_annotations(&self, expression: &str) -> HashMap<String, String> {
         let mut annotations = HashMap::new();
-        
+
         // Look for comments with annotation patterns
         for line in expression.lines() {
             if let Some(comment_start) = line.find("//") {
                 let comment = &line[comment_start + 2..].trim();
-                
+
                 for prefix in &self.annotation_prefixes {
                     if comment.starts_with(prefix) {
                         let annotation_content = comment[prefix.len()..].trim();
@@ -265,7 +285,7 @@ impl QuintAstParser {
     fn extract_parameters(&self, expression: &str) -> Vec<String> {
         // Simple parameter extraction (would be more sophisticated in practice)
         let mut parameters = Vec::new();
-        
+
         // Look for lambda expressions or function definitions
         if let Some(arrow_pos) = expression.find("=>") {
             let param_part = &expression[..arrow_pos];
@@ -283,13 +303,18 @@ impl QuintAstParser {
     }
 
     /// Convert parsed definition to QuintInvariant
-    fn definition_to_invariant(&self, def: &ParsedQuintDefinition) -> AstParseResult<QuintInvariant> {
-        let description = def.annotations
+    fn definition_to_invariant(
+        &self,
+        def: &ParsedQuintDefinition,
+    ) -> AstParseResult<QuintInvariant> {
+        let description = def
+            .annotations
             .get("description")
             .cloned()
             .unwrap_or_else(|| format!("Invariant: {}", def.name));
 
-        let tags = def.annotations
+        let tags = def
+            .annotations
             .get("tags")
             .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
             .unwrap_or_else(|| vec!["auto-extracted".to_string()]);
@@ -305,7 +330,10 @@ impl QuintAstParser {
     }
 
     /// Convert parsed definition to QuintTemporalProperty
-    fn definition_to_temporal_property(&self, def: &ParsedQuintDefinition) -> AstParseResult<QuintTemporalProperty> {
+    fn definition_to_temporal_property(
+        &self,
+        def: &ParsedQuintDefinition,
+    ) -> AstParseResult<QuintTemporalProperty> {
         let property_type = match def.property_type {
             Some(PropertyType::Always) => "Always".to_string(),
             Some(PropertyType::Eventually) => "Eventually".to_string(),
@@ -313,12 +341,14 @@ impl QuintAstParser {
             _ => "Always".to_string(), // Default
         };
 
-        let description = def.annotations
+        let description = def
+            .annotations
             .get("description")
             .cloned()
             .unwrap_or_else(|| format!("Temporal property: {}", def.name));
 
-        let tags = def.annotations
+        let tags = def
+            .annotations
             .get("tags")
             .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
             .unwrap_or_else(|| vec!["auto-extracted".to_string()]);
@@ -345,11 +375,17 @@ pub struct ParsedQuintModule {
 impl ParsedQuintModule {
     /// Get all property definitions from this module
     pub fn get_properties(&self) -> Vec<&ParsedQuintDefinition> {
-        self.definitions.iter().filter(|def| def.is_property).collect()
+        self.definitions
+            .iter()
+            .filter(|def| def.is_property)
+            .collect()
     }
 
     /// Get properties by type
-    pub fn get_properties_by_type(&self, property_type: PropertyType) -> Vec<&ParsedQuintDefinition> {
+    pub fn get_properties_by_type(
+        &self,
+        property_type: PropertyType,
+    ) -> Vec<&ParsedQuintDefinition> {
         self.definitions
             .iter()
             .filter(|def| def.property_type == Some(property_type))

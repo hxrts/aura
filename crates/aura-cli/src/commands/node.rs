@@ -97,13 +97,13 @@ pub async fn handle_node_command(cmd: NodeCommand, config: &crate::config::Confi
 async fn create_integrated_agent(
     config: &crate::config::Config,
 ) -> Result<Arc<dyn aura_agent::Agent>> {
-    use crate::commands::common::create_agent_core;
+    // use crate::commands::common::create_agent_core;
     use aura_agent::{AgentProtocol, BootstrapConfig};
 
     info!("Creating integrated agent for device {}", config.device_id);
 
     // Create agent core
-    let agent_core = create_agent_core(config).await?;
+    // let agent_core = create_agent_core(config).await?;
 
     // Create uninitialized agent protocol
     let uninitialized_agent = AgentProtocol::new(agent_core);

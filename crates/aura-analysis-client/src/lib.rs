@@ -71,20 +71,23 @@ pub struct AnalysisClient {
     violation_analyzer: Option<WasmViolationAnalyzer>,
 }
 
-#[wasm_bindgen]
-impl AnalysisClient {
-    /// Create new analysis client
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> AnalysisClient {
+impl Default for AnalysisClient {
+    fn default() -> Self {
         // Create engine with empty trace data initially
         let empty_trace = Vec::new();
         let engine = AnalysisEngine::new(&empty_trace).unwrap_or_else(|_| {
             // Fallback: create from empty events
-            AnalysisEngine::from_events(wasm_bindgen::JsValue::from(
-                serde_wasm_bindgen::to_value(&Vec::<aura_console_types::TraceEvent>::new())
-                    .unwrap(),
-            ))
-            .unwrap()
+            let empty_events = Vec::<aura_console_types::TraceEvent>::new();
+            let value = serde_wasm_bindgen::to_value(&empty_events)
+                .unwrap_or_else(|_| wasm_bindgen::JsValue::null());
+            AnalysisEngine::from_events(value).unwrap_or_else(|_| {
+                // Create engine with empty trace if parsing fails
+                let empty_trace = Vec::<u8>::new();
+                AnalysisEngine::new(&empty_trace).unwrap_or_else(|_| {
+                    // This should never fail with empty trace, but handle gracefully
+                    panic!("Failed to create empty AnalysisEngine")
+                })
+            })
         });
         let property_monitor = Some(WasmPropertyMonitor::new());
 
@@ -95,6 +98,15 @@ impl AnalysisClient {
             causality_analyzer: None,
             violation_analyzer: Some(WasmViolationAnalyzer::new()),
         }
+    }
+}
+
+#[wasm_bindgen]
+impl AnalysisClient {
+    /// Create new analysis client
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> AnalysisClient {
+        AnalysisClient::default()
     }
 
     /// Connect to analysis server

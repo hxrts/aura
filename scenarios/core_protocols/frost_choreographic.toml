@@ -1,0 +1,216 @@
+# FROST Choreographic Signing Protocol Scenario
+# Demonstrates P2P FROST signing without fixed coordinator
+
+[metadata]
+name = "frost_choreographic_signing"
+description = "Choreographic FROST threshold signing with failure recovery"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["frost", "threshold-signing", "choreography", "p2p", "failure-recovery"]
+
+[setup]
+participants = 5
+threshold = 3
+seed = 12345
+enable_tracing = true
+enable_choreography_recording = true
+
+[simulation]
+use_simulation_handler = true
+record_choreo_events = true
+deterministic_timing = true
+message_delay_ms = 15
+simulate_failures = false  # Can be enabled for failure testing
+
+[network]
+latency_range = [10, 40]
+drop_rate = 0.0
+
+# Pre-setup: Assume key shares are already distributed
+[[phases]]
+name = "initialization"
+description = "Initialize FROST protocol state"
+timeout_seconds = 1
+actions = [
+    { type = "setup_choreography", protocol = "FrostSigningProtocol", participants = ["alice", "bob", "carol", "david", "eve"] },
+    { type = "load_key_shares", threshold = 3 }
+]
+
+[[phases]]
+name = "message_agreement"
+description = "P2P agreement on message to sign"
+timeout_seconds = 3
+actions = [
+    { 
+        type = "run_choreography", 
+        choreography = "commit_reveal", 
+        participants = ["alice", "bob", "carol", "david", "eve"],
+        parameters = {
+            message = "Transaction: Send 100 AURA to 0xABCD..."
+        }
+    }
+]
+
+[[phases]]
+name = "coordinator_selection"
+description = "Select signing coordinator via lottery"
+timeout_seconds = 2
+actions = [
+    { 
+        type = "run_choreography", 
+        choreography = "decentralized_lottery", 
+        participants = ["alice", "bob", "carol", "david", "eve"]
+    }
+]
+
+[[phases]]
+name = "commitment_round"
+description = "All participants broadcast commitments"
+timeout_seconds = 4
+actions = [
+    { 
+        type = "run_choreography", 
+        choreography = "frost_commitment", 
+        participants = ["alice", "bob", "carol", "david", "eve"],
+        parameters = {
+            round = 1,
+            binding_factor_seed = "deterministic_seed"
+        }
+    }
+]
+
+[[phases]]
+name = "signing_round"
+description = "Generate and exchange signature shares"
+timeout_seconds = 5
+actions = [
+    { 
+        type = "run_choreography", 
+        choreography = "frost_signing", 
+        participants = ["alice", "bob", "carol", "david", "eve"],
+        parameters = {
+            required_signers = 3
+        }
+    }
+]
+
+[[phases]]
+name = "aggregation"
+description = "Aggregate signature shares"
+timeout_seconds = 3
+actions = [
+    { 
+        type = "run_choreography", 
+        choreography = "frost_aggregation", 
+        participants = ["alice", "bob", "carol", "david", "eve"]
+    }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify final signature"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "signature_valid", expected = true },
+    { type = "verify_property", property = "threshold_satisfied", expected = true },
+    { type = "verify_property", property = "all_agree_on_signature", expected = true }
+]
+
+# Coordinator failure recovery test
+[[phases]]
+name = "coordinator_failure_simulation"
+description = "Simulate coordinator failure and recovery"
+timeout_seconds = 10
+enabled = false  # Enable for failure testing
+actions = [
+    { type = "inject_failure", participant = "coordinator", failure_type = "timeout" },
+    { type = "wait_ms", duration = 200 },
+    { type = "run_choreography", choreography = "coordinator_failure_recovery", participants = ["alice", "bob", "carol", "david", "eve"] },
+    { type = "verify_property", property = "new_coordinator_elected", expected = true },
+    { type = "verify_property", property = "protocol_completes_after_recovery", expected = true }
+]
+
+[[properties]]
+name = "signature_valid"
+description = "Generated signature is cryptographically valid"
+property_type = "safety"
+
+[[properties]]
+name = "threshold_satisfied"
+description = "At least t participants contributed"
+property_type = "safety"
+
+[[properties]]
+name = "all_agree_on_signature"
+description = "All participants compute same signature"
+property_type = "safety"
+
+[[properties]]
+name = "no_coordinator_bottleneck"
+description = "Protocol progresses without coordinator monopoly"
+property_type = "liveness"
+
+[[properties]]
+name = "byzantine_tolerance"
+description = "Protocol tolerates f < t byzantine participants"
+property_type = "safety"
+
+# Session epoch integration
+[[properties]]
+name = "new_coordinator_elected"
+description = "New coordinator elected after failure"
+property_type = "liveness"
+
+[[properties]]
+name = "protocol_completes_after_recovery"
+description = "Protocol completes successfully after coordinator recovery"
+property_type = "liveness"
+
+# Choreographic invariants
+[[invariants]]
+name = "commitment_before_signing"
+description = "All commitments received before signing shares sent"
+expression = "temporal_ordering(commitment_phase, signing_phase)"
+
+[[invariants]]
+name = "share_threshold"
+description = "At least threshold shares for aggregation"
+expression = "count(signature_shares) >= threshold"
+
+[[invariants]]
+name = "session_epoch_consistency"
+description = "All participants in same session epoch"
+expression = "all_same_epoch"
+
+# Byzantine test scenarios
+[[byzantine_behaviors]]
+name = "malicious_commitment"
+description = "Send different commitments to different participants"
+enabled = false
+participants = ["eve"]
+behavior = "equivocation"
+phase = "commitment_round"
+
+[[byzantine_behaviors]]
+name = "delayed_shares"
+description = "Delay sending signature shares"
+enabled = false
+participants = ["david"]
+behavior = "delay"
+delay_ms = 5000
+phase = "signing_round"
+
+# Time-travel debugging configuration
+[debugging]
+enable_time_travel = true
+checkpoint_interval_ms = 100
+max_checkpoints = 50
+
+# Console visualization
+[visualization]
+highlight_messages = ["commitment", "signature_share", "aggregated_signature"]
+show_coordinator_indicator = true
+animate_lottery = true
+show_byzantine_participants = true
+timeline_grouping = "by_phase"
+export_format = "console_json"

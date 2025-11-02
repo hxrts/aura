@@ -910,3 +910,134 @@ mod tests {
         );
     }
 }
+
+// ========== High-Level FROST Types ==========
+
+/// A threshold share held by a participant
+///
+/// This is a higher-level wrapper around FROST's KeyPackage that includes
+/// additional metadata needed for protocol coordination.
+///
+/// SECURITY: This type contains sensitive cryptographic material.
+/// The FROST KeyPackage is zeroized on drop.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyShare {
+    /// Participant identifier (as u16 to avoid circular dependencies)
+    pub participant_id: u16,
+    /// FROST key package containing the actual secret share
+    pub share: frost::keys::KeyPackage,
+    /// Threshold required for signing
+    pub threshold: u16,
+    /// Total number of participants in the scheme
+    pub total_participants: u16,
+}
+
+impl Drop for KeyShare {
+    fn drop(&mut self) {
+        // Note: FROST's KeyPackage doesn't implement Zeroize directly,
+        // but it contains a SigningShare which does implement Zeroize.
+        // The signing_share() method returns a reference, so we rely on
+        // FROST's own Drop implementation to zeroize the internal data.
+        // This is a defense-in-depth measure.
+    }
+}
+
+impl KeyShare {
+    /// Create a new KeyShare
+    pub fn new(
+        participant_id: u16,
+        share: frost::keys::KeyPackage,
+        threshold: u16,
+        total_participants: u16,
+    ) -> Self {
+        Self {
+            participant_id,
+            share,
+            threshold,
+            total_participants,
+        }
+    }
+
+    /// Get the FROST identifier for this participant
+    pub fn frost_identifier(&self) -> frost::Identifier {
+        *self.share.identifier()
+    }
+
+    /// Get the verifying share for this participant
+    pub fn verifying_share(&self) -> frost::keys::VerifyingShare {
+        *self.share.verifying_share()
+    }
+}
+
+/// Public key package distributed to all participants after DKG
+///
+/// Contains the group public key and individual verifying shares needed
+/// for signature verification and coordination.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicKeyPackage {
+    /// Group public key for signature verification
+    #[serde(with = "crate::serde::verifying_key_serde")]
+    pub group_public: crate::signature::Ed25519VerifyingKey,
+    /// Verifying shares for each participant (indexed by participant ID as u16)
+    pub verifying_shares: BTreeMap<u16, frost::keys::VerifyingShare>,
+    /// Threshold required for signing
+    pub threshold: u16,
+    /// Total number of participants
+    pub total_participants: u16,
+}
+
+impl PublicKeyPackage {
+    /// Create a new PublicKeyPackage
+    pub fn new(
+        group_public: crate::signature::Ed25519VerifyingKey,
+        verifying_shares: BTreeMap<u16, frost::keys::VerifyingShare>,
+        threshold: u16,
+        total_participants: u16,
+    ) -> Self {
+        Self {
+            group_public,
+            verifying_shares,
+            threshold,
+            total_participants,
+        }
+    }
+
+    /// Convert to FROST PublicKeyPackage for signing operations
+    pub fn to_frost_package(&self) -> Result<frost::keys::PublicKeyPackage> {
+        // Convert the group public key
+        let group_public = dalek_verifying_key_to_frost(&self.group_public)?;
+
+        // Convert the verifying shares map (u16 -> frost::Identifier)
+        let mut frost_verifying_shares = BTreeMap::new();
+        for (&participant_id, &verifying_share) in &self.verifying_shares {
+            let frost_id = frost::Identifier::try_from(participant_id).map_err(|_| {
+                CryptoError::crypto_operation_failed(format!(
+                    "Invalid participant ID: {}",
+                    participant_id
+                ))
+            })?;
+            frost_verifying_shares.insert(frost_id, verifying_share);
+        }
+
+        // Construct the FROST PublicKeyPackage
+        Ok(frost::keys::PublicKeyPackage::new(
+            frost_verifying_shares,
+            group_public,
+        ))
+    }
+
+    /// Get verifying share for a specific participant
+    pub fn get_verifying_share(&self, participant_id: u16) -> Option<frost::keys::VerifyingShare> {
+        self.verifying_shares.get(&participant_id).copied()
+    }
+
+    /// Check if a participant ID is valid for this package
+    pub fn contains_participant(&self, participant_id: u16) -> bool {
+        self.verifying_shares.contains_key(&participant_id)
+    }
+
+    /// Get all participant IDs
+    pub fn participant_ids(&self) -> Vec<u16> {
+        self.verifying_shares.keys().copied().collect()
+    }
+}

@@ -652,7 +652,7 @@ impl ScenarioManager {
         let scenarios_to_run = self.filter_scenarios(args)?;
         info!("Executing {} scenarios", scenarios_to_run.len());
 
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let start_time = current_unix_timestamp() * 1000;
 
         let results = if args.parallel {
             self.execute_scenarios_parallel(&scenarios_to_run, args)?
@@ -660,7 +660,7 @@ impl ScenarioManager {
             self.execute_scenarios_sequential(&scenarios_to_run, args)?
         };
 
-        let end_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let end_time = current_unix_timestamp() * 1000;
 
         // Update metrics
         self.metrics.scenarios_executed = results.len();
@@ -813,7 +813,7 @@ impl ScenarioManager {
             description,
             tags,
             metadata: DiscoveryMetadata {
-                discovered_at: SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64,
+                discovered_at: current_unix_timestamp() * 1000,
                 file_size: metadata.len(),
                 last_modified: metadata.modified()?.duration_since(UNIX_EPOCH)?.as_millis() as u64,
                 checksum: "placeholder".to_string(), // Would calculate actual checksum
@@ -900,6 +900,12 @@ impl ScenarioManager {
         args: &RunArgs,
     ) -> Result<HashMap<String, ScenarioExecutionResult>> {
         // In a real implementation, this would use async/await or threading
+
+fn current_unix_timestamp() -> u64 {
+    aura_types::time_utils::current_unix_timestamp()
+}
+
+
         // For now, we'll simulate parallel execution
         let mut results = HashMap::new();
 
@@ -922,7 +928,7 @@ impl ScenarioManager {
         scenario: &DiscoveredScenario,
         args: &RunArgs,
     ) -> Result<ScenarioExecutionResult> {
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let start_time = current_unix_timestamp() * 1000;
 
         // Load scenario from TOML
         debug!("Loading scenario from: {}", scenario.path.display());
@@ -964,7 +970,7 @@ impl ScenarioManager {
         // Execute the scenario
         let result = engine.execute_scenario(&unified_scenario);
 
-        let end_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let end_time = current_unix_timestamp() * 1000;
         let execution_duration = end_time - start_time;
 
         match result {

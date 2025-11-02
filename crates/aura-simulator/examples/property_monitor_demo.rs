@@ -40,7 +40,11 @@ fn main() -> Result<()> {
 
     println!(
         "[OK] Property monitor created with {} properties",
-        monitor.get_metrics_snapshot().metrics.property_monitoring.total_evaluations
+        monitor
+            .get_metrics_snapshot()
+            .metrics
+            .property_monitoring
+            .total_evaluations
     );
 
     // Create test simulation state
@@ -170,22 +174,25 @@ fn main() -> Result<()> {
 
     println!("\n[graph] Monitoring Statistics:");
     let stats = monitor.get_metrics_snapshot();
-    println!("   Total evaluations: {}", stats.metrics.property_monitoring.total_evaluations);
+    println!(
+        "   Total evaluations: {}",
+        stats.metrics.property_monitoring.total_evaluations
+    );
     println!(
         "   Total evaluation time: {}ms",
         stats.metrics.property_monitoring.evaluation_time_ms.total()
     );
     let avg_time = if stats.metrics.property_monitoring.evaluation_time_ms.len() > 0 {
-        stats.metrics.property_monitoring.evaluation_time_ms.total() as f64 / 
-        stats.metrics.property_monitoring.evaluation_time_ms.len() as f64
+        stats.metrics.property_monitoring.evaluation_time_ms.total() as f64
+            / stats.metrics.property_monitoring.evaluation_time_ms.len() as f64
     } else {
         0.0
     };
+    println!("   Average evaluation time: {:.2}ms", avg_time);
     println!(
-        "   Average evaluation time: {:.2}ms",
-        avg_time
+        "   Violations detected: {}",
+        stats.metrics.property_monitoring.violations_detected
     );
-    println!("   Violations detected: {}", stats.metrics.property_monitoring.violations_detected);
 
     println!("\n[done] Property Monitor Demo completed successfully!");
     println!("   The Quint integration is working and evaluating properties correctly.");

@@ -3,7 +3,7 @@
 //! Replaces placeholder implementations with actual Quint CLI execution.
 //! Provides parsing, verification, and property evaluation using the real Quint tool.
 
-use crate::quint::types::{QuintSpec, QuintInvariant};
+use crate::quint::types::{QuintInvariant, QuintSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -67,15 +67,9 @@ pub enum QuintDefinition {
         expr: String,
     },
     #[serde(rename = "assume")]
-    Assumption {
-        name: Option<String>,
-        expr: String,
-    },
+    Assumption { name: Option<String>, expr: String },
     #[serde(rename = "import")]
-    Import {
-        name: String,
-        from: String,
-    },
+    Import { name: String, from: String },
 }
 
 /// Quint verification result
@@ -116,7 +110,7 @@ impl QuintCliRunner {
     /// Create a new Quint CLI runner
     pub fn new(quint_path: Option<PathBuf>, working_dir: PathBuf) -> QuintCliResult<Self> {
         let quint_path = quint_path.unwrap_or_else(|| PathBuf::from("quint"));
-        
+
         // Verify quint is available
         let output = Command::new(&quint_path)
             .arg("--version")
@@ -125,7 +119,7 @@ impl QuintCliRunner {
 
         if !output.status.success() {
             return Err(QuintCliError::CliNotFound(
-                "Quint CLI executable not found or failed version check".to_string()
+                "Quint CLI executable not found or failed version check".to_string(),
             ));
         }
 
@@ -149,53 +143,60 @@ impl QuintCliRunner {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(QuintCliError::ExecutionFailed(format!(
-                "Quint parse failed: {}", stderr
+                "Quint parse failed: {}",
+                stderr
             )));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let parse_result: QuintParseOutput = serde_json::from_str(&stdout)
-            .map_err(|e| QuintCliError::ParseFailed(format!(
-                "Failed to parse Quint JSON output: {}", e
-            )))?;
+        let parse_result: QuintParseOutput = serde_json::from_str(&stdout).map_err(|e| {
+            QuintCliError::ParseFailed(format!("Failed to parse Quint JSON output: {}", e))
+        })?;
 
         Ok(parse_result)
     }
 
     /// Verify properties in a Quint specification
-    pub async fn verify_spec(&self, spec_file: &Path, max_steps: Option<u32>) -> QuintCliResult<QuintVerificationResult> {
+    pub async fn verify_spec(
+        &self,
+        spec_file: &Path,
+        max_steps: Option<u32>,
+    ) -> QuintCliResult<QuintVerificationResult> {
         let mut cmd = AsyncCommand::new(&self.quint_path);
-        cmd.arg("verify")
-           .arg("--out=json")
-           .arg(spec_file);
+        cmd.arg("verify").arg("--out=json").arg(spec_file);
 
         if let Some(steps) = max_steps {
             cmd.arg(format!("--max-steps={}", steps));
         }
 
-        let output = cmd
-            .current_dir(&self.working_dir)
-            .output()
-            .await?;
+        let output = cmd.current_dir(&self.working_dir).output().await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(QuintCliError::ExecutionFailed(format!(
-                "Quint verify failed: {}", stderr
+                "Quint verify failed: {}",
+                stderr
             )));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let verify_result: QuintVerificationResult = serde_json::from_str(&stdout)
-            .map_err(|e| QuintCliError::ParseFailed(format!(
-                "Failed to parse Quint verification output: {}", e
-            )))?;
+        let verify_result: QuintVerificationResult =
+            serde_json::from_str(&stdout).map_err(|e| {
+                QuintCliError::ParseFailed(format!(
+                    "Failed to parse Quint verification output: {}",
+                    e
+                ))
+            })?;
 
         Ok(verify_result)
     }
 
     /// Run a specific property check
-    pub async fn check_property(&self, spec_file: &Path, property_name: &str) -> QuintCliResult<bool> {
+    pub async fn check_property(
+        &self,
+        spec_file: &Path,
+        property_name: &str,
+    ) -> QuintCliResult<bool> {
         let output = AsyncCommand::new(&self.quint_path)
             .arg("run")
             .arg("--out=json")
@@ -209,14 +210,15 @@ impl QuintCliRunner {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(QuintCliError::ExecutionFailed(format!(
-                "Quint property check failed: {}", stderr
+                "Quint property check failed: {}",
+                stderr
             )));
         }
 
         // Parse the result to determine if property holds
         let stdout = String::from_utf8_lossy(&output.stdout);
         let result: serde_json::Value = serde_json::from_str(&stdout)?;
-        
+
         // Check if the property evaluation indicates success
         let success = result
             .get("outcome")
@@ -228,7 +230,12 @@ impl QuintCliRunner {
     }
 
     /// Generate random traces using Quint
-    pub async fn generate_traces(&self, spec_file: &Path, count: u32, max_steps: u32) -> QuintCliResult<Vec<serde_json::Value>> {
+    pub async fn generate_traces(
+        &self,
+        spec_file: &Path,
+        count: u32,
+        max_steps: u32,
+    ) -> QuintCliResult<Vec<serde_json::Value>> {
         let output = AsyncCommand::new(&self.quint_path)
             .arg("run")
             .arg("--out=json")
@@ -243,7 +250,8 @@ impl QuintCliRunner {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(QuintCliError::ExecutionFailed(format!(
-                "Quint trace generation failed: {}", stderr
+                "Quint trace generation failed: {}",
+                stderr
             )));
         }
 
@@ -254,7 +262,11 @@ impl QuintCliRunner {
     }
 
     /// Convert Quint parse output to our internal QuintSpec format
-    pub fn parse_output_to_spec(&self, parse_output: QuintParseOutput, file_path: &Path) -> QuintCliResult<QuintSpec> {
+    pub fn parse_output_to_spec(
+        &self,
+        parse_output: QuintParseOutput,
+        file_path: &Path,
+    ) -> QuintCliResult<QuintSpec> {
         let spec_name = file_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -282,7 +294,8 @@ impl QuintCliRunner {
                         }
                     }
                     QuintDefinition::Assumption { name, expr } => {
-                        let assumption_name = name.unwrap_or_else(|| "unnamed_assumption".to_string());
+                        let assumption_name =
+                            name.unwrap_or_else(|| "unnamed_assumption".to_string());
                         invariants.push(QuintInvariant {
                             name: assumption_name.clone(),
                             description: format!("Assumption: {}", assumption_name),
@@ -329,7 +342,7 @@ impl QuintCliRunner {
 
         if !output.status.success() {
             return Err(QuintCliError::ExecutionFailed(
-                "Failed to get Quint version".to_string()
+                "Failed to get Quint version".to_string(),
             ));
         }
 

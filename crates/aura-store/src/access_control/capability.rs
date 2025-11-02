@@ -94,11 +94,7 @@ impl CapabilityManager {
             .sign(signing_key)
             .map_err(|e| aura_types::CapabilityError::InvalidSignature {
                 message: e.to_string(),
-                context: aura_types::ErrorContext {
-                    code: Some(aura_types::ErrorCode::InfraStorageWriteFailed),
-                    severity: Some(aura_types::ErrorSeverity::High),
-                    ..Default::default()
-                },
+                context: "".to_string(),
             })?;
 
         // Store the token
@@ -174,7 +170,7 @@ mod tests {
         let effects = Effects::test();
         let device_id = aura_types::DeviceId::new_with_effects(&effects);
         let account_id = aura_types::AccountId::new_with_effects(&effects);
-        
+
         CapabilityToken::new(
             Subject::Device(device_id),
             Resource::Account(account_id),

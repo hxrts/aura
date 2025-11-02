@@ -67,7 +67,7 @@ pub fn generate_test_variation_id(base_name: &str, variation_index: usize) -> St
         "{}_{:04}_{}",
         base_name,
         variation_index,
-        generate_random_uuid()[..8].to_string()
+        &generate_random_uuid()[..8]
     )
 }
 

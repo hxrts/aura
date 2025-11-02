@@ -41,6 +41,7 @@ pub struct SimulationResult<T> {
 
 /// Performance metrics for operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PerformanceMetrics {
     /// Duration of the operation in milliseconds
     pub duration_ms: u64,
@@ -324,17 +325,6 @@ impl<T> SimulationResult<T> {
     }
 }
 
-impl Default for PerformanceMetrics {
-    fn default() -> Self {
-        Self {
-            duration_ms: 0,
-            memory_usage_bytes: None,
-            cpu_utilization: None,
-            items_processed: 0,
-            counters: HashMap::new(),
-        }
-    }
-}
 
 impl PerformanceMetrics {
     /// Create new performance metrics with duration

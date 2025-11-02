@@ -193,7 +193,7 @@ impl AccountState {
         effects: &aura_crypto::Effects,
     ) -> crate::Result<()> {
         if self.removed_devices.contains(&device.device_id) {
-            return Err(crate::AuraError::protocol_invalid_instruction(
+            return Err(crate::AuraError::coordination_failed(
                 "Cannot re-add a removed device".to_string(),
             ));
         }
@@ -227,7 +227,7 @@ impl AccountState {
         effects: &aura_crypto::Effects,
     ) -> crate::Result<()> {
         if self.removed_guardians.contains(&guardian.guardian_id) {
-            return Err(crate::AuraError::protocol_invalid_instruction(
+            return Err(crate::AuraError::coordination_failed(
                 "Cannot re-add a removed guardian",
             ));
         }
@@ -670,6 +670,7 @@ mod tests {
             dkd_commitment_proofs: std::collections::BTreeMap::new(),
             next_nonce: 0,
             used_nonces: std::collections::BTreeSet::new(),
+            key_share_epoch: 0,
         }
     }
 

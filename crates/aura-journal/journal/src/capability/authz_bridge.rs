@@ -50,7 +50,7 @@ impl AuthorizationBridge {
             resource: authz_resource,
             capabilities: vec![], // Would populate from active capability tokens
             context: std::collections::HashMap::new(),
-            timestamp: std::time::SystemTime::now(),
+            timestamp: aura_types::time_utils::current_system_time(),
         };
 
         // Make authorization decision

@@ -15,6 +15,7 @@ pub use traits::{ConfigDefaults, ConfigMerge, ConfigValidation};
 
 /// Unified simulation configuration with hierarchical composition
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SimulationConfig {
     /// Core simulation parameters
     pub simulation: SimulationCoreConfig,
@@ -98,6 +99,7 @@ pub struct NetworkConfig {
 
 /// Scenario-specific configuration parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ScenarioConfig {
     /// Scenario file path if loaded
     pub scenario_file: Option<String>,
@@ -124,17 +126,6 @@ pub struct ByzantineConfig {
     pub adaptive_behavior: bool,
 }
 
-impl Default for SimulationConfig {
-    fn default() -> Self {
-        Self {
-            simulation: SimulationCoreConfig::default(),
-            property_monitoring: PropertyMonitoringConfig::default(),
-            performance: PerformanceConfig::default(),
-            network: NetworkConfig::default(),
-            scenario: ScenarioConfig::default(),
-        }
-    }
-}
 
 impl Default for SimulationCoreConfig {
     fn default() -> Self {
@@ -188,17 +179,6 @@ impl Default for NetworkConfig {
     }
 }
 
-impl Default for ScenarioConfig {
-    fn default() -> Self {
-        Self {
-            scenario_file: None,
-            parameters: HashMap::new(),
-            expected_participants: None,
-            protocols: Vec::new(),
-            byzantine_config: ByzantineConfig::default(),
-        }
-    }
-}
 
 impl Default for ByzantineConfig {
     fn default() -> Self {

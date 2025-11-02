@@ -20,16 +20,16 @@ impl AccountState {
         // Validate event version
         event
             .validate_version()
-            .map_err(AuraError::protocol_invalid_instruction)?;
+            .map_err(|e| AuraError::coordination_failed(e.to_string()))?;
 
         // Validate nonce to prevent replay attacks
         self.validate_nonce(event.nonce)
-            .map_err(AuraError::protocol_invalid_instruction)?;
+            .map_err(|e| AuraError::coordination_failed(e.to_string()))?;
 
         // Validate parent hash for causal ordering
         event
             .validate_parent(self.last_event_hash)
-            .map_err(AuraError::protocol_invalid_instruction)?;
+            .map_err(|e| AuraError::coordination_failed(e.to_string()))?;
 
         // Advance Lamport clock on every event (Lamport rule: max(local, received) + 1)
         self.advance_lamport_clock(event.epoch_at_write, effects);

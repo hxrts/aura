@@ -4,12 +4,19 @@
 //! and time travel debugging capabilities.
 
 use anyhow::Result;
+use aura_types::SessionStatus;
 use clap::{Args, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
+
+fn current_unix_timestamp() -> u64 {
+    aura_types::time_utils::current_unix_timestamp()
+}
+
+
 
 /// Debug command arguments
 #[derive(Debug, Args)]
@@ -463,19 +470,6 @@ pub struct DebugSession {
 }
 
 /// Session status
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-/// Debug session status
-pub enum SessionStatus {
-    /// Session is active
-    Active,
-    /// Session is paused
-    Paused,
-    /// Session completed successfully
-    Completed,
-    /// Session failed
-    Failed,
-}
 
 /// Violation information
 #[allow(dead_code)]
@@ -635,8 +629,8 @@ impl DebugSessionManager {
             status: SessionStatus::Active,
             scenario_path: args.scenario.clone(),
             violation,
-            created_at: SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64,
-            last_accessed: SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64,
+            created_at: current_unix_timestamp() * 1000,
+            last_accessed: current_unix_timestamp() * 1000,
             config: SessionConfig {
                 auto_analyze: args.auto_analyze,
                 time_travel: args.time_travel,
@@ -677,7 +671,7 @@ impl DebugSessionManager {
     pub fn analyze_violation(&mut self, args: &AnalyzeArgs) -> Result<AnalysisResult> {
         info!("Starting violation analysis");
 
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let start_time = current_unix_timestamp() * 1000;
 
         // Load violation information
         let violation = self.load_violation_info(&args.violation)?;
@@ -693,7 +687,7 @@ impl DebugSessionManager {
         let recommendations = self.generate_recommendations(&findings);
         let confidence = self.calculate_confidence(&findings);
 
-        let end_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let end_time = current_unix_timestamp() * 1000;
 
         let result = AnalysisResult {
             id: format!("analysis_{}", start_time),
@@ -717,7 +711,7 @@ impl DebugSessionManager {
             .get_mut(&args.session)
             .ok_or_else(|| anyhow::anyhow!("Session not found: {}", args.session))?;
 
-        session.last_accessed = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        session.last_accessed = current_unix_timestamp() * 1000;
         session.stats.navigation_actions += 1;
 
         match args.action {
@@ -746,7 +740,7 @@ impl DebugSessionManager {
     pub fn generate_reproduction(&self, args: &ReproduceArgs) -> Result<ReproductionResult> {
         info!("Starting minimal reproduction generation");
 
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let start_time = current_unix_timestamp() * 1000;
 
         // Load violation and scenario
         let _violation = self.load_violation_info(&args.violation)?;
@@ -755,7 +749,7 @@ impl DebugSessionManager {
         let original_complexity = 10.0; // Placeholder
         let reduced_complexity = original_complexity * (1.0 - args.target_reduction);
 
-        let end_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let end_time = current_unix_timestamp() * 1000;
 
         Ok(ReproductionResult {
             original_scenario: args.scenario.clone(),
@@ -800,7 +794,7 @@ impl DebugSessionManager {
             target: args.target.clone(),
             inspection_type: args.inspect.clone(),
             data: inspection_data,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64,
+            timestamp: current_unix_timestamp() * 1000,
         })
     }
 
@@ -812,7 +806,7 @@ impl DebugSessionManager {
             property_name: "test_property".to_string(),
             description: "Test violation".to_string(),
             tick: 100,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64,
+            timestamp: current_unix_timestamp() * 1000,
             severity: ViolationSeverity::High,
         })
     }

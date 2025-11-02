@@ -1,48 +1,77 @@
-//! Centralized wire format types for Aura protocol messages
+//! Aura Protocol Messages
 //!
-//! This crate consolidates all over-the-wire message types that were previously
-//! scattered across coordination, transport, and journal crates. It provides:
+//! This crate provides message types for all Aura distributed protocols:
 //!
-//! - Protocol messages for DKD, FROST, resharing, and recovery
-//! - Transport messages for presence and capability verification
-//! - Version negotiation and protocol evolution support
-//! - Consistent serialization across all message types
+//! - **Crypto**: Threshold cryptography protocols (DKD, FROST, resharing)
+//! - **Social**: Social coordination protocols (rendezvous, SSB)
+//! - **Recovery**: Account recovery protocols (guardian coordination)
+//! - **Common**: Shared message infrastructure (envelopes, errors)
 //!
 //! # Architecture
 //!
-//! All message types include version fields for forward compatibility and
-//! implement consistent serialization traits for reliable wire format.
+//! All message types are organized by domain with clean separation of concerns:
+//! - Protocol-specific messages in domain modules
+//! - Shared infrastructure in common module
+//! - Consistent serialization using serde traits
+//! - Version compatibility checking
 
 #![allow(missing_docs)] // TODO: Add comprehensive documentation
 
-pub mod protocol;
-pub mod serialization;
-pub mod transport;
-pub mod versioning;
+// Domain-specific message modules
+pub mod crypto;
+pub mod recovery;
+pub mod social;
 
-// Re-export main message types
-pub use protocol::*;
-pub use transport::*;
+// Shared infrastructure
+pub mod common;
+
+// Legacy modules (will be removed)
+mod versioning;
+
+// Integration examples and guidelines
+// TODO: Re-enable when error API is available
+// #[cfg(test)]
+// pub mod integration_example;
+
+// Re-export main message types organized by domain
+pub use common::*;
+pub use crypto::*;
+pub use recovery::*;
+pub use social::*;
+
+// Legacy re-exports for compatibility (will be removed)
 pub use versioning::*;
 
 /// Current wire format version
 pub const WIRE_FORMAT_VERSION: u16 = 1;
 
-/// Error types for message handling
-#[derive(Debug, thiserror::Error)]
-pub enum MessageError {
-    #[error("Unsupported wire format version: {found}, max supported: {max_supported}")]
-    UnsupportedVersion { found: u16, max_supported: u16 },
-
-    #[error("Serialization failed: {0}")]
-    SerializationFailed(String),
-
-    #[error("Deserialization failed: {0}")]
-    DeserializationFailed(String),
-
-    #[error("Invalid message format: {0}")]
-    InvalidFormat(String),
+/// Unified message envelope for all protocols
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum AuraMessage {
+    /// Threshold cryptography protocol messages
+    Crypto(crypto::CryptoMessage),
+    /// Social coordination protocol messages  
+    Social(social::SocialMessage),
+    /// Account recovery protocol messages
+    Recovery(recovery::RecoveryMessage),
 }
 
-/// Result type for message operations
-pub type MessageResult<T> = Result<T, MessageError>;
+impl AuraMessage {
+    /// Get the protocol domain for this message
+    pub fn domain(&self) -> &'static str {
+        match self {
+            AuraMessage::Crypto(_) => "crypto",
+            AuraMessage::Social(_) => "social",
+            AuraMessage::Recovery(_) => "recovery",
+        }
+    }
+
+    /// Get the specific protocol type for this message
+    pub fn protocol_type(&self) -> &'static str {
+        match self {
+            AuraMessage::Crypto(msg) => msg.protocol_type(),
+            AuraMessage::Social(msg) => msg.protocol_type(),
+            AuraMessage::Recovery(msg) => msg.protocol_type(),
+        }
+    }
+}

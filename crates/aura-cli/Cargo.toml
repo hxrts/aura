@@ -16,12 +16,13 @@ path = "src/main.rs"
 
 [dependencies]
 # Workspace crates
-aura-agent = { path = "../agent" }
+aura-agent = { path = "../aura-agent" }
 aura-authentication = { path = "../aura-authentication" }
 aura-protocol = { path = "../aura-protocol" }
 aura-crypto = { path = "../aura-crypto" }
 aura-journal = { path = "../aura-journal" }
 aura-simulator = { path = "../aura-simulator" }
+aura-store = { path = "../aura-store" }
 aura-transport = { path = "../aura-transport" }
 aura-types = { path = "../aura-types" }
 # session_types removed during refactor - implementation moved to coordination
@@ -47,6 +48,7 @@ ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
 blake3 = { workspace = true }
 dirs = "5.0"
+chrono = { workspace = true }
 
 [features]
 default = []

@@ -8,14 +8,14 @@ workspace = true
 
 [dependencies]
 # Internal crates
-aura-agent = { path = "../agent" }
+aura-agent = { path = "../aura-agent" }
 aura-journal = { path = "../aura-journal" }
 aura-transport = { path = "../aura-transport" }
 aura-crypto = { path = "../aura-crypto" }
 aura-protocol = { path = "../aura-protocol" }
-aura-console-types = { path = "../console-types" }
+aura-console-types = { path = "../aura-console-types" }
 aura-types = { path = "../aura-types" }
-quint_api = { path = "../quint-api" }
+quint_api = { path = "../aura-quint-api", package = "aura-quint-api" }
 
 # Cryptography
 blake3 = { workspace = true }

@@ -154,7 +154,7 @@ impl FunctionalRunner {
 
         // Handle automatic checkpointing
         let checkpoint_interval = self.config.performance.checkpoint_interval_ticks;
-        if checkpoint_interval > 0 && self.world.current_tick % checkpoint_interval == 0 {
+        if checkpoint_interval > 0 && self.world.current_tick.is_multiple_of(checkpoint_interval) {
             let label = format!("auto_checkpoint_tick_{}", self.world.current_tick);
             let _ = self.create_checkpoint(Some(label));
         }
@@ -196,6 +196,7 @@ impl FunctionalRunner {
 
     /// Run simulation until completion or stopping condition
     pub fn run_until_complete(&mut self) -> Result<SimulationRunResult> {
+        #[allow(clippy::disallowed_methods)]
         let start_time = std::time::SystemTime::now();
         let mut _total_events = 0;
 

@@ -4,37 +4,35 @@
 //! against simulation state with comprehensive temporal logic support, state history
 //! tracking, and optimized evaluation strategies.
 
-use super::types::{
-    QuintValue, ValidationResult, PropertyEvaluationResult, SimulationState
-};
-use super::properties::{VerifiableProperty, PropertyType, PropertyPriority};
-use crate::world_state::{WorldState, NetworkFailureConfig};
+use super::properties::{PropertyType, VerifiableProperty};
+use super::types::{PropertyEvaluationResult, QuintValue, SimulationState, ValidationResult};
+use crate::world_state::WorldState;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 use thiserror::Error;
-use serde::{Deserialize, Serialize};
 
 /// Errors that can occur during property evaluation
 #[derive(Error, Debug, Clone)]
 pub enum EvaluationError {
     #[error("Property evaluation failed: {0}")]
     EvaluationFailed(String),
-    
+
     #[error("Invalid temporal formula: {0}")]
     InvalidTemporalFormula(String),
-    
+
     #[error("State history insufficient for evaluation: {0}")]
     InsufficientHistory(String),
-    
+
     #[error("Evaluation timeout after {timeout_ms}ms: {property}")]
     EvaluationTimeout { property: String, timeout_ms: u64 },
-    
+
     #[error("Invalid property type for evaluation: {0}")]
     InvalidPropertyType(String),
-    
+
     #[error("Cache corruption detected: {0}")]
     CacheCorruption(String),
-    
+
     #[error("State extraction failed: {0}")]
     StateExtraction(String),
 }
@@ -132,7 +130,7 @@ impl StateHistory {
             if let Some(removed) = self.snapshots.pop_front() {
                 self.timestamp_index.remove(&removed.timestamp);
                 self.tick_index.remove(&removed.tick);
-                
+
                 // Adjust indices after removal
                 for index_map in [&mut self.timestamp_index, &mut self.tick_index] {
                     for index_value in index_map.values_mut() {
@@ -147,29 +145,29 @@ impl StateHistory {
 
     /// Get snapshot by timestamp
     pub fn get_by_timestamp(&self, timestamp: u64) -> Option<&StateSnapshot> {
-        self.timestamp_index.get(&timestamp)
+        self.timestamp_index
+            .get(&timestamp)
             .and_then(|&index| self.snapshots.get(index))
     }
 
     /// Get snapshot by tick
     pub fn get_by_tick(&self, tick: u64) -> Option<&StateSnapshot> {
-        self.tick_index.get(&tick)
+        self.tick_index
+            .get(&tick)
             .and_then(|&index| self.snapshots.get(index))
     }
 
     /// Get all snapshots in a time range
     pub fn get_range(&self, start_time: u64, end_time: u64) -> Vec<&StateSnapshot> {
-        self.snapshots.iter()
+        self.snapshots
+            .iter()
             .filter(|snapshot| snapshot.timestamp >= start_time && snapshot.timestamp <= end_time)
             .collect()
     }
 
     /// Get most recent snapshots up to a limit
     pub fn get_recent(&self, limit: usize) -> Vec<&StateSnapshot> {
-        self.snapshots.iter()
-            .rev()
-            .take(limit)
-            .collect()
+        self.snapshots.iter().rev().take(limit).collect()
     }
 
     /// Get current (most recent) snapshot
@@ -223,7 +221,7 @@ impl EvaluationCache {
 
     fn get(&mut self, property_name: &str, state_hash: u64) -> Option<PropertyEvaluationResult> {
         let cache_key = format!("{}_{}", property_name, state_hash);
-        
+
         if let Some(entry) = self.cache.get_mut(&cache_key) {
             self.access_counter += 1;
             entry.access_count = self.access_counter;
@@ -235,7 +233,7 @@ impl EvaluationCache {
 
     fn insert(&mut self, property_name: &str, state_hash: u64, result: PropertyEvaluationResult) {
         let cache_key = format!("{}_{}", property_name, state_hash);
-        
+
         // Evict least recently used entries if necessary
         if self.cache.len() >= self.eviction_threshold {
             self.evict_lru();
@@ -252,7 +250,9 @@ impl EvaluationCache {
     }
 
     fn evict_lru(&mut self) {
-        if let Some((key_to_remove, _)) = self.cache.iter()
+        if let Some((key_to_remove, _)) = self
+            .cache
+            .iter()
             .min_by_key(|(_, entry)| entry.access_count)
             .map(|(k, v)| (k.clone(), v.access_count))
         {
@@ -327,7 +327,7 @@ impl PropertyEvaluator {
     pub fn with_config(config: EvaluatorConfig) -> Self {
         let history = StateHistory::new(config.max_history_length);
         let cache = EvaluationCache::new(config.cache_eviction_threshold);
-        
+
         Self {
             config,
             history,
@@ -344,7 +344,10 @@ impl PropertyEvaluator {
     }
 
     /// Register properties for evaluation
-    pub fn register_properties(&mut self, properties: Vec<VerifiableProperty>) -> Result<(), EvaluationError> {
+    pub fn register_properties(
+        &mut self,
+        properties: Vec<VerifiableProperty>,
+    ) -> Result<(), EvaluationError> {
         for property in properties {
             self.validate_property(&property)?;
             self.properties.insert(property.id.clone(), property);
@@ -353,7 +356,10 @@ impl PropertyEvaluator {
     }
 
     /// Register a single property
-    pub fn register_property(&mut self, property: VerifiableProperty) -> Result<(), EvaluationError> {
+    pub fn register_property(
+        &mut self,
+        property: VerifiableProperty,
+    ) -> Result<(), EvaluationError> {
         self.validate_property(&property)?;
         self.properties.insert(property.id.clone(), property);
         Ok(())
@@ -365,27 +371,31 @@ impl PropertyEvaluator {
     }
 
     /// Update simulation state and trigger evaluations if in streaming mode
-    pub fn update_state(&mut self, world_state: &WorldState) -> Result<Option<ValidationResult>, EvaluationError> {
+    pub fn update_state(
+        &mut self,
+        world_state: &WorldState,
+    ) -> Result<Option<ValidationResult>, EvaluationError> {
         // Extract state variables from WorldState
         let snapshot = self.extract_state_snapshot(world_state)?;
         self.history.add_snapshot(snapshot);
 
         // Evaluate properties if in streaming mode
         match self.evaluation_mode {
-            EvaluationMode::Streaming => {
-                Ok(Some(self.evaluate_all_properties(world_state)?))
-            }
-            _ => Ok(None)
+            EvaluationMode::Streaming => Ok(Some(self.evaluate_all_properties(world_state)?)),
+            _ => Ok(None),
         }
     }
 
     /// Evaluate all registered properties against current state
-    pub fn evaluate_all_properties(&mut self, world_state: &WorldState) -> Result<ValidationResult, EvaluationError> {
+    pub fn evaluate_all_properties(
+        &mut self,
+        world_state: &WorldState,
+    ) -> Result<ValidationResult, EvaluationError> {
         let start_time = Instant::now();
         let mut validation_result = ValidationResult::new();
 
         let properties: Vec<_> = self.properties.values().cloned().collect();
-        
+
         if self.config.enable_parallel_evaluation && properties.len() > 1 {
             // Parallel evaluation for independent properties
             self.evaluate_properties_parallel(&properties, world_state, &mut validation_result)?;
@@ -396,26 +406,39 @@ impl PropertyEvaluator {
 
         validation_result.total_time_ms = start_time.elapsed().as_millis() as u64;
         self.stats.total_evaluation_time_ms += validation_result.total_time_ms;
-        
+
         Ok(validation_result)
     }
 
     /// Evaluate specific properties by ID
-    pub fn evaluate_properties(&mut self, property_ids: &[String], world_state: &WorldState) -> Result<ValidationResult, EvaluationError> {
-        let properties: Vec<_> = property_ids.iter()
+    pub fn evaluate_properties(
+        &mut self,
+        property_ids: &[String],
+        world_state: &WorldState,
+    ) -> Result<ValidationResult, EvaluationError> {
+        let properties: Vec<_> = property_ids
+            .iter()
             .filter_map(|id| self.properties.get(id).cloned())
             .collect();
 
         let mut validation_result = ValidationResult::new();
         self.evaluate_properties_sequential(&properties, world_state, &mut validation_result)?;
-        
+
         Ok(validation_result)
     }
 
     /// Evaluate a single property
-    pub fn evaluate_property(&mut self, property_id: &str, world_state: &WorldState) -> Result<PropertyEvaluationResult, EvaluationError> {
-        let property = self.properties.get(property_id)
-            .ok_or_else(|| EvaluationError::EvaluationFailed(format!("Property not found: {}", property_id)))?
+    pub fn evaluate_property(
+        &mut self,
+        property_id: &str,
+        world_state: &WorldState,
+    ) -> Result<PropertyEvaluationResult, EvaluationError> {
+        let property = self
+            .properties
+            .get(property_id)
+            .ok_or_else(|| {
+                EvaluationError::EvaluationFailed(format!("Property not found: {}", property_id))
+            })?
             .clone();
 
         self.evaluate_single_property(&property, world_state)
@@ -440,60 +463,86 @@ impl PropertyEvaluator {
     fn validate_property(&self, property: &VerifiableProperty) -> Result<(), EvaluationError> {
         // Check if property expression is valid
         if property.expression.trim().is_empty() {
-            return Err(EvaluationError::InvalidTemporalFormula(
-                format!("Empty expression for property: {}", property.name)
-            ));
+            return Err(EvaluationError::InvalidTemporalFormula(format!(
+                "Empty expression for property: {}",
+                property.name
+            )));
         }
 
         // Check for temporal properties that require history
-        if matches!(property.property_type, PropertyType::Temporal | PropertyType::Liveness) {
-            if self.config.max_history_length == 0 {
-                return Err(EvaluationError::InsufficientHistory(
-                    format!("Temporal property {} requires state history", property.name)
-                ));
+        if matches!(
+            property.property_type,
+            PropertyType::Temporal | PropertyType::Liveness
+        )
+            && self.config.max_history_length == 0 {
+                return Err(EvaluationError::InsufficientHistory(format!(
+                    "Temporal property {} requires state history",
+                    property.name
+                )));
             }
-        }
 
         Ok(())
     }
 
     /// Extract state snapshot from WorldState
-    fn extract_state_snapshot(&self, world_state: &WorldState) -> Result<StateSnapshot, EvaluationError> {
+    fn extract_state_snapshot(
+        &self,
+        world_state: &WorldState,
+    ) -> Result<StateSnapshot, EvaluationError> {
         let mut variables = HashMap::new();
         let mut metadata = HashMap::new();
 
         // Extract basic simulation state
-        variables.insert("current_tick".to_string(), QuintValue::Int(world_state.current_tick as i64));
-        variables.insert("current_time".to_string(), QuintValue::Int(world_state.current_time as i64));
-        variables.insert("participant_count".to_string(), QuintValue::Int(world_state.participants.len() as i64));
+        variables.insert(
+            "current_tick".to_string(),
+            QuintValue::Int(world_state.current_tick as i64),
+        );
+        variables.insert(
+            "current_time".to_string(),
+            QuintValue::Int(world_state.current_time as i64),
+        );
+        variables.insert(
+            "participant_count".to_string(),
+            QuintValue::Int(world_state.participants.len() as i64),
+        );
 
         // Extract participant states
         let mut participant_statuses = HashMap::new();
         let mut active_sessions = HashMap::new();
-        
+
         for (participant_id, participant) in &world_state.participants {
             participant_statuses.insert(
                 participant_id.clone(),
-                QuintValue::String(format!("{:?}", participant.status))
+                QuintValue::String(format!("{:?}", participant.status)),
             );
-            
+
             // Extract session information
             for (session_id, session) in &participant.active_sessions {
                 active_sessions.insert(
                     format!("{}_{}", participant_id, session_id),
-                    QuintValue::String(session.protocol_type.clone())
+                    QuintValue::String(session.protocol_type.clone()),
                 );
             }
         }
 
-        variables.insert("participant_statuses".to_string(), QuintValue::Map(participant_statuses));
-        variables.insert("active_sessions".to_string(), QuintValue::Map(active_sessions));
+        variables.insert(
+            "participant_statuses".to_string(),
+            QuintValue::Map(participant_statuses),
+        );
+        variables.insert(
+            "active_sessions".to_string(),
+            QuintValue::Map(active_sessions),
+        );
 
         // Extract network state
-        metadata.insert("network_in_flight_messages".to_string(), 
-            QuintValue::Int(world_state.network.in_flight_messages.len() as i64));
-        metadata.insert("byzantine_participant_count".to_string(),
-            QuintValue::Int(world_state.byzantine.byzantine_participants.len() as i64));
+        metadata.insert(
+            "network_in_flight_messages".to_string(),
+            QuintValue::Int(world_state.network.in_flight_messages.len() as i64),
+        );
+        metadata.insert(
+            "byzantine_participant_count".to_string(),
+            QuintValue::Int(world_state.byzantine.byzantine_participants.len() as i64),
+        );
 
         // Calculate state hash for cache key
         let state_hash = self.calculate_state_hash(&variables, &metadata);
@@ -508,12 +557,16 @@ impl PropertyEvaluator {
     }
 
     /// Calculate hash of state for cache keys
-    fn calculate_state_hash(&self, variables: &HashMap<String, QuintValue>, metadata: &HashMap<String, QuintValue>) -> u64 {
+    fn calculate_state_hash(
+        &self,
+        variables: &HashMap<String, QuintValue>,
+        metadata: &HashMap<String, QuintValue>,
+    ) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
-        
+
         // Hash variables in sorted order for consistency
         let mut var_keys: Vec<_> = variables.keys().collect();
         var_keys.sort();
@@ -570,10 +623,12 @@ impl PropertyEvaluator {
 
         // Check cache first if enabled
         if self.config.enable_caching {
-            let current_snapshot = self.history.current()
-                .ok_or_else(|| EvaluationError::StateExtraction("No current state available".to_string()))?;
-            
-            if let Some(cached_result) = self.cache.get(&property.name, current_snapshot.state_hash) {
+            let current_snapshot = self.history.current().ok_or_else(|| {
+                EvaluationError::StateExtraction("No current state available".to_string())
+            })?;
+
+            if let Some(cached_result) = self.cache.get(&property.name, current_snapshot.state_hash)
+            {
                 self.stats.cache_hits += 1;
                 return Ok(cached_result);
             }
@@ -598,12 +653,8 @@ impl PropertyEvaluator {
                 self.stats.temporal_evaluations += 1;
                 self.evaluate_temporal_property(property, world_state)?
             }
-            PropertyType::Security => {
-                self.evaluate_security_property(property, world_state)?
-            }
-            PropertyType::Consensus => {
-                self.evaluate_consensus_property(property, world_state)?
-            }
+            PropertyType::Security => self.evaluate_security_property(property, world_state)?,
+            PropertyType::Consensus => self.evaluate_consensus_property(property, world_state)?,
             PropertyType::Performance => {
                 self.evaluate_performance_property(property, world_state)?
             }
@@ -622,9 +673,11 @@ impl PropertyEvaluator {
         let result = PropertyEvaluationResult {
             property_name: property.name.clone(),
             holds,
-            details: format!("Evaluated {} property: {}", 
-                           format!("{:?}", property.property_type).to_lowercase(),
-                           property.expression),
+            details: format!(
+                "Evaluated {} property: {}",
+                format!("{:?}", property.property_type).to_lowercase(),
+                property.expression
+            ),
             witness: None, // Would be populated in full implementation
             evaluation_time_ms: evaluation_time,
         };
@@ -632,7 +685,8 @@ impl PropertyEvaluator {
         // Cache the result if caching is enabled
         if self.config.enable_caching {
             if let Some(current_snapshot) = self.history.current() {
-                self.cache.insert(&property.name, current_snapshot.state_hash, result.clone());
+                self.cache
+                    .insert(&property.name, current_snapshot.state_hash, result.clone());
             }
         }
 
@@ -640,10 +694,14 @@ impl PropertyEvaluator {
     }
 
     /// Evaluate invariant property
-    fn evaluate_invariant_property(&self, property: &VerifiableProperty, _world_state: &WorldState) -> Result<bool, EvaluationError> {
+    fn evaluate_invariant_property(
+        &self,
+        property: &VerifiableProperty,
+        _world_state: &WorldState,
+    ) -> Result<bool, EvaluationError> {
         // Simplified invariant evaluation - would use actual Quint evaluator in production
         let expression = &property.expression.to_lowercase();
-        
+
         // Basic pattern matching for common invariant patterns
         if expression.contains("no_double_spending") {
             // Check for double spending in current state
@@ -661,9 +719,13 @@ impl PropertyEvaluator {
     }
 
     /// Evaluate safety property
-    fn evaluate_safety_property(&self, property: &VerifiableProperty, world_state: &WorldState) -> Result<bool, EvaluationError> {
+    fn evaluate_safety_property(
+        &self,
+        property: &VerifiableProperty,
+        world_state: &WorldState,
+    ) -> Result<bool, EvaluationError> {
         let expression = &property.expression.to_lowercase();
-        
+
         if expression.contains("byzantine") {
             // Check byzantine tolerance
             let byzantine_count = world_state.byzantine.byzantine_participants.len();
@@ -678,19 +740,23 @@ impl PropertyEvaluator {
     }
 
     /// Evaluate liveness property
-    fn evaluate_liveness_property(&self, property: &VerifiableProperty, _world_state: &WorldState) -> Result<bool, EvaluationError> {
+    fn evaluate_liveness_property(
+        &self,
+        property: &VerifiableProperty,
+        _world_state: &WorldState,
+    ) -> Result<bool, EvaluationError> {
         let expression = &property.expression.to_lowercase();
-        
+
         if expression.contains("eventually") {
             // Check if property eventually holds within recent history
             let recent_snapshots = self.history.get_recent(10);
-            
+
             if recent_snapshots.is_empty() {
                 return Err(EvaluationError::InsufficientHistory(
-                    "No state history available for liveness evaluation".to_string()
+                    "No state history available for liveness evaluation".to_string(),
                 ));
             }
-            
+
             // Simplified liveness check - property should hold in at least one recent state
             Ok(recent_snapshots.len() > 5) // Simplified - assumes liveness if we have enough history
         } else {
@@ -699,9 +765,13 @@ impl PropertyEvaluator {
     }
 
     /// Evaluate temporal property
-    fn evaluate_temporal_property(&self, property: &VerifiableProperty, _world_state: &WorldState) -> Result<bool, EvaluationError> {
+    fn evaluate_temporal_property(
+        &self,
+        property: &VerifiableProperty,
+        _world_state: &WorldState,
+    ) -> Result<bool, EvaluationError> {
         let expression = &property.expression.to_lowercase();
-        
+
         if expression.contains("always") {
             // Universal temporal property - must hold in all states
             let all_snapshots = self.history.get_recent(self.config.max_history_length);
@@ -715,9 +785,13 @@ impl PropertyEvaluator {
     }
 
     /// Evaluate security property
-    fn evaluate_security_property(&self, property: &VerifiableProperty, _world_state: &WorldState) -> Result<bool, EvaluationError> {
+    fn evaluate_security_property(
+        &self,
+        property: &VerifiableProperty,
+        _world_state: &WorldState,
+    ) -> Result<bool, EvaluationError> {
         let expression = &property.expression.to_lowercase();
-        
+
         if expression.contains("auth") {
             // Check authentication properties
             Ok(true) // Simplified - would check signature validation
@@ -730,16 +804,22 @@ impl PropertyEvaluator {
     }
 
     /// Evaluate consensus property
-    fn evaluate_consensus_property(&self, property: &VerifiableProperty, world_state: &WorldState) -> Result<bool, EvaluationError> {
+    fn evaluate_consensus_property(
+        &self,
+        property: &VerifiableProperty,
+        world_state: &WorldState,
+    ) -> Result<bool, EvaluationError> {
         let expression = &property.expression.to_lowercase();
-        
+
         if expression.contains("agreement") {
             // Check if all honest participants agree
-            let honest_participants: Vec<_> = world_state.participants.iter()
+            let honest_participants: Vec<_> = world_state
+                .participants
+                .iter()
                 .filter(|(id, _)| !world_state.byzantine.byzantine_participants.contains(id))
                 .collect();
-            
-            Ok(honest_participants.len() > 0) // Simplified
+
+            Ok(!honest_participants.is_empty()) // Simplified
         } else if expression.contains("threshold") {
             // Check threshold requirements
             let active_participants = world_state.participants.len();
@@ -750,9 +830,13 @@ impl PropertyEvaluator {
     }
 
     /// Evaluate performance property
-    fn evaluate_performance_property(&self, property: &VerifiableProperty, world_state: &WorldState) -> Result<bool, EvaluationError> {
+    fn evaluate_performance_property(
+        &self,
+        property: &VerifiableProperty,
+        world_state: &WorldState,
+    ) -> Result<bool, EvaluationError> {
         let expression = &property.expression.to_lowercase();
-        
+
         if expression.contains("latency") {
             // Check latency requirements
             Ok(world_state.current_tick < 1000) // Simplified - under 1000 ticks
@@ -780,15 +864,21 @@ pub struct WorldStateAdapter<'a> {
 impl<'a> WorldStateAdapter<'a> {
     pub fn new(world_state: &'a WorldState) -> Self {
         let mut extracted_variables = HashMap::new();
-        
+
         // Extract key variables for property evaluation
-        extracted_variables.insert("current_tick".to_string(), 
-            QuintValue::Int(world_state.current_tick as i64));
-        extracted_variables.insert("participant_count".to_string(), 
-            QuintValue::Int(world_state.participants.len() as i64));
-        extracted_variables.insert("byzantine_count".to_string(), 
-            QuintValue::Int(world_state.byzantine.byzantine_participants.len() as i64));
-        
+        extracted_variables.insert(
+            "current_tick".to_string(),
+            QuintValue::Int(world_state.current_tick as i64),
+        );
+        extracted_variables.insert(
+            "participant_count".to_string(),
+            QuintValue::Int(world_state.participants.len() as i64),
+        );
+        extracted_variables.insert(
+            "byzantine_count".to_string(),
+            QuintValue::Int(world_state.byzantine.byzantine_participants.len() as i64),
+        );
+
         Self {
             world_state,
             extracted_variables,
@@ -800,21 +890,25 @@ impl<'a> SimulationState for WorldStateAdapter<'a> {
     fn get_variable(&self, name: &str) -> Option<QuintValue> {
         self.extracted_variables.get(name).cloned()
     }
-    
+
     fn get_all_variables(&self) -> HashMap<String, QuintValue> {
         self.extracted_variables.clone()
     }
-    
+
     fn get_current_time(&self) -> u64 {
         self.world_state.current_time
     }
-    
+
     fn get_metadata(&self) -> HashMap<String, QuintValue> {
         let mut metadata = HashMap::new();
-        metadata.insert("simulation_id".to_string(), 
-            QuintValue::String(self.world_state.simulation_id.to_string()));
-        metadata.insert("seed".to_string(), 
-            QuintValue::Int(self.world_state.seed as i64));
+        metadata.insert(
+            "simulation_id".to_string(),
+            QuintValue::String(self.world_state.simulation_id.to_string()),
+        );
+        metadata.insert(
+            "seed".to_string(),
+            QuintValue::Int(self.world_state.seed as i64),
+        );
         metadata
     }
 }
@@ -822,7 +916,10 @@ impl<'a> SimulationState for WorldStateAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world_state::{WorldState, ParticipantState, NetworkFabric, ProtocolExecutionState, ByzantineAdversaryState, SimulationConfiguration};
+    use crate::world_state::{
+        ByzantineAdversaryState, NetworkFabric, ParticipantState, ProtocolExecutionState,
+        SimulationConfiguration, WorldState,
+    };
     use aura_console_types::trace::{ParticipantStatus, ParticipantType};
     use std::collections::{HashMap, VecDeque};
     use uuid::Uuid;
@@ -896,7 +993,7 @@ mod tests {
     fn test_property_registration() {
         let mut evaluator = PropertyEvaluator::new();
         let property = create_test_property();
-        
+
         let result = evaluator.register_property(property);
         assert!(result.is_ok());
         assert_eq!(evaluator.properties.len(), 1);
@@ -906,10 +1003,10 @@ mod tests {
     fn test_state_update() {
         let mut evaluator = PropertyEvaluator::new();
         evaluator.set_evaluation_mode(EvaluationMode::Streaming);
-        
+
         let world_state = create_test_world_state();
         let result = evaluator.update_state(&world_state);
-        
+
         assert!(result.is_ok());
         assert_eq!(evaluator.history.len(), 1);
     }
@@ -919,13 +1016,13 @@ mod tests {
         let mut evaluator = PropertyEvaluator::new();
         let property = create_test_property();
         evaluator.register_property(property).unwrap();
-        
+
         let world_state = create_test_world_state();
         evaluator.update_state(&world_state).unwrap();
-        
+
         let result = evaluator.evaluate_all_properties(&world_state);
         assert!(result.is_ok());
-        
+
         let validation_result = result.unwrap();
         assert_eq!(validation_result.total_properties, 1);
         assert_eq!(validation_result.satisfied_properties, 1);
@@ -934,7 +1031,7 @@ mod tests {
     #[test]
     fn test_state_history() {
         let mut history = StateHistory::new(3);
-        
+
         for i in 0..5 {
             let snapshot = StateSnapshot {
                 timestamp: i * 1000,
@@ -945,7 +1042,7 @@ mod tests {
             };
             history.add_snapshot(snapshot);
         }
-        
+
         // Should only keep the last 3 snapshots
         assert_eq!(history.len(), 3);
         assert!(history.get_by_tick(0).is_none()); // Evicted
@@ -958,7 +1055,7 @@ mod tests {
     #[test]
     fn test_evaluation_cache() {
         let mut cache = EvaluationCache::new(2);
-        
+
         let result1 = PropertyEvaluationResult {
             property_name: "prop1".to_string(),
             holds: true,
@@ -966,13 +1063,13 @@ mod tests {
             witness: None,
             evaluation_time_ms: 10,
         };
-        
+
         cache.insert("prop1", 123, result1.clone());
-        
+
         let cached = cache.get("prop1", 123);
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().property_name, "prop1");
-        
+
         // Cache miss
         let missing = cache.get("prop1", 456);
         assert!(missing.is_none());
@@ -982,11 +1079,11 @@ mod tests {
     fn test_world_state_adapter() {
         let world_state = create_test_world_state();
         let adapter = WorldStateAdapter::new(&world_state);
-        
+
         assert_eq!(adapter.get_current_time(), 1000000);
         assert!(adapter.get_variable("current_tick").is_some());
         assert!(adapter.get_variable("participant_count").is_some());
-        
+
         let metadata = adapter.get_metadata();
         assert!(metadata.contains_key("simulation_id"));
         assert!(metadata.contains_key("seed"));

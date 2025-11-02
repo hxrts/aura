@@ -8,6 +8,7 @@ use crate::world_state::*;
 use crate::{AuraError, Result};
 use aura_console_types::trace::{DropReason, ParticipantStatus};
 use aura_console_types::{CausalityInfo, EventType, TraceEvent};
+use aura_types::SessionStatus;
 use std::collections::HashMap;
 use uuid::Uuid;
 

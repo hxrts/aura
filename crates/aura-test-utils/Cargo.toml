@@ -1,0 +1,41 @@
+[package]
+name = "aura-test-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Workspace crates
+aura-agent = { path = "../aura-agent" }
+aura-crypto = { path = "../aura-crypto" }
+aura-journal = { path = "../aura-journal" }
+aura-transport = { path = "../aura-transport" }
+aura-types = { path = "../aura-types" }
+
+# Async runtime
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+# Cryptography provided through aura-crypto
+ed25519-dalek = { workspace = true }
+frost-ed25519 = { workspace = true }
+blake3 = { workspace = true }
+sha2 = { workspace = true }
+
+# Randomness
+rand = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+
+[dev-dependencies]
+# For testing the test utilities themselves
+tokio-test = "0.4"

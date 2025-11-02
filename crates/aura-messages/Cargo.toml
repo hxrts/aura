@@ -14,8 +14,6 @@ workspace = true
 # Internal crates
 aura-types = { path = "../aura-types" }
 aura-crypto = { path = "../aura-crypto" }
-aura-protocol-types = { path = "../aura-protocol-types" }
-aura-authentication = { path = "../aura-authentication" }
 
 # Serialization
 serde = { workspace = true }
@@ -23,6 +21,13 @@ serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 bincode = { workspace = true }
 
+# Cryptography
+blake3 = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+hex = { workspace = true }
+
 # Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }
+chrono = { workspace = true }

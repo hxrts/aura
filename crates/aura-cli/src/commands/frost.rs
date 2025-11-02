@@ -4,10 +4,13 @@
 //! including key generation, signing, verification, and testing.
 
 use aura_crypto::{frost::FrostKeyShare, Effects};
-use aura_protocol::{LocalSessionRuntime, SessionCommand, SessionResponse};
+// use aura_protocol::{LocalSessionRuntime, SessionCommand, SessionResponse};
 use aura_types::{AccountId, AccountIdExt, AuraError, DeviceId, DeviceIdExt};
+use anyhow::anyhow;
 use clap::Args;
-use tracing::{info, warn};
+use std::fs;
+use std::path::Path;
+use tracing::{error, info, warn};
 
 type Result<T> = std::result::Result<T, AuraError>;
 
@@ -269,10 +272,43 @@ pub async fn sign(args: SignArgs) -> Result<()> {
 pub async fn verify(args: VerifyArgs) -> Result<()> {
     info!("Verifying FROST signature for message: '{}'", args.message);
 
-    // TODO: Implement signature verification using stored public key
-    warn!("FROST signature verification not yet fully implemented");
-    info!("Would verify signature from: {}", args.signature);
-    info!("Using public key from: {}", args.key_dir);
+    // Load the group public key from the key directory
+    let public_key_path = Path::new(&args.key_dir).join("group_public_key.json");
+    let public_key_data = fs::read(&public_key_path)
+        .map_err(|e| anyhow!("Failed to read public key from {}: {}", public_key_path.display(), e))?;
+    
+    let group_public_key: aura_crypto::Ed25519VerifyingKey = serde_json::from_slice(&public_key_data)
+        .map_err(|e| anyhow!("Failed to deserialize group public key: {}", e))?;
+
+    // Parse the signature (support both hex string and file)
+    let signature_bytes = if Path::new(&args.signature).exists() {
+        // Read from file
+        fs::read(&args.signature)
+            .map_err(|e| anyhow!("Failed to read signature file {}: {}", args.signature, e))?
+    } else {
+        // Parse as hex string
+        hex::decode(&args.signature)
+            .map_err(|e| anyhow!("Failed to decode signature hex: {}", e))?
+    };
+
+    // Deserialize the signature
+    let signature: aura_crypto::Ed25519Signature = serde_json::from_slice(&signature_bytes)
+        .map_err(|e| anyhow!("Failed to deserialize signature: {}", e))?;
+
+    // Verify the signature
+    let message_bytes = args.message.as_bytes();
+    let is_valid = aura_crypto::frost::verify_signature(message_bytes, &signature, &group_public_key)
+        .map_err(|e| anyhow!("Signature verification failed: {}", e))?;
+
+    if is_valid {
+        info!("✓ Signature verification PASSED");
+        info!("Message: '{}'", args.message);
+        info!("Signature is valid for the given public key");
+    } else {
+        error!("✗ Signature verification FAILED");
+        error!("The signature is invalid for the given message and public key");
+        return Err(anyhow!("Signature verification failed"));
+    }
 
     Ok(())
 }

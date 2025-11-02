@@ -125,7 +125,7 @@ impl MetricsCollector {
     {
         if self.enabled {
             let mut metrics = self.metrics.lock().unwrap();
-            Some(f(&mut *metrics))
+            Some(f(&mut metrics))
         } else {
             None
         }

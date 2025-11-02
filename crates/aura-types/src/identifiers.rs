@@ -312,6 +312,18 @@ impl FromStr for DeviceId {
     }
 }
 
+impl From<Uuid> for DeviceId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl From<DeviceId> for Uuid {
+    fn from(device_id: DeviceId) -> Self {
+        device_id.0
+    }
+}
+
 /// Guardian identifier for social recovery guardians
 ///
 /// Guardians are trusted third parties that can help recover account access

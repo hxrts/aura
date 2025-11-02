@@ -9,22 +9,20 @@ members = [
     "crates/aura-authorization",
     "crates/aura-messages",
     "crates/aura-protocol",
-    "crates/aura-protocol-types",
     "crates/aura-crypto",
     "crates/aura-journal",
     "crates/aura-store",
     "crates/aura-transport",
-    "crates/test-utils",
+    "crates/aura-test-utils",
     "crates/aura-cli",
     "crates/aura-simulator",
-    "crates/aura-interfaces",
-    "crates/console-types",
-    "crates/sim-server",
-    "crates/sim-client",
-    "crates/live-client",
+    "crates/aura-console-types",
+    "crates/aura-sim-server",
+    "crates/aura-sim-client",
+    "crates/aura-live-client",
     "crates/aura-analysis-client",
     "crates/aura-wasm",
-    "crates/quint-api",
+    "crates/aura-quint-api",
     "crates/aura-types",
     "crates/aura-console",
 ]
@@ -45,8 +43,11 @@ frost-ed25519 = "1.0"
 ed25519-dalek = { version = "2.0", features = ["rand_core", "serde"] }
 curve25519-dalek = "4.1"
 blake3 = "1.5"
+chrono = { version = "0.4", features = ["serde"] }
 hkdf = "0.12"
 sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
 aes-gcm = "0.10"
 hpke = "0.12"
 chacha20poly1305 = "0.10.1"
@@ -86,11 +87,13 @@ toml = "0.8"
 # Additional utilities
 rand = "0.8"
 rand_chacha = "0.3"
-hex = "0.4"
 base64 = "0.21"
 indexmap = "2.0"
 proptest = "1.4"
 dirs = "5.0"
+
+# Session types & choreographic programming
+rumpsteak = { git = "https://github.com/hxrts/rumpsteak-aura", package = "rumpsteak-aura" }
 
 # Keyhive dependencies
 arbitrary = { version = "1.4.1", features = ["derive"] }

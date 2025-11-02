@@ -1,4 +1,3 @@
-
 // Key Derivation Security Tests
 //
 // Tests security properties of the key derivation system:

@@ -3,7 +3,6 @@
 //! This module provides implementations of all standard choreographies
 //! used in TOML scenarios.
 
-use super::choreography_actions::run_protocol_with_scheduler;
 use super::engine::{ChoreographyExecutor, ChoreographyResult};
 use crate::{tick, QueuedProtocol, Result, WorldState};
 use std::collections::HashMap;
@@ -757,7 +756,7 @@ impl ChoreographyExecutor for CounterInitChoreography {
         string_params.insert("relationship_seed".to_string(), participants.join(","));
 
         let success =
-            run_protocol_with_scheduler(world_state, "CounterInit", participants, &string_params)
+            super::choreography_actions::run_protocol_with_middleware(world_state, "CounterInit", participants, &string_params)
                 .unwrap_or(false);
 
         let mut events_generated = 0;
@@ -806,7 +805,7 @@ impl ChoreographyExecutor for CounterIncrementChoreography {
         string_params.insert("ttl_epochs".to_string(), "50".to_string());
         string_params.insert("relationship_seed".to_string(), participants.join(","));
 
-        let success = run_protocol_with_scheduler(
+        let success = super::choreography_actions::run_protocol_with_middleware(
             world_state,
             "CounterIncrement",
             participants,

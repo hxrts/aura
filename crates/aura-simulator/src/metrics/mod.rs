@@ -63,6 +63,7 @@ impl Drop for TimerGuard {
 
 /// Central metrics registry for simulation components
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SimulationMetrics {
     /// Core simulation metrics
     pub simulation: SimulationCoreMetrics,
@@ -80,6 +81,7 @@ pub struct SimulationMetrics {
 
 /// Core simulation execution metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SimulationCoreMetrics {
     /// Current simulation tick
     pub current_tick: u64,
@@ -158,6 +160,7 @@ pub struct NetworkMetrics {
 
 /// Protocol execution metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ProtocolMetrics {
     /// Active protocol sessions
     pub active_sessions: usize,
@@ -173,33 +176,7 @@ pub struct ProtocolMetrics {
     pub byzantine_events: u64,
 }
 
-impl Default for SimulationMetrics {
-    fn default() -> Self {
-        Self {
-            simulation: SimulationCoreMetrics::default(),
-            property_monitoring: PropertyMonitoringMetrics::default(),
-            performance: PerformanceMetrics::default(),
-            network: NetworkMetrics::default(),
-            protocol: ProtocolMetrics::default(),
-            custom: HashMap::new(),
-        }
-    }
-}
 
-impl Default for SimulationCoreMetrics {
-    fn default() -> Self {
-        Self {
-            current_tick: 0,
-            current_time: 0,
-            total_duration_ms: 0,
-            participant_count: 0,
-            events_per_tick: TimeSeries::new(),
-            state_changes: 0,
-            checkpoints_created: 0,
-            time_travel_operations: 0,
-        }
-    }
-}
 
 impl Default for PropertyMonitoringMetrics {
     fn default() -> Self {
@@ -243,18 +220,6 @@ impl Default for NetworkMetrics {
     }
 }
 
-impl Default for ProtocolMetrics {
-    fn default() -> Self {
-        Self {
-            active_sessions: 0,
-            completed_sessions: 0,
-            failed_sessions: 0,
-            execution_time_by_type: HashMap::new(),
-            success_rates: HashMap::new(),
-            byzantine_events: 0,
-        }
-    }
-}
 
 impl SimulationMetrics {
     /// Create new metrics instance
@@ -333,7 +298,7 @@ impl SimulationMetrics {
         self.protocol
             .execution_time_by_type
             .entry(protocol_type.to_string())
-            .or_insert_with(TimeSeries::new)
+            .or_default()
             .add_point(timestamp, duration_ms);
 
         // Update success rate for this protocol type

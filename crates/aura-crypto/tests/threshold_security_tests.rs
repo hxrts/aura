@@ -1,4 +1,3 @@
-
 // Threshold Signature Security Tests
 //
 // Tests FROST threshold signature unforgeability properties:

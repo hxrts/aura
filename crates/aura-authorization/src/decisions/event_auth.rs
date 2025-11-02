@@ -99,7 +99,7 @@ fn verify_event_signature(
     // Get the public key for the initiator device
     let public_key = auth_context
         .get_device_public_key(&event.initiator)
-        .map_err(|e| AuthorizationError::AuthenticationError(e))?;
+        .map_err(AuthorizationError::AuthenticationError)?;
 
     // Convert signature bytes to Ed25519Signature and verify
     let signature = aura_crypto::Ed25519Signature::from_slice(&event.signature).map_err(|e| {
@@ -112,8 +112,8 @@ fn verify_event_signature(
     })?;
 
     // Verify the signature over the event payload
-    verify_signature(&public_key, &event.payload, &signature)
-        .map_err(|e| AuthorizationError::AuthenticationError(e))?;
+    verify_signature(public_key, &event.payload, &signature)
+        .map_err(AuthorizationError::AuthenticationError)?;
 
     Ok(())
 }
@@ -163,7 +163,7 @@ fn evaluate_threshold_requirements(
     // Get threshold configuration for this account
     let threshold_config = auth_context
         .get_threshold_config(&event.account_id)
-        .map_err(|e| AuthorizationError::AuthenticationError(e))?;
+        .map_err(AuthorizationError::AuthenticationError)?;
 
     // Count valid signatures on this event
     let signature_count = count_valid_signatures(event, auth_context)?;
@@ -199,7 +199,7 @@ fn count_valid_signatures(
 
     let _public_key = auth_context
         .get_device_public_key(&event.initiator)
-        .map_err(|e| AuthorizationError::AuthenticationError(e))?;
+        .map_err(AuthorizationError::AuthenticationError)?;
 
     // Simplified: just return 1 if signature is valid
     Ok(1)
@@ -222,7 +222,7 @@ fn verify_conditional_requirements(
     _auth_context: &AuthenticationContext,
 ) -> Result<bool> {
     // Simplified verification
-    for requirement in requirements {
+    if let Some(requirement) = requirements.iter().next() {
         match requirement.as_str() {
             "explicit_high_impact_capability" => {
                 // Would check for specific capability tokens

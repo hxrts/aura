@@ -4,27 +4,30 @@
 //! specifications. It analyzes verifiable properties to create targeted
 //! test scenarios that attempt to violate specific properties.
 
-use crate::quint::properties::{VerifiableProperty, PropertyType, PropertyPriority};
-use crate::scenario::types::{Scenario, ScenarioSetup, ByzantineConditions, NetworkConditions, ScenarioAssertion, ExpectedOutcome as ScenarioExpectedOutcome};
-use thiserror::Error;
+use crate::quint::properties::{PropertyPriority, PropertyType, VerifiableProperty};
+use crate::scenario::types::{
+    ByzantineConditions, ExpectedOutcome as ScenarioExpectedOutcome, NetworkConditions, Scenario,
+    ScenarioAssertion, ScenarioSetup,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use thiserror::Error;
 
 /// Errors that can occur during chaos scenario generation
 #[derive(Error, Debug, Clone)]
 pub enum ChaosGeneratorError {
     #[error("Property analysis failed: {0}")]
     PropertyAnalysisFailed(String),
-    
+
     #[error("Scenario generation failed: {0}")]
     ScenarioGenerationFailed(String),
-    
+
     #[error("Unsupported property type for chaos generation: {0:?}")]
     UnsupportedPropertyType(PropertyType),
-    
+
     #[error("Template not found: {0}")]
     TemplateNotFound(String),
-    
+
     #[error("Invalid chaos configuration: {0}")]
     InvalidConfiguration(String),
 }
@@ -173,7 +176,7 @@ impl ChaosGenerator {
             templates: Self::default_templates(),
         }
     }
-    
+
     /// Create chaos generator with custom configuration
     pub fn with_config(config: ChaosGenerationConfig) -> Self {
         Self {
@@ -182,7 +185,7 @@ impl ChaosGenerator {
             templates: Self::default_templates(),
         }
     }
-    
+
     /// Generate chaos scenarios from verifiable properties
     ///
     /// # Arguments
@@ -195,38 +198,40 @@ impl ChaosGenerator {
         properties: &[VerifiableProperty],
     ) -> Result<Vec<ChaosScenario>, ChaosGeneratorError> {
         self.scenarios.clear();
-        
+
         for property in properties {
             // Filter by priority
             if property.priority < self.config.min_property_priority {
                 continue;
             }
-            
+
             // Generate scenarios for this property
             let property_scenarios = self.generate_scenarios_for_property(property)?;
-            
+
             for scenario in property_scenarios {
                 self.scenarios.insert(scenario.id.clone(), scenario);
             }
         }
-        
+
         let mut result: Vec<ChaosScenario> = self.scenarios.values().cloned().collect();
-        
+
         // Sort by target property priority and chaos type
         result.sort_by(|a, b| {
             // Extract priority from property name (simplified approach)
             let a_priority = self.extract_property_priority(&a.target_property);
             let b_priority = self.extract_property_priority(&b.target_property);
-            
+
             match b_priority.cmp(&a_priority) {
-                std::cmp::Ordering::Equal => a.chaos_type.to_string().cmp(&b.chaos_type.to_string()),
+                std::cmp::Ordering::Equal => {
+                    a.chaos_type.to_string().cmp(&b.chaos_type.to_string())
+                }
                 other => other,
             }
         });
-        
+
         Ok(result)
     }
-    
+
     /// Generate scenarios for a specific property
     fn generate_scenarios_for_property(
         &self,
@@ -234,25 +239,25 @@ impl ChaosGenerator {
     ) -> Result<Vec<ChaosScenario>, ChaosGeneratorError> {
         let mut scenarios = Vec::new();
         let chaos_types = self.select_chaos_types_for_property(property);
-        
+
         for chaos_type in chaos_types {
             let generated = self.generate_scenario_variants(property, chaos_type)?;
             scenarios.extend(generated);
-            
+
             // Limit scenarios per property
             if scenarios.len() >= self.config.max_scenarios_per_property {
                 scenarios.truncate(self.config.max_scenarios_per_property);
                 break;
             }
         }
-        
+
         Ok(scenarios)
     }
-    
+
     /// Select appropriate chaos types for a property
     fn select_chaos_types_for_property(&self, property: &VerifiableProperty) -> Vec<ChaosType> {
         let mut chaos_types = Vec::new();
-        
+
         // Select chaos types based on property type and tags
         match property.property_type {
             PropertyType::Safety => {
@@ -289,24 +294,26 @@ impl ChaosGenerator {
                 chaos_types.push(ChaosType::NetworkPartition);
             }
         }
-        
+
         // Filter by enabled chaos types
         chaos_types.retain(|ct| self.config.enabled_chaos_types.contains(ct));
-        
+
         chaos_types
     }
-    
+
     /// Generate scenario variants for a property and chaos type
     fn generate_scenario_variants(
         &self,
         property: &VerifiableProperty,
         chaos_type: ChaosType,
     ) -> Result<Vec<ChaosScenario>, ChaosGeneratorError> {
-        let template = self.templates.get(&chaos_type)
+        let template = self
+            .templates
+            .get(&chaos_type)
             .ok_or_else(|| ChaosGeneratorError::TemplateNotFound(format!("{:?}", chaos_type)))?;
-        
+
         let mut scenarios = Vec::new();
-        
+
         // Generate variants by varying network size and byzantine ratio
         for &network_size in &self.config.test_network_sizes {
             for &byzantine_ratio in &self.config.byzantine_ratios {
@@ -320,10 +327,10 @@ impl ChaosGenerator {
                 scenarios.push(scenario);
             }
         }
-        
+
         Ok(scenarios)
     }
-    
+
     /// Create a scenario from a template with specific parameters
     fn create_scenario_from_template(
         &self,
@@ -334,29 +341,36 @@ impl ChaosGenerator {
         byzantine_ratio: f64,
     ) -> Result<ChaosScenario, ChaosGeneratorError> {
         let byzantine_count = (network_size as f64 * byzantine_ratio).floor() as usize;
-        
-        let scenario_id = format!("chaos_{}_{}_n{}_b{}", 
-                                 property.id, 
-                                 chaos_type.to_string().to_lowercase(),
-                                 network_size,
-                                 byzantine_count);
-        
-        let scenario_name = format!("Chaos Test: {} - {} (n={}, byzantine={})",
-                                   property.name,
-                                   chaos_type.to_string(),
-                                   network_size,
-                                   byzantine_count);
-        
+
+        let scenario_id = format!(
+            "chaos_{}_{}_n{}_b{}",
+            property.id,
+            chaos_type.to_string().to_lowercase(),
+            network_size,
+            byzantine_count
+        );
+
+        let scenario_name = format!(
+            "Chaos Test: {} - {} (n={}, byzantine={})",
+            property.name,
+            chaos_type,
+            network_size,
+            byzantine_count
+        );
+
         // Create scenario based on template
         let mut scenario = template.base_scenario.clone();
         scenario.name = scenario_name.clone();
-        scenario.description = format!("Generated chaos scenario to test property '{}' using {} chaos",
-                                     property.name, chaos_type.to_string());
-        
+        scenario.description = format!(
+            "Generated chaos scenario to test property '{}' using {} chaos",
+            property.name,
+            chaos_type
+        );
+
         // Configure participants
         scenario.setup.participants = network_size;
         scenario.setup.threshold = (network_size * 2 / 3) + 1; // 2/3 + 1 threshold
-        
+
         // Configure byzantine behavior
         if byzantine_count > 0 {
             scenario.byzantine = Some(ByzantineConditions {
@@ -364,21 +378,25 @@ impl ChaosGenerator {
                 participants: (0..byzantine_count).collect(),
                 strategies: vec![crate::scenario::types::LegacyByzantineStrategy {
                     strategy_type: self.select_byzantine_strategy(&chaos_type, property),
-                    description: Some(format!("Chaos testing strategy for {}", chaos_type.to_string())),
+                    description: Some(format!(
+                        "Chaos testing strategy for {}",
+                        chaos_type
+                    )),
                     abort_after: None,
                 }],
             });
         }
-        
+
         // Configure network based on chaos type
         scenario.network = Some(self.create_network_config(&chaos_type));
-        
+
         // Add property-specific assertions
         scenario.assertions = self.create_assertions(property, &chaos_type);
-        
+
         // Set expected outcome
-        scenario.expected_outcome = self.determine_expected_outcome(property, &chaos_type, byzantine_ratio);
-        
+        scenario.expected_outcome =
+            self.determine_expected_outcome(property, &chaos_type, byzantine_ratio);
+
         let generation_metadata = GenerationMetadata {
             source_property: property.id.clone(),
             template_name: format!("{:?}", chaos_type),
@@ -387,9 +405,11 @@ impl ChaosGenerator {
                 ("network_size".to_string(), network_size.to_string()),
                 ("byzantine_ratio".to_string(), byzantine_ratio.to_string()),
                 ("byzantine_count".to_string(), byzantine_count.to_string()),
-            ].into_iter().collect(),
+            ]
+            .into_iter()
+            .collect(),
         };
-        
+
         Ok(ChaosScenario {
             id: scenario_id,
             name: scenario_name,
@@ -400,9 +420,13 @@ impl ChaosGenerator {
             generation_metadata,
         })
     }
-    
+
     /// Select appropriate byzantine strategy for chaos type and property
-    fn select_byzantine_strategy(&self, chaos_type: &ChaosType, property: &VerifiableProperty) -> String {
+    fn select_byzantine_strategy(
+        &self,
+        chaos_type: &ChaosType,
+        property: &VerifiableProperty,
+    ) -> String {
         match chaos_type {
             ChaosType::Byzantine => {
                 if property.tags.contains(&"consensus".to_string()) {
@@ -419,11 +443,15 @@ impl ChaosGenerator {
             _ => "silent".to_string(),
         }
     }
-    
+
     /// Create chaos-specific parameters
-    fn _create_chaos_params(&self, chaos_type: &ChaosType, _property: &VerifiableProperty) -> HashMap<String, String> {
+    fn _create_chaos_params(
+        &self,
+        chaos_type: &ChaosType,
+        _property: &VerifiableProperty,
+    ) -> HashMap<String, String> {
         let mut params = HashMap::new();
-        
+
         match chaos_type {
             ChaosType::TimingAttack => {
                 params.insert("delay_ms".to_string(), "1000".to_string());
@@ -439,10 +467,10 @@ impl ChaosGenerator {
             }
             _ => {}
         }
-        
+
         params
     }
-    
+
     /// Create network configuration for chaos type
     fn create_network_config(&self, chaos_type: &ChaosType) -> NetworkConditions {
         match chaos_type {
@@ -463,11 +491,15 @@ impl ChaosGenerator {
             },
         }
     }
-    
+
     /// Create assertions for property and chaos type
-    fn create_assertions(&self, property: &VerifiableProperty, chaos_type: &ChaosType) -> Vec<ScenarioAssertion> {
+    fn create_assertions(
+        &self,
+        property: &VerifiableProperty,
+        chaos_type: &ChaosType,
+    ) -> Vec<ScenarioAssertion> {
         let mut assertions = Vec::new();
-        
+
         // Add property-specific assertion
         assertions.push(ScenarioAssertion {
             assertion_type: "property_monitor".to_string(),
@@ -476,7 +508,7 @@ impl ChaosGenerator {
             expected_property: Some(property.id.clone()),
             timeout_multiplier: None,
         });
-        
+
         // Add chaos-specific assertions
         match chaos_type {
             ChaosType::Byzantine => {
@@ -499,12 +531,17 @@ impl ChaosGenerator {
             }
             _ => {}
         }
-        
+
         assertions
     }
-    
+
     /// Determine expected outcome for property and chaos type
-    fn determine_expected_outcome(&self, property: &VerifiableProperty, chaos_type: &ChaosType, byzantine_ratio: f64) -> ScenarioExpectedOutcome {
+    fn determine_expected_outcome(
+        &self,
+        property: &VerifiableProperty,
+        chaos_type: &ChaosType,
+        byzantine_ratio: f64,
+    ) -> ScenarioExpectedOutcome {
         match (property.property_type.clone(), chaos_type, byzantine_ratio) {
             (PropertyType::Safety, ChaosType::Byzantine, ratio) if ratio > 0.33 => {
                 ScenarioExpectedOutcome::SafetyViolationPrevented
@@ -524,18 +561,18 @@ impl ChaosGenerator {
             }
         }
     }
-    
+
     /// Extract property priority from property name (simplified heuristic)
     fn extract_property_priority(&self, _property_name: &str) -> PropertyPriority {
         // Simplified approach - in practice would look up actual property
         PropertyPriority::Medium
     }
-    
+
     /// Get generated scenario by ID
     pub fn get_scenario(&self, id: &str) -> Option<&ChaosScenario> {
         self.scenarios.get(id)
     }
-    
+
     /// Get all scenarios for a specific property
     pub fn get_scenarios_for_property(&self, property_id: &str) -> Vec<&ChaosScenario> {
         self.scenarios
@@ -543,7 +580,7 @@ impl ChaosGenerator {
             .filter(|s| s.target_property == property_id)
             .collect()
     }
-    
+
     /// Get scenarios by chaos type
     pub fn get_scenarios_by_chaos_type(&self, chaos_type: ChaosType) -> Vec<&ChaosScenario> {
         self.scenarios
@@ -551,81 +588,92 @@ impl ChaosGenerator {
             .filter(|s| s.chaos_type == chaos_type)
             .collect()
     }
-    
+
     /// Default scenario templates for different chaos types
     fn default_templates() -> HashMap<ChaosType, ScenarioTemplate> {
         let mut templates = HashMap::new();
-        
+
         // Byzantine chaos template
-        templates.insert(ChaosType::Byzantine, ScenarioTemplate {
-            base_scenario: Self::create_base_byzantine_scenario(),
-            variable_params: vec![
-                VariableParameter {
+        templates.insert(
+            ChaosType::Byzantine,
+            ScenarioTemplate {
+                base_scenario: Self::create_base_byzantine_scenario(),
+                variable_params: vec![VariableParameter {
                     name: "byzantine_count".to_string(),
-                    values: vec![
-                        ParameterValue::Int(1),
-                        ParameterValue::Int(2),
-                    ],
-                },
-            ],
-            assertion_patterns: vec![
-                "byzantine_behavior_detected".to_string(),
-                "safety_maintained".to_string(),
-            ],
-        });
-        
+                    values: vec![ParameterValue::Int(1), ParameterValue::Int(2)],
+                }],
+                assertion_patterns: vec![
+                    "byzantine_behavior_detected".to_string(),
+                    "safety_maintained".to_string(),
+                ],
+            },
+        );
+
         // Network partition template
-        templates.insert(ChaosType::NetworkPartition, ScenarioTemplate {
-            base_scenario: Self::create_base_partition_scenario(),
-            variable_params: vec![
-                VariableParameter {
+        templates.insert(
+            ChaosType::NetworkPartition,
+            ScenarioTemplate {
+                base_scenario: Self::create_base_partition_scenario(),
+                variable_params: vec![VariableParameter {
                     name: "partition_duration".to_string(),
-                    values: vec![
-                        ParameterValue::Int(1000),
-                        ParameterValue::Int(5000),
-                    ],
-                },
-            ],
-            assertion_patterns: vec![
-                "partition_recovery".to_string(),
-                "liveness_maintained".to_string(),
-            ],
-        });
-        
+                    values: vec![ParameterValue::Int(1000), ParameterValue::Int(5000)],
+                }],
+                assertion_patterns: vec![
+                    "partition_recovery".to_string(),
+                    "liveness_maintained".to_string(),
+                ],
+            },
+        );
+
         // Add other chaos type templates...
-        templates.insert(ChaosType::TimingAttack, ScenarioTemplate {
-            base_scenario: Self::create_base_timing_scenario(),
-            variable_params: vec![],
-            assertion_patterns: vec!["timing_resilience".to_string()],
-        });
-        
-        templates.insert(ChaosType::ResourceExhaustion, ScenarioTemplate {
-            base_scenario: Self::create_base_resource_scenario(),
-            variable_params: vec![],
-            assertion_patterns: vec!["resource_management".to_string()],
-        });
-        
-        templates.insert(ChaosType::StateCorruption, ScenarioTemplate {
-            base_scenario: Self::create_base_corruption_scenario(),
-            variable_params: vec![],
-            assertion_patterns: vec!["state_integrity".to_string()],
-        });
-        
-        templates.insert(ChaosType::CryptographicAttack, ScenarioTemplate {
-            base_scenario: Self::create_base_crypto_scenario(),
-            variable_params: vec![],
-            assertion_patterns: vec!["crypto_security".to_string()],
-        });
-        
-        templates.insert(ChaosType::ConsensusDisruption, ScenarioTemplate {
-            base_scenario: Self::create_base_consensus_scenario(),
-            variable_params: vec![],
-            assertion_patterns: vec!["consensus_integrity".to_string()],
-        });
-        
+        templates.insert(
+            ChaosType::TimingAttack,
+            ScenarioTemplate {
+                base_scenario: Self::create_base_timing_scenario(),
+                variable_params: vec![],
+                assertion_patterns: vec!["timing_resilience".to_string()],
+            },
+        );
+
+        templates.insert(
+            ChaosType::ResourceExhaustion,
+            ScenarioTemplate {
+                base_scenario: Self::create_base_resource_scenario(),
+                variable_params: vec![],
+                assertion_patterns: vec!["resource_management".to_string()],
+            },
+        );
+
+        templates.insert(
+            ChaosType::StateCorruption,
+            ScenarioTemplate {
+                base_scenario: Self::create_base_corruption_scenario(),
+                variable_params: vec![],
+                assertion_patterns: vec!["state_integrity".to_string()],
+            },
+        );
+
+        templates.insert(
+            ChaosType::CryptographicAttack,
+            ScenarioTemplate {
+                base_scenario: Self::create_base_crypto_scenario(),
+                variable_params: vec![],
+                assertion_patterns: vec!["crypto_security".to_string()],
+            },
+        );
+
+        templates.insert(
+            ChaosType::ConsensusDisruption,
+            ScenarioTemplate {
+                base_scenario: Self::create_base_consensus_scenario(),
+                variable_params: vec![],
+                assertion_patterns: vec!["consensus_integrity".to_string()],
+            },
+        );
+
         templates
     }
-    
+
     /// Create base byzantine scenario template
     fn create_base_byzantine_scenario() -> Scenario {
         Scenario {
@@ -648,7 +696,7 @@ impl ChaosGenerator {
             quint_source: None,
         }
     }
-    
+
     /// Create base network partition scenario template
     fn create_base_partition_scenario() -> Scenario {
         Scenario {
@@ -675,24 +723,24 @@ impl ChaosGenerator {
             quint_source: None,
         }
     }
-    
+
     /// Create other base scenario templates (simplified implementations)
     fn create_base_timing_scenario() -> Scenario {
         Self::create_base_byzantine_scenario() // Simplified
     }
-    
+
     fn create_base_resource_scenario() -> Scenario {
         Self::create_base_byzantine_scenario() // Simplified
     }
-    
+
     fn create_base_corruption_scenario() -> Scenario {
         Self::create_base_byzantine_scenario() // Simplified
     }
-    
+
     fn create_base_crypto_scenario() -> Scenario {
         Self::create_base_byzantine_scenario() // Simplified
     }
-    
+
     fn create_base_consensus_scenario() -> Scenario {
         Self::create_base_byzantine_scenario() // Simplified
     }
@@ -721,14 +769,14 @@ impl std::fmt::Display for ChaosType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::quint::properties::{VerifiableProperty, PropertyType, PropertyPriority};
-    
+    use crate::quint::properties::{PropertyPriority, PropertyType, VerifiableProperty};
+
     #[test]
     fn test_chaos_generator_creation() {
         let generator = ChaosGenerator::new();
         assert_eq!(generator.scenarios.len(), 0);
         assert_eq!(generator.templates.len(), 7); // All chaos types
-        
+
         let config = ChaosGenerationConfig {
             max_scenarios_per_property: 2,
             enabled_chaos_types: vec![ChaosType::Byzantine],
@@ -737,46 +785,45 @@ mod tests {
             test_network_sizes: vec![3],
             byzantine_ratios: vec![0.33],
         };
-        
+
         let generator = ChaosGenerator::with_config(config);
         assert_eq!(generator.config.max_scenarios_per_property, 2);
     }
-    
+
     #[test]
     fn test_chaos_scenario_generation() {
         let mut generator = ChaosGenerator::new();
-        
-        let properties = vec![
-            VerifiableProperty {
-                id: "safety_prop".to_string(),
-                name: "Safety Property".to_string(),
-                property_type: PropertyType::Safety,
-                expression: "no_double_spending".to_string(),
-                description: "No double spending occurs".to_string(),
-                source_location: "test.qnt:10".to_string(),
-                priority: PropertyPriority::Critical,
-                tags: vec!["safety".to_string()],
-                continuous_monitoring: true,
-            },
-        ];
-        
+
+        let properties = vec![VerifiableProperty {
+            id: "safety_prop".to_string(),
+            name: "Safety Property".to_string(),
+            property_type: PropertyType::Safety,
+            expression: "no_double_spending".to_string(),
+            description: "No double spending occurs".to_string(),
+            source_location: "test.qnt:10".to_string(),
+            priority: PropertyPriority::Critical,
+            tags: vec!["safety".to_string()],
+            continuous_monitoring: true,
+        }];
+
         let result = generator.generate_chaos_scenarios(&properties);
         assert!(result.is_ok());
-        
+
         let scenarios = result.unwrap();
         assert!(!scenarios.is_empty());
-        
+
         // Should generate scenarios for safety property
-        let safety_scenarios: Vec<_> = scenarios.iter()
+        let safety_scenarios: Vec<_> = scenarios
+            .iter()
             .filter(|s| s.target_property == "safety_prop")
             .collect();
         assert!(!safety_scenarios.is_empty());
     }
-    
+
     #[test]
     fn test_chaos_type_selection() {
         let generator = ChaosGenerator::new();
-        
+
         let safety_property = VerifiableProperty {
             id: "safety_test".to_string(),
             name: "Safety Test".to_string(),
@@ -788,11 +835,11 @@ mod tests {
             tags: vec!["safety".to_string()],
             continuous_monitoring: true,
         };
-        
+
         let chaos_types = generator.select_chaos_types_for_property(&safety_property);
         assert!(chaos_types.contains(&ChaosType::Byzantine));
         assert!(chaos_types.contains(&ChaosType::StateCorruption));
-        
+
         let consensus_property = VerifiableProperty {
             id: "consensus_test".to_string(),
             name: "Consensus Test".to_string(),
@@ -804,16 +851,16 @@ mod tests {
             tags: vec!["consensus".to_string()],
             continuous_monitoring: true,
         };
-        
+
         let consensus_chaos_types = generator.select_chaos_types_for_property(&consensus_property);
         assert!(consensus_chaos_types.contains(&ChaosType::ConsensusDisruption));
         assert!(consensus_chaos_types.contains(&ChaosType::Byzantine));
     }
-    
+
     #[test]
     fn test_expected_outcome_determination() {
         let generator = ChaosGenerator::new();
-        
+
         let safety_property = VerifiableProperty {
             id: "safety_test".to_string(),
             name: "Safety Test".to_string(),
@@ -825,16 +872,18 @@ mod tests {
             tags: vec!["safety".to_string()],
             continuous_monitoring: true,
         };
-        
+
         // High byzantine ratio should expect safety violation prevented or failure
-        let outcome = generator.determine_expected_outcome(&safety_property, &ChaosType::Byzantine, 0.5);
+        let outcome =
+            generator.determine_expected_outcome(&safety_property, &ChaosType::Byzantine, 0.5);
         match outcome {
             ExpectedOutcome::SafetyViolationPrevented => {}
             _ => panic!("Expected safety violation prevented for high byzantine ratio"),
         }
-        
+
         // Low byzantine ratio should maintain safety
-        let outcome = generator.determine_expected_outcome(&safety_property, &ChaosType::Byzantine, 0.1);
+        let outcome =
+            generator.determine_expected_outcome(&safety_property, &ChaosType::Byzantine, 0.1);
         match outcome {
             ExpectedOutcome::Success => {}
             _ => panic!("Expected success for low byzantine ratio"),

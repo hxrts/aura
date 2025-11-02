@@ -19,16 +19,20 @@
 //! - `protocols`: Protocol types and operation enums
 //! - `content`: Content addressing and chunk types
 //! - `capabilities`: Capability system types
+//! - `peers`: Peer discovery and network coordination types
 //! - `relationships`: Relationship and context types
 //! - `session_core`: Core session type primitives and infrastructure
 //! - `session_utils`: Session type utilities, events, and formal verification properties
 
 pub mod capabilities;
 pub mod content;
+pub mod conversions;
 pub mod encoding;
 pub mod errors;
 pub mod identifiers;
 pub mod macros;
+pub mod peers;
+pub mod protocol_types;
 pub mod protocols;
 pub mod relationships;
 pub mod serialization;
@@ -36,6 +40,7 @@ pub mod session_core;
 pub mod session_utils;
 pub mod sessions;
 
+pub mod time_utils;
 // Re-export all public types for convenient access
 pub use capabilities::*;
 pub use content::*;
@@ -47,6 +52,8 @@ pub use errors::{
 // Re-export Result from errors module separately to avoid naming conflicts
 pub use errors::Result as AuraResult;
 pub use identifiers::*;
+pub use peers::*;
+pub use protocol_types::*;
 pub use protocols::*;
 pub use relationships::*;
 pub use serialization::{Result as SerializationResult, SerializationError};

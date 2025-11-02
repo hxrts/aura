@@ -486,7 +486,7 @@ impl ScenarioEngine {
                     // Check properties if enabled
                     if self.config.enable_property_checking {
                         for checker in &self.property_checkers {
-                            match checker.check_property(&world_state, &events) {
+                            match checker.check_property(&world_state, events) {
                                 Ok(holds) => {
                                     if !holds {
                                         let violation = PropertyViolation {

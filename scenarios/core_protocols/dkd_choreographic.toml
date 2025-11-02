@@ -1,0 +1,144 @@
+# DKD Choreographic Protocol Scenario
+# Demonstrates the new Rumpsteak-based DKD choreography with visualization
+
+[metadata]
+name = "dkd_choreographic"
+description = "Choreographic DKD protocol with session types and deterministic simulation"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["dkd", "choreography", "rumpsteak", "visualization"]
+
+[setup]
+participants = 3
+threshold = 2
+seed = 42
+enable_tracing = true
+enable_choreography_recording = true
+
+[simulation]
+# Enable choreographic simulation features
+use_simulation_handler = true
+record_choreo_events = true
+deterministic_timing = true
+message_delay_ms = 10
+
+[network]
+latency_range = [10, 30]
+drop_rate = 0.0  # No drops for deterministic testing
+
+[[phases]]
+name = "setup"
+description = "Initialize choreographic protocol handlers"
+timeout_seconds = 1
+actions = [
+    { type = "setup_choreography", protocol = "DkdProtocol", participants = ["alice", "bob", "carol"] }
+]
+
+[[phases]]
+name = "decentralized_lottery"
+description = "Select coordinator via decentralized lottery"
+timeout_seconds = 2
+actions = [
+    { type = "run_choreography", choreography = "decentralized_lottery", participants = ["alice", "bob", "carol"] }
+]
+
+[[phases]]
+name = "dkd_execution"
+description = "Execute DKD choreography with session types"
+timeout_seconds = 5
+actions = [
+    { 
+        type = "run_choreography", 
+        choreography = "dkd", 
+        participants = ["alice", "bob", "carol"],
+        parameters = { 
+            app_id = "test_app",
+            context = "user_keys",
+            threshold = 2
+        }
+    }
+]
+
+[[phases]]
+name = "trace_validation"
+description = "Validate choreographic execution traces"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "choreo_deadlock_free", expected = true },
+    { type = "verify_property", property = "choreo_progress", expected = true },
+    { type = "verify_property", property = "session_type_safety", expected = true }
+]
+
+[[phases]]
+name = "visualization_export"
+description = "Export choreography traces for console visualization"
+timeout_seconds = 1
+actions = [
+    { type = "export_choreo_trace", format = "console", output = "dkd_choreo_trace.json" }
+]
+
+[[properties]]
+name = "choreo_deadlock_free"
+description = "No deadlocks in choreographic execution"
+property_type = "safety"
+expression = "all_participants_complete"
+
+[[properties]]
+name = "choreo_progress"
+description = "All participants make progress"
+property_type = "liveness"
+expression = "eventually_all_finish"
+
+[[properties]]
+name = "session_type_safety"
+description = "No session type violations"
+property_type = "safety"
+expression = "no_type_errors"
+
+[[properties]]
+name = "deterministic_outcome"
+description = "Same inputs produce same outputs"
+property_type = "safety"
+expression = "output_deterministic"
+
+# Choreography-specific invariants
+[[invariants]]
+name = "message_causality"
+description = "Messages respect causal ordering"
+expression = "for_all_messages(sent_before_received)"
+
+[[invariants]]
+name = "coordinator_consensus"
+description = "All participants agree on coordinator"
+expression = "single_coordinator_elected"
+
+# Network conditions for testing
+[[network_conditions]]
+name = "normal"
+description = "Normal network conditions"
+latency_ms = 20
+jitter_ms = 5
+drop_rate = 0.0
+
+[[network_conditions]]
+name = "stressed"
+description = "Stressed network for timeout testing"
+latency_ms = 100
+jitter_ms = 50
+drop_rate = 0.1
+
+# Byzantine behavior injection (optional)
+[[byzantine_behaviors]]
+name = "coordinator_failure"
+description = "Coordinator fails after election"
+enabled = false
+participants = ["coordinator"]
+behavior = "stop_responding"
+trigger = "after_phase:decentralized_lottery"
+
+# Visualization hints
+[visualization]
+highlight_messages = ["commitment", "share", "aggregate"]
+show_phase_transitions = true
+animate_coordinator_election = true
+timeline_grouping = "by_participant"

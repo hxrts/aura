@@ -42,7 +42,11 @@ fn test_dkd_quint_spec_e2e() -> Result<()> {
 
     println!(
         "[stats] Created property monitor with {} invariants",
-        monitor.get_metrics_snapshot().metrics.property_monitoring.total_evaluations
+        monitor
+            .get_metrics_snapshot()
+            .metrics
+            .property_monitoring
+            .total_evaluations
     );
 
     // Create simulation states representing DKD protocol execution
@@ -70,7 +74,7 @@ fn test_dkd_quint_spec_e2e() -> Result<()> {
                     violation.property_name, violation.violation_details.description
                 );
             }
-            return Err(AuraError::protocol_execution_failed(
+            return Err(AuraError::coordination_failed(
                 "DKD protocol property violations detected",
             ));
         }

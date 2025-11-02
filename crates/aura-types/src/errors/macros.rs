@@ -4,7 +4,7 @@
 //! methods, significantly reducing the amount of boilerplate code required
 //! for error handling across the Aura codebase.
 
-use crate::{AuraError, ErrorCode, ErrorContext};
+use crate::AuraError;
 
 /// Generate error constructor methods automatically
 ///
@@ -173,10 +173,15 @@ impl AuraError {
 
     /// Create a timeout error
     pub fn timeout_error(message: impl Into<String>) -> Self {
-        Self::protocol_timeout(message)
+        Self::Protocol(crate::ProtocolError::Timeout {
+            protocol: "unknown".to_string(),
+            timeout_ms: 0,
+            phase: None,
+            context: message.into(),
+        })
     }
 
-    /// Create a connection error  
+    /// Create a connection error
     pub fn connection_error(message: impl Into<String>) -> Self {
         Self::transport_connection_failed(message)
     }
@@ -185,7 +190,7 @@ impl AuraError {
     pub fn quota_error(message: impl Into<String>) -> Self {
         Self::Infrastructure(crate::InfrastructureError::StorageQuotaExceeded {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::InfraStorageQuotaExceeded),
+            context: "".to_string(),
         })
     }
 
@@ -198,7 +203,7 @@ impl AuraError {
     pub fn witness_error(message: impl Into<String>) -> Self {
         Self::Session(crate::SessionError::ProtocolViolation {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SessionProtocolViolation),
+            context: "".to_string(),
         })
     }
 
@@ -206,7 +211,37 @@ impl AuraError {
     pub fn session_error(message: impl Into<String>) -> Self {
         Self::Session(crate::SessionError::ProtocolViolation {
             message: message.into(),
-            context: ErrorContext::new().with_code(ErrorCode::SessionProtocolViolation),
+            context: "".to_string(),
+        })
+    }
+
+    /// Create a protocol invalid instruction error
+    pub fn protocol_invalid_instruction(message: impl Into<String>) -> Self {
+        Self::Protocol(crate::ProtocolError::MessageValidationFailed {
+            message_type: "unknown".to_string(),
+            reason: message.into(),
+            sender: None,
+            context: "".to_string(),
+        })
+    }
+
+    /// Create an epoch mismatch error
+    pub fn epoch_mismatch(message: impl Into<String>) -> Self {
+        Self::Protocol(crate::ProtocolError::InvalidStateTransition {
+            from_state: "unknown".to_string(),
+            to_state: "unknown".to_string(),
+            reason: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    /// Create a protocol timeout error
+    pub fn protocol_timeout(message: impl Into<String>) -> Self {
+        Self::Protocol(crate::ProtocolError::Timeout {
+            protocol: "unknown".to_string(),
+            timeout_ms: 0,
+            phase: None,
+            context: message.into(),
         })
     }
 }
@@ -228,19 +263,5 @@ mod tests {
 
         let witness_error = AuraError::witness_error("Invalid witness");
         assert!(matches!(witness_error, AuraError::Session(_)));
-    }
-
-    #[test]
-    fn test_error_context() {
-        let error = AuraError::timeout_error("DKD timeout")
-            .with_context("participant", "alice")
-            .with_context("round", "2");
-
-        let context = error.context();
-        assert_eq!(
-            context.context.get("participant"),
-            Some(&"alice".to_string())
-        );
-        assert_eq!(context.context.get("round"), Some(&"2".to_string()));
     }
 }

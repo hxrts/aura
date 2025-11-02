@@ -4,13 +4,10 @@
 //! canonical entry point for all tests, integrating TOML scenarios, choreography
 //! actions, and debugging tools.
 
-use aura_simulator::{
-    scenario::{
-        ChoreographyAction, PropertyCheck,
-        ScenarioPhaseWithActions, ScenarioSetupConfig, UnifiedEngineConfig, UnifiedScenario,
-        UnifiedScenarioEngine, UnifiedScenarioLoader, register_all_standard_choreographies,
-        engine::ExpectedOutcome
-    },
+use aura_simulator::scenario::{
+    engine::ExpectedOutcome, register_all_standard_choreographies, ChoreographyAction,
+    PropertyCheck, ScenarioPhaseWithActions, ScenarioSetupConfig, UnifiedEngineConfig,
+    UnifiedScenario, UnifiedScenarioEngine, UnifiedScenarioLoader,
 };
 use std::collections::HashMap;
 use std::time::Duration;

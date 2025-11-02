@@ -11,10 +11,10 @@ workspace = true
 
 [dependencies]
 # Internal crates
-aura-console-types = { path = "../console-types" }
+aura-console-types = { path = "../aura-console-types" }
 aura-types = { path = "../aura-types" }
 wasm_core = { path = "../aura-wasm" }
-quint_api = { path = "../quint-api" }
+quint_api = { path = "../aura-quint-api", package = "aura-quint-api" }
 
 # WASM and web APIs
 wasm-bindgen = "0.2"

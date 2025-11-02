@@ -13,22 +13,23 @@ workspace = true
 [features]
 default = []
 dev-console = ["postcard"]
+test-utils = []
+simulation = ["transport"]
+transport = ["dep:aura-transport"]
 
 [dependencies]
 # Workspace crates
 aura-crypto = { path = "../aura-crypto" }
 aura-journal = { path = "../aura-journal" }
 aura-types = { path = "../aura-types" }
-aura-protocol-types = { path = "../aura-protocol-types" }
 aura-authentication = { path = "../aura-authentication" }
 aura-authorization = { path = "../aura-authorization" }
 aura-messages = { path = "../aura-messages" }
 # session_types removed during refactor - implementation moved to local modules
 # protocol-core merged into this crate
 # aura-session-types = { path = "../session-types" }  # Moved to local session_types module
-# Transport dependency removed to break circular dependency
-# Transport implements traits defined in coordination
-# aura-transport = { path = "../aura-transport" }
+# Transport dependency (optional for handler re-exports)
+aura-transport = { path = "../aura-transport", optional = true }
 
 # Curve operations
 curve25519-dalek = { workspace = true }
@@ -62,8 +63,13 @@ rand = { workspace = true }
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 
+# Session types & choreographic programming
+rumpsteak = { workspace = true }
+rumpsteak-choreography = { git = "https://github.com/hxrts/rumpsteak-aura", package = "rumpsteak-choreography" }
+
 # Dev console integration (optional)
 postcard = { version = "1.0", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
+aura-transport = { path = "../aura-transport" }

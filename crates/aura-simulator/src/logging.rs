@@ -4,13 +4,54 @@
 //! for replay, debugging, and Byzantine behavior analysis.
 
 use aura_journal::{ByzantineEvidence, ProtocolType};
-use aura_protocol::tracing::{AuraSpan, LogLevel, LogSink, LogValue, SpanOutcome};
 use aura_types::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+
+// Define minimal trace types for simulation
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum LogLevel {
+    Error,
+    Warning,
+    Info,
+    Debug,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LogValue {
+    String(String),
+    Number(i64),
+    Boolean(bool),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuraSpan {
+    pub id: Uuid,
+    pub span_id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub name: String,
+    pub start_time: u64,
+    pub device_id: DeviceId,
+    pub protocol: String,
+    pub session_id: Option<Uuid>,
+    pub operation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SpanOutcome {
+    Success,
+    Failure(String),
+}
+
+pub trait LogSink {
+    fn log_event(&self, level: LogLevel, span: &AuraSpan, message: String, fields: BTreeMap<String, LogValue>);
+    fn enter_span(&self, span: AuraSpan);
+    fn exit_span(&self, span_id: Uuid, outcome: SpanOutcome);
+    fn is_enabled(&self, level: LogLevel) -> bool;
+}
 
 /// A logged event in the simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -387,7 +428,7 @@ impl LogSink for SimulationLogSink {
             parent_span_id: span.parent_id,
             message,
             fields,
-            protocol_context: span.protocol,
+            protocol_context: None, // TODO: Convert span.protocol to ProtocolType
             session_id: span.session_id,
             operation: span.operation.clone(),
         };

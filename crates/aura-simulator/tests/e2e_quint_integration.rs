@@ -7,12 +7,12 @@
 //! 4. Verify formal properties during execution
 
 use aura_simulator::{
+    config::PropertyMonitoringConfig,
     scenario::{
-        UnifiedScenarioLoader, UnifiedEngineConfig, UnifiedScenarioEngine,
-        register_all_standard_choreographies
+        register_all_standard_choreographies, UnifiedEngineConfig, UnifiedScenarioEngine,
+        UnifiedScenarioLoader,
     },
     testing::{PropertyMonitor, QuintInvariant, QuintSafetyProperty},
-    config::PropertyMonitoringConfig,
     AuraError, Result,
 };
 use std::path::PathBuf;

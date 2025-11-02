@@ -1,0 +1,56 @@
+# Event-sourced account journal - CRDT-based event log with derived state
+[package]
+name = "aura-journal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+
+# Internal crates
+aura-types = { path = "../aura-types" }
+aura-crypto = { path = "../aura-crypto" }
+aura-authentication = { path = "../aura-authentication" }
+aura-authorization = { path = "../aura-authorization" }
+# Note: Cannot import aura-protocol due to circular dependency (aura-protocol imports journal)
+# Protocol types are now available through aura-types
+keyhive_core = { workspace = true }
+# aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
+
+# CRDT
+automerge = { workspace = true }
+
+# Cryptography provided through aura-crypto
+blake3 = { workspace = true }
+ed25519-dalek = { workspace = true }
+frost-ed25519 = { workspace = true }
+signature = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_cbor = { workspace = true }
+bincode = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+time = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+aura-test-utils = { path = "../aura-test-utils" }
+tokio-test = "0.4"
+rand_chacha = { workspace = true }
+proptest = { workspace = true }

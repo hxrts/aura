@@ -147,7 +147,7 @@ impl Appliable for ReserveCounterRangeEvent {
 macro_rules! now {
     ($effects:expr) => {
         $effects.now().map_err(|e| {
-            AuraError::protocol_invalid_instruction(format!("Failed to get timestamp: {:?}", e))
+            AuraError::coordination_failed(format!("Failed to get timestamp: {:?}", e))
         })?
     };
 }
@@ -215,7 +215,7 @@ impl Appliable for GrantOperationLockEvent {
 
         state
             .grant_lock(lock)
-            .map_err(AuraError::protocol_invalid_instruction)?;
+            .map_err(|e| AuraError::coordination_failed(e.to_string()))?;
 
         // Update session status to Completed for successful lock acquisition
         if let Some(session) = state.sessions.get_mut(&self.session_id) {
@@ -233,7 +233,7 @@ impl Appliable for ReleaseOperationLockEvent {
     fn apply(&self, state: &mut AccountState, _effects: &aura_crypto::Effects) -> AuraResult<()> {
         state
             .release_lock(self.session_id)
-            .map_err(AuraError::protocol_invalid_instruction)?;
+            .map_err(|e| AuraError::coordination_failed(e.to_string()))?;
 
         // Note: Session status remains Completed - lock release doesn't change session status
         // The session represents the lock acquisition process, which is already completed
@@ -471,7 +471,7 @@ impl Appliable for CompleteRecoveryEvent {
     fn apply(&self, state: &mut AccountState, _effects: &aura_crypto::Effects) -> AuraResult<()> {
         // Recovery complete, verify new device was actually added via AddDevice event
         if !state.devices.contains_key(&self.new_device_id) {
-            return Err(AuraError::protocol_invalid_instruction(format!(
+            return Err(AuraError::coordination_failed(format!(
                 "Recovery completion failed: device {} was not added to the account",
                 self.new_device_id.0
             )));
@@ -479,7 +479,7 @@ impl Appliable for CompleteRecoveryEvent {
 
         // Verify device is active (not tombstoned)
         if state.removed_devices.contains(&self.new_device_id) {
-            return Err(AuraError::protocol_invalid_instruction(format!(
+            return Err(AuraError::coordination_failed(format!(
                 "Recovery completion failed: device {} is tombstoned",
                 self.new_device_id.0
             )));
@@ -556,11 +556,11 @@ impl Appliable for AddDeviceEvent {
     fn apply(&self, state: &mut AccountState, effects: &aura_crypto::Effects) -> AuraResult<()> {
         let public_key = aura_crypto::Ed25519VerifyingKey::from_bytes(
             &self.public_key.as_slice().try_into().map_err(|_| {
-                AuraError::protocol_invalid_instruction("Invalid public key length".to_string())
+                AuraError::coordination_failed("Invalid public key length".to_string())
             })?,
         )
         .map_err(|e| {
-            AuraError::protocol_invalid_instruction(format!("Invalid public key: {:?}", e))
+            AuraError::coordination_failed(format!("Invalid public key: {:?}", e))
         })?;
 
         let device = DeviceMetadata {
@@ -573,6 +573,7 @@ impl Appliable for AddDeviceEvent {
             dkd_commitment_proofs: std::collections::BTreeMap::new(),
             next_nonce: 1,
             used_nonces: std::collections::BTreeSet::new(),
+            key_share_epoch: 0,
         };
 
         state.add_device(device, effects)?;
@@ -593,7 +594,7 @@ impl Appliable for UpdateDeviceNonceEvent {
         if let Some(device) = state.devices.get_mut(&self.device_id) {
             // Validate nonce increment
             if self.new_nonce != self.previous_nonce + 1 {
-                return Err(AuraError::protocol_invalid_instruction(format!(
+                return Err(AuraError::coordination_failed(format!(
                     "Invalid nonce increment for device {}: expected {}, got {}",
                     self.device_id.0,
                     self.previous_nonce + 1,
@@ -603,7 +604,7 @@ impl Appliable for UpdateDeviceNonceEvent {
 
             // Validate previous nonce matches current
             if device.next_nonce != self.previous_nonce + 1 {
-                return Err(AuraError::protocol_invalid_instruction(format!(
+                return Err(AuraError::coordination_failed(format!(
                     "Nonce mismatch for device {}: current {}, event claims {}",
                     self.device_id.0,
                     device.next_nonce,
@@ -774,7 +775,7 @@ impl Appliable for UpdateSessionStatusEvent {
         if let Some(session) = state.sessions.get_mut(&self.session_id) {
             // Validate status transition
             if session.status != self.previous_status {
-                return Err(AuraError::protocol_invalid_instruction(format!(
+                return Err(AuraError::coordination_failed(format!(
                     "Session {} status mismatch: expected {:?}, got {:?}",
                     self.session_id, self.previous_status, session.status
                 )));
@@ -787,7 +788,7 @@ impl Appliable for UpdateSessionStatusEvent {
                 self.session_id, self.previous_status, self.new_status
             );
         } else {
-            return Err(AuraError::protocol_invalid_instruction(format!(
+            return Err(AuraError::coordination_failed(format!(
                 "Session {} not found for status update",
                 self.session_id
             )));
@@ -808,7 +809,7 @@ impl Appliable for CompleteSessionEvent {
                 self.session_id, self.outcome
             );
         } else {
-            return Err(AuraError::protocol_invalid_instruction(format!(
+            return Err(AuraError::coordination_failed(format!(
                 "Session {} not found for completion",
                 self.session_id
             )));
@@ -824,7 +825,7 @@ impl Appliable for AbortSessionEvent {
         if let Some(session) = state.sessions.get_mut(&self.session_id) {
             // Validate previous status
             if session.status != self.previous_status {
-                return Err(AuraError::protocol_invalid_instruction(format!(
+                return Err(AuraError::coordination_failed(format!(
                     "Session {} status mismatch: expected {:?}, got {:?}",
                     self.session_id, self.previous_status, session.status
                 )));
@@ -849,7 +850,7 @@ impl Appliable for AbortSessionEvent {
                 self.session_id, self.reason
             );
         } else {
-            return Err(AuraError::protocol_invalid_instruction(format!(
+            return Err(AuraError::coordination_failed(format!(
                 "Session {} not found for abort",
                 self.session_id
             )));
@@ -1035,7 +1036,7 @@ fn apply_keyhive_cgka_operation(
     // In a full implementation, this would update persistent group state
     let current_time = _effects
         .now()
-        .map_err(|e| AuraError::protocol_invalid_instruction(format!("Time error: {}", e)))?;
+        .map_err(|e| AuraError::coordination_failed(format!("Time error: {}", e)))?;
 
     debug!("⏰ CGKA operation processed at timestamp: {}", current_time);
 

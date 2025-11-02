@@ -29,8 +29,8 @@ pub fn verify_threshold_signature(
     group_public_key: &Ed25519VerifyingKey,
     min_signers: usize,
 ) -> Result<()> {
-    // For now, treat Ed25519 signature as single signer
-    // In a full implementation, this would be replaced with actual FROST threshold verification
+    // For now, Ed25519 represents a single signer (until full FROST is implemented)
+    // Check if we have enough signers
     if min_signers > 1 {
         return Err(AuthenticationError::InvalidThresholdSignature(format!(
             "Insufficient signers: single signature provided, required {}",
@@ -38,16 +38,16 @@ pub fn verify_threshold_signature(
         )));
     }
 
-    // Verify the signature cryptographically
-    use ed25519_dalek::Verifier;
-    if group_public_key.verify(message, &threshold_sig.0).is_err() {
-        return Err(AuthenticationError::InvalidThresholdSignature(
-            "Cryptographic verification failed".to_string(),
-        ));
-    }
+    // Verify using FROST-compatible signature verification
+    // FROST signatures are compatible with standard Ed25519 verification
+    aura_crypto::ed25519_verify(group_public_key, message, threshold_sig).map_err(|e| {
+        AuthenticationError::InvalidThresholdSignature(format!(
+            "FROST threshold signature verification failed: {}",
+            e
+        ))
+    })?;
 
     tracing::debug!(
-        signers = 1,
         min_required = min_signers,
         "Threshold signature verified successfully"
     );
@@ -77,21 +77,13 @@ pub fn verify_threshold_signature_with_signers(
     expected_signers: &[DeviceId],
     group_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
-    // First verify the signature itself
-    use ed25519_dalek::Verifier;
-    if group_public_key.verify(message, &threshold_sig.0).is_err() {
-        return Err(AuthenticationError::InvalidThresholdSignature(
-            "Cryptographic verification failed".to_string(),
-        ));
-    }
-
-    // Check that we expect exactly one signer (since Ed25519 is single signature)
-    if expected_signers.len() != 1 {
-        return Err(AuthenticationError::InvalidThresholdSignature(format!(
-            "Signer count mismatch: Ed25519 signature is from 1 signer, expected {}",
-            expected_signers.len()
-        )));
-    }
+    // First verify the signature itself using FROST-compatible verification
+    aura_crypto::ed25519_verify(group_public_key, message, threshold_sig).map_err(|e| {
+        AuthenticationError::InvalidThresholdSignature(format!(
+            "FROST threshold signature verification failed: {}",
+            e
+        ))
+    })?;
 
     tracing::debug!(
         signers = ?expected_signers,

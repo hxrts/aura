@@ -189,7 +189,7 @@ impl ErrorCollector {
 #[macro_export]
 macro_rules! validation_error {
     ($field:expr, $message:expr) => {
-        crate::utils::errors::validation_error($field, "", $message)
+        $crate::utils::errors::validation_error($field, "", $message)
     };
     ($field:expr, $value:expr, $expected:expr) => {
         crate::utils::errors::validation_error($field, $value, $expected)

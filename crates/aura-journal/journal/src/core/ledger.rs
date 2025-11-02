@@ -766,7 +766,7 @@ impl AccountLedger {
     fn validate_epoch_tick(&self, tick: &EpochTickEvent) -> AuraResult<()> {
         // Verify new epoch is monotonically increasing
         if tick.new_epoch <= self.state.lamport_clock {
-            return Err(AuraError::epoch_mismatch(format!(
+            return Err(AuraError::coordination_failed(format!(
                 "Stale epoch: provided {} <= current {}",
                 tick.new_epoch, self.state.lamport_clock
             )));
@@ -775,7 +775,7 @@ impl AccountLedger {
         // Verify evidence_hash matches current state hash
         let current_state_hash = self.compute_state_hash()?;
         if tick.evidence_hash != current_state_hash {
-            return Err(AuraError::protocol_invalid_instruction(format!(
+            return Err(AuraError::coordination_failed(format!(
                 "Evidence hash mismatch: provided {:?}, computed {:?}",
                 hex::encode(tick.evidence_hash),
                 hex::encode(current_state_hash)
@@ -786,7 +786,7 @@ impl AccountLedger {
         let min_epoch_gap = 5; // Minimum 5 epochs between ticks
         let epoch_gap = tick.new_epoch - self.state.lamport_clock;
         if epoch_gap < min_epoch_gap {
-            return Err(AuraError::protocol_invalid_instruction(format!(
+            return Err(AuraError::coordination_failed(format!(
                 "Epoch tick rate limit exceeded: gap {} < minimum {}",
                 epoch_gap, min_epoch_gap
             )));
@@ -798,7 +798,7 @@ impl AccountLedger {
             if let Some(current_time) = self.get_current_time_estimate() {
                 let time_gap = current_time.saturating_sub(last_tick_time);
                 if time_gap < min_time_gap_ms {
-                    return Err(AuraError::protocol_invalid_instruction(format!(
+                    return Err(AuraError::coordination_failed(format!(
                         "Epoch tick time rate limit exceeded: gap {}ms < minimum {}ms",
                         time_gap, min_time_gap_ms
                     )));
@@ -918,7 +918,7 @@ impl AccountLedger {
     ) -> AuraResult<()> {
         self.state
             .update_session_status(session_id, status, effects)
-            .map_err(AuraError::protocol_invalid_instruction)
+            .map_err(|e| AuraError::coordination_failed(e.to_string()))
     }
 
     /// Complete a session with outcome
@@ -930,7 +930,7 @@ impl AccountLedger {
     ) -> AuraResult<()> {
         self.state
             .complete_session(session_id, outcome, effects)
-            .map_err(AuraError::protocol_invalid_instruction)
+            .map_err(|e| AuraError::coordination_failed(e.to_string()))
     }
 
     /// Abort a session with failure
@@ -943,7 +943,7 @@ impl AccountLedger {
     ) -> AuraResult<()> {
         self.state
             .abort_session(session_id, reason, blamed_party, effects)
-            .map_err(AuraError::protocol_invalid_instruction)
+            .map_err(|e| AuraError::coordination_failed(e.to_string()))
     }
 
     /// Clean up expired sessions based on current epoch
@@ -966,7 +966,7 @@ impl AccountLedger {
     ) -> AuraResult<CompactionProposal> {
         // Validate proposal
         if before_epoch >= self.lamport_clock() {
-            return Err(AuraError::protocol_invalid_instruction(
+            return Err(AuraError::coordination_failed(
                 "Cannot compact events from current or future epochs".to_string(),
             ));
         }
@@ -1005,7 +1005,7 @@ impl AccountLedger {
         has_required_proofs: bool,
     ) -> AuraResult<()> {
         if !has_required_proofs {
-            return Err(AuraError::protocol_invalid_instruction(
+            return Err(AuraError::coordination_failed(
                 "Cannot acknowledge compaction without required Merkle proofs".to_string(),
             ));
         }
@@ -1190,6 +1190,7 @@ mod tests {
             dkd_commitment_proofs: std::collections::BTreeMap::new(),
             next_nonce: 0,
             used_nonces: std::collections::BTreeSet::new(),
+            key_share_epoch: 0,
         };
 
         let state = AccountState::new(account_id, group_public_key, device, 2, 3);

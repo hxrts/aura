@@ -1702,6 +1702,7 @@ async fn test_ledger_consistency(
         info!("Phase 7: Testing ledger compaction and garbage collection");
 
         let mut compaction_successes = 0;
+        #[allow(clippy::disallowed_methods)]
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
@@ -1817,6 +1818,12 @@ async fn test_ledger_consistency(
                 let event_hash = &event_hashes[event_idx];
 
                 // Simplified proof validation (real implementation would use merkle path)
+
+fn current_unix_timestamp() -> u64 {
+    aura_types::time_utils::current_unix_timestamp()
+}
+
+
                 let proof_valid = event_hash.len() > 0 && merkle_input.contains(event_hash);
 
                 if proof_valid {

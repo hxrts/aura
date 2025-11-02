@@ -1,50 +1,42 @@
-//! Protocol Coordination for Aura
+//! Aura Protocol Middleware Architecture
+//!
+//! This crate provides a composable middleware architecture for Aura's distributed protocols,
+//! built on the rumpsteak choreographic programming framework.
+//!
+//! ## Quick Start
+//!
+//! Build a protocol handler with middleware stack:
+//!
+//! ```rust,ignore
+//! use aura_protocol::prelude::*;
+//!
+//! // Create base handler
+//! let handler = InMemoryHandler::new();
+//!
+//! // Build middleware stack using the builder
+//! let config = MiddlewareConfig {
+//!     device_name: "my-device".to_string(),
+//!     enable_tracing: true,
+//!     enable_metrics: true,
+//!     enable_capabilities: true,
+//!     enable_error_recovery: true,
+//!     ..Default::default()
+//! };
+//! 
+//! let handler = create_standard_stack(handler, config);
+//! ```
+//!
+//! ## Core Components
+//!
+//! - **Handlers**: Base protocol implementations (`handlers` module)
+//! - **Middleware**: Composable cross-cutting concerns (`middleware` module)
+//! - **Effects**: Side-effect injection system (`effects` module)
+//! - **Types**: Core protocol types (`types` module)
+//! - **Context**: Protocol execution context (`context` module)
+//! - **Protocols**: Protocol-specific implementations (`protocols` module)
+
 #![allow(clippy::result_large_err)]
 #![allow(clippy::large_enum_variant)]
-#![allow(clippy::redundant_closure)]
-#![allow(clippy::single_match_else)]
-#![allow(clippy::manual_async_fn)]
-#![allow(clippy::empty_line_after_doc_comments)]
-//!
-//! This crate provides coordination infrastructure for Aura's distributed protocols.
-//!
-//! ## Architecture
-//!
-//! The coordination crate is organized into several key layers:
-//!
-//! - **`protocols/`** - Complete protocol implementations combining session types
-//!   and choreographic execution (DKD, Recovery, Resharing)
-//! - **`execution/`** - Protocol execution infrastructure and context management
-//! - **`session_types/`** - Session type infrastructure for type-safe protocols
-//! - **`local_runtime/`** - Local session runtime for per-device coordination
-//! - **`instrumentation/`** - Dev console integration hooks and trace recording
-//! - **`utils/`** - Low-level coordination-specific utilities
-//!
-//! ## Usage
-//!
-//! For most use cases, import the complete protocol implementations:
-//!
-//! ```rust,ignore
-//! use aura_coordination::protocols::{dkd_choreography, recovery_choreography};
-//! use aura_coordination::execution::ProtocolContext;
-//! ```
-//!
-//! For dev console integration:
-//!
-//! ```rust,ignore
-//! #[cfg(feature = "dev-console")]
-//! use aura_coordination::instrumentation::{InstrumentationHooks, TraceRecorder};
-//! ```
-//!
-//! ## Crate Dependencies
-//!
-//! This crate follows a clean dependency hierarchy:
-//!
-//! - **Dependencies**: `aura-crypto`, `aura-journal`, `session`, `aura-groups`
-//! - **Dev Dependencies**: `aura-test-utils` (for testing utilities)
-//! - **Used By**: `aura-simulator` (protocol execution), `aura-sim-server` (trace recording)
-//! - **Features**: `dev-console` enables instrumentation for the Aura Dev Console
-
 #![allow(
     missing_docs,
     dead_code,
@@ -54,94 +46,193 @@
     clippy::too_many_arguments
 )]
 
-// ========== Error Types ==========
-pub mod error;
-pub use error::{CoordinationError, Result};
+// ========== Core Library Structure ==========
 
-// ========== Core Protocol Types ==========
-pub mod core;
+/// Core protocol handler trait and middleware system
+pub mod middleware;
 
-// Re-export core protocol types for convenience
-pub use core::{
-    capabilities::{ProtocolCapabilities, ProtocolEffects},
-    lifecycle::{
-        ProtocolDescriptor, ProtocolInput, ProtocolLifecycle, ProtocolRehydration, ProtocolStep,
-    },
-    metadata::{OperationType, ProtocolDuration, ProtocolMode, ProtocolPriority, ProtocolType},
-    typestate::{AnyProtocolState, SessionState, SessionStateTransition, StateWitness},
-};
+/// Protocol effects (side-effect operations)
+pub mod effects;
 
-// ========== Basic Infrastructure ==========
-pub mod utils;
+/// Protocol context and infrastructure
+pub mod context;
 
-// ========== Core Types ==========
-pub mod types;
-pub use types::{IdentifierMapping, KeyShare, PublicKeyPackage, SealedShare, ThresholdSignature};
-// Re-export from protocol-types
-pub use aura_protocol_types::{ParticipantId, SessionId, ThresholdConfig};
-
-// Utility exports
-pub use utils::{compute_lottery_ticket, determine_lock_winner};
-
-// ========== Protocol Execution ==========
-pub mod execution;
-pub use execution::{MemoryTransport, ProductionTimeSource, ProtocolContext, Transport};
-
-// ========== Complete Protocols ==========
+pub mod handlers;
+/// Protocol-specific utilities and message types
 pub mod protocols;
-// Direct exports for core protocols - lifecycle-only architecture
-pub use protocols::{
-    CounterLifecycle, CounterLifecycleError, DkdLifecycle, DkdLifecycleError, GroupLifecycle,
-    GroupLifecycleError, LockingLifecycle, LockingLifecycleError, RecoveryLifecycle,
-    RecoveryLifecycleError, ResharingLifecycle, ResharingLifecycleError,
-};
 
-// Counter choreographic functions removed - use CounterLifecycle through LifecycleScheduler
+/// Test utilities (not for production use)
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
-// ========== Lifecycle Scheduler ==========
-pub mod runtime;
-pub use runtime::lifecycle_scheduler::LifecycleScheduler;
+/// Core types used throughout the protocol system
+pub mod types;
 
-// ========== Tracing and Logging ==========
-pub mod tracing;
+// ========== Core Protocol Types and Utilities ==========
 
-// ========== Test Utilities ==========
-// Test utilities are now located in tests/test_utils.rs
+/// Safe bidirectional mapping between FrostParticipantId and frost::Identifier
+///
+/// This struct prevents the brittle byte manipulation that was previously used
+/// for reverse lookups from frost::Identifier back to FrostParticipantId.
+///
+/// This is protocol coordination logic. It manages the mapping between different
+/// ID representations used in threshold protocols.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentifierMapping {
+    participant_to_frost:
+        std::collections::BTreeMap<aura_types::FrostParticipantId, frost_ed25519::Identifier>,
+    frost_to_participant:
+        std::collections::BTreeMap<frost_ed25519::Identifier, aura_types::FrostParticipantId>,
+}
 
-// ========== Error Recovery ==========
-pub mod error_recovery;
+impl IdentifierMapping {
+    /// Create a new mapping from a list of participant IDs
+    pub fn new(participants: &[aura_types::FrostParticipantId]) -> aura_types::AuraResult<Self> {
+        use aura_types::AuraError;
+        use frost_ed25519 as frost;
 
-// ========== Local Session Runtime ==========
-pub mod local_runtime;
-pub mod session_runtime_config;
-pub use local_runtime::LocalSessionRuntime;
-// Re-export from protocol-types
-pub use aura_protocol_types::{
-    DkdResult, SessionCommand, SessionProtocolType, SessionResponse, SessionStatusInfo,
-};
-pub use session_runtime_config::{
-    ConfigurationError, SecurityConfig, SessionConfig, SessionRuntimeConfig,
-    SessionRuntimeConfigBuilder, SessionRuntimeFactory, TransportConfig,
-};
+        let mut participant_to_frost = std::collections::BTreeMap::new();
+        let mut frost_to_participant = std::collections::BTreeMap::new();
 
-// ========== FROST Session Management ==========
-// REMOVED: FrostSessionManager consolidated into agent::FrostKeyManager
+        for &participant_id in participants {
+            let frost_id = frost::Identifier::try_from(participant_id.as_u16()).map_err(|_| {
+                AuraError::coordination_failed(format!(
+                    "FrostParticipantId {} cannot be converted to frost::Identifier",
+                    participant_id.as_u16()
+                ))
+            })?;
 
-// ========== Capability Authorization ==========
-pub mod capability_authorization;
-pub use capability_authorization::{
-    create_capability_authorization_manager, CapabilityAuthError, CapabilityAuthorizationManager,
-};
+            participant_to_frost.insert(participant_id, frost_id);
+            frost_to_participant.insert(frost_id, participant_id);
+        }
 
-// ========== Session Types ==========
-pub mod session_types;
-pub use protocols::{ProtocolWrapper, ProtocolWrapperBuilder, ProtocolWrapperError};
-pub use session_types::{SessionProtocol, SessionTypedProtocol};
+        Ok(IdentifierMapping {
+            participant_to_frost,
+            frost_to_participant,
+        })
+    }
 
-// ========== Service Layer Architecture ==========
-pub mod coordination_service;
-pub mod protocol_results;
-pub use coordination_service::{CoordinationService, ServiceHealthStatus};
+    /// Convert FrostParticipantId to frost::Identifier safely
+    pub fn to_frost(
+        &self,
+        participant_id: aura_types::FrostParticipantId,
+    ) -> Option<frost_ed25519::Identifier> {
+        self.participant_to_frost.get(&participant_id).copied()
+    }
 
-// ========== Dev Console Instrumentation ==========
-pub mod instrumentation;
+    /// Convert frost::Identifier back to FrostParticipantId safely
+    pub fn from_frost(
+        &self,
+        frost_id: frost_ed25519::Identifier,
+    ) -> Option<aura_types::FrostParticipantId> {
+        self.frost_to_participant.get(&frost_id).copied()
+    }
+
+    /// Get all participant IDs in the mapping
+    pub fn participant_ids(&self) -> Vec<aura_types::FrostParticipantId> {
+        self.participant_to_frost.keys().copied().collect()
+    }
+
+    /// Get all frost identifiers in the mapping
+    pub fn frost_identifiers(&self) -> Vec<frost_ed25519::Identifier> {
+        self.participant_to_frost.values().copied().collect()
+    }
+
+    /// Check if a participant ID is in the mapping
+    pub fn contains_participant(&self, participant_id: aura_types::FrostParticipantId) -> bool {
+        self.participant_to_frost.contains_key(&participant_id)
+    }
+
+    /// Check if a frost identifier is in the mapping
+    pub fn contains_frost(&self, frost_id: frost_ed25519::Identifier) -> bool {
+        self.frost_to_participant.contains_key(&frost_id)
+    }
+}
+
+#[cfg(test)]
+#[allow(warnings, clippy::all)]
+mod types_tests {
+    use super::*;
+    use aura_types::FrostParticipantId;
+
+    #[test]
+    fn test_identifier_mapping_correctness() {
+        // Test that IdentifierMapping provides safe bidirectional conversion
+        let participants = vec![
+            FrostParticipantId::from_u16_unchecked(1),
+            FrostParticipantId::from_u16_unchecked(3),
+            FrostParticipantId::from_u16_unchecked(5),
+        ];
+
+        let mapping = IdentifierMapping::new(&participants).unwrap();
+
+        // Test forward conversion (FrostParticipantId -> frost::Identifier)
+        for &participant_id in &participants {
+            let frost_id = mapping.to_frost(participant_id).unwrap();
+
+            // Verify the conversion matches the direct From implementation
+            let direct_frost_id: frost_ed25519::Identifier = participant_id.into();
+            assert_eq!(frost_id, direct_frost_id);
+
+            // Test reverse conversion (frost::Identifier -> FrostParticipantId)
+            let recovered_participant = mapping.from_frost(frost_id).unwrap();
+            assert_eq!(recovered_participant, participant_id);
+        }
+
+        // Test non-existent conversions return None
+        let non_existent_participant = FrostParticipantId::from_u16_unchecked(99);
+        assert_eq!(mapping.to_frost(non_existent_participant), None);
+
+        let non_existent_frost = frost_ed25519::Identifier::try_from(99u16).unwrap();
+        assert_eq!(mapping.from_frost(non_existent_frost), None);
+
+        // Test membership checks
+        assert!(mapping.contains_participant(participants[0]));
+        assert!(!mapping.contains_participant(non_existent_participant));
+
+        let frost_id = mapping.to_frost(participants[0]).unwrap();
+        assert!(mapping.contains_frost(frost_id));
+        assert!(!mapping.contains_frost(non_existent_frost));
+
+        // Test collection methods
+        let participant_ids = mapping.participant_ids();
+        assert_eq!(participant_ids.len(), 3);
+        for participant_id in participants {
+            assert!(participant_ids.contains(&participant_id));
+        }
+
+        let frost_identifiers = mapping.frost_identifiers();
+        assert_eq!(frost_identifiers.len(), 3);
+    }
+}
+
+// ========== Simplified Public API ==========
+
+/// Convenient imports for common use cases
+pub mod prelude {
+
+    // Core handler trait and types
+    pub use crate::middleware::{AuraProtocolHandler, ProtocolError, ProtocolResult};
+
+    // Essential middleware
+    pub use crate::middleware::{
+        EffectsMiddleware, SessionMiddleware, WithEffects,
+        stack::{MiddlewareConfig, MiddlewareStackBuilder, create_standard_stack},
+    };
+
+    // Core types
+    pub use crate::IdentifierMapping;
+    pub use aura_types::{FrostParticipantId, SessionId, ThresholdConfig};
+
+    // Error handling from effects system
+    pub use crate::effects::{AuraError, AuraResult, ErrorCode, ErrorSeverity};
+}
+
+// ========== Selective Re-exports ==========
+
+// Core types
+pub use aura_types::{FrostParticipantId, SessionId, ThresholdConfig};
+
+// Essential middleware for common usage
+pub use middleware::{AuraProtocolHandler, ProtocolError, ProtocolResult};
+pub use middleware::{EffectsMiddleware, WithEffects};

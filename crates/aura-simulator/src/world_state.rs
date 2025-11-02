@@ -12,6 +12,7 @@
 use crate::Result;
 use aura_console_types::trace::{ParticipantStatus, ParticipantType};
 use aura_console_types::TraceEvent;
+use aura_types::SessionStatus;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use uuid::Uuid;
@@ -225,28 +226,6 @@ pub struct ProtocolSession {
     pub state_data: HashMap<String, Vec<u8>>,
     /// Messages exchanged in this session
     pub session_messages: Vec<Message>,
-}
-
-/// Status of a protocol session
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum SessionStatus {
-    /// Session is initializing
-    Initializing,
-    /// Session is actively running
-    Active,
-    /// Session is waiting for responses
-    Waiting,
-    /// Session completed successfully
-    Completed,
-    /// Session failed with error
-    Failed {
-        /// Reason for failure
-        reason: String,
-    },
-    /// Session timed out
-    TimedOut,
-    /// Session was cancelled
-    Cancelled,
 }
 
 /// Completed protocol session record

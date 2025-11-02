@@ -726,6 +726,7 @@ pub struct AnalysisMetadata {
 }
 
 /// Main violation analyzer engine
+#[derive(Default)]
 pub struct ViolationAnalyzer {
     /// Historical violations for comparison
     violation_history: BTreeMap<u64, ViolationAnalysis>,
@@ -775,12 +776,7 @@ pub struct AnalyzerStats {
 impl ViolationAnalyzer {
     /// Create a new violation analyzer
     pub fn new() -> Self {
-        Self {
-            violation_history: BTreeMap::new(),
-            pattern_database: HashMap::new(),
-            config: AnalyzerConfig::default(),
-            stats: AnalyzerStats::default(),
-        }
+        Self::default()
     }
 
     /// Create analyzer with custom configuration
@@ -887,8 +883,9 @@ impl ViolationAnalyzer {
 
         // Maintain history size limit
         if self.violation_history.len() > self.config.max_history_size {
-            let oldest_key = *self.violation_history.keys().next().unwrap();
-            self.violation_history.remove(&oldest_key);
+            if let Some(oldest_key) = self.violation_history.keys().next().copied() {
+                self.violation_history.remove(&oldest_key);
+            }
         }
 
         // Update statistics
@@ -1431,8 +1428,8 @@ impl ViolationAnalyzer {
             step_number: 1,
             title: "Verify violation occurrence".to_string(),
             instructions: format!(
-                "Confirm the {} violation actually occurred",
-                format!("{:?}", classification.violation_type)
+                "Confirm the {:?} violation actually occurred",
+                classification.violation_type
             ),
             expected_outcomes: vec!["Violation confirmed".to_string()],
             fallback_actions: vec!["Check property specification".to_string()],
@@ -1895,14 +1892,20 @@ pub struct WasmViolationAnalyzer {
     inner: ViolationAnalyzer,
 }
 
+impl Default for WasmViolationAnalyzer {
+    fn default() -> Self {
+        Self {
+            inner: ViolationAnalyzer::new(),
+        }
+    }
+}
+
 #[wasm_bindgen]
 impl WasmViolationAnalyzer {
     /// Create a new violation analyzer
     #[wasm_bindgen(constructor)]
     pub fn new() -> WasmViolationAnalyzer {
-        WasmViolationAnalyzer {
-            inner: ViolationAnalyzer::new(),
-        }
+        WasmViolationAnalyzer::default()
     }
 
     /// Analyze a violation (simplified interface for WASM)

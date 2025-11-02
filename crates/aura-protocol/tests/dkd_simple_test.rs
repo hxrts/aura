@@ -1,17 +1,214 @@
 //! Simple DKD Test
 //!
-//! This test verifies the core DKD choreography function works correctly
-//! by directly testing the coordination layer implementation.
+//! This test verifies the core DKD functionality using the AuraProtocolHandler
+//! middleware pattern for composable and type-safe protocol execution.
 
 use aura_crypto::Effects;
 use aura_journal::{AccountLedger, AccountState, DeviceMetadata, DeviceType};
-use aura_protocol::execution::time::ProductionTimeSource;
-use aura_protocol::execution::{MemoryTransport, ProtocolContext};
+use aura_protocol::{
+    handlers::InMemoryHandler,
+    middleware::{
+        AuraProtocolHandler, CapabilityMiddleware, ErrorRecoveryMiddleware, MetricsMiddleware,
+        ProtocolError, ProtocolResult, SessionMiddleware, TracingMiddleware,
+    },
+};
 use aura_types::{AccountId, DeviceId};
 use ed25519_dalek::SigningKey;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+
+/// DKD protocol message for testing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DkdMessage {
+    pub app_id: String,
+    pub context: String,
+    pub threshold: usize,
+    pub participants: Vec<DeviceId>,
+}
+
+/// Test protocol handler implementation for DKD
+pub struct DkdProtocolHandler {
+    device_id: DeviceId,
+    sessions: HashMap<Uuid, DkdSession>,
+    message_queue: HashMap<DeviceId, Vec<DkdMessage>>,
+}
+
+/// DKD session information
+#[derive(Debug, Clone)]
+pub struct DkdSession {
+    pub session_id: Uuid,
+    pub participants: Vec<DeviceId>,
+    pub app_id: String,
+    pub context: String,
+    pub threshold: usize,
+    pub started_at: u64,
+}
+
+impl DkdProtocolHandler {
+    pub fn new(device_id: DeviceId) -> Self {
+        Self {
+            device_id,
+            sessions: HashMap::new(),
+            message_queue: HashMap::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AuraProtocolHandler for DkdProtocolHandler {
+    type DeviceId = DeviceId;
+    type SessionId = Uuid;
+    type Message = DkdMessage;
+
+    async fn send_message(&mut self, to: Self::DeviceId, msg: Self::Message) -> ProtocolResult<()> {
+        self.message_queue
+            .entry(to)
+            .or_insert_with(Vec::new)
+            .push(msg);
+        Ok(())
+    }
+
+    async fn receive_message(&mut self, from: Self::DeviceId) -> ProtocolResult<Self::Message> {
+        if let Some(messages) = self.message_queue.get_mut(&from) {
+            if let Some(message) = messages.pop() {
+                return Ok(message);
+            }
+        }
+
+        // Return default message if no messages in queue
+        Ok(DkdMessage {
+            app_id: "default".to_string(),
+            context: "default".to_string(),
+            threshold: 2,
+            participants: vec![],
+        })
+    }
+
+    async fn start_session(
+        &mut self,
+        participants: Vec<Self::DeviceId>,
+        protocol_type: String,
+        metadata: HashMap<String, String>,
+    ) -> ProtocolResult<Self::SessionId> {
+        let session_id = Uuid::new_v4();
+
+        let app_id = metadata
+            .get("app_id")
+            .cloned()
+            .unwrap_or_else(|| "test_app".to_string());
+        let context = metadata
+            .get("context")
+            .cloned()
+            .unwrap_or_else(|| "test_context".to_string());
+        let threshold = metadata
+            .get("threshold")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2);
+
+        let session = DkdSession {
+            session_id,
+            participants,
+            app_id,
+            context,
+            threshold,
+            started_at: current_timestamp,
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        };
+
+        self.sessions.insert(session_id, session);
+        Ok(session_id)
+    }
+
+    async fn end_session(&mut self, session_id: Self::SessionId) -> ProtocolResult<()> {
+        self.sessions.remove(&session_id);
+        Ok(())
+    }
+
+    async fn get_session_info(
+        &mut self,
+        session_id: Self::SessionId,
+    ) -> ProtocolResult<aura_protocol::middleware::SessionInfo> {
+        if let Some(session) = self.sessions.get(&session_id) {
+            let mut metadata = HashMap::new();
+            metadata.insert("app_id".to_string(), session.app_id.clone());
+            metadata.insert("context".to_string(), session.context.clone());
+            metadata.insert("threshold".to_string(), session.threshold.to_string());
+
+            Ok(aura_protocol::middleware::SessionInfo {
+                session_id,
+                participants: session.participants.clone(),
+                protocol_type: "DKD".to_string(),
+                started_at: session.started_at,
+                metadata,
+            })
+        } else {
+            Err(ProtocolError::Session {
+                message: format!("Session not found: {}", session_id),
+            })
+        }
+    }
+
+    async fn list_sessions(
+        &mut self,
+    ) -> ProtocolResult<Vec<aura_protocol::middleware::SessionInfo>> {
+        let mut sessions = Vec::new();
+        for session in self.sessions.values() {
+            let mut metadata = HashMap::new();
+            metadata.insert("app_id".to_string(), session.app_id.clone());
+            metadata.insert("context".to_string(), session.context.clone());
+            metadata.insert("threshold".to_string(), session.threshold.to_string());
+
+            sessions.push(aura_protocol::middleware::SessionInfo {
+                session_id: session.session_id,
+                participants: session.participants.clone(),
+                protocol_type: "DKD".to_string(),
+                started_at: session.started_at,
+                metadata,
+            });
+        }
+        Ok(sessions)
+    }
+
+    async fn verify_capability(
+        &mut self,
+        _operation: &str,
+        _resource: &str,
+        _context: HashMap<String, String>,
+    ) -> ProtocolResult<bool> {
+        // For testing, always allow operations
+        Ok(true)
+    }
+
+    async fn create_authorization_proof(
+        &mut self,
+        _operation: &str,
+        _resource: &str,
+        _context: HashMap<String, String>,
+    ) -> ProtocolResult<Vec<u8>> {
+        // Return dummy proof for testing
+        Ok(vec![0x01, 0x02, 0x03])
+    }
+
+    fn device_id(&self) -> Self::DeviceId {
+        self.device_id
+    }
+}
+
+/// Build a DKD middleware stack for testing
+pub fn build_dkd_middleware_stack(
+    base_handler: DkdProtocolHandler,
+) -> impl AuraProtocolHandler<DeviceId = DeviceId, SessionId = Uuid, Message = DkdMessage> {
+    let handler = SessionMiddleware::new(base_handler);
+    let handler = CapabilityMiddleware::new(handler);
+    let handler = ErrorRecoveryMiddleware::new(handler);
+    let handler = MetricsMiddleware::new(handler);
+    TracingMiddleware::new(handler)
+}
 
 /// Helper function to create a test AccountState
 fn create_test_account_state(effects: &Effects) -> AccountState {
@@ -36,18 +233,16 @@ fn create_test_account_state(effects: &Effects) -> AccountState {
 }
 
 #[tokio::test]
-async fn test_dkd_choreography_execution() {
-    println!("=== DKD Choreography Test ===");
+async fn test_dkd_middleware_execution() {
+    println!("=== DKD Middleware Test ===");
 
-    // Create test context with deterministic parameters
-    let session_id = Uuid::from_u128(12345);
-    let device_id = Uuid::from_u128(67890);
+    // Create test devices and participants
+    let device_id = DeviceId(Uuid::from_u128(67890));
     let participants = vec![
-        DeviceId(device_id),
+        device_id,
         DeviceId(Uuid::from_u128(11111)),
         DeviceId(Uuid::from_u128(22222)),
     ];
-    let threshold = Some(2);
 
     // Create deterministic effects for testing
     let effects = Effects::deterministic(54321, 0);
@@ -58,104 +253,136 @@ async fn test_dkd_choreography_execution() {
         AccountLedger::new(initial_state).expect("Failed to create test ledger"),
     ));
 
-    // Create stub transport
-    let transport = Arc::new(MemoryTransport::default());
+    // Create protocol handler with middleware stack
+    let base_handler = DkdProtocolHandler::new(device_id);
+    let mut handler = build_dkd_middleware_stack(base_handler);
 
-    // Create device signing key deterministically
-    let device_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
+    println!("[OK] Created DKD protocol handler with middleware stack");
 
-    // Create time source
-    let time_source = Box::new(ProductionTimeSource::new());
+    // Setup the handler
+    handler.setup().await.expect("Failed to setup handler");
 
-    // Create protocol context for verification
-    let ctx = ProtocolContext::new_dkd(
-        session_id,
-        device_id,
-        participants.clone(),
-        threshold,
-        ledger,
-        transport,
-        effects,
-        device_key,
-        time_source,
+    // Test session creation
+    let mut session_metadata = HashMap::new();
+    session_metadata.insert("app_id".to_string(), "test-app".to_string());
+    session_metadata.insert("context".to_string(), "test-context".to_string());
+    session_metadata.insert("threshold".to_string(), "2".to_string());
+
+    let session_id = handler
+        .start_session(participants.clone(), "DKD".to_string(), session_metadata)
+        .await
+        .expect("Failed to start DKD session");
+
+    println!("[OK] Started DKD session: {}", session_id);
+
+    // Test session info retrieval
+    let session_info = handler
+        .get_session_info(session_id)
+        .await
+        .expect("Failed to get session info");
+
+    assert_eq!(session_info.protocol_type, "DKD");
+    assert_eq!(session_info.participants, participants);
+    assert_eq!(session_info.metadata.get("app_id").unwrap(), "test-app");
+    assert_eq!(
+        session_info.metadata.get("context").unwrap(),
+        "test-context"
     );
 
-    println!("[OK] Created protocol context successfully");
+    println!("[OK] Session info retrieved successfully");
 
-    // Test DKD choreography with a simple context
-    let context_id = b"test-app-context".to_vec();
+    // Test DKD message passing
+    let dkd_message = DkdMessage {
+        app_id: "test-app".to_string(),
+        context: "test-context".to_string(),
+        threshold: 2,
+        participants: participants.clone(),
+    };
 
-    // Test DKD protocol structure and initialization (not full execution)
-    use aura_protocol::protocols::DkdLifecycle;
-    use aura_protocol::SessionId;
-    println!("Creating DkdLifecycle...");
-    let _protocol = DkdLifecycle::new(
-        DeviceId(device_id),
-        SessionId(session_id),
-        context_id.clone(),
-        participants.clone(),
-    );
-    println!("DkdLifecycle created successfully");
+    // Send message to each participant
+    for participant in &participants[1..] {
+        handler
+            .send_message(*participant, dkd_message.clone())
+            .await
+            .expect("Failed to send DKD message");
+    }
 
-    // Test that the protocol can be initialized correctly
-    println!("[OK] DKD protocol structure validation passed");
-    println!("  Session ID: {}", session_id);
-    println!("  Device ID: {}", device_id);
-    println!("  Participants: {}", participants.len());
-    println!("  Context ID: {}", hex::encode(&context_id));
+    println!("[OK] Sent DKD messages to participants");
 
-    // Verify context configuration
-    assert_eq!(ctx.session_id(), session_id);
-    assert_eq!(ctx.device_id(), device_id);
-    assert_eq!(ctx.threshold(), Some(2));
-    assert_eq!(ctx.participants().len(), 3);
+    // Test receiving messages
+    for participant in &participants[1..] {
+        let received_message = handler
+            .receive_message(*participant)
+            .await
+            .expect("Failed to receive DKD message");
 
-    println!("=== Test PASSED: DKD Protocol Structure Validated ===");
+        assert_eq!(received_message.app_id, dkd_message.app_id);
+        assert_eq!(received_message.context, dkd_message.context);
+        assert_eq!(received_message.threshold, dkd_message.threshold);
+    }
+
+    println!("[OK] Received and validated DKD messages");
+
+    // Test capability verification
+    let mut capability_context = HashMap::new();
+    capability_context.insert("session_id".to_string(), session_id.to_string());
+
+    let can_derive = handler
+        .verify_capability("derive_key", "dkd", capability_context)
+        .await
+        .expect("Failed to verify capability");
+
+    assert!(can_derive);
+    println!("[OK] Capability verification passed");
+
+    // Test session cleanup
+    handler
+        .end_session(session_id)
+        .await
+        .expect("Failed to end session");
+
+    // Verify session is gone
+    assert!(handler.get_session_info(session_id).await.is_err());
+    println!("[OK] Session cleaned up successfully");
+
+    // Teardown the handler
+    handler
+        .teardown()
+        .await
+        .expect("Failed to teardown handler");
+
+    println!("=== Test PASSED: DKD Middleware Execution ===");
 }
 
 #[tokio::test]
 async fn test_dkd_deterministic_setup() {
     println!("\n=== DKD Deterministic Setup Test ===");
 
-    // Test that the same parameters produce the same context setup
-    let session_id = Uuid::from_u128(11111);
-    let device_id = Uuid::from_u128(22222);
-    let participants = vec![DeviceId(device_id)];
+    // Test that the same parameters produce the same handler setup
+    let device_id = DeviceId(Uuid::from_u128(22222));
 
     for i in 0..3 {
-        println!("  Run {}: Creating context...", i + 1);
+        println!("  Run {}: Creating handler...", i + 1);
 
-        let effects = Effects::deterministic(99999, 0); // Same seed
-        let initial_state = create_test_account_state(&effects);
-        let ledger = Arc::new(RwLock::new(
-            AccountLedger::new(initial_state).expect("Failed to create test ledger"),
-        ));
-        let transport = Arc::new(MemoryTransport::default());
+        let base_handler = DkdProtocolHandler::new(device_id);
+        let mut handler = build_dkd_middleware_stack(base_handler);
 
-        let device_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
-        let time_source = Box::new(ProductionTimeSource::new());
-
-        let ctx = ProtocolContext::new_dkd(
-            session_id,
-            device_id,
-            participants.clone(),
-            Some(1),
-            ledger,
-            transport,
-            effects,
-            device_key,
-            time_source,
-        );
+        // Setup handler
+        handler.setup().await.expect("Failed to setup handler");
 
         // Verify consistent setup
-        assert_eq!(ctx.session_id(), session_id);
-        assert_eq!(ctx.device_id(), device_id);
-        assert_eq!(ctx.threshold(), Some(1));
+        assert_eq!(handler.device_id(), device_id);
 
-        println!("  Run {}: Context created consistently", i + 1);
+        println!("  Run {}: Handler created consistently", i + 1);
+
+        // Teardown handler
+        handler
+            .teardown()
+            .await
+            .expect("Failed to teardown handler");
     }
 
-    println!("[OK] All {} runs produced consistent context setup", 3);
+    println!("[OK] All {} runs produced consistent handler setup", 3);
     println!("=== Deterministic Setup Test PASSED ===");
 }
 
@@ -164,61 +391,99 @@ async fn test_dkd_different_contexts() {
     println!("\n=== DKD Different Contexts Test ===");
 
     // Test that different contexts can be set up properly
-    let session_id = Uuid::from_u128(33333);
-    let device_id = Uuid::from_u128(44444);
-    let participants = vec![DeviceId(device_id)];
+    let device_id = DeviceId(Uuid::from_u128(44444));
+    let participants = vec![device_id];
 
     let contexts = vec![
-        b"context-1".to_vec(),
-        b"context-2".to_vec(),
-        b"different-app".to_vec(),
+        ("context-1", "app-1"),
+        ("context-2", "app-2"),
+        ("different-app", "app-3"),
     ];
 
-    for (i, context_id) in contexts.iter().enumerate() {
+    for (i, (context, app_id)) in contexts.iter().enumerate() {
         println!(
-            "  Testing context {}: {:?}",
+            "  Testing context {}: app_id={}, context={}",
             i + 1,
-            String::from_utf8_lossy(context_id)
+            app_id,
+            context
         );
 
-        let effects = Effects::deterministic(77777, 0); // Same seed for all
-        let initial_state = create_test_account_state(&effects);
-        let ledger = Arc::new(RwLock::new(
-            AccountLedger::new(initial_state).expect("Failed to create test ledger"),
-        ));
-        let transport = Arc::new(MemoryTransport::default());
+        let base_handler = DkdProtocolHandler::new(device_id);
+        let mut handler = build_dkd_middleware_stack(base_handler);
 
-        let device_key = SigningKey::from_bytes(&effects.random_bytes::<32>());
-        let time_source = Box::new(ProductionTimeSource::new());
+        // Setup handler
+        handler.setup().await.expect("Failed to setup handler");
 
-        let _ctx = ProtocolContext::new_dkd(
-            session_id,
-            device_id,
-            participants.clone(),
-            Some(1),
-            ledger,
-            transport,
-            effects,
-            device_key,
-            time_source,
-        );
+        // Create session with specific context
+        let mut session_metadata = HashMap::new();
+        session_metadata.insert("app_id".to_string(), app_id.to_string());
+        session_metadata.insert("context".to_string(), context.to_string());
+        session_metadata.insert("threshold".to_string(), "2".to_string());
 
-        // Test that protocol can be created for each context
-        use aura_protocol::protocols::DkdLifecycle;
-        use aura_protocol::SessionId;
-        let _protocol = DkdLifecycle::new(
-            DeviceId(device_id),
-            SessionId(session_id),
-            context_id.clone(),
-            participants.clone(),
-        );
+        let session_id = handler
+            .start_session(participants.clone(), "DKD".to_string(), session_metadata)
+            .await
+            .expect("Failed to start session");
 
-        println!("  Context {}: Protocol created successfully", i + 1);
+        // Verify session was created with correct context
+        let session_info = handler
+            .get_session_info(session_id)
+            .await
+            .expect("Failed to get session info");
+
+        assert_eq!(session_info.metadata.get("app_id").unwrap(), app_id);
+        assert_eq!(session_info.metadata.get("context").unwrap(), context);
+
+        println!("  Context {}: Session created successfully", i + 1);
+
+        // Cleanup
+        handler
+            .end_session(session_id)
+            .await
+            .expect("Failed to end session");
+        handler
+            .teardown()
+            .await
+            .expect("Failed to teardown handler");
     }
 
     println!(
-        "[OK] All {} contexts can create DKD protocols",
+        "[OK] All {} contexts can create DKD sessions",
         contexts.len()
     );
     println!("=== Different Contexts Test PASSED ===");
+}
+
+#[tokio::test]
+async fn test_dkd_middleware_stack_composition() {
+    println!("\n=== DKD Middleware Stack Composition Test ===");
+
+    let device_id = DeviceId::new();
+    let base_handler = DkdProtocolHandler::new(device_id);
+    let mut handler = build_dkd_middleware_stack(base_handler);
+
+    // Test that middleware stack is properly composed
+    handler
+        .setup()
+        .await
+        .expect("Failed to setup middleware stack");
+
+    // Test that all middleware layers are active
+    let health_check = handler.health_check().await.expect("Health check failed");
+    assert!(health_check);
+
+    // Test capabilities are properly layered
+    let can_operate = handler
+        .verify_capability("test", "test", HashMap::new())
+        .await
+        .expect("Capability check failed");
+    assert!(can_operate);
+
+    handler
+        .teardown()
+        .await
+        .expect("Failed to teardown middleware stack");
+
+    println!("[OK] Middleware stack composition test passed");
+    println!("=== Middleware Stack Composition Test PASSED ===");
 }

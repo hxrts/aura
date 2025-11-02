@@ -272,3 +272,147 @@ mod tests {
             .contains("decryption failed"));
     }
 }
+
+// ========== High-Level Sealed Types ==========
+
+/// Sealed share encrypted for device storage
+///
+/// This is a higher-level wrapper around SealedData specifically designed
+/// for encrypting threshold key shares with device-specific binding.
+///
+/// SECURITY: This type contains sensitive cryptographic material.
+/// All fields are zeroized on drop via the underlying SealedData.
+///
+/// # Encryption Scheme
+///
+/// Uses unified AES-256-GCM sealing from aura-crypto:
+/// - Key: Derived from device secret using BLAKE3
+/// - Nonce: Random 12 bytes (96-bit, GCM standard)
+/// - Associated Data: device_id || participant_id
+///
+/// # Production Requirements
+///
+/// For production use, the device secret should be:
+/// - iOS: Stored in Secure Enclave
+/// - Android: Stored in Keystore with StrongBox
+/// - macOS: Keychain Access with kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+/// - Linux: Secret Service API (gnome-keyring, kwallet)
+///
+/// Current implementation supports secure storage through the device interfaces.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SealedShare {
+    /// Device this share is bound to
+    pub device_id: crate::types::DeviceId,
+    /// Participant ID (as u16 to avoid circular dependencies)
+    pub participant_id: u16,
+    /// Encrypted share using unified sealing
+    #[serde(flatten)]
+    pub sealed_data: SealedData,
+}
+
+impl SealedShare {
+    /// Seal (encrypt) a key share for secure storage
+    ///
+    /// # Arguments
+    ///
+    /// * `share` - The KeyShare to encrypt
+    /// * `device_id` - The device this share belongs to (for AAD binding)
+    /// * `device_secret` - 32-byte device-specific secret (should come from secure storage)
+    /// * `effects` - Injectable effects for deterministic randomness
+    ///
+    /// # Security
+    ///
+    /// The device_id is included in the authenticated data to:
+    /// - Bind the encrypted share to a specific device
+    /// - Prevent cross-device replay attacks
+    /// - Provide cryptographic proof the share is for this device
+    ///
+    /// WARNING: The device_secret MUST be stored in platform-specific secure storage.
+    pub fn seal(
+        share: &crate::frost::KeyShare,
+        device_id: crate::types::DeviceId,
+        device_secret: &[u8; 32],
+        effects: &Effects,
+    ) -> Result<Self> {
+        // Create context for key derivation - includes real device_id
+        let context = format!(
+            "aura-share-seal-v1:{}:{}",
+            share.participant_id, device_id.0
+        );
+
+        // Associated data for authenticated encryption - includes real device_id
+        // This cryptographically binds the encryption to this specific device
+        let associated_data = format!("{}:{}", device_id.0, share.participant_id);
+
+        // Use unified sealing from aura-crypto
+        let sealed_data = SealedData::seal_value(
+            share,
+            device_secret,
+            &context,
+            Some(associated_data.as_bytes()),
+            effects,
+        )?;
+
+        Ok(SealedShare {
+            device_id,
+            participant_id: share.participant_id,
+            sealed_data,
+        })
+    }
+
+    /// Unseal (decrypt) a key share from secure storage
+    ///
+    /// # Arguments
+    ///
+    /// * `device_id` - The device attempting to unseal (must match sealed device_id)
+    /// * `device_secret` - 32-byte device-specific secret (must be same as used for sealing)
+    ///
+    /// # Security
+    ///
+    /// Verifies:
+    /// - The device_id matches (cryptographically verified via AAD)
+    /// - The device_secret is correct
+    /// - The data has not been tampered with
+    ///
+    /// # Returns
+    ///
+    /// The decrypted KeyShare, or an error if:
+    /// - Device ID mismatch (wrong device)
+    /// - Decryption fails (wrong key, tampered data)
+    /// - Deserialization fails (corrupted data)
+    pub fn unseal(
+        &self,
+        device_id: crate::types::DeviceId,
+        device_secret: &[u8; 32],
+    ) -> Result<crate::frost::KeyShare> {
+        // Verify device ID matches (before even attempting decryption)
+        if self.device_id != device_id {
+            return Err(CryptoError::data_corruption_detected(format!(
+                "Device mismatch: sealed for {:?}, attempted unseal by {:?}",
+                self.device_id, device_id
+            )));
+        }
+
+        self.sealed_data.unseal_value(device_secret)
+    }
+
+    /// Get the device ID this share is bound to
+    pub fn device_id(&self) -> crate::types::DeviceId {
+        self.device_id
+    }
+
+    /// Get the participant ID for this share
+    pub fn participant_id(&self) -> u16 {
+        self.participant_id
+    }
+
+    /// Check if this sealed share is for a specific device
+    pub fn is_for_device(&self, device_id: crate::types::DeviceId) -> bool {
+        self.device_id == device_id
+    }
+
+    /// Check if this sealed share is for a specific participant
+    pub fn is_for_participant(&self, participant_id: u16) -> bool {
+        self.participant_id == participant_id
+    }
+}

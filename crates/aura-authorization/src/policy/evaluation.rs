@@ -211,6 +211,7 @@ mod tests {
         };
         let action = Action::Admin;
         let resource = Resource::Account(aura_types::AccountId::new());
+        #[allow(clippy::disallowed_method)]
         let context = PolicyContext {
             current_time: SystemTime::now(),
             authority_graph: AuthorityGraph::new(),
@@ -227,6 +228,7 @@ mod tests {
         let subject = Subject::Device(aura_types::DeviceId::new());
         let action = Action::Read;
         let resource = Resource::Account(aura_types::AccountId::new());
+        #[allow(clippy::disallowed_method)]
         let context = PolicyContext {
             current_time: SystemTime::now(),
             authority_graph: AuthorityGraph::new(),

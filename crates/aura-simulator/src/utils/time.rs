@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub fn current_unix_timestamp_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("System time before UNIX epoch")
         .as_secs()
 }
 
@@ -14,7 +14,7 @@ pub fn current_unix_timestamp_secs() -> u64 {
 pub fn current_unix_timestamp_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("System time before UNIX epoch")
         .as_millis() as u64
 }
 
@@ -22,7 +22,7 @@ pub fn current_unix_timestamp_millis() -> u64 {
 pub fn current_unix_timestamp_micros() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("System time before UNIX epoch")
         .as_micros() as u64
 }
 

@@ -132,13 +132,13 @@ impl BootstrapManager {
 
         // Validate parameters
         if participants < 2 {
-            return Err(crate::AuraError::protocol_invalid_instruction(
+            return Err(crate::AuraError::coordination_failed(
                 "Minimum 2 participants required",
             ));
         }
 
         if threshold > participants {
-            return Err(crate::AuraError::protocol_invalid_instruction(
+            return Err(crate::AuraError::coordination_failed(
                 "Threshold cannot exceed participant count",
             ));
         }
@@ -164,6 +164,7 @@ impl BootstrapManager {
                 dkd_commitment_proofs: BTreeMap::new(),
                 next_nonce: 1,
                 used_nonces: std::collections::BTreeSet::new(),
+                key_share_epoch: 0,
             };
             device_ids.push(device_id);
             device_metadatas.push(device);
@@ -183,7 +184,7 @@ impl BootstrapManager {
             account_state
                 .add_device(device.clone(), effects)
                 .map_err(|e| {
-                    crate::AuraError::protocol_invalid_instruction(format!(
+                    crate::AuraError::coordination_failed(format!(
                         "Failed to add device: {:?}",
                         e
                     ))
@@ -200,7 +201,7 @@ impl BootstrapManager {
                 &mut rng,
             )
             .map_err(|e| {
-                crate::AuraError::protocol_invalid_instruction(format!(
+                crate::AuraError::coordination_failed(format!(
                     "FROST key generation failed: {}",
                     e
                 ))
@@ -213,7 +214,7 @@ impl BootstrapManager {
         {
             let key_package =
                 frost_ed25519::keys::KeyPackage::try_from(secret_share).map_err(|e| {
-                    crate::AuraError::protocol_invalid_instruction(format!(
+                    crate::AuraError::coordination_failed(format!(
                         "Key package creation failed: {}",
                         e
                     ))
@@ -234,7 +235,7 @@ impl BootstrapManager {
         let frost_vk = pubkey_package.verifying_key();
         let group_public_key = aura_crypto::Ed25519VerifyingKey::from_bytes(&frost_vk.serialize())
             .map_err(|e| {
-                crate::AuraError::protocol_invalid_instruction(format!("Invalid group key: {}", e))
+                crate::AuraError::coordination_failed(format!("Invalid group key: {}", e))
             })?;
 
         account_state.group_public_key = group_public_key;
@@ -260,14 +261,14 @@ impl BootstrapManager {
 
         // Create ledger and add genesis session
         let mut ledger = crate::AccountLedger::new(account_state).map_err(|e| {
-            crate::AuraError::protocol_invalid_instruction(format!("Ledger creation failed: {}", e))
+            crate::AuraError::coordination_failed(format!("Ledger creation failed: {}", e))
         })?;
 
         ledger.add_session(genesis_session, effects);
         ledger
             .update_session_status(genesis_session_id, crate::SessionStatus::Active, effects)
             .map_err(|e| {
-                crate::AuraError::protocol_invalid_instruction(format!(
+                crate::AuraError::coordination_failed(format!(
                     "Session update failed: {}",
                     e
                 ))
@@ -275,7 +276,7 @@ impl BootstrapManager {
         ledger
             .complete_session(genesis_session_id, crate::SessionOutcome::Success, effects)
             .map_err(|e| {
-                crate::AuraError::protocol_invalid_instruction(format!(
+                crate::AuraError::coordination_failed(format!(
                     "Session completion failed: {}",
                     e
                 ))

@@ -14,7 +14,7 @@ workspace = true
 
 # Internal crates
 aura-types = { path = "../aura-types" }
-aura-crypto = { path = "../crypto" }
+aura-crypto = { path = "../aura-crypto" }
 aura-authentication = { path = "../aura-authentication" }
 aura-authorization = { path = "../aura-authorization" }
 aura-protocol-types = { path = "../aura-protocol-types" }
@@ -51,7 +51,7 @@ rand = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
-aura-test-utils = { path = "../test-utils" }
+aura-test-utils = { path = "../aura-test-utils" }
 tokio-test = "0.4"
 rand_chacha = { workspace = true }
 proptest = { workspace = true }

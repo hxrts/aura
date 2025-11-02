@@ -254,6 +254,7 @@ fn create_test_device_metadata(device_id: DeviceId, effects: &Effects) -> Device
         dkd_commitment_proofs: BTreeMap::new(),
         next_nonce: 1,
         used_nonces: BTreeSet::new(),
+        key_share_epoch: 0,
     }
 }
 

@@ -10,7 +10,6 @@ use aura_console_types::{EventType, TraceEvent};
 use aura_types::session_utils::properties::PropertyId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use web_sys;
 
 /// Specialized causality analyzer for property violations
 #[derive(Debug, Clone)]
@@ -526,11 +525,7 @@ impl PropertyCausalityAnalyzer {
             }
         }
 
-        let time_span_ticks = if max_tick >= min_tick {
-            max_tick - min_tick
-        } else {
-            0
-        };
+        let time_span_ticks = max_tick.saturating_sub(min_tick);
         let max_depth = events.iter().map(|e| e.depth).max().unwrap_or(0);
 
         Some(ViolationCausalityChain {
@@ -802,12 +797,10 @@ impl PropertyCausalityAnalyzer {
     fn determine_criticality_reason(&self, event: &TraceEvent) -> CriticalityReason {
         // Determine why this event was critical based on its type
         match &event.event_type {
-            EventType::MessageDropped { reason, .. } => match reason {
-                aura_console_types::trace::DropReason::NetworkPartition => {
-                    CriticalityReason::NetworkPartition
-                }
-                _ => CriticalityReason::StateCorruption,
-            },
+            EventType::MessageDropped { reason: aura_console_types::trace::DropReason::NetworkPartition, .. } => {
+                CriticalityReason::NetworkPartition
+            }
+            EventType::MessageDropped { .. } => CriticalityReason::StateCorruption,
             EventType::CrdtMerge { .. } => CriticalityReason::StateCorruption,
             EventType::ProtocolStateTransition { .. } => CriticalityReason::SessionTypeViolation,
             _ => CriticalityReason::StateCorruption,

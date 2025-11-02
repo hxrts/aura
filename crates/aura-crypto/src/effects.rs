@@ -395,6 +395,48 @@ impl Effects {
             tokio::time::sleep(duration).await;
         }
     }
+
+    // ========== Cryptographic Operations ==========
+
+    /// Generate a signing key using the effects randomness
+    pub fn generate_signing_key(&self) -> ed25519_dalek::SigningKey {
+        let mut key_bytes = [0u8; 32];
+        self.random.fill_bytes(&mut key_bytes);
+        ed25519_dalek::SigningKey::from_bytes(&key_bytes)
+    }
+
+    /// Sign data with a signing key (generic signature operation)
+    pub fn sign_data(
+        &self,
+        data: &[u8],
+        key: &ed25519_dalek::SigningKey,
+    ) -> ed25519_dalek::Signature {
+        use ed25519_dalek::Signer;
+        key.sign(data)
+    }
+
+    /// Verify a signature (generic verification operation)  
+    pub fn verify_signature(
+        &self,
+        data: &[u8],
+        signature: &ed25519_dalek::Signature,
+        public_key: &ed25519_dalek::VerifyingKey,
+    ) -> bool {
+        use ed25519_dalek::Verifier;
+        public_key.verify(data, signature).is_ok()
+    }
+
+    /// Generate a key pair using the effects randomness
+    pub fn generate_keypair(&self) -> (ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey) {
+        let signing_key = self.generate_signing_key();
+        let verifying_key = signing_key.verifying_key();
+        (signing_key, verifying_key)
+    }
+
+    /// Hash data using Blake3 (deterministic, no randomness needed)
+    pub fn hash(&self, data: &[u8]) -> [u8; 32] {
+        *blake3::hash(data).as_bytes()
+    }
 }
 
 // ========== Monitoring Extensions ==========

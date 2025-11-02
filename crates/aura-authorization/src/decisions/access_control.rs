@@ -4,6 +4,7 @@ use crate::capability::CapabilityToken;
 use crate::policy::{evaluate_policy, PolicyContext, PolicyEvaluation};
 use crate::{Action, AuthorizationError, Resource, Result, Subject};
 use aura_authentication::AuthenticationContext;
+use aura_types::CapabilityId;
 use std::time::SystemTime;
 
 /// Final access control decision
@@ -36,7 +37,7 @@ pub enum AccessBasis {
 
     /// Valid capability token
     Capability {
-        capability_id: uuid::Uuid,
+        capability_id: CapabilityId,
         delegation_chain_length: u16,
     },
 
@@ -133,7 +134,7 @@ fn verify_subject_authentication(
             // Verify device is registered and has valid credentials
             auth_context
                 .verify_device_authentication(device_id)
-                .map_err(|e| AuthorizationError::AuthenticationError(e))?;
+                .map_err(AuthorizationError::AuthenticationError)?;
         }
 
         Subject::Guardian(guardian_id) => {
@@ -141,14 +142,14 @@ fn verify_subject_authentication(
             let guardian_id = aura_types::GuardianId(*guardian_id);
             auth_context
                 .verify_guardian_authentication(&guardian_id)
-                .map_err(|e| AuthorizationError::AuthenticationError(e))?;
+                .map_err(AuthorizationError::AuthenticationError)?;
         }
 
         Subject::Session { session_id, issuer } => {
             // Verify session ticket is valid and issued by the claimed device
             auth_context
                 .verify_session_authentication(session_id, issuer)
-                .map_err(|e| AuthorizationError::AuthenticationError(e))?;
+                .map_err(AuthorizationError::AuthenticationError)?;
         }
 
         Subject::ThresholdGroup {
@@ -159,7 +160,7 @@ fn verify_subject_authentication(
             for device_id in participants {
                 auth_context
                     .verify_device_authentication(device_id)
-                    .map_err(|e| AuthorizationError::AuthenticationError(e))?;
+                    .map_err(AuthorizationError::AuthenticationError)?;
             }
 
             // Verify threshold configuration is valid
@@ -188,9 +189,10 @@ fn validate_capability_tokens(
         })?;
         auth_context
             .verify_capability_signature(&capability_data)
-            .map_err(|e| AuthorizationError::AuthenticationError(e))?;
+            .map_err(AuthorizationError::AuthenticationError)?;
 
         // Check if capability is valid (includes expiration and condition checks)
+        #[allow(clippy::disallowed_methods)]
         let current_timestamp = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -350,8 +352,6 @@ fn convert_requirements_to_verification(requirements: &[String]) -> Result<Verif
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::CapabilityScope;
-    use uuid::Uuid;
 
     #[test]
     fn test_access_decision_conversion() {
@@ -362,8 +362,9 @@ mod tests {
             resource: Resource::Account(aura_types::AccountId::new()),
             capabilities: vec![],
             context: std::collections::HashMap::new(),
-            timestamp: SystemTime::now(),
+            timestamp: SystemTime::UNIX_EPOCH,
         };
+        #[allow(clippy::disallowed_method)]
         let policy_context = PolicyContext {
             current_time: SystemTime::now(),
             authority_graph: crate::policy::AuthorityGraph::new(),
