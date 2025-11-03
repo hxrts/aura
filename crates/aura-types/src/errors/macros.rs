@@ -199,6 +199,14 @@ impl AuraError {
         Self::data_corruption_detected(message)
     }
 
+    /// Create a configuration failed error
+    pub fn config_failed(message: impl Into<String>) -> Self {
+        Self::Infrastructure(crate::InfrastructureError::ConfigError {
+            message: message.into(),
+            context: "Configuration loading or validation failed".to_string(),
+        })
+    }
+
     /// Create a witness verification error
     pub fn witness_error(message: impl Into<String>) -> Self {
         Self::Session(crate::SessionError::ProtocolViolation {

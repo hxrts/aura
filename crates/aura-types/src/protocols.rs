@@ -17,8 +17,6 @@ pub enum ProtocolType {
     Counter,
     /// Key resharing protocol for threshold updates
     Resharing,
-    /// Account recovery protocol
-    Recovery,
     /// Resource locking protocol
     Locking,
     /// Lock acquisition protocol
@@ -33,7 +31,6 @@ impl fmt::Display for ProtocolType {
             ProtocolType::Dkd => write!(f, "dkd"),
             ProtocolType::Counter => write!(f, "counter"),
             ProtocolType::Resharing => write!(f, "resharing"),
-            ProtocolType::Recovery => write!(f, "recovery"),
             ProtocolType::Locking => write!(f, "locking"),
             ProtocolType::LockAcquisition => write!(f, "lock-acquisition"),
             ProtocolType::Compaction => write!(f, "compaction"),
@@ -48,7 +45,6 @@ impl ProtocolType {
             ProtocolType::Dkd,
             ProtocolType::Counter,
             ProtocolType::Resharing,
-            ProtocolType::Recovery,
             ProtocolType::Locking,
             ProtocolType::LockAcquisition,
             ProtocolType::Compaction,
@@ -62,7 +58,6 @@ impl ProtocolType {
             ProtocolType::Dkd
                 | ProtocolType::Counter
                 | ProtocolType::Resharing
-                | ProtocolType::Recovery
         )
     }
 
@@ -73,7 +68,6 @@ impl ProtocolType {
             ProtocolType::Dkd
                 | ProtocolType::Counter
                 | ProtocolType::Resharing
-                | ProtocolType::Recovery
                 | ProtocolType::Compaction
         )
     }
@@ -84,7 +78,6 @@ impl ProtocolType {
             ProtocolType::Dkd => ProtocolDuration::Short,
             ProtocolType::Counter => ProtocolDuration::Short,
             ProtocolType::Resharing => ProtocolDuration::Medium,
-            ProtocolType::Recovery => ProtocolDuration::Long,
             ProtocolType::Locking => ProtocolDuration::Short,
             ProtocolType::LockAcquisition => ProtocolDuration::Short,
             ProtocolType::Compaction => ProtocolDuration::Medium,
@@ -101,8 +94,6 @@ pub enum OperationType {
     Dkd,
     /// Key resharing operation
     Resharing,
-    /// Account recovery operation
-    Recovery,
     /// Resource locking operation
     Locking,
     /// Counter reservation operation
@@ -117,7 +108,6 @@ impl fmt::Display for OperationType {
             OperationType::Dkd => write!(f, "dkd"),
             OperationType::Counter => write!(f, "counter"),
             OperationType::Resharing => write!(f, "resharing"),
-            OperationType::Recovery => write!(f, "recovery"),
             OperationType::Locking => write!(f, "locking"),
             OperationType::Compaction => write!(f, "compaction"),
         }
@@ -130,7 +120,6 @@ impl From<ProtocolType> for OperationType {
             ProtocolType::Dkd => OperationType::Dkd,
             ProtocolType::Counter => OperationType::Counter,
             ProtocolType::Resharing => OperationType::Resharing,
-            ProtocolType::Recovery => OperationType::Recovery,
             ProtocolType::Locking => OperationType::Locking,
             ProtocolType::LockAcquisition => OperationType::Locking, // Maps to locking
             ProtocolType::Compaction => OperationType::Compaction,

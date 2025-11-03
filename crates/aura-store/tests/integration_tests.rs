@@ -5,7 +5,6 @@
 //!
 //! Reference: work/ssb_storage.md Phase 5.2
 
-use aura_authorization::{Action, CapabilityToken, Resource, Subject};
 use aura_crypto::Effects;
 use aura_journal::serialization::Serializable;
 use aura_store::{

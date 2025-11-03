@@ -1,11 +1,10 @@
 // Core types for the CRDT ledger
 
-use aura_crypto::{verifying_key_serde, Ed25519VerifyingKey};
+use aura_crypto::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // Re-export shared types from crypto and aura-types
-use aura_crypto::MerkleProof;
 use aura_types::{DeviceId, GuardianId};
 
 // Import authentication types (ThresholdSig is imported where needed)
@@ -23,8 +22,7 @@ pub struct Cid(pub String);
 impl Cid {
     /// Create a CID from bytes using Blake3 hash
     pub fn from_bytes(data: &[u8]) -> Self {
-        use aura_crypto::blake3_hash;
-        Cid(hex::encode(blake3_hash(data)))
+        Cid(hex::encode(blake3::hash(data).as_bytes()))
     }
 
     /// Create a CID from a string
@@ -37,19 +35,25 @@ impl Cid {
 
 /// Device metadata stored in CRDT
 ///
+/// Tracks device information, cryptographic keys, and replay protection state.
 /// Reference: 080 spec Part 3: Ledger Compaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceMetadata {
+    /// Unique identifier for this device
     pub device_id: DeviceId,
+    /// Human-readable name for the device
     pub device_name: String,
+    /// Classification of device type (Native, Guardian, or Browser)
     pub device_type: DeviceType,
-    #[serde(with = "verifying_key_serde")]
+    /// Ed25519 public key for device signature verification
     pub public_key: Ed25519VerifyingKey,
+    /// Timestamp (seconds since epoch) when device was added to account
     pub added_at: u64,
+    /// Timestamp of the most recent activity from this device
     pub last_seen: u64,
     /// Merkle proofs for DKD commitments (session_id -> proof)
     /// Required for post-compaction recovery verification
-    pub dkd_commitment_proofs: std::collections::BTreeMap<Uuid, MerkleProof>,
+    pub dkd_commitment_proofs: std::collections::BTreeMap<Uuid, Vec<u8>>,
     /// Next nonce for this device (monotonic counter)
     /// Used for device-specific replay protection
     pub next_nonce: u64,
@@ -64,28 +68,43 @@ pub struct DeviceMetadata {
 /// Device type classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeviceType {
-    Native,   // User's primary device
-    Guardian, // Guardian device
-    Browser,  // Browser-based device
+    /// User's primary device with full account control
+    Native,
+    /// Guardian device used for account recovery
+    Guardian,
+    /// Browser-based device with limited capabilities
+    Browser,
 }
 
 /// Guardian metadata
+///
+/// Tracks information about a guardian who can help recover account access.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianMetadata {
+    /// Unique identifier for this guardian
     pub guardian_id: GuardianId,
+    /// Device ID of the guardian's device
     pub device_id: DeviceId,
+    /// Email address for guardian contact
     pub email: String,
-    #[serde(with = "verifying_key_serde")]
+    /// Ed25519 public key for signature verification
     pub public_key: Ed25519VerifyingKey,
+    /// Timestamp when this guardian was added
     pub added_at: u64,
+    /// Policy controlling guardian recovery actions
     pub policy: GuardianPolicy,
 }
 
 /// Guardian policy configuration
+///
+/// Controls how a guardian can participate in account recovery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianPolicy {
+    /// Whether this guardian's recovery actions require explicit approval
     pub requires_approval: bool,
-    pub cooldown_period: u64, // seconds
+    /// Cooldown period in seconds between recovery actions by this guardian
+    pub cooldown_period: u64,
+    /// Maximum number of recovery operations allowed per calendar day
     pub max_recoveries_per_day: u32,
 }
 
@@ -104,12 +123,24 @@ impl Default for GuardianPolicy {
 // SessionId is now imported from aura-types
 // Extensions for journal-specific functionality
 pub trait SessionIdExt {
-    fn new_with_effects(effects: &aura_crypto::Effects) -> Self;
+    fn new_with_effects(effects: &dyn aura_types::effects::AuraEffects) -> Self;
 }
 
 impl SessionIdExt for SessionId {
-    fn new_with_effects(effects: &aura_crypto::Effects) -> Self {
-        SessionId::from_uuid(effects.gen_uuid())
+    fn new_with_effects(effects: &dyn aura_types::effects::AuraEffects) -> Self {
+        // Generate random bytes for UUID v4
+        let random_bytes = effects.random_bytes(16);
+
+        // Create UUID v4 from random bytes
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&random_bytes);
+
+        // Set version (4) and variant bits for UUID v4
+        uuid_bytes[6] = (uuid_bytes[6] & 0x0f) | 0x40; // Version 4
+        uuid_bytes[8] = (uuid_bytes[8] & 0x3f) | 0x80; // Variant 10
+
+        let uuid = uuid::Uuid::from_bytes(uuid_bytes);
+        SessionId::from_uuid(uuid)
     }
 }
 
@@ -184,50 +215,83 @@ pub enum ShareVerificationStatus {
 // EventNonce is now imported from aura-types
 
 /// Operation lock for distributed coordination
+///
+/// Prevents concurrent execution of the same operation type across devices.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationLock {
+    /// Type of operation being locked
     pub operation_type: OperationType,
+    /// Session ID associated with this lock
     pub session_id: SessionId,
+    /// Timestamp when lock was acquired
     pub acquired_at: u64,
+    /// Timestamp when lock expires (auto-release)
     pub expires_at: u64,
+    /// Participant ID holding the lock
     pub holder: ParticipantId,
+    /// Device ID of the lock holder
     pub holder_device_id: DeviceId,
+    /// Epoch during which lock was granted
     pub granted_at_epoch: u64,
+    /// Lottery ticket for fair lock acquisition
     pub lottery_ticket: [u8; 32],
 }
 
 /// DKD commitment root for verification
+///
+/// Stores the root hash of DKD commitments for a session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DkdCommitmentRoot {
+    /// Session ID for which commitments were made
     pub session_id: SessionId,
+    /// Blake3 hash of all commitments (32 bytes)
     pub root_hash: [u8; 32],
+    /// Number of individual commitments included in this root
     pub commitment_count: u32,
+    /// Timestamp when root was created
     pub created_at: u64,
 }
 
 /// Contact information for guardians
+///
+/// Stores communication details for reaching a guardian.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContactInfo {
+    /// Primary email address for guardian contact
     pub email: String,
+    /// Optional phone number for guardian contact
     pub phone: Option<String>,
+    /// Optional backup email address
     pub backup_email: Option<String>,
+    /// Guardian's notification preferences
     pub notification_preferences: NotificationPreferences,
 }
 
 /// Notification preferences
+///
+/// Controls how and when guardians receive notifications.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationPreferences {
+    /// Whether email notifications are enabled
     pub email_enabled: bool,
+    /// Whether phone/SMS notifications are enabled
     pub phone_enabled: bool,
+    /// Minimum urgency level required to send notifications
     pub urgency_threshold: UrgencyLevel,
 }
 
 /// Urgency level for notifications
+///
+/// Categorizes operational events by their importance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UrgencyLevel {
+    /// Low priority - routine updates
     Low,
+    /// Medium priority - important updates requiring attention
     Medium,
+    /// High priority - urgent security events
     High,
+    /// Critical priority - immediate action required
     Critical,
 }
 
@@ -242,18 +306,36 @@ impl Default for NotificationPreferences {
 }
 
 /// Session information
+///
+/// Represents an active or completed protocol session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
+    /// Unique identifier for this session
     pub session_id: SessionId,
+    /// Type of protocol being executed in this session
     pub protocol_type: ProtocolType,
+    /// List of participants in this session
     pub participants: Vec<ParticipantId>,
+    /// Timestamp when session was started
     pub started_at: u64,
+    /// Timestamp when session will expire
     pub expires_at: u64,
+    /// Current status of the session
     pub status: SessionStatus,
+    /// Additional metadata stored with the session
     pub metadata: std::collections::BTreeMap<String, String>,
 }
 
 impl Session {
+    /// Create a new session
+    ///
+    /// # Arguments
+    /// * `session_id` - Unique identifier for the session
+    /// * `protocol_type` - Type of protocol being executed
+    /// * `participants` - List of participating device IDs
+    /// * `started_at` - Timestamp when session starts
+    /// * `ttl_in_epochs` - Time-to-live in epochs
+    /// * `_timestamp` - Current timestamp (unused)
     pub fn new(
         session_id: SessionId,
         protocol_type: ProtocolType,
@@ -273,18 +355,35 @@ impl Session {
         }
     }
 
+    /// Update the session status
+    ///
+    /// # Arguments
+    /// * `status` - New status for the session
+    /// * `_timestamp` - Current timestamp (unused)
     pub fn update_status(&mut self, status: SessionStatus, _timestamp: u64) {
         self.status = status;
     }
 
+    /// Mark session as completed
+    ///
+    /// # Arguments
+    /// * `_outcome` - Protocol outcome (unused)
+    /// * `timestamp` - Timestamp of completion
     pub fn complete(&mut self, _outcome: SessionOutcome, timestamp: u64) {
         self.update_status(SessionStatus::Completed, timestamp);
     }
 
+    /// Abort the session due to failure
+    ///
+    /// # Arguments
+    /// * `_reason` - Reason for abort (unused)
+    /// * `_blamed_party` - Party responsible for failure (unused)
+    /// * `timestamp` - Timestamp of abort
     pub fn abort(&mut self, _reason: &str, _blamed_party: Option<ParticipantId>, timestamp: u64) {
         self.update_status(SessionStatus::Failed, timestamp);
     }
 
+    /// Check if session is in a terminal state
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.status,
@@ -295,10 +394,18 @@ impl Session {
         )
     }
 
+    /// Check if session has timed out
+    ///
+    /// # Arguments
+    /// * `current_epoch` - Current epoch for comparison
     pub fn is_timed_out(&self, current_epoch: u64) -> bool {
         current_epoch > self.expires_at
     }
 
+    /// Check if session has expired
+    ///
+    /// # Arguments
+    /// * `current_epoch` - Current epoch for comparison
     pub fn is_expired(&self, current_epoch: u64) -> bool {
         self.is_timed_out(current_epoch)
     }
@@ -308,42 +415,63 @@ impl Session {
 
 // SessionOutcome is now imported from aura-types
 
-/// Ed25519Signature share for threshold signatures
+/// Ed25519 signature share for threshold signatures
+///
+/// Represents one participant's contribution to a threshold signature.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignatureShare {
+    /// ID of the participant who created this share
     pub participant_id: ParticipantId,
+    /// The signature share bytes
     pub signature_share: Vec<u8>,
+    /// Commitment value for this share
     pub commitment: Vec<u8>,
 }
 
 /// Cooldown counter for rate limiting
+///
+/// Tracks how many times an operation has been performed recently.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CooldownCounter {
+    /// Participant being rate-limited
     pub participant_id: ParticipantId,
+    /// Type of operation being counted
     pub operation_type: OperationType,
+    /// Current count in this cooldown period
     pub count: u32,
+    /// Timestamp when counter resets
     pub reset_at: u64,
 }
 
 /// Presence ticket cache
+///
+/// Caches presence tickets for efficient session participation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresenceTicketCache {
+    /// Device holding this ticket
     pub device_id: DeviceId,
+    /// Session epoch for which ticket is valid
     pub session_epoch: SessionEpoch,
+    /// The ticket bytes
     pub ticket: Vec<u8>,
+    /// Timestamp when ticket expires
     pub expires_at: u64,
+    /// Timestamp when ticket was issued
     pub issued_at: u64,
+    /// Blake3 digest of the ticket for verification
     pub ticket_digest: [u8; 32],
 }
 
 /// Evidence of Byzantine behavior for logging and analysis
+///
+/// Documents detected misbehavior by system participants.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ByzantineEvidence {
     /// Resource exhaustion attack detected
     ResourceExhaustion {
         /// Number of excessive requests
         request_count: u64,
-        /// Time window of the attack
+        /// Time window of the attack in milliseconds
         window_ms: u64,
     },
     /// Invalid protocol behavior
@@ -363,6 +491,8 @@ pub enum ByzantineEvidence {
 }
 
 /// Severity level for Byzantine behavior
+///
+/// Indicates the operational impact of detected misbehavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ByzantineSeverity {
     /// Low impact, monitoring only
@@ -416,92 +546,128 @@ pub struct StorageQuota {
 }
 
 /// Replication status for a blob
+///
+/// Tracks the current state of blob replication across the network.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReplicationStatus {
     /// Still replicating to reach target factor
-    Replicating { current: u8, target: u8 },
+    Replicating {
+        /// Current number of replicas
+        current: u8,
+        /// Target number of replicas
+        target: u8,
+    },
     /// Successfully replicated
-    Complete { replica_count: u8 },
+    Complete {
+        /// Number of replicas achieved
+        replica_count: u8,
+    },
     /// Replication degraded (lost replicas)
-    Degraded { current: u8, target: u8 },
+    Degraded {
+        /// Current number of replicas
+        current: u8,
+        /// Target number of replicas
+        target: u8,
+    },
     /// Replication failed
-    Failed { reason: String },
+    Failed {
+        /// Reason for replication failure
+        reason: String,
+    },
 }
 
 /// Access control policy for storage blobs
+///
+/// Specifies who can perform which operations on a blob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessPolicy {
-    /// Read access requirements
+    /// Read access requirements (list of required capabilities)
     pub read_permissions: Vec<String>,
-    /// Write access requirements
+    /// Write access requirements (list of required capabilities)
     pub write_permissions: Vec<String>,
-    /// Delete access requirements
+    /// Delete access requirements (list of required capabilities)
     pub delete_permissions: Vec<String>,
     /// Time-based access restrictions
     pub time_restrictions: Option<TimeRestrictions>,
 }
 
 /// Time-based access restrictions
+///
+/// Controls when a blob can be accessed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeRestrictions {
-    /// Access not allowed before this timestamp
+    /// Access not allowed before this timestamp (seconds since epoch)
     pub not_before: Option<u64>,
-    /// Access not allowed after this timestamp
+    /// Access not allowed after this timestamp (seconds since epoch)
     pub not_after: Option<u64>,
 }
 
 /// Access audit log entry
+///
+/// Records each access attempt to a storage blob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessAuditEntry {
     /// Unique audit entry ID
     pub entry_id: Uuid,
-    /// Content that was accessed
+    /// Content identifier that was accessed
     pub cid: Cid,
-    /// Type of access operation
+    /// Type of access operation performed
     pub operation: AccessOperation,
     /// Device that performed the access
     pub device_id: DeviceId,
-    /// Capability token used for access
+    /// ID of the capability token used for access
     pub capability_token_id: String,
-    /// Timestamp of access
+    /// Timestamp when access occurred (seconds since epoch)
     pub accessed_at: u64,
     /// Result of the access attempt
     pub result: AccessResult,
-    /// Additional context
+    /// Additional context about the access
     pub context: Option<String>,
 }
 
 /// Type of storage access operation
+///
+/// Categorizes the different kinds of operations on storage blobs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AccessOperation {
-    /// Read operation
+    /// Read operation - retrieve blob contents
     Read,
-    /// Write/store operation
+    /// Write/store operation - create or update blob
     Write,
-    /// Delete operation
+    /// Delete operation - remove blob
     Delete,
-    /// Metadata query
+    /// Metadata query - read blob metadata without content
     Metadata,
 }
 
 /// Result of an access attempt
+///
+/// Indicates success or failure of an access operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AccessResult {
     /// Access granted successfully
     Granted,
     /// Access denied due to insufficient permissions
-    Denied { reason: String },
+    Denied {
+        /// Reason why access was denied
+        reason: String,
+    },
     /// Access failed due to technical error
-    Failed { error: String },
+    Failed {
+        /// Error description
+        error: String,
+    },
 }
 
 /// Key derivation specification for encryption
+///
+/// Specifies parameters for deriving encryption keys for storage blobs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyDerivationSpec {
-    /// Context for key derivation
+    /// Context string for key derivation (e.g., blob ID, device ID)
     pub context: String,
-    /// Algorithm used for key derivation
+    /// Key derivation algorithm (e.g., "HKDF-SHA256")
     pub algorithm: String,
-    /// Additional parameters
+    /// Additional algorithm-specific parameters
     pub params: std::collections::BTreeMap<String, String>,
 }

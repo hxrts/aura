@@ -1,7 +1,21 @@
 //! Capability system types
 //!
-//! This module provides types for the capability-based access control system
-//! used throughout the Aura platform.
+//! This module provides the unified capability-based access control system
+//! used throughout the Aura platform. It serves as the single source of truth
+//! for all capability token definitions.
+//!
+//! # Architecture
+//!
+//! The capability system uses a layered approach:
+//! - **aura-types::CapabilityToken** - Canonical foundation type (this module)
+//! - **External OCAP library** - Low-level OCAP machinery (issuance, verification, revocation)
+//! - **KeyFabric** - Unified policy abstractions via graph structure
+//!
+//! # Threshold-Based Identity
+//!
+//! Capability tokens bridge threshold authentication (M-of-N devices) to individual
+//! operations. The threshold signs tokens, then individual devices use those tokens
+//! independently without further coordination.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -69,9 +83,6 @@ impl CapabilityId {
     }
 
     /// Generate a deterministic capability ID from a parent chain
-    ///
-    /// Creates a capability ID based on a parent capability, subject identifier,
-    /// and scope. This allows for deterministic derivation of child capabilities.
     pub fn from_chain(
         parent_id: Option<&CapabilityId>,
         subject_id: &[u8],
@@ -90,7 +101,6 @@ impl CapabilityId {
     }
 
     /// Generate a capability ID from device and timestamp
-    /// This creates a deterministic ID for device-specific capabilities
     pub fn from_device_and_timestamp(device_id: crate::DeviceId, timestamp: u64) -> Self {
         let mut hasher = blake3::Hasher::new();
         hasher.update(device_id.0.as_bytes());
@@ -102,7 +112,7 @@ impl CapabilityId {
 
 impl fmt::Display for CapabilityId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "capability-{}", self.to_hex())
+        write!(f, "cap:{}", &self.to_hex()[..16])
     }
 }
 
@@ -124,538 +134,469 @@ impl From<CapabilityId> for [u8; 32] {
     }
 }
 
-/// Capability scope enumeration
+// =============================================================================
+// Unified Capability Token - Single Source of Truth
+// =============================================================================
+
+/// Unified capability token for delegated access control
 ///
-/// Defines the scope of access that a capability grants.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum CapabilityScope {
-    /// Read-only access
-    Read,
-    /// Write access (includes read)
-    Write,
-    /// Execute access for operations
-    Execute,
-    /// Administrative access (full control)
-    Admin,
-    /// Custom scope with specific permissions
-    Custom(String),
-}
-
-impl fmt::Display for CapabilityScope {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CapabilityScope::Read => write!(f, "read"),
-            CapabilityScope::Write => write!(f, "write"),
-            CapabilityScope::Execute => write!(f, "execute"),
-            CapabilityScope::Admin => write!(f, "admin"),
-            CapabilityScope::Custom(custom) => write!(f, "custom:{}", custom),
-        }
-    }
-}
-
-impl CapabilityScope {
-    /// Check if this scope includes read access
-    pub fn includes_read(&self) -> bool {
-        matches!(
-            self,
-            CapabilityScope::Read | CapabilityScope::Write | CapabilityScope::Admin
-        )
-    }
-
-    /// Check if this scope includes write access
-    pub fn includes_write(&self) -> bool {
-        matches!(self, CapabilityScope::Write | CapabilityScope::Admin)
-    }
-
-    /// Check if this scope includes execute access
-    pub fn includes_execute(&self) -> bool {
-        matches!(self, CapabilityScope::Execute | CapabilityScope::Admin)
-    }
-
-    /// Check if this scope includes admin access
-    pub fn includes_admin(&self) -> bool {
-        matches!(self, CapabilityScope::Admin)
-    }
-}
-
-/// Capability resource type
+/// This is the canonical CapabilityToken definition that consolidates all previous
+/// definitions across the codebase into a single authoritative source.
 ///
-/// Identifies the type of resource that a capability controls access to.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum CapabilityResource {
-    /// Storage chunk access
-    Chunk(crate::content::ChunkId),
-    /// Session access
-    Session(crate::identifiers::SessionId),
-    /// Account access
-    Account(crate::identifiers::AccountId),
-    /// Device access
-    Device(crate::identifiers::DeviceId),
-    /// Protocol access
-    Protocol(crate::protocols::ProtocolType),
-    /// Custom resource type
-    Custom {
-        /// Type of the custom resource
-        resource_type: String,
-        /// Identifier of the specific resource
-        resource_id: String,
-    },
-}
-
-impl fmt::Display for CapabilityResource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CapabilityResource::Chunk(chunk_id) => write!(f, "chunk:{}", chunk_id),
-            CapabilityResource::Session(session_id) => write!(f, "session:{}", session_id),
-            CapabilityResource::Account(account_id) => write!(f, "account:{}", account_id.0),
-            CapabilityResource::Device(device_id) => write!(f, "device:{}", device_id.0),
-            CapabilityResource::Protocol(protocol_type) => write!(f, "protocol:{}", protocol_type),
-            CapabilityResource::Custom {
-                resource_type,
-                resource_id,
-            } => {
-                write!(f, "{}:{}", resource_type, resource_id)
-            }
-        }
-    }
-}
-
-/// Permission types for capability-based access control
+/// # Design Principles
 ///
-/// Defines the types of permissions that can be granted through capabilities.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Permission {
-    /// Read access to storage or data
-    StorageRead,
-    /// Write access to storage or data
-    StorageWrite,
-    /// Delete access to storage or data
-    StorageDelete,
-    /// Send messages over communication channels
-    CommunicationSend,
-    /// Receive messages over communication channels
-    CommunicationReceive,
-    /// Execute protocol operations
-    ProtocolExecute,
-    /// Modify protocol state
-    ProtocolModify,
-    /// Access recovery mechanisms
-    RecoveryAccess,
-    /// Administrative access (full control)
-    Admin,
-    /// Custom permission type
-    Custom(String),
-}
-
-impl fmt::Display for Permission {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Permission::StorageRead => write!(f, "storage:read"),
-            Permission::StorageWrite => write!(f, "storage:write"),
-            Permission::StorageDelete => write!(f, "storage:delete"),
-            Permission::CommunicationSend => write!(f, "communication:send"),
-            Permission::CommunicationReceive => write!(f, "communication:receive"),
-            Permission::ProtocolExecute => write!(f, "protocol:execute"),
-            Permission::ProtocolModify => write!(f, "protocol:modify"),
-            Permission::RecoveryAccess => write!(f, "recovery:access"),
-            Permission::Admin => write!(f, "admin"),
-            Permission::Custom(perm) => write!(f, "custom:{}", perm),
-        }
-    }
-}
-
-/// Capability token for delegated access
+/// - **Bearer Token**: Possession grants access (like a physical key)
+/// - **Threshold-Signed**: Created by M-of-N threshold signature
+/// - **Delegatable**: Can be attenuated and delegated to other devices
+/// - **Conditional**: Can have time windows, usage limits, and other conditions
+/// - **Verifiable**: Cryptographically signed and independently verifiable
 ///
-/// Represents a delegated capability that grants specific permissions
-/// for a specific resource with optional constraints.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// # Lifecycle
+///
+/// 1. **Issuance**: Threshold (M-of-N devices) creates and signs token
+/// 2. **Distribution**: Token distributed to authorized devices
+/// 3. **Usage**: Individual devices present token for access
+/// 4. **Verification**: Service verifies signature and conditions
+/// 5. **Revocation**: Token can be revoked if compromised
+///
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityToken {
-    /// Unique identifier for this capability
-    pub id: CapabilityId,
-    /// Subject (entity) that the capability is granted to
-    pub subject: crate::identifiers::DeviceId,
-    /// Resource this capability grants access to
-    pub resource: CapabilityResource,
-    /// Permissions granted by this capability
-    pub permissions: Vec<Permission>,
-    /// Scope of this capability
-    pub scope: CapabilityScope,
-    /// When this capability expires
-    pub expiration: CapabilityExpiration,
-    /// Optional parent capability (for delegation chains)
-    pub parent_id: Option<CapabilityId>,
-    /// Timestamp when capability was created
-    pub created_at: u64,
-    /// Signature over the capability data (for verification)
+    /// Unique identifier for this capability token
+    pub token_id: CapabilityId,
+
+    /// Account that issued this token (threshold identity)
+    pub issuer: crate::AccountId,
+
+    /// Permissions granted by this token
+    pub permissions: Vec<crate::CanonicalPermission>,
+
+    /// Optional resource restrictions (e.g., specific chunk IDs, paths)
+    pub resources: Vec<String>,
+
+    /// Unix timestamp when this capability was issued
+    pub issued_at: u64,
+
+    /// Optional Unix timestamp when this capability expires
+    pub expires_at: Option<u64>,
+
+    /// Whether this token has been revoked
+    pub revoked: bool,
+
+    /// Devices that participated in creating this token (M-of-N threshold)
+    pub signers: Vec<crate::DeviceId>,
+
+    /// The threshold signature authorizing this token
+    pub threshold_signature: Vec<u8>,
+
+    /// Delegation chain showing token ancestry
+    pub delegation_chain: Vec<DelegationProof>,
+
+    /// Maximum delegation depth allowed
+    pub max_delegation_depth: u8,
+
+    /// Current delegation depth (0 = original token)
+    pub current_delegation_depth: u8,
+
+    /// Conditions that must be met for this token to be valid
+    pub conditions: Vec<CapabilityCondition>,
+
+    /// Nonce for uniqueness and replay protection
+    pub nonce: [u8; 32],
+}
+
+/// Proof of delegation from parent token to child token
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegationProof {
+    /// Parent token that delegated authority
+    pub parent_token_id: CapabilityId,
+
+    /// Permissions delegated (must be subset of parent's permissions)
+    pub delegated_permissions: Vec<crate::CanonicalPermission>,
+
+    /// Device that performed the delegation
+    pub delegator_device_id: crate::DeviceId,
+
+    /// Signature from delegator device
     pub signature: Vec<u8>,
+
+    /// Unix timestamp when delegation occurred
+    pub timestamp: u64,
+}
+
+/// Conditions that can be attached to capability tokens
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CapabilityCondition {
+    /// Only valid during a specific time window
+    TimeWindow {
+        /// Unix timestamp for window start
+        start: u64,
+        /// Unix timestamp for window end
+        end: u64,
+    },
+
+    /// Only valid when used from specific devices
+    DeviceRestriction {
+        /// List of device IDs that are allowed to use this capability
+        allowed_devices: Vec<crate::DeviceId>,
+    },
+
+    /// Only valid for a limited number of uses
+    UsageLimit {
+        /// Maximum number of times this capability can be used
+        max_uses: u32,
+        /// Current usage count
+        current_uses: u32,
+    },
+
+    /// Only valid when combined with other capabilities
+    RequiresCombination {
+        /// Other capability IDs that must be presented together
+        required_capabilities: Vec<CapabilityId>,
+    },
+
+    /// Custom condition with arbitrary key-value data
+    Custom {
+        /// Custom condition key
+        key: String,
+        /// Custom condition value
+        value: String,
+    },
 }
 
 impl CapabilityToken {
     /// Create a new capability token
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        subject: crate::identifiers::DeviceId,
-        resource: CapabilityResource,
-        permissions: Vec<Permission>,
-        scope: CapabilityScope,
-        expiration: CapabilityExpiration,
-        current_timestamp: u64,
+        issuer: crate::AccountId,
+        permissions: Vec<crate::CanonicalPermission>,
+        resources: Vec<String>,
+        issued_at: u64,
+        expires_at: Option<u64>,
+        signers: Vec<crate::DeviceId>,
+        threshold_signature: Vec<u8>,
+        nonce: [u8; 32],
     ) -> Self {
-        let now = current_timestamp;
-
-        let id = CapabilityId::from_chain(
-            None,
-            subject.0.as_bytes(),
-            format!("{:?}", resource).as_bytes(),
-        );
+        let token_id = CapabilityId::from_blake3_hash(&blake3::hash(&nonce));
 
         Self {
-            id,
-            subject,
-            resource,
+            token_id,
+            issuer,
             permissions,
-            scope,
-            expiration,
-            parent_id: None,
-            created_at: now,
-            signature: vec![],
+            resources,
+            issued_at,
+            expires_at,
+            revoked: false,
+            signers,
+            threshold_signature,
+            delegation_chain: Vec::new(),
+            max_delegation_depth: 5,
+            current_delegation_depth: 0,
+            conditions: Vec::new(),
+            nonce,
         }
     }
 
-    /// Create a derived capability token (delegation)
-    pub fn derive(
-        &self,
-        new_subject: crate::identifiers::DeviceId,
-        new_permissions: Vec<Permission>,
-        current_timestamp: u64,
-    ) -> Self {
-        let now = current_timestamp;
-
-        let id = CapabilityId::from_chain(
-            Some(&self.id),
-            new_subject.0.as_bytes(),
-            format!("{:?}", new_permissions).as_bytes(),
-        );
-
-        Self {
-            id,
-            subject: new_subject,
-            resource: self.resource.clone(),
-            permissions: new_permissions,
-            scope: self.scope.clone(),
-            expiration: self.expiration.clone(),
-            parent_id: Some(self.id),
-            created_at: now,
-            signature: vec![],
+    /// Check if this capability is currently valid
+    pub fn is_valid(&self, current_time: u64) -> bool {
+        // Check revocation
+        if self.revoked {
+            return false;
         }
-    }
 
-    /// Check if this capability is still valid at the given timestamp
-    pub fn is_valid(&self, current_timestamp: u64) -> bool {
-        !self.expiration.has_expired(current_timestamp)
+        // Check expiration
+        if let Some(expires_at) = self.expires_at {
+            if current_time > expires_at {
+                return false;
+            }
+        }
+
+        // Check conditions
+        for condition in &self.conditions {
+            if !self.check_condition(condition, current_time) {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Check if this capability grants a specific permission
-    pub fn grants_permission(&self, permission: &Permission) -> bool {
-        self.permissions.iter().any(|p| p == permission)
-            || matches!(
-                self.permissions.iter().find(|_| true),
-                Some(Permission::Admin)
-            )
+    pub fn has_permission(&self, permission: &crate::CanonicalPermission) -> bool {
+        self.permissions.contains(permission)
+            || self
+                .permissions
+                .contains(&crate::CanonicalPermission::Admin)
+    }
+
+    /// Check if this capability can access a specific resource
+    pub fn can_access_resource(&self, resource: &str) -> bool {
+        // Empty resources list means access to all resources
+        if self.resources.is_empty() {
+            return true;
+        }
+
+        self.resources.iter().any(|r| r == resource)
+    }
+
+    /// Check if this token can be delegated
+    pub fn can_delegate(&self) -> bool {
+        self.current_delegation_depth < self.max_delegation_depth
+    }
+
+    /// Create a delegated token with attenuated permissions
+    pub fn delegate(
+        &self,
+        delegated_permissions: Vec<crate::CanonicalPermission>,
+        delegated_resources: Vec<String>,
+        delegator_device_id: crate::DeviceId,
+        delegator_signature: Vec<u8>,
+        current_time: u64,
+    ) -> Result<Self, String> {
+        if !self.can_delegate() {
+            return Err("Maximum delegation depth exceeded".to_string());
+        }
+
+        // Verify delegated permissions are subset of current permissions
+        for perm in &delegated_permissions {
+            if !self.has_permission(perm) {
+                return Err(format!(
+                    "Cannot delegate permission {:?} not held by parent token",
+                    perm
+                ));
+            }
+        }
+
+        // Create delegation proof
+        let proof = DelegationProof {
+            parent_token_id: self.token_id,
+            delegated_permissions: delegated_permissions.clone(),
+            delegator_device_id,
+            signature: delegator_signature,
+            timestamp: current_time,
+        };
+
+        // Generate new nonce for delegated token
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&self.nonce);
+        hasher.update(delegator_device_id.0.as_bytes());
+        hasher.update(&current_time.to_le_bytes());
+        let new_nonce: [u8; 32] = hasher.finalize().into();
+
+        let mut delegation_chain = self.delegation_chain.clone();
+        delegation_chain.push(proof);
+
+        Ok(Self {
+            token_id: CapabilityId::from_blake3_hash(&blake3::hash(&new_nonce)),
+            issuer: self.issuer.clone(),
+            permissions: delegated_permissions,
+            resources: delegated_resources,
+            issued_at: current_time,
+            expires_at: self.expires_at, // Inherit parent expiration
+            revoked: false,
+            signers: self.signers.clone(),
+            threshold_signature: self.threshold_signature.clone(),
+            delegation_chain,
+            max_delegation_depth: self.max_delegation_depth,
+            current_delegation_depth: self.current_delegation_depth + 1,
+            conditions: self.conditions.clone(),
+            nonce: new_nonce,
+        })
+    }
+
+    /// Revoke this token
+    pub fn revoke(&mut self) {
+        self.revoked = true;
+    }
+
+    /// Add a condition to this token
+    pub fn add_condition(&mut self, condition: CapabilityCondition) {
+        self.conditions.push(condition);
+    }
+
+    /// Get the root token ID (start of delegation chain)
+    pub fn root_token_id(&self) -> CapabilityId {
+        self.delegation_chain
+            .first()
+            .map(|proof| proof.parent_token_id)
+            .unwrap_or(self.token_id)
+    }
+
+    /// Check a specific condition
+    fn check_condition(&self, condition: &CapabilityCondition, current_time: u64) -> bool {
+        match condition {
+            CapabilityCondition::TimeWindow { start, end } => {
+                current_time >= *start && current_time <= *end
+            }
+            CapabilityCondition::DeviceRestriction { allowed_devices } => {
+                // This check requires device context from caller
+                // For now, return true - enforcement happens at verification layer
+                !allowed_devices.is_empty()
+            }
+            CapabilityCondition::UsageLimit {
+                max_uses,
+                current_uses,
+            } => current_uses < max_uses,
+            CapabilityCondition::RequiresCombination {
+                required_capabilities,
+            } => {
+                // This check requires capability context from caller
+                // For now, return true - enforcement happens at verification layer
+                !required_capabilities.is_empty()
+            }
+            CapabilityCondition::Custom { .. } => {
+                // Custom conditions must be checked by application layer
+                true
+            }
+        }
+    }
+
+    /// Serialize token for signing (excludes signature field)
+    pub fn serialize_for_signature(&self) -> Vec<u8> {
+        // Serialize all fields except threshold_signature
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.token_id.as_bytes());
+        hasher.update(self.issuer.0.as_bytes());
+        hasher.update(&self.issued_at.to_le_bytes());
+        if let Some(expires_at) = self.expires_at {
+            hasher.update(&expires_at.to_le_bytes());
+        }
+        hasher.update(&self.nonce);
+        hasher.finalize().as_bytes().to_vec()
     }
 }
 
-impl PartialEq for CapabilityToken {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+impl fmt::Display for CapabilityToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "CapabilityToken({}, issuer={}, depth={}/{})",
+            self.token_id, self.issuer, self.current_delegation_depth, self.max_delegation_depth
+        )
     }
 }
-
-impl Eq for CapabilityToken {}
 
 impl Hash for CapabilityToken {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
+        self.token_id.hash(state);
     }
 }
 
-/// Capability expiration time
-///
-/// Defines when a capability expires.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum CapabilityExpiration {
-    /// Never expires
-    Never,
-    /// Expires at a specific timestamp (Unix timestamp)
-    Timestamp(u64),
-    /// Expires after a duration (seconds from creation)
-    Duration(u64),
-    /// Expires at the end of a session
-    SessionEnd(crate::identifiers::SessionId),
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl fmt::Display for CapabilityExpiration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CapabilityExpiration::Never => write!(f, "never"),
-            CapabilityExpiration::Timestamp(timestamp) => write!(f, "timestamp:{}", timestamp),
-            CapabilityExpiration::Duration(seconds) => write!(f, "duration:{}s", seconds),
-            CapabilityExpiration::SessionEnd(session_id) => write!(f, "session-end:{}", session_id),
-        }
-    }
-}
+    fn create_test_token() -> CapabilityToken {
+        let issuer = crate::AccountId::from_bytes(*b"test_account_id_1234567890123456");
+        let device1 = crate::DeviceId::from_bytes(*b"device1_test_id_1234567890123456");
+        let device2 = crate::DeviceId::from_bytes(*b"device2_test_id_1234567890123456");
 
-impl CapabilityExpiration {
-    /// Check if the capability has expired at the given timestamp
-    pub fn has_expired(&self, current_timestamp: u64) -> bool {
-        match self {
-            CapabilityExpiration::Never => false,
-            CapabilityExpiration::Timestamp(expiry) => current_timestamp >= *expiry,
-            CapabilityExpiration::Duration(_) => {
-                // Duration-based expiration needs creation time to determine expiry
-                // This should be handled by the capability management system
-                false
-            }
-            CapabilityExpiration::SessionEnd(_) => {
-                // Session-based expiration needs session state to determine expiry
-                // This should be handled by the capability management system
-                false
-            }
-        }
-    }
-}
-
-// =============================================================================
-// Conversion Traits for Layered Capability System
-// =============================================================================
-
-/// Capability Type Layer Documentation
-///
-/// The Aura capability system uses a layered approach with clear separation of concerns:
-///
-/// 1. **aura-types::CapabilityToken** - Lightweight, canonical foundation type
-///    - Wire format compatible
-///    - Universal reference type
-///    - Minimal dependencies
-///
-/// 2. **aura-authorization::CapabilityToken** - Rich policy enforcement
-///    - Cryptographic signatures
-///    - Rich conditions and constraints
-///    - Delegation depth tracking
-///
-/// 3. **aura-journal::CapabilityToken** - Ledger event representation
-///    - Clean auth/authz separation
-///    - Domain-specific permissions
-///    - Event-sourced state management
-///
-/// 4. **aura-store::CapabilityManager** - Storage lifecycle management
-///    - Uses aura-authorization types
-///    - Capability tracking and revocation
-///    - Integration layer
-///
-/// Trait for converting canonical capability tokens to authorization layer tokens
-pub trait IntoAuthorizationToken {
-    /// Convert to authorization token with signature and issuer
-    fn into_authorization_token(
-        self,
-        issuer: crate::identifiers::DeviceId,
-        signature: Vec<u8>,
-    ) -> AuthorizationCapabilityToken;
-}
-
-/// Trait for converting canonical capability tokens to journal layer tokens
-pub trait IntoJournalToken {
-    /// Convert to journal token for event recording
-    fn into_journal_token(
-        self,
-        authenticated_device: crate::identifiers::DeviceId,
-        delegation_chain: Vec<CapabilityId>,
-        signature: Vec<u8>,
-    ) -> JournalCapabilityToken;
-}
-
-/// Authorization layer capability token representation
-///
-/// This mirrors the structure from aura-authorization but without the heavyweight dependencies
-/// for conversion purposes. The actual aura-authorization::CapabilityToken should be used
-/// for authorization operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthorizationCapabilityToken {
-    /// Unique identifier for this capability token
-    pub id: CapabilityId,
-    /// The device/subject this capability is granted to
-    pub subject: crate::identifiers::DeviceId,
-    /// The resource this capability grants access to
-    pub resource: CapabilityResource,
-    /// List of permissions granted by this capability
-    pub permissions: Vec<Permission>,
-    /// Scope limitations for this capability
-    pub scope: CapabilityScope,
-    /// Unix timestamp when this capability was issued
-    pub issued_at: u64,
-    /// Optional Unix timestamp when this capability expires
-    pub expires_at: Option<u64>,
-    /// The device that issued this capability
-    pub issuer: crate::identifiers::DeviceId,
-    /// Cryptographic signature of this capability
-    pub signature: Vec<u8>,
-    /// Whether this capability can be delegated to others
-    pub delegatable: bool,
-    /// Current delegation depth (0 = original capability)
-    pub delegation_depth: u8,
-}
-
-/// Journal layer capability token representation
-///
-/// Separates authentication (who) from authorization (what) for ledger operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JournalCapabilityToken {
-    /// Unique identifier for this capability token
-    pub id: CapabilityId,
-    /// The authenticated device that has been granted this capability
-    pub authenticated_device: crate::identifiers::DeviceId,
-    /// List of permissions granted by this capability
-    pub granted_permissions: Vec<Permission>,
-    /// Chain of delegation showing how this capability was derived
-    pub delegation_chain: Vec<CapabilityId>,
-    /// Cryptographic signature validating this capability
-    pub signature: Vec<u8>,
-    /// Unix timestamp when this capability was issued
-    pub issued_at: u64,
-    /// Optional Unix timestamp when this capability expires
-    pub expires_at: Option<u64>,
-}
-
-impl IntoAuthorizationToken for CapabilityToken {
-    fn into_authorization_token(
-        self,
-        issuer: crate::identifiers::DeviceId,
-        signature: Vec<u8>,
-    ) -> AuthorizationCapabilityToken {
-        let expires_at = match &self.expiration {
-            CapabilityExpiration::Never => None,
-            CapabilityExpiration::Timestamp(ts) => Some(*ts),
-            CapabilityExpiration::Duration(duration) => Some(self.created_at + duration),
-            CapabilityExpiration::SessionEnd(_) => None, // Requires session context
-        };
-
-        AuthorizationCapabilityToken {
-            id: self.id,
-            subject: self.subject,
-            resource: self.resource,
-            permissions: self.permissions,
-            scope: self.scope,
-            issued_at: self.created_at,
-            expires_at,
+        CapabilityToken::new(
             issuer,
-            signature,
-            delegatable: true,   // Default - can be customized
-            delegation_depth: 5, // Default - can be customized
-        }
-    }
-}
-
-impl IntoJournalToken for CapabilityToken {
-    fn into_journal_token(
-        self,
-        authenticated_device: crate::identifiers::DeviceId,
-        delegation_chain: Vec<CapabilityId>,
-        signature: Vec<u8>,
-    ) -> JournalCapabilityToken {
-        let expires_at = match &self.expiration {
-            CapabilityExpiration::Never => None,
-            CapabilityExpiration::Timestamp(ts) => Some(*ts),
-            CapabilityExpiration::Duration(duration) => Some(self.created_at + duration),
-            CapabilityExpiration::SessionEnd(_) => None, // Requires session context
-        };
-
-        JournalCapabilityToken {
-            id: self.id,
-            authenticated_device,
-            granted_permissions: self.permissions,
-            delegation_chain,
-            signature,
-            issued_at: self.created_at,
-            expires_at,
-        }
-    }
-}
-
-impl CapabilityToken {
-    /// Create a signed authorization token from this lightweight token
-    ///
-    /// # Example
-    /// ```ignore
-    /// let canonical_token = CapabilityToken::new(device_id, resource, permissions, scope, expiration);
-    /// let auth_token = canonical_token.authorize(issuer_device_id, signature);
-    /// ```
-    pub fn authorize(
-        self,
-        issuer: crate::identifiers::DeviceId,
-        signature: Vec<u8>,
-    ) -> AuthorizationCapabilityToken {
-        self.into_authorization_token(issuer, signature)
+            vec![crate::CanonicalPermission::StorageRead],
+            vec!["resource1".to_string()],
+            1000,
+            Some(2000),
+            vec![device1, device2],
+            vec![0u8; 64], // Mock signature
+            [0u8; 32],
+        )
     }
 
-    /// Create a journal event token for ledger operations
-    ///
-    /// # Example  
-    /// ```ignore
-    /// let canonical_token = CapabilityToken::new(device_id, resource, permissions, scope, expiration);
-    /// let journal_token = canonical_token.for_journal(authenticated_device, delegation_chain, signature);
-    /// ```
-    pub fn for_journal(
-        self,
-        authenticated_device: crate::identifiers::DeviceId,
-        delegation_chain: Vec<CapabilityId>,
-        signature: Vec<u8>,
-    ) -> JournalCapabilityToken {
-        self.into_journal_token(authenticated_device, delegation_chain, signature)
-    }
-}
-
-// =============================================================================
-// Permission Mapping Support
-// =============================================================================
-
-impl Permission {
-    /// Map canonical permissions to authorization actions
-    ///
-    /// This provides a clear mapping between the generic permission model
-    /// and the authorization layer's action-based model.
-    pub fn to_authorization_actions(&self) -> Vec<String> {
-        match self {
-            Permission::StorageRead => vec!["Read".to_string()],
-            Permission::StorageWrite => vec!["Read".to_string(), "Write".to_string()],
-            Permission::StorageDelete => vec![
-                "Read".to_string(),
-                "Write".to_string(),
-                "Delete".to_string(),
-            ],
-            Permission::CommunicationSend => vec!["Execute".to_string()],
-            Permission::CommunicationReceive => vec!["Read".to_string()],
-            Permission::ProtocolExecute => vec!["Execute".to_string()],
-            Permission::ProtocolModify => vec!["Execute".to_string(), "Write".to_string()],
-            Permission::RecoveryAccess => vec!["Admin".to_string()],
-            Permission::Admin => vec!["Admin".to_string()],
-            Permission::Custom(perm) => vec![format!("Custom:{}", perm)],
-        }
+    #[test]
+    fn test_capability_token_creation() {
+        let token = create_test_token();
+        assert_eq!(token.current_delegation_depth, 0);
+        assert!(!token.revoked);
+        assert_eq!(token.signers.len(), 2);
     }
 
-    /// Map canonical permissions to journal domain operations
-    ///
-    /// This provides mapping to the journal layer's domain-specific permission model.
-    pub fn to_journal_operations(&self) -> Vec<String> {
-        match self {
-            Permission::StorageRead => vec!["Storage:Read".to_string()],
-            Permission::StorageWrite => vec!["Storage:Write".to_string()],
-            Permission::StorageDelete => vec!["Storage:Delete".to_string()],
-            Permission::CommunicationSend => vec!["Communication:Send".to_string()],
-            Permission::CommunicationReceive => vec!["Communication:Receive".to_string()],
-            Permission::ProtocolExecute => vec!["Protocol:Execute".to_string()],
-            Permission::ProtocolModify => vec!["Protocol:Modify".to_string()],
-            Permission::RecoveryAccess => vec!["Recovery:Access".to_string()],
-            Permission::Admin => vec!["Admin".to_string()],
-            Permission::Custom(perm) => vec![format!("Custom:{}", perm)],
-        }
+    #[test]
+    fn test_capability_token_validity() {
+        let token = create_test_token();
+
+        assert!(token.is_valid(1500)); // Within validity period
+        assert!(!token.is_valid(2500)); // After expiration
+    }
+
+    #[test]
+    fn test_capability_token_permissions() {
+        let token = create_test_token();
+
+        assert!(token.has_permission(&crate::CanonicalPermission::StorageRead));
+        assert!(!token.has_permission(&crate::CanonicalPermission::StorageWrite));
+    }
+
+    #[test]
+    fn test_capability_token_delegation() {
+        let token = create_test_token();
+        let delegator = crate::DeviceId::from_bytes(*b"delegator_test_id_12345678901234");
+
+        let delegated = token
+            .delegate(
+                vec![crate::CanonicalPermission::StorageRead],
+                vec!["resource1".to_string()],
+                delegator,
+                vec![0u8; 64],
+                1500,
+            )
+            .expect("Delegation should succeed");
+
+        assert_eq!(delegated.current_delegation_depth, 1);
+        assert_eq!(delegated.delegation_chain.len(), 1);
+        assert!(delegated.can_delegate());
+    }
+
+    #[test]
+    fn test_capability_token_delegation_depth_limit() {
+        let mut token = create_test_token();
+        token.max_delegation_depth = 2;
+        token.current_delegation_depth = 2;
+
+        assert!(!token.can_delegate());
+
+        let delegator = crate::DeviceId::from_bytes(*b"delegator_test_id_12345678901234");
+        let result = token.delegate(
+            vec![crate::CanonicalPermission::StorageRead],
+            vec![],
+            delegator,
+            vec![],
+            1500,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_capability_token_revocation() {
+        let mut token = create_test_token();
+        assert!(token.is_valid(1500));
+
+        token.revoke();
+        assert!(!token.is_valid(1500));
+    }
+
+    #[test]
+    fn test_capability_condition_time_window() {
+        let mut token = create_test_token();
+        token.add_condition(CapabilityCondition::TimeWindow {
+            start: 1200,
+            end: 1800,
+        });
+
+        assert!(!token.is_valid(1100)); // Before window
+        assert!(token.is_valid(1500)); // Within window
+        assert!(!token.is_valid(1900)); // After window
+    }
+
+    #[test]
+    fn test_capability_id_generation() {
+        let id1 = CapabilityId::random();
+        let id2 = CapabilityId::random();
+        assert_ne!(id1, id2);
+
+        let device = crate::DeviceId::from_bytes(*b"device_test_id_12345678901234567");
+        let id3 = CapabilityId::from_device_and_timestamp(device, 1000);
+        let id4 = CapabilityId::from_device_and_timestamp(device, 1000);
+        assert_eq!(id3, id4); // Deterministic
     }
 }

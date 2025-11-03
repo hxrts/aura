@@ -647,6 +647,74 @@ pub enum CryptoError {
     /// Generic cryptographic operation failure
     #[error("Cryptographic operation failed: {message}")]
     OperationFailed { message: String, context: String },
+
+    /// Invalid input provided to cryptographic operation
+    #[error("Invalid input: {message}")]
+    InvalidInput { message: String, context: String },
+
+    /// Invalid output from cryptographic operation
+    #[error("Invalid output: {message}")]
+    InvalidOutput { message: String, context: String },
+
+    /// Signing operation failed
+    #[error("Signing failed: {message}")]
+    SigningFailed { message: String, context: String },
+
+    /// Verification operation failed
+    #[error("Verification failed: {message}")]
+    VerificationFailed { message: String, context: String },
+
+    /// Insufficient security level for operation
+    #[error("Insufficient security level: {message}")]
+    InsufficientSecurityLevel { message: String, context: String },
+
+    /// Rate limiting applied to operation
+    #[error("Rate limited: {message}")]
+    RateLimited { message: String, context: String },
+
+    /// Permission denied for operation
+    #[error("Permission denied: {message}")]
+    PermissionDenied { message: String, context: String },
+
+    /// Hardware security module not available
+    #[error("Hardware not available: {message}")]
+    HardwareNotAvailable { message: String, context: String },
+
+    /// Hardware attestation failed
+    #[error("Attestation failed: {message}")]
+    AttestationFailed { message: String, context: String },
+
+    /// Timing anomaly detected
+    #[error("Timing anomaly: {message}")]
+    TimingAnomaly { message: String, context: String },
+
+    /// Insufficient entropy for operation
+    #[error("Insufficient entropy: {message}")]
+    InsufficientEntropy { message: String, context: String },
+
+    /// Poor randomness quality detected
+    #[error("Poor randomness: {message}")]
+    PoorRandomness { message: String, context: String },
+
+    /// Component not initialized
+    #[error("Not initialized: {message}")]
+    NotInitialized { message: String, context: String },
+
+    /// Invalid operation requested
+    #[error("Invalid operation: {message}")]
+    InvalidOperation { message: String, context: String },
+
+    /// Resource not found
+    #[error("Not found: {message}")]
+    NotFound { message: String, context: String },
+
+    /// Unsupported algorithm
+    #[error("Unsupported algorithm: {message}")]
+    UnsupportedAlgorithm { message: String, context: String },
+
+    /// Internal error
+    #[error("Internal error: {message}")]
+    InternalError { message: String, context: String },
 }
 
 /// Infrastructure and external system errors
@@ -659,6 +727,10 @@ pub enum InfrastructureError {
     /// Storage layer operation failure
     #[error("Storage error: {message}")]
     Storage { message: String, context: String },
+
+    /// Configuration error
+    #[error("Configuration error: {message}")]
+    ConfigError { message: String, context: String },
 
     /// Network communication error
     #[error("Network error: {message}")]
@@ -1088,11 +1160,29 @@ impl AuraError {
                 | CryptoError::DecryptionFailed { context, .. }
                 | CryptoError::HashingFailed { context, .. }
                 | CryptoError::RandomGenerationFailed { context, .. }
-                | CryptoError::OperationFailed { context, .. } => context,
+                | CryptoError::OperationFailed { context, .. }
+                | CryptoError::InvalidInput { context, .. }
+                | CryptoError::InvalidOutput { context, .. }
+                | CryptoError::SigningFailed { context, .. }
+                | CryptoError::VerificationFailed { context, .. }
+                | CryptoError::InsufficientSecurityLevel { context, .. }
+                | CryptoError::RateLimited { context, .. }
+                | CryptoError::PermissionDenied { context, .. }
+                | CryptoError::HardwareNotAvailable { context, .. }
+                | CryptoError::AttestationFailed { context, .. }
+                | CryptoError::TimingAnomaly { context, .. }
+                | CryptoError::InsufficientEntropy { context, .. }
+                | CryptoError::PoorRandomness { context, .. }
+                | CryptoError::NotInitialized { context, .. }
+                | CryptoError::InvalidOperation { context, .. }
+                | CryptoError::NotFound { context, .. }
+                | CryptoError::UnsupportedAlgorithm { context, .. }
+                | CryptoError::InternalError { context, .. } => context,
             },
             Self::Infrastructure(e) => match e {
                 InfrastructureError::Transport { context, .. }
                 | InfrastructureError::Storage { context, .. }
+                | InfrastructureError::ConfigError { context, .. }
                 | InfrastructureError::Network { context, .. }
                 | InfrastructureError::TransportConnectionFailed { context, .. }
                 | InfrastructureError::TransportTimeout { context, .. }
@@ -1217,11 +1307,29 @@ impl AuraError {
                 | CryptoError::DecryptionFailed { context, .. }
                 | CryptoError::HashingFailed { context, .. }
                 | CryptoError::RandomGenerationFailed { context, .. }
-                | CryptoError::OperationFailed { context, .. } => context,
+                | CryptoError::OperationFailed { context, .. }
+                | CryptoError::InvalidInput { context, .. }
+                | CryptoError::InvalidOutput { context, .. }
+                | CryptoError::SigningFailed { context, .. }
+                | CryptoError::VerificationFailed { context, .. }
+                | CryptoError::InsufficientSecurityLevel { context, .. }
+                | CryptoError::RateLimited { context, .. }
+                | CryptoError::PermissionDenied { context, .. }
+                | CryptoError::HardwareNotAvailable { context, .. }
+                | CryptoError::AttestationFailed { context, .. }
+                | CryptoError::TimingAnomaly { context, .. }
+                | CryptoError::InsufficientEntropy { context, .. }
+                | CryptoError::PoorRandomness { context, .. }
+                | CryptoError::NotInitialized { context, .. }
+                | CryptoError::InvalidOperation { context, .. }
+                | CryptoError::NotFound { context, .. }
+                | CryptoError::UnsupportedAlgorithm { context, .. }
+                | CryptoError::InternalError { context, .. } => context,
             },
             Self::Infrastructure(e) => match e {
                 InfrastructureError::Transport { context, .. }
                 | InfrastructureError::Storage { context, .. }
+                | InfrastructureError::ConfigError { context, .. }
                 | InfrastructureError::Network { context, .. }
                 | InfrastructureError::TransportConnectionFailed { context, .. }
                 | InfrastructureError::TransportTimeout { context, .. }
@@ -1404,6 +1512,118 @@ impl AuraError {
 
     pub fn crypto_operation_failed(message: impl Into<String>) -> Self {
         Self::Crypto(CryptoError::OperationFailed {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn invalid_input(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::InvalidInput {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn invalid_output(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::InvalidOutput {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn signing_failed(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::SigningFailed {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn verification_failed(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::VerificationFailed {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn insufficient_security_level(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::InsufficientSecurityLevel {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn rate_limited(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::RateLimited {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn hardware_not_available(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::HardwareNotAvailable {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn attestation_failed(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::AttestationFailed {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn timing_anomaly(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::TimingAnomaly {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn insufficient_entropy(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::InsufficientEntropy {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn poor_randomness(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::PoorRandomness {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn not_initialized(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::NotInitialized {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn invalid_operation(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::InvalidOperation {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::NotFound {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn unsupported_algorithm(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::UnsupportedAlgorithm {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn internal_error(message: impl Into<String>) -> Self {
+        Self::Crypto(CryptoError::InternalError {
             message: message.into(),
             context: "".to_string(),
         })
@@ -1811,6 +2031,120 @@ impl AuraError {
     pub fn permission_denied(message: impl Into<String>) -> Self {
         Self::System(SystemError::PermissionDenied {
             message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    // Legacy compatibility constructors for aura-agent
+    pub fn serialization_error(message: impl Into<String>) -> Self {
+        Self::Data(DataError::SerializationFailed {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn deserialization_error(message: impl Into<String>) -> Self {
+        Self::Data(DataError::DeserializationFailed {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn data_not_found(message: impl Into<String>) -> Self {
+        Self::Data(DataError::LedgerOperationFailed {
+            message: format!("Data not found: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn invalid_data(message: impl Into<String>) -> Self {
+        Self::Data(DataError::InvalidContext {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn already_initialized(message: impl Into<String>) -> Self {
+        Self::Agent(AgentError::AlreadyInitialized {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+
+    pub fn session_limit_exceeded(message: impl Into<String>) -> Self {
+        Self::Agent(AgentError::OperationNotAllowed {
+            message: format!("Session limit exceeded: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn session_required(message: impl Into<String>) -> Self {
+        Self::Agent(AgentError::InvalidState {
+            message: format!("Session required: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn session_expired(message: impl Into<String>) -> Self {
+        Self::Session(SessionError::Timeout {
+            message: format!("Session expired: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn session_access_denied(message: impl Into<String>) -> Self {
+        Self::Session(SessionError::ProtocolViolation {
+            message: format!("Session access denied: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn session_not_found(message: impl Into<String>) -> Self {
+        Self::Agent(AgentError::InvalidState {
+            message: format!("Session not found: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn policy_violation(message: impl Into<String>) -> Self {
+        Self::Capability(CapabilityError::PermissionDenied {
+            message: format!("Policy violation: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn device_not_registered(message: impl Into<String>) -> Self {
+        Self::Agent(AgentError::DeviceNotFound {
+            message: format!("Device not registered: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn capability_missing(message: impl Into<String>) -> Self {
+        Self::Capability(CapabilityError::Insufficient {
+            message: format!("Capability missing: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn storage_quota_exceeded(message: impl Into<String>) -> Self {
+        Self::Infrastructure(InfrastructureError::StorageQuotaExceeded {
+            message: message.into(),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn backup_limit_exceeded(message: impl Into<String>) -> Self {
+        Self::Agent(AgentError::OperationNotAllowed {
+            message: format!("Backup limit exceeded: {}", message.into()),
+            context: "".to_string(),
+        })
+    }
+
+    pub fn backup_rate_limited(message: impl Into<String>) -> Self {
+        Self::Agent(AgentError::OperationNotAllowed {
+            message: format!("Backup rate limited: {}", message.into()),
             context: "".to_string(),
         })
     }

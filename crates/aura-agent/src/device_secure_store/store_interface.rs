@@ -48,6 +48,17 @@ pub trait SecureStorage: Send + Sync {
     /// Delete secure data by key
     fn delete_secure_data(&self, key: &str) -> Result<()>;
 
+    /// Store data with security level (legacy compatibility)
+    fn store_data(&self, key: &str, data: &[u8], _security_level: SecurityLevel) -> Result<()> {
+        self.store_secure_data(key, data)
+    }
+
+    /// Retrieve data (legacy compatibility)
+    fn retrieve_data(&self, key: &str) -> Result<Vec<u8>> {
+        self.load_secure_data(key)?
+            .ok_or_else(|| aura_types::AuraError::data_not_found(format!("Key not found: {}", key)))
+    }
+
     /// Get device attestation information
     fn get_device_attestation(&self) -> Result<DeviceAttestation> {
         DeviceAttestation::new()

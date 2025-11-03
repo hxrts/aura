@@ -6,8 +6,7 @@
 
 use crate::{
     device_secure_store::{DeviceAttestation, SecureStorage},
-    error::{AuraError, Result},
-    utils::ResultExt,
+    error::{AuraError, Result, ResultExt},
 };
 use aura_crypto::KeyShare;
 use aura_types::{AccountId, DeviceId};

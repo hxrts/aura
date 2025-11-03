@@ -6,7 +6,8 @@ exclude = ["ext/*", "vendored/*"]  # ext/* are external dependencies, vendored/*
 members = [
     "crates/aura-agent",
     "crates/aura-authentication",
-    "crates/aura-authorization",
+    "crates/aura-choreography",
+    "crates/aura-macros",
     "crates/aura-messages",
     "crates/aura-protocol",
     "crates/aura-crypto",
@@ -16,15 +17,15 @@ members = [
     "crates/aura-test-utils",
     "crates/aura-cli",
     "crates/aura-simulator",
-    "crates/aura-console-types",
-    "crates/aura-sim-server",
-    "crates/aura-sim-client",
-    "crates/aura-live-client",
-    "crates/aura-analysis-client",
-    "crates/aura-wasm",
+    "crates/app-console-types",
+    "crates/app-sim-server",
+    "crates/app-sim-client",
+    "crates/app-live-client",
+    "crates/app-analysis-client",
+    "crates/app-wasm",
     "crates/aura-quint-api",
     "crates/aura-types",
-    "crates/aura-console",
+    "crates/app-console",
 ]
 
 
@@ -95,25 +96,18 @@ dirs = "5.0"
 # Session types & choreographic programming
 rumpsteak = { git = "https://github.com/hxrts/rumpsteak-aura", package = "rumpsteak-aura" }
 
-# Keyhive dependencies
-arbitrary = { version = "1.4.1", features = ["derive"] }
-derive_more = { version = "1.0", features = ["from", "into", "try_into", "deref", "display", "debug"] }
-dupe = "0.9.0"
-nonempty = { version = "0.10.0", features = ["serialize"] }
-signature = "2.2"
+# Additional dependencies for cryptography
 x25519-dalek = { version = "2.0", features = ["serde", "reusable_secrets", "static_secrets"] }
-bolero = { version = "0.11.1", features = ["arbitrary"] }
-num = { version = "0.4.3", features = ["num-bigint"] }
-derivative = "2.2"
-derive-where = "1.2"
-topological-sort = "0.2"
-trait-variant = "0.1.2"
+signature = "2.2"
+derive_more = { version = "1.0", features = ["from", "into", "try_into", "deref", "display", "debug"] }
+
+# KeyFabric dependencies - external libraries for threshold operations and graph algorithms
+petgraph = "0.6"
+# secret_sharing = "0.1"  # Removed due to yanked zeroize dependency - using MVP placeholder
+biscuit-auth = "6.0"    # For OCAP capability tokens
 
 # WASM Core
-wasm_core = { path = "crates/wasm-core" }
-
-# Authorization & CGKA using real Keyhive
-keyhive_core = { path = "ext/keyhive/keyhive_core" }
+app-wasm = { path = "crates/app-wasm" }
 
 [profile.release]
 opt-level = 3

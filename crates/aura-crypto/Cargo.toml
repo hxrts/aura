@@ -31,6 +31,7 @@ curve25519-dalek = "4.1"
 
 # Serialization
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 bincode = { workspace = true }
 

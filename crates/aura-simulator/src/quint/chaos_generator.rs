@@ -359,7 +359,7 @@ impl ChaosGenerator {
         // Create scenario based on template
         let mut scenario = template.base_scenario.clone();
         scenario.name = scenario_name.clone();
-        scenario.description = format!(
+        scenario.name = format!(
             "Generated chaos scenario to test property '{}' using {} chaos",
             property.name, chaos_type
         );
@@ -370,19 +370,16 @@ impl ChaosGenerator {
 
         // Configure byzantine behavior
         if byzantine_count > 0 {
-            scenario.byzantine = Some(ByzantineConditions {
-                count: byzantine_count,
-                participants: (0..byzantine_count).collect(),
+            scenario.byzantine_conditions = Some(ByzantineConditions {
                 strategies: vec![crate::scenario::types::LegacyByzantineStrategy {
-                    strategy_type: self.select_byzantine_strategy(&chaos_type, property),
-                    description: Some(format!("Chaos testing strategy for {}", chaos_type)),
-                    abort_after: None,
+                    name: format!("Chaos testing strategy for {:?}", chaos_type),
+                    parameters: std::collections::HashMap::new(),
                 }],
             });
         }
 
         // Configure network based on chaos type
-        scenario.network = Some(self.create_network_config(&chaos_type));
+        scenario.network_conditions = Some(self.create_network_config(&chaos_type));
 
         // Add property-specific assertions
         scenario.assertions = self.create_assertions(property, &chaos_type);
@@ -469,19 +466,16 @@ impl ChaosGenerator {
     fn create_network_config(&self, chaos_type: &ChaosType) -> NetworkConditions {
         match chaos_type {
             ChaosType::NetworkPartition => NetworkConditions {
-                latency_range: [100, 500],
-                drop_rate: 0.1,
-                partitions: vec![vec![0, 1], vec![2, 3]], // Example partition
+                latency_ms: Some(300),
+                packet_loss: Some(0.1),
             },
             ChaosType::TimingAttack => NetworkConditions {
-                latency_range: [50, 2000],
-                drop_rate: 0.05,
-                partitions: vec![],
+                latency_ms: Some(1000),
+                packet_loss: Some(0.05),
             },
             _ => NetworkConditions {
-                latency_range: [10, 100],
-                drop_rate: 0.01,
-                partitions: vec![],
+                latency_ms: Some(50),
+                packet_loss: Some(0.01),
             },
         }
     }
@@ -496,31 +490,22 @@ impl ChaosGenerator {
 
         // Add property-specific assertion
         assertions.push(ScenarioAssertion {
-            assertion_type: "property_monitor".to_string(),
-            honest_participants: None,
-            expected_detected: None,
-            expected_property: Some(property.id.clone()),
-            timeout_multiplier: None,
+            property: property.name.clone(),
+            expected: true,
         });
 
         // Add chaos-specific assertions
         match chaos_type {
             ChaosType::Byzantine => {
                 assertions.push(ScenarioAssertion {
-                    assertion_type: "byzantine_detection".to_string(),
-                    honest_participants: None,
-                    expected_detected: Some((0..property.priority.clone() as usize).collect()), // Simplified
-                    expected_property: None,
-                    timeout_multiplier: None,
+                    property: "byzantine_detection".to_string(),
+                    expected: true,
                 });
             }
             ChaosType::NetworkPartition => {
                 assertions.push(ScenarioAssertion {
-                    assertion_type: "network_recovery".to_string(),
-                    honest_participants: None,
-                    expected_detected: None,
-                    expected_property: None,
-                    timeout_multiplier: Some(2.0),
+                    property: "network_recovery".to_string(),
+                    expected: true,
                 });
             }
             _ => {}
@@ -671,50 +656,35 @@ impl ChaosGenerator {
     /// Create base byzantine scenario template
     fn create_base_byzantine_scenario() -> Scenario {
         Scenario {
+            id: "byzantine-chaos-template".to_string(),
             name: "Byzantine Chaos Template".to_string(),
-            description: "Template for byzantine participant chaos testing".to_string(),
-            extends: None,
             setup: ScenarioSetup {
                 participants: 3,
                 threshold: 2,
-                seed: 42,
-                network_conditions: None,
-                byzantine_conditions: None,
             },
-            network: None,
-            byzantine: None,
-            phases: None,
-            protocols: None,
+            network_conditions: None,
+            byzantine_conditions: None,
             assertions: Vec::new(),
             expected_outcome: ScenarioExpectedOutcome::Success,
-            quint_source: None,
         }
     }
 
     /// Create base network partition scenario template
     fn create_base_partition_scenario() -> Scenario {
         Scenario {
+            id: "network-partition-template".to_string(),
             name: "Network Partition Template".to_string(),
-            description: "Template for network partition chaos testing".to_string(),
-            extends: None,
             setup: ScenarioSetup {
                 participants: 5,
                 threshold: 3,
-                seed: 42,
-                network_conditions: None,
-                byzantine_conditions: None,
             },
-            network: Some(NetworkConditions {
-                latency_range: [100, 1000],
-                drop_rate: 0.1,
-                partitions: vec![vec![0, 1], vec![2, 3, 4]],
+            network_conditions: Some(NetworkConditions {
+                latency_ms: Some(500),
+                packet_loss: Some(0.1),
             }),
-            byzantine: None,
-            phases: None,
-            protocols: None,
+            byzantine_conditions: None,
             assertions: Vec::new(),
             expected_outcome: ScenarioExpectedOutcome::Success,
-            quint_source: None,
         }
     }
 

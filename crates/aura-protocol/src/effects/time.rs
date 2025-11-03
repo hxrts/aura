@@ -1,17 +1,46 @@
-//! Time and Scheduling Effects
+//! Time effects interface
 //!
-//! This module implements time-related effects for protocol coordination.
-//! It provides both simulated and production time sources that work identically
-//! for deterministic testing and real-world execution.
-//!
-//! Key principles:
-//! - No polling: All waiting is event-driven with specific wake conditions
-//! - Deterministic simulation: Time advancement is controlled by simulation engine
-//! - Clean architecture: Single execution model for all environments
+//! Pure trait definitions for time and scheduling operations used by protocols.
 
-use super::TimeEffects;
-use crate::types::{EventFilter, ProtocolError};
+use async_trait::async_trait;
 use uuid::Uuid;
+
+/// Time effects for protocol coordination and scheduling
+#[async_trait]
+pub trait TimeEffects: Send + Sync {
+    /// Get the current epoch/timestamp
+    async fn current_epoch(&self) -> u64;
+    
+    /// Sleep for the specified duration in milliseconds
+    async fn sleep_ms(&self, ms: u64);
+    
+    /// Sleep until a specific epoch/timestamp
+    async fn sleep_until(&self, epoch: u64);
+    
+    /// Yield execution until a condition is met
+    async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError>;
+    
+    /// Set a timeout for an operation
+    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle;
+    
+    /// Cancel a previously set timeout
+    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError>;
+    
+    /// Check if we're running in simulated time mode
+    fn is_simulated(&self) -> bool;
+    
+    /// Register a context for notifications
+    fn register_context(&self, context_id: Uuid);
+    
+    /// Unregister a context
+    fn unregister_context(&self, context_id: Uuid);
+    
+    /// Notify that events are available for waiting contexts
+    async fn notify_events_available(&self);
+    
+    /// Get time resolution in milliseconds
+    fn resolution_ms(&self) -> u64;
+}
 
 /// Wake conditions for cooperative yielding in protocol execution
 #[derive(Debug, Clone)]
@@ -22,393 +51,40 @@ pub enum WakeCondition {
     EpochReached(u64),
     /// Wake when timeout expires
     TimeoutAt(u64),
-    /// Wake when specific event pattern appears
-    EventMatching(EventFilter),
-    /// Wake when threshold number of matching events received
-    ThresholdEvents { count: usize, filter: EventFilter },
+    /// Wake when specific condition is met
+    Custom(String),
+    /// Wake immediately (for testing)
+    Immediate,
 }
 
-/// Time source abstraction for simulation and production environments
-#[async_trait::async_trait]
-pub trait TimeSource: Send + Sync + dyn_clone::DynClone {
-    /// Get current epoch (simulation tick or wall clock)
-    fn current_epoch(&self) -> u64;
+/// Handle for a timeout operation
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TimeoutHandle(pub Uuid);
 
-    /// Yield execution until condition is met
-    async fn yield_until(&self, condition: WakeCondition) -> Result<(), ProtocolError>;
-
-    /// Check if we're running in simulation mode
-    fn is_simulated(&self) -> bool;
-
-    /// Register a context for wake condition notifications
-    fn register_context(&self, context_id: Uuid);
-
-    /// Unregister a context (cleanup on completion)
-    fn unregister_context(&self, context_id: Uuid);
-
-    /// Notify that new events are available (for immediate wake-up)
-    async fn notify_events_available(&self);
-}
-
-dyn_clone::clone_trait_object!(TimeSource);
-
-/// Simulation-based time source with cooperative scheduling
-#[derive(Clone)]
-pub struct SimulatedTimeSource {
-    context_id: Uuid,
-    scheduler: std::sync::Arc<tokio::sync::RwLock<SimulationScheduler>>,
-}
-
-impl SimulatedTimeSource {
-    pub fn new(
-        context_id: Uuid,
-        scheduler: std::sync::Arc<tokio::sync::RwLock<SimulationScheduler>>,
-    ) -> Self {
-        Self {
-            context_id,
-            scheduler,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl TimeSource for SimulatedTimeSource {
-    fn current_epoch(&self) -> u64 {
-        // Get current simulation tick
-        let scheduler = futures::executor::block_on(self.scheduler.read());
-        scheduler.current_tick()
-    }
-
-    async fn yield_until(&self, condition: WakeCondition) -> Result<(), ProtocolError> {
-        // Register condition and obtain receiver without holding the lock across await
-        let receiver = {
-            let mut scheduler = self.scheduler.write().await;
-            match scheduler.prepare_wake_condition(self.context_id, condition.clone()) {
-                PrepareResult::AlreadySatisfied => return Ok(()),
-                PrepareResult::Receiver(rx) => rx,
-            }
-        };
-
-        // Await outside of lock to avoid deadlocks
-        let _ = receiver.await;
-
-        // Clean up any lingering state
-        let mut scheduler = self.scheduler.write().await;
-        scheduler.complete_wake(self.context_id);
-
-        Ok(())
-    }
-
-    fn is_simulated(&self) -> bool {
-        true
-    }
-
-    fn register_context(&self, context_id: Uuid) {
-        let mut scheduler = futures::executor::block_on(self.scheduler.write());
-        scheduler.register_context(context_id);
-    }
-
-    fn unregister_context(&self, context_id: Uuid) {
-        let mut scheduler = futures::executor::block_on(self.scheduler.write());
-        scheduler.unregister_context(context_id);
-    }
-
-    async fn notify_events_available(&self) {
-        let mut scheduler = self.scheduler.write().await;
-        scheduler.notify_events_available_globally();
-    }
-}
-
-impl TimeEffects for SimulatedTimeSource {
-    fn current_epoch(&self) -> u64 {
-        <Self as TimeSource>::current_epoch(self)
-    }
-
-    fn yield_until(
-        &self,
-        condition: WakeCondition,
-    ) -> impl std::future::Future<Output = Result<(), ProtocolError>> + Send {
-        <Self as TimeSource>::yield_until(self, condition)
-    }
-
-    fn register_context(&self, context_id: Uuid) {
-        <Self as TimeSource>::register_context(self, context_id)
-    }
-
-    fn unregister_context(&self, context_id: Uuid) {
-        <Self as TimeSource>::unregister_context(self, context_id)
-    }
-
-    fn notify_events_available(&self) -> impl std::future::Future<Output = ()> + Send {
-        <Self as TimeSource>::notify_events_available(self)
-    }
-}
-
-/// Production time source using wall clock and async notifications
-#[derive(Clone)]
-pub struct ProductionTimeSource {
-    event_notifier: std::sync::Arc<tokio::sync::Notify>,
-    start_time: std::time::Instant,
-}
-
-impl ProductionTimeSource {
+impl TimeoutHandle {
     pub fn new() -> Self {
-        Self {
-            event_notifier: std::sync::Arc::new(tokio::sync::Notify::new()),
-            start_time: std::time::Instant::now(),
-        }
-    }
-
-    /// Notify waiting contexts that new events are available
-    pub fn notify_new_events(&self) {
-        self.event_notifier.notify_waiters();
+        Self(Uuid::new_v4())
     }
 }
 
-impl Default for ProductionTimeSource {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait::async_trait]
-impl TimeSource for ProductionTimeSource {
-    fn current_epoch(&self) -> u64 {
-        self.start_time.elapsed().as_secs()
-    }
-
-    async fn yield_until(&self, condition: WakeCondition) -> Result<(), ProtocolError> {
-        match condition {
-            WakeCondition::NewEvents => {
-                // Use async notification for new events
-                self.event_notifier.notified().await;
-                Ok(())
-            }
-            WakeCondition::EpochReached(target) => {
-                let current = <Self as TimeSource>::current_epoch(self);
-                if target > current {
-                    let duration = std::time::Duration::from_secs(target - current);
-                    tokio::time::sleep(duration).await;
-                }
-                Ok(())
-            }
-            WakeCondition::TimeoutAt(target) => {
-                let current = <Self as TimeSource>::current_epoch(self);
-                if target > current {
-                    let duration = std::time::Duration::from_secs(target - current);
-                    tokio::time::sleep(duration).await;
-                }
-                Ok(())
-            }
-            WakeCondition::EventMatching(_) => {
-                // For production, fall back to event notification
-                self.event_notifier.notified().await;
-                Ok(())
-            }
-            WakeCondition::ThresholdEvents { .. } => {
-                // For production, fall back to event notification
-                self.event_notifier.notified().await;
-                Ok(())
-            }
-        }
-    }
-
-    fn is_simulated(&self) -> bool {
-        false
-    }
-
-    fn register_context(&self, _context_id: Uuid) {
-        // No-op for production
-    }
-
-    fn unregister_context(&self, _context_id: Uuid) {
-        // No-op for production
-    }
-
-    async fn notify_events_available(&self) {
-        self.event_notifier.notify_waiters();
-    }
-}
-
-impl TimeEffects for ProductionTimeSource {
-    fn current_epoch(&self) -> u64 {
-        <Self as TimeSource>::current_epoch(self)
-    }
-
-    fn yield_until(
-        &self,
-        condition: WakeCondition,
-    ) -> impl std::future::Future<Output = Result<(), ProtocolError>> + Send {
-        <Self as TimeSource>::yield_until(self, condition)
-    }
-
-    fn register_context(&self, context_id: Uuid) {
-        <Self as TimeSource>::register_context(self, context_id)
-    }
-
-    fn unregister_context(&self, context_id: Uuid) {
-        <Self as TimeSource>::unregister_context(self, context_id)
-    }
-
-    fn notify_events_available(&self) -> impl std::future::Future<Output = ()> + Send {
-        <Self as TimeSource>::notify_events_available(self)
-    }
-}
-
-/// Simulation scheduler that manages wake conditions and context coordination
-pub struct SimulationScheduler {
-    current_tick: u64,
-    waiting_contexts: std::collections::HashMap<Uuid, WakeCondition>,
-    context_wakers: std::collections::HashMap<Uuid, tokio::sync::oneshot::Sender<()>>,
-    active_contexts: std::collections::HashSet<Uuid>,
-}
-
-/// Result of registering a wake condition with the scheduler
-pub enum PrepareResult {
-    AlreadySatisfied,
-    Receiver(tokio::sync::oneshot::Receiver<()>),
-}
-
-impl SimulationScheduler {
-    pub fn new() -> Self {
-        Self {
-            current_tick: 0,
-            waiting_contexts: std::collections::HashMap::new(),
-            context_wakers: std::collections::HashMap::new(),
-            active_contexts: std::collections::HashSet::new(),
-        }
-    }
-
-    pub fn current_tick(&self) -> u64 {
-        self.current_tick
-    }
-
-    pub fn register_context(&mut self, context_id: Uuid) {
-        self.active_contexts.insert(context_id);
-    }
-
-    pub fn unregister_context(&mut self, context_id: Uuid) {
-        self.active_contexts.remove(&context_id);
-        self.waiting_contexts.remove(&context_id);
-        self.context_wakers.remove(&context_id);
-    }
-
-    /// Check if there are any contexts waiting on conditions
-    pub fn has_waiting_contexts(&self) -> bool {
-        !self.waiting_contexts.is_empty()
-    }
-
-    /// Check if there are any active contexts that might still be running
-    pub fn has_active_contexts(&self) -> bool {
-        !self.active_contexts.is_empty()
-    }
-
-    /// Get the number of active contexts
-    pub fn active_context_count(&self) -> usize {
-        self.active_contexts.len()
-    }
-
-    /// Get the number of waiting contexts
-    pub fn waiting_context_count(&self) -> usize {
-        self.waiting_contexts.len()
-    }
-
-    /// Prepare a wake condition, returning a receiver that can be awaited
-    pub fn prepare_wake_condition(
-        &mut self,
-        context_id: Uuid,
-        condition: WakeCondition,
-    ) -> PrepareResult {
-        if self.condition_satisfied(&condition) {
-            return PrepareResult::AlreadySatisfied;
-        }
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.waiting_contexts.insert(context_id, condition);
-        self.context_wakers.insert(context_id, sender);
-        PrepareResult::Receiver(receiver)
-    }
-
-    /// Complete a wake condition registration, cleaning up state
-    pub fn complete_wake(&mut self, context_id: Uuid) {
-        self.waiting_contexts.remove(&context_id);
-        self.context_wakers.remove(&context_id);
-    }
-
-    pub fn advance_time(&mut self, ticks: u64) {
-        self.current_tick += ticks;
-
-        // Wake contexts waiting for time conditions
-        let mut contexts_to_wake = Vec::new();
-
-        for (context_id, condition) in &self.waiting_contexts {
-            if self.condition_satisfied(condition) {
-                contexts_to_wake.push(*context_id);
-            }
-        }
-
-        for context_id in contexts_to_wake {
-            self.wake_context(context_id);
-        }
-    }
-
-    pub fn notify_events_available(&mut self, _context_id: Uuid) {
-        // Wake ALL contexts waiting for events (since we don't know which specific events were added)
-        let contexts_to_wake: Vec<Uuid> = self
-            .waiting_contexts
-            .iter()
-            .filter_map(|(context_id, condition)| match condition {
-                WakeCondition::NewEvents
-                | WakeCondition::EventMatching(_)
-                | WakeCondition::ThresholdEvents { .. } => Some(*context_id),
-                _ => None,
-            })
-            .collect();
-
-        for context_id in contexts_to_wake {
-            self.wake_context(context_id);
-        }
-    }
-
-    /// Notify that events are available globally (wake all waiting contexts)
-    pub fn notify_events_available_globally(&mut self) {
-        let contexts_to_wake: Vec<Uuid> = self
-            .waiting_contexts
-            .iter()
-            .filter_map(|(context_id, condition)| match condition {
-                WakeCondition::NewEvents
-                | WakeCondition::EventMatching(_)
-                | WakeCondition::ThresholdEvents { .. } => Some(*context_id),
-                _ => None,
-            })
-            .collect();
-
-        for context_id in contexts_to_wake {
-            self.wake_context(context_id);
-        }
-    }
-
-    pub fn condition_satisfied(&self, condition: &WakeCondition) -> bool {
-        match condition {
-            WakeCondition::EpochReached(target) => self.current_tick >= *target,
-            WakeCondition::TimeoutAt(target) => self.current_tick >= *target,
-            // Events conditions are satisfied externally via notify_events_available
-            // We return false here to ensure they go through the notification system
-            WakeCondition::NewEvents
-            | WakeCondition::EventMatching(_)
-            | WakeCondition::ThresholdEvents { .. } => false,
-        }
-    }
-
-    fn wake_context(&mut self, context_id: Uuid) {
-        self.waiting_contexts.remove(&context_id);
-        if let Some(waker) = self.context_wakers.remove(&context_id) {
-            let _ = waker.send(()); // Wake the waiting context
-        }
-    }
-}
-
-impl Default for SimulationScheduler {
-    fn default() -> Self {
-        Self::new()
-    }
+/// Time-related errors
+#[derive(Debug, thiserror::Error)]
+pub enum TimeError {
+    #[error("Operation timed out after {timeout_ms}ms")]
+    Timeout { timeout_ms: u64 },
+    
+    #[error("Timeout handle not found: {handle:?}")]
+    TimeoutNotFound { handle: TimeoutHandle },
+    
+    #[error("Invalid epoch: {epoch}")]
+    InvalidEpoch { epoch: u64 },
+    
+    #[error("Time source not available")]
+    TimeSourceNotAvailable,
+    
+    #[error("Clock skew detected: expected {expected}, got {actual}")]
+    ClockSkew { expected: u64, actual: u64 },
+    
+    #[error("Time operation failed: {reason}")]
+    OperationFailed { reason: String },
 }

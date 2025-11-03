@@ -324,6 +324,16 @@ impl From<DeviceId> for Uuid {
     }
 }
 
+impl From<&str> for DeviceId {
+    fn from(s: &str) -> Self {
+        DeviceId::from_str(s).unwrap_or_else(|_| {
+            // Create a deterministic UUID from the string if parsing fails
+            let namespace = Uuid::NAMESPACE_DNS;
+            DeviceId(Uuid::new_v5(&namespace, s.as_bytes()))
+        })
+    }
+}
+
 /// Guardian identifier for social recovery guardians
 ///
 /// Guardians are trusted third parties that can help recover account access
@@ -498,3 +508,63 @@ impl IndividualIdExt for IndividualId {
         Self(format!("dkd:{}:{}", context, fingerprint_hex))
     }
 }
+
+/// Data identifier for stored data chunks
+///
+/// Identifies data stored in the Aura storage system.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DataId(pub String);
+
+impl DataId {
+    /// Create a new random data ID
+    #[allow(clippy::disallowed_methods)]
+    pub fn new() -> Self {
+        Self(format!("data:{}", Uuid::new_v4()))
+    }
+
+    /// Create a new data ID with Effects for deterministic generation
+    pub fn new_with_effects(effects: &impl EffectsLike) -> Self {
+        Self(format!("data:{}", effects.gen_uuid()))
+    }
+
+    /// Create an encrypted data ID
+    #[allow(clippy::disallowed_methods)]
+    pub fn new_encrypted() -> Self {
+        Self(format!("encrypted:{}", Uuid::new_v4()))
+    }
+
+    /// Create an encrypted data ID with Effects
+    pub fn new_encrypted_with_effects(effects: &impl EffectsLike) -> Self {
+        Self(format!("encrypted:{}", effects.gen_uuid()))
+    }
+
+    /// Get the inner string
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for DataId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for DataId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for DataId {
+    fn from(id: String) -> Self {
+        Self(id)
+    }
+}
+
+impl From<&str> for DataId {
+    fn from(id: &str) -> Self {
+        Self(id.to_string())
+    }
+}
+

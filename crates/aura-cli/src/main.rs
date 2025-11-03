@@ -1,36 +1,24 @@
-//! Capability-driven CLI for Aura
+//! Aura CLI Main Entry Point
 //!
 //! Command-line interface for the Aura threshold identity platform.
-//! Provides tools for account management, key derivation, and protocol testing.
+//! Built on composable middleware architecture for extensibility and maintainability.
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use serde_json::json;
 use std::path::PathBuf;
-// Temporarily disabled - not needed without coordination
-// use std::sync::Arc;
 
-mod commands;
-mod config;
-
-// Temporarily disabled - requires coordination crate
-// use aura_protocol::{production::ConsoleLogSink, LogSink};
-use commands::{
-    // Temporarily disabled - requires agent crate
-    // authz::{handle_authz_command, AuthzCommand},
-    common,
-    frost::{self, FrostCommand},
-    init,
-    // network::{handle_network_command, NetworkCommand},
-    node::{handle_node_command, NodeCommand},
-    scenarios::{handle_scenarios_command, ScenariosArgs},
-    status,
-    storage::{handle_storage_command, StorageCommand},
-    threshold::{handle_threshold_command, ThresholdCommand},
+use aura_cli::{
+    CliStackBuilder, CliContext, CliOperation, CliConfig,
+    InputValidationMiddleware, OutputFormattingMiddleware, 
+    ProgressReportingMiddleware, ErrorHandlingMiddleware,
+    ConfigurationMiddleware, AuthenticationMiddleware
 };
+use aura_cli::middleware::handler::CoreCliHandler;
 
 #[derive(Parser)]
 #[command(name = "aura")]
-#[command(about = "Aura - Capability-Based Identity and Storage Platform", long_about = None)]
+#[command(about = "Aura - Threshold Identity and Storage Platform", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -42,107 +30,146 @@ struct Cli {
     /// Config file path
     #[arg(short, long, global = true, default_value = ".aura/config.toml")]
     config: PathBuf,
+
+    /// Output format
+    #[arg(long, global = true, default_value = "text")]
+    format: String,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize a new account with threshold capabilities
+    /// Initialize a new Aura configuration
     Init {
-        /// Number of participants
-        #[arg(short = 'n', long, default_value = "3")]
-        participants: u16,
-
-        /// Threshold (M in M-of-N)
-        #[arg(short = 't', long, default_value = "2")]
-        threshold: u16,
-
-        /// Output directory for configuration
-        #[arg(short, long, default_value = ".aura")]
-        output: String,
+        /// Force overwrite existing configuration
+        #[arg(short, long)]
+        force: bool,
     },
-
-    /// Show account status
-    Status,
-
-    /// Scenario management and execution
-    Scenarios(ScenariosArgs),
-    /// Start an Aura node with optional dev console
-    Node(NodeCommand),
-    /// Test threshold signature operations
-    Threshold(ThresholdCommand),
-
-    /// FROST threshold signature operations
-    Frost(FrostCommand),
-    //
-    // /// Authorization commands - permission management (what you can do)
-    // #[command(subcommand)]
-    // Authz(AuthzCommand),
-    //
-    /// Storage operations with capability protection
-    #[command(subcommand)]
-    Storage(StorageCommand),
-    //
-    // Network and CGKA operations (disabled - requires API refactoring)
-    // #[command(subcommand)]
-    // Network(NetworkCommand),
+    
+    /// Show version information
+    Version,
+    
+    /// Show help information
+    Help {
+        /// Command to show help for
+        command: Option<String>,
+    },
+    
+    /// Execute a command with arguments
+    Command {
+        /// Command arguments
+        args: Vec<String>,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logging
+    tracing_subscriber::fmt::init();
+    
     let cli = Cli::parse();
-
-    // Initialize unified logging system
-    let log_level = if cli.verbose { "debug" } else { "info" };
-    tracing_subscriber::fmt().with_env_filter(log_level).init();
-
-    // Temporarily disabled - requires coordination crate
-    // Create console log sink for Aura logging
-    // let _log_sink: Arc<dyn LogSink> = Arc::new(ConsoleLogSink::new());
-
-    match cli.command {
-        Commands::Init {
-            participants,
-            threshold,
-            output,
-        } => {
-            init::run(participants, threshold, &output).await?;
+    
+    // Create CLI context
+    let mut context = CliContext::new("aura".to_string(), vec![]);
+    context = context.with_verbose(cli.verbose);
+    
+    // Set up configuration
+    let mut config = CliConfig::default();
+    config.config_path = cli.config;
+    context = context.with_config(config);
+    
+    // Build middleware stack
+    let stack = CliStackBuilder::new()
+        .with_middleware(std::sync::Arc::new(ConfigurationMiddleware::new()))
+        .with_middleware(std::sync::Arc::new(InputValidationMiddleware::new()))
+        .with_middleware(std::sync::Arc::new(AuthenticationMiddleware::new()))
+        .with_middleware(std::sync::Arc::new(ProgressReportingMiddleware::new()))
+        .with_middleware(std::sync::Arc::new(ErrorHandlingMiddleware::new()))
+        .with_middleware(std::sync::Arc::new(OutputFormattingMiddleware::new()))
+        .with_handler(std::sync::Arc::new(CoreCliHandler::new()))
+        .build();
+    
+    // Convert CLI command to operation
+    let operation = match cli.command {
+        Commands::Init { force } => {
+            CliOperation::Init {
+                config_path: context.config.config_path.clone(),
+                force,
+            }
         }
-
-        Commands::Status => {
-            let _config = common::load_config(&cli.config).await?;
-            status::show_status(&cli.config.to_string_lossy()).await?;
+        Commands::Version => CliOperation::Version,
+        Commands::Help { command } => CliOperation::Help { command },
+        Commands::Command { args } => CliOperation::Command { args },
+    };
+    
+    // Execute operation through middleware stack
+    match stack.process(operation, &context) {
+        Ok(result) => {
+            // Format and display result based on requested format
+            match cli.format.as_str() {
+                "json" => {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+                "yaml" => {
+                    println!("{}", serde_yaml::to_string(&result)?);
+                }
+                _ => {
+                    // Default text format
+                    if let Some(formatted) = result.get("formatted") {
+                        if let Some(text) = formatted.as_str() {
+                            println!("{}", text);
+                        } else {
+                            println!("{}", serde_json::to_string_pretty(&result)?);
+                        }
+                    } else if result.get("error").is_some() {
+                        // Handle error output
+                        if let Some(message) = result.get("message") {
+                            if let Some(msg_str) = message.as_str() {
+                                eprintln!("Error: {}", msg_str);
+                                std::process::exit(1);
+                            }
+                        }
+                        eprintln!("Error: {}", result);
+                        std::process::exit(1);
+                    } else {
+                        // Pretty print JSON as fallback
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    }
+                }
+            }
         }
-
-        Commands::Scenarios(args) => {
-            handle_scenarios_command(args)?;
-        } // Temporarily disabled - requires agent crate
-        Commands::Node(cmd) => {
-            let config = common::load_config(&cli.config).await?;
-            handle_node_command(cmd, &config).await?;
+        Err(error) => {
+            eprintln!("CLI Error: {}", error);
+            std::process::exit(1);
         }
-
-        Commands::Threshold(cmd) => {
-            handle_threshold_command(cmd).await?;
-        }
-
-        Commands::Frost(cmd) => {
-            frost::run(cmd).await?;
-        }
-        //
-        // Commands::Authz(cmd) => {
-        //     let config = common::load_config(&cli.config).await?;
-        //     handle_authz_command(cmd, &config).await?;
-        // }
-        //
-        Commands::Storage(cmd) => {
-            let config = common::load_config(&cli.config).await?;
-            handle_storage_command(cmd, &config).await?;
-        } // //
-          // Commands::Network(cmd) => {
-          //     let config = common::load_config(&cli.config).await?;
-          //     handle_network_command(cmd, &config).await?;
-          // }
     }
-
+    
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_cli_parsing() {
+        let cli = Cli::try_parse_from(&["aura", "version"]).unwrap();
+        assert!(matches!(cli.command, Commands::Version));
+        assert!(!cli.verbose);
+    }
+    
+    #[test]
+    fn test_cli_with_verbose() {
+        let cli = Cli::try_parse_from(&["aura", "--verbose", "version"]).unwrap();
+        assert!(cli.verbose);
+    }
+    
+    #[test]
+    fn test_cli_init_with_force() {
+        let cli = Cli::try_parse_from(&["aura", "init", "--force"]).unwrap();
+        if let Commands::Init { force } = cli.command {
+            assert!(force);
+        } else {
+            panic!("Expected Init command");
+        }
+    }
 }

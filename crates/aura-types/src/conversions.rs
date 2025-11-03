@@ -3,9 +3,9 @@
 //! This module provides explicit conversion traits between types from different
 //! crates and architectural layers, enabling clear cross-layer communication.
 
-use crate::capabilities::Permission as CanonicalPermission;
+use crate::permissions::CanonicalPermission;
 
-/// Conversion trait for permissions across the aura-authorization layer
+/// Conversion trait for permissions across external authorization systems
 ///
 /// Converts between the canonical Permission type in aura-types and
 /// the authorization-layer specific variants.
@@ -13,7 +13,7 @@ pub trait FromAuthorizationPermission: Sized {
     /// Error type for conversion failures
     type Error: std::fmt::Display;
 
-    /// Convert from aura-authorization Action to canonical Permission
+    /// Convert from external authorization Action to canonical Permission
     fn from_authorization(action: String) -> Result<Self, Self::Error>;
 }
 
@@ -66,15 +66,15 @@ impl FromJournalPermission for CanonicalPermission {
             ("storage", "delete") => Ok(CanonicalPermission::StorageDelete),
             ("storage", "replicate") => Ok(CanonicalPermission::StorageRead), // Replication requires read
 
-            // Communication operations
-            ("communication", "send") => Ok(CanonicalPermission::CommunicationSend),
-            ("communication", "receive") => Ok(CanonicalPermission::CommunicationReceive),
-            ("communication", "subscribe") => Ok(CanonicalPermission::CommunicationReceive),
+            // Communication operations (map to ProtocolExecute)
+            ("communication", "send") => Ok(CanonicalPermission::ProtocolExecute),
+            ("communication", "receive") => Ok(CanonicalPermission::ProtocolExecute),
+            ("communication", "subscribe") => Ok(CanonicalPermission::ProtocolExecute),
 
-            // Relay operations (treat as communication)
-            ("relay", "forward") => Ok(CanonicalPermission::CommunicationSend),
+            // Relay operations
+            ("relay", "forward") => Ok(CanonicalPermission::ProtocolExecute),
             ("relay", "store") => Ok(CanonicalPermission::StorageWrite),
-            ("relay", "announce") => Ok(CanonicalPermission::CommunicationSend),
+            ("relay", "announce") => Ok(CanonicalPermission::Admin),
 
             // Custom or unknown
             (cat, op) => Ok(CanonicalPermission::Custom(format!("{}:{}", cat, op))),
@@ -88,11 +88,7 @@ pub fn permission_to_action(permission: &CanonicalPermission) -> String {
         CanonicalPermission::StorageRead => "read".to_string(),
         CanonicalPermission::StorageWrite => "write".to_string(),
         CanonicalPermission::StorageDelete => "delete".to_string(),
-        CanonicalPermission::CommunicationSend => "execute".to_string(),
-        CanonicalPermission::CommunicationReceive => "execute".to_string(),
         CanonicalPermission::ProtocolExecute => "execute".to_string(),
-        CanonicalPermission::ProtocolModify => "delegate".to_string(),
-        CanonicalPermission::RecoveryAccess => "admin".to_string(),
         CanonicalPermission::Admin => "admin".to_string(),
         CanonicalPermission::Custom(custom) => custom.clone(),
     }
@@ -106,13 +102,7 @@ pub fn permission_to_journal(permission: &CanonicalPermission) -> (String, Strin
         CanonicalPermission::StorageRead => ("storage".to_string(), "read".to_string()),
         CanonicalPermission::StorageWrite => ("storage".to_string(), "write".to_string()),
         CanonicalPermission::StorageDelete => ("storage".to_string(), "delete".to_string()),
-        CanonicalPermission::CommunicationSend => ("communication".to_string(), "send".to_string()),
-        CanonicalPermission::CommunicationReceive => {
-            ("communication".to_string(), "receive".to_string())
-        }
         CanonicalPermission::ProtocolExecute => ("protocol".to_string(), "execute".to_string()),
-        CanonicalPermission::ProtocolModify => ("protocol".to_string(), "modify".to_string()),
-        CanonicalPermission::RecoveryAccess => ("recovery".to_string(), "access".to_string()),
         CanonicalPermission::Admin => ("admin".to_string(), "all".to_string()),
         CanonicalPermission::Custom(custom) => {
             // Try to parse custom format "category:operation"
@@ -156,12 +146,12 @@ mod tests {
 
         assert_eq!(
             CanonicalPermission::from_journal_permission("communication", "send", "alice").unwrap(),
-            CanonicalPermission::CommunicationSend
+            CanonicalPermission::ProtocolExecute
         );
 
         assert_eq!(
             CanonicalPermission::from_journal_permission("relay", "forward", "bob").unwrap(),
-            CanonicalPermission::CommunicationSend
+            CanonicalPermission::ProtocolExecute
         );
     }
 
@@ -186,8 +176,8 @@ mod tests {
         );
 
         assert_eq!(
-            permission_to_journal(&CanonicalPermission::CommunicationSend),
-            ("communication".to_string(), "send".to_string())
+            permission_to_journal(&CanonicalPermission::ProtocolExecute),
+            ("protocol".to_string(), "execute".to_string())
         );
 
         assert_eq!(

@@ -6,7 +6,43 @@
 
 use super::properties::{PropertyType, VerifiableProperty};
 use super::types::{PropertyEvaluationResult, QuintValue, SimulationState, ValidationResult};
-use crate::world_state::WorldState;
+// Note: WorldState to be imported when module structure is finalized
+// use crate::world_state::WorldState;
+
+// Placeholder WorldState type until module is available
+#[derive(Debug, Clone)]
+pub struct WorldState {
+    pub participants: HashMap<String, Participant>,
+    pub state_variables: HashMap<String, String>,
+    pub current_time: u64,
+    pub current_tick: u64,
+    pub byzantine: ByzantineState,
+    pub network: NetworkState,
+    pub simulation_id: String,
+    pub seed: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct Participant {
+    pub id: String,
+    pub active_sessions: HashMap<String, Session>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Session {
+    pub protocol_type: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ByzantineState {
+    pub byzantine_participants: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NetworkState {
+    pub in_flight_messages: Vec<String>,
+}
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use thiserror::Error;

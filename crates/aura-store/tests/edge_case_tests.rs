@@ -8,7 +8,6 @@
 //!
 //! Reference: work/ssb_storage.md Phase 5.3
 
-use aura_authorization::{Action, CapabilityToken, Resource, Subject};
 use aura_crypto::{Effects, KeyRotationCoordinator};
 use aura_store::{
     manifest::{Permission, ResourceScope, SignatureShare, StorageOperation, ThresholdSignature},

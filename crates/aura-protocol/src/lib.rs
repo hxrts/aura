@@ -1,254 +1,148 @@
-//! Aura Protocol Middleware Architecture
+//! Aura Protocol - Algebraic Effects Architecture
 //!
-//! This crate provides a composable middleware architecture for Aura's distributed protocols,
-//! built on the rumpsteak choreographic programming framework.
+//! This crate provides a clean algebraic effects architecture for Aura's distributed protocols.
+//! Following the algebraic effects pattern, it separates effect definitions (what can be done)
+//! from effect handlers (how effects are implemented) and middleware (cross-cutting concerns).
 //!
 //! ## Quick Start
 //!
-//! Build a protocol handler with middleware stack:
+//! ```rust,ignore
+//! use aura_protocol::prelude::*;
+//! use uuid::Uuid;
 //!
+//! // Create an execution context for testing
+//! let context = ContextBuilder::new()
+//!     .with_device_id(DeviceId::from(Uuid::new_v4()))
+//!     .with_participants(vec![device_id])
+//!     .build_for_testing();
+//!
+//! // Use effects in your protocol
+//! let random_bytes = context.effects.random_bytes(32).await;
+//! context.effects.send_to_peer(peer_id, message).await?;
+//! ```
+//!
+//! ## Architecture Overview
+//!
+//! ### Effects (`effects/`)
+//! Pure trait definitions for all side-effect operations:
+//! - **NetworkEffects**: Peer communication, message passing
+//! - **StorageEffects**: Data persistence, key-value operations
+//! - **CryptoEffects**: Cryptographic operations, secure randomness
+//! - **TimeEffects**: Scheduling, timeouts, temporal coordination
+//! - **ConsoleEffects**: Logging, debugging, visualization
+//! - **LedgerEffects**: Account state, event sourcing
+//! - **ChoreographicEffects**: Distributed protocol coordination
+//!
+//! ### Handlers (`handlers/`)
+//! Concrete implementations of effect traits for different contexts:
+//! - **Multiple implementations per effect** (real, mock, simulation)
+//! - **CompositeHandler**: Unified handler implementing all effects
+//! - **Context-aware selection**: Testing vs Production vs Simulation
+//!
+//! ### Middleware (`middleware/`)
+//! Effect decorators that add cross-cutting concerns:
+//! - **Observability**: Tracing, metrics, logging
+//! - **Resilience**: Retry, timeout, circuit breaker
+//! - **Security**: Authorization, capability checking
+//! - **Caching**: Result caching and memoization
+//!
+//! ### Runtime (`runtime/`)
+//! Execution context and session management:
+//! - **ExecutionContext**: Environment for protocol execution
+//! - **SessionManager**: Protocol session lifecycle
+//! - **EffectExecutor**: Coordinates effect operations
+//!
+//! ## Examples
+//!
+//! ### Basic Usage
 //! ```rust,ignore
 //! use aura_protocol::prelude::*;
 //!
-//! // Create base handler
-//! let handler = InMemoryHandler::new();
-//!
-//! // Build middleware stack using the builder
-//! let config = MiddlewareConfig {
-//!     device_name: "my-device".to_string(),
-//!     enable_tracing: true,
-//!     enable_metrics: true,
-//!     enable_capabilities: true,
-//!     enable_error_recovery: true,
-//!     ..Default::default()
-//! };
-//!
-//! let handler = create_standard_stack(handler, config);
+//! // Create handler with middleware
+//! let handler = CompositeHandler::for_production(device_id);
+//! let enhanced = MiddlewareStack::new(handler, device_id)
+//!     .with_tracing("my-service".to_string())
+//!     .with_metrics()
+//!     .with_retry(RetryConfig::default())
+//!     .build();
 //! ```
 //!
-//! ## Core Components
-//!
-//! - **Handlers**: Base protocol implementations (`handlers` module)
-//! - **Middleware**: Composable cross-cutting concerns (`middleware` module)
-//! - **Effects**: Side-effect injection system (`effects` module)
-//! - **Types**: Core protocol types (`types` module)
-//! - **Context**: Protocol execution context (`context` module)
-//! - **Protocols**: Protocol-specific implementations (`protocols` module)
+//! ### Protocol Implementation
+//! ```rust,ignore
+//! async fn my_protocol<E>(effects: &E) -> Result<Vec<u8>, ProtocolError>
+//! where
+//!     E: NetworkEffects + CryptoEffects + TimeEffects,
+//! {
+//!     // Generate random nonce
+//!     let nonce = effects.random_bytes(32).await;
+//!     
+//!     // Send to peer
+//!     effects.send_to_peer(peer_id, nonce.clone()).await?;
+//!     
+//!     // Wait for response
+//!     let (from, response) = effects.receive().await?;
+//!     
+//!     Ok(response)
+//! }
+//! ```
 
-#![allow(clippy::result_large_err)]
-#![allow(clippy::large_enum_variant)]
-#![allow(
-    missing_docs,
-    dead_code,
-    clippy::disallowed_methods,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::too_many_arguments
-)]
-
-// ========== Core Library Structure ==========
-
-/// Core protocol handler trait and middleware system
-pub mod middleware;
-
-/// Protocol effects (side-effect operations)
+// Core modules following algebraic effects pattern
 pub mod effects;
-
-/// Protocol context and infrastructure
-pub mod context;
-
 pub mod handlers;
-/// Protocol-specific utilities and message types
-pub mod protocols;
+pub mod middleware;
+pub mod runtime;
 
-/// Test utilities (not for production use)
-#[cfg(any(test, feature = "test-utils"))]
-pub mod test_utils;
+// Clean algebraic effects architecture only
 
-/// Test helper utilities for tests
-#[cfg(test)]
-pub mod test_helpers;
+// Public API re-exports
+pub use effects::{
+    // Effect traits
+    NetworkEffects, StorageEffects, CryptoEffects, TimeEffects,
+    ConsoleEffects, LedgerEffects, ChoreographicEffects,
+    ProtocolEffects, MinimalEffects,
+    
+    // Error types
+    NetworkError, StorageError, CryptoError, TimeError,
+    
+    // Common types
+    WakeCondition, TimeoutHandle, PeerEvent, StorageStats,
+    ChoreographicRole, ChoreographyEvent,
+};
 
-/// Core types used throughout the protocol system
-pub mod types;
+pub use handlers::{
+    CompositeHandler, HandlerBuilder,
+    
+    // Individual handlers for advanced use
+    MemoryNetworkHandler, RealNetworkHandler, SimulatedNetworkHandler,
+    MockCryptoHandler, RealCryptoHandler,
+    RealTimeHandler, SimulatedTimeHandler,
+    MemoryStorageHandler, FilesystemStorageHandler,
+    SilentConsoleHandler, StdoutConsoleHandler, StructuredConsoleHandler,
+};
 
-// ========== Core Protocol Types and Utilities ==========
+pub use middleware::{
+    // Middleware types
+    MiddlewareStack, MiddlewareConfig, Middleware,
+    
+    // Specific middleware
+    TracingMiddleware, MetricsMiddleware,
+    RetryMiddleware, RetryConfig,
+    CapabilityMiddleware, AuthorizationMiddleware,
+    
+    // Middleware utilities
+    create_standard_stack,
+};
 
-/// Safe bidirectional mapping between FrostParticipantId and frost::Identifier
-///
-/// This struct prevents the brittle byte manipulation that was previously used
-/// for reverse lookups from frost::Identifier back to FrostParticipantId.
-///
-/// This is protocol coordination logic. It manages the mapping between different
-/// ID representations used in threshold protocols.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IdentifierMapping {
-    participant_to_frost:
-        std::collections::BTreeMap<aura_types::FrostParticipantId, frost_ed25519::Identifier>,
-    frost_to_participant:
-        std::collections::BTreeMap<frost_ed25519::Identifier, aura_types::FrostParticipantId>,
-}
+pub use runtime::{
+    ExecutionContext, ContextBuilder,
+    SessionManager, SessionState, SessionStatus, SessionConfig,
+    EffectExecutor, ExecutorConfig, ExecutionMode,
+};
 
-impl IdentifierMapping {
-    /// Create a new mapping from a list of participant IDs
-    pub fn new(participants: &[aura_types::FrostParticipantId]) -> aura_types::AuraResult<Self> {
-        use aura_types::AuraError;
-        use frost_ed25519 as frost;
+// Clean API - no legacy compatibility
 
-        let mut participant_to_frost = std::collections::BTreeMap::new();
-        let mut frost_to_participant = std::collections::BTreeMap::new();
+// Convenient prelude for common imports
+pub mod prelude;
 
-        for &participant_id in participants {
-            let frost_id = frost::Identifier::try_from(participant_id.as_u16()).map_err(|_| {
-                AuraError::coordination_failed(format!(
-                    "FrostParticipantId {} cannot be converted to frost::Identifier",
-                    participant_id.as_u16()
-                ))
-            })?;
-
-            participant_to_frost.insert(participant_id, frost_id);
-            frost_to_participant.insert(frost_id, participant_id);
-        }
-
-        Ok(IdentifierMapping {
-            participant_to_frost,
-            frost_to_participant,
-        })
-    }
-
-    /// Convert FrostParticipantId to frost::Identifier safely
-    pub fn to_frost(
-        &self,
-        participant_id: aura_types::FrostParticipantId,
-    ) -> Option<frost_ed25519::Identifier> {
-        self.participant_to_frost.get(&participant_id).copied()
-    }
-
-    /// Convert frost::Identifier back to FrostParticipantId safely
-    pub fn from_frost(
-        &self,
-        frost_id: frost_ed25519::Identifier,
-    ) -> Option<aura_types::FrostParticipantId> {
-        self.frost_to_participant.get(&frost_id).copied()
-    }
-
-    /// Get all participant IDs in the mapping
-    pub fn participant_ids(&self) -> Vec<aura_types::FrostParticipantId> {
-        self.participant_to_frost.keys().copied().collect()
-    }
-
-    /// Get all frost identifiers in the mapping
-    pub fn frost_identifiers(&self) -> Vec<frost_ed25519::Identifier> {
-        self.participant_to_frost.values().copied().collect()
-    }
-
-    /// Check if a participant ID is in the mapping
-    pub fn contains_participant(&self, participant_id: aura_types::FrostParticipantId) -> bool {
-        self.participant_to_frost.contains_key(&participant_id)
-    }
-
-    /// Check if a frost identifier is in the mapping
-    pub fn contains_frost(&self, frost_id: frost_ed25519::Identifier) -> bool {
-        self.frost_to_participant.contains_key(&frost_id)
-    }
-}
-
-/*
- * TODO: Update tests for new protocol API
- *
- * The types_tests module tests core IdentifierMapping functionality which is still
- * valid, but may need updates if the API surface changes. Keeping these tests
- * disabled for now to ensure consistency with other test refactoring.
- *
- * Disabled temporarily to unblock compilation.
- */
-
-/*
-#[cfg(test)]
-#[allow(warnings, clippy::all)]
-mod types_tests {
-    use super::*;
-    use aura_types::FrostParticipantId;
-
-    #[test]
-    fn test_identifier_mapping_correctness() {
-        // Test that IdentifierMapping provides safe bidirectional conversion
-        let participants = vec![
-            FrostParticipantId::from_u16_unchecked(1),
-            FrostParticipantId::from_u16_unchecked(3),
-            FrostParticipantId::from_u16_unchecked(5),
-        ];
-
-        let mapping = IdentifierMapping::new(&participants).unwrap();
-
-        // Test forward conversion (FrostParticipantId -> frost::Identifier)
-        for &participant_id in &participants {
-            let frost_id = mapping.to_frost(participant_id).unwrap();
-
-            // Verify the conversion matches the direct From implementation
-            let direct_frost_id: frost_ed25519::Identifier = participant_id.into();
-            assert_eq!(frost_id, direct_frost_id);
-
-            // Test reverse conversion (frost::Identifier -> FrostParticipantId)
-            let recovered_participant = mapping.from_frost(frost_id).unwrap();
-            assert_eq!(recovered_participant, participant_id);
-        }
-
-        // Test non-existent conversions return None
-        let non_existent_participant = FrostParticipantId::from_u16_unchecked(99);
-        assert_eq!(mapping.to_frost(non_existent_participant), None);
-
-        let non_existent_frost = frost_ed25519::Identifier::try_from(99u16).unwrap();
-        assert_eq!(mapping.from_frost(non_existent_frost), None);
-
-        // Test membership checks
-        assert!(mapping.contains_participant(participants[0]));
-        assert!(!mapping.contains_participant(non_existent_participant));
-
-        let frost_id = mapping.to_frost(participants[0]).unwrap();
-        assert!(mapping.contains_frost(frost_id));
-        assert!(!mapping.contains_frost(non_existent_frost));
-
-        // Test collection methods
-        let participant_ids = mapping.participant_ids();
-        assert_eq!(participant_ids.len(), 3);
-        for participant_id in participants {
-            assert!(participant_ids.contains(&participant_id));
-        }
-
-        let frost_identifiers = mapping.frost_identifiers();
-        assert_eq!(frost_identifiers.len(), 3);
-    }
-}
-*/
-
-// ========== Simplified Public API ==========
-
-/// Convenient imports for common use cases
-pub mod prelude {
-
-    // Core handler trait and types
-    pub use crate::middleware::{AuraProtocolHandler, ProtocolError, ProtocolResult};
-
-    // Essential middleware
-    pub use crate::middleware::{
-        stack::{create_standard_stack, MiddlewareConfig, MiddlewareStackBuilder},
-        EffectsMiddleware, SessionMiddleware, WithEffects,
-    };
-
-    // Core types
-    pub use crate::IdentifierMapping;
-    pub use aura_types::{FrostParticipantId, SessionId, ThresholdConfig};
-
-    // Error handling from effects system
-    pub use crate::effects::{AuraError, AuraResult, ErrorCode, ErrorSeverity};
-}
-
-// ========== Selective Re-exports ==========
-
-// Core types
-pub use aura_types::{FrostParticipantId, SessionId, ThresholdConfig};
-
-// Essential middleware for common usage
-pub use middleware::{AuraProtocolHandler, ProtocolError, ProtocolResult};
-pub use middleware::{EffectsMiddleware, WithEffects};
+// Version information
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

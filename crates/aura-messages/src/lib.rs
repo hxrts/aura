@@ -4,7 +4,6 @@
 //!
 //! - **Crypto**: Threshold cryptography protocols (DKD, FROST, resharing)
 //! - **Social**: Social coordination protocols (rendezvous, SSB)
-//! - **Recovery**: Account recovery protocols (guardian coordination)
 //! - **Common**: Shared message infrastructure (envelopes, errors)
 //!
 //! # Architecture
@@ -19,7 +18,6 @@
 
 // Domain-specific message modules
 pub mod crypto;
-pub mod recovery;
 pub mod social;
 
 // Shared infrastructure
@@ -36,7 +34,6 @@ mod versioning;
 // Re-export main message types organized by domain
 pub use common::*;
 pub use crypto::*;
-pub use recovery::*;
 pub use social::*;
 
 // Legacy re-exports for compatibility (will be removed)
@@ -52,8 +49,6 @@ pub enum AuraMessage {
     Crypto(crypto::CryptoMessage),
     /// Social coordination protocol messages  
     Social(social::SocialMessage),
-    /// Account recovery protocol messages
-    Recovery(recovery::RecoveryMessage),
 }
 
 impl AuraMessage {
@@ -62,7 +57,6 @@ impl AuraMessage {
         match self {
             AuraMessage::Crypto(_) => "crypto",
             AuraMessage::Social(_) => "social",
-            AuraMessage::Recovery(_) => "recovery",
         }
     }
 
@@ -71,7 +65,6 @@ impl AuraMessage {
         match self {
             AuraMessage::Crypto(msg) => msg.protocol_type(),
             AuraMessage::Social(msg) => msg.protocol_type(),
-            AuraMessage::Recovery(msg) => msg.protocol_type(),
         }
     }
 }

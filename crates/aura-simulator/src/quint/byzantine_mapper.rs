@@ -5,8 +5,16 @@
 //! properties with sophisticated adversarial behaviors.
 
 use crate::quint::types::{ChaosScenario, ChaosType, ViolationPattern};
-use crate::scenario::types::ByzantineStrategy;
-use crate::Result;
+// ByzantineStrategy - placeholder until module is available
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ByzantineStrategy {
+    SlowDown,
+    DropMessages,
+    SendInvalid,
+    InvalidSignatures,
+    RefuseParticipation,
+}
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

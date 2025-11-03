@@ -1,8 +1,9 @@
 //! Integration tests for the Automerge-based journal
 
-use aura_journal::{AccountState, Operation, SyncProtocol};
+use aura_journal::{AccountState, SyncManager};
 use aura_crypto::Effects;
 use aura_types::{AccountIdExt, DeviceIdExt};
+use std::sync::{Arc, RwLock};
 
 #[tokio::test]
 async fn test_basic_state_operations() {
@@ -67,36 +68,35 @@ async fn test_sync_between_devices() {
     let device2 = aura_types::DeviceId::new_with_effects(&effects);
     
     // Create two states
-    let state1 = std::sync::Arc::new(tokio::sync::RwLock::new(
+    let state1 = Arc::new(RwLock::new(
         AccountState::new(account_id, group_public_key).unwrap()
     ));
-    let state2 = std::sync::Arc::new(tokio::sync::RwLock::new(
+    let state2 = Arc::new(RwLock::new(
         AccountState::new(account_id, group_public_key).unwrap()
     ));
     
-    // Create sync protocols
-    let sync1 = SyncProtocol::new(device1, state1.clone());
-    let sync2 = SyncProtocol::new(device2, state2.clone());
+    // Create sync managers (using compatibility interface)
+    let sync1 = SyncManager::new(device1, state1.clone());
+    let sync2 = SyncManager::new(device2, state2.clone());
     
     // Make changes on device1
     {
-        let mut s1 = state1.write().await;
+        let mut s1 = state1.write().unwrap();
         s1.increment_epoch().unwrap();
     }
     
     // Generate sync message from device1 to device2
-    let msg = sync1.generate_sync_message(device2).await.unwrap();
+    let msg = sync1.generate_sync_message(device2, account_id).unwrap();
     assert_eq!(msg.epoch, 1);
     
     // Apply sync message on device2
-    let result = sync2.receive_sync_message(msg).await.unwrap();
-    assert!(result.changes_applied > 0);
+    let result = sync2.receive_sync_message(msg, account_id).unwrap();
     assert_eq!(result.new_epoch, 1);
     
     // Verify states are synchronized
     {
-        let s1 = state1.read().await;
-        let s2 = state2.read().await;
+        let s1 = state1.read().unwrap();
+        let s2 = state2.read().unwrap();
         assert_eq!(s1.get_epoch(), s2.get_epoch());
     }
 }

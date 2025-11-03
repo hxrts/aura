@@ -30,8 +30,14 @@ base64 = { workspace = true }
 # Cryptographic hashing
 blake3 = { workspace = true }
 
+# Randomness
+rand = { workspace = true }
+
 # FROST threshold cryptography (for ParticipantId conversion)
 frost-ed25519 = { workspace = true }
+
+# Ed25519 signatures for effects
+ed25519-dalek = { workspace = true }
 
 # Time utilities
 chrono = { version = "0.4", features = ["serde"] }

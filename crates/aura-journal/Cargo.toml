@@ -16,10 +16,8 @@ workspace = true
 aura-types = { path = "../aura-types" }
 aura-crypto = { path = "../aura-crypto" }
 aura-authentication = { path = "../aura-authentication" }
-aura-authorization = { path = "../aura-authorization" }
 # Note: Cannot import aura-protocol due to circular dependency (aura-protocol imports journal)
 # Protocol types are now available through aura-types
-keyhive_core = { workspace = true }
 # aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
 
 # CRDT
@@ -30,6 +28,7 @@ blake3 = { workspace = true }
 ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
 signature = { workspace = true }
+aes-gcm = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -39,6 +38,8 @@ bincode = { workspace = true }
 
 # Async
 tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }
@@ -48,6 +49,11 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
+
+# KeyFabric external dependencies
+petgraph = { workspace = true }
+# secret_sharing = { workspace = true }  # Removed due to yanked zeroize dependency - using MVP placeholder
+biscuit-auth = { workspace = true }
 
 [dev-dependencies]
 aura-test-utils = { path = "../aura-test-utils" }

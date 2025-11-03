@@ -80,6 +80,9 @@ pub struct AuthenticationContext {
     group_keys: std::collections::HashMap<aura_types::AccountId, aura_crypto::Ed25519VerifyingKey>,
 }
 
+// Re-export types for convenience
+use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
+
 /// Threshold signature configuration
 #[derive(Debug, Clone)]
 pub struct ThresholdConfig {
@@ -105,7 +108,7 @@ impl AuthenticationContext {
     pub fn get_device_public_key(
         &self,
         device_id: &aura_types::DeviceId,
-    ) -> Result<&aura_crypto::Ed25519VerifyingKey> {
+    ) -> Result<&Ed25519VerifyingKey> {
         self.device_keys.get(device_id).ok_or_else(|| {
             AuthenticationError::InvalidDeviceSignature(format!("Unknown device: {}", device_id))
         })
@@ -115,7 +118,7 @@ impl AuthenticationContext {
     pub fn add_device_key(
         &mut self,
         device_id: aura_types::DeviceId,
-        public_key: aura_crypto::Ed25519VerifyingKey,
+        public_key: Ed25519VerifyingKey,
     ) {
         self.device_keys.insert(device_id, public_key);
     }
@@ -146,7 +149,7 @@ impl AuthenticationContext {
     pub fn get_guardian_public_key(
         &self,
         guardian_id: &aura_types::GuardianId,
-    ) -> Result<&aura_crypto::Ed25519VerifyingKey> {
+    ) -> Result<&Ed25519VerifyingKey> {
         self.guardian_keys.get(guardian_id).ok_or_else(|| {
             AuthenticationError::InvalidGuardianSignature(format!(
                 "Unknown guardian: {}",
@@ -159,7 +162,7 @@ impl AuthenticationContext {
     pub fn add_guardian_key(
         &mut self,
         guardian_id: aura_types::GuardianId,
-        public_key: aura_crypto::Ed25519VerifyingKey,
+        public_key: Ed25519VerifyingKey,
     ) {
         self.guardian_keys.insert(guardian_id, public_key);
     }
@@ -168,7 +171,7 @@ impl AuthenticationContext {
     pub fn get_group_public_key(
         &self,
         account_id: &aura_types::AccountId,
-    ) -> Result<&aura_crypto::Ed25519VerifyingKey> {
+    ) -> Result<&Ed25519VerifyingKey> {
         self.group_keys.get(account_id).ok_or_else(|| {
             AuthenticationError::InvalidThresholdSignature(format!(
                 "No group key for account: {}",
@@ -181,7 +184,7 @@ impl AuthenticationContext {
     pub fn add_group_key(
         &mut self,
         account_id: aura_types::AccountId,
-        group_key: aura_crypto::Ed25519VerifyingKey,
+        group_key: Ed25519VerifyingKey,
     ) {
         self.group_keys.insert(account_id, group_key);
     }
@@ -216,12 +219,6 @@ impl AuthenticationContext {
         // Verify the issuer device is known
         self.verify_device_authentication(issuer)
     }
-
-    /// Verify capability signature (simplified for now)
-    pub fn verify_capability_signature(&self, _capability_data: &[u8]) -> Result<()> {
-        // Simplified implementation - would verify the capability token signature
-        Ok(())
-    }
 }
 
 impl Default for AuthenticationContext {
@@ -239,14 +236,14 @@ pub enum EventAuthorization {
     /// Single device certificate signature
     DeviceCertificate {
         device_id: aura_types::DeviceId,
-        #[serde(with = "aura_crypto::signature_serde")]
-        signature: aura_crypto::Ed25519Signature,
+        #[serde(with = "aura_crypto::middleware::serde_utils::signature_serde")]
+        signature: Ed25519Signature,
     },
     /// Guardian signature (for recovery approvals)
     GuardianSignature {
         guardian_id: aura_types::GuardianId,
-        #[serde(with = "aura_crypto::signature_serde")]
-        signature: aura_crypto::Ed25519Signature,
+        #[serde(with = "aura_crypto::middleware::serde_utils::signature_serde")]
+        signature: Ed25519Signature,
     },
     /// Lifecycle-internal authorization used during protocol execution
     LifecycleInternal,
@@ -256,8 +253,8 @@ pub enum EventAuthorization {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ThresholdSig {
     /// The aggregated Ed25519 signature
-    #[serde(with = "aura_crypto::signature_serde")]
-    pub signature: aura_crypto::Ed25519Signature,
+    #[serde(with = "aura_crypto::middleware::serde_utils::signature_serde")]
+    pub signature: Ed25519Signature,
     /// Indices of devices that participated in signing
     pub signers: Vec<u8>,
     /// Individual signature shares (for auditing)

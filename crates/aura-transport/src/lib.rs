@@ -1,27 +1,10 @@
-//! Unified transport layer for Aura
+//! Transport Middleware System
 //!
-//! Provides a clean, layered architecture:
-//! - Core Transport Layer: Transport trait and implementations
-//! - Adapter Layer: Protocol-specific adapters (AuraProtocolHandler, ChoreoHandler)
-//! - Handler Layer: High-level protocol handlers
+//! This crate provides a composable middleware system for transport operations.
+//! All transport functionality is implemented as middleware layers that can be
+//! stacked to create custom transport behaviors.
 
-// Core modules
-pub mod adapters;
-pub mod core;
-pub mod error;
-pub mod types;
+pub mod middleware;
 
-// Legacy modules (transitional)
-pub mod handlers;
-
-// Re-export unified types and traits
-pub use error::{TransportError, TransportErrorBuilder, TransportResult};
-pub use types::{
-    MessageMetadata, MessagePriority, TransportConfig, TransportEnvelope, TransportType,
-};
-
-// Re-export core transport system
-pub use core::{MemoryTransport, Transport, TransportFactory};
-
-// Re-export adapters
-pub use adapters::{ChoreographicAdapter, ProtocolAdapter};
+// Re-export all middleware components
+pub use middleware::*;

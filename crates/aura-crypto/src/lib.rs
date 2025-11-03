@@ -1,63 +1,146 @@
-//! Common cryptographic utilities for Aura
+//! Aura Crypto: Middleware-based cryptographic operations
+//!
+//! This crate provides a middleware-based cryptographic operations system that follows
+//! the foundation pattern established throughout Aura. All cryptographic operations
+//! are processed through configurable middleware stacks that provide security,
+//! monitoring, and compliance features.
+//!
+//! ## Core Components
+//!
+//! - **Middleware System**: Type-safe middleware composition for crypto operations
+//! - **Security Levels**: Hierarchical security enforcement (Basic → Critical)
+//! - **Operation Tracking**: Comprehensive audit logging and monitoring
+//! - **Hardware Integration**: TEE/HSM support with attestation
+//! - **Performance Optimization**: Intelligent caching and rate limiting
+//!
+//! ## Essential Crypto Library Components
+//!
+//!
+//! All cryptographic operations are now provided through the composable middleware system
+//! which provides security, monitoring, and compliance features.
+
 #![allow(clippy::result_large_err)]
-#![allow(clippy::disallowed_types)] // Crypto crate needs OsRng for actual cryptographic operations
-#![allow(clippy::expect_used)] // Crypto operations sometimes need expect for invariants
 
-/// AES-GCM encryption for content and chunk encryption
-pub mod content_encryption;
-/// Device key management and secure storage
-pub mod device_keys;
-/// Deterministic Key Derivation (DKD) for deriving context-specific keys
-pub mod dkd;
-/// Injectable time and randomness for deterministic testing
-pub mod effects;
-/// Symmetric encryption abstractions (ChaCha20Poly1305)
-pub mod encryption;
-/// Unified error handling for cryptographic operations
-pub mod error;
-/// FROST threshold signatures implementation
-pub mod frost;
-/// Hash function abstractions (Blake3)
-pub mod hash;
-/// HPKE encryption for guardian shares
-pub mod hpke_encryption;
-/// Separated key derivation for identity and permission keys
-pub mod key_derivation;
-/// Coordinated key rotation for independent subsystems
-pub mod key_rotation;
-/// Merkle tree implementation for commitment verification
+// Merkle tree utilities
 pub mod merkle;
-/// Key resharing and threshold share management
-pub mod resharing;
-/// Sealing and encryption of sensitive data
-pub mod sealing;
-/// Serialization utilities for cryptographic types (serde helpers)
-pub mod serde;
-/// Digital signature abstractions (Ed25519)
-pub mod signature;
-/// Time utilities with proper error handling
-pub mod time;
-/// Shared types (DeviceId, AccountId, etc.)
-pub mod types;
-/// UUID utilities and abstractions
-pub mod uuid_utils;
 
-pub use content_encryption::*;
-pub use device_keys::*;
-pub use dkd::*;
-pub use effects::*;
-pub use encryption::*;
-pub use error::*;
-pub use frost::*;
-pub use hash::*;
-pub use hpke_encryption::*;
-pub use key_derivation::*;
-pub use key_rotation::*;
-pub use merkle::*;
-pub use resharing::*;
-pub use sealing::*;
-pub use serde::{signature_serde, verifying_key_serde};
-pub use signature::*;
-pub use time::*;
-pub use types::*;
-pub use uuid_utils::*;
+// Middleware system (complete implementation)
+pub mod middleware;
+
+// Re-export commonly used types for convenience
+pub use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey as Ed25519VerifyingKey};
+
+// Error types - unified error system
+pub use aura_types::{AuraError, AuraResult, ErrorCode, ErrorSeverity};
+/// General cryptographic operation error alias
+pub type CryptoError = AuraError;
+/// Crypto result type alias
+pub type Result<T> = AuraResult<T>;
+
+// Re-export complete middleware system
+pub use middleware::*;
+
+// Re-export merkle utilities
+pub use merkle::{
+    build_commitment_tree, build_merkle_root, verify_merkle_proof, SimpleMerkleProof,
+};
+
+// Type aliases for HPKE functionality (placeholder implementations)
+pub type HpkePrivateKey = [u8; 32];
+pub type HpkePublicKey = [u8; 32];
+pub type MerkleProof = SimpleMerkleProof;
+
+// FROST threshold cryptography types (re-exported for compatibility)
+pub use frost_ed25519::{
+    keys::{KeyPackage as FrostKeyPackage, PublicKeyPackage as FrostPublicKeyPackage},
+    round1::SigningCommitments as FrostSigningCommitments,
+    round2::SignatureShare as FrostSignatureShare,
+    Signature as FrostSignature,
+};
+
+/// Legacy KeyShare type for agent compatibility
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct KeyShare {
+    pub identifier: u16,
+    pub key_package: Vec<u8>, // Serialized FrostKeyPackage
+    pub public_key_package: Vec<u8>, // Serialized FrostPublicKeyPackage
+}
+
+impl KeyShare {
+    /// Create a new KeyShare from FROST components
+    pub fn new(identifier: u16, key_package: Vec<u8>, public_key_package: Vec<u8>) -> Self {
+        Self {
+            identifier,
+            key_package,
+            public_key_package,
+        }
+    }
+    
+    /// Get the identifier
+    pub fn identifier(&self) -> u16 {
+        self.identifier
+    }
+    
+    /// Get the key package bytes
+    pub fn key_package(&self) -> &[u8] {
+        &self.key_package
+    }
+    
+    /// Get the public key package bytes
+    pub fn public_key_package(&self) -> &[u8] {
+        &self.public_key_package
+    }
+}
+
+/// Generate a UUID for compatibility
+pub fn generate_uuid() -> uuid::Uuid {
+    uuid::Uuid::new_v4()
+}
+
+/// Simple HPKE key pair implementation (placeholder)
+#[derive(Debug, Clone)]
+pub struct HpkeKeyPair {
+    pub private_key: HpkePrivateKey,
+    pub public_key: HpkePublicKey,
+}
+
+impl HpkeKeyPair {
+    /// Generate a new HPKE key pair using a random number generator
+    pub fn generate<R: rand::RngCore>(rng: &mut R) -> Self {
+        let mut private_key = [0u8; 32];
+        let mut public_key = [0u8; 32];
+        rng.fill_bytes(&mut private_key);
+        rng.fill_bytes(&mut public_key);
+        
+        Self {
+            private_key,
+            public_key,
+        }
+    }
+    
+    /// Get the private key
+    pub fn private_key(&self) -> &HpkePrivateKey {
+        &self.private_key
+    }
+    
+    /// Get the public key  
+    pub fn public_key(&self) -> &HpkePublicKey {
+        &self.public_key
+    }
+}
+
+/// Verify an Ed25519 signature using a public key
+///
+/// This is a convenience function that verifies a signature against a message
+/// using the provided public key. Works for both regular Ed25519 signatures
+/// and FROST threshold signatures (which produce standard Ed25519 signatures).
+pub fn ed25519_verify(
+    public_key: &Ed25519VerifyingKey,
+    message: &[u8],
+    signature: &Ed25519Signature,
+) -> Result<()> {
+    use ed25519_dalek::Verifier;
+    public_key.verify(message, signature).map_err(|e| {
+        AuraError::crypto_operation_failed(format!("Signature verification failed: {}", e))
+    })
+}

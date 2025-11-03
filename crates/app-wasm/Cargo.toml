@@ -1,0 +1,34 @@
+[package]
+name = "app-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+wee_alloc = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "WebSocket",
+    "MessageEvent",
+    "CloseEvent",
+    "ErrorEvent",
+    "BinaryType",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+
+# Optional Leptos integration
+leptos = { version = "0.7", features = ["csr"], optional = true }
+
+[features]
+default = []
+leptos = ["dep:leptos"]
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

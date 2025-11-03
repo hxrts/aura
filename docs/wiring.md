@@ -41,10 +41,10 @@ graph TD
     %% WASM & Console
     aura_wasm[aura-wasm]
     console[aura-console]
-    analysis_client[aura-analysis-client]
-    live_client[aura-live-client]
-    sim_client[aura-sim-client]
-    sim_server[aura-sim-server]
+    analysis_client[app-analysis-client]
+    live_client[app-live-client]
+    sim_client[app-sim-client]
+    sim_server[app-sim-server]
     
     %% Dependencies
     messages --> types
@@ -276,10 +276,10 @@ graph TD
 ### WASM & Console (Light Purple)
 - **aura-wasm**: WebAssembly bindings
 - **aura-console**: Web-based debugging console
-- **aura-analysis-client**: Analysis and property monitoring
-- **aura-live-client**: Live network debugging
-- **aura-sim-client**: Simulation client interface
-- **aura-sim-server**: Simulation server backend
+- **app-analysis-client**: Analysis and property monitoring
+- **app-live-client**: Live network debugging
+- **app-sim-client**: Simulation client interface
+- **app-sim-server**: Simulation server backend
 
 ---
 
@@ -590,14 +590,14 @@ graph TD
 
 ---
 
-### aura-sim-client
+### app-sim-client
 **Purpose**: Simulation client interface
 
 **Key Exports**:
 - **Simulation Client**: Client interface for simulation backend
 - **Event Buffer**: Simulation event buffering
 
-**Dependencies**: `aura-console-types`, `aura-wasm`
+**Dependencies**: `app-console-types`, `app-wasm`
 
 ---
 

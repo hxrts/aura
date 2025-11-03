@@ -11,18 +11,21 @@
 //! - **Sync**: Built-in protocol for efficient state synchronization
 
 // Core modules
+mod effects;
 mod error;
-mod types;
+pub mod fabric;
+pub mod middleware;
 mod operations;
 mod state;
-mod effects;
 mod sync;
+mod types;
 
 // Re-exports
+pub use effects::*;
 pub use error::{Error, Result};
-pub use types::*;
+pub use fabric::*;
+pub use middleware::*;
 pub use operations::*;
 pub use state::*;
-pub use effects::*;
 pub use sync::*;
-
+pub use types::*;

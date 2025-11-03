@@ -40,6 +40,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
 serde_cbor = { workspace = true }
 hex = { workspace = true }
 rand = { workspace = true }
@@ -49,6 +50,12 @@ frost-ed25519 = { workspace = true }
 blake3 = { workspace = true }
 dirs = "5.0"
 chrono = { workspace = true }
+shell-words = "1.1"
+atty = "0.2"
+thiserror = { workspace = true }
+regex = "1.10"
+url = "2.5"
+tempfile = "3.8"
 
 [features]
 default = []

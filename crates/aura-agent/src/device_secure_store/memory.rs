@@ -4,7 +4,7 @@
 //! that don't have native secure storage support.
 
 use super::{DeviceAttestation, SecureStorage, SecurityLevel};
-use aura_protocol::KeyShare;
+use aura_crypto::KeyShare;
 use aura_types::{AuraError, AuraResult as Result};
 use std::collections::HashMap;
 

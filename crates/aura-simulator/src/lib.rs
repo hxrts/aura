@@ -1,220 +1,151 @@
-// Note: This crate contains experimental and test code with intentional patterns
-// that may trigger certain clippy warnings. Specific allows are applied at the
-// item level where necessary for testing utilities and simulation code.
-
-//! Aura Simulation Engine - Unified Test Execution Framework
+//! Aura Simulator Library
 //!
-//! A comprehensive simulation engine that serves as the canonical entry point for all tests,
-//! from simple protocol checks to complex multi-phase chaos scenarios. The engine supports
-//! both imperative (programmatic) and declarative (TOML-based) test definitions.
+//! This crate implements simulation functionality through composable middleware layers that handle:
+//! - Scenario injection and dynamic test modifications
+//! - Fault simulation and error injection
+//! - Time control and temporal operations
+//! - State inspection and monitoring
+//! - Property checking and validation
+//! - Chaos coordination and complex scenarios
 //!
-//! # Unified Test Execution Model
+//! All simulation functionality is implemented as middleware components
+//! following Aura's foundation pattern for algebraic effect composition.
 //!
-//! The simulation engine provides three complementary approaches:
+//! # Middleware Architecture
 //!
-//! 1. **Functional Architecture**: Pure state transitions with `tick()` function
-//! 2. **Observability Tools**: Passive observers for analysis and time-travel debugging
-//! 3. **Unified Scenario Engine**: Declarative TOML scenarios with choreography actions
+//! The simulator uses a composable middleware stack where each layer adds specific
+//! simulation capabilities:
 //!
-//! # Key Features
-//!
-//! - **Deterministic Testing**: Same seed → same execution path
-//! - **Byzantine Testing**: Inject faults via declarative actions
-//! - **Network Simulation**: Control latency, partitions, and message delivery
-//! - **Time Travel Debugging**: Replay from checkpoints with precise control
-//! - **Choreographic Actions**: Convert imperative helpers to declarative TOML
-//! - **Property Checking**: Extensible validation framework
-//! - **Passive Observation**: Zero-coupling debugging tools
-//!
-//! # Architecture
-//!
-//! ## Functional Core (State + Logic + Execution)
-//! - **WorldState**: Pure data container (no methods, just state)
-//! - **tick()**: Pure function for state transitions (logic only)
-//! - **FunctionalRunner**: Execution harness (control only)
-//!
-//! ## Decoupled Debugging Tools
-//! - **PassiveTraceRecorder**: External event observer
-//! - **CheckpointManager**: Standalone state serialization
-//! - **TimeTravelDebugger**: Independent replay tool
-//! - **ScenarioEngine**: High-level coordination framework
-//!
-//! ## Unified Test Execution
-//! - **UnifiedScenarioEngine**: Canonical entry point for all tests
-//! - **ChoreographyActions**: Declarative protocol execution
-//! - **TOML Scenarios**: Unified scenario definition format
-//! - **Property Framework**: Extensible validation system
-//!
-//! # Example: Declarative TOML Scenario
-//!
-//! ```toml
-//! [metadata]
-//! name = "dkd_with_byzantine_test"
-//! description = "DKD protocol with Byzantine participant and network partition"
-//!
-//! [setup]
-//! participants = 3
-//! threshold = 2
-//! seed = 42
-//!
-//! [[phases]]
-//! name = "dkd_execution"
-//! description = "Run DKD protocol"
-//!
-//!   [[phases.actions]]
-//!   type = "run_choreography"
-//!   choreography = "dkd"
-//!   threshold = 2
-//!   app_id = "test_app"
-//!   context = "user_auth"
-//!
-//!   [[phases.actions]]
-//!   type = "inject_byzantine"
-//!   participant = "alice"
-//!   behavior = "drop_messages"
-//!
-//!   [[phases.actions]]
-//!   type = "apply_network_condition"
-//!   condition = "partition"
-//!   participants = ["bob", "charlie"]
-//!   duration_ticks = 10
-//!
-//! expected_outcome = "success"
-//! ```
-//!
-//! # Example: Programmatic Usage
-//!
-//! ```ignore
+//! ```rust,ignore
 //! use aura_simulator::{
-//!     UnifiedScenarioEngine, UnifiedScenarioLoader,
-//!     choreography_actions::register_standard_choreographies
+//!     SimulatorStackBuilder,
+//!     ScenarioInjectionMiddleware,
+//!     FaultSimulationMiddleware,
+//!     TimeControlMiddleware,
+//!     StateInspectionMiddleware,
+//!     PropertyCheckingMiddleware,
+//!     ChaosCoordinationMiddleware,
+//!     CoreSimulatorHandler,
 //! };
 //!
-//! // Create unified engine
-//! let mut engine = UnifiedScenarioEngine::new("./test_artifacts")?;
-//! register_standard_choreographies(&mut engine);
+//! let stack = SimulatorStackBuilder::new()
+//!     .with_middleware(std::sync::Arc::new(ScenarioInjectionMiddleware::new()))
+//!     .with_middleware(std::sync::Arc::new(FaultSimulationMiddleware::new()))
+//!     .with_middleware(std::sync::Arc::new(TimeControlMiddleware::new()))
+//!     .with_middleware(std::sync::Arc::new(StateInspectionMiddleware::new()))
+//!     .with_middleware(std::sync::Arc::new(PropertyCheckingMiddleware::new()))
+//!     .with_middleware(std::sync::Arc::new(ChaosCoordinationMiddleware::new()))
+//!     .with_handler(std::sync::Arc::new(CoreSimulatorHandler::new()))
+//!     .build()?;
+//! ```
 //!
-//! // Load declarative scenarios
-//! let mut loader = UnifiedScenarioLoader::new("./scenarios");
-//! let scenario = loader.load_scenario("dkd_basic.toml")?;
+//! # Example Usage
 //!
-//! // Execute with debugging and analysis
-//! let result = engine.execute_scenario(&scenario)?;
+//! ```rust,ignore
+//! use aura_simulator::*;
+//! use std::time::Duration;
 //!
-//! assert!(result.success);
-//! assert_eq!(result.phase_results.len(), 2);
+//! // Create simulation context
+//! let context = SimulatorContext::new("test_scenario".to_string(), "run_1".to_string())
+//!     .with_participants(5, 3)
+//!     .with_seed(42);
+//!
+//! // Execute simulation operations
+//! let result = stack.process(
+//!     SimulatorOperation::ExecuteTick {
+//!         tick_number: 1,
+//!         delta_time: Duration::from_millis(100),
+//!     },
+//!     &context,
+//! )?;
 //! ```
 
-// ================================================================
-// UNIFIED ARCHITECTURE (Phases 0-5 Complete)
-// ================================================================
+#![allow(missing_docs)]
 
-// Shared types and interfaces (eliminates circular dependencies)
-pub mod types;
+// Core middleware system
+pub mod middleware;
 
-// Core simulation engine (pure functional logic)
-pub mod simulation_engine;
-pub mod world_state;
-
-// Unified framework modules (infrastructure)
-pub mod config;
-pub mod metrics;
-pub mod results;
-pub mod state;
-pub mod utils;
-
-// Analysis and debugging tools (external observers)
-pub mod analysis;
-pub mod observability;
-
-// Scenario execution and testing
-pub mod scenario;
-pub mod testing;
-
-// Legacy support
-pub mod logging;
-
-// Quint integration
+// Quint integration for formal verification
 pub mod quint;
 
-// ================================================================
-// CLEAN ARCHITECTURE NOTES
-// ================================================================
-//
-// Legacy modules have been removed as part of the deduplication effort.
-// The following modules were identified as either:
-// - Superseded by unified framework modules
-// - Creating circular dependencies
-// - Having unresolved external dependencies
-//
-// All functionality has been consolidated into the unified architecture.
+// Utility functions
+pub mod utils;
 
-// ================================================================
-// CLEAN PUBLIC API (Explicit Exports - No Ambiguous Globs)
-// ================================================================
+// Scenario definitions
+pub mod scenario;
 
-// Core simulation functionality
-pub use simulation_engine::tick;
-pub use world_state::{
-    ByzantineStrategy, NetworkPartition, ParticipantState, QueuedProtocol, WorldState,
-    WorldStateSnapshot,
-};
-
-// Unified framework (primary API)
-pub use types::{
-    current_unix_timestamp_millis,
-    // Common utilities
-    current_unix_timestamp_secs,
-    generate_checkpoint_id,
-    generate_random_uuid,
-    CheckpointManager,
-
-    ConfigBuilder,
-    ConfigValidation,
-
-    ExecutionTrace,
-
-    MetricCategory,
-
-    MetricsCollector,
-    MetricsProvider,
-    PropertyCheckResult,
-    // Property types (moved from testing to eliminate circular deps)
-    PropertyViolation,
+// Re-export core middleware types for external usage
+pub use middleware::{
+    SimulatorMiddlewareStack,
+    SimulatorStackBuilder,
+    SimulatorHandler,
+    SimulatorOperation,
+    SimulatorContext,
+    SimulatorConfig,
+    SimulatorMiddleware,
+    ScenarioInjectionMiddleware,
+    FaultSimulationMiddleware,
+    TimeControlMiddleware,
+    StateInspectionMiddleware,
+    PropertyCheckingMiddleware,
+    ChaosCoordinationMiddleware,
+    LogLevel,
+    NetworkConfig,
+    TimeConfig,
+    FaultType,
+    ByzantineStrategy,
     PropertyViolationType,
-    ResultExt,
-    // Configuration system
-    SimulationConfig,
-    // Core results and metrics
-    SimulationExecutionResult,
-    SimulationMetrics,
-    SimulationRunResult,
-    SimulationState,
-    // State management
-    StateManager,
-    UnifiedStateManager,
-    ValidationResult,
-    ViolationDetails,
-    ViolationDetectionReport,
-    ViolationSeverity,
+    TimeControlAction,
+    StateQuery,
+    ChaosStrategy,
+    SimulationOutcome,
+    SimulatorError,
+    Result,
 };
 
-// Analysis and debugging tools
-pub use analysis::{FailureAnalysisResult, FailureAnalyzer, FocusedTester, MinimalReproduction};
+// Re-export handler implementations
+pub use middleware::handler::{CoreSimulatorHandler, NoOpSimulatorHandler};
 
-// Observability tools
-pub use observability::{PassiveTraceRecorder, TimeTravelDebugger};
+// Re-export specific middleware types for convenience
+pub use middleware::scenario_injection::{
+    ScenarioDefinition,
+    InjectionAction,
+    TriggerCondition,
+};
 
-// Testing framework
-pub use testing::{FunctionalRunner, PropertyMonitor};
+pub use middleware::fault_simulation::{
+    FaultInjectionRule,
+    FaultCondition,
+    FaultRecoverySettings,
+};
 
-// Scenario execution
-// pub use scenario::{
-//     Scenario, ScenarioEngine, ChoreographyAction, NetworkConditions
-// };
+pub use middleware::time_control::{
+    RealtimeSync,
+};
 
-// Error types and Result are provided by aura_types unified system
-pub use aura_types::AuraError;
+pub use middleware::state_inspection::{
+    StateWatcher,
+    WatcherCondition,
+    StateTrigger,
+    TriggerAction,
+};
 
-/// Result type alias for simulator operations
-pub type Result<T> = std::result::Result<T, AuraError>;
+pub use middleware::property_checking::{
+    PropertyChecker,
+    PropertyType,
+    PropertyCheckResult,
+    PropertyViolation,
+};
+
+pub use middleware::chaos_coordination::{
+    ChaosStrategyTemplate,
+    ChaosRule,
+    ChaosRuleCondition,
+    ChaosRuleOperator,
+    ChaosRuleAction,
+    ChaosAction,
+    ChaosRecoverySettings,
+};
+
+// Re-export Duration for convenience
+pub use std::time::Duration;
