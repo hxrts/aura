@@ -5,7 +5,7 @@ use aura_choreography::threshold_crypto::DkdProtocol;
 use aura_protocol::choreographic::{BridgedEndpoint, RumpsteakAdapter};
 use aura_protocol::effects::AuraEffectsAdapter;
 use aura_protocol::runtime::context::ProtocolContext;
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use rumpsteak_choreography::ChoreoHandler;
 use tokio_test;
 use uuid::Uuid;

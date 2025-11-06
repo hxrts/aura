@@ -23,21 +23,10 @@ pub mod social;
 // Shared infrastructure
 pub mod common;
 
-// Legacy modules (will be removed)
-mod versioning;
-
-// Integration examples and guidelines
-// TODO: Re-enable when error API is available
-// #[cfg(test)]
-// pub mod integration_example;
-
 // Re-export main message types organized by domain
 pub use common::*;
 pub use crypto::*;
 pub use social::*;
-
-// Legacy re-exports for compatibility (will be removed)
-pub use versioning::*;
 
 /// Current wire format version
 pub const WIRE_FORMAT_VERSION: u16 = 1;

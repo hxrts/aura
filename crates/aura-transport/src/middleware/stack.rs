@@ -3,7 +3,7 @@
 //! Provides the middleware composition system for transport operations.
 
 use super::handler::{TransportHandler, TransportOperation, TransportResult};
-use aura_types::effects::AuraEffects;
+use aura_protocol::effects::AuraEffects;
 use aura_types::{MiddlewareContext, MiddlewareResult};
 use std::collections::HashMap;
 

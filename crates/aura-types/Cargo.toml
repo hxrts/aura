@@ -26,6 +26,8 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
 
 # Cryptographic hashing
 blake3 = { workspace = true }
@@ -43,6 +45,11 @@ ed25519-dalek = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 time = { workspace = true }
 
+# Async runtime and crypto utilities
+tokio = { workspace = true }
+subtle = "2.5"
+zeroize = { workspace = true }
+
 [features]
 # Optional postcard support for trace compression
 postcard-support = ["postcard"]
@@ -50,4 +57,4 @@ postcard-support = ["postcard"]
 [dev-dependencies]
 # For testing DKD functionality
 sha2 = { workspace = true }
-tokio = { workspace = true }
+proptest = { workspace = true }

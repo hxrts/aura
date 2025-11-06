@@ -16,6 +16,7 @@ aura-crypto = { path = "../aura-crypto" }
 aura-journal = { path = "../aura-journal" }
 aura-transport = { path = "../aura-transport" }
 aura-types = { path = "../aura-types" }
+aura-protocol = { path = "../aura-protocol" }
 
 # Async runtime
 async-trait = { workspace = true }

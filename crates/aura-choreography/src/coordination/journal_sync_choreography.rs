@@ -9,7 +9,7 @@
 //! a coordinator for that specific phase only.
 
 use aura_journal::AccountState;
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use aura_types::{AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -658,7 +658,7 @@ pub async fn bump_session_epoch(current_epoch: u64, _participants: &[DeviceId]) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_types::effects::Effects;
+    use aura_protocol::effects::Effects;
     use aura_types::{AccountIdExt, DeviceIdExt};
 
     #[tokio::test]

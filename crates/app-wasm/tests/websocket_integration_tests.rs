@@ -1,6 +1,6 @@
 //! Integration tests for WASM foundation WebSocket and client modes
 
-use app_wasm::websocket::{ClientMode, MessageEnvelope, UnifiedWebSocketClient};
+use app_wasm::websocket::{ClientMode, WasmClientEnvelope, UnifiedWebSocketClient};
 use serde_json::json;
 use wasm_bindgen_test::*;
 
@@ -15,9 +15,9 @@ fn test_client_modes() {
 
 #[wasm_bindgen_test]
 fn test_message_envelope() {
-    let envelope = MessageEnvelope::new("test", json!({"key": "value"}));
+    let envelope = WasmClientEnvelope::new("test", json!({"key": "value"}));
     let json_str = envelope.to_json().unwrap();
-    let parsed = MessageEnvelope::from_json(&json_str).unwrap();
+    let parsed = WasmClientEnvelope::from_json(&json_str).unwrap();
 
     assert_eq!(envelope.message_type, parsed.message_type);
     assert_eq!(envelope.payload, parsed.payload);

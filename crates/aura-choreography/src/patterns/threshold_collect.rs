@@ -16,7 +16,7 @@
 //! This enables reuse across DKD, FROST, and other threshold protocols.
 
 use aura_protocol::effects::choreographic::ChoreographicRole;
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use rumpsteak_choreography::{ChoreoHandler, ChoreographyError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeMap;

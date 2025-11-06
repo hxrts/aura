@@ -952,7 +952,7 @@ mod tests {
     use super::*;
     use crate::quint::types::PropertyPriority;
     use crate::world_state::{
-        ByzantineAdversaryState, NetworkFabric, NetworkFailureConfig, ProtocolExecutionState,
+        ByzantineAdversaryState, NetworkJournal, NetworkFailureConfig, ProtocolExecutionState,
         SimulationConfiguration, WorldState,
     };
     use std::collections::{HashMap, VecDeque};
@@ -965,7 +965,7 @@ mod tests {
             current_time: 1000000,
             seed: 12345,
             participants: HashMap::new(),
-            network: NetworkFabric {
+            network: NetworkJournal {
                 partitions: Vec::new(),
                 message_delays: HashMap::new(),
                 in_flight_messages: VecDeque::new(),

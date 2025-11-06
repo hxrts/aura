@@ -1,7 +1,7 @@
 //! Fixed middleware integration tests
 
 use aura_choreography::integration::effects_integration::{ChoreographicEffectsAdapter, ChoreographicEffects};
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use rumpsteak_choreography::ChoreographyError;
 use uuid::Uuid;
 

@@ -286,9 +286,22 @@ impl DeviceId {
         Self(Uuid::new_v4())
     }
 
+    /// Create a placeholder device ID for temporary use
+    pub fn placeholder() -> Self {
+        Self(Uuid::nil())
+    }
+
     /// Create from a UUID
     pub fn from_uuid(uuid: Uuid) -> Self {
         Self(uuid)
+    }
+
+    /// Create from 32 bytes (for testing)
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        // Take first 16 bytes for UUID
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&bytes[..16]);
+        Self(Uuid::from_bytes(uuid_bytes))
     }
 }
 
@@ -391,6 +404,14 @@ impl AccountId {
     /// Create from a UUID
     pub fn from_uuid(uuid: Uuid) -> Self {
         Self(uuid)
+    }
+
+    /// Create from 32 bytes (for testing)
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        // Take first 16 bytes for UUID
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&bytes[..16]);
+        Self(Uuid::from_bytes(uuid_bytes))
     }
 }
 

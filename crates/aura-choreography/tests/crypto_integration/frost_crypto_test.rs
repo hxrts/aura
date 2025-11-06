@@ -2,7 +2,7 @@
 
 use aura_choreography::integration::crypto_bridge::FrostCryptoBridge;
 use aura_choreography::test_utils::crypto_test_utils::{generate_test_frost_shares, create_test_signing_package};
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use frost_ed25519::Identifier;
 use frost_ed25519::round1::SigningCommitments;
 use std::collections::BTreeMap;

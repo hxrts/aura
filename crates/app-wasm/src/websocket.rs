@@ -290,9 +290,9 @@ impl WebSocketClientJs {
     }
 }
 
-/// Generic message envelope for all client modes.
+/// Generic message envelope for WASM client communication.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MessageEnvelope {
+pub struct WasmClientEnvelope {
     /// Type of the message.
     pub message_type: String,
     /// Message payload.
@@ -303,7 +303,7 @@ pub struct MessageEnvelope {
     pub client_id: Option<String>,
 }
 
-impl MessageEnvelope {
+impl WasmClientEnvelope {
     /// Creates a new message envelope.
     pub fn new(message_type: impl Into<String>, payload: serde_json::Value) -> Self {
         Self {
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_message_envelope_creation() {
-        let envelope = MessageEnvelope::new("test_message", serde_json::json!({"key": "value"}));
+        let envelope = WasmClientEnvelope::new("test_message", serde_json::json!({"key": "value"}));
 
         assert_eq!(envelope.message_type, "test_message");
         assert_eq!(envelope.timestamp, None);
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_message_envelope_with_metadata() {
-        let envelope = MessageEnvelope::new("test_message", serde_json::json!({"key": "value"}))
+        let envelope = WasmClientEnvelope::new("test_message", serde_json::json!({"key": "value"}))
             .with_timestamp(12345)
             .with_client_id("client_1");
 
@@ -369,12 +369,12 @@ mod tests {
 
     #[test]
     fn test_message_envelope_serialization() {
-        let envelope = MessageEnvelope::new("test_message", serde_json::json!({"key": "value"}))
+        let envelope = WasmClientEnvelope::new("test_message", serde_json::json!({"key": "value"}))
             .with_timestamp(12345)
             .with_client_id("client_1");
 
         let json = envelope.to_json().expect("should serialize");
-        let deserialized = MessageEnvelope::from_json(&json).expect("should deserialize");
+        let deserialized = WasmClientEnvelope::from_json(&json).expect("should deserialize");
 
         assert_eq!(deserialized.message_type, "test_message");
         assert_eq!(deserialized.timestamp, Some(12345));

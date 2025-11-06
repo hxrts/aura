@@ -78,7 +78,7 @@ pub struct SideEffectRuntime {
     scheduler: Scheduler,
 }
 
-/// Logical network fabric; no canonical oracle state.
+/// Logical network journal; no canonical oracle state.
 pub struct SimulatedNetwork {
     /// Messages to deliver, keyed by delivery tick
     inflight_messages: BTreeMap<u64, Vec<Envelope>>,
@@ -123,7 +123,7 @@ Understanding the flow of information is key.
 
 4.  **Effect Interpretation:** The `SideEffectRuntime` inspects the effect type:
     *   `Effect::WriteToLocalLedger(event)` is handed back to the originating participant, which applies it to its own `AccountLedger`.
-    *   `Effect::Send(envelope)` is forwarded to the `SimulatedNetwork` unchanged. The runtime never fabricates broadcasts; it only executes what the agent requested (broadcast, fan-out, direct RPC, etc.).
+    *   `Effect::Send(envelope)` is forwarded to the `SimulatedNetwork` unchanged. The runtime never journalates broadcasts; it only executes what the agent requested (broadcast, fan-out, direct RPC, etc.).
 
 5.  **Network Simulation:** The `SimulatedNetwork` enqueues the envelope according to latency/partition rules. The deterministically-seeded RNG picks a delivery delay and records the explicit recipient set embedded in the envelope (single peer, subset, broadcast).
 

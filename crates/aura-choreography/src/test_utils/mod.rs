@@ -1,7 +1,7 @@
 //! Test utilities for choreographic protocols
 
 use aura_protocol::effects::choreographic::ChoreographicRole;
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use uuid::Uuid;
 
 pub mod crypto_test_utils;

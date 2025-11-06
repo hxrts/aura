@@ -90,7 +90,6 @@
 pub mod effects;
 pub mod handlers;
 pub mod middleware;
-pub mod runtime;
 
 // Clean algebraic effects architecture only
 
@@ -98,45 +97,48 @@ pub mod runtime;
 pub use effects::{
     // Effect traits
     NetworkEffects, StorageEffects, CryptoEffects, TimeEffects,
-    ConsoleEffects, LedgerEffects, ChoreographicEffects,
-    ProtocolEffects, MinimalEffects,
+    ConsoleEffects, LedgerEffects, ChoreographicEffects, JournalEffects,
+    RandomEffects, AgentEffects, AuthenticationEffects,
+    DeviceStorageEffects, SessionManagementEffects, ConfigurationEffects,
+    Effects, ProtocolEffects, MinimalEffects,
     
     // Error types
-    NetworkError, StorageError, CryptoError, TimeError,
+    NetworkError, StorageError, JournalError, LedgerError,
+    AuthError, DeviceStorageError, SessionError, ConfigError,
     
     // Common types
-    WakeCondition, TimeoutHandle, PeerEvent, StorageStats,
-    ChoreographicRole, ChoreographyEvent,
+    WakeCondition, NetworkAddress, StorageLocation, ConsoleEvent, LogLevel,
+    ChoreographicRole, ChoreographyEvent, SessionData, SessionType,
+    SessionUpdate, DeviceAttestation, JournalStats, DeviceMetadata,
+    LedgerEvent, LedgerEventStream,
 };
 
 pub use handlers::{
-    CompositeHandler, HandlerBuilder,
+    // Main handler types
+    AuraHandler, BoxedHandler, AuraHandlerFactory, HandlerUtils,
     
-    // Individual handlers for advanced use
-    MemoryNetworkHandler, RealNetworkHandler, SimulatedNetworkHandler,
-    MockCryptoHandler, RealCryptoHandler,
-    RealTimeHandler, SimulatedTimeHandler,
-    MemoryStorageHandler, FilesystemStorageHandler,
-    SilentConsoleHandler, StdoutConsoleHandler, StructuredConsoleHandler,
+    // Context and configuration
+    AuraContext, ExecutionMode, EffectType, AuraHandlerError,
+    
+    // Factory and registry
+    AuraHandlerBuilder, AuraHandlerConfig, FactoryError,
+    EffectRegistry, RegistrableHandler, RegistryError,
 };
 
 pub use middleware::{
-    // Middleware types
-    MiddlewareStack, MiddlewareConfig, Middleware,
+    // Core middleware traits and types
+    AuraMiddleware, MiddlewareHandler, ProtocolHandler,
+    MiddlewareStack, MiddlewareLayer, StackBuilder,
+    
+    // Context and results
+    MiddlewareContext, MiddlewareResult, HandlerMetadata,
     
     // Specific middleware
-    TracingMiddleware, MetricsMiddleware,
-    RetryMiddleware, RetryConfig,
-    CapabilityMiddleware, AuthorizationMiddleware,
+    AuthMiddleware, MetricsMiddleware, LoggingMiddleware,
+    EffectMiddleware, EffectInjector,
     
-    // Middleware utilities
-    create_standard_stack,
-};
-
-pub use runtime::{
-    ExecutionContext, ContextBuilder,
-    SessionManager, SessionState, SessionStatus, SessionConfig,
-    EffectExecutor, ExecutorConfig, ExecutionMode,
+    // Errors
+    MiddlewareError, HandlerError, ErrorHandler,
 };
 
 // Clean API - no legacy compatibility

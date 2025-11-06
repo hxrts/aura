@@ -1,7 +1,7 @@
 //! Cryptographic testing utilities for choreographic protocols
 
 // CryptoEffects not available in current middleware structure
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use frost_ed25519::{Identifier, SigningPackage};
 use frost_ed25519::keys::{KeyPackage, SecretShare};

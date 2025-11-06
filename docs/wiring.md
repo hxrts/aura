@@ -531,7 +531,7 @@ graph TD
 - **Adversary**: Byzantine failure and network attack simulation
 - **Analysis**: Trace recording and failure analysis
 - **Builder**: Simulation configuration builder
-- **Network**: Simulated network fabric
+- **Network**: Simulated network journal
 - **Observability**: Debugging and monitoring tools
 - **SessionStatus**: Re-exported from aura-types (canonical single source of truth)
 

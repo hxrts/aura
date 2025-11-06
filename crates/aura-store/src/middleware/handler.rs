@@ -2,7 +2,7 @@
 //!
 //! Defines the core storage operations that can be wrapped with middleware.
 
-use aura_types::effects::AuraEffects;
+use aura_protocol::effects::AuraEffects;
 use aura_types::{AuraError, MiddlewareResult};
 use std::collections::HashMap;
 
@@ -125,7 +125,7 @@ impl StorageHandler for BaseStorageHandler {
         operation: StorageOperation,
         effects: &dyn AuraEffects,
     ) -> MiddlewareResult<StorageResult> {
-        use aura_types::effects::StorageLocation;
+        use aura_protocol::effects::StorageLocation;
 
         match operation {
             StorageOperation::Store {

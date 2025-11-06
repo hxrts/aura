@@ -23,6 +23,8 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 ed25519-dalek = { workspace = true }
+hex = { workspace = true }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

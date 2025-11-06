@@ -1,99 +1,429 @@
-//! Effect Handlers Module
+//! Unified Aura Handler Architecture
 //!
-//! This module contains concrete implementations of the effect traits defined in the effects module.
-//! Following the algebraic effects pattern, handlers interpret effect operations and provide
-//! different implementations (real, mock, simulation) for different execution contexts.
+//! This module defines the core traits and types for Aura's unified handler system.
+//! All effect execution, session type interpretation, and middleware composition
+//! flows through these interfaces.
 //!
-//! ## Architecture Principles
+//! # Architecture Overview
 //!
-//! 1. **Multiple Implementations**: Each effect has multiple handlers (real, mock, simulation)
-//! 2. **Handler Selection**: Choose appropriate handler based on execution context
-//! 3. **Composability**: Handlers can be combined into composite effect providers
-//! 4. **Middleware Integration**: Handlers can be wrapped with middleware decorators
+//! The unified handler architecture replaces the previous fragmented approach
+//! with a single, elegant composition system:
 //!
-//! ## Handler Categories
+//! - **AuraHandler**: Core trait for all effect execution and session interpretation
+//! - **AuraContext**: Unified context flowing through all operations
+//! - **Effect**: Type-safe wrapper for all effect operations
+//! - **EffectType**: Classification system for effect dispatch
+//! - **ExecutionMode**: Environment control (Testing, Production, Simulation)
 //!
-//! - **Network Handlers**: Memory, real network, simulated network
-//! - **Storage Handlers**: Memory, filesystem, distributed storage
-//! - **Crypto Handlers**: Real crypto, mock crypto for testing
-//! - **Time Handlers**: System time, simulated time for deterministic testing
-//! - **Console Handlers**: Stdout, structured logging, silent for tests
-//! - **Ledger Handlers**: Memory ledger, persistent ledger
-//! - **Choreographic Handlers**: Rumpsteak integration, local execution
+//! # Design Principles
 //!
-//! ## Usage Pattern
-//!
-//! ```rust,ignore
-//! use crate::handlers::{
-//!     network::MemoryNetworkHandler,
-//!     crypto::RealCryptoHandler,
-//!     time::SimulatedTimeHandler,
-//!     composite::CompositeHandler,
-//! };
-//!
-//! // Create individual handlers
-//! let network = MemoryNetworkHandler::new();
-//! let crypto = RealCryptoHandler::new();
-//! let time = SimulatedTimeHandler::new();
-//!
-//! // Combine into composite handler
-//! let effects = CompositeHandler::builder()
-//!     .with_network(network)
-//!     .with_crypto(crypto)
-//!     .with_time(time)
-//!     .build();
-//! ```
+//! - **Algebraic Composition**: Preserve free algebra properties
+//! - **Middleware-First**: All handlers are middleware in a composable stack
+//! - **Unified Context**: Single context object flows through all layers
+//! - **Zero Legacy**: Clean replacement with no backwards compatibility
 
-pub mod choreographic;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use thiserror::Error;
+
+pub mod context;
 pub mod composite;
-pub mod console;
-pub mod crypto;
-pub mod ledger;
-pub mod network;
-pub mod storage;
-pub mod time;
+pub mod erased;
+pub mod factory;
+pub mod middleware;
+pub mod registry;
+pub mod typed_bridge;
 
-// Re-export commonly used handlers
-pub use composite::CompositeHandler;
-pub use console::{SilentConsoleHandler, StdoutConsoleHandler, StructuredConsoleHandler};
-pub use crypto::{MockCryptoHandler, RealCryptoHandler};
-pub use network::{MemoryNetworkHandler, RealNetworkHandler, SimulatedNetworkHandler};
-pub use storage::{MemoryStorageHandler, FilesystemStorageHandler};
-pub use time::{RealTimeHandler, SimulatedTimeHandler};
-
-/// Builder for creating composite effect handlers
-pub struct HandlerBuilder {
-    device_id: uuid::Uuid,
-    is_simulation: bool,
+/// Execution mode for Aura handlers
+///
+/// Controls the environment and implementation strategy for effect execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExecutionMode {
+    /// Testing mode: Mock implementations, deterministic behavior
+    Testing,
+    /// Production mode: Real implementations, actual system operations
+    Production,
+    /// Simulation mode: Deterministic implementations with controllable effects
+    Simulation {
+        /// Random seed for deterministic simulation
+        seed: u64,
+    },
 }
 
-impl HandlerBuilder {
-    /// Create a new handler builder
-    pub fn new(device_id: uuid::Uuid) -> Self {
-        Self {
-            device_id,
-            is_simulation: false,
+impl ExecutionMode {
+    /// Check if this mode uses deterministic effects
+    pub fn is_deterministic(&self) -> bool {
+        matches!(self, Self::Testing | Self::Simulation { .. })
+    }
+
+    /// Check if this mode uses real system operations
+    pub fn is_production(&self) -> bool {
+        matches!(self, Self::Production)
+    }
+
+    /// Get the seed for deterministic modes
+    pub fn seed(&self) -> Option<u64> {
+        match self {
+            Self::Simulation { seed } => Some(*seed),
+            _ => None,
+        }
+    }
+}
+
+/// Effect type classification for dispatch and middleware routing
+///
+/// Categorizes all effects in the Aura system for efficient dispatch
+/// and middleware composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EffectType {
+    /// Cryptographic operations (FROST, DKD, hashing, key derivation)
+    Crypto,
+    /// Network communication (send, receive, broadcast)
+    Network,
+    /// Persistent storage operations
+    Storage,
+    /// Time-related operations (current time, sleep)
+    Time,
+    /// Console and logging operations
+    Console,
+    /// Random number generation
+    Random,
+    /// Ledger operations (transaction log, state)
+    Ledger,
+    /// Journal operations (event log, snapshots)
+    Journal,
+
+    /// Choreographic protocol coordination
+    Choreographic,
+
+    /// Device-local storage
+    DeviceStorage,
+    /// Device authentication and sessions
+    Authentication,
+    /// Configuration management
+    Configuration,
+    /// Session lifecycle management
+    SessionManagement,
+
+    /// Fault injection for testing
+    FaultInjection,
+    /// Time control for simulation
+    TimeControl,
+    /// State inspection for debugging
+    StateInspection,
+    /// Property checking for verification
+    PropertyChecking,
+    /// Chaos coordination for resilience testing
+    ChaosCoordination,
+}
+
+impl fmt::Display for EffectType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Crypto => write!(f, "crypto"),
+            Self::Network => write!(f, "network"),
+            Self::Storage => write!(f, "storage"),
+            Self::Time => write!(f, "time"),
+            Self::Console => write!(f, "console"),
+            Self::Random => write!(f, "random"),
+            Self::Ledger => write!(f, "ledger"),
+            Self::Journal => write!(f, "journal"),
+            Self::Choreographic => write!(f, "choreographic"),
+            Self::DeviceStorage => write!(f, "device_storage"),
+            Self::Authentication => write!(f, "authentication"),
+            Self::Configuration => write!(f, "configuration"),
+            Self::SessionManagement => write!(f, "session_management"),
+            Self::FaultInjection => write!(f, "fault_injection"),
+            Self::TimeControl => write!(f, "time_control"),
+            Self::StateInspection => write!(f, "state_inspection"),
+            Self::PropertyChecking => write!(f, "property_checking"),
+            Self::ChaosCoordination => write!(f, "chaos_coordination"),
+        }
+    }
+}
+
+/// Error type for Aura handler operations
+#[derive(Debug, Error)]
+pub enum AuraHandlerError {
+    /// Effect not supported by this handler
+    #[error("Effect {effect_type:?} not supported")]
+    UnsupportedEffect {
+        /// Type of effect that is not supported
+        effect_type: EffectType,
+    },
+
+    /// Operation not found within effect type
+    #[error("Operation '{operation}' not found in effect {effect_type:?}")]
+    UnknownOperation {
+        /// Type of effect being queried
+        effect_type: EffectType,
+        /// Name of the operation requested
+        operation: String,
+    },
+
+    /// Effect parameter serialization failed
+    #[error("Failed to serialize parameters for {effect_type:?}.{operation}")]
+    EffectSerialization {
+        /// Type of effect
+        effect_type: EffectType,
+        /// Name of the operation
+        operation: String,
+        /// Underlying error
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Effect parameter deserialization failed
+    #[error("Failed to deserialize parameters for {effect_type:?}.{operation}")]
+    EffectDeserialization {
+        /// Type of effect
+        effect_type: EffectType,
+        /// Name of the operation
+        operation: String,
+        /// Underlying error
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Session type execution failed
+    #[error("Session type execution failed")]
+    SessionExecution {
+        /// Underlying error
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Context operation failed
+    #[error("Context operation failed: {message}")]
+    ContextError {
+        /// Error message
+        message: String,
+    },
+
+    /// Middleware operation failed
+    #[error("Middleware operation failed")]
+    MiddlewareError {
+        /// Underlying error
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Registry operation failed
+    #[error("Registry operation failed")]
+    RegistryError {
+        /// Underlying error
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Operation not supported by effect type
+    #[error("Operation '{operation}' not supported by effect {effect_type:?}")]
+    UnsupportedOperation {
+        /// Type of effect
+        effect_type: EffectType,
+        /// Name of the operation
+        operation: String,
+    },
+
+    /// Parameter deserialization failed
+    #[error("Failed to deserialize parameters")]
+    ParameterDeserializationFailed {
+        /// Underlying error
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Effect execution failed
+    #[error("Effect execution failed")]
+    ExecutionFailed {
+        /// Underlying error
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Authorization failed
+    #[error("Authorization failed")]
+    AuthorizationFailed {
+        /// Underlying error
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Handler creation failed
+    #[error("Handler creation failed")]
+    HandlerCreationFailed {
+        /// Underlying error from handler creation
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+impl AuraHandlerError {
+    /// Create a context error
+    pub fn context_error(message: impl Into<String>) -> Self {
+        Self::ContextError {
+            message: message.into(),
         }
     }
 
-    /// Enable simulation mode
-    pub fn simulation(mut self) -> Self {
-        self.is_simulation = true;
-        self
+    /// Wrap another error as a middleware error
+    pub fn middleware_error(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::MiddlewareError {
+            source: Box::new(source),
+        }
     }
 
-    /// Build handlers optimized for testing
-    pub fn for_testing(self) -> CompositeHandler {
-        CompositeHandler::for_testing(self.device_id)
+    /// Wrap another error as a registry error
+    pub fn registry_error(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::RegistryError {
+            source: Box::new(source),
+        }
     }
 
-    /// Build handlers for production use
-    pub fn for_production(self) -> CompositeHandler {
-        CompositeHandler::for_production(self.device_id)
+    /// Wrap another error as a session execution error
+    pub fn session_error(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::SessionExecution {
+            source: Box::new(source),
+        }
+    }
+}
+
+// The primary AuraHandler trait is now defined in the erased module
+// to avoid duplication and ensure all handlers use the unified interface.
+
+impl EffectType {
+    /// Get all effect types
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::Crypto,
+            Self::Network,
+            Self::Storage,
+            Self::Time,
+            Self::Console,
+            Self::Random,
+            Self::Ledger,
+            Self::Journal,
+            Self::Choreographic,
+            Self::DeviceStorage,
+            Self::Authentication,
+            Self::Configuration,
+            Self::SessionManagement,
+            Self::FaultInjection,
+            Self::TimeControl,
+            Self::StateInspection,
+            Self::PropertyChecking,
+            Self::ChaosCoordination,
+        ]
     }
 
-    /// Build handlers for simulation/deterministic testing
-    pub fn for_simulation(self) -> CompositeHandler {
-        CompositeHandler::for_simulation(self.device_id)
+    /// Check if this is a core protocol effect
+    pub fn is_protocol_effect(&self) -> bool {
+        matches!(
+            self,
+            Self::Crypto
+                | Self::Network
+                | Self::Storage
+                | Self::Time
+                | Self::Console
+                | Self::Random
+                | Self::Ledger
+                | Self::Journal
+                | Self::Choreographic
+        )
+    }
+
+    /// Check if this is an agent effect
+    pub fn is_agent_effect(&self) -> bool {
+        matches!(
+            self,
+            Self::DeviceStorage
+                | Self::Authentication
+                | Self::Configuration
+                | Self::SessionManagement
+        )
+    }
+
+    /// Check if this is a simulation effect
+    pub fn is_simulation_effect(&self) -> bool {
+        matches!(
+            self,
+            Self::FaultInjection
+                | Self::TimeControl
+                | Self::StateInspection
+                | Self::PropertyChecking
+                | Self::ChaosCoordination
+        )
+    }
+}
+
+// Re-export types from submodules (selective to avoid ambiguous re-exports)
+pub use context::{
+    AgentContext, AuraContext, ChoreographicContext, MiddlewareContext, PlatformInfo,
+    SimulationContext,
+};
+pub use composite::CompositeHandler;
+pub use erased::{AuraHandler, BoxedHandler, HandlerUtils};
+pub use factory::{AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, FactoryError};
+pub use middleware::{AuraMiddleware, MiddlewareStack};
+pub use registry::{EffectRegistry, RegistrableHandler, RegistryError};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_execution_mode_properties() {
+        let testing = ExecutionMode::Testing;
+        assert!(testing.is_deterministic());
+        assert!(!testing.is_production());
+        assert_eq!(testing.seed(), None);
+
+        let production = ExecutionMode::Production;
+        assert!(!production.is_deterministic());
+        assert!(production.is_production());
+        assert_eq!(production.seed(), None);
+
+        let simulation = ExecutionMode::Simulation { seed: 42 };
+        assert!(simulation.is_deterministic());
+        assert!(!simulation.is_production());
+        assert_eq!(simulation.seed(), Some(42));
+    }
+
+    #[test]
+    fn test_effect_type_classification() {
+        assert!(EffectType::Crypto.is_protocol_effect());
+        assert!(!EffectType::Crypto.is_agent_effect());
+        assert!(!EffectType::Crypto.is_simulation_effect());
+
+        assert!(!EffectType::Authentication.is_protocol_effect());
+        assert!(EffectType::Authentication.is_agent_effect());
+        assert!(!EffectType::Authentication.is_simulation_effect());
+
+        assert!(!EffectType::FaultInjection.is_protocol_effect());
+        assert!(!EffectType::FaultInjection.is_agent_effect());
+        assert!(EffectType::FaultInjection.is_simulation_effect());
+    }
+
+    #[test]
+    fn test_effect_serialization() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct TestParams {
+            value: u32,
+        }
+
+        let params = TestParams { value: 42 };
+        let serialized = bincode::serialize(&params).unwrap();
+        let deserialized: TestParams = bincode::deserialize(&serialized).unwrap();
+
+        assert_eq!(deserialized.value, 42);
+    }
+
+    #[test]
+    fn test_effect_type_all() {
+        let all_effects = EffectType::all();
+        assert!(all_effects.len() >= 18); // We have at least 18 effect types
+        assert!(all_effects.contains(&EffectType::Crypto));
+        assert!(all_effects.contains(&EffectType::Choreographic));
+        assert!(all_effects.contains(&EffectType::FaultInjection));
     }
 }

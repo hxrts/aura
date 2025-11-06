@@ -1,7 +1,7 @@
 //! Analysis client handler
 
 use crate::error::{WasmError, WasmResult};
-use crate::websocket::{ClientHandler, MessageEnvelope};
+use crate::websocket::{ClientHandler, WasmClientEnvelope};
 use crate::{console_error, console_log};
 
 /// Handler for trace analysis engine communication
@@ -30,7 +30,7 @@ impl ClientHandler for AnalysisHandler {
     fn handle_message(&mut self, data: &str) -> WasmResult<()> {
         console_log!("[Analysis] Received message: {}", data);
 
-        let envelope = MessageEnvelope::from_json(data)?;
+        let envelope = WasmClientEnvelope::from_json(data)?;
 
         match envelope.message_type.as_str() {
             "analysis_result" => {

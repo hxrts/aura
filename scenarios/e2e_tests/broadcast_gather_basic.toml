@@ -1,0 +1,86 @@
+# Basic Broadcast-Gather E2E Test Scenario
+#
+# This scenario tests the fundamental broadcast-and-gather choreographic pattern
+# where multiple participants exchange messages in an all-to-all fashion.
+#
+# Protocol Flow:
+# 1. Each participant creates a message with their identity
+# 2. Each participant broadcasts to all other participants
+# 3. Each participant collects messages from all N-1 other participants
+# 4. Verification that all messages were received correctly
+
+[metadata]
+name = "broadcast_gather_basic_e2e"
+description = "Basic end-to-end test of broadcast-and-gather choreography with 3 participants"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["e2e", "broadcast-gather", "choreography", "basic"]
+
+[setup]
+participants = 3
+threshold = 3  # All participants must participate
+seed = 42      # Deterministic execution
+
+[network]
+latency_range = [5, 10]  # Low latency for fast tests
+drop_rate = 0.0           # No packet loss in basic test
+
+[[phases]]
+name = "initialization"
+description = "Initialize participants and set up network"
+timeout_seconds = 2
+actions = [
+    { type = "wait_ticks", ticks = 10 }
+]
+
+[[phases]]
+name = "broadcast_phase"
+description = "Each participant broadcasts their message"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "broadcast_gather", participants = ["participant_0", "participant_1", "participant_2"] }
+]
+
+[[phases]]
+name = "gather_phase"
+description = "Each participant collects messages from others"
+timeout_seconds = 5
+actions = [
+    { type = "verify_property", property = "all_messages_received", expected = true },
+    { type = "verify_property", property = "message_consistency", expected = true }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify all participants have consistent view"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "consistent_message_count", expected = true },
+    { type = "verify_property", property = "no_duplicate_messages", expected = true }
+]
+
+# Properties to verify during execution
+[[properties]]
+name = "all_messages_received"
+property_type = "safety"
+description = "Each participant receives messages from all N-1 other participants"
+
+[[properties]]
+name = "message_consistency"
+property_type = "safety"
+description = "All participants have the same set of messages"
+
+[[properties]]
+name = "consistent_message_count"
+property_type = "safety"
+description = "All participants collected exactly N messages (including their own)"
+
+[[properties]]
+name = "no_duplicate_messages"
+property_type = "safety"
+description = "No participant appears more than once in any participant's message set"
+
+[[properties]]
+name = "broadcast_completes"
+property_type = "liveness"
+description = "The broadcast-and-gather choreography completes within timeout"

@@ -6,7 +6,7 @@
 
 use super::threshold_collect::ThresholdOperationProvider;
 use aura_protocol::effects::choreographic::ChoreographicRole;
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -313,7 +313,7 @@ impl ThresholdOperationProvider<FrostContext, FrostMaterial, FrostResult>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_types::effects::Effects;
+    use aura_protocol::effects::Effects;
     use uuid::Uuid;
 
     #[tokio::test]

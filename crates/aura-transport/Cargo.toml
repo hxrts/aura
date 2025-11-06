@@ -18,6 +18,7 @@ workspace = true
 # Workspace crates
 aura-types = { path = "../aura-types" }
 aura-messages = { path = "../aura-messages" }
+aura-protocol = { path = "../aura-protocol" }
 # session_types removed during refactor - implementation moved to coordination
 # Removed circular dependency: transport no longer depends on coordination
 # aura-coordination = { path = "../coordination" }

@@ -9,7 +9,7 @@ pub type MessageId = Uuid;
 
 /// Base message envelope for all WebSocket communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessageEnvelope {
+pub struct WebSocketEnvelope {
     /// Unique message identifier
     pub id: MessageId,
     /// Message type identifier
@@ -221,7 +221,7 @@ pub enum AnalysisClientMessage {
     },
 }
 
-impl MessageEnvelope {
+impl WebSocketEnvelope {
     /// Create a new message envelope
     #[allow(clippy::disallowed_methods)]
     pub fn new(message_type: String, source: String, payload: serde_json::Value) -> Self {

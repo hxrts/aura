@@ -14,7 +14,7 @@ use aura_protocol::{
         ChoreographyResult, OperationType, SafeChoreography, TimeoutConfig, TimeoutManager,
     },
 };
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use aura_types::{errors::AuraError, DeviceId};
 use rumpsteak_choreography::ChoreoHandler;
 use std::sync::Arc;

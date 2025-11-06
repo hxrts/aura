@@ -21,6 +21,9 @@
 
 #![allow(clippy::result_large_err)]
 
+// Effects system for crypto operations
+pub mod effects;
+
 // Merkle tree utilities
 pub mod merkle;
 

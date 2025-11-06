@@ -1,0 +1,93 @@
+# Multi-Round Coordination E2E Test Scenario
+#
+# Tests multi-phase choreographic protocols where participants
+# go through multiple rounds of communication.
+#
+# Protocol Flow:
+# Round 1: Commitment phase - each participant sends commitments
+# Round 2: Response phase - each participant responds to commitments
+# Round 3: Finalization phase - each participant sends final confirmation
+
+[metadata]
+name = "multi_round_coordination_e2e"
+description = "End-to-end test of multi-round choreographic coordination"
+version = "1.0.0"
+author = "Aura Team"
+tags = ["e2e", "multi-round", "choreography", "coordination"]
+
+[setup]
+participants = 3
+threshold = 3
+seed = 100
+
+[network]
+latency_range = [10, 20]
+drop_rate = 0.0
+
+[[phases]]
+name = "setup"
+description = "Initialize multi-round protocol"
+timeout_seconds = 2
+actions = [
+    { type = "wait_ticks", ticks = 5 }
+]
+
+[[phases]]
+name = "round_1_commitments"
+description = "Round 1: Exchange commitments"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "broadcast_gather", participants = ["participant_0", "participant_1", "participant_2"], round = 1 },
+    { type = "verify_property", property = "round_1_complete", expected = true }
+]
+
+[[phases]]
+name = "round_2_responses"
+description = "Round 2: Exchange responses"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "broadcast_gather", participants = ["participant_0", "participant_1", "participant_2"], round = 2 },
+    { type = "verify_property", property = "round_2_complete", expected = true }
+]
+
+[[phases]]
+name = "round_3_finalization"
+description = "Round 3: Finalization"
+timeout_seconds = 5
+actions = [
+    { type = "run_choreography", choreography = "broadcast_gather", participants = ["participant_0", "participant_1", "participant_2"], round = 3 },
+    { type = "verify_property", property = "round_3_complete", expected = true }
+]
+
+[[phases]]
+name = "verification"
+description = "Verify protocol completed correctly"
+timeout_seconds = 2
+actions = [
+    { type = "verify_property", property = "all_rounds_complete", expected = true },
+    { type = "verify_property", property = "protocol_success", expected = true }
+]
+
+[[properties]]
+name = "round_1_complete"
+property_type = "safety"
+
+[[properties]]
+name = "round_2_complete"
+property_type = "safety"
+
+[[properties]]
+name = "round_3_complete"
+property_type = "safety"
+
+[[properties]]
+name = "all_rounds_complete"
+property_type = "safety"
+
+[[properties]]
+name = "protocol_success"
+property_type = "safety"
+
+[[properties]]
+name = "protocol_completes"
+property_type = "liveness"

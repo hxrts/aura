@@ -13,19 +13,31 @@
 // Core modules
 mod effects;
 mod error;
-pub mod fabric;
+pub mod journal_ops;
 pub mod middleware;
 mod operations;
 mod state;
 mod sync;
 mod types;
 
+// Domain modules moved from aura-types
+pub mod crdt;
+pub mod journal;
+pub mod ledger;
+pub mod tree;
+
 // Re-exports
 pub use effects::*;
 pub use error::{Error, Result};
-pub use fabric::*;
+pub use journal_ops::*;
 pub use middleware::*;
 pub use operations::*;
 pub use state::*;
 pub use sync::*;
 pub use types::*;
+
+// Domain re-exports
+pub use crdt::*;
+pub use journal::*;
+pub use ledger::*;
+pub use tree::*;

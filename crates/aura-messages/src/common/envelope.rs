@@ -5,9 +5,9 @@
 use aura_types::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 
-/// Generic message envelope for all protocols
+/// Generic message envelope for wire protocol communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessageEnvelope<T> {
+pub struct WireEnvelope<T> {
     /// Message format version
     pub version: u16,
     /// Session this message belongs to (optional for some protocols)
@@ -22,7 +22,7 @@ pub struct MessageEnvelope<T> {
     pub payload: T,
 }
 
-impl<T> MessageEnvelope<T> {
+impl<T> WireEnvelope<T> {
     /// Create a new message envelope
     pub fn new(
         session_id: Option<SessionId>,

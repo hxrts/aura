@@ -1,7 +1,7 @@
 //! Scenario testing framework for choreographic protocols
 
 use crate::test_utils::create_test_participants;
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;

@@ -2,7 +2,7 @@
 
 // TODO: Fix FROST imports after getting basic structure working
 // use aura_crypto::middleware::CryptoEffects;
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 // use frost_ed25519::{Identifier, KeyPackage, SigningCommitments, SigningNonces, SigningPackage};
 use std::collections::BTreeMap;
 

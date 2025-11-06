@@ -5,6 +5,8 @@
 //! stacked to create custom transport behaviors.
 
 pub mod middleware;
+pub mod peers;
 
 // Re-export all middleware components
 pub use middleware::*;
+pub use peers::*;

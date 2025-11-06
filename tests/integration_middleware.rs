@@ -19,7 +19,7 @@ use aura_journal::middleware::{
 };
 use aura_journal::{DeviceMetadata, DeviceType, JournalOperation, JournalContext};
 
-use aura_types::effects::{DefaultEffects, EffectsBuilder};
+use aura_protocol::effects::{DefaultEffects, EffectsBuilder};
 use aura_types::{DeviceId, MiddlewareContext};
 use aura_crypto::{Ed25519VerifyingKey, AccountId};
 

@@ -1,7 +1,7 @@
 //! DKD crypto integration tests
 
 use aura_choreography::integration::crypto_bridge::DkdCryptoBridge;
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use std::collections::HashMap;
 
 /// Test DKD crypto bridge basic functionality

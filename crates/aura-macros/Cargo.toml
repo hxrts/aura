@@ -21,6 +21,7 @@ syn = { version = "2.0", features = ["full", "extra-traits"] }
 
 # Internal types for macro generation
 aura-types = { path = "../aura-types" }
+aura-protocol = { path = "../aura-protocol" }
 
 # Utilities
 thiserror = { workspace = true }

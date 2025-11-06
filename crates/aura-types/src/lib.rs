@@ -23,62 +23,43 @@
 //! - `relationships`: Relationship and context types
 //! - `session_utils`: Session type utilities, events, and formal verification properties
 
-pub mod capabilities;
 pub mod config;
 pub mod content;
 pub mod conversions;
-pub mod crdt;
-pub mod effects;
 pub mod encoding;
 pub mod errors;
-pub mod fabric;
 pub mod identifiers;
 pub mod macros;
-// pub mod middleware; // Temporarily disabled due to async lifetime issues
-pub mod simple_middleware;
-pub mod peers;
 pub mod permissions;
 pub mod protocol_types;
 pub mod protocols;
-pub mod relationships;
 pub mod serialization;
 pub mod session_utils;
 pub mod sessions;
-
-pub mod time_utils;
+pub mod time;
 // Re-export all public types for convenient access
-pub use capabilities::*;
 pub use config::{
     AuraConfig, ConfigDefaults, ConfigFormat, ConfigLoader, ConfigMerge, ConfigValidation,
 };
 pub use content::*;
-pub use crdt::{AutomergeCrdt, CrdtBuilder, CrdtError, CrdtOperation, CrdtState, CrdtValue};
-pub use effects::{
-    AuraEffects, ConsoleEffects, CryptoEffects, EffectsBuilder, NetworkEffects, RandomEffects,
-    StorageEffects, TimeEffects,
-};
 pub use encoding::{FromBase64, FromHex, ToBase64, ToHex};
 pub use errors::{
     AgentError, AuraError, CapabilityError, CryptoError, DataError, ErrorCode, ErrorContext,
     ErrorSeverity, InfrastructureError, ProtocolError, SessionError, SystemError,
 };
-pub use fabric::{
-    CryptoBackendId, EdgeId, EdgeKind, HashFunctionId, KeyEdge, KeyNode, NodeCommitment, NodeId,
-    NodeKind, NodePolicy, ShareHeader,
-};
 // Re-export Result from errors module separately to avoid naming conflicts
 pub use errors::Result as AuraResult;
 pub use identifiers::*;
-// pub use middleware::{AuraMiddleware, HandlerMetadata, MiddlewareContext, MiddlewareError, MiddlewareResult, PerformanceProfile}; // Temporarily disabled
-pub use simple_middleware::{MiddlewareContext, MiddlewareResult};
-pub use peers::*;
 pub use permissions::CanonicalPermission;
 pub use protocol_types::*;
 pub use protocols::*;
-pub use relationships::*;
 pub use serialization::{Result as SerializationResult, SerializationError};
 pub use session_utils::*;
 pub use sessions::*;
+// Backward compatibility exports
+pub use time::{
+    current_system_time, current_unix_timestamp, current_unix_timestamp_millis, LamportTimestamp,
+};
 
 /// Result type for type-related operations
 pub type Result<T> = std::result::Result<T, TypeError>;

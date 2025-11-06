@@ -473,7 +473,7 @@ use aura_types::{
 
 **Effect Traits** (for injectable effects):
 ```rust
-use aura_types::effects::{
+use aura_protocol::effects::{
     CryptoEffects,       // Cryptographic operations
     TimeEffects,         // Time-related operations
     NetworkEffects,      // Network operations

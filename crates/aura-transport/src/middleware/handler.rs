@@ -2,7 +2,7 @@
 //!
 //! Defines the core transport operations that can be wrapped with middleware.
 
-use aura_types::effects::AuraEffects;
+use aura_protocol::effects::AuraEffects;
 use aura_types::MiddlewareResult;
 use std::collections::HashMap;
 use std::net::SocketAddr;

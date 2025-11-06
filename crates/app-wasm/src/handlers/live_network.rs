@@ -1,7 +1,7 @@
 //! Live network client handler
 
 use crate::error::{WasmError, WasmResult};
-use crate::websocket::{ClientHandler, MessageEnvelope};
+use crate::websocket::{ClientHandler, WasmClientEnvelope};
 use crate::{console_error, console_log};
 
 /// Handler for live network node communication
@@ -30,7 +30,7 @@ impl ClientHandler for LiveNetworkHandler {
     fn handle_message(&mut self, data: &str) -> WasmResult<()> {
         console_log!("[LiveNetwork] Received message: {}", data);
 
-        let envelope = MessageEnvelope::from_json(data)?;
+        let envelope = WasmClientEnvelope::from_json(data)?;
 
         match envelope.message_type.as_str() {
             "trace_event" => {

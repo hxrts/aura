@@ -18,6 +18,10 @@ pub mod guardian;
 pub mod session;
 pub mod threshold;
 
+// Domain modules moved from aura-types
+pub mod capabilities;
+pub mod relationships;
+
 // Integration tests
 #[cfg(test)]
 mod integration_tests;
@@ -33,6 +37,10 @@ pub use event_validation::{
     validate_device_signature, validate_guardian_signature, validate_threshold_signature,
     EventValidator,
 };
+
+// Re-export domain types
+pub use capabilities::*;
+pub use relationships::*;
 
 // EventAuthorization and ThresholdSig are defined in this module and exported by default
 

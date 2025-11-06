@@ -1,0 +1,140 @@
+# CRDT Choreographic Integration Scenario
+# Tests session-type-based CRDT operations using choreographic protocols
+
+[scenario]
+name = "crdt_choreographic_integration"
+description = "Integration test for session-type-based CRDT operations with choreographic coordination"
+version = "0.1.0"
+
+[participants]
+count = 5
+roles = ["Replica1", "Replica2", "Replica3", "Replica4", "Replica5"]
+
+[phases]
+
+# Phase 1: Initialize CRDT replicas
+[[phases.initialization]]
+name = "Initialize CRDT replicas"
+description = "Set up journal CRDT state on all participants"
+timeout_ms = 5000
+
+[[phases.initialization.actions]]
+type = "create_journal_crdt_state"
+participants = ["Replica1", "Replica2", "Replica3", "Replica4", "Replica5"]
+
+# Phase 2: Operation broadcast via choreography
+[[phases.operation_broadcast]]
+name = "CRDT operation broadcast"
+description = "Test CmRDT operation broadcast using session-type choreography"
+timeout_ms = 10000
+
+[[phases.operation_broadcast.actions]]
+type = "journal_op_broadcast"
+issuer = "Replica1"
+operation = { type = "AddNode", node_id = "node_1" }
+participants = ["Replica1", "Replica2", "Replica3", "Replica4", "Replica5"]
+
+[[phases.operation_broadcast.actions]]
+type = "verify_causal_delivery"
+participants = ["Replica2", "Replica3", "Replica4", "Replica5"]
+expected_operation_id = { device = "Replica1", sequence = 1 }
+
+# Phase 3: Concurrent operations test
+[[phases.concurrent_operations]]
+name = "Concurrent CRDT operations"
+description = "Test commutativity under concurrent operations"
+timeout_ms = 15000
+
+[[phases.concurrent_operations.actions]]
+type = "parallel_operations"
+operations = [
+    { issuer = "Replica1", type = "AddNode", node_id = "node_2" },
+    { issuer = "Replica2", type = "AddEdge", from = "node_1", to = "node_2" },
+    { issuer = "Replica3", type = "ContributeShares", parent = "node_1", child = "node_2" }
+]
+
+[[phases.concurrent_operations.actions]]
+type = "verify_convergence"
+participants = ["Replica1", "Replica2", "Replica3", "Replica4", "Replica5"]
+timeout_ms = 5000
+
+# Phase 4: Repair protocol test
+[[phases.repair_protocol]]
+name = "CRDT repair protocol"
+description = "Test missing operation repair using session-type choreography"
+timeout_ms = 10000
+
+[[phases.repair_protocol.actions]]
+type = "simulate_message_loss"
+from = "Replica1"
+to = "Replica5"
+operation = { type = "IncrementEpoch", new_epoch = 2 }
+
+[[phases.repair_protocol.actions]]
+type = "journal_repair_protocol"
+puller = "Replica5"
+responder = "Replica1"
+
+[[phases.repair_protocol.actions]]
+type = "verify_repair_convergence"
+participants = ["Replica1", "Replica5"]
+
+# Phase 5: Anti-entropy protocol test
+[[phases.anti_entropy]]
+name = "Anti-entropy state exchange"
+description = "Test CvRDT anti-entropy using choreographic state exchange"
+timeout_ms = 8000
+
+[[phases.anti_entropy.actions]]
+type = "journal_anti_entropy"
+peer_a = "Replica2"
+peer_b = "Replica4"
+
+[[phases.anti_entropy.actions]]
+type = "verify_state_convergence"
+participants = ["Replica2", "Replica4"]
+
+[invariants]
+
+# CRDT semantic invariants
+[[invariants.crdt_convergence]]
+type = "eventual_consistency"
+description = "All replicas converge to same state after finite operations"
+check_interval_ms = 1000
+
+[[invariants.causal_delivery]]
+type = "causal_ordering"
+description = "Operations delivered in causal order"
+participants = ["Replica1", "Replica2", "Replica3", "Replica4", "Replica5"]
+
+[[invariants.session_safety]]
+type = "choreographic_safety"
+description = "All session-type protocols complete safely without deadlock"
+
+[[invariants.commutativity]]
+type = "operation_commutativity"
+description = "Concurrent operations commute to same final state"
+
+[byzantine_tolerance]
+enabled = true
+max_faulty_nodes = 1
+byzantine_behaviors = ["message_delay", "duplicate_operations"]
+
+[network]
+topology = "full_mesh"
+message_loss_rate = 0.05
+max_delay_ms = 100
+
+[effects]
+enabled_effects = [
+    "ChoreographicEffects",
+    "CryptoEffects", 
+    "NetworkEffects",
+    "TimeEffects",
+    "LedgerEffects"
+]
+
+# Use deterministic effects for reproducible testing
+time_mode = "simulated"
+crypto_mode = "deterministic"
+network_mode = "simulated"

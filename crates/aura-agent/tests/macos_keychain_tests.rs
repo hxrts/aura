@@ -13,10 +13,11 @@ use frost_ed25519 as frost;
 use std::process::Command;
 use uuid::Uuid;
 
-/// Helper function to create test IDs
+/// Helper function to create test IDs using effects
 fn create_test_ids() -> (DeviceId, AccountId) {
-    let device_id = DeviceId(Uuid::new_v4());
-    let account_id = AccountId(Uuid::new_v4());
+    let effects = Effects::for_test("macos_keychain_test");
+    let device_id = DeviceId(effects.gen_uuid());
+    let account_id = AccountId(effects.gen_uuid());
     (device_id, account_id)
 }
 
@@ -69,7 +70,8 @@ async fn test_keychain_basic_operations() {
     let (device_id, account_id) = create_test_ids();
     let storage =
         PlatformSecureStorage::new(device_id, account_id).expect("Failed to create storage");
-    let test_key_id = format!("test_basic_ops_{}", Uuid::new_v4());
+    let effects = Effects::for_test("basic_ops_test");
+    let test_key_id = format!("test_basic_ops_{}", effects.gen_uuid());
 
     // Create a test key share
     let key_share = create_test_key_share();
@@ -123,7 +125,8 @@ async fn test_keychain_list_operations() {
     let (device_id, account_id) = create_test_ids();
     let storage =
         PlatformSecureStorage::new(device_id, account_id).expect("Failed to create storage");
-    let test_prefix = format!("test_list_{}", Uuid::new_v4());
+    let effects = Effects::for_test("list_ops_test");
+    let test_prefix = format!("test_list_{}", effects.gen_uuid());
     let key_ids: Vec<String> = (0..3).map(|i| format!("{}_{}", test_prefix, i)).collect();
 
     // Create test key shares
@@ -164,7 +167,8 @@ async fn test_keychain_list_operations() {
 /// Test that keychain storage persists across storage instance creation
 #[tokio::test]
 async fn test_keychain_persistence() {
-    let test_key_id = format!("test_persistence_{}", Uuid::new_v4());
+    let effects = Effects::for_test("persistence_test");
+    let test_key_id = format!("test_persistence_{}", effects.gen_uuid());
 
     // Create test key share
     let key_share = create_test_key_share();
@@ -323,7 +327,8 @@ async fn test_keychain_access_control() {
     let (device_id, account_id) = create_test_ids();
     let storage =
         PlatformSecureStorage::new(device_id, account_id).expect("Failed to create storage");
-    let test_key_id = format!("test_access_control_{}", Uuid::new_v4());
+    let effects = Effects::for_test("access_control_test");
+    let test_key_id = format!("test_access_control_{}", effects.gen_uuid());
 
     // Create test key share
     let key_share = create_test_key_share();
@@ -384,7 +389,8 @@ async fn test_complete_keychain_workflow() {
         .expect("Should be able to create secure storage on macOS");
 
     // Step 2: Create test data
-    let test_uuid = Uuid::new_v4();
+    let effects = Effects::for_test("workflow_test");
+    let test_uuid = effects.gen_uuid();
     let key_id = format!("aura_key_share_{}", test_uuid);
 
     let key_share = create_test_key_share();
@@ -466,7 +472,8 @@ async fn test_keychain_performance() {
     // Measure store operations
     let start = std::time::Instant::now();
     for i in 0..test_count {
-        let key_id = format!("perf_test_store_{}", i);
+        let effects = Effects::for_test(&format!("perf_store_{}", i));
+        let key_id = format!("perf_test_store_{}", effects.gen_uuid());
         storage
             .store_key_share(&key_id, &key_share)
             .expect("Store operation should succeed");

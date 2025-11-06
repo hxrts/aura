@@ -101,7 +101,7 @@ x25519-dalek = { version = "2.0", features = ["serde", "reusable_secrets", "stat
 signature = "2.2"
 derive_more = { version = "1.0", features = ["from", "into", "try_into", "deref", "display", "debug"] }
 
-# KeyFabric dependencies - external libraries for threshold operations and graph algorithms
+# KeyJournal dependencies - external libraries for threshold operations and graph algorithms
 petgraph = "0.6"
 # secret_sharing = "0.1"  # Removed due to yanked zeroize dependency - using MVP placeholder
 biscuit-auth = "6.0"    # For OCAP capability tokens

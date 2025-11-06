@@ -75,7 +75,7 @@ The handler system follows a clean separation of concerns:
 **Key Integration Points:**
 - **Cryptography**: Uses `aura-crypto` primitives via effects system (no crypto reimplementation)
 - **Storage**: Coordinates `aura-store` operations per [Unified Storage Specification](../../../../docs/040_storage.md)
-- **Authorization**: Leverages KeyFabric via capability middleware
+- **Authorization**: Leverages KeyJournal via capability middleware
 - **State Management**: Integrates with `aura-journal` CRDT through existing context
 - **Transport**: Uses established transport abstraction and session management
 - **Privacy**: Integrates with cover traffic and onion routing per [Privacy Model](../../../../docs/131_privacy_model.md)
@@ -129,7 +129,7 @@ crates/aura-choreography/src/
 ├── storage_coordination/            # Storage operation choreographies
 │   ├── mod.rs                       # Storage coordination utilities
 │   ├── object_operations.rs         # Store/retrieve/delete using aura-store
-│   ├── capability_coordination.rs   # Capability verification via KeyFabric
+│   ├── capability_coordination.rs   # Capability verification via KeyJournal
 │   ├── capability_delegation.rs     # Multi-party capability flows
 │   ├── proof_verification.rs        # Proof-of-storage coordination
 │   ├── content_recovery.rs          # Multi-guardian content recovery
@@ -423,7 +423,7 @@ impl ChoreoHandler for RumpsteakAdapter {
 4. **Metadata Synchronization**: CRDT-based metadata coordination via `aura-journal`
 5. **Access Control**: Ongoing capability verification for access operations
 
-**Integration**: Uses `aura-store`, KeyFabric, and `aura-journal` for storage operations, capability verification, and CRDT state coordination respectively.
+**Integration**: Uses `aura-store`, KeyJournal, and `aura-journal` for storage operations, capability verification, and CRDT state coordination respectively.
 
 #### Social Bulletin Board (SSB) Coordination
 **Location**: `social_coordination/` module
@@ -756,7 +756,7 @@ The following Aura crates provide the foundational APIs that choreographic proto
 - Unified error hierarchy - `AuraError` with rich context and source chain tracking
 - Serialization utilities - JSON, CBOR, bincode, TOML support for all types
 
-**KeyFabric** - Access Control (Layer 3)
+**KeyJournal** - Access Control (Layer 3)
 - `authorize_event()` - Event authorization decisions based on device capabilities
 - `CapabilityToken` - Capability-based access tokens with scope and expiration
 - `PolicyEvaluation` - Policy decision framework for complex authorization rules
@@ -823,7 +823,7 @@ Core Aura Crates APIs (aura-crypto, aura-journal, aura-store, etc.)
 **Integration Flow:**
 1. **Effects System** (`../effects/`) provides unified interface to all crate APIs
 2. **Handlers** (`../handlers/`) implement transport and session management using aura-transport and aura-agent APIs
-3. **Middleware** (`../middleware/`) composes cross-cutting concerns using KeyFabric, aura-authentication APIs
+3. **Middleware** (`../middleware/`) composes cross-cutting concerns using KeyJournal, aura-authentication APIs
 4. **Runtime Context** (`../runtime/`) coordinates protocol state using aura-journal, aura-types APIs
 5. **Generated Choreographies** access all functionality through this unified interface
 

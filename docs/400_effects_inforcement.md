@@ -43,7 +43,7 @@ rand::rngs::ThreadRng
 
 ### Effects-Based (Preferred)
 ```rust
-fn create_session(effects: &aura_crypto::Effects) -> Session {
+fn create_session(effects: &impl aura_protocol::CryptoEffects) -> Session {
     Session {
         id: effects.gen_uuid(),           // [VERIFIED] Deterministic UUID
         created_at: effects.now().unwrap_or(0), // [VERIFIED] Controlled time
@@ -53,7 +53,7 @@ fn create_session(effects: &aura_crypto::Effects) -> Session {
 
 #[cfg(test)]
 fn test_session_creation() {
-    let effects = Effects::for_test("session_test");
+    let effects = aura_protocol::AuraEffectSystem::for_test("session_test");
     let session = create_session(&effects);
     // Test is deterministic and reproducible
 }
@@ -77,15 +77,15 @@ fn create_session_bad() -> Session {
 
 Some code legitimately needs direct access to system resources. These cases are marked with explicit `#[allow]` annotations:
 
-### Production Effects Implementation
+### Production Effect Handler Implementation
 ```rust
-impl TimeSource for SystemTimeSource {
-    fn current_timestamp(&self) -> Result<u64> {
-        #[allow(clippy::disallowed_methods)] // [VERIFIED] Acceptable in effects implementation
+impl TimeEffects for RealTimeHandler {
+    async fn current_epoch(&self) -> u64 {
+        #[allow(clippy::disallowed_methods)] // [VERIFIED] Acceptable in effect handlers
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .map_err(|e| CryptoError::SystemTimeError(format!("...", e)))
+            .unwrap_or_default()
+            .as_secs()
     }
 }
 ```
@@ -140,7 +140,7 @@ The GitHub Actions CI workflow includes:
 ### For New Code
 Always use effects from the start:
 ```rust
-fn new_function(effects: &aura_crypto::Effects) {
+fn new_function(effects: &impl aura_protocol::CryptoEffects) {
     let id = effects.gen_uuid();
     let timestamp = effects.now().unwrap_or(0);
     let random_bytes = effects.random_bytes::<32>();
@@ -148,13 +148,13 @@ fn new_function(effects: &aura_crypto::Effects) {
 ```
 
 ### For Existing Code
-1. Add `effects: &aura_crypto::Effects` parameter
+1. Add `effects: &impl aura_protocol::EffectType` parameter
 2. Replace direct calls with effects-based equivalents:
    - `SystemTime::now()` → `effects.now().unwrap_or(0)`
    - `Uuid::new_v4()` → `effects.gen_uuid()`
    - `rand::random()` → `effects.random_bytes()` or `effects.rng()`
 3. Update all callers to pass effects
-4. Add test with `Effects::for_test("test_name")`
+4. Add test with `aura_protocol::AuraEffectSystem::for_test("test_name")`
 
 ### Example Migration
 ```rust
@@ -167,7 +167,7 @@ fn old_function() -> Record {
 }
 
 // After  
-fn new_function(effects: &aura_crypto::Effects) -> Record {
+fn new_function(effects: &impl aura_protocol::CryptoEffects) -> Record {
     Record {
         id: effects.gen_uuid(),
         timestamp: effects.now().unwrap_or(0),
@@ -198,16 +198,16 @@ This enforcement system provides:
 ```
 error: use of a disallowed method `std::time::SystemTime::now`
 ```
-**Solution**: Use `effects.now()` instead and add `effects: &aura_crypto::Effects` parameter.
+**Solution**: Use `effects.now()` instead and add `effects: &impl aura_protocol::TimeEffects` parameter.
 
 ### "Missing effects parameter" 
 When functions require effects but you don't have access:
 1. Add effects parameter to your function
 2. Thread effects through the call chain
-3. At the top level, use `Effects::production()` or `Effects::for_test()`
+3. At the top level, use `aura_protocol::AuraEffectSystem::for_production()` or `aura_protocol::AuraEffectSystem::for_test()`
 
 ### Legitimate System Access
 If you genuinely need direct system access:
 1. Add `#[allow(clippy::disallowed_methods)]` 
 2. Document why this exception is necessary
-3. Consider if the code can be moved to the effects implementation instead
+3. Consider if the code can be moved to the effect handler implementation in `aura-protocol` instead

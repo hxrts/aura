@@ -2,7 +2,7 @@
 
 use super::stack::TransportMiddleware;
 use super::handler::{TransportHandler, TransportOperation, TransportResult};
-use aura_types::effects::AuraEffects;
+use aura_protocol::effects::AuraEffects;
 use aura_types::{MiddlewareContext, MiddlewareResult, AuraError};
 use std::collections::HashMap;
 

@@ -16,7 +16,7 @@
 //!
 //! ```rust
 //! use aura_store::middleware::*;
-//! use aura_types::effects::DefaultEffects;
+//! use aura_protocol::effects::DefaultEffects;
 //! use std::collections::HashMap;
 //!
 //! // Create a storage handler with middleware stack
@@ -48,9 +48,11 @@
 //! - **ReplicationMiddleware**: Data replication across multiple nodes
 //! - **IntegrityMiddleware**: Data integrity verification with checksums
 
+pub mod content;
 pub mod middleware;
 
 // Re-export core types for convenience
+pub use content::{ChunkId, ContentSize};
 pub use middleware::{
     // Core traits and types
     StorageHandler, StorageOperation, StorageResult, ChunkInfo,
@@ -70,7 +72,7 @@ pub use middleware::{
 
 // Re-export foundation types
 pub use aura_types::{MiddlewareContext, MiddlewareResult};
-pub use aura_types::effects::AuraEffects;
+pub use aura_protocol::effects::AuraEffects;
 
 /// Storage layer error type
 pub use middleware::handler::StorageError;

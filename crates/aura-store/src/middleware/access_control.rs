@@ -2,7 +2,7 @@
 
 use super::stack::StorageMiddleware;
 use super::handler::{StorageHandler, StorageOperation, StorageResult};
-use aura_types::effects::AuraEffects;
+use aura_protocol::effects::AuraEffects;
 use aura_types::{MiddlewareContext, MiddlewareResult, AuraError};
 use std::collections::{HashMap, HashSet};
 

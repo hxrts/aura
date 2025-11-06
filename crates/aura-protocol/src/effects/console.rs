@@ -1,265 +1,261 @@
-//! Console visualization effects
-//!
-//! This module treats console visualization as an algebraic effect,
-//! allowing protocols to emit visualization events without directly
-//! coupling to the console implementation.
+//! Console effects for logging and debugging
 
-// Remove circular import - ConsoleEffect is defined below
-use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use uuid::Uuid;
+use aura_types::DeviceId;
+use std::future::Future;
 
-/// Console visualization effects interface
-///
-/// This trait defines the effect operations for emitting visualization
-/// events to the console. Implementations can be swapped out for testing,
-/// production use, or different visualization backends.
-#[async_trait]
-pub trait ConsoleEffects: Send + Sync {
-    /// Emit a choreography event for visualization
-    async fn emit_choreo_event(&self, event: ConsoleEffect);
-
-    /// Mark a protocol as started
-    async fn protocol_started(&self, protocol_id: Uuid, protocol_type: &str);
-
-    /// Mark a protocol as completed
-    async fn protocol_completed(&self, protocol_id: Uuid, duration_ms: u64);
-
-    /// Mark a protocol as failed
-    async fn protocol_failed(&self, protocol_id: Uuid, error: &str);
-
-    /// Log an info message
-    async fn log_info(&self, message: &str);
-
-    /// Log a warning message
-    async fn log_warning(&self, message: &str);
-
-    /// Log an error message
-    async fn log_error(&self, message: &str);
-
-    /// Flush any buffered events
-    async fn flush(&self);
+/// Log levels for console output
+#[derive(Debug, Clone, Copy)]
+pub enum LogLevel {
+    /// Trace level - detailed diagnostic information
+    Trace,
+    /// Debug level - debugging information
+    Debug,
+    /// Info level - informational messages
+    Info,
+    /// Warn level - warning messages
+    Warn,
+    /// Error level - error messages
+    Error,
 }
 
-/// No-op implementation for when console is not available
-#[derive(Debug, Clone, Default)]
-pub struct NoOpConsoleEffects;
-
-#[async_trait]
-impl ConsoleEffects for NoOpConsoleEffects {
-    async fn emit_choreo_event(&self, _event: ConsoleEffect) {}
-    async fn protocol_started(&self, _protocol_id: Uuid, _protocol_type: &str) {}
-    async fn protocol_completed(&self, _protocol_id: Uuid, _duration_ms: u64) {}
-    async fn protocol_failed(&self, _protocol_id: Uuid, _error: &str) {}
-    async fn log_info(&self, _message: &str) {}
-    async fn log_warning(&self, _message: &str) {}
-    async fn log_error(&self, _message: &str) {}
-    async fn flush(&self) {}
-}
-
-/// Channel-based console effects for async event streaming
-pub struct ChannelConsoleEffects {
-    /// Channel sender for console events
-    sender: mpsc::UnboundedSender<ConsoleEffect>,
-}
-
-/// Console effect event types
+/// Console events for debugging and monitoring
 #[derive(Debug, Clone)]
-pub enum ConsoleEffect {
-    /// Choreography event with arbitrary JSON data
-    ChoreoEvent(serde_json::Value),
-    /// Protocol started event
+pub enum ConsoleEvent {
+    /// Protocol has started execution
     ProtocolStarted {
-        /// Unique identifier for the protocol instance
-        protocol_id: Uuid,
+        /// Unique identifier for this protocol instance
+        protocol_id: String,
         /// Type of protocol being executed
         protocol_type: String,
+        /// Device running the protocol
+        device_id: DeviceId,
     },
-    /// Protocol completed successfully
+    /// Protocol has completed execution
     ProtocolCompleted {
-        /// Unique identifier for the protocol instance
-        protocol_id: Uuid,
-        /// Total execution duration in milliseconds
-        duration_ms: u64,
+        /// Unique identifier for this protocol instance
+        protocol_id: String,
+        /// Whether the protocol succeeded
+        success: bool,
+        /// Device that ran the protocol
+        device_id: DeviceId,
     },
-    /// Protocol failed
-    ProtocolFailed {
-        /// Unique identifier for the protocol instance
-        protocol_id: Uuid,
-        /// Error message describing the failure
+    /// Message was sent between devices
+    MessageSent {
+        /// Source device
+        from: DeviceId,
+        /// Destination device
+        to: DeviceId,
+        /// Type of message being sent
+        message_type: String,
+    },
+    /// Message was received by a device
+    MessageReceived {
+        /// Source device
+        from: DeviceId,
+        /// Destination device
+        to: DeviceId,
+        /// Type of message received
+        message_type: String,
+    },
+    /// Component state has changed
+    StateChanged {
+        /// Component that changed state
+        component: String,
+        /// Previous state value
+        old_state: String,
+        /// New state value
+        new_state: String,
+    },
+    /// Error occurred in a component
+    Error {
+        /// Component where error occurred
+        component: String,
+        /// Error description
         error: String,
     },
-    /// Informational log message
-    LogInfo {
-        /// The log message
-        message: String,
-    },
-    /// Warning log message
-    LogWarning {
-        /// The warning message
-        message: String,
-    },
-    /// Error log message
-    LogError {
-        /// The error message
-        message: String,
-    },
-    /// Custom marker event
-    Marker {
-        /// Type of marker
-        marker_type: String,
-        /// Arbitrary JSON data for the marker
+    /// Custom event with user-defined data
+    Custom {
+        /// Type of custom event
+        event_type: String,
+        /// JSON data for the event
         data: serde_json::Value,
     },
-    /// Flush buffered events
-    Flush,
 }
 
-impl ChannelConsoleEffects {
-    /// Create a new channel-based console effects provider
-    pub fn new() -> (Self, mpsc::UnboundedReceiver<ConsoleEffect>) {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        (Self { sender }, receiver)
+/// Console effects interface for logging and event emission
+pub trait ConsoleEffects {
+    /// Log a trace message with structured fields
+    ///
+    /// # Arguments
+    /// * `message` - The trace message to log
+    /// * `fields` - Key-value pairs of structured data to include with the message
+    fn log_trace(&self, message: &str, fields: &[(&str, &str)]);
+
+    /// Log a debug message with structured fields
+    ///
+    /// # Arguments
+    /// * `message` - The debug message to log
+    /// * `fields` - Key-value pairs of structured data to include with the message
+    fn log_debug(&self, message: &str, fields: &[(&str, &str)]);
+
+    /// Log an info message with structured fields
+    ///
+    /// # Arguments
+    /// * `message` - The info message to log
+    /// * `fields` - Key-value pairs of structured data to include with the message
+    fn log_info(&self, message: &str, fields: &[(&str, &str)]);
+
+    /// Log a warning message with structured fields
+    ///
+    /// # Arguments
+    /// * `message` - The warning message to log
+    /// * `fields` - Key-value pairs of structured data to include with the message
+    fn log_warn(&self, message: &str, fields: &[(&str, &str)]);
+
+    /// Log an error message with structured fields
+    ///
+    /// # Arguments
+    /// * `message` - The error message to log
+    /// * `fields` - Key-value pairs of structured data to include with the message
+    fn log_error(&self, message: &str, fields: &[(&str, &str)]);
+
+    /// Emit a structured event for debugging/monitoring
+    ///
+    /// # Arguments
+    /// * `event` - The console event to emit
+    fn emit_event(
+        &self,
+        event: ConsoleEvent,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+}
+
+/// Production console effects using real logging
+///
+/// Outputs all logs and events to stdout with timestamps and severity levels.
+pub struct ProductionConsoleEffects;
+
+impl ProductionConsoleEffects {
+    /// Create a new production console effects instance
+    pub fn new() -> Self {
+        Self
     }
 }
 
-#[async_trait]
-impl ConsoleEffects for ChannelConsoleEffects {
-    async fn emit_choreo_event(&self, event: ConsoleEffect) {
-        let _ = self.sender.send(event);
-    }
-
-    async fn protocol_started(&self, protocol_id: Uuid, protocol_type: &str) {
-        let _ = self.sender.send(ConsoleEffect::ProtocolStarted {
-            protocol_id,
-            protocol_type: protocol_type.to_string(),
-        });
-    }
-
-    async fn protocol_completed(&self, protocol_id: Uuid, duration_ms: u64) {
-        let _ = self.sender.send(ConsoleEffect::ProtocolCompleted {
-            protocol_id,
-            duration_ms,
-        });
-    }
-
-    async fn protocol_failed(&self, protocol_id: Uuid, error: &str) {
-        let _ = self.sender.send(ConsoleEffect::ProtocolFailed {
-            protocol_id,
-            error: error.to_string(),
-        });
-    }
-
-    async fn log_info(&self, message: &str) {
-        let _ = self.sender.send(ConsoleEffect::LogInfo {
-            message: message.to_string(),
-        });
-    }
-
-    async fn log_warning(&self, message: &str) {
-        let _ = self.sender.send(ConsoleEffect::LogWarning {
-            message: message.to_string(),
-        });
-    }
-
-    async fn log_error(&self, message: &str) {
-        let _ = self.sender.send(ConsoleEffect::LogError {
-            message: message.to_string(),
-        });
-    }
-
-    async fn flush(&self) {
-        let _ = self.sender.send(ConsoleEffect::Flush);
-    }
-}
-
-/// Recording console effects for testing and replay
-pub struct RecordingConsoleEffects {
-    /// Recorded events
-    events: Arc<tokio::sync::Mutex<Vec<ConsoleEffect>>>,
-}
-
-impl Default for RecordingConsoleEffects {
+impl Default for ProductionConsoleEffects {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl RecordingConsoleEffects {
-    /// Create a new recording console effects provider
-    pub fn new() -> Self {
-        Self {
-            events: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-        }
+impl ConsoleEffects for ProductionConsoleEffects {
+    fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
+        println!("[TRACE] {}: {:?}", message, fields);
     }
 
-    /// Get all recorded events
-    pub async fn get_events(&self) -> Vec<ConsoleEffect> {
-        self.events.lock().await.clone()
+    fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
+        println!("[DEBUG] {}: {:?}", message, fields);
     }
 
-    /// Clear all recorded events
-    pub async fn clear(&self) {
-        self.events.lock().await.clear()
+    fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
+        println!("[INFO] {}: {:?}", message, fields);
+    }
+
+    fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
+        println!("[WARN] {}: {:?}", message, fields);
+    }
+
+    fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
+        println!("[ERROR] {}: {:?}", message, fields);
+    }
+
+    fn emit_event(
+        &self,
+        event: ConsoleEvent,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            println!("[EVENT] {:?}", event);
+        })
     }
 }
 
-#[async_trait]
-impl ConsoleEffects for RecordingConsoleEffects {
-    async fn emit_choreo_event(&self, event: ConsoleEffect) {
-        self.events.lock().await.push(event);
+/// Test console effects that capture output for verification
+///
+/// Captures all logs and events in memory for use in tests. All output is
+/// stored and can be retrieved for assertion and verification.
+pub struct TestConsoleEffects {
+    /// Captured logs with their severity level
+    logs: std::sync::Arc<std::sync::Mutex<Vec<(LogLevel, String)>>>,
+    /// Captured console events
+    events: std::sync::Arc<std::sync::Mutex<Vec<ConsoleEvent>>>,
+}
+
+impl TestConsoleEffects {
+    /// Create a new test console effects instance with empty logs and events
+    pub fn new() -> Self {
+        Self {
+            logs: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            events: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
     }
 
-    async fn protocol_started(&self, protocol_id: Uuid, protocol_type: &str) {
-        self.events
+    /// Get all captured logs as a cloned vector
+    pub fn get_logs(&self) -> Vec<(LogLevel, String)> {
+        self.logs.lock().unwrap().clone()
+    }
+
+    /// Get all captured events as a cloned vector
+    pub fn get_events(&self) -> Vec<ConsoleEvent> {
+        self.events.lock().unwrap().clone()
+    }
+
+    /// Clear all captured logs and events
+    pub fn clear(&self) {
+        self.logs.lock().unwrap().clear();
+        self.events.lock().unwrap().clear();
+    }
+}
+
+impl ConsoleEffects for TestConsoleEffects {
+    fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
+        self.logs
             .lock()
-            .await
-            .push(ConsoleEffect::ProtocolStarted {
-                protocol_id,
-                protocol_type: protocol_type.to_string(),
-            });
+            .unwrap()
+            .push((LogLevel::Trace, format!("{}: {:?}", message, fields)));
     }
 
-    async fn protocol_completed(&self, protocol_id: Uuid, duration_ms: u64) {
-        self.events
+    fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
+        self.logs
             .lock()
-            .await
-            .push(ConsoleEffect::ProtocolCompleted {
-                protocol_id,
-                duration_ms,
-            });
+            .unwrap()
+            .push((LogLevel::Debug, format!("{}: {:?}", message, fields)));
     }
 
-    async fn protocol_failed(&self, protocol_id: Uuid, error: &str) {
-        self.events
+    fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
+        self.logs
             .lock()
-            .await
-            .push(ConsoleEffect::ProtocolFailed {
-                protocol_id,
-                error: error.to_string(),
-            });
+            .unwrap()
+            .push((LogLevel::Info, format!("{}: {:?}", message, fields)));
     }
 
-    async fn log_info(&self, message: &str) {
-        self.events.lock().await.push(ConsoleEffect::LogInfo {
-            message: message.to_string(),
-        });
+    fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
+        self.logs
+            .lock()
+            .unwrap()
+            .push((LogLevel::Warn, format!("{}: {:?}", message, fields)));
     }
 
-    async fn log_warning(&self, message: &str) {
-        self.events.lock().await.push(ConsoleEffect::LogWarning {
-            message: message.to_string(),
-        });
+    fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
+        self.logs
+            .lock()
+            .unwrap()
+            .push((LogLevel::Error, format!("{}: {:?}", message, fields)));
     }
 
-    async fn log_error(&self, message: &str) {
-        self.events.lock().await.push(ConsoleEffect::LogError {
-            message: message.to_string(),
-        });
-    }
-
-    async fn flush(&self) {
-        // No-op for recording
+    fn emit_event(
+        &self,
+        event: ConsoleEvent,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.events.lock().unwrap().push(event);
+        Box::pin(async move {})
     }
 }

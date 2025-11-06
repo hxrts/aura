@@ -1,7 +1,7 @@
 //! Effects system integration for choreographic protocols
 
 // use aura_protocol::effects::ProtocolEffects; // TODO: Re-enable when ProtocolEffects is available
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 use rumpsteak_choreography::ChoreographyError;
 use std::time::Duration;
 use uuid::Uuid;

@@ -1,10 +1,10 @@
-//! KeyFabric choreographic threshold cryptography protocols
+//! KeyJournal choreographic threshold cryptography protocols
 //!
-//! This module provides choreographic implementations for KeyFabric operations:
+//! This module provides choreographic implementations for KeyJournal operations:
 //! - Threshold unwrapping with M-of-N secret reconstruction  
 //! - Share contribution and accumulation
 //! - Node rotation with epoch-based anti-replay protection
-//! - FROST threshold signatures integrated with fabric model
+//! - FROST threshold signatures integrated with journal model
 //!
 //! ## Pattern-Based Implementations
 //!
@@ -19,24 +19,24 @@
 //! - Uniform timeout and error handling
 //! - Simplified development of new threshold protocols
 
-pub mod keyfabric_threshold;
-pub mod keyfabric_share_contribution;
-pub mod keyfabric_rotation;
-pub mod keyfabric_frost_signing;
+pub mod keyjournal_threshold;
+pub mod keyjournal_share_contribution;
+pub mod keyjournal_rotation;
+pub mod keyjournal_frost_signing;
 
-pub use keyfabric_threshold::{
-    KeyFabricThresholdChoreography, ThresholdResult, ThresholdUnwrapConfig,
-    keyfabric_threshold_unwrap,
+pub use keyjournal_threshold::{
+    KeyJournalThresholdChoreography, ThresholdResult, ThresholdUnwrapConfig,
+    keyjournal_threshold_unwrap,
 };
-pub use keyfabric_share_contribution::{
-    KeyFabricShareContributionChoreography, ShareCollectionResult, ShareContributionConfig,
-    keyfabric_collect_shares,
+pub use keyjournal_share_contribution::{
+    KeyJournalShareContributionChoreography, ShareCollectionResult, ShareContributionConfig,
+    keyjournal_collect_shares,
 };
-pub use keyfabric_rotation::{
-    KeyFabricNodeRotationChoreography, NodeRotationResult, NodeRotationConfig,
-    keyfabric_rotate_node,
+pub use keyjournal_rotation::{
+    KeyJournalNodeRotationChoreography, NodeRotationResult, NodeRotationConfig,
+    keyjournal_rotate_node,
 };
-pub use keyfabric_frost_signing::{
-    KeyFabricFrostSigningChoreography, KeyFabricFrostResult, KeyFabricFrostConfig,
-    keyfabric_frost_sign,
+pub use keyjournal_frost_signing::{
+    KeyJournalFrostSigningChoreography, KeyJournalFrostResult, KeyJournalFrostConfig,
+    keyjournal_frost_sign,
 };

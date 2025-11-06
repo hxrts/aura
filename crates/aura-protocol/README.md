@@ -166,7 +166,7 @@ The `aura-protocol` crate provides the foundational infrastructure for Aura's di
 
 **Effect Implementations:**
 
-- **`AuraEffectsAdapter`**: Complete bridge to `aura_types::effects::Effects` system
+- **`AuraEffectsAdapter`**: Complete bridge to `aura_protocol::effects::Effects` system
 - **`CombinedEffects`**: Functional composition of multiple effect providers
 - **Production Effects**: Real cryptography and system time
 - **Test Effects**: Deterministic effects with fixed seeds and controlled time progression
@@ -252,7 +252,7 @@ The `aura-protocol` crate provides the foundational infrastructure for Aura's di
 use aura_protocol::protocols::choreographic::{
     ChoreographicHandlerBuilder, BridgedRole, BridgedEndpoint
 };
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -315,7 +315,7 @@ let handler = MiddlewareStackBuilder::new(handler)
 ### Deterministic Protocol Testing
 
 ```rust
-use aura_types::effects::Effects;
+use aura_protocol::effects::Effects;
 
 #[tokio::test]
 async fn test_protocol_deterministically() {

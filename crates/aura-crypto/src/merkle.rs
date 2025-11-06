@@ -3,7 +3,7 @@
 //! Simple merkle tree utilities using the effects system for hashing.
 
 use crate::Result;
-use aura_types::effects::Effects;
+use crate::effects::CryptoEffects;
 
 /// Simple Merkle proof structure
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -40,9 +40,9 @@ impl Default for SimpleMerkleProof {
 ///
 /// # Returns
 /// A simple merkle proof or an error if the operation fails
-pub fn build_commitment_tree(
+pub async fn build_commitment_tree(
     commitments: &[Vec<u8>],
-    effects: &Effects,
+    effects: &impl CryptoEffects,
 ) -> Result<SimpleMerkleProof> {
     // Simplified implementation
     if commitments.is_empty() {
@@ -55,7 +55,7 @@ pub fn build_commitment_tree(
     // Add path elements using blake3 hashing
     for i in 0..commitments.len().min(8) {
         let hash = if i < commitments.len() {
-            effects.blake3_hash(&commitments[i])
+            effects.blake3_hash_async(&commitments[i]).await
         } else {
             [0u8; 32]
         };
@@ -76,7 +76,7 @@ pub fn build_commitment_tree(
 ///
 /// # Returns
 /// The computed Merkle root hash
-pub fn build_merkle_root(leaves: &[Vec<u8>], effects: &Effects) -> [u8; 32] {
+pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects) -> [u8; 32] {
     if leaves.is_empty() {
         return [0u8; 32];
     }
@@ -87,7 +87,7 @@ pub fn build_merkle_root(leaves: &[Vec<u8>], effects: &Effects) -> [u8; 32] {
         combined.extend_from_slice(leaf);
     }
 
-    effects.blake3_hash(&combined)
+    effects.blake3_hash_async(&combined).await
 }
 
 /// Verify a Merkle proof against a root hash (simplified)
@@ -100,19 +100,19 @@ pub fn build_merkle_root(leaves: &[Vec<u8>], effects: &Effects) -> [u8; 32] {
 ///
 /// # Returns
 /// `true` if the proof is valid, `false` otherwise
-pub fn verify_merkle_proof(
+pub async fn verify_merkle_proof(
     proof: &SimpleMerkleProof,
     root: &[u8; 32],
     leaf: &[u8; 32],
-    effects: &Effects,
+    effects: &impl CryptoEffects,
 ) -> bool {
     // Simplified verification
     if proof.proof_path.is_empty() {
-        return effects.blake3_hash(leaf) == *root;
+        return effects.blake3_hash_async(leaf).await == *root;
     }
 
     // In a real implementation, this would compute the path to the root
     // For now, just check if the leaf hash matches any in the proof path
-    let leaf_hash = effects.blake3_hash(leaf);
+    let leaf_hash = effects.blake3_hash_async(leaf).await;
     proof.proof_path.contains(&leaf_hash)
 }

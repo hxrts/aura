@@ -123,13 +123,13 @@ impl Default for GuardianPolicy {
 // SessionId is now imported from aura-types
 // Extensions for journal-specific functionality
 pub trait SessionIdExt {
-    fn new_with_effects(effects: &dyn aura_types::effects::AuraEffects) -> Self;
+    fn new_with_effects(effects: &dyn aura_crypto::effects::CryptoEffects) -> Self;
 }
 
 impl SessionIdExt for SessionId {
-    fn new_with_effects(effects: &dyn aura_types::effects::AuraEffects) -> Self {
-        // Generate random bytes for UUID v4
-        let random_bytes = effects.random_bytes(16);
+    fn new_with_effects(effects: &dyn aura_crypto::effects::CryptoEffects) -> Self {
+        // Generate random bytes for UUID v4 using crypto effects
+        let random_bytes: Vec<u8> = (0..16).map(|_| effects.random_byte()).collect();
 
         // Create UUID v4 from random bytes
         let mut uuid_bytes = [0u8; 16];

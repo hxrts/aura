@@ -50,7 +50,7 @@ tracing = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
 
-# KeyFabric external dependencies
+# KeyJournal external dependencies
 petgraph = { workspace = true }
 # secret_sharing = { workspace = true }  # Removed due to yanked zeroize dependency - using MVP placeholder
 biscuit-auth = { workspace = true }

@@ -41,7 +41,7 @@ impl DecentralizedLottery {
         let n = self.participants.len();
 
         // Phase 1: Commit to random values
-        let effects = aura_types::effects::Effects::production();
+        let effects = aura_protocol::effects::Effects::production();
         let my_random = effects.random_bytes_array::<32>();
         let my_commitment = self.hash(&my_random);
 

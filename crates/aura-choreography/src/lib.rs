@@ -13,7 +13,7 @@
 //! ## Quick Start
 //!
 //! ```rust,ignore
-//! use aura_choreography::threshold_crypto::KeyFabricThresholdChoreography;
+//! use aura_choreography::threshold_crypto::KeyJournalThresholdChoreography;
 //! use aura_protocol::choreographic::ChoreographicHandlerBuilder;
 //!
 //! // Create choreographic handler with middleware
@@ -21,8 +21,8 @@
 //!     .with_device_name("device-1".to_string())
 //!     .build_in_memory(device_id, context);
 //!
-//! // Execute KeyFabric threshold unwrapping
-//! let threshold = KeyFabricThresholdChoreography::new(config, fabric_nodes, effects)?;
+//! // Execute KeyJournal threshold unwrapping
+//! let threshold = KeyJournalThresholdChoreography::new(config, journal_nodes, effects)?;
 //! let result = threshold.execute(&mut handler, &mut endpoint, my_role).await?;
 //! ```
 
@@ -46,7 +46,7 @@ pub mod common;
 pub mod integration;
 
 /// Test utilities for choreographic protocols
-/// TODO: Re-implement test utilities for KeyFabric choreographies
+/// TODO: Re-implement test utilities for KeyJournal choreographies
 // #[cfg(any(test, feature = "test-utils"))]
 // pub mod test_utils;
 
@@ -61,6 +61,6 @@ pub use coordination::{
 };
 pub use patterns::{DecentralizedLottery, LotteryMessage};
 pub use threshold_crypto::{
-    KeyFabricThresholdChoreography, KeyFabricShareContributionChoreography,
-    KeyFabricNodeRotationChoreography, KeyFabricFrostSigningChoreography
+    KeyJournalThresholdChoreography, KeyJournalShareContributionChoreography,
+    KeyJournalNodeRotationChoreography, KeyJournalFrostSigningChoreography
 };

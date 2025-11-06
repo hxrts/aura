@@ -6,6 +6,7 @@
 #![cfg(target_os = "macos")]
 
 use aura_agent::device_secure_store::{DeviceAttestation, PlatformSecureStorage};
+use aura_crypto::Effects;
 use aura_types::{AccountId, DeviceId};
 use uuid::Uuid;
 
@@ -13,8 +14,9 @@ use uuid::Uuid;
 #[tokio::test]
 async fn test_keychain_system_available() {
     // Test that we can create the secure storage system
-    let device_id = DeviceId(Uuid::new_v4());
-    let account_id = AccountId(Uuid::new_v4());
+    let effects = Effects::for_test("quick_keychain_test");
+    let device_id = DeviceId(effects.gen_uuid());
+    let account_id = AccountId(effects.gen_uuid());
     let storage_result = PlatformSecureStorage::new(device_id, account_id);
     println!(
         "PlatformSecureStorage creation result: {:?}",
@@ -55,8 +57,9 @@ fn test_macos_backend_selection() {
 
     // We can't easily test the internal backend selection without exposing internals,
     // but we can verify that creation works and assume the right backend is selected
-    let device_id = DeviceId(Uuid::new_v4());
-    let account_id = AccountId(Uuid::new_v4());
+    let effects = Effects::for_test("backend_selection_test");
+    let device_id = DeviceId(effects.gen_uuid());
+    let account_id = AccountId(effects.gen_uuid());
     let storage = PlatformSecureStorage::new(device_id, account_id);
     assert!(
         storage.is_ok(),

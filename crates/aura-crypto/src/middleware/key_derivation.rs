@@ -1,8 +1,8 @@
 //! Key derivation middleware for DKD protocols
 
-use super::{CryptoMiddleware, CryptoHandler, CryptoContext};
-use crate::{CryptoError, Result};
+use super::{CryptoContext, CryptoHandler, CryptoMiddleware};
 use crate::middleware::CryptoOperation;
+use crate::{CryptoError, Result};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct KeyDerivationMiddleware {
     /// Key cache for performance
     cache: Arc<RwLock<KeyCache>>,
-    
+
     /// Configuration
     config: KeyDerivationConfig,
 }
@@ -24,7 +24,7 @@ impl KeyDerivationMiddleware {
             config,
         }
     }
-    
+
     /// Get key derivation statistics
     pub fn stats(&self) -> KeyDerivationStats {
         let cache = self.cache.read().unwrap();
@@ -36,7 +36,7 @@ impl KeyDerivationMiddleware {
             validation_failures: cache.validation_failures,
         }
     }
-    
+
     /// Clear key cache
     pub fn clear_cache(&self) {
         let mut cache = self.cache.write().unwrap();
@@ -52,13 +52,21 @@ impl CryptoMiddleware for KeyDerivationMiddleware {
         next: &dyn CryptoHandler,
     ) -> Result<serde_json::Value> {
         match operation {
-            CryptoOperation::DeriveKey { app_id, context: derivation_context, derivation_path } => {
+            CryptoOperation::DeriveKey {
+                app_id,
+                context: derivation_context,
+                derivation_path,
+            } => {
                 // Validate derivation parameters
-                self.validate_derivation_parameters(&app_id, &derivation_context, &derivation_path)?;
-                
+                self.validate_derivation_parameters(
+                    &app_id,
+                    &derivation_context,
+                    &derivation_path,
+                )?;
+
                 // Check rate limiting
                 self.check_rate_limiting(&context.account_id.to_string(), &app_id)?;
-                
+
                 // Check cache if enabled
                 if self.config.enable_caching {
                     let cache_key = self.generate_cache_key(
@@ -67,7 +75,7 @@ impl CryptoMiddleware for KeyDerivationMiddleware {
                         &derivation_context,
                         &derivation_path,
                     );
-                    
+
                     if let Some(cached_result) = self.get_cached_key(&cache_key)? {
                         return Ok(serde_json::json!({
                             "operation": "derive_key",
@@ -79,10 +87,10 @@ impl CryptoMiddleware for KeyDerivationMiddleware {
                         }));
                     }
                 }
-                
+
                 // Record derivation attempt
                 self.record_derivation_attempt(&context.account_id.to_string(), &app_id)?;
-                
+
                 // Process through next handler
                 let operation_clone = CryptoOperation::DeriveKey {
                     app_id: app_id.clone(),
@@ -90,9 +98,14 @@ impl CryptoMiddleware for KeyDerivationMiddleware {
                     derivation_path: derivation_path.clone(),
                 };
                 let result = next.handle(operation_clone, context)?;
-                
+
                 // Cache the result if successful and caching is enabled
-                if self.config.enable_caching && result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                if self.config.enable_caching
+                    && result
+                        .get("success")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                {
                     if let Some(key_hash) = result.get("key_hash").and_then(|v| v.as_str()) {
                         let cache_key = self.generate_cache_key(
                             &context.account_id.to_string(),
@@ -110,17 +123,17 @@ impl CryptoMiddleware for KeyDerivationMiddleware {
                         self.cache_key(cache_key, cached_key)?;
                     }
                 }
-                
+
                 Ok(result)
             }
-            
+
             _ => {
                 // Pass through other operations
                 next.handle(operation, context)
             }
         }
     }
-    
+
     fn name(&self) -> &str {
         "key_derivation"
     }
@@ -137,7 +150,7 @@ impl KeyDerivationMiddleware {
         if app_id.is_empty() {
             return Err(CryptoError::invalid_input("App ID cannot be empty"));
         }
-        
+
         if app_id.len() > self.config.max_app_id_length {
             return Err(CryptoError::invalid_input(format!(
                 "App ID too long: {} > {}",
@@ -145,12 +158,12 @@ impl KeyDerivationMiddleware {
                 self.config.max_app_id_length
             )));
         }
-        
+
         // Validate context
         if context.is_empty() {
             return Err(CryptoError::invalid_input("Context cannot be empty"));
         }
-        
+
         if context.len() > self.config.max_context_length {
             return Err(CryptoError::invalid_input(format!(
                 "Context too long: {} > {}",
@@ -158,7 +171,7 @@ impl KeyDerivationMiddleware {
                 self.config.max_context_length
             )));
         }
-        
+
         // Validate derivation path
         if derivation_path.len() > self.config.max_derivation_path_length {
             return Err(CryptoError::invalid_input(format!(
@@ -167,48 +180,53 @@ impl KeyDerivationMiddleware {
                 self.config.max_derivation_path_length
             )));
         }
-        
+
         // Check for forbidden characters
-        if !app_id.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
+        if !app_id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+        {
             return Err(CryptoError::invalid_input(
-                "App ID contains invalid characters"
+                "App ID contains invalid characters",
             ));
         }
-        
+
         Ok(())
     }
-    
+
     fn check_rate_limiting(&self, account_id: &str, app_id: &str) -> Result<()> {
         if !self.config.enable_rate_limiting {
             return Ok(());
         }
-        
+
         let mut cache = self.cache.write().map_err(|_| {
             CryptoError::internal_error("Failed to acquire write lock on key cache")
         })?;
-        
+
         let key = format!("{}:{}", account_id, app_id);
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        
-        let requests = cache.rate_limit_tracker
-            .entry(key)
-            .or_insert_with(Vec::new);
-        
+        #[allow(clippy::disallowed_methods)] // [VERIFIED] Acceptable in rate limiting middleware
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let requests = cache.rate_limit_tracker.entry(key).or_insert_with(Vec::new);
+
         // Remove old requests outside the window
         requests.retain(|&timestamp| now - timestamp < self.config.rate_limit_window_seconds);
-        
+
         // Check if rate limit exceeded
         if requests.len() >= self.config.max_derivations_per_window {
             cache.validation_failures += 1;
             return Err(CryptoError::rate_limited(
-                "Too many key derivation requests"
+                "Too many key derivation requests",
             ));
         }
-        
+
         requests.push(now);
         Ok(())
     }
-    
+
     fn generate_cache_key(
         &self,
         account_id: &str,
@@ -223,19 +241,21 @@ impl KeyDerivationMiddleware {
             .join("/");
         format!("{}:{}:{}:{}", account_id, app_id, context, path_str)
     }
-    
+
     fn get_cached_key(&self, key: &str) -> Result<Option<CachedKey>> {
         let mut cache = self.cache.write().map_err(|_| {
             CryptoError::internal_error("Failed to acquire write lock on key cache")
         })?;
-        
+
         if let Some(cached_key) = cache.keys.get(key).cloned() {
             // Check if cache entry is still valid
+            #[allow(clippy::disallowed_methods)] // [VERIFIED] Acceptable in cache TTL check
             let age = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_secs() - cached_key.derived_at;
-            
+                .as_secs()
+                - cached_key.derived_at;
+
             if age <= self.config.cache_ttl_seconds {
                 cache.cache_hits += 1;
                 Ok(Some(cached_key))
@@ -250,26 +270,26 @@ impl KeyDerivationMiddleware {
             Ok(None)
         }
     }
-    
+
     fn cache_key(&self, key: String, cached_key: CachedKey) -> Result<()> {
         let mut cache = self.cache.write().map_err(|_| {
             CryptoError::internal_error("Failed to acquire write lock on key cache")
         })?;
-        
+
         // Evict old entries if cache is full
         if cache.keys.len() >= self.config.max_cache_entries {
             cache.evict_oldest();
         }
-        
+
         cache.keys.insert(key, cached_key);
         Ok(())
     }
-    
+
     fn record_derivation_attempt(&self, _account_id: &str, _app_id: &str) -> Result<()> {
         let mut cache = self.cache.write().map_err(|_| {
             CryptoError::internal_error("Failed to acquire write lock on key cache")
         })?;
-        
+
         cache.derivation_requests += 1;
         Ok(())
     }
@@ -280,28 +300,28 @@ impl KeyDerivationMiddleware {
 pub struct KeyDerivationConfig {
     /// Whether to enable key caching
     pub enable_caching: bool,
-    
+
     /// Cache TTL in seconds
     pub cache_ttl_seconds: u64,
-    
+
     /// Maximum cache entries
     pub max_cache_entries: usize,
-    
+
     /// Whether to enable rate limiting
     pub enable_rate_limiting: bool,
-    
+
     /// Rate limit window in seconds
     pub rate_limit_window_seconds: u64,
-    
+
     /// Maximum derivations per window
     pub max_derivations_per_window: usize,
-    
+
     /// Maximum app ID length
     pub max_app_id_length: usize,
-    
+
     /// Maximum context length
     pub max_context_length: usize,
-    
+
     /// Maximum derivation path length
     pub max_derivation_path_length: usize,
 }
@@ -353,7 +373,7 @@ impl KeyCache {
             validation_failures: 0,
         }
     }
-    
+
     fn clear(&mut self) {
         self.keys.clear();
         self.rate_limit_tracker.clear();
@@ -362,9 +382,10 @@ impl KeyCache {
         self.cache_misses = 0;
         self.validation_failures = 0;
     }
-    
+
     fn evict_oldest(&mut self) {
-        if let Some(oldest_key) = self.keys
+        if let Some(oldest_key) = self
+            .keys
             .iter()
             .min_by_key(|(_, key)| key.derived_at)
             .map(|(key, _)| key.clone())
@@ -379,16 +400,16 @@ impl KeyCache {
 pub struct KeyDerivationStats {
     /// Number of cached keys
     pub cached_keys: usize,
-    
+
     /// Total derivation requests
     pub derivation_requests: u64,
-    
+
     /// Cache hits
     pub cache_hits: u64,
-    
+
     /// Cache misses
     pub cache_misses: u64,
-    
+
     /// Validation failures
     pub validation_failures: u64,
 }
@@ -398,15 +419,15 @@ mod tests {
     use super::*;
     use crate::middleware::handler::NoOpHandler;
     use crate::middleware::SecurityLevel;
-    use aura_types::{AccountIdExt, DeviceIdExt};
     use aura_crypto::Effects;
-    
+    use aura_types::{AccountIdExt, DeviceIdExt};
+
     #[test]
     fn test_key_derivation_middleware() {
         let effects = Effects::test(42);
         let account_id = aura_types::AccountId::new_with_effects(&effects);
         let device_id = aura_types::DeviceId::new_with_effects(&effects);
-        
+
         let middleware = KeyDerivationMiddleware::new(KeyDerivationConfig::default());
         let handler = NoOpHandler;
         let context = CryptoContext::new(
@@ -420,54 +441,44 @@ mod tests {
             context: "user-context".to_string(),
             derivation_path: vec![0, 1, 2],
         };
-        
+
         let result = middleware.process(operation, &context, &handler);
         assert!(result.is_ok());
-        
+
         let stats = middleware.stats();
         assert_eq!(stats.derivation_requests, 1);
     }
-    
+
     #[test]
     fn test_key_derivation_validation() {
         let middleware = KeyDerivationMiddleware::new(KeyDerivationConfig::default());
-        
+
         // Valid parameters
-        assert!(middleware.validate_derivation_parameters(
-            "valid-app",
-            "valid-context",
-            &[0, 1, 2]
-        ).is_ok());
-        
+        assert!(middleware
+            .validate_derivation_parameters("valid-app", "valid-context", &[0, 1, 2])
+            .is_ok());
+
         // Invalid app_id
-        assert!(middleware.validate_derivation_parameters(
-            "",
-            "valid-context",
-            &[0, 1, 2]
-        ).is_err());
-        
-        assert!(middleware.validate_derivation_parameters(
-            "app with spaces",
-            "valid-context",
-            &[0, 1, 2]
-        ).is_err());
-        
+        assert!(middleware
+            .validate_derivation_parameters("", "valid-context", &[0, 1, 2])
+            .is_err());
+
+        assert!(middleware
+            .validate_derivation_parameters("app with spaces", "valid-context", &[0, 1, 2])
+            .is_err());
+
         // Invalid context
-        assert!(middleware.validate_derivation_parameters(
-            "valid-app",
-            "",
-            &[0, 1, 2]
-        ).is_err());
-        
+        assert!(middleware
+            .validate_derivation_parameters("valid-app", "", &[0, 1, 2])
+            .is_err());
+
         // Invalid derivation path
         let long_path: Vec<u32> = (0..20).collect();
-        assert!(middleware.validate_derivation_parameters(
-            "valid-app",
-            "valid-context",
-            &long_path
-        ).is_err());
+        assert!(middleware
+            .validate_derivation_parameters("valid-app", "valid-context", &long_path)
+            .is_err());
     }
-    
+
     #[test]
     fn test_rate_limiting() {
         let config = KeyDerivationConfig {
@@ -476,14 +487,14 @@ mod tests {
             ..KeyDerivationConfig::default()
         };
         let middleware = KeyDerivationMiddleware::new(config);
-        
+
         // First two requests should succeed
         assert!(middleware.check_rate_limiting("account1", "app1").is_ok());
         assert!(middleware.check_rate_limiting("account1", "app1").is_ok());
-        
+
         // Third request should be rate limited
         assert!(middleware.check_rate_limiting("account1", "app1").is_err());
-        
+
         // Different app should have separate limit
         assert!(middleware.check_rate_limiting("account1", "app2").is_ok());
     }

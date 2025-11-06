@@ -4,30 +4,30 @@
 //! All command processing, input validation, output formatting, and error handling functionality
 //! is implemented as composable middleware layers that can be stacked and configured.
 
-pub mod stack;
+pub mod authentication;
+pub mod configuration;
+pub mod error_handling;
 pub mod handler;
 pub mod input_validation;
 pub mod output_formatting;
 pub mod progress_reporting;
-pub mod error_handling;
-pub mod configuration;
-pub mod authentication;
+pub mod stack;
 
 // Re-export core middleware types
-pub use stack::{CliMiddlewareStack, CliStackBuilder};
+pub use aura_protocol::middleware::{MiddlewareContext, MiddlewareResult};
 pub use handler::{CliHandler, CliOperation, CliResult};
-pub use aura_types::middleware::{MiddlewareContext, MiddlewareResult};
+pub use stack::{CliMiddlewareStack, CliStackBuilder};
 
 // Re-export middleware implementations
+pub use authentication::AuthenticationMiddleware;
+pub use configuration::ConfigurationMiddleware;
+pub use error_handling::ErrorHandlingMiddleware;
 pub use input_validation::InputValidationMiddleware;
 pub use output_formatting::OutputFormattingMiddleware;
 pub use progress_reporting::ProgressReportingMiddleware;
-pub use error_handling::ErrorHandlingMiddleware;
-pub use configuration::ConfigurationMiddleware;
-pub use authentication::AuthenticationMiddleware;
 
-use aura_types::{DeviceId, AccountId};
-use serde::{Serialize, Deserialize};
+use aura_types::{AccountId, DeviceId};
+use serde::{Deserialize, Serialize};
 
 /// Context for CLI middleware operations
 #[derive(Debug, Clone)]
@@ -108,7 +108,7 @@ impl CliContext {
     pub fn new(command: String, args: Vec<String>) -> Self {
         let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
         let env = std::env::vars().collect();
-        
+
         Self {
             command,
             args,
@@ -124,19 +124,19 @@ impl CliContext {
             metadata: std::collections::HashMap::new(),
         }
     }
-    
+
     /// Add metadata to the context
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value);
         self
     }
-    
+
     /// Set verbosity
     pub fn with_verbose(mut self, verbose: bool) -> Self {
         self.verbose = verbose;
         self
     }
-    
+
     /// Set configuration
     pub fn with_config(mut self, config: CliConfig) -> Self {
         self.config = config;

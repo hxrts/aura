@@ -4,7 +4,7 @@
 
 use super::handler::{StorageError, StorageHandler, StorageOperation, StorageResult};
 use super::stack::StorageMiddleware;
-use aura_types::effects::AuraEffects;
+use aura_protocol::effects::AuraEffects;
 use aura_types::{AuraError, MiddlewareContext, MiddlewareResult};
 use std::collections::HashMap;
 

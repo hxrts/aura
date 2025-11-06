@@ -1,7 +1,7 @@
 //! Leptos integration for reactive WebSocket clients
 
 use crate::error::{WasmError, WasmResult};
-use crate::websocket::{ClientMode, DefaultHandler, MessageEnvelope, UnifiedWebSocketClient};
+use crate::websocket::{ClientMode, DefaultHandler, WasmClientEnvelope, UnifiedWebSocketClient};
 #[cfg(feature = "leptos")]
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,7 @@ pub struct ReactiveWebSocketClient {
     /// Signal for connection state.
     connection_state: WriteSignal<ConnectionState>,
     /// Signal for incoming messages.
-    messages: WriteSignal<VecDeque<MessageEnvelope>>,
+    messages: WriteSignal<VecDeque<WasmClientEnvelope>>,
     /// Signal for responses.
     responses: WriteSignal<VecDeque<serde_json::Value>>,
     /// Whether to automatically reconnect on failure.
@@ -51,7 +51,7 @@ impl ReactiveWebSocketClient {
         mode: &str,
         url: String,
         connection_state: WriteSignal<ConnectionState>,
-        messages: WriteSignal<VecDeque<MessageEnvelope>>,
+        messages: WriteSignal<VecDeque<WasmClientEnvelope>>,
         responses: WriteSignal<VecDeque<serde_json::Value>>,
     ) -> WasmResult<Self> {
         let client_mode = match mode {
@@ -86,7 +86,7 @@ impl ReactiveWebSocketClient {
     }
 
     /// Sends a message.
-    pub fn send_message(&self, envelope: &MessageEnvelope) -> WasmResult<()> {
+    pub fn send_message(&self, envelope: &WasmClientEnvelope) -> WasmResult<()> {
         let json = envelope.to_json()?;
         self.client.borrow().send(&json)
     }
@@ -94,7 +94,7 @@ impl ReactiveWebSocketClient {
     /// Sends a typed message.
     pub fn send_typed<T: Serialize>(&self, message_type: &str, payload: &T) -> WasmResult<()> {
         let payload_json = serde_json::to_value(payload).map_err(WasmError::from)?;
-        let envelope = MessageEnvelope::new(message_type, payload_json);
+        let envelope = WasmClientEnvelope::new(message_type, payload_json);
         self.send_message(&envelope)
     }
 
@@ -119,9 +119,9 @@ pub fn use_reactive_websocket(
     url: String,
 ) -> (
     ReadSignal<ConnectionState>,
-    ReadSignal<VecDeque<MessageEnvelope>>,
+    ReadSignal<VecDeque<WasmClientEnvelope>>,
     ReadSignal<VecDeque<serde_json::Value>>,
-    impl Fn(&MessageEnvelope) + Clone,
+    impl Fn(&WasmClientEnvelope) + Clone,
     impl Fn() + Clone,
     impl Fn() + Clone,
 ) {
@@ -153,7 +153,7 @@ pub fn use_reactive_websocket(
     // Send message function
     let send_message = {
         let client = client.clone();
-        move |envelope: &MessageEnvelope| {
+        move |envelope: &WasmClientEnvelope| {
             let _ = client.borrow().send_message(envelope);
         }
     };

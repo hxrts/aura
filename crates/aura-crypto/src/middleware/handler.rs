@@ -1,31 +1,31 @@
 //! Crypto operation handlers
 
-use super::{CryptoHandler, CryptoContext, SecurityLevel};
-use crate::Result;
+use super::{CryptoContext, CryptoHandler, SecurityLevel};
 use crate::middleware::CryptoOperation;
+use crate::Result;
 // Use effects system instead of legacy crypto modules
-use aura_types::effects::Effects;
+use crate::effects::{Effects, CryptoEffectsExt};
 use aura_types::AuraError;
 use std::sync::Arc;
 
 /// Main crypto handler that processes operations using the crypto library
 pub struct CoreCryptoHandler {
     /// Effects for time and randomness
-    effects: Arc<Effects>,
-    
+    effects: Arc<dyn Effects>,
+
     /// Device ID for threshold operations
     device_id: Option<aura_types::identifiers::DeviceId>,
 }
 
 impl CoreCryptoHandler {
     /// Create a new core crypto handler
-    pub fn new(effects: Arc<Effects>) -> Self {
+    pub fn new(effects: Arc<dyn Effects>) -> Self {
         Self {
             effects,
             device_id: None,
         }
     }
-    
+
     /// Create handler with device ID for threshold operations
     pub fn with_device_id(mut self, device_id: aura_types::identifiers::DeviceId) -> Self {
         self.device_id = Some(device_id);
@@ -41,17 +41,18 @@ impl CryptoHandler for CoreCryptoHandler {
     ) -> Result<serde_json::Value> {
         // Validate security level
         self.validate_security_level(&operation, &context.security_level)?;
-        
+
         match operation {
-            CryptoOperation::DeriveKey { app_id, context: derivation_context, derivation_path: _ } => {
+            CryptoOperation::DeriveKey {
+                app_id,
+                context: derivation_context,
+                derivation_path: _,
+            } => {
                 // Simplified key derivation for middleware
-                let key_material = self.effects.blake3_hash(format!(
-                    "{}:{}:{}",
-                    context.account_id,
-                    app_id,
-                    derivation_context
-                ).as_bytes());
-                
+                let key_material = self.effects.blake3_hash(
+                    format!("{}:{}:{}", context.account_id, app_id, derivation_context).as_bytes(),
+                );
+
                 Ok(serde_json::json!({
                     "operation": "derive_key",
                     "app_id": app_id,
@@ -60,14 +61,18 @@ impl CryptoHandler for CoreCryptoHandler {
                     "success": true
                 }))
             }
-            
-            CryptoOperation::GenerateSignature { message, signing_package: _ } => {
-                let _device_id = self.device_id.as_ref()
-                    .ok_or_else(|| AuraError::not_initialized("Device ID not configured for threshold operations"))?;
-                
+
+            CryptoOperation::GenerateSignature {
+                message,
+                signing_package: _,
+            } => {
+                let _device_id = self.device_id.as_ref().ok_or_else(|| {
+                    AuraError::not_initialized("Device ID not configured for threshold operations")
+                })?;
+
                 // Simplified signature generation for middleware
                 let signature = vec![0u8; 64]; // Placeholder signature
-                
+
                 Ok(serde_json::json!({
                     "operation": "generate_signature",
                     "message_hash": hex::encode(blake3::hash(&message).as_bytes()),
@@ -75,11 +80,15 @@ impl CryptoHandler for CoreCryptoHandler {
                     "success": true
                 }))
             }
-            
-            CryptoOperation::VerifySignature { message, signature, public_key: _ } => {
+
+            CryptoOperation::VerifySignature {
+                message,
+                signature,
+                public_key: _,
+            } => {
                 // Simplified signature verification for middleware
                 let is_valid = signature.len() == 64; // Basic validation
-                
+
                 Ok(serde_json::json!({
                     "operation": "verify_signature",
                     "message_hash": hex::encode(blake3::hash(&message).as_bytes()),
@@ -87,20 +96,18 @@ impl CryptoHandler for CoreCryptoHandler {
                     "success": true
                 }))
             }
-            
+
             CryptoOperation::GenerateRandom { num_bytes } => {
                 // Validate reasonable bounds
                 if num_bytes == 0 || num_bytes > 1024 * 1024 {
-                    return Err(AuraError::invalid_input(
-                        "Invalid random bytes count"
-                    ));
+                    return Err(AuraError::invalid_input("Invalid random bytes count"));
                 }
-                
+
                 // Generate random bytes using effects
-                let random_bytes: Vec<u8> = (0..num_bytes).map(|_| {
-                    self.effects.random_bytes_array::<1>()[0]
-                }).collect();
-                
+                let random_bytes: Vec<u8> = (0..num_bytes)
+                    .map(|_| self.effects.random_bytes_array::<1>()[0])
+                    .collect();
+
                 Ok(serde_json::json!({
                     "operation": "generate_random",
                     "num_bytes": num_bytes,
@@ -108,8 +115,12 @@ impl CryptoHandler for CoreCryptoHandler {
                     "success": true
                 }))
             }
-            
-            CryptoOperation::RotateKeys { old_threshold, new_threshold, new_participants } => {
+
+            CryptoOperation::RotateKeys {
+                old_threshold,
+                new_threshold,
+                new_participants,
+            } => {
                 // Key rotation is a complex operation that would involve
                 // coordination with multiple devices - simplified here
                 Ok(serde_json::json!({
@@ -117,15 +128,18 @@ impl CryptoHandler for CoreCryptoHandler {
                     "old_threshold": old_threshold,
                     "new_threshold": new_threshold,
                     "participants": new_participants.len(),
-                    "rotation_id": uuid::Uuid::new_v4().to_string(),
+                    "rotation_id": self.effects.gen_uuid().to_string(),
                     "success": true
                 }))
             }
-            
-            CryptoOperation::Encrypt { plaintext, recipient_keys } => {
+
+            CryptoOperation::Encrypt {
+                plaintext,
+                recipient_keys,
+            } => {
                 // Simplified content encryption for middleware
                 let encrypted = plaintext.clone(); // Placeholder encryption
-                
+
                 Ok(serde_json::json!({
                     "operation": "encrypt",
                     "plaintext_size": plaintext.len(),
@@ -135,11 +149,14 @@ impl CryptoHandler for CoreCryptoHandler {
                     "success": true
                 }))
             }
-            
-            CryptoOperation::Decrypt { ciphertext, private_key: _ } => {
+
+            CryptoOperation::Decrypt {
+                ciphertext,
+                private_key: _,
+            } => {
                 // Simplified content decryption for middleware
                 let decrypted = ciphertext.clone(); // Placeholder decryption
-                
+
                 Ok(serde_json::json!({
                     "operation": "decrypt",
                     "ciphertext_size": ciphertext.len(),
@@ -148,7 +165,7 @@ impl CryptoHandler for CoreCryptoHandler {
                     "success": true
                 }))
             }
-            
+
             CryptoOperation::Hash { data, algorithm } => {
                 let hash_result = match algorithm.as_str() {
                     "blake3" => self.effects.blake3_hash(&data).to_vec(),
@@ -156,7 +173,7 @@ impl CryptoHandler for CoreCryptoHandler {
                         return Err(AuraError::unsupported_algorithm(algorithm));
                     }
                 };
-                
+
                 Ok(serde_json::json!({
                     "operation": "hash",
                     "algorithm": algorithm,
@@ -170,7 +187,11 @@ impl CryptoHandler for CoreCryptoHandler {
 }
 
 impl CoreCryptoHandler {
-    fn validate_security_level(&self, operation: &CryptoOperation, level: &SecurityLevel) -> Result<()> {
+    fn validate_security_level(
+        &self,
+        operation: &CryptoOperation,
+        level: &SecurityLevel,
+    ) -> Result<()> {
         let required_level = match operation {
             CryptoOperation::DeriveKey { .. } => SecurityLevel::High,
             CryptoOperation::GenerateSignature { .. } => SecurityLevel::Critical,
@@ -181,13 +202,14 @@ impl CoreCryptoHandler {
             CryptoOperation::Decrypt { .. } => SecurityLevel::High,
             CryptoOperation::Hash { .. } => SecurityLevel::Basic,
         };
-        
+
         if level < &required_level {
             return Err(AuraError::insufficient_security_level(format!(
-                "Required: {:?}, Provided: {:?}", required_level, level
+                "Required: {:?}, Provided: {:?}",
+                required_level, level
             )));
         }
-        
+
         Ok(())
     }
 }
@@ -213,15 +235,15 @@ impl CryptoHandler for NoOpHandler {
 mod tests {
     use super::*;
     use crate::middleware::SecurityLevel;
+    use crate::effects::{Effects, TestCryptoEffects};
     use aura_types::{AccountIdExt, DeviceIdExt};
-    use aura_crypto::Effects;
-    
+
     #[test]
     fn test_core_crypto_handler() {
-        let effects = Arc::new(Effects::test(42));
+        let effects = Arc::new(TestCryptoEffects::new(42));
         let account_id = aura_types::AccountId::new_with_effects(&effects);
         let device_id = aura_types::DeviceId::new_with_effects(&effects);
-        
+
         let handler = CoreCryptoHandler::new(effects.clone());
         let context = CryptoContext::new(
             account_id,
@@ -230,23 +252,23 @@ mod tests {
             SecurityLevel::Standard,
         );
         let operation = CryptoOperation::GenerateRandom { num_bytes: 32 };
-        
+
         let result = handler.handle(operation, &context);
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         assert_eq!(response.get("success").unwrap(), true);
         assert_eq!(response.get("num_bytes").unwrap(), 32);
     }
-    
+
     #[test]
     fn test_security_level_validation() {
-        let effects = Arc::new(Effects::test(42));
+        let effects = Arc::new(TestCryptoEffects::new(42));
         let account_id = aura_types::AccountId::new_with_effects(&effects);
         let device_id = aura_types::DeviceId::new_with_effects(&effects);
-        
+
         let handler = CoreCryptoHandler::new(effects.clone());
-        
+
         // High security operation with basic security level should fail
         let context = CryptoContext::new(
             account_id,
@@ -259,17 +281,17 @@ mod tests {
             context: "test".to_string(),
             derivation_path: vec![],
         };
-        
+
         let result = handler.handle(operation, &context);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn test_hash_operation() {
-        let effects = Arc::new(Effects::test(42));
+        let effects = Arc::new(TestCryptoEffects::new(42));
         let account_id = aura_types::AccountId::new_with_effects(&effects);
         let device_id = aura_types::DeviceId::new_with_effects(&effects);
-        
+
         let handler = CoreCryptoHandler::new(effects.clone());
         let context = CryptoContext::new(
             account_id,
@@ -281,10 +303,10 @@ mod tests {
             data: b"hello world".to_vec(),
             algorithm: "blake3".to_string(),
         };
-        
+
         let result = handler.handle(operation, &context);
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         assert_eq!(response.get("success").unwrap(), true);
         assert_eq!(response.get("algorithm").unwrap(), "blake3");
