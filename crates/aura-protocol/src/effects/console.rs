@@ -19,7 +19,7 @@ pub enum LogLevel {
 }
 
 /// Console events for debugging and monitoring
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ConsoleEvent {
     /// Protocol has started execution
     ProtocolStarted {
@@ -83,7 +83,7 @@ pub enum ConsoleEvent {
 }
 
 /// Console effects interface for logging and event emission
-pub trait ConsoleEffects {
+pub trait ConsoleEffects: Send + Sync {
     /// Log a trace message with structured fields
     ///
     /// # Arguments
@@ -127,135 +127,4 @@ pub trait ConsoleEffects {
         &self,
         event: ConsoleEvent,
     ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>>;
-}
-
-/// Production console effects using real logging
-///
-/// Outputs all logs and events to stdout with timestamps and severity levels.
-pub struct ProductionConsoleEffects;
-
-impl ProductionConsoleEffects {
-    /// Create a new production console effects instance
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for ProductionConsoleEffects {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ConsoleEffects for ProductionConsoleEffects {
-    fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
-        println!("[TRACE] {}: {:?}", message, fields);
-    }
-
-    fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
-        println!("[DEBUG] {}: {:?}", message, fields);
-    }
-
-    fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
-        println!("[INFO] {}: {:?}", message, fields);
-    }
-
-    fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
-        println!("[WARN] {}: {:?}", message, fields);
-    }
-
-    fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
-        println!("[ERROR] {}: {:?}", message, fields);
-    }
-
-    fn emit_event(
-        &self,
-        event: ConsoleEvent,
-    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            println!("[EVENT] {:?}", event);
-        })
-    }
-}
-
-/// Test console effects that capture output for verification
-///
-/// Captures all logs and events in memory for use in tests. All output is
-/// stored and can be retrieved for assertion and verification.
-pub struct TestConsoleEffects {
-    /// Captured logs with their severity level
-    logs: std::sync::Arc<std::sync::Mutex<Vec<(LogLevel, String)>>>,
-    /// Captured console events
-    events: std::sync::Arc<std::sync::Mutex<Vec<ConsoleEvent>>>,
-}
-
-impl TestConsoleEffects {
-    /// Create a new test console effects instance with empty logs and events
-    pub fn new() -> Self {
-        Self {
-            logs: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            events: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        }
-    }
-
-    /// Get all captured logs as a cloned vector
-    pub fn get_logs(&self) -> Vec<(LogLevel, String)> {
-        self.logs.lock().unwrap().clone()
-    }
-
-    /// Get all captured events as a cloned vector
-    pub fn get_events(&self) -> Vec<ConsoleEvent> {
-        self.events.lock().unwrap().clone()
-    }
-
-    /// Clear all captured logs and events
-    pub fn clear(&self) {
-        self.logs.lock().unwrap().clear();
-        self.events.lock().unwrap().clear();
-    }
-}
-
-impl ConsoleEffects for TestConsoleEffects {
-    fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
-        self.logs
-            .lock()
-            .unwrap()
-            .push((LogLevel::Trace, format!("{}: {:?}", message, fields)));
-    }
-
-    fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
-        self.logs
-            .lock()
-            .unwrap()
-            .push((LogLevel::Debug, format!("{}: {:?}", message, fields)));
-    }
-
-    fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
-        self.logs
-            .lock()
-            .unwrap()
-            .push((LogLevel::Info, format!("{}: {:?}", message, fields)));
-    }
-
-    fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
-        self.logs
-            .lock()
-            .unwrap()
-            .push((LogLevel::Warn, format!("{}: {:?}", message, fields)));
-    }
-
-    fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
-        self.logs
-            .lock()
-            .unwrap()
-            .push((LogLevel::Error, format!("{}: {:?}", message, fields)));
-    }
-
-    fn emit_event(
-        &self,
-        event: ConsoleEvent,
-    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        self.events.lock().unwrap().push(event);
-        Box::pin(async move {})
-    }
 }

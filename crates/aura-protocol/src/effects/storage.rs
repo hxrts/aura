@@ -1,12 +1,11 @@
-//! Storage effects for file I/O operations
+//! Storage effects for key-value operations
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use async_trait::async_trait;
 
-/// Storage location wrapper
-#[derive(Debug, Clone)]
+/// Storage location wrapper (kept for backwards compatibility)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StorageLocation {
     path: PathBuf,
 }
@@ -36,225 +35,72 @@ impl StorageLocation {
 /// Storage operation errors
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
-    /// Failed to read file contents
-    #[error("Failed to read file: {0}")]
+    /// Failed to read data
+    #[error("Failed to read: {0}")]
     ReadFailed(String),
-    /// Failed to write file contents
-    #[error("Failed to write file: {0}")]
+    /// Failed to write data
+    #[error("Failed to write: {0}")]
     WriteFailed(String),
-    /// Failed to delete file
-    #[error("Failed to delete file: {0}")]
+    /// Failed to delete data
+    #[error("Failed to delete: {0}")]
     DeleteFailed(String),
-    /// Failed to list files in directory
-    #[error("Failed to list files: {0}")]
+    /// Failed to list keys
+    #[error("Failed to list: {0}")]
     ListFailed(String),
-    /// File not found at the specified location
-    #[error("File not found: {0}")]
+    /// Key not found
+    #[error("Key not found: {0}")]
     NotFound(String),
     /// Permission denied for storage operation
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
 }
 
-/// Storage effects interface for file I/O operations
-pub trait StorageEffects {
-    /// Read file contents from the specified location
-    ///
-    /// # Arguments
-    /// * `location` - The storage location of the file to read
-    fn read_file(
-        &self,
-        location: StorageLocation,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Vec<u8>, StorageError>> + Send + '_>>;
-
-    /// Write data to file at the specified location
-    ///
-    /// Creates parent directories as needed.
-    ///
-    /// # Arguments
-    /// * `location` - The storage location where the file should be written
-    /// * `data` - The data to write to the file
-    fn write_file(
-        &self,
-        location: StorageLocation,
-        data: &[u8],
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + '_>>;
-
-    /// Delete file at the specified location
-    ///
-    /// # Arguments
-    /// * `location` - The storage location of the file to delete
-    fn delete_file(
-        &self,
-        location: StorageLocation,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + '_>>;
-
-    /// List all files in a directory
-    ///
-    /// # Arguments
-    /// * `location` - The storage location of the directory to list
-    fn list_files(
-        &self,
-        location: StorageLocation,
-    ) -> std::pin::Pin<
-        Box<dyn Future<Output = Result<Vec<StorageLocation>, StorageError>> + Send + '_>,
-    >;
+/// Storage statistics
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StorageStats {
+    /// Number of keys stored
+    pub key_count: u64,
+    /// Total size of stored data in bytes
+    pub total_size: u64,
+    /// Available space in bytes (if known)
+    pub available_space: Option<u64>,
+    /// Backend type (e.g., "memory", "filesystem", "distributed")
+    pub backend_type: String,
 }
 
-/// Production storage effects using real filesystem
+/// Storage effects interface for key-value operations
 ///
-/// Performs actual file I/O operations on the system's filesystem.
-pub struct ProductionStorageEffects;
+/// This trait provides storage operations for the Aura effects system.
+/// Implementations in aura-protocol provide:
+/// - Production: Filesystem-based persistent storage
+/// - Testing: In-memory storage for fast tests
+/// - Simulation: Configurable storage with fault injection
+#[async_trait]
+pub trait StorageEffects: Send + Sync {
+    /// Store a value under the given key
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError>;
 
-impl ProductionStorageEffects {
-    /// Create a new production storage effects instance
-    pub fn new() -> Self {
-        Self
-    }
-}
+    /// Retrieve a value by key
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError>;
 
-impl StorageEffects for ProductionStorageEffects {
-    fn read_file(
-        &self,
-        location: StorageLocation,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Vec<u8>, StorageError>> + Send + '_>> {
-        Box::pin(async move {
-            std::fs::read(location.path()).map_err(|e| StorageError::ReadFailed(e.to_string()))
-        })
-    }
+    /// Remove a key-value pair
+    async fn remove(&self, key: &str) -> Result<bool, StorageError>;
 
-    fn write_file(
-        &self,
-        location: StorageLocation,
-        data: &[u8],
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + '_>> {
-        let data = data.to_vec(); // Clone for move
-        Box::pin(async move {
-            if let Some(parent) = location.path().parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
-            }
-            std::fs::write(location.path(), data)
-                .map_err(|e| StorageError::WriteFailed(e.to_string()))
-        })
-    }
+    /// List all keys with optional prefix filter
+    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError>;
 
-    fn delete_file(
-        &self,
-        location: StorageLocation,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + '_>> {
-        Box::pin(async move {
-            std::fs::remove_file(location.path())
-                .map_err(|e| StorageError::DeleteFailed(e.to_string()))
-        })
-    }
+    /// Check if a key exists
+    async fn exists(&self, key: &str) -> Result<bool, StorageError>;
 
-    fn list_files(
-        &self,
-        location: StorageLocation,
-    ) -> std::pin::Pin<
-        Box<dyn Future<Output = Result<Vec<StorageLocation>, StorageError>> + Send + '_>,
-    > {
-        Box::pin(async move {
-            match std::fs::read_dir(location.path()) {
-                Ok(entries) => {
-                    let mut files = Vec::new();
-                    for entry in entries {
-                        match entry {
-                            Ok(entry) => files.push(StorageLocation::from_path(entry.path())),
-                            Err(e) => return Err(StorageError::ListFailed(e.to_string())),
-                        }
-                    }
-                    Ok(files)
-                }
-                Err(e) => Err(StorageError::ListFailed(e.to_string())),
-            }
-        })
-    }
-}
+    /// Store multiple key-value pairs atomically
+    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError>;
 
-/// Test storage effects using in-memory filesystem
-///
-/// Provides a mock filesystem implementation using a HashMap for testing
-/// file I/O operations without accessing the actual filesystem.
-pub struct TestStorageEffects {
-    /// In-memory store of files mapped from path to contents
-    files: Arc<RwLock<HashMap<String, Vec<u8>>>>,
-}
+    /// Retrieve multiple values by keys
+    async fn retrieve_batch(&self, keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError>;
 
-impl TestStorageEffects {
-    /// Create a new test storage effects instance with an empty filesystem
-    pub fn new() -> Self {
-        Self {
-            files: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-}
+    /// Clear all stored data
+    async fn clear_all(&self) -> Result<(), StorageError>;
 
-impl StorageEffects for TestStorageEffects {
-    fn read_file(
-        &self,
-        location: StorageLocation,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Vec<u8>, StorageError>> + Send + '_>> {
-        let files = self.files.clone();
-        Box::pin(async move {
-            let files = files.read().unwrap();
-            let path_str = location.path().to_string_lossy().to_string();
-            files
-                .get(&path_str)
-                .cloned()
-                .ok_or_else(|| StorageError::NotFound(path_str))
-        })
-    }
-
-    fn write_file(
-        &self,
-        location: StorageLocation,
-        data: &[u8],
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + '_>> {
-        let files = self.files.clone();
-        let data = data.to_vec();
-        Box::pin(async move {
-            let mut files = files.write().unwrap();
-            let path_str = location.path().to_string_lossy().to_string();
-            files.insert(path_str, data);
-            Ok(())
-        })
-    }
-
-    fn delete_file(
-        &self,
-        location: StorageLocation,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + '_>> {
-        let files = self.files.clone();
-        Box::pin(async move {
-            let mut files = files.write().unwrap();
-            let path_str = location.path().to_string_lossy().to_string();
-            files
-                .remove(&path_str)
-                .map(|_| ())
-                .ok_or_else(|| StorageError::NotFound(path_str))
-        })
-    }
-
-    fn list_files(
-        &self,
-        location: StorageLocation,
-    ) -> std::pin::Pin<
-        Box<dyn Future<Output = Result<Vec<StorageLocation>, StorageError>> + Send + '_>,
-    > {
-        let files = self.files.clone();
-        Box::pin(async move {
-            let files = files.read().unwrap();
-            let base_path = location.path().to_string_lossy();
-            let mut result = Vec::new();
-
-            for path in files.keys() {
-                if path.starts_with(&*base_path) {
-                    result.push(StorageLocation::from_path(path.clone()));
-                }
-            }
-            Ok(result)
-        })
-    }
+    /// Get storage statistics
+    async fn stats(&self) -> Result<StorageStats, StorageError>;
 }

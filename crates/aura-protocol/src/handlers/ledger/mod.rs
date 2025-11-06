@@ -2,6 +2,6 @@
 //!
 //! Handlers for ledger and account state effects.
 
-pub mod memory;
-
-pub use memory::MemoryLedgerHandler;
+// Temporarily commented out - incomplete implementation
+// pub mod memory;
+// pub use memory::MemoryLedgerHandler;

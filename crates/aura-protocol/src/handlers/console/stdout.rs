@@ -1,8 +1,7 @@
 //! Stdout console handler for simple logging
 
-use crate::effects::{ConsoleEffects, ConsoleEffect};
-use async_trait::async_trait;
-use uuid::Uuid;
+use crate::effects::{ConsoleEffects, ConsoleEvent};
+use std::future::Future;
 
 /// Stdout console handler for simple text output
 pub struct StdoutConsoleHandler;
@@ -19,37 +18,50 @@ impl Default for StdoutConsoleHandler {
     }
 }
 
-#[async_trait]
 impl ConsoleEffects for StdoutConsoleHandler {
-    async fn emit_choreo_event(&self, event: ConsoleEffect) {
-        println!("[CHOREO] {:?}", event);
+    fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
+        let fields_str = format_fields(fields);
+        println!("[TRACE] {} {}", message, fields_str);
     }
 
-    async fn protocol_started(&self, protocol_id: Uuid, protocol_type: &str) {
-        println!("[PROTOCOL] Started {} ({})", protocol_type, protocol_id);
+    fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
+        let fields_str = format_fields(fields);
+        println!("[DEBUG] {} {}", message, fields_str);
     }
 
-    async fn protocol_completed(&self, protocol_id: Uuid, duration_ms: u64) {
-        println!("[PROTOCOL] Completed {} in {}ms", protocol_id, duration_ms);
+    fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
+        let fields_str = format_fields(fields);
+        println!("[INFO] {} {}", message, fields_str);
     }
 
-    async fn protocol_failed(&self, protocol_id: Uuid, error: &str) {
-        println!("[PROTOCOL] Failed {} - {}", protocol_id, error);
+    fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
+        let fields_str = format_fields(fields);
+        println!("[WARN] {} {}", message, fields_str);
     }
 
-    async fn log_info(&self, message: &str) {
-        println!("[INFO] {}", message);
+    fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
+        let fields_str = format_fields(fields);
+        println!("[ERROR] {} {}", message, fields_str);
     }
 
-    async fn log_warning(&self, message: &str) {
-        println!("[WARN] {}", message);
+    fn emit_event(
+        &self,
+        event: ConsoleEvent,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            println!("[EVENT] {:?}", event);
+        })
     }
+}
 
-    async fn log_error(&self, message: &str) {
-        println!("[ERROR] {}", message);
-    }
-
-    async fn flush(&self) {
-        // stdout flushes automatically
+fn format_fields(fields: &[(&str, &str)]) -> String {
+    if fields.is_empty() {
+        String::new()
+    } else {
+        let field_strings: Vec<String> = fields
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect();
+        format!("[{}]", field_strings.join(" "))
     }
 }

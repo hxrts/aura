@@ -3,8 +3,7 @@
 use super::{
     traits::*, MiddlewareContext, HandlerMetadata, AuraMiddleware
 };
-use crate::effects::Effects;
-use aura_types::AuraError;
+// Removed unused imports
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;

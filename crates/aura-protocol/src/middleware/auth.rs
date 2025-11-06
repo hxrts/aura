@@ -1,7 +1,7 @@
 //! Authentication and authorization middleware
 
 use super::{MiddlewareContext, AuraMiddleware};
-use crate::effects::Effects;
+use crate::handlers::AuraHandler;
 use aura_types::permissions::CanonicalPermission;
 use std::future::Future;
 use std::pin::Pin;

@@ -10,32 +10,10 @@ use crate::effects::*;
 use crate::errors::{AgentError, Result as AgentResult};
 use crate::handlers::AuthenticationHandler;
 use crate::middleware::{AgentMiddlewareStack, MiddlewareStackBuilder};
-// TODO: Remove dependency on aura_protocol until it compiles
-// use aura_protocol::effects::AuraEffectSystem;
 use aura_types::{identifiers::{DeviceId, AccountId}, AuraError};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-/// Temporary stub for AuraEffectSystem until aura-protocol compiles
-#[derive(Debug, Clone)]
-pub struct AuraEffectSystem {
-    device_id: DeviceId,
-}
-
-impl AuraEffectSystem {
-    pub fn for_testing(device_id: DeviceId) -> Self {
-        Self { device_id }
-    }
-    
-    pub fn for_production(device_id: DeviceId) -> Result<Self, String> {
-        Ok(Self { device_id })
-    }
-    
-    pub fn for_simulation(device_id: DeviceId, _seed: u64) -> Self {
-        Self { device_id }
-    }
-}
 
 /// Core agent runtime that composes handlers and middleware
 ///

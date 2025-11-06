@@ -64,7 +64,7 @@ where
         &'a self,
         request: Self::Request,
         context: &'a MiddlewareContext,
-        effects: &'a dyn super::super::effects::Effects,
+        effects: &'a dyn super::super::handlers::AuraHandler,
         next: Box<dyn super::traits::MiddlewareHandler<Self::Request, Self::Response, Self::Error>>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'a>> {
         let collector = self.collector.clone();

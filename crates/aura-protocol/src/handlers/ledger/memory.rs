@@ -27,17 +27,7 @@ impl Default for MemoryLedgerHandler {
 
 #[async_trait]
 impl LedgerEffects for MemoryLedgerHandler {
-    async fn read_ledger(&self) -> Result<Arc<RwLock<aura_journal::AccountState>>, LedgerError> {
-        Err(LedgerError::NotAvailable)
-    }
-
-    async fn write_ledger(&self) -> Result<Arc<RwLock<aura_journal::AccountState>>, LedgerError> {
-        Err(LedgerError::NotAvailable)
-    }
-
-    async fn get_account_state(&self) -> Result<aura_journal::AccountState, LedgerError> {
-        Err(LedgerError::NotAvailable)
-    }
+    // Removed old methods that are no longer part of the trait
 
     async fn append_event(&self, _event: Vec<u8>) -> Result<(), LedgerError> {
         Ok(())

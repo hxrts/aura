@@ -130,6 +130,32 @@ impl CryptoEffects for AuraEffectSystem {
 
 This means the "registry" is a logical concept in the architecture diagrams, but the implementation achieves the same routing behavior through Rust's trait system with zero runtime cost.
 
+## Session Type Algebra Integration
+
+The unified effect system integrates with Aura's session type algebra for choreographic programming. The session type algebra provides a compositional interface above the effect system:
+
+```
+Session Type Algebra (Global Protocol)
+    ↓ projection
+Local Session Types (Per-Role Protocols)
+    ↓ execution via
+Effect Algebra (CryptoEffects, NetworkEffects, etc.)
+    ↓ interpretation by
+Handler Implementations
+```
+
+### Implementation Locations
+
+The session type algebra types are implemented in the following locations:
+
+- **Global Protocol AST** (`Protocol` enum): `crates/aura-types/src/sessions.rs`
+- **Effect-Based Representation** (`Effect` enum, `Program` type): `crates/aura-types/src/effects/choreographic.rs`
+- **Supporting Types** (`MessageType`): `crates/aura-types/src/identifiers.rs`
+- **Supporting Types** (`Label`, `Branch`): `crates/aura-types/src/sessions.rs`
+- **Projection Functions**: `crates/aura-types/src/sessions.rs`
+
+See `docs/401_session_type_algebra.md` for the complete formal specification.
+
 ## File Structure and Architectural Layering
 
 ### Crate-Level Middleware Organization

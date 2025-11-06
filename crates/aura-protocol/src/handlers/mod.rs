@@ -30,7 +30,6 @@ pub mod context;
 pub mod composite;
 pub mod erased;
 pub mod factory;
-pub mod middleware;
 pub mod registry;
 pub mod typed_bridge;
 
@@ -364,7 +363,8 @@ pub use context::{
 pub use composite::CompositeHandler;
 pub use erased::{AuraHandler, BoxedHandler, HandlerUtils};
 pub use factory::{AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, FactoryError};
-pub use middleware::{AuraMiddleware, MiddlewareStack};
+pub use crate::middleware::AuraMiddleware;
+// MiddlewareStack removed - incompatible with new unified architecture
 pub use registry::{EffectRegistry, RegistrableHandler, RegistryError};
 
 #[cfg(test)]
@@ -427,3 +427,12 @@ mod tests {
         assert!(all_effects.contains(&EffectType::FaultInjection));
     }
 }
+
+// Additional handler modules (others already declared above)
+pub mod choreographic;
+pub mod ledger;
+pub mod console;
+pub mod crypto;
+pub mod network;
+pub mod storage;
+pub mod time;

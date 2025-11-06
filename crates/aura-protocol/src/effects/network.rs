@@ -57,6 +57,20 @@ pub enum NetworkError {
     NotImplemented,
 }
 
+/// Stream type for peer connection events
+pub type PeerEventStream = std::pin::Pin<Box<dyn futures::Stream<Item = PeerEvent> + Send>>;
+
+/// Peer connection events
+#[derive(Debug, Clone)]
+pub enum PeerEvent {
+    /// Peer connected
+    Connected(uuid::Uuid),
+    /// Peer disconnected  
+    Disconnected(uuid::Uuid),
+    /// Connection failed
+    ConnectionFailed(uuid::Uuid, String),
+}
+
 /// Network effects interface for communication operations
 ///
 /// This trait defines network operations for the Aura effects system.
@@ -67,21 +81,24 @@ pub enum NetworkError {
 /// - Simulation: Network scenarios with partitions and faults
 #[async_trait]
 pub trait NetworkEffects: Send + Sync {
-    /// Send a message to a specific device
-    async fn send_to_device(&self, device_id: DeviceId, data: &[u8]) -> Result<(), NetworkError>;
+    /// Send a message to a specific peer
+    async fn send_to_peer(&self, peer_id: uuid::Uuid, message: Vec<u8>) -> Result<(), NetworkError>;
     
     /// Broadcast a message to all connected peers
-    async fn broadcast(&self, data: &[u8]) -> Result<(), NetworkError>;
+    async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError>;
     
     /// Receive the next available message
-    async fn receive_message(&self) -> Result<(DeviceId, Vec<u8>), NetworkError>;
+    async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), NetworkError>;
     
-    /// Connect to a peer by device ID
-    async fn connect_to_device(&self, device_id: DeviceId) -> Result<(), NetworkError>;
-    
-    /// Disconnect from a peer
-    async fn disconnect_from_device(&self, device_id: DeviceId) -> Result<(), NetworkError>;
+    /// Receive message from a specific peer
+    async fn receive_from(&self, peer_id: uuid::Uuid) -> Result<Vec<u8>, NetworkError>;
     
     /// Get list of currently connected peers
-    async fn connected_peers(&self) -> Vec<DeviceId>;
+    async fn connected_peers(&self) -> Vec<uuid::Uuid>;
+    
+    /// Check if a peer is connected
+    async fn is_peer_connected(&self, peer_id: uuid::Uuid) -> bool;
+    
+    /// Subscribe to peer connection events
+    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError>;
 }

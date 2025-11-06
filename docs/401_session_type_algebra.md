@@ -139,7 +139,7 @@ Rumpsteak defines two representations of the session type algebra:
 
 ### 1. Global Protocol Algebra (`Protocol` AST)
 
-The global choreography as an abstract syntax tree:
+The global choreography as an abstract syntax tree (implemented in `crates/aura-types/src/sessions.rs`):
 
 ```rust
 enum Protocol {
@@ -184,7 +184,7 @@ enum Protocol {
 
 ### 2. Effect Algebra (`Program` Free Algebra)
 
-The effect-based representation (first-class programs):
+The effect-based representation (first-class programs, implemented in `crates/aura-types/src/effects/choreographic.rs`):
 
 ```rust
 enum Effect<R, M> {
@@ -597,6 +597,53 @@ The session type algebra is founded on π-calculus:
 - **Recursion**: `μX.P`
 
 Key difference: Session types enforce linear channel usage. Each channel used exactly once per session, preventing races and deadlocks.
+
+## Implementation Locations
+
+All session type algebra types are implemented in the `aura-types` crate to ensure they are available foundation-wide:
+
+### Core Algebra Types
+
+- **`Protocol` enum** (Global Protocol AST): `crates/aura-types/src/sessions.rs`
+  - Send, Broadcast, Parallel, Choice, Rec, Var, End variants
+  - Sequential composition via continuation fields
+  - Complete global choreography representation
+
+- **`Effect<R, M>` enum** (Effect-Based Programs): `crates/aura-types/src/effects/choreographic.rs`
+  - Send, Recv, Choose, Offer, Branch, Parallel, Loop, Timeout, End variants
+  - Generic over Role and Message types
+  - Free algebra for sequential composition
+
+- **`Program<R, M>` type**: `crates/aura-types/src/effects/choreographic.rs`
+  - Defined as `Vec<Effect<R, M>>` for sequential composition
+  - Program combinators (then, parallel, choice)
+
+### Supporting Types
+
+- **`MessageType` enum**: `crates/aura-types/src/identifiers.rs`
+  - Unit, Bool, Int, String, Bytes, Custom variants
+  - Wire protocol serialization support
+
+- **`Label` and `Branch` types**: `crates/aura-types/src/sessions.rs`
+  - Label with string identifier and optional guards
+  - Branch with label, guard expression, and Protocol continuation
+
+### Projection and Safety
+
+- **Projection Functions**: `crates/aura-types/src/sessions.rs`
+  - Global-to-local projection function `πᵣ(G)`
+  - Local type duality function for session type safety
+  - Conflict detection for parallel composition
+
+### Import Paths
+
+In your code, import these types with:
+
+```rust
+use aura_types::sessions::{Protocol, Label, Branch};
+use aura_types::effects::choreographic::{Effect, Program};
+use aura_types::identifiers::MessageType;
+```
 
 ## References
 

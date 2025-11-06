@@ -16,11 +16,53 @@
 //! All operations are performed through this effects interface, following the
 //! algebraic effects pattern defined in docs/400_effect_system.md
 
-use aura_types::identifiers::DeviceId;
-use aura_journal::ledger::{CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, JournalError, JournalMap, JournalStats, TreeOpRecord};
-use aura_journal::tree::state::Epoch;
-use aura_journal::tree::{Commitment, LeafIndex, RatchetTree};
-use aura_types::ProtocolError;
+use aura_types::{
+    identifiers::{DeviceId, GuardianId},
+    AuraError,
+};
+// TODO: These types should be defined in aura-types when implementing the actual journal functionality
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+// Stub types for compilation - should be moved to aura-types when implementing journal
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityId(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityRef(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Intent(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntentId(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntentStatus(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalMap(pub HashMap<String, Vec<u8>>);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalStats {
+    pub entry_count: u64,
+    pub total_size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeOpRecord(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Commitment(pub Vec<u8>);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeafIndex(pub u32);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RatchetTree(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Epoch(pub u64);
 use async_trait::async_trait;
 
 /// Journal effects interface
@@ -40,19 +82,19 @@ pub trait JournalEffects: Send + Sync {
     // ===== Journal State Queries =====
 
     /// Get the complete journal map state
-    async fn get_journal_state(&self) -> Result<JournalMap, JournalError>;
+    async fn get_journal_state(&self) -> Result<JournalMap, AuraError>;
 
     /// Get the current tree state (latest epoch)
-    async fn get_current_tree(&self) -> Result<RatchetTree, JournalError>;
+    async fn get_current_tree(&self) -> Result<RatchetTree, AuraError>;
 
     /// Get the tree state at a specific epoch
-    async fn get_tree_at_epoch(&self, epoch: Epoch) -> Result<RatchetTree, JournalError>;
+    async fn get_tree_at_epoch(&self, epoch: Epoch) -> Result<RatchetTree, AuraError>;
 
     /// Get the current root commitment
-    async fn get_current_commitment(&self) -> Result<Commitment, JournalError>;
+    async fn get_current_commitment(&self) -> Result<Commitment, AuraError>;
 
     /// Get the latest epoch number
-    async fn get_latest_epoch(&self) -> Result<Option<Epoch>, JournalError>;
+    async fn get_latest_epoch(&self) -> Result<Option<Epoch>, AuraError>;
 
     // ===== TreeOp Operations =====
 
@@ -60,13 +102,13 @@ pub trait JournalEffects: Send + Sync {
     ///
     /// This is the authoritative write operation that records a completed TreeSession.
     /// The TreeOp must include a valid threshold signature.
-    async fn append_tree_op(&self, op: TreeOpRecord) -> Result<(), JournalError>;
+    async fn append_tree_op(&self, op: TreeOpRecord) -> Result<(), AuraError>;
 
     /// Get a tree operation by epoch
-    async fn get_tree_op(&self, epoch: Epoch) -> Result<Option<TreeOpRecord>, JournalError>;
+    async fn get_tree_op(&self, epoch: Epoch) -> Result<Option<TreeOpRecord>, AuraError>;
 
     /// List all tree operations in epoch order
-    async fn list_tree_ops(&self) -> Result<Vec<TreeOpRecord>, JournalError>;
+    async fn list_tree_ops(&self) -> Result<Vec<TreeOpRecord>, AuraError>;
 
     // ===== Intent Pool Operations =====
 
@@ -74,27 +116,27 @@ pub trait JournalEffects: Send + Sync {
     ///
     /// Intents use observed-remove set semantics for high availability.
     /// Any device can submit an intent while offline; convergence happens via gossip.
-    async fn submit_intent(&self, intent: Intent) -> Result<IntentId, JournalError>;
+    async fn submit_intent(&self, intent: Intent) -> Result<IntentId, AuraError>;
 
     /// Get an intent by ID
-    async fn get_intent(&self, intent_id: IntentId) -> Result<Option<Intent>, JournalError>;
+    async fn get_intent(&self, intent_id: IntentId) -> Result<Option<Intent>, AuraError>;
 
     /// Get the status of an intent
-    async fn get_intent_status(&self, intent_id: IntentId) -> Result<IntentStatus, JournalError>;
+    async fn get_intent_status(&self, intent_id: IntentId) -> Result<IntentStatus, AuraError>;
 
     /// List all pending intents
-    async fn list_pending_intents(&self) -> Result<Vec<Intent>, JournalError>;
+    async fn list_pending_intents(&self) -> Result<Vec<Intent>, AuraError>;
 
     /// Tombstone an intent (mark as completed)
     ///
     /// Called after a TreeSession successfully executes an intent.
-    async fn tombstone_intent(&self, intent_id: IntentId) -> Result<(), JournalError>;
+    async fn tombstone_intent(&self, intent_id: IntentId) -> Result<(), AuraError>;
 
     /// Prune stale intents based on snapshot commitment
     async fn prune_stale_intents(
         &self,
         current_commitment: Commitment,
-    ) -> Result<usize, JournalError>;
+    ) -> Result<usize, AuraError>;
 
     // ===== Capability Operations =====
 
@@ -105,19 +147,19 @@ pub trait JournalEffects: Send + Sync {
     /// - Not expired
     /// - Not revoked (no tombstone)
     /// - Issuer has authority (according to tree policy)
-    async fn validate_capability(&self, capability: &CapabilityRef) -> Result<bool, JournalError>;
+    async fn validate_capability(&self, capability: &CapabilityRef) -> Result<bool, AuraError>;
 
     /// Check if a capability has been revoked
     async fn is_capability_revoked(
         &self,
         capability_id: &CapabilityId,
-    ) -> Result<bool, JournalError>;
+    ) -> Result<bool, AuraError>;
 
     /// List capabilities issued in a specific TreeOp
     async fn list_capabilities_in_op(
         &self,
         epoch: Epoch,
-    ) -> Result<Vec<CapabilityRef>, JournalError>;
+    ) -> Result<Vec<CapabilityRef>, AuraError>;
 
     // ===== CRDT Operations =====
 
@@ -125,25 +167,25 @@ pub trait JournalEffects: Send + Sync {
     ///
     /// Implements the CRDT join-semilattice merge operation.
     /// Used for anti-entropy and gossip synchronization.
-    async fn merge_journal_state(&self, other: JournalMap) -> Result<(), JournalError>;
+    async fn merge_journal_state(&self, other: JournalMap) -> Result<(), AuraError>;
 
     /// Get journal statistics
-    async fn get_journal_stats(&self) -> Result<JournalStats, JournalError>;
+    async fn get_journal_stats(&self) -> Result<JournalStats, AuraError>;
 
     // ===== Tree Membership Queries =====
 
     /// Check if a device is currently in the tree
-    async fn is_device_member(&self, device_id: DeviceId) -> Result<bool, JournalError>;
+    async fn is_device_member(&self, device_id: DeviceId) -> Result<bool, AuraError>;
 
     /// Get the leaf index for a device (if it exists)
     async fn get_device_leaf_index(
         &self,
         device_id: DeviceId,
-    ) -> Result<Option<LeafIndex>, JournalError>;
+    ) -> Result<Option<LeafIndex>, AuraError>;
 
     /// List all devices in the current tree
-    async fn list_devices(&self) -> Result<Vec<DeviceId>, JournalError>;
+    async fn list_devices(&self) -> Result<Vec<DeviceId>, AuraError>;
 
     /// List all guardians in the current tree
-    async fn list_guardians(&self) -> Result<Vec<aura_types::identifiers::GuardianId>, JournalError>;
+    async fn list_guardians(&self) -> Result<Vec<GuardianId>, AuraError>;
 }

@@ -3,17 +3,124 @@
 //! Combines multiple effect handlers into a single unified handler that implements all effect traits.
 
 use crate::effects::*;
-use crate::handlers::{
+use super::{
     console::{SilentConsoleHandler, StdoutConsoleHandler},
     crypto::{MockCryptoHandler, RealCryptoHandler},
     network::{MemoryNetworkHandler, RealNetworkHandler, SimulatedNetworkHandler},
     storage::{MemoryStorageHandler, FilesystemStorageHandler},
-    time::{RealTimeHandler, SimulatedTimeHandler},
+    // time::{RealTimeHandler, SimulatedTimeHandler}, // Temporarily commented out
+    erased::AuraHandler,
+    context::AuraContext,
+    {AuraHandlerError, EffectType, ExecutionMode},
 };
 use async_trait::async_trait;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use std::sync::Arc;
+use std::future::Future;
 use uuid::Uuid;
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use aura_types::sessions::LocalSessionType;
+use serde_json;
+
+/// Dummy time handler for stub implementation
+pub struct DummyTimeHandler;
+
+impl DummyTimeHandler {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl TimeEffects for DummyTimeHandler {
+    async fn current_epoch(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+
+    async fn current_timestamp(&self) -> u64 {
+        self.current_epoch().await / 1000
+    }
+
+    async fn current_timestamp_millis(&self) -> u64 {
+        self.current_epoch().await
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+    }
+
+    async fn sleep_until(&self, _epoch: u64) {
+        // Stub implementation
+    }
+
+    async fn delay(&self, duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_types::AuraError> {
+        self.sleep_ms(duration_ms).await;
+        Ok(())
+    }
+
+    async fn yield_until(&self, _condition: WakeCondition) -> Result<(), TimeError> {
+        Ok(()) // Stub - immediately returns
+    }
+
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), aura_types::AuraError> {
+        self.yield_until(condition).await
+            .map_err(|e| aura_types::AuraError::Infrastructure(aura_types::InfrastructureError::ConfigError {
+                message: format!("Wait until failed: {}", e),
+                context: "wait_until".to_string()
+            }))
+    }
+
+    async fn set_timeout(&self, _timeout_ms: u64) -> TimeoutHandle {
+        Uuid::new_v4()
+    }
+
+    async fn cancel_timeout(&self, _handle: TimeoutHandle) -> Result<(), TimeError> {
+        Ok(()) // Stub
+    }
+
+    async fn timeout<F, T>(&self, future: F, duration_ms: u64) -> Result<T, aura_types::AuraError>
+    where
+        F: std::future::Future<Output = T> + Send + 'async_trait,
+        T: Send + 'async_trait,
+    {
+        match tokio::time::timeout(Duration::from_millis(duration_ms), future).await {
+            Ok(result) => Ok(result),
+            Err(_) => Err(aura_types::AuraError::Protocol(aura_types::ProtocolError::Timeout {
+                protocol: "timeout".to_string(),
+                timeout_ms: duration_ms,
+                phase: None,
+                context: "timeout operation".to_string(),
+            })),
+        }
+    }
+
+    fn is_simulated(&self) -> bool {
+        false // Not a simulation
+    }
+
+    fn register_context(&self, _context_id: Uuid) {
+        // Stub
+    }
+
+    fn unregister_context(&self, _context_id: Uuid) {
+        // Stub
+    }
+
+    async fn notify_events_available(&self) {
+        // Stub
+    }
+
+    fn resolution_ms(&self) -> u64 {
+        1 // 1ms resolution
+    }
+}
 
 /// Composite handler that implements all effect traits
 pub struct CompositeHandler {
@@ -22,7 +129,7 @@ pub struct CompositeHandler {
     network: Box<dyn NetworkEffects>,
     storage: Box<dyn StorageEffects>,
     crypto: Box<dyn CryptoEffects>,
-    time: Box<dyn TimeEffects>,
+    time: DummyTimeHandler,
     console: Box<dyn ConsoleEffects>,
     // Note: LedgerEffects and ChoreographicEffects will be added when their handlers are implemented
 }
@@ -36,7 +143,7 @@ impl CompositeHandler {
             network: Box::new(MemoryNetworkHandler::new(device_id)),
             storage: Box::new(MemoryStorageHandler::new()),
             crypto: Box::new(MockCryptoHandler::new(42)),
-            time: Box::new(SimulatedTimeHandler::new()),
+            time: DummyTimeHandler::new(),
             console: Box::new(SilentConsoleHandler::new()),
         }
     }
@@ -49,7 +156,7 @@ impl CompositeHandler {
             network: Box::new(RealNetworkHandler::new(device_id, "tcp://0.0.0.0:0".to_string())),
             storage: Box::new(FilesystemStorageHandler::new("/tmp/aura".into()).unwrap()),
             crypto: Box::new(RealCryptoHandler::new()),
-            time: Box::new(RealTimeHandler::new()),
+            time: DummyTimeHandler::new(),
             console: Box::new(StdoutConsoleHandler::new()),
         }
     }
@@ -62,7 +169,7 @@ impl CompositeHandler {
             network: Box::new(SimulatedNetworkHandler::new(device_id)),
             storage: Box::new(MemoryStorageHandler::new()),
             crypto: Box::new(MockCryptoHandler::new(device_id.as_u128() as u64)),
-            time: Box::new(SimulatedTimeHandler::new()),
+            time: DummyTimeHandler::new(),
             console: Box::new(SilentConsoleHandler::new()),
         }
     }
@@ -237,58 +344,67 @@ impl TimeEffects for CompositeHandler {
     fn resolution_ms(&self) -> u64 {
         self.time.resolution_ms()
     }
+
+    async fn current_timestamp(&self) -> u64 {
+        self.time.current_timestamp().await
+    }
+
+    async fn current_timestamp_millis(&self) -> u64 {
+        self.time.current_timestamp_millis().await
+    }
+
+    async fn delay(&self, duration: std::time::Duration) {
+        self.time.delay(duration).await
+    }
+
+    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_types::AuraError> {
+        self.time.sleep(duration_ms).await
+    }
+
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), aura_types::AuraError> {
+        self.time.wait_until(condition).await
+    }
+
+    async fn timeout<F, T>(&self, future: F, duration_ms: u64) -> Result<T, aura_types::AuraError>
+    where
+        F: std::future::Future<Output = T> + Send + 'async_trait,
+        T: Send + 'async_trait,
+    {
+        self.time.timeout(future, duration_ms).await
+    }
 }
 
-#[async_trait]
 impl ConsoleEffects for CompositeHandler {
-    async fn emit_choreo_event(&self, event: ConsoleEffect) {
-        self.console.emit_choreo_event(event).await
+    fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
+        self.console.log_trace(message, fields);
     }
 
-    async fn protocol_started(&self, protocol_id: Uuid, protocol_type: &str) {
-        self.console.protocol_started(protocol_id, protocol_type).await
+    fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
+        self.console.log_debug(message, fields);
     }
 
-    async fn protocol_completed(&self, protocol_id: Uuid, duration_ms: u64) {
-        self.console.protocol_completed(protocol_id, duration_ms).await
+    fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
+        self.console.log_info(message, fields);
     }
 
-    async fn protocol_failed(&self, protocol_id: Uuid, error: &str) {
-        self.console.protocol_failed(protocol_id, error).await
+    fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
+        self.console.log_warn(message, fields);
     }
 
-    async fn log_info(&self, message: &str) {
-        self.console.log_info(message).await
+    fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
+        self.console.log_error(message, fields);
     }
 
-    async fn log_warning(&self, message: &str) {
-        self.console.log_warning(message).await
-    }
-
-    async fn log_error(&self, message: &str) {
-        self.console.log_error(message).await
-    }
-
-    async fn flush(&self) {
-        self.console.flush().await
+    fn emit_event(
+        &self,
+        event: ConsoleEvent,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.console.emit_event(event)
     }
 }
 
-impl ProtocolEffects for CompositeHandler {
-    fn device_id(&self) -> Uuid {
-        self.device_id
-    }
-
-    fn is_simulation(&self) -> bool {
-        self.is_simulation
-    }
-}
-
-impl MinimalEffects for CompositeHandler {
-    fn device_id(&self) -> Uuid {
-        self.device_id
-    }
-}
+// Removed legacy ProtocolEffects and MinimalEffects traits
+// Device ID and simulation state are available through the struct fields directly
 
 /// Builder for creating custom composite handlers
 pub struct CompositeHandlerBuilder {
@@ -297,7 +413,7 @@ pub struct CompositeHandlerBuilder {
     network: Option<Box<dyn NetworkEffects>>,
     storage: Option<Box<dyn StorageEffects>>,
     crypto: Option<Box<dyn CryptoEffects>>,
-    time: Option<Box<dyn TimeEffects>>,
+    time: Option<DummyTimeHandler>,
     console: Option<Box<dyn ConsoleEffects>>,
 }
 
@@ -334,7 +450,7 @@ impl CompositeHandlerBuilder {
         self
     }
 
-    pub fn with_time(mut self, time: Box<dyn TimeEffects>) -> Self {
+    pub fn with_time(mut self, time: DummyTimeHandler) -> Self {
         self.time = Some(time);
         self
     }
@@ -372,13 +488,7 @@ impl CompositeHandlerBuilder {
                     Box::new(RealCryptoHandler::new())
                 }
             }),
-            time: self.time.unwrap_or_else(|| {
-                if is_simulation {
-                    Box::new(SimulatedTimeHandler::new())
-                } else {
-                    Box::new(RealTimeHandler::new())
-                }
-            }),
+            time: self.time.unwrap_or_else(|| DummyTimeHandler::new()),
             console: self.console.unwrap_or_else(|| {
                 if is_simulation {
                     Box::new(SilentConsoleHandler::new())
@@ -393,17 +503,7 @@ impl CompositeHandlerBuilder {
 // Implement LedgerEffects with placeholder delegation
 #[async_trait]
 impl LedgerEffects for CompositeHandler {
-    async fn read_ledger(&self) -> Result<Arc<tokio::sync::RwLock<aura_journal::AccountState>>, LedgerError> {
-        Err(LedgerError::NotAvailable)
-    }
-
-    async fn write_ledger(&self) -> Result<Arc<tokio::sync::RwLock<aura_journal::AccountState>>, LedgerError> {
-        Err(LedgerError::NotAvailable)
-    }
-
-    async fn get_account_state(&self) -> Result<aura_journal::AccountState, LedgerError> {
-        Err(LedgerError::NotAvailable)
-    }
+    // Removed old methods that are no longer part of the trait
 
     async fn append_event(&self, _event: Vec<u8>) -> Result<(), LedgerError> {
         Err(LedgerError::NotAvailable)
@@ -431,6 +531,60 @@ impl LedgerEffects for CompositeHandler {
 
     async fn subscribe_to_events(&self) -> Result<LedgerEventStream, LedgerError> {
         Err(LedgerError::NotAvailable)
+    }
+
+    async fn would_create_cycle(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+        _new_edge: (Vec<u8>, Vec<u8>),
+    ) -> Result<bool, LedgerError> {
+        Ok(false) // Stub implementation
+    }
+
+    async fn find_connected_components(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Vec<Vec<Vec<u8>>>, LedgerError> {
+        Ok(vec![]) // Stub implementation
+    }
+
+    async fn topological_sort(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Vec<Vec<u8>>, LedgerError> {
+        Ok(vec![]) // Stub implementation
+    }
+
+    async fn shortest_path(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+        _start: Vec<u8>,
+        _end: Vec<u8>,
+    ) -> Result<Option<Vec<Vec<u8>>>, LedgerError> {
+        Ok(None) // Stub implementation
+    }
+
+    async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, LedgerError> {
+        let random_bytes = self.crypto.random_bytes(length).await;
+        Ok(random_bytes)
+    }
+
+    async fn hash_blake3(&self, _data: &[u8]) -> Result<[u8; 32], LedgerError> {
+        let hash = self.crypto.blake3_hash(_data).await;
+        Ok(hash)
+    }
+
+    async fn current_timestamp(&self) -> Result<u64, LedgerError> {
+        let timestamp = self.time.current_timestamp().await;
+        Ok(timestamp)
+    }
+
+    async fn ledger_device_id(&self) -> Result<aura_types::DeviceId, LedgerError> {
+        Ok(self.device_id.into())
+    }
+
+    async fn new_uuid(&self) -> Result<Uuid, LedgerError> {
+        Ok(Uuid::new_v4())
     }
 }
 
@@ -477,8 +631,11 @@ impl ChoreographicEffects for CompositeHandler {
 
     async fn emit_choreo_event(&self, event: ChoreographyEvent) -> Result<(), ChoreographyError> {
         // Convert to console event
-        let console_event = ConsoleEffect::ChoreoEvent(serde_json::to_value(event).unwrap_or_default());
-        self.console.emit_choreo_event(console_event).await;
+        let console_event = ConsoleEvent::Custom {
+            event_type: "choreography".to_string(),
+            data: serde_json::to_value(event).unwrap_or_default(),
+        };
+        self.console.emit_event(console_event).await;
         Ok(())
     }
 
@@ -494,6 +651,277 @@ impl ChoreographicEffects for CompositeHandler {
             timeout_count: 0,
             retry_count: 0,
             total_duration_ms: 0,
+        }
+    }
+}
+
+// Implementation of unified AuraHandler trait
+#[async_trait]
+impl AuraHandler for CompositeHandler {
+    /// Execute an effect with serialized parameters and return serialized result
+    async fn execute_effect(
+        &mut self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+        _ctx: &mut AuraContext,
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match effect_type {
+            EffectType::Network => {
+                self.execute_network_effect(operation, parameters).await
+            },
+            EffectType::Storage => {
+                self.execute_storage_effect(operation, parameters).await
+            },
+            EffectType::Crypto => {
+                self.execute_crypto_effect(operation, parameters).await
+            },
+            EffectType::Time => {
+                self.execute_time_effect(operation, parameters).await
+            },
+            EffectType::Console => {
+                self.execute_console_effect(operation, parameters).await
+            },
+            EffectType::Ledger => {
+                self.execute_ledger_effect(operation, parameters).await
+            },
+            EffectType::Choreographic => {
+                self.execute_choreographic_effect(operation, parameters).await
+            },
+            _ => Err(AuraHandlerError::UnsupportedEffect { effect_type }),
+        }
+    }
+
+    /// Execute a session type
+    async fn execute_session(
+        &mut self,
+        _session: LocalSessionType,
+        _ctx: &mut AuraContext,
+    ) -> Result<(), AuraHandlerError> {
+        // Placeholder implementation - session type execution will be implemented
+        // when the session type algebra is fully defined
+        Err(AuraHandlerError::UnsupportedEffect { 
+            effect_type: EffectType::SessionManagement 
+        })
+    }
+
+    /// Check if this handler supports a specific effect type
+    fn supports_effect(&self, effect_type: EffectType) -> bool {
+        matches!(effect_type, 
+            EffectType::Network 
+            | EffectType::Storage 
+            | EffectType::Crypto 
+            | EffectType::Time 
+            | EffectType::Console 
+            | EffectType::Ledger 
+            | EffectType::Choreographic
+        )
+    }
+
+    /// Get the execution mode of this handler
+    fn execution_mode(&self) -> ExecutionMode {
+        if self.is_simulation {
+            ExecutionMode::Simulation { seed: 0 }
+        } else {
+            ExecutionMode::Production
+        }
+    }
+}
+
+impl CompositeHandler {
+    /// Execute network effects through serialized interface
+    async fn execute_network_effect(
+        &self,
+        operation: &str,
+        parameters: &[u8],
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "send_to_peer" => {
+                let (peer_id, message): (Uuid, Vec<u8>) = serde_json::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e)
+                    })?;
+                self.network.send_to_peer(peer_id, message).await
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Network effect {} failed: {}", operation, e)
+                    })?;
+                Ok(serde_json::to_vec(&()).unwrap_or_default())
+            },
+            "broadcast" => {
+                let message: Vec<u8> = serde_json::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e)
+                    })?;
+                self.network.broadcast(message).await
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Network effect {} failed: {}", operation, e)
+                    })?;
+                Ok(serde_json::to_vec(&()).unwrap_or_default())
+            },
+            _ => Err(AuraHandlerError::UnknownOperation { 
+                effect_type: EffectType::Network,
+                operation: operation.to_string()
+            }),
+        }
+    }
+
+    /// Execute storage effects through serialized interface
+    async fn execute_storage_effect(
+        &self,
+        operation: &str,
+        parameters: &[u8],
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "store" => {
+                let (key, value): (String, Vec<u8>) = serde_json::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e)
+                    })?;
+                self.storage.store(&key, value).await
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Storage effect {} failed: {}", operation, e)
+                    })?;
+                Ok(serde_json::to_vec(&()).unwrap_or_default())
+            },
+            "retrieve" => {
+                let key: String = serde_json::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e)
+                    })?;
+                let result = self.storage.retrieve(&key).await
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Storage effect {} failed: {}", operation, e)
+                    })?;
+                Ok(serde_json::to_vec(&result).unwrap_or_default())
+            },
+            _ => Err(AuraHandlerError::UnknownOperation { 
+                effect_type: EffectType::Storage,
+                operation: operation.to_string()
+            }),
+        }
+    }
+
+    /// Execute crypto effects through serialized interface
+    async fn execute_crypto_effect(
+        &self,
+        operation: &str,
+        parameters: &[u8],
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "random_bytes" => {
+                let len: usize = serde_json::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e)
+                    })?;
+                let result = self.crypto.random_bytes(len).await;
+                Ok(serde_json::to_vec(&result).unwrap_or_default())
+            },
+            "blake3_hash" => {
+                let data: Vec<u8> = serde_json::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e)
+                    })?;
+                let result = self.crypto.blake3_hash(&data).await;
+                Ok(serde_json::to_vec(&result).unwrap_or_default())
+            },
+            _ => Err(AuraHandlerError::UnknownOperation { 
+                effect_type: EffectType::Crypto,
+                operation: operation.to_string()
+            }),
+        }
+    }
+
+    /// Execute time effects through serialized interface
+    async fn execute_time_effect(
+        &self,
+        operation: &str,
+        parameters: &[u8],
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "current_epoch" => {
+                let result = self.time.current_epoch().await;
+                Ok(serde_json::to_vec(&result).unwrap_or_default())
+            },
+            "sleep_ms" => {
+                let ms: u64 = serde_json::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e)
+                    })?;
+                self.time.sleep_ms(ms).await;
+                Ok(serde_json::to_vec(&()).unwrap_or_default())
+            },
+            _ => Err(AuraHandlerError::UnknownOperation { 
+                effect_type: EffectType::Time,
+                operation: operation.to_string()
+            }),
+        }
+    }
+
+    /// Execute console effects through serialized interface
+    async fn execute_console_effect(
+        &self,
+        operation: &str,
+        parameters: &[u8],
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "log_info" => {
+                let (message, fields): (String, Vec<(String, String)>) = serde_json::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e)
+                    })?;
+                let field_refs: Vec<(&str, &str)> = fields.iter()
+                    .map(|(k, v)| (k.as_str(), v.as_str()))
+                    .collect();
+                self.console.log_info(&message, &field_refs);
+                Ok(serde_json::to_vec(&()).unwrap_or_default())
+            },
+            _ => Err(AuraHandlerError::UnknownOperation { 
+                effect_type: EffectType::Console,
+                operation: operation.to_string()
+            }),
+        }
+    }
+
+    /// Execute ledger effects through serialized interface
+    async fn execute_ledger_effect(
+        &self,
+        operation: &str,
+        _parameters: &[u8],
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "current_epoch" => {
+                let result = self.time.current_epoch().await;
+                Ok(serde_json::to_vec(&result).unwrap_or_default())
+            },
+            _ => Err(AuraHandlerError::UnknownOperation { 
+                effect_type: EffectType::Ledger,
+                operation: operation.to_string()
+            }),
+        }
+    }
+
+    /// Execute choreographic effects through serialized interface
+    async fn execute_choreographic_effect(
+        &self,
+        operation: &str,
+        parameters: &[u8],
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "send_to_role_bytes" => {
+                let (role, message): (ChoreographicRole, Vec<u8>) = serde_json::from_slice(parameters)
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e)
+                    })?;
+                self.network.send_to_peer(role.device_id, message).await
+                    .map_err(|e| AuraHandlerError::ContextError { 
+                        message: format!("Choreographic effect {} failed: {}", operation, e)
+                    })?;
+                Ok(serde_json::to_vec(&()).unwrap_or_default())
+            },
+            _ => Err(AuraHandlerError::UnknownOperation { 
+                effect_type: EffectType::Choreographic,
+                operation: operation.to_string()
+            }),
         }
     }
 }

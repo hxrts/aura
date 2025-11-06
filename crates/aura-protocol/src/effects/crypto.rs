@@ -34,7 +34,7 @@ pub trait CryptoEffects: Send + Sync {
     async fn random_bytes_32(&self) -> [u8; 32];
     
     /// Generate random number in range
-    async fn random_range(&self, min: u64, max: u64) -> u64;
+    async fn random_range(&self, range: std::ops::Range<u64>) -> u64;
     
     /// Ed25519 signature generation
     async fn ed25519_sign(&self, data: &[u8], key: &SigningKey) -> Result<Signature, CryptoError>;

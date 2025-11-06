@@ -1,4 +1,4 @@
-//! Choreographic effects interface
+//! Choreographic effect interface
 //!
 //! Pure trait definitions for choreographic protocol operations.
 

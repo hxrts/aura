@@ -38,7 +38,7 @@ pub use metrics::{AgentMetrics, MetricsMiddleware, OperationMetrics};
 pub use tracing::{OperationTracer, TracingMiddleware};
 pub use validation::{InputValidator, ValidationMiddleware, ValidationRule};
 
-use aura_protocol::effects::AuraEffectSystem;
+use crate::agent::AuraEffectSystem;
 use aura_types::{
     identifiers::DeviceId,
     AuraError, AuraResult as Result,
@@ -241,7 +241,7 @@ impl MiddlewareStackBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_protocol::effects::AuraEffectSystem;
+    use crate::agent::AuraEffectSystem;
 
     #[tokio::test]
     async fn test_middleware_stack_creation() {

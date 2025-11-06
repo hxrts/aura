@@ -57,10 +57,10 @@ impl NetworkEffects for RealNetworkHandler {
                 // This would use the real transport layer to send the message
                 Ok(())
             } else {
-                Err(NetworkError::PeerNotConnected { peer_id })
+                Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
             }
         } else {
-            Err(NetworkError::PeerNotConnected { peer_id })
+            Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
         }
     }
 
@@ -77,12 +77,12 @@ impl NetworkEffects for RealNetworkHandler {
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
         // TODO: Receive from actual transport
         // This would block until a message arrives from any peer
-        Err(NetworkError::ReceiveTimeout { timeout_ms: 5000 })
+        Err(NetworkError::ReceiveFailed("Timeout".to_string()))
     }
 
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         // TODO: Receive from specific peer through actual transport
-        Err(NetworkError::ReceiveTimeout { timeout_ms: 5000 })
+        Err(NetworkError::ReceiveFailed("Timeout".to_string()))
     }
 
     async fn connected_peers(&self) -> Vec<Uuid> {
@@ -108,7 +108,7 @@ impl NetworkEffects for RealNetworkHandler {
         // TODO: Hook into actual transport events
         // This would subscribe to connection/disconnection events from the transport layer
 
-        Ok(Box::new(
+        Ok(Box::pin(
             tokio_stream::wrappers::UnboundedReceiverStream::new(receiver),
         ))
     }

@@ -24,7 +24,7 @@
 //!
 //! ```rust
 //! use aura_types::middleware::*;
-//! use aura_protocol::effects::Effects;
+//! // Removed old Effects reference
 //!
 //! // Define a protocol handler using derive macro
 //! #[derive(AuraHandler)]
@@ -59,40 +59,41 @@
 //! ```
 
 pub mod traits;
-pub mod stack;
-pub mod effects;
-pub mod auth;
-pub mod metrics;
-pub mod logging;
-pub mod errors;
+// Temporarily commented out legacy middleware modules
+// pub mod stack;
+// pub mod effects;
+// pub mod auth;
+// pub mod metrics;
+// pub mod logging;
+// pub mod errors;
 
-// Re-export core middleware types
-pub use traits::{
-    MiddlewareHandler, ProtocolHandler, RequestHandler, ResponseHandler
-};
+// Re-export core middleware types (temporarily commented out)
+// pub use traits::{
+//     MiddlewareHandler, ProtocolHandler, RequestHandler, ResponseHandler
+// };
 // Note: MiddlewareContext, MiddlewareResult, HandlerMetadata, PerformanceProfile 
 // are defined later in this module and don't need re-export
-pub use stack::{
-    MiddlewareStack, MiddlewareLayer, LayerConfig, StackBuilder
-};
-pub use effects::{
-    EffectMiddleware, EffectInjector, EffectContext, EffectScope
-};
-pub use auth::{
-    AuthMiddleware, AuthContext, AuthPolicy, Permission
-};
-pub use metrics::{
-    MetricsMiddleware, MetricsCollector, MetricEvent, MetricType
-};
-pub use logging::{
-    LoggingMiddleware, LogContext, LogLevel, StructuredLogger
-};
-pub use errors::{
-    MiddlewareError, HandlerError, ErrorContext, ErrorHandler
-};
+// pub use stack::{
+//     MiddlewareStack, MiddlewareLayer, LayerConfig, StackBuilder
+// };
+// pub use effects::{
+//     EffectMiddleware, EffectInjector, EffectContext, EffectScope
+// };
+// Temporarily commented out legacy middleware exports
+// pub use auth::{
+//     AuthMiddleware, AuthContext, AuthPolicy, Permission
+// };
+// pub use metrics::{
+//     MetricsMiddleware, MetricsCollector, MetricEvent, MetricType
+// };
+// pub use logging::{
+//     LoggingMiddleware, LogContext, LogLevel, StructuredLogger
+// };
+// pub use errors::{
+//     MiddlewareError, HandlerError, ErrorContext, ErrorHandler
+// };
 
-use crate::effects::Effects;
-use aura_types::AuraError;
+// Removed unused imports
 use std::future::Future;
 use std::pin::Pin;
 
@@ -108,6 +109,8 @@ pub trait AuraMiddleware: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Process a request through this middleware layer
+    /// TEMPORARILY COMMENTED OUT - incompatible with new unified architecture
+    /*
     fn process<'a>(
         &'a self,
         request: Self::Request,
@@ -115,6 +118,7 @@ pub trait AuraMiddleware: Send + Sync {
         effects: &'a dyn Effects,
         next: Box<dyn MiddlewareHandler<Self::Request, Self::Response, Self::Error>>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'a>>;
+    */
 
     /// Get metadata about this middleware
     fn metadata(&self) -> HandlerMetadata {
@@ -216,6 +220,22 @@ impl Default for MiddlewareContext {
 }
 
 /// Result type for middleware operations
+/// Middleware operation errors
+#[derive(Debug, thiserror::Error)]
+pub enum MiddlewareError {
+    /// Generic middleware error
+    #[error("Middleware error: {message}")]
+    General { message: String },
+    
+    /// Configuration error
+    #[error("Configuration error: {reason}")]
+    Configuration { reason: String },
+    
+    /// Handler not found
+    #[error("Handler not found: {handler_type}")]
+    HandlerNotFound { handler_type: String },
+}
+
 pub type MiddlewareResult<T> = Result<T, MiddlewareError>;
 
 /// Handler metadata for describing middleware capabilities

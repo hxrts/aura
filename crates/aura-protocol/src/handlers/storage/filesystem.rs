@@ -29,15 +29,11 @@ impl StorageEffects for FilesystemStorageHandler {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| StorageError::Backend {
-                    source: Box::new(e),
-                })?;
+                .map_err(|e| StorageError::WriteFailed(format!("I/O error: {}", e)))?;
         }
         fs::write(path, value)
             .await
-            .map_err(|e| StorageError::Backend {
-                source: Box::new(e),
-            })?;
+            .map_err(|e| StorageError::WriteFailed(format!("I/O error: {}", e)))?;
         Ok(())
     }
 
@@ -46,9 +42,7 @@ impl StorageEffects for FilesystemStorageHandler {
         match fs::read(path).await {
             Ok(data) => Ok(Some(data)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(StorageError::Backend {
-                source: Box::new(e),
-            }),
+            Err(e) => Err(StorageError::ReadFailed(format!("I/O error: {}", e))),
         }
     }
 
@@ -57,9 +51,7 @@ impl StorageEffects for FilesystemStorageHandler {
         match fs::remove_file(path).await {
             Ok(()) => Ok(true),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(StorageError::Backend {
-                source: Box::new(e),
-            }),
+            Err(e) => Err(StorageError::DeleteFailed(format!("I/O error: {}", e))),
         }
     }
 

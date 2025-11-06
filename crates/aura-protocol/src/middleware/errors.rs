@@ -1,7 +1,7 @@
 //! Error handling middleware and error types
 
 use super::{MiddlewareContext, AuraMiddleware};
-use crate::effects::Effects;
+use crate::handlers::AuraHandler;
 use aura_types::AuraError;
 use std::future::Future;
 use std::pin::Pin;

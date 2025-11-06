@@ -10,15 +10,12 @@
 //! use aura_protocol::prelude::*;
 //! use uuid::Uuid;
 //!
-//! // Create an execution context for testing
-//! let context = ContextBuilder::new()
-//!     .with_device_id(DeviceId::from(Uuid::new_v4()))
-//!     .with_participants(vec![device_id])
-//!     .build_for_testing();
+//! // Create unified effect system for testing
+//! let handler = AuraEffectSystem::for_testing(device_id);
 //!
-//! // Use effects in your protocol
-//! let random_bytes = context.effects.random_bytes(32).await;
-//! context.effects.send_to_peer(peer_id, message).await?;
+//! // Use effects directly with zero overhead
+//! let random_bytes = handler.random_bytes(32).await;
+//! handler.send_to_peer(peer_id, message).await?;
 //! ```
 //!
 //! ## Architecture Overview
@@ -46,25 +43,20 @@
 //! - **Security**: Authorization, capability checking
 //! - **Caching**: Result caching and memoization
 //!
-//! ### Runtime (`runtime/`)
-//! Execution context and session management:
-//! - **ExecutionContext**: Environment for protocol execution
-//! - **SessionManager**: Protocol session lifecycle
-//! - **EffectExecutor**: Coordinates effect operations
-//!
 //! ## Examples
 //!
 //! ### Basic Usage
 //! ```rust,ignore
 //! use aura_protocol::prelude::*;
 //!
-//! // Create handler with middleware
-//! let handler = CompositeHandler::for_production(device_id);
-//! let enhanced = MiddlewareStack::new(handler, device_id)
-//!     .with_tracing("my-service".to_string())
-//!     .with_metrics()
-//!     .with_retry(RetryConfig::default())
-//!     .build();
+//! // Create unified system with optional middleware
+//! let base = AuraEffectSystem::for_production(device_id)?;
+//! let enhanced = TracingMiddleware::new(
+//!     MetricsMiddleware::new(
+//!         RetryMiddleware::new(base, 3)
+//!     ),
+//!     "my-service"
+//! );
 //! ```
 //!
 //! ### Protocol Implementation
@@ -75,76 +67,135 @@
 //! {
 //!     // Generate random nonce
 //!     let nonce = effects.random_bytes(32).await;
-//!     
+//!
 //!     // Send to peer
 //!     effects.send_to_peer(peer_id, nonce.clone()).await?;
-//!     
+//!
 //!     // Wait for response
 //!     let (from, response) = effects.receive().await?;
-//!     
+//!
 //!     Ok(response)
 //! }
 //! ```
 
-// Core modules following algebraic effects pattern
+// Core modules following unified effect system architecture
 pub mod effects;
 pub mod handlers;
 pub mod middleware;
 
-// Clean algebraic effects architecture only
+// Unified AuraEffectSystem architecture only
 
 // Public API re-exports
 pub use effects::{
-    // Effect traits
-    NetworkEffects, StorageEffects, CryptoEffects, TimeEffects,
-    ConsoleEffects, LedgerEffects, ChoreographicEffects, JournalEffects,
-    RandomEffects, AgentEffects, AuthenticationEffects,
-    DeviceStorageEffects, SessionManagementEffects, ConfigurationEffects,
-    Effects, ProtocolEffects, MinimalEffects,
-    
-    // Error types
-    NetworkError, StorageError, JournalError, LedgerError,
-    AuthError, DeviceStorageError, SessionError, ConfigError,
-    
-    // Common types
-    WakeCondition, NetworkAddress, StorageLocation, ConsoleEvent, LogLevel,
-    ChoreographicRole, ChoreographyEvent, SessionData, SessionType,
-    SessionUpdate, DeviceAttestation, JournalStats, DeviceMetadata,
-    LedgerEvent, LedgerEventStream,
+    AuraEffectSystem,
+    AuraEffectSystemFactory,
+    AuraEffectSystemStats,
+    ChoreographicEffects,
+    ChoreographicRole,
+    ChoreographyEvent,
+    ChoreographyMetrics,
+    ConsoleEffects,
+    ConsoleEvent,
+    CryptoEffects,
+    DeviceMetadata,
+    JournalEffects,
+    LedgerEffects,
+    LedgerError,
+    LedgerEvent,
+    LedgerEventStream,
+    LogLevel,
+    NetworkAddress,
+    NetworkEffects,
+    NetworkError,
+    RandomEffects,
+    StorageEffects,
+    StorageError,
+    StorageLocation,
+    TimeEffects,
+    WakeCondition,
 };
 
 pub use handlers::{
-    // Main handler types
-    AuraHandler, BoxedHandler, AuraHandlerFactory, HandlerUtils,
-    
-    // Context and configuration
-    AuraContext, ExecutionMode, EffectType, AuraHandlerError,
-    
-    // Factory and registry
-    AuraHandlerBuilder, AuraHandlerConfig, FactoryError,
-    EffectRegistry, RegistrableHandler, RegistryError,
+    AuraContext,
+    AuraHandler,
+    AuraHandlerError,
+
+    // Factory and utilities
+    AuraHandlerFactory,
+    EffectType,
+    ExecutionMode,
+    HandlerUtils,
 };
 
 pub use middleware::{
-    // Core middleware traits and types
-    AuraMiddleware, MiddlewareHandler, ProtocolHandler,
-    MiddlewareStack, MiddlewareLayer, StackBuilder,
+    // Core middleware traits and types (working middleware only)
+    // Legacy middleware temporarily commented out
+    // AuthMiddleware,
+    // EffectInjector,
+    // EffectMiddleware,
+    // ErrorHandler,
+    // HandlerError,
+    // LoggingMiddleware,
+    // MetricsMiddleware,
     
-    // Context and results
-    MiddlewareContext, MiddlewareResult, HandlerMetadata,
-    
-    // Specific middleware
-    AuthMiddleware, MetricsMiddleware, LoggingMiddleware,
-    EffectMiddleware, EffectInjector,
-    
-    // Errors
-    MiddlewareError, HandlerError, ErrorHandler,
+    // Context and results (available)
+    // MiddlewareContext,
+    // Legacy middleware types temporarily commented out
+    // MiddlewareError,
+    // MiddlewareHandler,
+    // MiddlewareLayer,
+    // MiddlewareResult,
+    // MiddlewareStack,
+    // ProtocolHandler,
+    // StackBuilder,
 };
 
 // Clean API - no legacy compatibility
 
 // Convenient prelude for common imports
-pub mod prelude;
+pub mod prelude {
+    //! Prelude for common imports
+    //!
+    //! This module re-exports the most commonly used types and traits for convenient importing.
+
+    // Core effect traits
+    pub use crate::effects::{
+        ChoreographicEffects, ConsoleEffects, CryptoEffects, JournalEffects,
+        LedgerEffects, NetworkEffects, RandomEffects, StorageEffects, TimeEffects,
+    };
+
+    // Common error types
+    pub use crate::effects::{ChoreographyError, LedgerError, NetworkError, StorageError};
+
+    // Utility types
+    pub use crate::effects::{
+        ChoreographicRole, ChoreographyEvent, ChoreographyMetrics, ConsoleEvent, NetworkAddress,
+        StorageLocation, WakeCondition,
+    };
+
+    // Handler types
+    pub use crate::handlers::{
+        AuraHandler, AuraHandlerFactory, CompositeHandler, EffectType, ExecutionMode,
+    };
+
+    // Middleware types (temporarily commented out)
+    // pub use crate::middleware::{
+    //     LoggingMiddleware, MetricsMiddleware, MiddlewareStack,
+    // };
+
+    // Context types
+    pub use crate::handlers::{AuraContext, MiddlewareContext};
+
+    // External dependencies commonly used with this crate
+    pub use async_trait::async_trait;
+    pub use aura_types::{AuraError, AuraResult, DeviceId};
+    pub use uuid::Uuid;
+
+    // Common standard library types
+    pub use std::collections::HashMap;
+    pub use std::sync::Arc;
+    pub use std::time::Duration;
+}
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

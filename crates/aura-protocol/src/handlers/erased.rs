@@ -55,7 +55,7 @@ pub struct AuraHandlerFactory;
 impl AuraHandlerFactory {
     /// Create a handler for testing
     pub fn for_testing(device_id: aura_types::DeviceId) -> Box<dyn AuraHandler> {
-        let handler = super::middleware::MiddlewareStack::new(device_id, ExecutionMode::Testing);
+        let handler = crate::handlers::CompositeHandler::for_testing(device_id.into());
         Box::new(handler)
     }
 
@@ -63,7 +63,7 @@ impl AuraHandlerFactory {
     pub fn for_production(
         device_id: aura_types::DeviceId,
     ) -> Result<Box<dyn AuraHandler>, AuraHandlerError> {
-        let handler = super::middleware::MiddlewareStack::new(device_id, ExecutionMode::Production);
+        let handler = crate::handlers::CompositeHandler::for_production(device_id.into());
         Ok(Box::new(handler))
     }
 
@@ -72,8 +72,7 @@ impl AuraHandlerFactory {
         device_id: aura_types::DeviceId,
         seed: u64,
     ) -> Box<dyn AuraHandler> {
-        let handler =
-            super::middleware::MiddlewareStack::new(device_id, ExecutionMode::Simulation { seed });
+        let handler = crate::handlers::CompositeHandler::for_simulation(device_id.into());
         Box::new(handler)
     }
 }

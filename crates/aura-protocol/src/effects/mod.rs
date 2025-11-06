@@ -44,7 +44,6 @@
 //! ```
 
 // Effect trait definitions
-pub mod agent;
 pub mod choreographic;
 pub mod console;
 pub mod crypto;
@@ -54,70 +53,27 @@ pub mod network;
 pub mod params;
 pub mod random;
 pub mod storage;
+pub mod system;
 pub mod time;
 
-// Re-export all effect traits
-pub use agent::{
-    AgentEffects, AuthError, AuthenticationEffects, ConfigError,
-    ConfigurationEffects, DeviceAttestation, DeviceStorageEffects, DeviceStorageError,
-    SessionData, SessionError, SessionManagementEffects, SessionType, SessionUpdate,
-};
+// Re-export core effect traits
 pub use choreographic::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, ChoreographyMetrics,
 };
-pub use console::{ConsoleEvent, ConsoleEffects, LogLevel, ProductionConsoleEffects, TestConsoleEffects};
-pub use crypto::CryptoEffects;
+pub use console::{ConsoleEvent, ConsoleEffects, LogLevel};
+pub use crypto::{CryptoEffects, CryptoError};
 pub use journal::JournalEffects;
-pub use aura_journal::ledger::{JournalError, JournalStats};
 pub use ledger::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEvent, LedgerEventStream};
-pub use network::{NetworkEffects, NetworkError, NetworkAddress};
+pub use network::{NetworkEffects, NetworkError, NetworkAddress, PeerEvent, PeerEventStream};
 pub use params::*; // Re-export all parameter types
 pub use random::RandomEffects;
-pub use storage::{StorageEffects, StorageError, StorageLocation, ProductionStorageEffects};
-pub use time::{TimeEffects, WakeCondition};
+pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
+pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 
 // Re-export unified error system
 pub use aura_types::{AuraError, AuraResult, ErrorCode, ErrorSeverity};
 
-/// Legacy Effects trait for backward compatibility
-///
-/// This trait matches the old `aura_protocol::effects::Effects` interface to ease migration.
-/// It combines all effect traits into a single interface.
-pub trait Effects:
-    NetworkEffects
-    + StorageEffects
-    + CryptoEffects
-    + TimeEffects
-    + ConsoleEffects
-    + LedgerEffects
-    + ChoreographicEffects
-    + JournalEffects
-    + RandomEffects
-    + AgentEffects
-    + Send
-    + Sync
-{
-    /// Get the device ID for this effects context
-    fn device_id(&self) -> uuid::Uuid;
+// Re-export unified effect system
+pub use system::{AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats};
 
-    /// Check if we're running in a simulated/test environment
-    fn is_simulation(&self) -> bool;
-}
-
-/// Combined protocol effects interface
-///
-/// This trait represents the union of all effects needed by most protocol operations.
-/// Individual protocols can also depend on subsets of effects for more targeted implementations.
-/// 
-/// This is an alias for Effects to maintain consistency.
-pub trait ProtocolEffects: Effects {}
-
-/// Minimal effects interface for simple operations
-///
-/// Some protocols may only need a subset of effects. This trait provides
-/// the most commonly needed effects without the full ProtocolEffects overhead.
-pub trait MinimalEffects: CryptoEffects + TimeEffects + RandomEffects + Send + Sync {
-    /// Get the device ID for this effects context
-    fn device_id(&self) -> uuid::Uuid;
-}
 

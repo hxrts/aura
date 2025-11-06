@@ -1,7 +1,7 @@
 //! Core middleware traits and interfaces
 
 use super::{MiddlewareContext, MiddlewareResult, HandlerMetadata};
-use crate::effects::Effects;
+use crate::handlers::AuraHandler;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -17,7 +17,7 @@ where
         &'a self,
         request: Req,
         context: &'a MiddlewareContext,
-        effects: &'a dyn Effects,
+        effects: &'a dyn AuraHandler,
     ) -> Pin<Box<dyn Future<Output = Result<Resp, Err>> + Send + 'a>>;
 
     /// Get handler metadata
@@ -41,7 +41,7 @@ pub trait ProtocolHandler: Send + Sync {
     fn handle<'a>(
         &'a mut self,
         request: Self::Request,
-        effects: &'a dyn Effects,
+        effects: &'a dyn AuraHandler,
     ) -> Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'a>>;
 
     /// Get the protocol name this handler supports
@@ -53,12 +53,12 @@ pub trait ProtocolHandler: Send + Sync {
     }
 
     /// Initialize the handler
-    fn initialize(&mut self, _effects: &dyn Effects) -> Result<(), Self::Error> {
+    fn initialize(&mut self, _handler: &dyn AuraHandler) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Shutdown the handler
-    fn shutdown(&mut self, _effects: &dyn Effects) -> Result<(), Self::Error> {
+    fn shutdown(&mut self, _handler: &dyn AuraHandler) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -76,7 +76,7 @@ where
         &'a self,
         request: Req,
         context: &'a MiddlewareContext,
-        effects: &'a dyn Effects,
+        effects: &'a dyn AuraHandler,
     ) -> Pin<Box<dyn Future<Output = Result<Req, Self::Error>> + Send + 'a>>;
 }
 
@@ -93,7 +93,7 @@ where
         &'a self,
         response: Resp,
         context: &'a MiddlewareContext,
-        effects: &'a dyn Effects,
+        effects: &'a dyn AuraHandler,
     ) -> Pin<Box<dyn Future<Output = Result<Resp, Self::Error>> + Send + 'a>>;
 }
 
@@ -111,7 +111,7 @@ where
         &'a self,
         request: Req,
         context: &'a MiddlewareContext,
-        effects: &'a dyn Effects,
+        effects: &'a dyn AuraHandler,
     ) -> Pin<Box<dyn Future<Output = Result<Req, Self::Error>> + Send + 'a>>;
 
     /// Process an outgoing response
@@ -119,7 +119,7 @@ where
         &'a self,
         response: Resp,
         context: &'a MiddlewareContext,
-        effects: &'a dyn Effects,
+        effects: &'a dyn AuraHandler,
     ) -> Pin<Box<dyn Future<Output = Result<Resp, Self::Error>> + Send + 'a>>;
 }
 
@@ -146,10 +146,10 @@ pub trait StatefulHandler: Send + Sync {
     fn reset_state(&mut self) -> Result<(), Self::Error>;
 
     /// Save the handler's state
-    fn save_state<'a>(&'a self, effects: &'a dyn Effects) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
+    fn save_state<'a>(&'a self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
 
     /// Load the handler's state
-    fn load_state<'a>(&'a mut self, effects: &'a dyn Effects) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
+    fn load_state<'a>(&'a mut self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
 }
 
 /// Configurable middleware trait for handlers with runtime configuration
@@ -179,32 +179,32 @@ pub trait LifecycleHandler: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Called when the handler is first created
-    fn on_create(&mut self, context: &MiddlewareContext, effects: &dyn Effects) -> Result<(), Self::Error> {
+    fn on_create(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called when the handler starts processing requests
-    fn on_start(&mut self, context: &MiddlewareContext, effects: &dyn Effects) -> Result<(), Self::Error> {
+    fn on_start(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called when the handler stops processing requests
-    fn on_stop(&mut self, context: &MiddlewareContext, effects: &dyn Effects) -> Result<(), Self::Error> {
+    fn on_stop(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called when the handler is being destroyed
-    fn on_destroy(&mut self, context: &MiddlewareContext, effects: &dyn Effects) -> Result<(), Self::Error> {
+    fn on_destroy(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called on configuration changes
-    fn on_config_change(&mut self, context: &MiddlewareContext, effects: &dyn Effects) -> Result<(), Self::Error> {
+    fn on_config_change(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called on error conditions
-    fn on_error(&mut self, error: &dyn std::error::Error, context: &MiddlewareContext, effects: &dyn Effects) -> Result<(), Self::Error> {
+    fn on_error(&mut self, error: &dyn std::error::Error, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -212,20 +212,20 @@ pub trait LifecycleHandler: Send + Sync {
 /// Metrics-aware middleware trait
 pub trait MetricsHandler: Send + Sync {
     /// Record a metric event
-    fn record_metric(&self, name: &str, value: f64, labels: &[(&str, &str)], effects: &dyn Effects);
+    fn record_metric(&self, name: &str, value: f64, labels: &[(&str, &str)], effects: &dyn AuraHandler);
 
     /// Record a timing metric
-    fn record_timing(&self, name: &str, duration: std::time::Duration, labels: &[(&str, &str)], effects: &dyn Effects) {
+    fn record_timing(&self, name: &str, duration: std::time::Duration, labels: &[(&str, &str)], effects: &dyn AuraHandler) {
         self.record_metric(name, duration.as_secs_f64(), labels, effects);
     }
 
     /// Record a counter metric
-    fn record_counter(&self, name: &str, count: u64, labels: &[(&str, &str)], effects: &dyn Effects) {
+    fn record_counter(&self, name: &str, count: u64, labels: &[(&str, &str)], effects: &dyn AuraHandler) {
         self.record_metric(name, count as f64, labels, effects);
     }
 
     /// Record a gauge metric
-    fn record_gauge(&self, name: &str, value: f64, labels: &[(&str, &str)], effects: &dyn Effects) {
+    fn record_gauge(&self, name: &str, value: f64, labels: &[(&str, &str)], effects: &dyn AuraHandler) {
         self.record_metric(name, value, labels, effects);
     }
 }
@@ -239,13 +239,13 @@ pub trait HealthCheckHandler: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Perform a health check
-    fn health_check<'a>(&'a self, effects: &'a dyn Effects) -> Pin<Box<dyn Future<Output = Result<Self::HealthStatus, Self::Error>> + Send + 'a>>;
+    fn health_check<'a>(&'a self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<Self::HealthStatus, Self::Error>> + Send + 'a>>;
 
     /// Check if the handler is ready to process requests
-    fn readiness_check<'a>(&'a self, effects: &'a dyn Effects) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + Send + 'a>>;
+    fn readiness_check<'a>(&'a self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + Send + 'a>>;
 
     /// Check if the handler is alive
-    fn liveness_check<'a>(&'a self, effects: &'a dyn Effects) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + Send + 'a>>;
+    fn liveness_check<'a>(&'a self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + Send + 'a>>;
 }
 
 /// Combined trait for handlers that support all middleware features
@@ -277,7 +277,7 @@ where
         &'a self,
         request: Req,
         context: &'a MiddlewareContext,
-        effects: &'a dyn Effects,
+        effects: &'a dyn AuraHandler,
     ) -> Pin<Box<dyn Future<Output = Result<Resp, Self::Error>> + Send + 'a>>;
 
     /// Add a handler to the chain

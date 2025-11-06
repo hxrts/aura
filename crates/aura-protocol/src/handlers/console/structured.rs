@@ -1,9 +1,9 @@
 //! Structured console handler for JSON logging
 
-use crate::effects::{ConsoleEffects, ConsoleEffect};
-use async_trait::async_trait;
+use crate::effects::{ConsoleEffects, ConsoleEvent};
+use chrono;
 use serde_json::json;
-use uuid::Uuid;
+use std::future::Future;
 
 /// Structured console handler for JSON output
 pub struct StructuredConsoleHandler;
@@ -20,75 +20,93 @@ impl Default for StructuredConsoleHandler {
     }
 }
 
-#[async_trait]
 impl ConsoleEffects for StructuredConsoleHandler {
-    async fn emit_choreo_event(&self, event: ConsoleEffect) {
+    fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
+        let field_map: serde_json::Map<String, serde_json::Value> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), json!(v)))
+            .collect();
+        
         let log_entry = json!({
-            "type": "choreo_event",
-            "event": format!("{:?}", event),
+            "level": "trace",
+            "message": message,
+            "fields": field_map,
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
         println!("{}", log_entry);
     }
 
-    async fn protocol_started(&self, protocol_id: Uuid, protocol_type: &str) {
+    fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
+        let field_map: serde_json::Map<String, serde_json::Value> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), json!(v)))
+            .collect();
+        
         let log_entry = json!({
-            "type": "protocol_started",
-            "protocol_id": protocol_id,
-            "protocol_type": protocol_type,
+            "level": "debug",
+            "message": message,
+            "fields": field_map,
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
         println!("{}", log_entry);
     }
 
-    async fn protocol_completed(&self, protocol_id: Uuid, duration_ms: u64) {
-        let log_entry = json!({
-            "type": "protocol_completed",
-            "protocol_id": protocol_id,
-            "duration_ms": duration_ms,
-            "timestamp": chrono::Utc::now().to_rfc3339()
-        });
-        println!("{}", log_entry);
-    }
-
-    async fn protocol_failed(&self, protocol_id: Uuid, error: &str) {
-        let log_entry = json!({
-            "type": "protocol_failed",
-            "protocol_id": protocol_id,
-            "error": error,
-            "timestamp": chrono::Utc::now().to_rfc3339()
-        });
-        println!("{}", log_entry);
-    }
-
-    async fn log_info(&self, message: &str) {
+    fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
+        let field_map: serde_json::Map<String, serde_json::Value> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), json!(v)))
+            .collect();
+        
         let log_entry = json!({
             "level": "info",
             "message": message,
+            "fields": field_map,
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
         println!("{}", log_entry);
     }
 
-    async fn log_warning(&self, message: &str) {
+    fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
+        let field_map: serde_json::Map<String, serde_json::Value> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), json!(v)))
+            .collect();
+        
         let log_entry = json!({
-            "level": "warning",
+            "level": "warn",
             "message": message,
+            "fields": field_map,
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
         println!("{}", log_entry);
     }
 
-    async fn log_error(&self, message: &str) {
+    fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
+        let field_map: serde_json::Map<String, serde_json::Value> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), json!(v)))
+            .collect();
+        
         let log_entry = json!({
             "level": "error",
             "message": message,
+            "fields": field_map,
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
         println!("{}", log_entry);
     }
 
-    async fn flush(&self) {
-        // stdout flushes automatically
+    fn emit_event(
+        &self,
+        event: ConsoleEvent,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            let log_entry = json!({
+                "type": "console_event",
+                "event": format!("{:?}", event),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            });
+            println!("{}", log_entry);
+        })
     }
 }

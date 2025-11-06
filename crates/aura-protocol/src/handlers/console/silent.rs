@@ -1,8 +1,7 @@
 //! Silent console handler for testing
 
-use crate::effects::{ConsoleEffects, ConsoleEffect};
-use async_trait::async_trait;
-use uuid::Uuid;
+use crate::effects::{ConsoleEffects, ConsoleEvent};
+use std::future::Future;
 
 /// Silent console handler that discards all output
 pub struct SilentConsoleHandler;
@@ -19,37 +18,33 @@ impl Default for SilentConsoleHandler {
     }
 }
 
-#[async_trait]
 impl ConsoleEffects for SilentConsoleHandler {
-    async fn emit_choreo_event(&self, _event: ConsoleEffect) {
+    fn log_trace(&self, _message: &str, _fields: &[(&str, &str)]) {
         // Silent - do nothing
     }
 
-    async fn protocol_started(&self, _protocol_id: Uuid, _protocol_type: &str) {
+    fn log_debug(&self, _message: &str, _fields: &[(&str, &str)]) {
         // Silent - do nothing
     }
 
-    async fn protocol_completed(&self, _protocol_id: Uuid, _duration_ms: u64) {
+    fn log_info(&self, _message: &str, _fields: &[(&str, &str)]) {
         // Silent - do nothing
     }
 
-    async fn protocol_failed(&self, _protocol_id: Uuid, _error: &str) {
+    fn log_warn(&self, _message: &str, _fields: &[(&str, &str)]) {
         // Silent - do nothing
     }
 
-    async fn log_info(&self, _message: &str) {
+    fn log_error(&self, _message: &str, _fields: &[(&str, &str)]) {
         // Silent - do nothing
     }
 
-    async fn log_warning(&self, _message: &str) {
-        // Silent - do nothing
-    }
-
-    async fn log_error(&self, _message: &str) {
-        // Silent - do nothing
-    }
-
-    async fn flush(&self) {
-        // Silent - do nothing
+    fn emit_event(
+        &self,
+        _event: ConsoleEvent,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            // Silent - do nothing
+        })
     }
 }

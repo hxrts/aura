@@ -1,7 +1,6 @@
 //! Logging middleware for structured request/response logging
 
 use super::{MiddlewareContext, AuraMiddleware};
-use crate::effects::Effects;
 use std::future::Future;
 use std::pin::Pin;
 use std::collections::HashMap;

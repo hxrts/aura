@@ -1,7 +1,7 @@
 //! Effect-based middleware for dependency injection
 
 use super::{MiddlewareContext, AuraMiddleware};
-use crate::effects::Effects;
+use crate::handlers::AuraHandler;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;

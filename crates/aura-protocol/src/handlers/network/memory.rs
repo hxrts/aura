@@ -48,7 +48,7 @@ impl MemoryNetworkHandler {
 
         // Notify of peer connection
         if let Some(sender) = &*self.event_sender.lock().await {
-            let _ = sender.send(PeerEvent::Connected { peer_id });
+            let _ = sender.send(PeerEvent::Connected(peer_id));
         }
     }
 
@@ -58,7 +58,7 @@ impl MemoryNetworkHandler {
         if peers.remove(&peer_id).is_some() {
             // Notify of peer disconnection
             if let Some(sender) = &*self.event_sender.lock().await {
-                let _ = sender.send(PeerEvent::Disconnected { peer_id });
+                let _ = sender.send(PeerEvent::Disconnected(peer_id));
             }
         }
     }
@@ -80,10 +80,10 @@ impl NetworkEffects for MemoryNetworkHandler {
                 // For testing, we just simulate success
                 Ok(())
             } else {
-                Err(NetworkError::PeerNotConnected { peer_id })
+                Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
             }
         } else {
-            Err(NetworkError::PeerNotConnected { peer_id })
+            Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
         }
     }
 
@@ -105,7 +105,7 @@ impl NetworkEffects for MemoryNetworkHandler {
         } else {
             // In a real implementation, this would block until a message arrives
             // For testing, we return a timeout error
-            Err(NetworkError::ReceiveTimeout { timeout_ms: 1000 })
+            Err(NetworkError::ReceiveFailed("Timeout".to_string()))
         }
     }
 
@@ -117,7 +117,7 @@ impl NetworkEffects for MemoryNetworkHandler {
             let (_, message) = messages.remove(pos).unwrap();
             Ok(message)
         } else {
-            Err(NetworkError::ReceiveTimeout { timeout_ms: 1000 })
+            Err(NetworkError::ReceiveFailed("Timeout".to_string()))
         }
     }
 
@@ -142,7 +142,7 @@ impl NetworkEffects for MemoryNetworkHandler {
         let (sender, receiver) = mpsc::unbounded_channel();
         *self.event_sender.lock().await = Some(sender);
 
-        Ok(Box::new(
+        Ok(Box::pin(
             tokio_stream::wrappers::UnboundedReceiverStream::new(receiver),
         ))
     }

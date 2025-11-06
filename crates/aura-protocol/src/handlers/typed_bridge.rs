@@ -25,16 +25,18 @@
 
 use super::erased::{AuraHandler, HandlerUtils};
 use super::EffectType;
-use crate::effects::params::{RandomBytesParams, RandomRangeParams, Blake3HashParams, Sha256HashParams, DelayParams};
-use crate::effects::*;
 use crate::effects::crypto::CryptoError;
+use crate::effects::params::{
+    Blake3HashParams, DelayParams, RandomBytesParams, RandomRangeParams, Sha256HashParams,
+};
+use crate::effects::*;
 use crate::handlers::context::AuraContext;
-use std::time::Duration;
-use std::future::Future;
 use async_trait::async_trait;
-use aura_types::{DeviceId, AuraError};
+use aura_types::{AuraError, DeviceId};
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -92,7 +94,7 @@ impl CryptoEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
         .unwrap_or([0u8; 32])
     }
 
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
+    async fn random_range(&self, range: std::ops::Range<u64>) -> u64 {
         let mut handler = self.write().await;
         let mut ctx = get_context();
 
@@ -101,13 +103,13 @@ impl CryptoEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
             EffectType::Crypto,
             "random_range",
             RandomRangeParams {
-                start: min,
-                end: max,
+                start: range.start,
+                end: range.end,
             },
             &mut ctx,
         )
         .await
-        .unwrap_or(min)
+        .unwrap_or(range.start)
     }
 
     async fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
@@ -149,7 +151,10 @@ impl CryptoEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
         _data: &[u8],
         _key: &SigningKey,
     ) -> Result<Signature, CryptoError> {
-        Err(AuraError::crypto_error("ed25519_sign requires direct handler access"))
+        Err(AuraError::Crypto(aura_types::CryptoError::OperationFailed {
+            message: "ed25519_sign requires direct handler access".to_string(),
+            context: "typed_bridge".to_string(),
+        }))
     }
 
     async fn ed25519_verify(
@@ -158,11 +163,17 @@ impl CryptoEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
         _signature: &Signature,
         _public_key: &VerifyingKey,
     ) -> Result<bool, CryptoError> {
-        Err(AuraError::crypto_error("ed25519_verify requires direct handler access"))
+        Err(AuraError::Crypto(aura_types::CryptoError::OperationFailed {
+            message: "ed25519_verify requires direct handler access".to_string(),
+            context: "typed_bridge".to_string(),
+        }))
     }
 
     async fn ed25519_generate_keypair(&self) -> Result<(SigningKey, VerifyingKey), CryptoError> {
-        Err(AuraError::crypto_error("ed25519_generate_keypair requires direct handler access"))
+        Err(AuraError::Crypto(aura_types::CryptoError::OperationFailed {
+            message: "ed25519_generate_keypair requires direct handler access".to_string(),
+            context: "typed_bridge".to_string(),
+        }))
     }
 
     async fn ed25519_public_key(&self, key: &SigningKey) -> VerifyingKey {
@@ -178,9 +189,6 @@ impl CryptoEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
         use zeroize::Zeroize;
         data.zeroize();
     }
-
-
-
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -189,6 +197,21 @@ impl CryptoEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
 
 #[async_trait]
 impl TimeEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
+    async fn current_epoch(&self) -> u64 {
+        let mut handler = self.write().await;
+        let mut ctx = get_context();
+
+        HandlerUtils::execute_typed_effect::<u64>(
+            &mut **handler,
+            EffectType::Time,
+            "current_epoch",
+            (),
+            &mut ctx,
+        )
+        .await
+        .unwrap_or(0)
+    }
+
     async fn current_timestamp(&self) -> u64 {
         let mut handler = self.write().await;
         let mut ctx = get_context();
@@ -219,6 +242,34 @@ impl TimeEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
         .unwrap_or(0)
     }
 
+    async fn sleep_ms(&self, ms: u64) {
+        let mut handler = self.write().await;
+        let mut ctx = get_context();
+
+        let _ = HandlerUtils::execute_typed_effect::<()>(
+            &mut **handler,
+            EffectType::Time,
+            "sleep_ms",
+            ms,
+            &mut ctx,
+        )
+        .await;
+    }
+
+    async fn sleep_until(&self, epoch: u64) {
+        let mut handler = self.write().await;
+        let mut ctx = get_context();
+
+        let _ = HandlerUtils::execute_typed_effect::<()>(
+            &mut **handler,
+            EffectType::Time,
+            "sleep_until",
+            epoch,
+            &mut ctx,
+        )
+        .await;
+    }
+
     async fn delay(&self, duration: Duration) {
         let mut handler = self.write().await;
         let mut ctx = get_context();
@@ -227,21 +278,101 @@ impl TimeEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
             &mut **handler,
             EffectType::Time,
             "delay",
-            DelayParams { duration_ms: duration.as_millis() as u64 },
+            DelayParams {
+                duration_ms: duration.as_millis() as u64,
+            },
             &mut ctx,
         )
         .await;
     }
 
-    async fn yield_until(
-        &self,
-        _condition: crate::effects::WakeCondition,
-    ) -> Result<(), aura_types::AuraError> {
-        Err(aura_types::AuraError::OperationFailed {
-            message: "yield_until not yet implemented through bridge".to_string(),
-        })
+    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
+        let mut handler = self.write().await;
+        let mut ctx = get_context();
+
+        HandlerUtils::execute_typed_effect::<()>(
+            &mut **handler,
+            EffectType::Time,
+            "sleep",
+            duration_ms,
+            &mut ctx,
+        )
+        .await
+        .map_err(|e| AuraError::Infrastructure(aura_types::InfrastructureError::ConfigError {
+            message: format!("Sleep failed: {}", e),
+            context: "typed_bridge".to_string(),
+        }))
     }
 
+    async fn yield_until(&self, _condition: WakeCondition) -> Result<(), TimeError> {
+        Err(TimeError::ServiceUnavailable)
+    }
+
+    async fn wait_until(&self, _condition: WakeCondition) -> Result<(), AuraError> {
+        Err(AuraError::Infrastructure(aura_types::InfrastructureError::ConfigError {
+            message: "wait_until not implemented through bridge".to_string(),
+            context: "typed_bridge".to_string(),
+        }))
+    }
+
+    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
+        let mut handler = self.write().await;
+        let mut ctx = get_context();
+
+        HandlerUtils::execute_typed_effect::<TimeoutHandle>(
+            &mut **handler,
+            EffectType::Time,
+            "set_timeout",
+            timeout_ms,
+            &mut ctx,
+        )
+        .await
+        .unwrap_or_else(|_| uuid::Uuid::new_v4())
+    }
+
+    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
+        let mut handler = self.write().await;
+        let mut ctx = get_context();
+
+        HandlerUtils::execute_typed_effect::<()>(
+            &mut **handler,
+            EffectType::Time,
+            "cancel_timeout",
+            handle,
+            &mut ctx,
+        )
+        .await
+        .map_err(|_| TimeError::ServiceUnavailable)
+    }
+
+    async fn timeout<F, T>(&self, future: F, _duration_ms: u64) -> Result<T, AuraError>
+    where
+        F: std::future::Future<Output = T> + Send + 'async_trait,
+        T: Send + 'async_trait,
+    {
+        // For now, just execute the future without timeout
+        Ok(future.await)
+    }
+
+    fn is_simulated(&self) -> bool {
+        false // Bridge implementations assume production mode
+    }
+
+    fn register_context(&self, _context_id: uuid::Uuid) {
+        // Placeholder
+    }
+
+    fn unregister_context(&self, _context_id: uuid::Uuid) {
+        // Placeholder
+    }
+
+    async fn notify_events_available(&self) {
+        // Placeholder
+    }
+
+    fn resolution_ms(&self) -> u64 {
+        1 // Default 1ms resolution
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -249,46 +380,64 @@ impl TimeEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
 // ═══════════════════════════════════════════════════════════════════════════
 
 impl ConsoleEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
-
     fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
-        let rt = tokio::runtime::Handle::current();
-        rt.spawn(async move {
-            // Simplified implementation for bridge
-            println!("[TRACE] {}: {:?}", message, fields);
-        });
+        // Convert to owned strings to avoid lifetime issues
+        let message_owned = message.to_string();
+        let fields_owned: Vec<(String, String)> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        // Simplified implementation for bridge - just print synchronously
+        println!("[TRACE] {}: {:?}", message_owned, fields_owned);
     }
 
     fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
-        let rt = tokio::runtime::Handle::current();
-        rt.spawn(async move {
-            // Simplified implementation for bridge
-            println!("[DEBUG] {}: {:?}", message, fields);
-        });
+        // Convert to owned strings to avoid lifetime issues
+        let message_owned = message.to_string();
+        let fields_owned: Vec<(String, String)> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        // Simplified implementation for bridge - just print synchronously
+        println!("[DEBUG] {}: {:?}", message_owned, fields_owned);
     }
 
     fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
-        let rt = tokio::runtime::Handle::current();
-        rt.spawn(async move {
-            // Simplified implementation for bridge
-            println!("[INFO] {}: {:?}", message, fields);
-        });
+        // Convert to owned strings to avoid lifetime issues
+        let message_owned = message.to_string();
+        let fields_owned: Vec<(String, String)> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        // Simplified implementation for bridge - just print synchronously
+        println!("[INFO] {}: {:?}", message_owned, fields_owned);
     }
 
     fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
-        let rt = tokio::runtime::Handle::current();
-        rt.spawn(async move {
-            // Simplified implementation for bridge
-            println!("[WARN] {}: {:?}", message, fields);
-        });
+        // Convert to owned strings to avoid lifetime issues
+        let message_owned = message.to_string();
+        let fields_owned: Vec<(String, String)> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        // Simplified implementation for bridge - just print synchronously
+        println!("[WARN] {}: {:?}", message_owned, fields_owned);
     }
 
-
     fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
-        let rt = tokio::runtime::Handle::current();
-        rt.spawn(async move {
-            // Simplified implementation for bridge
-            eprintln!("[ERROR] {}: {:?}", message, fields);
-        });
+        // Convert to owned strings to avoid lifetime issues
+        let message_owned = message.to_string();
+        let fields_owned: Vec<(String, String)> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        // Simplified implementation for bridge - just print synchronously
+        eprintln!("[ERROR] {}: {:?}", message_owned, fields_owned);
     }
 
     fn emit_event(
@@ -300,7 +449,6 @@ impl ConsoleEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
             println!("[EVENT] {:?}", event);
         })
     }
-
 }
 
 #[cfg(test)]

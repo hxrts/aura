@@ -80,7 +80,7 @@ impl SimulatedNetworkHandler {
         );
 
         if let Some(sender) = &*self.event_sender.lock().await {
-            let _ = sender.send(PeerEvent::Connected { peer_id });
+            let _ = sender.send(PeerEvent::Connected(peer_id));
         }
     }
 
@@ -89,7 +89,7 @@ impl SimulatedNetworkHandler {
         let mut peers = self.peers.write().await;
         if peers.remove(&peer_id).is_some() {
             if let Some(sender) = &*self.event_sender.lock().await {
-                let _ = sender.send(PeerEvent::Disconnected { peer_id });
+                let _ = sender.send(PeerEvent::Disconnected(peer_id));
             }
         }
     }
@@ -155,15 +155,13 @@ impl NetworkEffects for SimulatedNetworkHandler {
                     Ok(())
                 } else {
                     // Message was dropped due to network conditions
-                    Err(NetworkError::Protocol {
-                        message: "Message dropped due to network conditions".to_string(),
-                    })
+                    Err(NetworkError::SendFailed("Message dropped due to network conditions".to_string()))
                 }
             } else {
-                Err(NetworkError::PeerNotConnected { peer_id })
+                Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
             }
         } else {
-            Err(NetworkError::PeerNotConnected { peer_id })
+            Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
         }
     }
 
@@ -186,7 +184,7 @@ impl NetworkEffects for SimulatedNetworkHandler {
             let (from, _, message) = queue.remove(pos).unwrap();
             Ok((from, message))
         } else {
-            Err(NetworkError::ReceiveTimeout { timeout_ms: 1000 })
+            Err(NetworkError::ReceiveFailed("Timeout waiting for message".to_string()))
         }
     }
 
@@ -198,7 +196,7 @@ impl NetworkEffects for SimulatedNetworkHandler {
             let (_, _, message) = queue.remove(pos).unwrap();
             Ok(message)
         } else {
-            Err(NetworkError::ReceiveTimeout { timeout_ms: 1000 })
+            Err(NetworkError::ReceiveFailed("Timeout waiting for message".to_string()))
         }
     }
 
@@ -223,7 +221,7 @@ impl NetworkEffects for SimulatedNetworkHandler {
         let (sender, receiver) = mpsc::unbounded_channel();
         *self.event_sender.lock().await = Some(sender);
         
-        Ok(Box::new(
+        Ok(Box::pin(
             tokio_stream::wrappers::UnboundedReceiverStream::new(receiver),
         ))
     }
