@@ -5,7 +5,7 @@
 
 use crate::device::DeviceSetBuilder;
 use aura_crypto::Effects;
-use aura_journal::{AccountState, DeviceMetadata, DeviceType};
+use aura_journal::{DeviceMetadata, DeviceType, ModernAccountState as AccountState};
 use aura_types::{AccountId, DeviceId};
 use ed25519_dalek::SigningKey;
 use uuid::Uuid;
@@ -209,12 +209,12 @@ impl AccountStateFactory {
         // Use a default group key from the first device
         let group_public_key = initial_device.public_key;
 
-        let mut state = AccountState::new(self.account_id, group_public_key, initial_device, 2, 3);
+        let mut state = AccountState::new(self.account_id, group_public_key);
 
-        // Add remaining devices if any
-        let effects = Effects::for_test("factory_build");
+        // Add the initial device and all remaining devices
+        state.add_device(initial_device);
         for device in self.devices.iter().skip(1) {
-            state.add_device(device.clone(), &effects).ok();
+            state.add_device(device.clone());
         }
 
         state
@@ -364,7 +364,7 @@ pub mod helpers {
     /// Verify scenario data integrity
     pub fn verify_scenario_integrity(data: &MultiDeviceScenarioData) -> bool {
         // Verify device count matches
-        if data.devices.len() != data.account_state.devices.len() {
+        if data.devices.len() != data.account_state.device_registry.devices.len() {
             return false;
         }
 
@@ -372,6 +372,7 @@ pub mod helpers {
         for device in &data.devices {
             if !data
                 .account_state
+                .device_registry
                 .devices
                 .iter()
                 .any(|(_, metadata)| metadata.device_id == device.device_id())

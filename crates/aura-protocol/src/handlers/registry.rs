@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use super::context::AuraContext;
 use super::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
-use aura_types::sessions::LocalSessionType;
+use aura_types::LocalSessionType;
 
 /// Error type for registry operations
 #[derive(Debug, Error)]

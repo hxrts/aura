@@ -4,8 +4,8 @@
 //! Every TreeOp is attested by a threshold signature and records the complete
 //! state transition including affected nodes and new commitments.
 
-use aura_types::identifiers::DeviceId;
 use crate::tree::{AffectedPath, Commitment, LeafIndex, LeafNode, NodeIndex, Policy};
+use aura_types::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

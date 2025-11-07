@@ -6,7 +6,7 @@
 
 use crate::{test_account_with_threshold, test_effects_deterministic};
 use aura_crypto::Effects;
-use aura_journal::AccountState;
+use aura_journal::ModernAccountState as AccountState;
 use aura_types::{AccountId, DeviceId};
 
 /// High-level fixture for protocol testing scenarios
@@ -43,12 +43,18 @@ impl ProtocolTestFixture {
         let effects = test_effects_deterministic(seed, 1000);
         let account_state = test_account_with_threshold(&effects, threshold, total_devices);
         let device_id = account_state
+            .device_registry
             .devices
             .keys()
             .next()
             .cloned()
             .unwrap_or_else(DeviceId::new);
-        let all_device_ids: Vec<_> = account_state.devices.keys().cloned().collect();
+        let all_device_ids: Vec<_> = account_state
+            .device_registry
+            .devices
+            .keys()
+            .cloned()
+            .collect();
 
         Self {
             effects,
@@ -193,12 +199,18 @@ impl AccountTestFixture {
         let account_state = test_account_with_threshold(&effects, threshold, total_devices);
         let account_id = account_state.account_id;
         let primary_device = account_state
+            .device_registry
             .devices
             .keys()
             .next()
             .cloned()
             .unwrap_or_else(DeviceId::new);
-        let all_devices: Vec<_> = account_state.devices.keys().cloned().collect();
+        let all_devices: Vec<_> = account_state
+            .device_registry
+            .devices
+            .keys()
+            .cloned()
+            .collect();
 
         Self {
             effects,

@@ -4,7 +4,7 @@
 //! all inputs meet security and business requirements before being processed.
 
 use aura_types::{
-    identifiers::{DeviceId, SessionId, AccountId},
+    identifiers::{AccountId, DeviceId, SessionId},
     AuraError, AuraResult as Result,
 };
 use std::collections::HashMap;
@@ -45,9 +45,7 @@ pub enum ValidationRuleType {
         field_patterns: Vec<String>,
     },
     /// Custom validation function
-    Custom {
-        description: String,
-    },
+    Custom { description: String },
 }
 
 /// Input validation middleware for agent operations
@@ -78,10 +76,18 @@ impl ValidationMiddleware {
     }
 
     /// Validate device ID according to configured rules
-    pub async fn validate_device_id(&self, device_id: DeviceId, current_device: DeviceId) -> Result<()> {
+    pub async fn validate_device_id(
+        &self,
+        device_id: DeviceId,
+        current_device: DeviceId,
+    ) -> Result<()> {
         // Find device ID validation rules
         for rule in &self.rules {
-            if let ValidationRuleType::DeviceIdValidation { allow_self, allowed_devices } = &rule.validator {
+            if let ValidationRuleType::DeviceIdValidation {
+                allow_self,
+                allowed_devices,
+            } = &rule.validator
+            {
                 // Check self access
                 if device_id == current_device && !allow_self {
                     return Err(AuraError::permission_denied("Self-access not allowed"));
@@ -90,7 +96,8 @@ impl ValidationMiddleware {
                 // Check allowed devices list
                 if !allowed_devices.is_empty() && !allowed_devices.contains(&device_id) {
                     return Err(AuraError::permission_denied(format!(
-                        "Device {} not in allowed list", device_id
+                        "Device {} not in allowed list",
+                        device_id
                     )));
                 }
             }
@@ -102,12 +109,16 @@ impl ValidationMiddleware {
     pub async fn validate_session_id(&self, session_id: &SessionId) -> Result<()> {
         // Basic format validation
         if session_id.to_string().is_empty() {
-            return Err(AuraError::invalid_argument("Session ID cannot be empty"));
+            return Err(AuraError::invalid_input("Session ID cannot be empty"));
         }
 
         // Apply session-specific rules
         for rule in &self.rules {
-            if let ValidationRuleType::SessionIdValidation { require_active, allowed_types } = &rule.validator {
+            if let ValidationRuleType::SessionIdValidation {
+                require_active,
+                allowed_types,
+            } = &rule.validator
+            {
                 // TODO: Check session state via effect system
                 if *require_active {
                     // Would check if session is active via effect system
@@ -127,18 +138,24 @@ impl ValidationMiddleware {
     /// Validate input size according to configured rules
     pub async fn validate_input_size(&self, field_name: &str, data: &[u8]) -> Result<()> {
         for rule in &self.rules {
-            if let ValidationRuleType::InputSize { max_bytes, field_patterns } = &rule.validator {
+            if let ValidationRuleType::InputSize {
+                max_bytes,
+                field_patterns,
+            } = &rule.validator
+            {
                 // Check if field matches patterns
-                let field_matches = field_patterns.is_empty() || 
-                    field_patterns.iter().any(|pattern| {
+                let field_matches = field_patterns.is_empty()
+                    || field_patterns.iter().any(|pattern| {
                         // Simple pattern matching (could use glob crate for more sophisticated patterns)
                         pattern == "*" || pattern == field_name || field_name.contains(pattern)
                     });
 
                 if field_matches && data.len() > *max_bytes {
-                    return Err(AuraError::invalid_argument(format!(
-                        "Input field '{}' size {} exceeds maximum {}", 
-                        field_name, data.len(), max_bytes
+                    return Err(AuraError::invalid_input(format!(
+                        "Input field '{}' size {} exceeds maximum {}",
+                        field_name,
+                        data.len(),
+                        max_bytes
                     )));
                 }
             }
@@ -159,17 +176,29 @@ impl ValidationMiddleware {
     }
 
     /// Apply a specific validation rule
-    async fn apply_validation_rule(&self, rule: &ValidationRule, operation_name: &str) -> Result<()> {
+    async fn apply_validation_rule(
+        &self,
+        rule: &ValidationRule,
+        operation_name: &str,
+    ) -> Result<()> {
         match &rule.validator {
-            ValidationRuleType::RateLimit { max_operations, window } => {
-                self.check_rate_limit(operation_name, *max_operations, *window).await
-            },
+            ValidationRuleType::RateLimit {
+                max_operations,
+                window,
+            } => {
+                self.check_rate_limit(operation_name, *max_operations, *window)
+                    .await
+            }
             ValidationRuleType::Custom { description } => {
                 // Custom validation would be implemented by specific business logic
                 // For now, just log that custom validation was requested
-                tracing::debug!("Custom validation '{}' for operation '{}'", description, operation_name);
+                tracing::debug!(
+                    "Custom validation '{}' for operation '{}'",
+                    description,
+                    operation_name
+                );
                 Ok(())
-            },
+            }
             _ => {
                 // Other validation types are handled by specific methods
                 Ok(())
@@ -178,15 +207,21 @@ impl ValidationMiddleware {
     }
 
     /// Check rate limiting for an operation
-    async fn check_rate_limit(&self, operation_name: &str, max_ops: u32, window: Duration) -> Result<()> {
+    async fn check_rate_limit(
+        &self,
+        operation_name: &str,
+        max_ops: u32,
+        window: Duration,
+    ) -> Result<()> {
         // Note: This is a simplified in-memory rate limiter
         // Production implementation would use persistent storage
-        
+
         let now = Instant::now();
         let window_start = now - window;
 
         // Count recent operations (this would need to be properly synchronized in real implementation)
-        let recent_ops = self.rate_limit_state
+        let recent_ops = self
+            .rate_limit_state
             .get(operation_name)
             .map(|ops| ops.iter().filter(|&&time| time >= window_start).count())
             .unwrap_or(0);
@@ -207,7 +242,11 @@ pub struct ValidationRuleBuilder;
 
 impl ValidationRuleBuilder {
     /// Create a device ID validation rule
-    pub fn device_id_rule(name: String, allow_self: bool, allowed_devices: Vec<DeviceId>) -> ValidationRule {
+    pub fn device_id_rule(
+        name: String,
+        allow_self: bool,
+        allowed_devices: Vec<DeviceId>,
+    ) -> ValidationRule {
         ValidationRule {
             name,
             operation_patterns: vec!["*device*".to_string(), "*auth*".to_string()],
@@ -219,7 +258,12 @@ impl ValidationRuleBuilder {
     }
 
     /// Create a rate limiting rule
-    pub fn rate_limit_rule(name: String, operations: Vec<String>, max_ops: u32, window: Duration) -> ValidationRule {
+    pub fn rate_limit_rule(
+        name: String,
+        operations: Vec<String>,
+        max_ops: u32,
+        window: Duration,
+    ) -> ValidationRule {
         ValidationRule {
             name,
             operation_patterns: operations,
@@ -231,7 +275,11 @@ impl ValidationRuleBuilder {
     }
 
     /// Create an input size validation rule
-    pub fn input_size_rule(name: String, max_bytes: usize, field_patterns: Vec<String>) -> ValidationRule {
+    pub fn input_size_rule(
+        name: String,
+        max_bytes: usize,
+        field_patterns: Vec<String>,
+    ) -> ValidationRule {
         ValidationRule {
             name,
             operation_patterns: vec!["*store*".to_string(), "*upload*".to_string()],
@@ -243,7 +291,11 @@ impl ValidationRuleBuilder {
     }
 
     /// Create a session validation rule
-    pub fn session_rule(name: String, require_active: bool, allowed_types: Vec<String>) -> ValidationRule {
+    pub fn session_rule(
+        name: String,
+        require_active: bool,
+        allowed_types: Vec<String>,
+    ) -> ValidationRule {
         ValidationRule {
             name,
             operation_patterns: vec!["*session*".to_string()],
@@ -259,13 +311,13 @@ impl ValidationRuleBuilder {
         vec![
             Self::device_id_rule(
                 "strict_device_access".to_string(),
-                true, // Allow self
+                true,                 // Allow self
                 vec![current_device], // Only allow current device
             ),
             Self::rate_limit_rule(
                 "auth_rate_limit".to_string(),
                 vec!["*auth*".to_string(), "*login*".to_string()],
-                5, // Max 5 auth operations
+                5,                       // Max 5 auth operations
                 Duration::from_secs(60), // Per minute
             ),
             Self::input_size_rule(
@@ -301,7 +353,7 @@ impl InputValidator {
     /// Validate account ID format
     pub fn validate_account_id(account_id: &AccountId) -> Result<()> {
         if account_id.to_string().is_empty() {
-            return Err(AuraError::invalid_argument("Account ID cannot be empty"));
+            return Err(AuraError::invalid_input("Account ID cannot be empty"));
         }
         // Additional format validation could be added here
         Ok(())
@@ -310,7 +362,7 @@ impl InputValidator {
     /// Validate device ID format  
     pub fn validate_device_id_format(device_id: &DeviceId) -> Result<()> {
         if device_id.to_string().is_empty() {
-            return Err(AuraError::invalid_argument("Device ID cannot be empty"));
+            return Err(AuraError::invalid_input("Device ID cannot be empty"));
         }
         // Additional format validation could be added here
         Ok(())
@@ -319,7 +371,7 @@ impl InputValidator {
     /// Validate session ID format
     pub fn validate_session_id_format(session_id: &SessionId) -> Result<()> {
         if session_id.to_string().is_empty() {
-            return Err(AuraError::invalid_argument("Session ID cannot be empty"));
+            return Err(AuraError::invalid_input("Session ID cannot be empty"));
         }
         // Additional format validation could be added here
         Ok(())
@@ -328,19 +380,24 @@ impl InputValidator {
     /// Validate string input for common issues
     pub fn validate_string_input(input: &str, field_name: &str, max_length: usize) -> Result<()> {
         if input.is_empty() {
-            return Err(AuraError::invalid_argument(format!("{} cannot be empty", field_name)));
+            return Err(AuraError::invalid_input(format!(
+                "{} cannot be empty",
+                field_name
+            )));
         }
 
         if input.len() > max_length {
-            return Err(AuraError::invalid_argument(format!(
-                "{} exceeds maximum length of {} characters", field_name, max_length
+            return Err(AuraError::invalid_input(format!(
+                "{} exceeds maximum length of {} characters",
+                field_name, max_length
             )));
         }
 
         // Check for common security issues
         if input.contains('\0') {
-            return Err(AuraError::invalid_argument(format!(
-                "{} contains null bytes", field_name
+            return Err(AuraError::invalid_input(format!(
+                "{} contains null bytes",
+                field_name
             )));
         }
 
@@ -350,13 +407,18 @@ impl InputValidator {
     /// Validate binary data input
     pub fn validate_binary_input(data: &[u8], field_name: &str, max_size: usize) -> Result<()> {
         if data.is_empty() {
-            return Err(AuraError::invalid_argument(format!("{} cannot be empty", field_name)));
+            return Err(AuraError::invalid_input(format!(
+                "{} cannot be empty",
+                field_name
+            )));
         }
 
         if data.len() > max_size {
-            return Err(AuraError::invalid_argument(format!(
-                "{} size {} exceeds maximum {} bytes", 
-                field_name, data.len(), max_size
+            return Err(AuraError::invalid_input(format!(
+                "{} size {} exceeds maximum {} bytes",
+                field_name,
+                data.len(),
+                max_size
             )));
         }
 
@@ -371,21 +433,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_validation_middleware() {
-        let rules = vec![
-            ValidationRuleBuilder::rate_limit_rule(
-                "test_rate_limit".to_string(),
-                vec!["test_op".to_string()],
-                2,
-                Duration::from_secs(60),
-            ),
-        ];
+        let rules = vec![ValidationRuleBuilder::rate_limit_rule(
+            "test_rate_limit".to_string(),
+            vec!["test_op".to_string()],
+            2,
+            Duration::from_secs(60),
+        )];
 
         let middleware = ValidationMiddleware::new(rules);
-        
+
         // First two operations should succeed
         assert!(middleware.validate_operation("test_op").await.is_ok());
         assert!(middleware.validate_operation("test_op").await.is_ok());
-        
+
         // Third operation should be rate limited (in a real implementation)
         // Note: Current implementation doesn't track state properly for testing
     }
@@ -404,10 +464,16 @@ mod tests {
         let middleware = ValidationMiddleware::new(rules);
 
         // Should reject self-access
-        assert!(middleware.validate_device_id(device1, device1).await.is_err());
+        assert!(middleware
+            .validate_device_id(device1, device1)
+            .await
+            .is_err());
 
         // Should allow device2
-        assert!(middleware.validate_device_id(device2, device1).await.is_ok());
+        assert!(middleware
+            .validate_device_id(device2, device1)
+            .await
+            .is_ok());
     }
 
     #[test]

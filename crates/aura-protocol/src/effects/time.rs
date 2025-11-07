@@ -3,9 +3,9 @@
 //! This module defines the trait interface for time operations.
 //! Implementations are provided in aura-protocol crate.
 
-use std::time::Duration;
-use aura_types::AuraError;
 use async_trait::async_trait;
+use aura_types::AuraError;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Wake conditions for cooperative yielding
@@ -95,10 +95,13 @@ pub trait TimeEffects: Send + Sync {
     async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError>;
 
     /// Execute a future with timeout
-    async fn timeout<F, T>(&self, future: F, duration_ms: u64) -> Result<T, AuraError>
-    where
-        F: std::future::Future<Output = T> + Send + 'async_trait,
-        T: Send + 'async_trait;
+    ///
+    /// Note: This method is removed to make TimeEffects dyn-compatible.
+    /// Use tokio::time::timeout directly in your code instead.
+    // async fn timeout<F, T>(&self, future: F, duration_ms: u64) -> Result<T, AuraError>
+    // where
+    //     F: std::future::Future<Output = T> + Send + 'async_trait,
+    //     T: Send + 'async_trait;
 
     /// Check if this is a simulated time handler
     fn is_simulated(&self) -> bool;

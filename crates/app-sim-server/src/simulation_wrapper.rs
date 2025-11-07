@@ -1,21 +1,59 @@
-//! Simulation wrapper that adapts FunctionalRunner to sim-server API
+//! Simulation wrapper that adapts simulator middleware to sim-server API
 //!
 //! This wrapper provides the interface expected by the sim-server while using
-//! the new functional simulation architecture internally.
+//! the new middleware-based simulation architecture internally.
 
 use anyhow::Result;
 use app_console_types::{
     trace::{ParticipantStatus, ParticipantType},
     DeviceInfo, TraceEvent,
 };
-use aura_simulator::{FunctionalRunner, WorldState};
-use serde_json::Value;
+use aura_simulator::{
+    CoreSimulatorHandler, SimulatorContext, SimulatorMiddlewareStack, SimulatorOperation,
+};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
-/// Wrapper around FunctionalRunner that provides sim-server compatibility
+/// Simulation participant state
+#[derive(Debug, Clone)]
+pub struct ParticipantState {
+    pub device_id: String,
+    pub account_id: String,
+    pub status: ParticipantStatus,
+    pub message_count: u32,
+}
+
+/// Simulation state tracker
+#[derive(Debug)]
+pub struct SimulationState {
+    pub participants: HashMap<String, ParticipantState>,
+    pub current_tick: u64,
+    pub current_time: u64,
+    pub byzantine_participants: Vec<String>,
+}
+
+impl Default for SimulationState {
+    fn default() -> Self {
+        Self {
+            participants: HashMap::new(),
+            current_tick: 0,
+            current_time: 0,
+            byzantine_participants: Vec::new(),
+        }
+    }
+}
+
+/// Wrapper around simulator middleware stack that provides sim-server compatibility
 pub struct SimulationWrapper {
-    /// The underlying functional runner
-    runner: FunctionalRunner,
+    /// The underlying middleware stack
+    stack: SimulatorMiddlewareStack,
+    /// Simulation context
+    context: SimulatorContext,
+    /// Simulation state
+    state: SimulationState,
     /// Simulation ID for tracking
     pub id: Uuid,
     /// Original seed used for simulation
@@ -28,8 +66,20 @@ pub struct SimulationWrapper {
 impl SimulationWrapper {
     /// Create a new simulation wrapper
     pub fn new(seed: u64) -> Self {
+        // Create core handler
+        let handler = Arc::new(CoreSimulatorHandler::new());
+
+        // Build middleware stack with basic components
+        let stack = SimulatorMiddlewareStack::new(handler);
+
+        let context =
+            SimulatorContext::new(format!("sim_{}", Uuid::new_v4()), format!("run_{}", seed))
+                .with_seed(seed);
+
         Self {
-            runner: FunctionalRunner::new(seed),
+            stack,
+            context,
+            state: SimulationState::default(),
             id: Uuid::new_v4(),
             seed,
             recording_enabled: true,
@@ -38,19 +88,34 @@ impl SimulationWrapper {
 
     /// Get current tick
     pub fn current_tick(&self) -> u64 {
-        self.runner.current_tick()
+        self.state.current_tick
     }
 
     /// Get current time
     pub fn current_time(&self) -> u64 {
-        self.runner.current_time()
+        self.state.current_time
     }
 
     /// Execute a single simulation step
     pub fn step(&mut self) -> Result<Vec<TraceEvent>> {
-        self.runner
-            .step()
-            .map_err(|e| anyhow::anyhow!("Step failed: {}", e))
+        // Execute a tick operation through the middleware stack
+        let operation = SimulatorOperation::ExecuteTick {
+            tick_number: self.state.current_tick + 1,
+            delta_time: Duration::from_millis(100),
+        };
+
+        match self.stack.process(operation, &self.context) {
+            Ok(_result) => {
+                // Update internal state
+                self.state.current_tick += 1;
+                self.state.current_time += 100; // ms
+
+                // For now, return empty trace events
+                // In a full implementation, this would extract events from the result
+                Ok(vec![])
+            }
+            Err(e) => Err(anyhow::anyhow!("Step failed: {}", e)),
+        }
     }
 
     /// Check if recording is enabled
@@ -60,32 +125,32 @@ impl SimulationWrapper {
 
     /// Check if simulation is idle (simplified - just check if no participants)
     pub fn is_idle(&self) -> bool {
-        self.runner.world_state().participants.is_empty()
+        self.state.participants.is_empty()
     }
 
     /// Get participant list as device info
     pub fn get_participants(&self) -> Vec<DeviceInfo> {
-        self.runner
-            .world_state()
+        self.state
             .participants
             .iter()
             .map(|(id, participant)| DeviceInfo {
                 id: id.clone(),
                 device_id: participant.device_id.clone(),
                 account_id: participant.account_id.clone(),
-                participant_type: ParticipantType::Honest,
-                status: ParticipantStatus::Online,
-                message_count: 0,
+                participant_type: if self.state.byzantine_participants.contains(id) {
+                    ParticipantType::Byzantine
+                } else {
+                    ParticipantType::Honest
+                },
+                status: participant.status,
+                message_count: participant.message_count as u64,
             })
             .collect()
     }
 
     /// Get a specific participant by ID
-    pub fn get_participant(
-        &self,
-        participant_id: &str,
-    ) -> Option<&aura_simulator::world_state::ParticipantState> {
-        self.runner.world_state().participants.get(participant_id)
+    pub fn get_participant(&self, participant_id: &str) -> Option<&ParticipantState> {
+        self.state.participants.get(participant_id)
     }
 
     /// Add a participant to the simulation  
@@ -95,24 +160,37 @@ impl SimulationWrapper {
         device_id: String,
         account_id: String,
     ) -> Result<()> {
-        self.runner
-            .add_participant(id, device_id, account_id)
-            .map_err(|e| anyhow::anyhow!("Failed to add participant: {}", e))
+        // Add to local state
+        let participant = ParticipantState {
+            device_id: device_id.clone(),
+            account_id: account_id.clone(),
+            status: ParticipantStatus::Online,
+            message_count: 0,
+        };
+
+        self.state.participants.insert(id.clone(), participant);
+
+        // For now, just use local state management
+        // In a full implementation, this would trigger protocol initialization
+        tracing::debug!("Added participant {} to simulation", id);
+        Ok(())
     }
 
-    /// Set a participant as byzantine (simplified - just mark in world state)
+    /// Set a participant as byzantine (simplified - just mark in state)
     pub fn set_participant_byzantine(&mut self, participant_id: &str) -> Result<()> {
-        // For now, just log this - full byzantine behavior would require more complex integration
         tracing::info!("Marking participant {} as byzantine", participant_id);
 
-        // Add to byzantine participants list if it exists in world state
-        if let Some(_participant) = self
-            .runner
-            .world_state_mut()
-            .participants
-            .get_mut(participant_id)
-        {
-            // Mark participant as byzantine in some way
+        // Add to byzantine participants list if participant exists
+        if self.state.participants.contains_key(participant_id) {
+            if !self
+                .state
+                .byzantine_participants
+                .contains(&participant_id.to_string())
+            {
+                self.state
+                    .byzantine_participants
+                    .push(participant_id.to_string());
+            }
             tracing::debug!("Participant {} marked as byzantine", participant_id);
         }
 
@@ -151,14 +229,14 @@ impl SimulationWrapper {
         );
     }
 
-    /// Get world state for advanced access
-    pub fn world_state(&self) -> &WorldState {
-        self.runner.world_state()
+    /// Get simulation state for advanced access
+    pub fn simulation_state(&self) -> &SimulationState {
+        &self.state
     }
 
-    /// Get mutable world state for setup
-    pub fn world_state_mut(&mut self) -> &mut WorldState {
-        self.runner.world_state_mut()
+    /// Get mutable simulation state for setup
+    pub fn simulation_state_mut(&mut self) -> &mut SimulationState {
+        &mut self.state
     }
 }
 

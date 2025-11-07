@@ -4,8 +4,8 @@
 //! Intents enable lock-free coordination where any online device can become the instigator
 //! for executing a batch of compatible intents.
 
-use aura_types::identifiers::DeviceId;
 use crate::tree::{Commitment, NodeIndex, TreeOperation};
+use aura_types::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

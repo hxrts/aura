@@ -23,11 +23,15 @@ impl ExecutionTrace {
             steps: Vec::with_capacity(capacity),
         }
     }
-    
+
     pub fn len(&self) -> usize {
         self.steps.len()
     }
-    
+
+    pub fn add_state(&mut self, state: String) {
+        self.steps.push(state);
+    }
+
     pub fn get_all_states(&self) -> Vec<Box<dyn SimulationState>> {
         // Placeholder implementation
         vec![]
@@ -37,20 +41,54 @@ impl ExecutionTrace {
 #[derive(Debug, Clone)]
 pub struct PropertyViolation {
     pub property_name: String,
+    pub property_type: PropertyViolationType,
     pub violation_type: String,
     pub detected_at: u64,
     pub violation_state: SimulationStateSnapshot,
+    pub violation_details: ViolationDetails,
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone)]
 pub struct SimulationStateSnapshot {
     pub time: u64,
+    pub tick: u64,
+    pub participant_count: usize,
+    pub active_sessions: usize,
+    pub completed_sessions: usize,
+    pub state_hash: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct ViolationDetectionReport {
     pub violations: Vec<PropertyViolation>,
 }
+
+// Additional types needed by test code
+#[derive(Debug, Clone)]
+pub enum PropertyViolationType {
+    Invariant,
+    Safety,
+    Liveness,
+}
+
+#[derive(Debug, Clone)]
+pub struct ViolationDetails {
+    pub description: String,
+    pub evidence: Vec<String>,
+    pub potential_causes: Vec<String>,
+    pub severity: ViolationSeverity,
+    pub remediation_suggestions: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ViolationSeverity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
 use crate::quint::types::SimulationState;
 use aura_types::AuraError;
 
@@ -649,7 +687,10 @@ impl TraceConverter {
     // Private implementation methods
 
     /// Sample states from a large trace
-    fn sample_states(&self, execution_trace: &ExecutionTrace) -> Result<Vec<Box<dyn SimulationState>>> {
+    fn sample_states(
+        &self,
+        execution_trace: &ExecutionTrace,
+    ) -> Result<Vec<Box<dyn SimulationState>>> {
         let all_states = execution_trace.get_all_states();
         let sample_size = (all_states.len() as f64 * self.config.sampling_rate) as usize;
         let step_size = all_states.len() / sample_size.max(1);
@@ -678,10 +719,7 @@ impl TraceConverter {
         }
 
         // Add step information
-        variables.insert(
-            "step".to_string(),
-            QuintValue::Int(step as i64),
-        );
+        variables.insert("step".to_string(), QuintValue::Int(step as i64));
 
         // Add current time
         variables.insert(
@@ -933,11 +971,47 @@ impl ItfExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{
-        MessageDeliveryStats, NetworkFailureConditions, NetworkStateSnapshot,
-        PropertyViolationType, ProtocolExecutionState, SimulationStateSnapshot, ViolationDetails,
-        ViolationSeverity,
-    };
+
+    // Mock types for testing
+    #[derive(Debug, Clone)]
+    struct TestSimulationState {
+        tick: u64,
+        time: u64,
+        variables: HashMap<String, String>,
+        protocol_state: ProtocolExecutionState,
+        participants: Vec<String>,
+        network_state: NetworkStateSnapshot,
+    }
+
+    #[derive(Debug, Clone)]
+    struct NetworkStateSnapshot {
+        partitions: Vec<String>,
+        message_stats: MessageDeliveryStats,
+        failure_conditions: NetworkFailureConditions,
+    }
+
+    #[derive(Debug, Clone)]
+    struct MessageDeliveryStats {
+        messages_sent: u64,
+        messages_delivered: u64,
+        messages_dropped: u64,
+        average_latency_ms: f64,
+    }
+
+    #[derive(Debug, Clone)]
+    struct NetworkFailureConditions {
+        partitions_active: bool,
+        failure_rate: f64,
+        drop_rate: f64,
+        latency_range_ms: (u64, u64),
+    }
+
+    #[derive(Debug, Clone)]
+    struct ProtocolExecutionState {
+        active_sessions: Vec<String>,
+        completed_sessions: Vec<String>,
+        queued_protocols: Vec<String>,
+    }
 
     #[test]
     fn test_trace_converter_creation() {
@@ -950,7 +1024,7 @@ mod tests {
         let mut converter = TraceConverter::new();
         let mut execution_trace = ExecutionTrace::new(10);
 
-        let state = SimulationState {
+        let state = TestSimulationState {
             tick: 1,
             time: 1000,
             variables: HashMap::new(),
@@ -972,11 +1046,12 @@ mod tests {
                     drop_rate: 0.0,
                     latency_range_ms: (0, 100),
                     partitions_active: false,
+                    failure_rate: 0.0,
                 },
             },
         };
 
-        execution_trace.add_state(state);
+        execution_trace.add_state(format!("{:?}", state));
 
         let result = converter.convert_trace(&execution_trace);
         assert!(result.is_ok());
@@ -1028,6 +1103,7 @@ mod tests {
         let violation = PropertyViolation {
             property_name: "test_property".to_string(),
             property_type: PropertyViolationType::Invariant,
+            violation_type: "invariant_violation".to_string(),
             violation_state: SimulationStateSnapshot {
                 tick: 1,
                 time: 1000,
@@ -1072,7 +1148,7 @@ mod tests {
 
     #[test]
     fn test_itf_comprehensive_features() {
-        let mut converter = ItfTraceConverter::new();
+        let converter = ItfTraceConverter::new();
 
         // Test complete ITF functionality
         let test_trace = ItfTrace {

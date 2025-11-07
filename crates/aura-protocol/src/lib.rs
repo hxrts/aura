@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Aura Protocol - Algebraic Effects Architecture
 //!
 //! This crate provides a clean algebraic effects architecture for Aura's distributed protocols.
@@ -87,31 +88,11 @@ pub mod middleware;
 
 // Public API re-exports
 pub use effects::{
-    AuraEffectSystem,
-    AuraEffectSystemFactory,
-    AuraEffectSystemStats,
-    ChoreographicEffects,
-    ChoreographicRole,
-    ChoreographyEvent,
-    ChoreographyMetrics,
-    ConsoleEffects,
-    ConsoleEvent,
-    CryptoEffects,
-    DeviceMetadata,
-    JournalEffects,
-    LedgerEffects,
-    LedgerError,
-    LedgerEvent,
-    LedgerEventStream,
-    LogLevel,
-    NetworkAddress,
-    NetworkEffects,
-    NetworkError,
-    RandomEffects,
-    StorageEffects,
-    StorageError,
-    StorageLocation,
-    TimeEffects,
+    AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats, AuraEffects,
+    ChoreographicEffects, ChoreographicRole, ChoreographyEvent, ChoreographyMetrics,
+    ConsoleEffects, ConsoleEvent, CryptoEffects, DeviceMetadata, JournalEffects, LedgerEffects,
+    LedgerError, LedgerEvent, LedgerEventStream, LogLevel, NetworkAddress, NetworkEffects,
+    NetworkError, RandomEffects, StorageEffects, StorageError, StorageLocation, TimeEffects,
     WakeCondition,
 };
 
@@ -127,29 +108,6 @@ pub use handlers::{
     HandlerUtils,
 };
 
-pub use middleware::{
-    // Core middleware traits and types (working middleware only)
-    // Legacy middleware temporarily commented out
-    // AuthMiddleware,
-    // EffectInjector,
-    // EffectMiddleware,
-    // ErrorHandler,
-    // HandlerError,
-    // LoggingMiddleware,
-    // MetricsMiddleware,
-    
-    // Context and results (available)
-    // MiddlewareContext,
-    // Legacy middleware types temporarily commented out
-    // MiddlewareError,
-    // MiddlewareHandler,
-    // MiddlewareLayer,
-    // MiddlewareResult,
-    // MiddlewareStack,
-    // ProtocolHandler,
-    // StackBuilder,
-};
-
 // Clean API - no legacy compatibility
 
 // Convenient prelude for common imports
@@ -160,8 +118,8 @@ pub mod prelude {
 
     // Core effect traits
     pub use crate::effects::{
-        ChoreographicEffects, ConsoleEffects, CryptoEffects, JournalEffects,
-        LedgerEffects, NetworkEffects, RandomEffects, StorageEffects, TimeEffects,
+        ChoreographicEffects, ConsoleEffects, CryptoEffects, JournalEffects, LedgerEffects,
+        NetworkEffects, RandomEffects, StorageEffects, TimeEffects,
     };
 
     // Common error types
@@ -178,13 +136,13 @@ pub mod prelude {
         AuraHandler, AuraHandlerFactory, CompositeHandler, EffectType, ExecutionMode,
     };
 
-    // Middleware types (temporarily commented out)
-    // pub use crate::middleware::{
-    //     LoggingMiddleware, MetricsMiddleware, MiddlewareStack,
-    // };
+    // Middleware types
+    pub use crate::middleware::{
+        HandlerMetadata, MiddlewareContext, MiddlewareError, MiddlewareResult,
+    };
 
     // Context types
-    pub use crate::handlers::{AuraContext, MiddlewareContext};
+    pub use crate::handlers::AuraContext;
 
     // External dependencies commonly used with this crate
     pub use async_trait::async_trait;

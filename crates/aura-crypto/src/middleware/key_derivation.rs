@@ -347,8 +347,11 @@ impl Default for KeyDerivationConfig {
 struct CachedKey {
     key_hash: String,
     derived_at: u64,
+    #[allow(dead_code)] // Stored for audit/debugging purposes
     app_id: String,
+    #[allow(dead_code)] // Stored for audit/debugging purposes
     derivation_context: String,
+    #[allow(dead_code)] // Stored for audit/debugging purposes
     derivation_path: Vec<u32>,
 }
 

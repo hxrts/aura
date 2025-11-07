@@ -3,7 +3,7 @@
 //! This module provides checkpoint-based time-travel debugging capabilities,
 //! allowing developers to step forward and backward through protocol execution.
 
-use super::{ChoreographicRole, ChoreoEvent, SimulationConfig};
+use super::{ChoreoEvent, ChoreographicRole, SimulationConfig};
 use crate::{
     context::BaseContext, effects::ProtocolEffects, middleware::handler::AuraProtocolHandler,
 };

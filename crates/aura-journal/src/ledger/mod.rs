@@ -15,14 +15,13 @@
 //! attestation, while capabilities provide fine-grained, revocable authorization tokens.
 
 pub mod capability;
-pub mod crdt;
 pub mod intent;
 pub mod journal_types;
 pub mod tree_op;
 
 // Re-export key types
+pub use crate::semilattice::JournalMap; // Use harmonized CRDT implementation
 pub use capability::{CapabilityId, CapabilityRef, ResourceRef};
-pub use crdt::JournalMap;
 pub use intent::{Intent, IntentBatch, IntentId, IntentStatus, Priority};
 pub use journal_types::{JournalError, JournalStats};
 pub use tree_op::{ThresholdSignature, TreeOp, TreeOpRecord};

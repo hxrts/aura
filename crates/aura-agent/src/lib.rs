@@ -50,9 +50,8 @@ pub use errors::{AgentError, Result as AgentResult};
 pub use effects::*;
 
 pub use middleware::{
-    AgentMetrics, AgentMiddlewareStack, InputValidator, LogLevel, MetricsMiddleware,
-    MiddlewareStackBuilder, OperationMetrics, SpanId, TraceId, TracingMiddleware,
-    ValidationMiddleware, ValidationRule,
+    AgentMetrics, AgentMiddlewareStack, InputValidator, MetricsMiddleware, MiddlewareStackBuilder,
+    OperationMetrics, TracingMiddleware, ValidationMiddleware, ValidationRule,
 };
 
 // Re-export core types from aura-types for convenience
@@ -66,10 +65,9 @@ pub use aura_types::{
 /// This is a convenience function for creating an agent runtime with production
 /// effect handlers. The runtime composes real system effects into device workflows.
 pub async fn create_production_agent(device_id: DeviceId) -> AgentResult<AuraAgent> {
-    use crate::agent::AuraEffectSystem;
+    use aura_protocol::effects::AuraEffectSystem;
 
-    let core_effects = AuraEffectSystem::for_production(device_id)
-        .map_err(|e| AgentError::EffectSystemError(e.to_string()))?;
+    let core_effects = AuraEffectSystem::for_production(device_id);
 
     Ok(AuraAgent::new(core_effects, device_id))
 }
@@ -87,7 +85,7 @@ pub fn create_testing_agent(device_id: DeviceId) -> AuraAgent {
 /// This creates an agent runtime with controlled effects for simulation scenarios.
 /// The seed ensures deterministic behavior across simulation runs.
 pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AuraAgent {
-    use crate::agent::AuraEffectSystem;
+    use aura_protocol::effects::AuraEffectSystem;
 
     let core_effects = AuraEffectSystem::for_simulation(device_id, seed);
     AuraAgent::new(core_effects, device_id)

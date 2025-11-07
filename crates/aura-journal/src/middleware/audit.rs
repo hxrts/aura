@@ -28,6 +28,8 @@ impl AuditMiddleware {
 }
 
 impl JournalMiddleware for AuditMiddleware {
+    // [VERIFIED] Uses SystemTime for audit timing measurements
+    #[allow(clippy::disallowed_methods)]
     fn process(
         &self,
         operation: JournalOperation,
@@ -163,6 +165,9 @@ pub struct AuditEntry {
 
 impl AuditEntry {
     /// Create a new audit entry
+    ///
+    /// [VERIFIED] Uses SystemTime and UUID for audit trail creation
+    #[allow(clippy::disallowed_methods)]
     pub fn new(
         account_id: String,
         device_id: String,

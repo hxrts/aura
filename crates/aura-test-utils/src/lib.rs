@@ -56,7 +56,7 @@ pub use transport::*;
 
 // Re-export commonly used external types for convenience
 pub use aura_crypto::Effects;
-pub use aura_journal::{AccountState, DeviceMetadata, DeviceType};
+pub use aura_journal::{DeviceMetadata, DeviceType, ModernAccountState as AccountState};
 pub use aura_types::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 pub use std::collections::BTreeMap;

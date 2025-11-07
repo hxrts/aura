@@ -1,0 +1,392 @@
+//! Domain-specific CRDT implementations using foundation traits
+//!
+//! This module provides journal-specific CRDT types built on the
+//! harmonized foundation from `aura-types`.
+
+use crate::ledger::intent::{Intent, IntentId};
+use aura_types::identifiers::DeviceId;
+use aura_types::semilattice::{Bottom, CvState, JoinSemilattice};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Intent pool CRDT with observed-remove semantics
+///
+/// Manages a pool of pending intents where additions win over removals,
+/// providing eventual consistency for intent staging.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntentPool {
+    /// Active intents
+    pub intents: BTreeMap<IntentId, Intent>,
+    /// Tombstones for removed intents
+    pub tombstones: BTreeSet<IntentId>,
+}
+
+impl IntentPool {
+    /// Create a new empty intent pool
+    pub fn new() -> Self {
+        Self {
+            intents: BTreeMap::new(),
+            tombstones: BTreeSet::new(),
+        }
+    }
+
+    /// Add an intent to the pool
+    pub fn add_intent(&mut self, intent: Intent) {
+        let id = intent.intent_id;
+
+        // Only add if not tombstoned (observed-remove: add wins)
+        if !self.tombstones.contains(&id) {
+            self.intents.insert(id, intent);
+        }
+    }
+
+    /// Remove an intent from the pool
+    pub fn remove_intent(&mut self, id: IntentId) {
+        self.tombstones.insert(id);
+        self.intents.remove(&id);
+    }
+
+    /// Check if an intent is present
+    pub fn contains(&self, id: &IntentId) -> bool {
+        self.intents.contains_key(id)
+    }
+
+    /// Get an intent by ID
+    pub fn get(&self, id: &IntentId) -> Option<&Intent> {
+        self.intents.get(id)
+    }
+
+    /// List all active intents
+    pub fn list_intents(&self) -> Vec<&Intent> {
+        self.intents.values().collect()
+    }
+
+    /// Get number of active intents
+    pub fn len(&self) -> usize {
+        self.intents.len()
+    }
+
+    /// Check if pool is empty
+    pub fn is_empty(&self) -> bool {
+        self.intents.is_empty()
+    }
+}
+
+impl JoinSemilattice for IntentPool {
+    fn join(&self, other: &Self) -> Self {
+        let mut result = self.clone();
+
+        // Merge intents (add wins over remove)
+        for (id, intent) in &other.intents {
+            if !result.tombstones.contains(id) {
+                result.intents.insert(*id, intent.clone());
+            }
+        }
+
+        // Merge tombstones (union)
+        for id in &other.tombstones {
+            result.tombstones.insert(*id);
+            result.intents.remove(id); // Remove if present
+        }
+
+        result
+    }
+}
+
+impl Bottom for IntentPool {
+    fn bottom() -> Self {
+        Self::new()
+    }
+}
+
+impl CvState for IntentPool {}
+
+impl Default for IntentPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Epoch-ordered operation log CRDT
+///
+/// Maintains a grow-only log of operations ordered by epoch,
+/// with deterministic conflict resolution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpochLog<T> {
+    /// Operations by epoch
+    pub ops: BTreeMap<u64, T>,
+}
+
+impl<T: Clone> EpochLog<T> {
+    /// Create a new empty log
+    pub fn new() -> Self {
+        Self {
+            ops: BTreeMap::new(),
+        }
+    }
+
+    /// Add an operation to the epoch log
+    pub fn add_operation(&mut self, epoch: u64, op: T) {
+        self.ops.insert(epoch, op);
+    }
+
+    /// Append an operation at the given epoch
+    pub fn append(&mut self, epoch: u64, op: T) {
+        self.ops.insert(epoch, op);
+    }
+
+    /// Get operation at epoch
+    pub fn get(&self, epoch: u64) -> Option<&T> {
+        self.ops.get(&epoch)
+    }
+
+    /// Get all operations in epoch order
+    pub fn ops_ordered(&self) -> Vec<&T> {
+        self.ops.values().collect()
+    }
+
+    /// Get latest epoch
+    pub fn latest_epoch(&self) -> Option<u64> {
+        self.ops.keys().max().copied()
+    }
+
+    /// Get number of operations
+    pub fn len(&self) -> usize {
+        self.ops.len()
+    }
+
+    /// Check if log is empty
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
+}
+
+impl<T: Clone + Ord> JoinSemilattice for EpochLog<T> {
+    fn join(&self, other: &Self) -> Self {
+        let mut result = self.clone();
+
+        // Merge operations (for conflicts, keep the greater one by Ord)
+        for (epoch, op) in &other.ops {
+            if let Some(existing) = result.ops.get(epoch) {
+                if op > existing {
+                    result.ops.insert(*epoch, op.clone());
+                }
+            } else {
+                result.ops.insert(*epoch, op.clone());
+            }
+        }
+
+        result
+    }
+}
+
+impl<T: Clone> Bottom for EpochLog<T> {
+    fn bottom() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Clone + Ord> CvState for EpochLog<T> {}
+
+impl<T: Clone> Default for EpochLog<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Device registry CRDT
+///
+/// Maintains a grow-only set of registered devices with metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceRegistry {
+    /// Registered devices with their metadata
+    pub devices: BTreeMap<DeviceId, crate::types::DeviceMetadata>,
+}
+
+impl DeviceRegistry {
+    /// Create a new empty registry
+    pub fn new() -> Self {
+        Self {
+            devices: BTreeMap::new(),
+        }
+    }
+
+    /// Register a device
+    pub fn register_device(&mut self, metadata: crate::types::DeviceMetadata) {
+        self.devices.insert(metadata.device_id, metadata);
+    }
+
+    /// Get device metadata
+    pub fn get_device(&self, id: &DeviceId) -> Option<&crate::types::DeviceMetadata> {
+        self.devices.get(id)
+    }
+
+    /// List all registered devices
+    pub fn list_devices(&self) -> Vec<&crate::types::DeviceMetadata> {
+        self.devices.values().collect()
+    }
+
+    /// Check if device is registered
+    pub fn is_registered(&self, id: &DeviceId) -> bool {
+        self.devices.contains_key(id)
+    }
+
+    /// Get number of registered devices
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    /// Check if registry is empty
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+}
+
+impl JoinSemilattice for DeviceRegistry {
+    fn join(&self, other: &Self) -> Self {
+        let mut result = self.clone();
+
+        // Merge devices (later registration timestamp wins)
+        for (id, metadata) in &other.devices {
+            if let Some(existing) = result.devices.get(id) {
+                if metadata.added_at > existing.added_at {
+                    result.devices.insert(*id, metadata.clone());
+                }
+            } else {
+                result.devices.insert(*id, metadata.clone());
+            }
+        }
+
+        result
+    }
+}
+
+impl Bottom for DeviceRegistry {
+    fn bottom() -> Self {
+        Self::new()
+    }
+}
+
+impl CvState for DeviceRegistry {}
+
+impl Default for DeviceRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ledger::intent::{Intent, Priority};
+    use crate::tree::{AffectedPath, Commitment, LeafIndex, TreeOperation};
+
+    #[test]
+    fn test_intent_pool_join_semantics() {
+        let mut pool1 = IntentPool::new();
+        let mut pool2 = IntentPool::new();
+
+        let intent = Intent::new(
+            TreeOperation::RotatePath {
+                leaf_index: LeafIndex(0),
+                affected_path: AffectedPath::new(),
+            },
+            vec![],
+            Commitment::default(),
+            Priority::default(),
+            DeviceId::new(),
+            1000,
+        );
+
+        let intent_id = intent.intent_id;
+
+        // Add intent to pool1
+        pool1.add_intent(intent);
+
+        // Remove intent from pool2 (tombstone)
+        pool2.remove_intent(intent_id);
+
+        // Join should result in intent being removed (tombstone wins)
+        let joined = pool1.join(&pool2);
+        assert!(!joined.contains(&intent_id));
+    }
+
+    #[test]
+    fn test_epoch_log_conflict_resolution() {
+        let mut log1 = EpochLog::<String>::new();
+        let mut log2 = EpochLog::<String>::new();
+
+        // Same epoch, different values
+        log1.append(1, "value_a".to_string());
+        log2.append(1, "value_b".to_string());
+
+        let joined = log1.join(&log2);
+
+        // Higher value should win (lexicographic ordering)
+        assert_eq!(joined.get(1), Some(&"value_b".to_string()));
+    }
+
+    #[test]
+    fn test_device_registry_registration_conflict() {
+        let mut registry1 = DeviceRegistry::new();
+        let mut registry2 = DeviceRegistry::new();
+
+        let device_id = DeviceId::new();
+
+        let metadata1 = crate::types::DeviceMetadata {
+            device_id,
+            device_name: "device1".to_string(),
+            device_type: crate::types::DeviceType::Native,
+            public_key: aura_crypto::Ed25519VerifyingKey::from_bytes(&[1u8; 32]).unwrap(),
+            added_at: 1000,
+            last_seen: 1000,
+            dkd_commitment_proofs: std::collections::BTreeMap::new(),
+            next_nonce: 0,
+            used_nonces: std::collections::BTreeSet::new(),
+            key_share_epoch: 0,
+        };
+
+        let metadata2 = crate::types::DeviceMetadata {
+            device_id,
+            device_name: "device2".to_string(),
+            device_type: crate::types::DeviceType::Native,
+            public_key: aura_crypto::Ed25519VerifyingKey::from_bytes(&[2u8; 32]).unwrap(),
+            added_at: 2000, // Later timestamp
+            last_seen: 2000,
+            dkd_commitment_proofs: std::collections::BTreeMap::new(),
+            next_nonce: 0,
+            used_nonces: std::collections::BTreeSet::new(),
+            key_share_epoch: 0,
+        };
+
+        registry1.register_device(metadata1);
+        registry2.register_device(metadata2.clone());
+
+        let joined = registry1.join(&registry2);
+
+        // Later registration should win
+        assert_eq!(joined.get_device(&device_id), Some(&metadata2));
+    }
+
+    #[test]
+    fn test_crdt_laws() {
+        let pool1 = IntentPool::new();
+        let pool2 = IntentPool::new();
+        let pool3 = IntentPool::new();
+
+        // Commutativity: a ⊔ b = b ⊔ a
+        assert_eq!(pool1.join(&pool2), pool2.join(&pool1));
+
+        // Associativity: (a ⊔ b) ⊔ c = a ⊔ (b ⊔ c)
+        assert_eq!(
+            pool1.join(&pool2).join(&pool3),
+            pool1.join(&pool2.join(&pool3))
+        );
+
+        // Idempotence: a ⊔ a = a
+        assert_eq!(pool1.join(&pool1), pool1);
+
+        // Identity: a ⊔ ⊥ = a
+        assert_eq!(pool1.join(&IntentPool::bottom()), pool1);
+    }
+}

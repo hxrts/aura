@@ -1,6 +1,9 @@
 //! Time control middleware for managing simulation time and temporal operations
 
-use super::{SimulatorMiddleware, SimulatorHandler, SimulatorOperation, SimulatorContext, SimulatorError, Result, TimeControlAction};
+use super::{
+    Result, SimulatorContext, SimulatorError, SimulatorHandler, SimulatorMiddleware,
+    SimulatorOperation, TimeControlAction,
+};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -39,26 +42,26 @@ impl TimeControlMiddleware {
             realtime_sync: RealtimeSync::default(),
         }
     }
-    
+
     /// Set acceleration factor bounds
     pub fn with_acceleration_bounds(mut self, min: f64, max: f64) -> Self {
         self.min_acceleration = min.max(0.01); // Minimum sensible value
         self.max_acceleration = max.min(1000.0); // Maximum sensible value
         self
     }
-    
+
     /// Enable precise timing control
     pub fn with_precise_timing(mut self, enable: bool) -> Self {
         self.precise_timing = enable;
         self
     }
-    
+
     /// Configure real-time synchronization
     pub fn with_realtime_sync(mut self, sync: RealtimeSync) -> Self {
         self.realtime_sync = sync;
         self
     }
-    
+
     /// Enable time travel debugging
     pub fn with_time_travel(mut self, enable: bool) -> Self {
         if enable {
@@ -68,9 +71,14 @@ impl TimeControlMiddleware {
         }
         self
     }
-    
+
     /// Control simulation time
-    fn control_time(&mut self, action: TimeControlAction, parameters: &HashMap<String, Value>, context: &SimulatorContext) -> Result<Value> {
+    fn control_time(
+        &mut self,
+        action: TimeControlAction,
+        parameters: &HashMap<String, Value>,
+        context: &SimulatorContext,
+    ) -> Result<Value> {
         match action {
             TimeControlAction::Pause => {
                 self.is_paused = true;
@@ -81,7 +89,7 @@ impl TimeControlMiddleware {
                     "status": "paused"
                 }))
             }
-            
+
             TimeControlAction::Resume => {
                 self.is_paused = false;
                 Ok(json!({
@@ -91,11 +99,11 @@ impl TimeControlMiddleware {
                     "status": "resumed"
                 }))
             }
-            
+
             TimeControlAction::SetAcceleration { factor } => {
                 let clamped_factor = factor.clamp(self.min_acceleration, self.max_acceleration);
                 self.acceleration_factor = clamped_factor;
-                
+
                 Ok(json!({
                     "action": "set_acceleration",
                     "requested_factor": factor,
@@ -104,7 +112,7 @@ impl TimeControlMiddleware {
                     "status": "set"
                 }))
             }
-            
+
             TimeControlAction::JumpTo { timestamp } => {
                 // In a real implementation, this would modify the simulation state
                 Ok(json!({
@@ -114,7 +122,7 @@ impl TimeControlMiddleware {
                     "status": "jumped"
                 }))
             }
-            
+
             TimeControlAction::Checkpoint { id } => {
                 let checkpoint = TimeCheckpoint {
                     id: id.clone(),
@@ -124,9 +132,9 @@ impl TimeControlMiddleware {
                     created_at: Instant::now(),
                     metadata: parameters.clone(),
                 };
-                
+
                 self.checkpoints.insert(id.clone(), checkpoint);
-                
+
                 Ok(json!({
                     "action": "checkpoint",
                     "checkpoint_id": id,
@@ -135,11 +143,11 @@ impl TimeControlMiddleware {
                     "status": "created"
                 }))
             }
-            
+
             TimeControlAction::Restore { id } => {
                 if let Some(checkpoint) = self.checkpoints.get(&id) {
                     self.acceleration_factor = checkpoint.acceleration_factor;
-                    
+
                     Ok(json!({
                         "action": "restore",
                         "checkpoint_id": id,
@@ -149,34 +157,42 @@ impl TimeControlMiddleware {
                         "status": "restored"
                     }))
                 } else {
-                    Err(SimulatorError::TimeControlError(format!("Checkpoint not found: {}", id)))
+                    Err(SimulatorError::TimeControlError(format!(
+                        "Checkpoint not found: {}",
+                        id
+                    )))
                 }
             }
         }
     }
-    
+
     /// Calculate adjusted delta time based on acceleration
     fn calculate_adjusted_delta(&self, original_delta: Duration) -> Duration {
         if self.is_paused {
             Duration::from_millis(0)
         } else {
-            let adjusted_millis = (original_delta.as_millis() as f64 * self.acceleration_factor) as u64;
+            let adjusted_millis =
+                (original_delta.as_millis() as f64 * self.acceleration_factor) as u64;
             Duration::from_millis(adjusted_millis)
         }
     }
-    
+
     /// Check if operation should be processed (not paused)
     fn should_process_operation(&self, operation: &SimulatorOperation) -> bool {
         if !self.is_paused {
             return true;
         }
-        
+
         // Always allow time control operations when paused
         matches!(operation, SimulatorOperation::ControlTime { .. })
     }
-    
+
     /// Update time travel state if enabled
-    fn update_time_travel_state(&mut self, operation: &SimulatorOperation, context: &SimulatorContext) {
+    fn update_time_travel_state(
+        &mut self,
+        operation: &SimulatorOperation,
+        context: &SimulatorContext,
+    ) {
         if let Some(ref mut time_travel) = self.time_travel_state {
             let entry = TimeTravelEntry {
                 tick: context.tick,
@@ -185,11 +201,11 @@ impl TimeControlMiddleware {
                 acceleration_factor: self.acceleration_factor,
                 recorded_at: Instant::now(),
             };
-            
+
             time_travel.add_entry(entry);
         }
     }
-    
+
     /// Get time travel history
     fn get_time_travel_history(&self) -> Value {
         if let Some(ref time_travel) = self.time_travel_state {
@@ -212,17 +228,17 @@ impl TimeControlMiddleware {
             })
         }
     }
-    
+
     /// Perform real-time synchronization if enabled
     fn sync_realtime(&self, context: &SimulatorContext) -> Result<Value> {
         if !self.realtime_sync.enabled {
             return Ok(json!({"realtime_sync": "disabled"}));
         }
-        
+
         let expected_real_time = Duration::from_millis(
-            (context.timestamp.as_millis() as f64 / self.acceleration_factor) as u64
+            (context.timestamp.as_millis() as f64 / self.acceleration_factor) as u64,
         );
-        
+
         Ok(json!({
             "realtime_sync": {
                 "enabled": true,
@@ -256,7 +272,7 @@ impl SimulatorMiddleware for TimeControlMiddleware {
                 "timestamp": context.timestamp.as_millis()
             }));
         }
-        
+
         match &operation {
             SimulatorOperation::ControlTime { action, parameters } => {
                 // Handle time control operations directly (would use interior mutability in real implementation)
@@ -268,39 +284,41 @@ impl SimulatorMiddleware for TimeControlMiddleware {
                     "timestamp": context.timestamp.as_millis(),
                     "status": "processed"
                 });
-                
+
                 // Add time control info to context
                 let mut enhanced_context = context.clone();
-                enhanced_context.metadata.insert(
-                    "time_control_action".to_string(),
-                    format!("{:?}", action),
-                );
+                enhanced_context
+                    .metadata
+                    .insert("time_control_action".to_string(), format!("{:?}", action));
                 enhanced_context.metadata.insert(
                     "acceleration_factor".to_string(),
                     self.acceleration_factor.to_string(),
                 );
-                
+
                 // Call next handler
                 let mut result = next.handle(operation, &enhanced_context)?;
-                
+
                 // Add time control results
                 if let Some(obj) = result.as_object_mut() {
                     obj.insert("time_control".to_string(), control_result);
                 }
-                
+
                 Ok(result)
             }
-            
-            SimulatorOperation::ExecuteTick { tick_number, delta_time } => {
+
+            SimulatorOperation::ExecuteTick {
+                tick_number,
+                delta_time,
+            } => {
                 // Adjust delta time based on acceleration
                 let adjusted_delta = self.calculate_adjusted_delta(*delta_time);
-                
+
                 // Create modified operation with adjusted time
                 let adjusted_operation = SimulatorOperation::ExecuteTick {
                     tick_number: *tick_number,
                     delta_time: adjusted_delta,
                 };
-                
+
                 // Add time control info to context
                 let mut enhanced_context = context.clone();
                 enhanced_context.metadata.insert(
@@ -315,28 +333,31 @@ impl SimulatorMiddleware for TimeControlMiddleware {
                     "acceleration_factor".to_string(),
                     self.acceleration_factor.to_string(),
                 );
-                
+
                 // Perform real-time sync
                 let sync_result = self.sync_realtime(&enhanced_context)?;
-                
+
                 // Call next handler
                 let mut result = next.handle(adjusted_operation, &enhanced_context)?;
-                
+
                 // Add time control information
                 if let Some(obj) = result.as_object_mut() {
-                    obj.insert("time_control".to_string(), json!({
-                        "acceleration_factor": self.acceleration_factor,
-                        "is_paused": self.is_paused,
-                        "original_delta_ms": delta_time.as_millis(),
-                        "adjusted_delta_ms": adjusted_delta.as_millis(),
-                        "time_travel": self.get_time_travel_history()
-                    }));
+                    obj.insert(
+                        "time_control".to_string(),
+                        json!({
+                            "acceleration_factor": self.acceleration_factor,
+                            "is_paused": self.is_paused,
+                            "original_delta_ms": delta_time.as_millis(),
+                            "adjusted_delta_ms": adjusted_delta.as_millis(),
+                            "time_travel": self.get_time_travel_history()
+                        }),
+                    );
                     obj.insert("realtime_sync".to_string(), sync_result);
                 }
-                
+
                 Ok(result)
             }
-            
+
             _ => {
                 // For other operations, just add time control metadata
                 let mut enhanced_context = context.clone();
@@ -344,26 +365,28 @@ impl SimulatorMiddleware for TimeControlMiddleware {
                     "acceleration_factor".to_string(),
                     self.acceleration_factor.to_string(),
                 );
-                enhanced_context.metadata.insert(
-                    "time_paused".to_string(),
-                    self.is_paused.to_string(),
-                );
-                
+                enhanced_context
+                    .metadata
+                    .insert("time_paused".to_string(), self.is_paused.to_string());
+
                 let mut result = next.handle(operation, &enhanced_context)?;
-                
+
                 // Add time control status to result
                 if let Some(obj) = result.as_object_mut() {
-                    obj.insert("time_status".to_string(), json!({
-                        "acceleration_factor": self.acceleration_factor,
-                        "is_paused": self.is_paused
-                    }));
+                    obj.insert(
+                        "time_status".to_string(),
+                        json!({
+                            "acceleration_factor": self.acceleration_factor,
+                            "is_paused": self.is_paused
+                        }),
+                    );
                 }
-                
+
                 Ok(result)
             }
         }
     }
-    
+
     fn name(&self) -> &str {
         "time_control"
     }
@@ -394,7 +417,7 @@ impl TimeTravelState {
             max_entries: 1000,
         }
     }
-    
+
     fn add_entry(&mut self, entry: TimeTravelEntry) {
         if self.entries.len() >= self.max_entries {
             self.entries.pop_front();
@@ -438,26 +461,26 @@ impl Default for RealtimeSync {
 mod tests {
     use super::*;
     use crate::middleware::handler::NoOpSimulatorHandler;
-    
+
     #[test]
     fn test_time_control_creation() {
         let middleware = TimeControlMiddleware::new()
             .with_acceleration_bounds(0.5, 10.0)
             .with_precise_timing(true)
             .with_time_travel(true);
-        
+
         assert_eq!(middleware.min_acceleration, 0.5);
         assert_eq!(middleware.max_acceleration, 10.0);
         assert!(middleware.precise_timing);
         assert!(middleware.time_travel_state.is_some());
     }
-    
+
     #[test]
     fn test_time_control_operation() {
         let middleware = TimeControlMiddleware::new();
         let handler = NoOpSimulatorHandler;
         let context = SimulatorContext::new("test".to_string(), "run1".to_string());
-        
+
         let result = middleware.process(
             SimulatorOperation::ControlTime {
                 action: TimeControlAction::SetAcceleration { factor: 2.0 },
@@ -466,35 +489,35 @@ mod tests {
             &context,
             &handler,
         );
-        
+
         assert!(result.is_ok());
         let value = result.unwrap();
         assert!(value.get("time_control").is_some());
     }
-    
+
     #[test]
     fn test_time_acceleration() {
         let middleware = TimeControlMiddleware::new();
         let original_delta = Duration::from_millis(100);
         let adjusted = middleware.calculate_adjusted_delta(original_delta);
-        
+
         // With default acceleration factor of 1.0, should be unchanged
         assert_eq!(adjusted, original_delta);
     }
-    
+
     #[test]
     fn test_pause_functionality() {
         let mut middleware = TimeControlMiddleware::new();
         middleware.is_paused = true;
-        
+
         let operation = SimulatorOperation::ExecuteTick {
             tick_number: 1,
             delta_time: Duration::from_millis(100),
         };
-        
+
         // Should not process when paused
         assert!(!middleware.should_process_operation(&operation));
-        
+
         // Should process time control operations when paused
         let time_control = SimulatorOperation::ControlTime {
             action: TimeControlAction::Resume,
@@ -502,7 +525,7 @@ mod tests {
         };
         assert!(middleware.should_process_operation(&time_control));
     }
-    
+
     #[test]
     fn test_realtime_sync() {
         let sync = RealtimeSync {
@@ -510,7 +533,7 @@ mod tests {
             tolerance: Duration::from_millis(50),
             target_factor: 1.0,
         };
-        
+
         assert!(sync.enabled);
         assert_eq!(sync.tolerance, Duration::from_millis(50));
         assert_eq!(sync.target_factor, 1.0);

@@ -20,7 +20,8 @@ use aura_journal::middleware::{
 use aura_journal::{DeviceMetadata, DeviceType, JournalOperation, JournalContext};
 
 use aura_protocol::effects::{DefaultEffects, EffectsBuilder};
-use aura_types::{DeviceId, MiddlewareContext};
+use aura_types::DeviceId;
+use aura_protocol::middleware::MiddlewareContext};
 use aura_crypto::{Ed25519VerifyingKey, AccountId};
 
 /// Test that transport and journal middleware can be composed together

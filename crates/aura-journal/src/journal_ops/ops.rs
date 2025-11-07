@@ -3,8 +3,8 @@
 //! This module defines the operation set for KeyJournal and maps them to
 //! native Automerge CRDT operations without custom reducers.
 
-use aura_types::AuraError;
 use crate::journal::*;
+use aura_types::AuraError;
 use serde::{Deserialize, Serialize};
 
 /// KeyJournal operation enumeration
@@ -137,7 +137,9 @@ impl JournalOp {
             JournalOp::ContributeShare { node, .. } => Some(format!("journal://node/{}", node)),
             JournalOp::SendGroupMessage { group, .. } => Some(format!("journal://group/{}", group)),
             JournalOp::GrantCapability { target, .. } => Some(target.resource_type()),
-            JournalOp::RevokeCapability { token_id } => Some(format!("journal://token/{}", token_id)),
+            JournalOp::RevokeCapability { token_id } => {
+                Some(format!("journal://token/{}", token_id))
+            }
         }
     }
 }
@@ -371,13 +373,17 @@ impl AutomergeOperations {
                 proof,
                 epoch,
             } => {
+                // Use deterministic key based on node, child, and epoch
+                // This ensures CRDT convergence without requiring random UUIDs
+                let share_key = format!("share_{}:{}:{}", node, child, epoch);
+
                 vec![AutomergeOp::MapInsert {
                     path: vec![
                         "journal".to_string(),
                         "accumulated_shares".to_string(),
                         format!("{}:{}", node, child),
                     ],
-                    key: format!("share_{}", uuid::Uuid::new_v4()),
+                    key: share_key,
                     value: AutomergeValue::Share {
                         data: share_data.clone(),
                         commitment: commitment.clone(),

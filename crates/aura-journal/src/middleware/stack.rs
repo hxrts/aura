@@ -1,6 +1,6 @@
 //! Journal middleware stack for composing multiple middleware layers
 
-use super::{JournalMiddleware, JournalHandler, JournalContext};
+use super::{JournalContext, JournalHandler, JournalMiddleware};
 use crate::error::Result;
 use crate::operations::JournalOperation;
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use std::sync::Arc;
 pub struct JournalMiddlewareStack {
     /// Middleware layers in processing order
     middleware: Vec<Arc<dyn JournalMiddleware>>,
-    
+
     /// Final handler for operations
     handler: Arc<dyn JournalHandler>,
 }
@@ -22,13 +22,13 @@ impl JournalMiddlewareStack {
             handler,
         }
     }
-    
+
     /// Add middleware to the stack
     pub fn with_middleware(mut self, middleware: Arc<dyn JournalMiddleware>) -> Self {
         self.middleware.push(middleware);
         self
     }
-    
+
     /// Process an operation through the middleware stack
     pub fn process(
         &self,
@@ -52,9 +52,12 @@ impl<'a> MiddlewareChain<'a> {
         middleware: &'a [Arc<dyn JournalMiddleware>],
         handler: &'a Arc<dyn JournalHandler>,
     ) -> Self {
-        Self { middleware, handler }
+        Self {
+            middleware,
+            handler,
+        }
     }
-    
+
     fn process(
         &self,
         operation: JournalOperation,
@@ -70,7 +73,7 @@ impl<'a> MiddlewareChain<'a> {
                 chain: self,
                 index: index + 1,
             };
-            
+
             self.middleware[index].process(operation, context, &next_handler)
         }
     }
@@ -97,13 +100,13 @@ mod tests {
     use super::*;
     use crate::middleware::handler::NoOpHandler;
     use crate::operations::JournalOperation;
-    use aura_types::{AccountIdExt, DeviceIdExt};
     use aura_crypto::Effects;
-    
+    use aura_types::{AccountIdExt, DeviceIdExt};
+
     struct TestMiddleware {
         name: String,
     }
-    
+
     impl TestMiddleware {
         fn new(name: &str) -> Self {
             Self {
@@ -111,7 +114,7 @@ mod tests {
             }
         }
     }
-    
+
     impl JournalMiddleware for TestMiddleware {
         fn process(
             &self,
@@ -121,37 +124,37 @@ mod tests {
         ) -> Result<serde_json::Value> {
             // Call next handler and add our middleware info
             let mut result = next.handle(operation, context)?;
-            
+
             if let Some(obj) = result.as_object_mut() {
                 obj.insert(
                     format!("middleware_{}", self.name),
                     serde_json::Value::String("processed".to_string()),
                 );
             }
-            
+
             Ok(result)
         }
-        
+
         fn name(&self) -> &str {
             &self.name
         }
     }
-    
+
     #[test]
     fn test_middleware_stack() {
         let effects = Effects::test(42);
         let account_id = aura_types::AccountId::new_with_effects(&effects);
         let device_id = aura_types::DeviceId::new_with_effects(&effects);
-        
+
         let stack = JournalMiddlewareStack::new(Arc::new(NoOpHandler))
             .with_middleware(Arc::new(TestMiddleware::new("auth")))
             .with_middleware(Arc::new(TestMiddleware::new("metrics")));
-        
+
         let context = JournalContext::new(account_id, device_id, "test".to_string());
         let operation = JournalOperation::GetEpoch;
-        
+
         let result = stack.process(operation, &context).unwrap();
-        
+
         // Verify that both middleware processed the request
         assert!(result.get("middleware_auth").is_some());
         assert!(result.get("middleware_metrics").is_some());

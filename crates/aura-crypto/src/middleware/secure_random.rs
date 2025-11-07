@@ -313,6 +313,7 @@ struct RandomTracker {
     total_bytes_requested: u64,
     total_bytes_generated: u64,
     rate_limit_tracker: HashMap<String, Vec<u64>>, // device_id -> timestamps
+    #[allow(dead_code)] // Stored for entropy monitoring
     last_entropy_check: u64,
     entropy_samples: Vec<f64>,
 }

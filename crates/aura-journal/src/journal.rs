@@ -319,11 +319,7 @@ pub struct KeyEdge {
 impl KeyEdge {
     /// Create a new edge with a random ID
     #[allow(clippy::disallowed_methods)]
-    pub fn new(
-        from: NodeId,
-        to: NodeId,
-        kind: EdgeKind,
-    ) -> Self {
+    pub fn new(from: NodeId, to: NodeId, kind: EdgeKind) -> Self {
         Self {
             id: uuid::Uuid::new_v4(),
             from,

@@ -7,6 +7,7 @@
 use aura_authentication::{
     AuthenticationContext, EventAuthorization, ThresholdConfig, ThresholdSig,
 };
+use aura_crypto::Effects;
 use aura_types::{AccountId, DeviceId, GuardianId};
 use ed25519_dalek::{Signer, SigningKey};
 
@@ -15,8 +16,10 @@ fn test_device_authentication_flow() {
     let device_id = DeviceId::new();
     let account_id = AccountId::new();
 
-    // Generate keys
-    let signing_key = SigningKey::generate(&mut rand::thread_rng());
+    // Generate keys using effects system
+    let effects = Effects::test();
+    let key_bytes: [u8; 32] = effects.random_bytes();
+    let signing_key = SigningKey::from_bytes(&key_bytes);
     let verifying_key = signing_key.verifying_key();
 
     // Create authentication context
@@ -49,8 +52,10 @@ fn test_guardian_authentication_flow() {
     let guardian_id = GuardianId::new();
     let account_id = AccountId::new();
 
-    // Generate guardian keys
-    let signing_key = SigningKey::generate(&mut rand::thread_rng());
+    // Generate guardian keys using effects system
+    let effects = Effects::test();
+    let key_bytes: [u8; 32] = effects.random_bytes();
+    let signing_key = SigningKey::from_bytes(&key_bytes);
     let verifying_key = signing_key.verifying_key();
 
     // Create authentication context
@@ -82,8 +87,10 @@ fn test_guardian_authentication_flow() {
 fn test_threshold_authentication_flow() {
     let account_id = AccountId::new();
 
-    // Generate group keys for threshold
-    let group_signing_key = SigningKey::generate(&mut rand::thread_rng());
+    // Generate group keys for threshold using effects system
+    let effects = Effects::test();
+    let key_bytes: [u8; 32] = effects.random_bytes();
+    let group_signing_key = SigningKey::from_bytes(&key_bytes);
     let group_verifying_key = group_signing_key.verifying_key();
 
     // Create authentication context
@@ -126,9 +133,12 @@ fn test_invalid_authentication_fails() {
     let device_id = DeviceId::new();
     let account_id = AccountId::new();
 
-    // Generate different keys (wrong key for verification)
-    let signing_key = SigningKey::generate(&mut rand::thread_rng());
-    let wrong_signing_key = SigningKey::generate(&mut rand::thread_rng());
+    // Generate different keys (wrong key for verification) using effects system
+    let effects = Effects::test();
+    let key_bytes1: [u8; 32] = effects.random_bytes();
+    let key_bytes2: [u8; 32] = effects.random_bytes();
+    let signing_key = SigningKey::from_bytes(&key_bytes1);
+    let wrong_signing_key = SigningKey::from_bytes(&key_bytes2);
     let wrong_verifying_key = wrong_signing_key.verifying_key();
 
     // Create authentication context with wrong key

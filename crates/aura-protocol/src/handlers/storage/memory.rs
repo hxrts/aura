@@ -12,6 +12,7 @@ pub struct MemoryStorageHandler {
 }
 
 impl MemoryStorageHandler {
+    /// Create a new memory storage handler
     pub fn new() -> Self {
         Self {
             data: Arc::new(RwLock::new(HashMap::new())),
@@ -69,7 +70,10 @@ impl StorageEffects for MemoryStorageHandler {
         Ok(())
     }
 
-    async fn retrieve_batch(&self, keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
         let data = self.data.read().await;
         let mut result = HashMap::new();
         for key in keys {

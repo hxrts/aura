@@ -368,10 +368,130 @@ Projection gives `issuer: μX . ⊕{ issue : ! OpWithCtx<Op, Ctx> . X, idle : en
 
 ---
 
-## 10. Conclusion
+## 10. Harmonized Implementation Architecture
 
-Aura expresses CRDT replication as a system of role explicit session types combined with effect handlers. The global types describe communication among roles, and projection gives each role a local binary type. This structure enforces safety and keeps the protocol definition clear.
+### 10.1 Separation of Concerns
 
-Convergence arises from the handler logic and the delivery effects. The grammar defines message flow and ordering, while the effect layer enforces lattice joins and causal order. Execution connects to the algebra through these effects rather than intents.
+Aura's CRDT system implements the session-type algebra through a **4-layer architecture** that separates:
 
-This approach gives Aura a clear way to represent and verify CRDT protocols through types and effects. It keeps network safety and algebraic correctness aligned and supports reusable, compositional protocol definitions.
+1. **Semantic Foundation** - Core CRDT traits and message type definitions
+2. **Effect Interpretation** - Composable handlers that enforce CRDT laws
+3. **Choreographic Protocols** - Session-type communication patterns
+4. **Application CRDTs** - Domain-specific implementations
+
+This separation ensures that **typed messages** (`T` in session types) and **effect interpreters** (semantic law enforcement) are clearly defined and composable.
+
+### 10.2 File Organization
+
+```
+aura-types/src/semilattice/          # Foundation layer (workspace-wide)
+├── semantic_traits.rs               # JoinSemilattice, MeetSemiLattice, CvState, MvState, etc.
+├── message_types.rs                 # StateMsg<S>, MeetStateMsg<S>, OpWithCtx<Op,Ctx>, etc.
+├── tests/                          # Property-based tests for algebraic laws
+│   └── meet_properties.rs          # Meet semi-lattice law validation
+└── mod.rs                          # Re-exports and trait implementations
+
+aura-protocol/src/effects/semilattice/  # Effect interpreter layer
+├── cv_handler.rs                   # CvHandler<S: CvState> - join-based state CRDTs
+├── mv_handler.rs                   # MvHandler<S: MvState> - meet-based constraint CRDTs
+├── delta_handler.rs                # DeltaHandler<S,D> - delta-based  
+├── cm_handler.rs                   # CmHandler<S,Op> - operation-based
+├── delivery.rs                     # CausalBroadcast, AtLeastOnce effects
+└── mod.rs                          # Handler composition utilities
+
+aura-choreography/src/semilattice/  # Choreographic protocol layer
+├── protocols.rs                    # CvSync, DeltaSync, OpBroadcast choreographies
+├── meet_protocols.rs               # ConstraintSync, CapabilityRestriction choreographies
+├── composition.rs                  # Protocol composition and execution utilities
+└── mod.rs                          # Re-exports
+
+aura-journal/src/semilattice/       # Application semilattice layer
+├── journal_map.rs                  # JournalMap as CvState implementation
+├── account_state.rs                # Modern AccountState using semilattice composition
+├── concrete_types.rs               # Domain-specific CRDT types (DeviceRegistry, etc.)
+├── meet_types.rs                   # Domain-specific meet CRDTs (CapabilitySet, etc.)
+├── tests/                          # Integration tests
+│   └── meet_integration.rs         # End-to-end meet CRDT scenario tests
+└── mod.rs                          # Journal-specific re-exports
+```
+
+### 10.3 Component Specifications
+
+**Foundation Layer** (`aura-types/src/semilattice/`):
+- `JoinSemilattice`, `Bottom`, `CvState` traits for join-based CRDTs
+- `MeetSemiLattice`, `Top`, `MvState` traits for meet-based CRDTs
+- `CausalOp`, `CmApply`, `Dedup` traits for operation-based CRDTs  
+- `StateMsg<S>`, `MeetStateMsg<S>`, `DeltaMsg<D>`, `OpWithCtx<Op,Ctx>` message types
+- `ConstraintMsg<C>`, `ConsistencyProof` for meet-based protocols
+- Common trait implementations for primitive types and duality mappings
+
+**Effect Layer** (`aura-protocol/src/effects/semilattice/`):
+- `CvHandler<S>`: Enforces `state := state.join(&received_state)` law for accumulative semantics
+- `MvHandler<S>`: Enforces `state := state.meet(&constraint)` law for restrictive semantics  
+- `CmHandler<S,Op>`: Enforces causal ordering and deduplication laws
+- `DeltaHandler<S,D>`: Accumulates deltas and folds into state
+- `MultiConstraintHandler<S>`: Manages constraints across different scopes
+- Delivery effects for causal broadcast and gossip protocols
+
+**Choreographic Layer** (`aura-choreography/src/semilattice/`):
+- `CvSync` choreography: `μX . (r → * : StateMsg<S> . X)` for join-based sync
+- `ConstraintSync` choreography: constraint propagation and intersection protocols
+- `CapabilityRestriction` choreography: capability intersection with verification
+- `OpBroadcast` choreography: `μX . r ⊳ { issue : r → * : OpWithCtx . X, idle : end }`
+- Execution functions that bridge session types with effect handlers
+
+**Application Layer** (`aura-journal/src/semilattice/`):
+- `JournalMap` implementing `CvState` for ops + intent staging
+- `ModernAccountState` composing multiple semilattice CRDTs for account management
+- `DeviceRegistry`, `IntentPool`, `EpochLog` domain-specific join CRDTs
+- `CapabilitySet`, `TimeWindow`, `SecurityPolicy` domain-specific meet CRDTs
+- Integration with choreographic synchronization protocols
+- Migration utilities from legacy Automerge-based implementations
+
+### 10.4 Usage Pattern
+
+```rust
+// Foundation types - Join-based CRDTs
+use aura_types::semilattice::{StateMsg, CvState};
+
+// Foundation types - Meet-based CRDTs  
+use aura_types::semilattice::{MeetStateMsg, ConstraintMsg, MvState};
+
+// Effect handlers
+use aura_protocol::effects::semilattice::{CvHandler, MvHandler};
+
+// Choreographic execution  
+use aura_choreography::semilattice::{execute_cv_sync, execute_constraint_sync};
+
+// Application CRDTs
+use aura_journal::semilattice::{JournalMap, CapabilitySet, ModernAccountState};
+
+// Complete integration - Join-based synchronization
+let mut cv_handler = CvHandler::<JournalMap>::new();
+execute_cv_sync(adapter, replicas, my_role, &mut cv_handler).await?;
+
+// Complete integration - Meet-based constraint coordination
+let mut mv_handler = MvHandler::<CapabilitySet>::new();
+execute_constraint_sync(adapter, constraint, participants, my_device_id).await?;
+
+// Unified account management
+let account_state = ModernAccountState::new(account_id, group_key);
+```
+
+This architecture achieves **composable semilattices on session types** where:
+- Messages are precisely typed as session payloads (`T`)
+- Effect handlers enforce semilattice semantic laws independently  
+- Choreographies define communication patterns algebraically
+- Both accumulative (join) and restrictive (meet) semantics are supported
+- Application semilattices integrate seamlessly with the unified journal
+- Legacy CRDT implementations can migrate to the harmonized system
+
+---
+
+## 11. Conclusion
+
+Aura expresses semilattice replication as a system of role explicit session types combined with effect handlers. The global types describe communication among roles, and projection gives each role a local binary type. This structure enforces safety and keeps the protocol definition clear.
+
+Convergence arises from the handler logic and the delivery effects. The grammar defines message flow and ordering, while the effect layer enforces semilattice operations (both join and meet) and causal order. Execution connects to the algebra through these effects rather than intents.
+
+This unified approach gives Aura a complete algebraic foundation for distributed state management through both accumulative and restrictive semantics. It keeps network safety and algebraic correctness aligned while supporting reusable, compositional protocol definitions that span the full spectrum from growth-oriented CRDTs to constraint-oriented meet semi-lattices.

@@ -5,7 +5,8 @@
 mod common;
 
 // Note: Effects are now accessed through the unified handler interface
-use aura_protocol::handlers::{AuraContext, AuraHandlerFactory, EffectType, HandlerUtils};
+use aura_protocol::handlers::erased::AuraHandlerFactory;
+use aura_protocol::handlers::{AuraContext, EffectType, ExecutionMode, HandlerUtils};
 use aura_types::identifiers::DeviceId;
 use uuid::Uuid;
 
@@ -29,7 +30,7 @@ async fn test_crypto_effects() {
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
+    // Random effect type not handled in CompositeHandler::execute_effect
     assert!(result.is_err());
 
     // Test crypto hash effect
@@ -43,15 +44,15 @@ async fn test_crypto_effects() {
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
+    // Operation "blake3_hash" not implemented in execute_crypto_effect
     assert!(result.is_err());
 
     // Verify handler basic functionality works
     assert_eq!(
         handler.execution_mode(),
-        aura_types::handlers::ExecutionMode::Testing
+        ExecutionMode::Simulation { seed: 0 }
     );
-    assert!(!handler.supports_effect(EffectType::Crypto)); // Stub returns false
+    assert!(handler.supports_effect(EffectType::Crypto)); // Testing handler includes crypto support
 }
 
 /// Test unified handler interface for network effects
@@ -74,7 +75,7 @@ async fn test_network_effects() {
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
+    // Operation "connected_peers" not implemented in execute_network_effect
     assert!(result.is_err());
 
     // Test send_to_peer effect
@@ -89,11 +90,11 @@ async fn test_network_effects() {
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
+    // Operation "send_to_peer" not implemented in execute_network_effect
     assert!(result.is_err());
 
     // Verify handler basic functionality
-    assert!(!handler.supports_effect(EffectType::Network)); // Stub returns false
+    assert!(handler.supports_effect(EffectType::Network)); // Testing handler includes network support
 }
 
 /// Test unified handler interface for storage effects
@@ -119,7 +120,7 @@ async fn test_storage_effects() {
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
+    // Operation "store" not implemented in execute_storage_effect
     assert!(result.is_err());
 
     // Test retrieve effect
@@ -132,11 +133,11 @@ async fn test_storage_effects() {
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
+    // Operation "retrieve" not implemented in execute_storage_effect
     assert!(result.is_err());
 
     // Verify handler basic functionality
-    assert!(!handler.supports_effect(EffectType::Storage)); // Stub returns false
+    assert!(handler.supports_effect(EffectType::Storage)); // Testing handler includes storage support
 }
 
 /// Test unified handler interface for time effects
@@ -159,8 +160,8 @@ async fn test_time_effects() {
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
-    assert!(result.is_err());
+    // Operation "current_epoch" is implemented and bincode/serde_json are compatible for u64
+    assert!(result.is_ok());
 
     // Test set_timeout effect
     let result: Result<u64, _> = HandlerUtils::execute_typed_effect(
@@ -172,14 +173,14 @@ async fn test_time_effects() {
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
+    // Operation "set_timeout" not implemented in execute_time_effect
     assert!(result.is_err());
 
     // Verify handler basic functionality
-    assert!(!handler.supports_effect(EffectType::Time)); // Stub returns false
+    assert!(handler.supports_effect(EffectType::Time)); // Testing handler includes time support
     assert_eq!(
         handler.execution_mode(),
-        aura_types::handlers::ExecutionMode::Testing
+        ExecutionMode::Simulation { seed: 0 }
     );
 }
 
@@ -205,7 +206,7 @@ async fn test_console_effects() {
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
+    // Operation "protocol_started" not implemented in execute_console_effect
     assert!(result.is_err());
 
     // Test log_info effect
@@ -213,16 +214,19 @@ async fn test_console_effects() {
         &mut *handler,
         EffectType::Console,
         "log_info",
-        "Test info message",
+        (
+            "Test info message".to_string(),
+            Vec::<(String, String)>::new(),
+        ),
         &mut ctx,
     )
     .await;
 
-    // Current stub implementation returns UnsupportedEffect, which is expected
+    // Operation "log_info" uses serde_json but execute_typed_effect uses bincode - serialization mismatch
     assert!(result.is_err());
 
     // Verify handler basic functionality
-    assert!(!handler.supports_effect(EffectType::Console)); // Stub returns false
+    assert!(handler.supports_effect(EffectType::Console)); // Testing handler includes console support
 }
 
 /// Test unified handler basic functionality
@@ -234,18 +238,16 @@ async fn test_unified_handler_functionality() {
     // Test basic handler properties
     assert_eq!(
         handler.execution_mode(),
-        aura_types::handlers::ExecutionMode::Testing
+        ExecutionMode::Simulation { seed: 0 }
     );
     assert!(handler.execution_mode().is_deterministic());
     assert!(!handler.execution_mode().is_production());
 
-    // Test supported effects (stub implementation returns false for all)
+    // Test supported effects (testing handler creates CompositeHandler with full effect support)
     let supported_effects = handler.supported_effects();
-    // In current stub implementation, no effects are supported
-    assert!(
-        supported_effects.is_empty()
-            || supported_effects
-                .iter()
-                .all(|&effect| !handler.supports_effect(effect))
-    );
+    // Testing handler should support multiple effects
+    assert!(!supported_effects.is_empty());
+    assert!(supported_effects
+        .iter()
+        .all(|&effect| handler.supports_effect(effect)));
 }

@@ -146,7 +146,7 @@ impl FaultSimulationMiddleware {
 
         // Collect fault IDs to remove
         let mut to_remove = Vec::new();
-        
+
         for (fault_id, fault) in &self.active_faults {
             // Check if fault has expired
             if let Some(duration) = fault.duration {
@@ -165,14 +165,14 @@ impl FaultSimulationMiddleware {
                 // Inline recovery check to avoid borrow conflict
                 let elapsed_ticks = context.tick - fault.start_tick;
                 let should_recover = elapsed_ticks >= recovery_settings.min_recovery_ticks;
-                
+
                 if should_recover {
                     removed_faults.push(fault_id.clone());
                     to_remove.push(fault_id.clone());
                 }
             }
         }
-        
+
         // Remove faults that need to be removed
         for fault_id in to_remove {
             self.active_faults.remove(&fault_id);

@@ -54,25 +54,34 @@ pub mod middleware;
 // Re-export core types for convenience
 pub use content::{ChunkId, ContentSize};
 pub use middleware::{
-    // Core traits and types
-    StorageHandler, StorageOperation, StorageResult, ChunkInfo,
-    StorageMiddleware, StorageMiddlewareStack, StorageStackBuilder,
-    
+    AccessControlMiddleware,
     // Base handler
     BaseStorageHandler,
-    
+
+    CachingMiddleware,
+    ChunkInfo,
+    CompressionMiddleware,
+    DeduplicationMiddleware,
     // Middleware implementations
-    EncryptionMiddleware, CompressionMiddleware, DeduplicationMiddleware,
-    QuotaMiddleware, CachingMiddleware, AccessControlMiddleware,
-    ReplicationMiddleware, IntegrityMiddleware,
-    
+    EncryptionMiddleware,
+    IntegrityMiddleware,
+
+    QuotaMiddleware,
+    ReplicationMiddleware,
+    // Core traits and types
+    StorageHandler,
     // Extension trait for fluent composition
     StorageHandlerExt,
+    StorageMiddleware,
+    StorageMiddlewareStack,
+    StorageOperation,
+    StorageResult,
+    StorageStackBuilder,
 };
 
 // Re-export foundation types
-pub use aura_types::{MiddlewareContext, MiddlewareResult};
 pub use aura_protocol::effects::AuraEffects;
+pub use aura_protocol::middleware::{MiddlewareContext, MiddlewareResult};
 
 /// Storage layer error type
 pub use middleware::handler::StorageError;
@@ -84,21 +93,20 @@ pub fn create_standard_storage_stack(
 ) -> StorageMiddlewareStack {
     let base_handler = BaseStorageHandler::new(storage_path);
     let mut stack_builder = StorageStackBuilder::new();
-    
+
     // Add standard middleware layers in order
     stack_builder = stack_builder.add_layer(Box::new(IntegrityMiddleware::new()));
     stack_builder = stack_builder.add_layer(Box::new(DeduplicationMiddleware::new()));
     stack_builder = stack_builder.add_layer(Box::new(CompressionMiddleware::new()));
-    
+
     if let Some(key) = encryption_key {
-        let encryption = EncryptionMiddleware::new()
-            .add_key("default".to_string(), key);
+        let encryption = EncryptionMiddleware::new().add_key("default".to_string(), key);
         stack_builder = stack_builder.add_layer(Box::new(encryption));
     }
-    
+
     stack_builder = stack_builder.add_layer(Box::new(QuotaMiddleware::new()));
     stack_builder = stack_builder.add_layer(Box::new(CachingMiddleware::new(1024 * 1024))); // 1MB cache
-    
+
     stack_builder.build(Box::new(base_handler))
 }
 
@@ -108,7 +116,7 @@ pub fn create_performance_storage_stack(
     cache_size: usize,
 ) -> StorageMiddlewareStack {
     let base_handler = BaseStorageHandler::new(storage_path);
-    
+
     StorageStackBuilder::new()
         .add_layer(Box::new(CachingMiddleware::new(cache_size)))
         .add_layer(Box::new(DeduplicationMiddleware::new()))
@@ -122,9 +130,8 @@ pub fn create_secure_storage_stack(
     encryption_key: Vec<u8>,
 ) -> StorageMiddlewareStack {
     let base_handler = BaseStorageHandler::new(storage_path);
-    let encryption = EncryptionMiddleware::new()
-        .add_key("secure".to_string(), encryption_key);
-    
+    let encryption = EncryptionMiddleware::new().add_key("secure".to_string(), encryption_key);
+
     StorageStackBuilder::new()
         .add_layer(Box::new(AccessControlMiddleware::new()))
         .add_layer(Box::new(IntegrityMiddleware::new()))
@@ -137,27 +144,25 @@ pub fn create_secure_storage_stack(
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    
+
     #[test]
     fn test_storage_middleware_composition() {
-        let storage = create_standard_storage_stack(
-            "/tmp/test-storage".to_string(),
-            Some(vec![0x42; 32])
-        );
-        
+        let storage =
+            create_standard_storage_stack("/tmp/test-storage".to_string(), Some(vec![0x42; 32]));
+
         let info = storage.stack_info();
         assert!(info.contains_key("middleware_count"));
         assert!(info.contains_key("middleware_layers"));
     }
-    
+
     #[test]
     fn test_fluent_middleware_composition() {
         use middleware::handler::BaseStorageHandler;
         use middleware::StorageHandlerExt;
-        
-        let _storage = BaseStorageHandler::new("/tmp/test".to_string())
-            .layer(CompressionMiddleware::new());
-        
+
+        let _storage =
+            BaseStorageHandler::new("/tmp/test".to_string()).layer(CompressionMiddleware::new());
+
         // Test compiles successfully
     }
 }

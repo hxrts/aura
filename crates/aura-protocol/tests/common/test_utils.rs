@@ -3,8 +3,8 @@
 //! This module provides test-specific implementations and utilities
 //! that should not be used in production code.
 
-use aura_protocol::effects::*;
 use async_trait::async_trait;
+use aura_protocol::effects::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -49,7 +49,10 @@ impl MockNetworkTransport {
 
     /// Remove a connected peer
     pub fn remove_peer(&self, peer_id: Uuid) {
-        self.connected_peers.lock().unwrap().retain(|&id| id != peer_id);
+        self.connected_peers
+            .lock()
+            .unwrap()
+            .retain(|&id| id != peer_id);
     }
 }
 
@@ -57,22 +60,19 @@ impl MockNetworkTransport {
 impl NetworkEffects for MockNetworkTransport {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         if !self.connected_peers.lock().unwrap().contains(&peer_id) {
-            return Err(NetworkError::PeerNotConnected { peer_id });
+            return Err(NetworkError::SendFailed(format!(
+                "Peer not connected: {}",
+                peer_id
+            )));
         }
-        
-        self.messages
-            .lock()
-            .unwrap()
-            .push((peer_id, message));
+
+        self.messages.lock().unwrap().push((peer_id, message));
         Ok(())
     }
 
     async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
         let broadcast_id = Uuid::from_u128(0); // Special ID for broadcasts
-        self.messages
-            .lock()
-            .unwrap()
-            .push((broadcast_id, message));
+        self.messages.lock().unwrap().push((broadcast_id, message));
         Ok(())
     }
 
@@ -81,7 +81,7 @@ impl NetworkEffects for MockNetworkTransport {
         if let Some((peer_id, message)) = messages.first() {
             Ok((*peer_id, message.clone()))
         } else {
-            Err(NetworkError::ReceiveTimeout { timeout_ms: 0 })
+            Err(NetworkError::NoMessage)
         }
     }
 
@@ -92,7 +92,7 @@ impl NetworkEffects for MockNetworkTransport {
                 return Ok(message.clone());
             }
         }
-        Err(NetworkError::ReceiveTimeout { timeout_ms: 0 })
+        Err(NetworkError::NoMessage)
     }
 
     async fn connected_peers(&self) -> Vec<Uuid> {
@@ -106,7 +106,7 @@ impl NetworkEffects for MockNetworkTransport {
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
         // Return an empty stream for testing
         use futures::stream;
-        Ok(Box::new(stream::empty()))
+        Ok(Box::pin(stream::empty()))
     }
 }
 
@@ -172,7 +172,10 @@ impl StorageEffects for MockStorage {
         Ok(())
     }
 
-    async fn retrieve_batch(&self, keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
         let data = self.data.lock().unwrap();
         let mut result = HashMap::new();
         for key in keys {
@@ -241,7 +244,11 @@ impl CryptoEffects for MockCrypto {
         hasher.finalize().into()
     }
 
-    async fn ed25519_sign(&self, data: &[u8], key: &ed25519_dalek::SigningKey) -> Result<ed25519_dalek::Signature, CryptoError> {
+    async fn ed25519_sign(
+        &self,
+        data: &[u8],
+        key: &ed25519_dalek::SigningKey,
+    ) -> Result<ed25519_dalek::Signature, CryptoError> {
         use ed25519_dalek::Signer;
         Ok(key.sign(data))
     }
@@ -258,7 +265,9 @@ impl CryptoEffects for MockCrypto {
         }
     }
 
-    async fn ed25519_generate_keypair(&self) -> Result<(ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey), CryptoError> {
+    async fn ed25519_generate_keypair(
+        &self,
+    ) -> Result<(ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey), CryptoError> {
         // Use deterministic key generation for testing
         let seed = self.random_bytes_32().await;
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
@@ -266,7 +275,10 @@ impl CryptoEffects for MockCrypto {
         Ok((signing_key, verifying_key))
     }
 
-    async fn ed25519_public_key(&self, private_key: &ed25519_dalek::SigningKey) -> ed25519_dalek::VerifyingKey {
+    async fn ed25519_public_key(
+        &self,
+        private_key: &ed25519_dalek::SigningKey,
+    ) -> ed25519_dalek::VerifyingKey {
         private_key.verifying_key()
     }
 
@@ -287,16 +299,16 @@ impl CryptoEffects for MockCrypto {
 /// Generate a deterministic test UUID for non-production use
 pub fn generate_test_uuid() -> Uuid {
     Uuid::from_bytes([
-        0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 
-        0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
+        0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd,
+        0xef,
     ])
 }
 
 /// Generate deterministic test UUIDs with different seeds
 pub fn generate_test_uuid_with_seed(seed: u8) -> Uuid {
     Uuid::from_bytes([
-        seed, seed, seed, seed, seed, seed, seed, seed,
-        seed, seed, seed, seed, seed, seed, seed, seed,
+        seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed,
+        seed,
     ])
 }
 
@@ -316,14 +328,17 @@ mod tests {
     async fn test_mock_network_transport() {
         let transport = MockNetworkTransport::new();
         let peer_id = generate_test_uuid();
-        
+
         // Add peer and test connectivity
         transport.add_peer(peer_id);
         assert!(transport.is_peer_connected(peer_id).await);
         assert_eq!(transport.connected_peers().await, vec![peer_id]);
 
         // Test send
-        transport.send_to_peer(peer_id, b"hello".to_vec()).await.unwrap();
+        transport
+            .send_to_peer(peer_id, b"hello".to_vec())
+            .await
+            .unwrap();
         let messages = transport.get_messages();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].0, peer_id);
@@ -353,7 +368,10 @@ mod tests {
         assert!(!storage.exists("key2").await.unwrap());
 
         // Test list keys
-        storage.store("prefix_key", b"value".to_vec()).await.unwrap();
+        storage
+            .store("prefix_key", b"value".to_vec())
+            .await
+            .unwrap();
         let keys = storage.list_keys(Some("prefix")).await.unwrap();
         assert_eq!(keys, vec!["prefix_key"]);
 

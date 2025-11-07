@@ -118,8 +118,12 @@ impl CanonicalPermission {
             "protocol:execute" | "execute" => Ok(CanonicalPermission::ProtocolExecute),
             "admin" => Ok(CanonicalPermission::Admin),
             s if s.starts_with("custom:") => {
-                let name = s.strip_prefix("custom:").unwrap();
-                Ok(CanonicalPermission::Custom(name.to_string()))
+                if let Some(name) = s.strip_prefix("custom:") {
+                    Ok(CanonicalPermission::Custom(name.to_string()))
+                } else {
+                    // This should never happen due to the starts_with check above
+                    Err(PermissionError::InvalidPermission(s.to_string()))
+                }
             }
             _ => Err(PermissionError::InvalidPermission(s.to_string())),
         }

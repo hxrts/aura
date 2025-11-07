@@ -6,10 +6,9 @@
 
 mod common;
 
-use aura_types::{
-    handlers::{erased::AuraHandlerFactory, AuraContext, ExecutionMode},
-    identifiers::DeviceId,
-};
+use aura_protocol::handlers::erased::AuraHandlerFactory;
+use aura_protocol::handlers::{AuraContext, ExecutionMode};
+use aura_types::identifiers::DeviceId;
 use uuid::Uuid;
 
 /// Test basic handler creation
@@ -20,12 +19,15 @@ async fn test_composite_handler_creation() {
     let _ctx = AuraContext::for_testing(device_id);
 
     // Test that handler can be created and has correct execution mode
-    assert_eq!(handler.execution_mode(), ExecutionMode::Testing);
-    
-    // Test that handler can report supported effects (current stub returns empty)
+    assert_eq!(
+        handler.execution_mode(),
+        ExecutionMode::Simulation { seed: 0 }
+    );
+
+    // Test that handler can report supported effects
     let supported_effects = handler.supported_effects();
-    // Current stub implementation supports no effects - this is expected for now
-    assert!(supported_effects.is_empty());
+    // Testing handler creates CompositeHandler with full effect support
+    assert!(!supported_effects.is_empty());
 }
 
 /// Test effect support
@@ -36,10 +38,12 @@ async fn test_effect_support() {
 
     // Test that handler can report supported effects
     let supported_effects = handler.supported_effects();
-    
-    // Current stub implementation supports no effects - this is expected for now
-    // In a real implementation, handlers would support specific effect types
-    assert!(supported_effects.is_empty(), "Current stub implementation supports no effects");
+
+    // Testing handler creates CompositeHandler with full effect support
+    assert!(
+        !supported_effects.is_empty(),
+        "Testing handler should support multiple effects"
+    );
 }
 
 /// Test execution mode
@@ -49,7 +53,10 @@ async fn test_execution_mode() {
     let handler = AuraHandlerFactory::for_testing(device_id);
 
     // Test execution mode is correct for testing
-    assert_eq!(handler.execution_mode(), ExecutionMode::Testing);
+    assert_eq!(
+        handler.execution_mode(),
+        ExecutionMode::Simulation { seed: 0 }
+    );
     assert!(handler.execution_mode().is_deterministic());
     assert!(!handler.execution_mode().is_production());
 }

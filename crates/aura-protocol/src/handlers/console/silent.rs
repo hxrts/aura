@@ -7,6 +7,7 @@ use std::future::Future;
 pub struct SilentConsoleHandler;
 
 impl SilentConsoleHandler {
+    /// Create a new silent console handler
     pub fn new() -> Self {
         Self
     }

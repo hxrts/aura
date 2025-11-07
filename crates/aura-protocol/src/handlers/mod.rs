@@ -26,8 +26,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
 
-pub mod context;
 pub mod composite;
+pub mod context;
 pub mod erased;
 pub mod factory;
 pub mod registry;
@@ -356,15 +356,15 @@ impl EffectType {
 }
 
 // Re-export types from submodules (selective to avoid ambiguous re-exports)
+pub use crate::middleware::traits::{MiddlewareChain, MiddlewareHandler, ProtocolHandler};
+pub use composite::CompositeHandler;
 pub use context::{
     AgentContext, AuraContext, ChoreographicContext, MiddlewareContext, PlatformInfo,
     SimulationContext,
 };
-pub use composite::CompositeHandler;
 pub use erased::{AuraHandler, BoxedHandler, HandlerUtils};
 pub use factory::{AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, FactoryError};
-pub use crate::middleware::AuraMiddleware;
-// MiddlewareStack removed - incompatible with new unified architecture
+// Unified CompositeHandler replaces old MiddlewareStack
 pub use registry::{EffectRegistry, RegistrableHandler, RegistryError};
 
 #[cfg(test)]
@@ -430,9 +430,9 @@ mod tests {
 
 // Additional handler modules (others already declared above)
 pub mod choreographic;
-pub mod ledger;
 pub mod console;
 pub mod crypto;
+pub mod ledger;
 pub mod network;
 pub mod storage;
 pub mod time;

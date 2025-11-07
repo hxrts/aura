@@ -25,6 +25,9 @@ aura-simulator = { path = "../aura-simulator" }
 aura-store = { path = "../aura-store" }
 aura-transport = { path = "../aura-transport" }
 aura-types = { path = "../aura-types" }
+
+# Effect system
+async-trait = { workspace = true }
 # session_types removed during refactor - implementation moved to coordination
 
 # CLI

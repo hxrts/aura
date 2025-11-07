@@ -133,10 +133,8 @@ pub trait JournalEffects: Send + Sync {
     async fn tombstone_intent(&self, intent_id: IntentId) -> Result<(), AuraError>;
 
     /// Prune stale intents based on snapshot commitment
-    async fn prune_stale_intents(
-        &self,
-        current_commitment: Commitment,
-    ) -> Result<usize, AuraError>;
+    async fn prune_stale_intents(&self, current_commitment: Commitment)
+        -> Result<usize, AuraError>;
 
     // ===== Capability Operations =====
 
@@ -150,16 +148,10 @@ pub trait JournalEffects: Send + Sync {
     async fn validate_capability(&self, capability: &CapabilityRef) -> Result<bool, AuraError>;
 
     /// Check if a capability has been revoked
-    async fn is_capability_revoked(
-        &self,
-        capability_id: &CapabilityId,
-    ) -> Result<bool, AuraError>;
+    async fn is_capability_revoked(&self, capability_id: &CapabilityId) -> Result<bool, AuraError>;
 
     /// List capabilities issued in a specific TreeOp
-    async fn list_capabilities_in_op(
-        &self,
-        epoch: Epoch,
-    ) -> Result<Vec<CapabilityRef>, AuraError>;
+    async fn list_capabilities_in_op(&self, epoch: Epoch) -> Result<Vec<CapabilityRef>, AuraError>;
 
     // ===== CRDT Operations =====
 

@@ -1,18 +1,23 @@
-# Aura Journal: Unified Threshold and Membership System
+# Aura Journal: Threshold Identity and Ledger System
 
 ## Executive Summary
 
-The Aura Journal is a unified CRDT-based graph structure that integrates threshold cryptography and group membership into a single data model. Rather than maintaining separate systems for "who can sign" (threshold) and "who's in the group" (membership tree), the Journal expresses threshold policies as structural properties of the graph itself.
+The Aura Journal implements a two-layer architecture that separates authentication (who you are) from the replicated history of operations. The system consists of a **ratchet tree** for threshold identity management and a **journal ledger** for immutable operation history.
 
-A 2-of-3 threshold identity is not an algorithm with external configuration, it's a graph node with a `Threshold{2,3}` policy and three child device nodes. The structure *is* the security policy.
+Rather than encoding everything in a single CRDT structure, the Journal maintains:
+1. **Ratchet Tree**: A left-balanced binary tree (LBBT) containing devices and guardians with threshold policies on branch nodes
+2. **Journal Ledger**: A session-typed CRDT log storing immutable `TreeOp` entries that record tree mutations
+
+This separation provides clear responsibilities: the tree handles authentication (membership and thresholds), while the ledger provides ordering, convergence, and audit trails.
 
 **Current Implementation**:
-- Constructs own CRDTs from session types (MLS-type eventually consistent authenticated data structure)
-- Uses `petgraph` for graph algorithms and cycle detection
-- Uses external threshold-crypto libraries for share splitting
-- Uses external capability token library for authorization
-- Supports Group nodes for private messaging
-- Implemented backend: Ed25519 + Blake3
+- **Ratchet Tree**: Left-balanced binary tree with deterministic indices (TreeKEM-inspired structure)
+- **Journal Ledger**: Session-typed CRDT map storing `TreeOp` entries by epoch
+- **TreeSession Choreography**: Orchestrated protocols for tree mutations (add/remove/rotate)
+- **Intent Pool**: OR-set for staging proposed operations with high availability
+- **Capability System**: Explicit capability references issued as part of `TreeOp`s
+- **Threshold Signatures**: Multi-signatures attest all tree operations
+- Implemented backend: Ed25519 + FROST + Blake3
 
 ---
 
@@ -20,20 +25,21 @@ A 2-of-3 threshold identity is not an algorithm with external configuration, it'
 
 ### 1.1 Design Principles
 
-The Journal unifies four traditionally separate systems into one CRDT graph:
+The Journal implements a clean two-layer architecture that separates concerns:
 
-| Traditional System | Journal Integration |
-|-------------------|-------------------|
-| **Membership Tree** | Graph nodes represent members (devices, identities, groups, guardians) |
-| **Threshold Policy** | Node policies (All, Any, Threshold{m,n}) are structural properties |
-| **Recovery** | Guardian subtrees implement social recovery natively |
-| **Authorization** | Capability tokens bind OCAP tokens to journal resources |
+| Layer | Responsibility | Implementation |
+|-------|---------------|----------------|
+| **Ratchet Tree** | Authentication - "Who you are" | Left-balanced binary tree with threshold policies |
+| **Journal Ledger** | History - "What happened" | Session-typed CRDT log of immutable `TreeOp` entries |
+| **TreeSession** | Coordination - "How changes happen" | Choreographed protocols with threshold signatures |
+| **Intent Pool** | Availability - "Staging proposed changes" | OR-set of proposed operations |
 
-This unified approach eliminates impedance mismatches:
-- Membership changes and threshold updates are atomic CRDT operations
-- No separate threshold coordination—policy is part of node definition
-- Recovery is built into the graph structure, not an external ceremony
-- Authorization uses capability tokens scoped to journal resources
+This separation provides:
+- **Clear responsibilities**: Tree handles identity, ledger handles history
+- **Explicit operations**: Every tree mutation produces a signed, auditable `TreeOp`
+- **Structured identity**: Left-balanced layout gives deterministic node indices
+- **High availability**: Intent pool allows offline proposal staging
+- **Convergence**: Session-type algebra ensures deterministic merging
 
 ### 1.2 Cryptographic Modularity
 
@@ -66,26 +72,68 @@ The Journal separates **structure** from **cryptographic realization**:
 
 All backend changes remain isolated from the core Journal semantics—the graph structure and CRDT properties continue to work with any underlying cryptographic backend.
 
-### 1.3 Tree Structure: K-Ary Threshold Policy Tree
+### 1.3 Ratchet Tree Structure
 
-The Journal uses a generic k-ary tree where every node carries a **policy** that determines how its secret can be unwrapped:
+The Journal uses a **left-balanced binary tree (LBBT)** with deterministic node indices, inspired by TreeKEM but adapted for threshold identities:
 
 #### Node Types
 
-Every node in the Journal is one of four kinds:
-- **Device**: Leaf node with private key material
-- **Identity**: Inner node representing an M-of-N threshold identity
-- **Group**: Inner node with encrypted messaging key for private group communication
-- **Guardian**: Leaf node representing a social recovery participant
+```text
+LeafNode {
+  leaf_id: LeafId,            // Stable index assigned via LBBT rules
+  role: Device | Guardian,    // Fixed semantics
+  public_key: KeyPackage,     // E2E or signing key bundle
+  meta: LeafMeta,             // Display name, platform hints
+}
 
-#### Node Policies
+BranchNode {
+  node_id: NodeIndex,         // Implicit from tree position
+  policy: All | Any | Threshold { m, n },
+  commitment: Hash,           // Hash(branch tag || epoch || left || right)
+}
+```
 
-Each node has a policy determining how its secret unwraps:
-- **All**: All children must participate (AND logic)
-- **Any**: Any one child can participate (OR logic)
-- **Threshold{m,n}**: M-of-N children must participate
+#### Policies and Structure
 
-Policies are structural properties, not external configuration. When a policy is read from the graph, it defines the unwrapping semantics directly.
+- **Policies live only on branch nodes**: Leaves inherit the policy of their ancestor path
+- **Left-balanced layout**: Every node gets a deterministic `NodeIndex` as in TreeKEM
+- **Fixed semantics**: Device vs Guardian roles are explicit, not policy-dependent
+
+#### Example Tree Structure
+
+```mermaid
+graph TD
+    Root(["I₀<br/>Threshold(2,3)"])
+    N1(["Devices N₁<br/>Threshold(2,3)"])
+    N2(["N₂<br/>Threshold(2,3)"])
+    D1["D₁ Laptop"]
+    D2["D₂ Phone"]
+    D3["D₃ Tablet"]
+    Rec(["Recovery R₁<br/>Threshold(2,3)"])
+    RG1(["R₁L<br/>Threshold(2,2)"])
+    RG2(["R₁R<br/>Threshold(1,2)"])
+    G1["G₁ Bob"]
+    G2["G₂ Carol"]
+    G3["G₃ Dave"]
+
+    Root --> N1
+    Root --> N2
+    N1 --> D1
+    N1 --> D2
+    N2 --> D3
+    N2 --> Rec
+    Rec --> RG1
+    Rec --> RG2
+    RG1 --> G1
+    RG1 --> G2
+    RG2 --> G3
+```
+
+This tree shows:
+- **Device subtree**: Devices occupy the lowest available leaves under threshold branch nodes
+- **Recovery subtree**: Guardians are organized using binary splitting to preserve structural invariants
+- **Threshold policies**: Each branch node specifies the m-of-n requirement for its subtree
+- **Deterministic structure**: LBBT rules ensure consistent tree layout across replicas
 
 #### Graph Structure
 
@@ -95,22 +143,31 @@ Two edge types compose the graph:
 
 #### Commitment Derivation
 
-Each node has a **commitment** computed as:
+Each node has a **commitment** computed with ordered children to enforce structural identity:
+
 ```
-C(node) = H(
-    tag = "NODE",
-    kind,
-    policy,
+Commit(branch_node) = H(
+    "BRANCH",
+    node_index,
     epoch,
-    sorted_child_commitments
+    policy_tag,
+    left_child_commitment,
+    right_child_commitment
+)
+
+Commit(leaf_node) = H(
+    "LEAF", 
+    leaf_index, 
+    epoch, 
+    public_key
 )
 ```
 
-This commitment:
-- Is independent of the cryptographic backend (uses hash function)
-- Is deterministic across replicas (children sorted by NodeId)
-- Is stable for equality checks
-- Suits zero-knowledge proofs and cross-domain verification
+This commitment scheme:
+- **Enforces structure**: Ordered pair of children prevents topological ambiguity  
+- **Enables verification**: Node indices make tree structure cryptographically verifiable
+- **Supports auditing**: Commitments provide tamper-evident tree snapshots
+- **Deterministic**: Same tree structure always produces same commitment
 
 #### Threshold Unwrap/Wrap
 
@@ -249,66 +306,127 @@ Transport ships Journal operations as CRDT deltas. No changes required.
 
 ## 3. Data Model
 
-### 3.1 Node Types
+### 3.1 TreeOp Structure
+
+The journal ledger stores immutable `TreeOp` entries that record all tree mutations:
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NodeKind {
-    /// Physical device with private key
-    Device,
-    /// Threshold identity (M-of-N devices)
-    Identity,
-    /// Private group with messaging capabilities
-    Group,
-    /// Guardian for social recovery
-    Guardian,
+pub struct TreeOp {
+    /// Strictly increasing epoch counter
+    pub epoch: u64,
+    /// Type of operation performed
+    pub op: TreeOpKind,
+    /// Node indices affected by this operation  
+    pub affected_indices: Vec<NodeIndex>,
+    /// New commitments after the operation
+    pub new_commitments: Vec<(NodeIndex, Hash)>,
+    /// Capability references issued by this operation
+    pub capability_refs: Vec<CapabilityRef>,
+    /// Threshold signatures attesting this operation
+    pub attestation: MultiSignature,
+    /// When this operation was authored
+    pub authored_at: Timestamp,
+    /// Device that authored this operation
+    pub author: DeviceId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TreeOpKind {
+    /// Add a new leaf to the tree
+    AddLeaf,
+    /// Remove a leaf from the tree  
+    RemoveLeaf,
+    /// Rotate secrets along a path
+    RotatePath,
+    /// Update branch policies
+    RefreshPolicy,
+    /// Grant recovery capability
+    RecoveryGrant,
+    /// Bump epoch to invalidate credentials
+    EpochBump,
 }
 ```
 
-### 3.2 Policies
+### 3.2 Node Structure
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NodePolicy {
-    /// All children must participate (AND)
+pub enum Node {
+    Leaf(LeafNode),
+    Branch(BranchNode),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeafNode {
+    /// Stable index assigned via LBBT rules
+    pub leaf_id: LeafId,
+    /// Device or Guardian role
+    pub role: LeafRole,
+    /// E2E or signing key bundle
+    pub public_key: KeyPackage,
+    /// Display name, platform hints, etc.
+    pub meta: LeafMeta,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchNode {
+    /// Implicit from tree position
+    pub node_id: NodeIndex,
+    /// Threshold policy for this subtree
+    pub policy: Policy,
+    /// Cryptographic commitment 
+    pub commitment: Hash,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Policy {
+    /// All children must participate
     All,
-    /// Any one child can participate (OR)
+    /// Any one child can participate
     Any,
     /// M-of-N threshold requirement
     Threshold { m: u8, n: u8 },
 }
 ```
 
-All policies are **validated** on application:
-- Threshold policies require `m ≤ n` and `m,n > 0`
-- All/Any policies are always valid
-- Invalid policies are rejected before node creation
+### 3.3 Capability References
 
-### 3.3 Node Structure
+Capability tokens are issued as part of TreeOps, providing explicit authorization:
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeyNode {
-    /// Unique node identifier (UUID-based)
-    pub id: NodeId,
-    /// Type of node (Device, Identity, Group, Guardian)
-    pub kind: NodeKind,
-    /// Policy for deriving/unwrapping this node's secret
-    pub policy: NodePolicy,
-    /// AEAD-encrypted node secret (wrapped with KEK)
-    pub enc_secret: Vec<u8>,
-    /// Per-child share metadata for threshold unwrap
-    pub share_headers: Vec<ShareHeader>,
-    /// AEAD-encrypted messaging key (Groups only)
-    pub enc_messaging_key: Option<Vec<u8>>,
-    /// Rotation counter (prevents replay attacks)
-    pub epoch: u64,
-    /// Cryptographic backend identifier (versioned)
-    pub crypto_backend: CryptoBackendId,
-    /// Hash function identifier (versioned)
-    pub hash_function: HashFunctionId,
-    /// Non-sensitive metadata (display name, timestamps, etc.)
-    pub meta: BTreeMap<String, String>,
+pub struct CapabilityRef {
+    /// Unique capability identifier
+    pub id: CapabilityId,
+    /// Resource this capability grants access to
+    pub resource: ResourceUri, // e.g., journal://recovery/{leaf}#{epoch}
+    /// When this capability expires
+    pub expires_at: Timestamp,
+    /// Cryptographic signature over the capability
+    pub signature: CapabilitySig,
+}
+```
+
+### 3.4 Intent Pool Structure
+
+The intent pool stages proposed operations for high availability:
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Intent {
+    /// Unique intent identifier
+    pub intent_id: IntentId,
+    /// Proposed tree operation
+    pub op: TreeOpKind,
+    /// Nodes that will be affected
+    pub path_span: Vec<NodeIndex>,
+    /// Tree snapshot this intent was based on
+    pub snapshot_commitment: Hash,
+    /// Priority for deterministic ranking
+    pub priority: u64,
+    /// Device that authored this intent
+    pub author: DeviceId,
 }
 ```
 
@@ -370,24 +488,85 @@ Group(ProjectTeam)[Threshold{2,3}, messaging_key: encrypted]
 
 ## 4. Operations
 
-The Journal supports these CRDT operations:
+The Journal supports these tree operations through TreeSession choreography:
 
-### 4.1 Node Operations
+### 4.1 Tree Operations
 
-**AddNode**: Insert a new node into the Journal
-- Idempotent: existing nodes merge by metadata
-- Initializes with epoch=0 and empty share headers
+**AddLeaf**: Insert a new device or guardian
+- TreeSession loads current tree snapshot
+- New leaf publishes KeyPackage  
+- Path from leaf to root is recalculated
+- Produces `TreeOp::AddLeaf` with affected indices and new commitments
 
-**UpdateNodePolicy**: Change a node's threshold policy
-- Triggers re-encryption with new key derivation
-- Increments epoch (invalidates old shares)
-- Propagates rewrap upward through parent nodes
+**RemoveLeaf**: Remove a device or guardian
+- Blanks the leaf and rebalances (swap with last leaf to maintain LBBT)
+- Runs RotatePath for affected path to ensure forward secrecy
+- Produces `TreeOp::RemoveLeaf`
 
-**RotateNode**: Generate fresh secret and increment epoch
-- Fresh randomness ensures forward secrecy
-- Increments epoch (invalidates old shares)
-- Generates new share headers for current policy
-- Post-compromise secure: old secrets unrecoverable
+**RotatePath**: Generate fresh secrets for a path
+- Initiator selects leaf and invites required co-path holders
+- Share round produces fresh secrets for each node on the direct path
+- Produces `TreeOp::RotatePath` with updated commitments
+- Increments epoch to invalidate old shares
+
+### 4.2 Key Rotation Flow
+
+The key rotation process demonstrates how TreeSessions coordinate tree mutations:
+
+```mermaid
+graph TD
+    subgraph Before["Before (epoch = e)"]
+        BRoot(["I₀<br/>Commit C₀"])
+        BLeft(["N₁<br/>Commit C₁"])
+        BRight(["N₂<br/>Commit C₂"])
+        BD1["D₁"]
+        BD2["D₂"]
+        BD3["D₃"]
+        BRec(["R₁<br/>Commit CR₁"])
+
+        BRoot --> BLeft
+        BRoot --> BRight
+        BLeft --> BD1
+        BLeft --> BD2
+        BRight --> BD3
+        BRight --> BRec
+    end
+
+    subgraph After["After (epoch = e + 1)"]
+        ARoot(["I₀<br/>Commit C₀′"])
+        ALeft(["N₁<br/>Commit C₁′"])
+        ARight(["N₂<br/>Commit C₂′"])
+        AD1["D₁"]
+        AD2["D₂<br/>(new key)"]
+        AD3["D₃"]
+        ARec(["R₁<br/>Commit CR₁"])
+
+        ARoot --> ALeft
+        ARoot --> ARight
+        ALeft --> AD1
+        ALeft --> AD2
+        ARight --> AD3
+        ARight --> ARec
+    end
+
+    Before -.->|Key Rotation| After
+
+    style BRoot fill:#f0f2ff,stroke:#6c5ce7,stroke-width:2px
+    style BLeft fill:#f0f2ff,stroke:#6c5ce7,stroke-width:2px
+    style BD2 fill:#f0f2ff,stroke:#6c5ce7,stroke-width:2px
+    style ARoot fill:#e8fdf5,stroke:#00b894,stroke-width:2px
+    style ALeft fill:#e8fdf5,stroke:#00b894,stroke-width:2px
+    style AD2 fill:#e8fdf5,stroke:#00b894,stroke-width:2px
+```
+
+**Key Rotation Process**:
+1. **Snapshot**: Initiator captures latest commitment `C_epoch`
+2. **Proposal**: `RotatePath { leaf_id, snapshot: C_epoch }` broadcast to peers  
+3. **Share Round**: Path participants derive fresh secrets (kept inside session)
+4. **Finalize**: New commitments computed, threshold signature attests update, epoch increments
+5. **Ledger Commit**: Append `TreeOp::RotatePath` with new root commitment
+
+The blue highlighted nodes show the ancestor path participating in rotation. The green nodes show refreshed commitments after the TreeSession finalizes and bumps the epoch.
 
 ### 4.2 Edge Operations
 
@@ -537,11 +716,13 @@ All future enhancements remain compatible with the core Journal structure and CR
 
 ## 9. Conclusion
 
-The Journal is a unified CRDT-based graph that integrates threshold cryptography, membership, recovery, and authorization into a single coherent data model. By expressing **security as structure**, the Journal achieves:
+The Journal implements a clean two-layer architecture that separates authentication (ratchet tree) from operation history (ledger). By **making every transition explicit**, the Journal achieves:
 
-- **Unified State Management**: Single source of truth for identity and cryptography
-- **Deterministic Merging**: Session-type algebra guarantees convergence under all orderings (MLS-type eventually consistent authenticated data structure)
-- **Composable Security**: Devices, guardians, and groups use same primitives
-- **Future-Proof Design**: Cryptographic backends pluggable without structural changes
+- **Clear Separation of Concerns**: Tree handles identity, ledger handles history, choreography handles coordination
+- **Explicit Auditability**: Every tree mutation produces a signed, immutable `TreeOp` 
+- **Deterministic Structure**: Left-balanced binary tree with verifiable commitments
+- **High Availability**: Intent pool allows offline operation staging and eventual execution
+- **Threshold-Native Design**: Multi-signatures attest all operations, aligning with relational trust model
+- **Future-Proof Architecture**: Tree operations and ledger structure support rich extensions
 
-The implementation is complete and production-ready for Phase 1-7 operations.
+This revision addresses the complexity issues from the previous unified graph approach while maintaining the core benefits of threshold identity and social recovery.

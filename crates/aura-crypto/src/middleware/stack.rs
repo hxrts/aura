@@ -1,15 +1,15 @@
 //! Crypto middleware stack for composing multiple middleware layers
 
-use super::{CryptoMiddleware, CryptoHandler, CryptoContext};
-use crate::Result;
+use super::{CryptoContext, CryptoHandler, CryptoMiddleware};
 use crate::middleware::CryptoOperation;
+use crate::Result;
 use std::sync::Arc;
 
 /// A stack of crypto middleware that processes operations in order
 pub struct CryptoMiddlewareStack {
     /// Middleware layers in processing order
     middleware: Vec<Arc<dyn CryptoMiddleware>>,
-    
+
     /// Final handler for operations
     handler: Arc<dyn CryptoHandler>,
 }
@@ -22,13 +22,13 @@ impl CryptoMiddlewareStack {
             handler,
         }
     }
-    
+
     /// Add middleware to the stack
     pub fn with_middleware(mut self, middleware: Arc<dyn CryptoMiddleware>) -> Self {
         self.middleware.push(middleware);
         self
     }
-    
+
     /// Process an operation through the middleware stack
     pub fn process(
         &self,
@@ -52,9 +52,12 @@ impl<'a> MiddlewareChain<'a> {
         middleware: &'a [Arc<dyn CryptoMiddleware>],
         handler: &'a Arc<dyn CryptoHandler>,
     ) -> Self {
-        Self { middleware, handler }
+        Self {
+            middleware,
+            handler,
+        }
     }
-    
+
     fn process(
         &self,
         operation: CryptoOperation,
@@ -70,7 +73,7 @@ impl<'a> MiddlewareChain<'a> {
                 chain: self,
                 index: index + 1,
             };
-            
+
             self.middleware[index].process(operation, context, &next_handler)
         }
     }
@@ -96,13 +99,13 @@ impl<'a> CryptoHandler for NextHandler<'a> {
 mod tests {
     use super::*;
     use crate::middleware::{CryptoOperation, SecurityLevel};
-    use aura_types::{AccountIdExt, DeviceIdExt};
     use aura_crypto::Effects;
-    
+    use aura_types::{AccountIdExt, DeviceIdExt};
+
     struct TestMiddleware {
         name: String,
     }
-    
+
     impl TestMiddleware {
         fn new(name: &str) -> Self {
             Self {
@@ -110,7 +113,7 @@ mod tests {
             }
         }
     }
-    
+
     impl CryptoMiddleware for TestMiddleware {
         fn process(
             &self,
@@ -120,24 +123,24 @@ mod tests {
         ) -> Result<serde_json::Value> {
             // Call next handler and add our middleware info
             let mut result = next.handle(operation, context)?;
-            
+
             if let Some(obj) = result.as_object_mut() {
                 obj.insert(
                     format!("middleware_{}", self.name),
                     serde_json::Value::String("processed".to_string()),
                 );
             }
-            
+
             Ok(result)
         }
-        
+
         fn name(&self) -> &str {
             &self.name
         }
     }
-    
+
     struct NoOpHandler;
-    
+
     impl CryptoHandler for NoOpHandler {
         fn handle(
             &self,
@@ -151,17 +154,17 @@ mod tests {
             }))
         }
     }
-    
+
     #[test]
     fn test_crypto_middleware_stack() {
         let effects = Effects::test(42);
         let account_id = aura_types::AccountId::new_with_effects(&effects);
         let device_id = aura_types::DeviceId::new_with_effects(&effects);
-        
+
         let stack = CryptoMiddlewareStack::new(Arc::new(NoOpHandler))
             .with_middleware(Arc::new(TestMiddleware::new("timing")))
             .with_middleware(Arc::new(TestMiddleware::new("audit")));
-        
+
         let context = CryptoContext::new(
             account_id,
             device_id,
@@ -169,9 +172,9 @@ mod tests {
             SecurityLevel::Standard,
         );
         let operation = CryptoOperation::GenerateRandom { num_bytes: 32 };
-        
+
         let result = stack.process(operation, &context).unwrap();
-        
+
         // Verify that both middleware processed the request
         assert!(result.get("middleware_timing").is_some());
         assert!(result.get("middleware_audit").is_some());

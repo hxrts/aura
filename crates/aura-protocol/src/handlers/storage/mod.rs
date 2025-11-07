@@ -1,7 +1,7 @@
 //! Storage effect handlers
 
-pub mod memory;
 pub mod filesystem;
+pub mod memory;
 
-pub use memory::MemoryStorageHandler;
 pub use filesystem::FilesystemStorageHandler;
+pub use memory::MemoryStorageHandler;

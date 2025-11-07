@@ -5,8 +5,8 @@
 //! Phase 2 adds policy-aware derivation and DKD integration.
 //! Phase 3 adds threshold unwrapping with M-of-N secret reconstruction.
 
-use aura_types::AuraError;
 use crate::journal::*;
+use aura_types::AuraError;
 
 // Public modules
 pub mod effects_simple;
@@ -20,11 +20,6 @@ pub mod views;
 
 // Phase 3: Distributed operations moved to aura-choreography crate
 // Use choreographic coordination for threshold, share contribution, and rotation
-
-// TODO: Complex modules (to be completed in future phase)
-// pub mod effects;
-// pub mod handlers;
-// pub mod middleware;
 
 // Re-exports for MVP
 pub use effects_simple::*;

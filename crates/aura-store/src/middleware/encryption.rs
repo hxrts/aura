@@ -5,7 +5,8 @@
 use super::handler::{StorageError, StorageHandler, StorageOperation, StorageResult};
 use super::stack::StorageMiddleware;
 use aura_protocol::effects::AuraEffects;
-use aura_types::{AuraError, MiddlewareContext, MiddlewareResult};
+use aura_protocol::middleware::{MiddlewareContext, MiddlewareError, MiddlewareResult};
+use aura_types::AuraError;
 use std::collections::HashMap;
 
 /// Configuration for encryption middleware
@@ -147,9 +148,11 @@ impl StorageMiddleware for EncryptionMiddleware {
                 mut metadata,
             } => {
                 // Encrypt the data before passing to next handler
-                let encrypted_data = self
-                    .encrypt_data(&data)
-                    .map_err(|e| AuraError::internal_error(e.to_string()))?;
+                let encrypted_data =
+                    self.encrypt_data(&data)
+                        .map_err(|e| MiddlewareError::General {
+                            message: format!("Encryption failed: {}", e),
+                        })?;
 
                 // Add encryption metadata
                 metadata.insert("encrypted".to_string(), "true".to_string());
@@ -185,9 +188,11 @@ impl StorageMiddleware for EncryptionMiddleware {
                             .unwrap_or(false)
                         {
                             // Decrypt the data
-                            let decrypted_data = self
-                                .decrypt_data(&data)
-                                .map_err(|e| AuraError::internal_error(e.to_string()))?;
+                            let decrypted_data =
+                                self.decrypt_data(&data)
+                                    .map_err(|e| MiddlewareError::General {
+                                        message: format!("Decryption failed: {}", e),
+                                    })?;
 
                             Ok(StorageResult::Retrieved {
                                 chunk_id: retrieved_chunk_id,

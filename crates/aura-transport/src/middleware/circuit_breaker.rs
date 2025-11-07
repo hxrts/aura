@@ -1,9 +1,10 @@
 //! Circuit Breaker Middleware
 
+use super::handler::{NetworkAddress, TransportHandler, TransportOperation, TransportResult};
 use super::stack::TransportMiddleware;
-use super::handler::{TransportHandler, TransportOperation, TransportResult, NetworkAddress};
 use aura_protocol::effects::AuraEffects;
-use aura_types::{MiddlewareContext, MiddlewareResult, AuraError};
+use aura_protocol::middleware::{MiddlewareContext, MiddlewareError, MiddlewareResult};
+use aura_types::AuraError;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -25,9 +26,9 @@ impl Default for CircuitBreakerConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 enum CircuitState {
-    Closed,      // Normal operation
-    Open,        // Failing fast
-    HalfOpen,    // Testing if service recovered
+    Closed,   // Normal operation
+    Open,     // Failing fast
+    HalfOpen, // Testing if service recovered
 }
 
 struct CircuitBreaker {
@@ -48,13 +49,15 @@ impl CircuitBreaker {
             config,
         }
     }
-    
+
     fn can_execute(&mut self, current_time: u64) -> bool {
         match self.state {
             CircuitState::Closed => true,
             CircuitState::Open => {
                 // Check if recovery timeout has passed
-                if current_time.saturating_sub(self.last_failure_time) >= self.config.recovery_timeout_ms {
+                if current_time.saturating_sub(self.last_failure_time)
+                    >= self.config.recovery_timeout_ms
+                {
                     self.state = CircuitState::HalfOpen;
                     self.success_count = 0;
                     true
@@ -65,7 +68,7 @@ impl CircuitBreaker {
             CircuitState::HalfOpen => true,
         }
     }
-    
+
     fn record_success(&mut self) {
         match self.state {
             CircuitState::Closed => {
@@ -84,11 +87,11 @@ impl CircuitBreaker {
             }
         }
     }
-    
+
     fn record_failure(&mut self, current_time: u64) {
         self.failure_count += 1;
         self.last_failure_time = current_time;
-        
+
         match self.state {
             CircuitState::Closed => {
                 if self.failure_count >= self.config.failure_threshold {
@@ -118,7 +121,7 @@ impl CircuitBreakerMiddleware {
             config: CircuitBreakerConfig::default(),
         }
     }
-    
+
     pub fn with_config(config: CircuitBreakerConfig) -> Self {
         Self {
             breakers: HashMap::new(),
@@ -141,8 +144,11 @@ impl TransportMiddleware for CircuitBreakerMiddleware {
         effects: &dyn AuraEffects,
         next: &mut dyn TransportHandler,
     ) -> MiddlewareResult<TransportResult> {
-        let current_time = effects.current_timestamp() * 1000; // Convert to milliseconds
-        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64; // Get timestamp in milliseconds
+
         // Get the target address for circuit breaker tracking
         let target_address = match &operation {
             TransportOperation::Send { destination, .. } => Some(destination.clone()),
@@ -150,21 +156,21 @@ impl TransportMiddleware for CircuitBreakerMiddleware {
             TransportOperation::Disconnect { address } => Some(address.clone()),
             _ => None,
         };
-        
+
         if let Some(address) = target_address {
             // Get or create circuit breaker for this address
-            let breaker = self.breakers
+            let breaker = self
+                .breakers
                 .entry(address.clone())
                 .or_insert_with(|| CircuitBreaker::new(self.config.clone()));
-            
+
             // Check if we can execute the operation
             if !breaker.can_execute(current_time) {
-                return Err(AuraError::Infrastructure(aura_types::InfrastructureError::Transport {
-                    message: "Circuit breaker open".to_string(),
-                    context: format!("address: {}", address.as_string()),
-                }));
+                return Err(MiddlewareError::General {
+                    message: format!("Circuit breaker open for address: {}", address.as_string()),
+                });
             }
-            
+
             // Execute the operation
             match next.execute(operation, effects) {
                 Ok(result) => {
@@ -181,23 +187,37 @@ impl TransportMiddleware for CircuitBreakerMiddleware {
             next.execute(operation, effects)
         }
     }
-    
+
     fn middleware_name(&self) -> &'static str {
         "CircuitBreakerMiddleware"
     }
-    
+
     fn middleware_info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();
-        info.insert("failure_threshold".to_string(), self.config.failure_threshold.to_string());
-        info.insert("recovery_timeout_ms".to_string(), self.config.recovery_timeout_ms.to_string());
-        info.insert("success_threshold".to_string(), self.config.success_threshold.to_string());
-        info.insert("tracked_addresses".to_string(), self.breakers.len().to_string());
-        
-        let open_circuits = self.breakers.values()
+        info.insert(
+            "failure_threshold".to_string(),
+            self.config.failure_threshold.to_string(),
+        );
+        info.insert(
+            "recovery_timeout_ms".to_string(),
+            self.config.recovery_timeout_ms.to_string(),
+        );
+        info.insert(
+            "success_threshold".to_string(),
+            self.config.success_threshold.to_string(),
+        );
+        info.insert(
+            "tracked_addresses".to_string(),
+            self.breakers.len().to_string(),
+        );
+
+        let open_circuits = self
+            .breakers
+            .values()
             .filter(|b| b.state == CircuitState::Open)
             .count();
         info.insert("open_circuits".to_string(), open_circuits.to_string());
-        
+
         info
     }
 }

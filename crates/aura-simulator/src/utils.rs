@@ -2,7 +2,7 @@
 
 pub mod time {
     //! Time utilities for the simulator
-    
+
     /// Get current timestamp in milliseconds since UNIX epoch
     pub fn current_unix_timestamp_millis() -> u64 {
         std::time::SystemTime::now()

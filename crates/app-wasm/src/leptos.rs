@@ -1,7 +1,7 @@
 //! Leptos integration for reactive WebSocket clients
 
 use crate::error::{WasmError, WasmResult};
-use crate::websocket::{ClientMode, DefaultHandler, WasmClientEnvelope, UnifiedWebSocketClient};
+use crate::websocket::{ClientMode, DefaultHandler, UnifiedWebSocketClient, WasmClientEnvelope};
 #[cfg(feature = "leptos")]
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};

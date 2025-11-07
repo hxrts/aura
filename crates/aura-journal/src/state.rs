@@ -7,6 +7,29 @@ use aura_types::{AccountId, DeviceId};
 use automerge::{transaction::Transactable, AutoCommit, Automerge, ReadDoc};
 
 /// Account state backed by Automerge CRDT
+///
+/// # Deprecation Notice
+///
+/// This implementation is deprecated in favor of `ModernAccountState` from
+/// `crate::semilattice::account_state`. The new implementation provides the same
+/// functionality with better performance and composability using the unified
+/// semilattice system.
+///
+/// ## Migration
+///
+/// ```rust
+/// use aura_journal::ModernAccountState;
+/// use aura_journal::semilattice::account_state::migration;
+///
+/// // Convert from legacy to modern
+/// let modern_state = migration::from_legacy(&legacy_state);
+/// ```
+///
+/// See `MIGRATION.md` for detailed migration guidance.
+#[deprecated(
+    since = "0.1.0",
+    note = "Use ModernAccountState from crate::semilattice::account_state instead"
+)]
 pub struct AccountState {
     /// Core Automerge document
     doc: AutoCommit,
@@ -186,10 +209,7 @@ impl AccountState {
                 .put(
                     &device_obj,
                     "removed_at",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs() as i64,
+                    aura_types::time::current_unix_timestamp() as i64,
                 )
                 .map_err(|e| Error::storage_failed(format!("Failed to set removed_at: {}", e)))?;
         } else {
@@ -527,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_automerge_state_creation() {
-        let effects = Effects::test(42);
+        let effects = Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
         let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
         let group_public_key = signing_key.verifying_key();
@@ -539,7 +559,7 @@ mod tests {
 
     #[test]
     fn test_device_management() {
-        let effects = Effects::test(42);
+        let effects = Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
         let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
         let group_public_key = signing_key.verifying_key();
@@ -575,7 +595,7 @@ mod tests {
 
     #[test]
     fn test_epoch_management() {
-        let effects = Effects::test(42);
+        let effects = Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
         let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
         let group_public_key = signing_key.verifying_key();

@@ -15,8 +15,9 @@
 //!
 //! ## Usage Pattern
 //!
-//! ```rust
+//! ```ignore
 //! use aura_types::config::{AuraConfig, ConfigLoader};
+//! use std::time::Duration;
 //!
 //! // Define configuration using derive macro
 //! #[derive(AuraConfig)]
@@ -24,7 +25,7 @@
 //! struct ComponentConfig {
 //!     #[config(required, range(1..=100))]
 //!     max_connections: u32,
-//!     #[config(default = "30s", validate = "timeout_range")]  
+//!     #[config(default = "30s", validate = "timeout_range")]
 //!     timeout: Duration,
 //!     #[config(default = "info")]
 //!     log_level: String,
@@ -32,20 +33,20 @@
 //!
 //! // Load and use configuration
 //! let config = ComponentConfig::load_from_file("config.toml")?;
-//! let merged_config = config.merge_with_env()?.merge_with_cli_args(args)?;
+//! let merged_config = config.merge_with_env()?.merge_with_cli_args(&["arg1"])?;
 //! merged_config.validate()?;
 //! ```
 
-pub mod traits;
-pub mod loader;
-pub mod validation;
 pub mod formats;
+pub mod loader;
+pub mod traits;
+pub mod validation;
 
 // Re-export core config types from traits module
-pub use traits::{AuraConfig, ConfigValidation, ConfigMerge, ConfigDefaults};
-pub use loader::{ConfigLoader, ConfigSource, ConfigPriority};
-pub use validation::{ConfigValidator, ValidationRule, ValidationResult};
-pub use formats::{ConfigFormat, TomlFormat, JsonFormat, YamlFormat};
+pub use formats::{ConfigFormat, JsonFormat, TomlFormat, YamlFormat};
+pub use loader::{ConfigLoader, ConfigPriority, ConfigSource};
+pub use traits::{AuraConfig, ConfigDefaults, ConfigMerge, ConfigValidation};
+pub use validation::{ConfigValidator, ValidationResult, ValidationRule};
 
 use crate::AuraError;
 use std::path::Path;
@@ -66,11 +67,10 @@ impl<T: AuraConfig> ConfigBuilder<T> {
     }
 }
 
-impl<T: AuraConfig> ConfigBuilder<T> 
+impl<T: AuraConfig> ConfigBuilder<T>
 where
     AuraError: From<T::Error>,
 {
-
     /// Load from a file with specified priority
     pub fn from_file(mut self, path: &Path, priority: ConfigPriority) -> Result<Self, AuraError> {
         let file_config = T::load_from_file(path)?;
@@ -78,7 +78,7 @@ where
             path: path.to_path_buf(),
             priority,
         });
-        
+
         match priority {
             ConfigPriority::Low => {
                 // Low priority: only use if current config is defaults
@@ -95,7 +95,7 @@ where
                 self.config = file_config;
             }
         }
-        
+
         Ok(self)
     }
 
@@ -173,11 +173,13 @@ impl<T: AuraConfig> ConfigWatcher<T> {
 /// Global configuration registry for component configurations (using safe statics)
 use std::sync::{Mutex, Once};
 
-static CONFIG_REGISTRY: Mutex<Option<std::collections::HashMap<String, Box<dyn std::any::Any + Send + Sync>>>> = 
-    Mutex::new(None);
+static CONFIG_REGISTRY: Mutex<
+    Option<std::collections::HashMap<String, Box<dyn std::any::Any + Send + Sync>>>,
+> = Mutex::new(None);
 static CONFIG_REGISTRY_INIT: Once = Once::new();
 
 /// Register a configuration for a component
+#[allow(clippy::unwrap_used)] // Mutex lock failure is unrecoverable in this context
 pub fn register_config<T: AuraConfig + Send + Sync + 'static>(component_name: &str, config: T) {
     CONFIG_REGISTRY_INIT.call_once(|| {
         *CONFIG_REGISTRY.lock().unwrap() = Some(std::collections::HashMap::new());
@@ -191,9 +193,11 @@ pub fn register_config<T: AuraConfig + Send + Sync + 'static>(component_name: &s
 
 /// Get a registered configuration for a component
 /// Note: Returns owned config to avoid lifetime issues with locked mutex
+#[allow(clippy::unwrap_used)] // Mutex lock failure is unrecoverable in this context
 pub fn get_config<T: AuraConfig + Clone + 'static>(component_name: &str) -> Option<T> {
     let registry = CONFIG_REGISTRY.lock().unwrap();
-    registry.as_ref()?
+    registry
+        .as_ref()?
         .get(component_name)
         .and_then(|config| config.downcast_ref::<T>())
         .cloned()

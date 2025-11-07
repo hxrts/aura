@@ -10,7 +10,10 @@ use crate::effects::*;
 use crate::errors::{AgentError, Result as AgentResult};
 use crate::handlers::AuthenticationHandler;
 use crate::middleware::{AgentMiddlewareStack, MiddlewareStackBuilder};
-use aura_types::{identifiers::{DeviceId, AccountId}, AuraError};
+use aura_types::{
+    identifiers::{AccountId, DeviceId},
+    AuraError,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -68,7 +71,7 @@ impl AuraAgent {
     /// into a unified runtime. All operations will be performed through composed handlers.
     pub fn new(core_effects: AuraEffectSystem, device_id: DeviceId) -> Self {
         let core_effects = Arc::new(RwLock::new(core_effects));
-        
+
         Self {
             device_id,
             auth_handler: AuthenticationHandler::new(device_id, core_effects.clone()),
@@ -122,9 +125,10 @@ impl AuraAgent {
 
         // Log initialization completion
         let effects = self.core_effects.read().await;
-        effects
-            .log_info(&format!("Agent initialized for device {}", self.device_id))
-            .await;
+        effects.log_info(
+            &format!("Agent initialized for device {}", self.device_id),
+            &[],
+        );
 
         Ok(())
     }
@@ -214,7 +218,11 @@ impl AuraAgent {
     pub async fn create_session(&self, session_type: &str) -> AgentResult<String> {
         // TODO: Implement proper session creation through effects
         // For now, return a placeholder session ID
-        let session_id = format!("session_{}_{}", self.device_id.as_simple(), chrono::Utc::now().timestamp());
+        let session_id = format!(
+            "session_{}_{}",
+            self.device_id.0,
+            chrono::Utc::now().timestamp()
+        );
         Ok(session_id)
     }
 

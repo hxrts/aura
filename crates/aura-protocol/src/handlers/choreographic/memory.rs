@@ -1,6 +1,9 @@
 //! Memory-based choreographic handler for testing
 
-use crate::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, ChoreographyMetrics};
+use crate::effects::{
+    ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
+    ChoreographyMetrics,
+};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -16,6 +19,7 @@ pub struct MemoryChoreographicHandler {
 }
 
 impl MemoryChoreographicHandler {
+    /// Create a new memory-based choreographic handler
     pub fn new(device_id: Uuid) -> Self {
         Self {
             device_id,
@@ -36,17 +40,24 @@ impl MemoryChoreographicHandler {
 
 #[async_trait]
 impl ChoreographicEffects for MemoryChoreographicHandler {
-    async fn send_to_role_bytes(&self, role: ChoreographicRole, message: Vec<u8>) -> Result<(), ChoreographyError> {
+    async fn send_to_role_bytes(
+        &self,
+        role: ChoreographicRole,
+        message: Vec<u8>,
+    ) -> Result<(), ChoreographyError> {
         let mut queue = self.message_queue.lock().unwrap();
         queue.entry(role).or_insert_with(Vec::new).push(message);
-        
+
         let mut metrics = self.metrics.lock().unwrap();
         metrics.messages_sent += 1;
-        
+
         Ok(())
     }
 
-    async fn receive_from_role_bytes(&self, role: ChoreographicRole) -> Result<Vec<u8>, ChoreographyError> {
+    async fn receive_from_role_bytes(
+        &self,
+        role: ChoreographicRole,
+    ) -> Result<Vec<u8>, ChoreographyError> {
         let mut queue = self.message_queue.lock().unwrap();
         if let Some(messages) = queue.get_mut(&role) {
             if let Some(message) = messages.pop() {
@@ -55,10 +66,10 @@ impl ChoreographicEffects for MemoryChoreographicHandler {
                 return Ok(message);
             }
         }
-        
-        Err(ChoreographyError::CommunicationTimeout { 
-            role, 
-            timeout_ms: 1000 
+
+        Err(ChoreographyError::CommunicationTimeout {
+            role,
+            timeout_ms: 1000,
         })
     }
 
@@ -87,7 +98,11 @@ impl ChoreographicEffects for MemoryChoreographicHandler {
         self.active_roles.lock().unwrap().contains(&role)
     }
 
-    async fn start_session(&self, _session_id: Uuid, roles: Vec<ChoreographicRole>) -> Result<(), ChoreographyError> {
+    async fn start_session(
+        &self,
+        _session_id: Uuid,
+        roles: Vec<ChoreographicRole>,
+    ) -> Result<(), ChoreographyError> {
         *self.active_roles.lock().unwrap() = roles;
         Ok(())
     }

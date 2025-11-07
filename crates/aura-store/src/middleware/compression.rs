@@ -5,7 +5,8 @@
 use super::handler::{StorageError, StorageHandler, StorageOperation, StorageResult};
 use super::stack::StorageMiddleware;
 use aura_protocol::effects::AuraEffects;
-use aura_types::{AuraError, MiddlewareContext, MiddlewareResult};
+use aura_protocol::middleware::{MiddlewareContext, MiddlewareError, MiddlewareResult};
+use aura_types::AuraError;
 use std::collections::HashMap;
 
 /// Compression algorithms supported by the middleware
@@ -252,8 +253,9 @@ impl StorageMiddleware for CompressionMiddleware {
                 // Attempt to compress the data
                 match self
                     .compress_data(&data)
-                    .map_err(|e| AuraError::internal_error(e.to_string()))?
-                {
+                    .map_err(|e| MiddlewareError::General {
+                        message: format!("Compression failed: {}", e),
+                    })? {
                     Some(compressed_data) => {
                         // Compression was beneficial, store compressed data
                         metadata.insert("compressed".to_string(), "true".to_string());
@@ -319,7 +321,9 @@ impl StorageMiddleware for CompressionMiddleware {
                             // Decompress the data
                             let decompressed_data = self
                                 .decompress_data(&data, &algorithm)
-                                .map_err(|e| AuraError::internal_error(e.to_string()))?;
+                                .map_err(|e| MiddlewareError::General {
+                                    message: format!("Decompression failed: {}", e),
+                                })?;
 
                             Ok(StorageResult::Retrieved {
                                 chunk_id: retrieved_chunk_id,

@@ -5,7 +5,6 @@
 //! Effect handlers are provided by aura-protocol handlers.
 
 use async_trait::async_trait;
-use aura_types::identifiers::DeviceId;
 
 /// Network address for peer communication
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -82,23 +81,24 @@ pub enum PeerEvent {
 #[async_trait]
 pub trait NetworkEffects: Send + Sync {
     /// Send a message to a specific peer
-    async fn send_to_peer(&self, peer_id: uuid::Uuid, message: Vec<u8>) -> Result<(), NetworkError>;
-    
+    async fn send_to_peer(&self, peer_id: uuid::Uuid, message: Vec<u8>)
+        -> Result<(), NetworkError>;
+
     /// Broadcast a message to all connected peers
     async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError>;
-    
+
     /// Receive the next available message
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), NetworkError>;
-    
+
     /// Receive message from a specific peer
     async fn receive_from(&self, peer_id: uuid::Uuid) -> Result<Vec<u8>, NetworkError>;
-    
+
     /// Get list of currently connected peers
     async fn connected_peers(&self) -> Vec<uuid::Uuid>;
-    
+
     /// Check if a peer is connected
     async fn is_peer_connected(&self, peer_id: uuid::Uuid) -> bool;
-    
+
     /// Subscribe to peer connection events
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError>;
 }

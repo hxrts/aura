@@ -1,9 +1,9 @@
 //! Encryption Middleware
 
-use super::stack::TransportMiddleware;
 use super::handler::{TransportHandler, TransportOperation, TransportResult};
+use super::stack::TransportMiddleware;
 use aura_protocol::effects::AuraEffects;
-use aura_types::{MiddlewareContext, MiddlewareResult};
+use aura_protocol::middleware::{MiddlewareContext, MiddlewareResult};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -81,12 +81,12 @@ impl EncryptionAlgorithm {
             }
         }
     }
-    
+
     fn decrypt(&self, data: &[u8], _key: &[u8]) -> Result<Vec<u8>, String> {
         if data.len() < 32 {
             return Err("Invalid encrypted data".to_string());
         }
-        
+
         let header = &data[0..8];
         let expected_header = match self {
             EncryptionAlgorithm::ChaCha20Poly1305 => b"CHA20P13",
@@ -94,40 +94,42 @@ impl EncryptionAlgorithm {
             EncryptionAlgorithm::AesGcm128 => b"AES128GC",
             EncryptionAlgorithm::XChaCha20Poly1305 => b"XCHA20P1",
         };
-        
+
         if header != expected_header {
-            return Err(format!("Invalid encryption header: expected {:?}, got {:?}", 
-                              expected_header, header));
+            return Err(format!(
+                "Invalid encryption header: expected {:?}, got {:?}",
+                expected_header, header
+            ));
         }
-        
+
         let nonce_size = match self {
             EncryptionAlgorithm::XChaCha20Poly1305 => 24,
             _ => 12,
         };
-        
+
         if data.len() < 8 + nonce_size + 4 + 16 {
             return Err("Insufficient data for decryption".to_string());
         }
-        
+
         let original_size = u32::from_be_bytes([
             data[8 + nonce_size],
             data[8 + nonce_size + 1],
             data[8 + nonce_size + 2],
-            data[8 + nonce_size + 3]
+            data[8 + nonce_size + 3],
         ]) as usize;
-        
+
         // Simulate decryption by extracting the plaintext portion
         let plaintext_start = 8 + nonce_size + 4;
         let plaintext_end = plaintext_start + original_size;
-        
+
         if data.len() < plaintext_end + 16 {
             return Err("Insufficient data for authentication tag".to_string());
         }
-        
+
         // In real implementation, would verify auth tag here
         Ok(data[plaintext_start..plaintext_end].to_vec())
     }
-    
+
     fn nonce_size(&self) -> usize {
         match self {
             EncryptionAlgorithm::XChaCha20Poly1305 => 24,
@@ -158,7 +160,7 @@ impl EncryptionMiddleware {
             stats: EncryptionStats::default(),
         }
     }
-    
+
     pub fn with_config(key: Vec<u8>, config: EncryptionConfig) -> Self {
         Self {
             config,
@@ -166,15 +168,18 @@ impl EncryptionMiddleware {
             stats: EncryptionStats::default(),
         }
     }
-    
+
     fn generate_nonce(&self, effects: &dyn AuraEffects) -> Vec<u8> {
         let nonce_size = self.config.algorithm.nonce_size();
         let mut nonce = vec![0; nonce_size];
-        
+
         // Use timestamp and device ID for nonce generation (not cryptographically secure)
-        let timestamp = effects.current_timestamp();
-        let device_id = effects.device_id();
-        
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let device_id = aura_types::identifiers::DeviceId::from(uuid::Uuid::new_v4()); // Use random ID for nonce generation
+
         // Fill nonce with timestamp and device ID data
         let timestamp_bytes = timestamp.to_be_bytes();
         for (i, &byte) in timestamp_bytes.iter().enumerate() {
@@ -182,7 +187,7 @@ impl EncryptionMiddleware {
                 nonce[i] = byte;
             }
         }
-        
+
         // XOR with device ID bytes
         let device_bytes = device_id.0.as_bytes();
         for (i, &byte) in device_bytes.iter().enumerate() {
@@ -190,16 +195,25 @@ impl EncryptionMiddleware {
                 nonce[i + 8] ^= byte;
             }
         }
-        
+
         nonce
     }
-    
+
     fn add_encryption_metadata(&self, metadata: &mut HashMap<String, String>) {
-        metadata.insert("encryption".to_string(), format!("{:?}", self.config.algorithm));
-        metadata.insert("key_size".to_string(), format!("{:?}", self.config.key_size));
-        metadata.insert("authenticated".to_string(), self.config.require_authentication.to_string());
+        metadata.insert(
+            "encryption".to_string(),
+            format!("{:?}", self.config.algorithm),
+        );
+        metadata.insert(
+            "key_size".to_string(),
+            format!("{:?}", self.config.key_size),
+        );
+        metadata.insert(
+            "authenticated".to_string(),
+            self.config.require_authentication.to_string(),
+        );
     }
-    
+
     fn is_encrypted(&self, metadata: &HashMap<String, String>) -> bool {
         metadata.contains_key("encryption")
     }
@@ -214,72 +228,88 @@ impl TransportMiddleware for EncryptionMiddleware {
         next: &mut dyn TransportHandler,
     ) -> MiddlewareResult<TransportResult> {
         match operation {
-            TransportOperation::Send { destination, data, mut metadata } => {
+            TransportOperation::Send {
+                destination,
+                data,
+                mut metadata,
+            } => {
                 let nonce = self.generate_nonce(effects);
-                
+
                 match self.config.algorithm.encrypt(&data, &self.key, &nonce) {
                     Ok(encrypted) => {
                         self.add_encryption_metadata(&mut metadata);
                         self.stats.bytes_encrypted += data.len() as u64;
                         self.stats.operations += 1;
-                        
+
                         effects.log_info(
-                            &format!("Encrypted {} bytes using {:?}", 
-                                    data.len(), self.config.algorithm),
-                            &[]
+                            &format!(
+                                "Encrypted {} bytes using {:?}",
+                                data.len(),
+                                self.config.algorithm
+                            ),
+                            &[],
                         );
-                        
-                        next.execute(TransportOperation::Send {
-                            destination,
-                            data: encrypted,
-                            metadata,
-                        }, effects)
+
+                        next.execute(
+                            TransportOperation::Send {
+                                destination,
+                                data: encrypted,
+                                metadata,
+                            },
+                            effects,
+                        )
                     }
                     Err(e) => {
                         self.stats.errors += 1;
-                        effects.log_error(
-                            &format!("Encryption failed: {}", e),
-                            &[]
-                        );
-                        
+                        effects.log_error(&format!("Encryption failed: {}", e), &[]);
+
                         // Fall back to unencrypted transmission
-                        next.execute(TransportOperation::Send {
-                            destination,
-                            data,
-                            metadata,
-                        }, effects)
+                        next.execute(
+                            TransportOperation::Send {
+                                destination,
+                                data,
+                                metadata,
+                            },
+                            effects,
+                        )
                     }
                 }
             }
-            
+
             TransportOperation::Receive { source, timeout_ms } => {
-                let result = next.execute(TransportOperation::Receive { source, timeout_ms }, effects)?;
-                
-                if let TransportResult::Received { source, data, metadata } = result {
+                let result =
+                    next.execute(TransportOperation::Receive { source, timeout_ms }, effects)?;
+
+                if let TransportResult::Received {
+                    source,
+                    data,
+                    metadata,
+                } = result
+                {
                     let processed_data = if self.is_encrypted(&metadata) {
                         match self.config.algorithm.decrypt(&data, &self.key) {
                             Ok(decrypted) => {
                                 self.stats.bytes_decrypted += decrypted.len() as u64;
                                 effects.log_info(
-                                    &format!("Decrypted {} bytes to {} bytes", 
-                                            data.len(), decrypted.len()),
-                                    &[]
+                                    &format!(
+                                        "Decrypted {} bytes to {} bytes",
+                                        data.len(),
+                                        decrypted.len()
+                                    ),
+                                    &[],
                                 );
                                 decrypted
                             }
                             Err(e) => {
                                 self.stats.errors += 1;
-                                effects.log_error(
-                                    &format!("Decryption failed: {}", e),
-                                    &[]
-                                );
+                                effects.log_error(&format!("Decryption failed: {}", e), &[]);
                                 data
                             }
                         }
                     } else {
                         data
                     };
-                    
+
                     Ok(TransportResult::Received {
                         source,
                         data: processed_data,
@@ -289,22 +319,37 @@ impl TransportMiddleware for EncryptionMiddleware {
                     Ok(result)
                 }
             }
-            
+
             _ => next.execute(operation, effects),
         }
     }
-    
+
     fn middleware_name(&self) -> &'static str {
         "EncryptionMiddleware"
     }
-    
+
     fn middleware_info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();
-        info.insert("algorithm".to_string(), format!("{:?}", self.config.algorithm));
-        info.insert("key_size".to_string(), format!("{:?}", self.config.key_size));
-        info.insert("authentication".to_string(), self.config.require_authentication.to_string());
-        info.insert("bytes_encrypted".to_string(), self.stats.bytes_encrypted.to_string());
-        info.insert("bytes_decrypted".to_string(), self.stats.bytes_decrypted.to_string());
+        info.insert(
+            "algorithm".to_string(),
+            format!("{:?}", self.config.algorithm),
+        );
+        info.insert(
+            "key_size".to_string(),
+            format!("{:?}", self.config.key_size),
+        );
+        info.insert(
+            "authentication".to_string(),
+            self.config.require_authentication.to_string(),
+        );
+        info.insert(
+            "bytes_encrypted".to_string(),
+            self.stats.bytes_encrypted.to_string(),
+        );
+        info.insert(
+            "bytes_decrypted".to_string(),
+            self.stats.bytes_decrypted.to_string(),
+        );
         info.insert("operations".to_string(), self.stats.operations.to_string());
         info.insert("errors".to_string(), self.stats.errors.to_string());
         info

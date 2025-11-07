@@ -2,7 +2,7 @@
 //!
 //! Provides different implementations of TimeEffects for various execution contexts.
 
-// Temporarily commented out - incomplete implementations  
+// Temporarily commented out - incomplete implementations
 // pub mod real;
 // pub mod simulated;
 // pub use real::RealTimeHandler;

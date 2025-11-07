@@ -15,7 +15,7 @@
 //!
 //! Types are organized into modules by domain:
 //! - `identifiers`: Core ID types (SessionId, EventId, etc.)
-//! - `sessions`: Session-related types and status enums
+//! - `session_epochs`: Session epochs, participant IDs, and session status enums
 //! - `protocols`: Protocol types and operation enums
 //! - `content`: Content addressing and chunk types
 //! - `capabilities`: Capability system types
@@ -26,16 +26,18 @@
 pub mod config;
 pub mod content;
 pub mod conversions;
+pub mod effects;
 pub mod encoding;
 pub mod errors;
 pub mod identifiers;
 pub mod macros;
 pub mod permissions;
-pub mod protocol_types;
 pub mod protocols;
+pub mod relationships;
+pub mod semilattice;
 pub mod serialization;
+pub mod session_epochs;
 pub mod session_utils;
-pub mod sessions;
 pub mod time;
 // Re-export all public types for convenient access
 pub use config::{
@@ -51,12 +53,11 @@ pub use errors::{
 pub use errors::Result as AuraResult;
 pub use identifiers::*;
 pub use permissions::CanonicalPermission;
-pub use protocol_types::*;
 pub use protocols::*;
+pub use relationships::*;
 pub use serialization::{Result as SerializationResult, SerializationError};
+pub use session_epochs::*;
 pub use session_utils::*;
-pub use sessions::*;
-// Backward compatibility exports
 pub use time::{
     current_system_time, current_unix_timestamp, current_unix_timestamp_millis, LamportTimestamp,
 };

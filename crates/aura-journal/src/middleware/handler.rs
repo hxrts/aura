@@ -1,6 +1,6 @@
 //! Journal operation handlers
 
-use super::{JournalHandler, JournalContext};
+use super::{JournalContext, JournalHandler};
 use crate::error::{Error, Result};
 use crate::operations::JournalOperation;
 use crate::state::AccountState;
@@ -31,23 +31,23 @@ impl JournalHandler for StateHandler {
                 let mut state = self.state.write().map_err(|_| {
                     Error::storage_failed("Failed to acquire write lock on account state")
                 })?;
-                
+
                 let changes = state.add_device(device)?;
-                
+
                 Ok(serde_json::json!({
                     "operation": "add_device",
                     "success": true,
                     "changes_count": changes.len()
                 }))
             }
-            
+
             JournalOperation::RemoveDevice { device_id } => {
                 let mut state = self.state.write().map_err(|_| {
                     Error::storage_failed("Failed to acquire write lock on account state")
                 })?;
-                
+
                 let changes = state.remove_device(device_id)?;
-                
+
                 Ok(serde_json::json!({
                     "operation": "remove_device",
                     "device_id": device_id.to_string(),
@@ -55,29 +55,29 @@ impl JournalHandler for StateHandler {
                     "changes_count": changes.len()
                 }))
             }
-            
+
             JournalOperation::AddGuardian { guardian } => {
                 let mut state = self.state.write().map_err(|_| {
                     Error::storage_failed("Failed to acquire write lock on account state")
                 })?;
-                
+
                 let changes = state.add_guardian(guardian)?;
-                
+
                 Ok(serde_json::json!({
                     "operation": "add_guardian",
                     "success": true,
                     "changes_count": changes.len()
                 }))
             }
-            
+
             JournalOperation::IncrementEpoch => {
                 let mut state = self.state.write().map_err(|_| {
                     Error::storage_failed("Failed to acquire write lock on account state")
                 })?;
-                
+
                 let changes = state.increment_epoch()?;
                 let new_epoch = state.get_epoch();
-                
+
                 Ok(serde_json::json!({
                     "operation": "increment_epoch",
                     "new_epoch": new_epoch,
@@ -85,35 +85,34 @@ impl JournalHandler for StateHandler {
                     "changes_count": changes.len()
                 }))
             }
-            
+
             JournalOperation::GetDevices => {
                 let state = self.state.read().map_err(|_| {
                     Error::storage_failed("Failed to acquire read lock on account state")
                 })?;
-                
+
                 let devices = state.get_devices();
-                
+
                 Ok(serde_json::json!({
                     "operation": "get_devices",
                     "devices": devices.len(),
                     "success": true
                 }))
             }
-            
+
             JournalOperation::GetEpoch => {
                 let state = self.state.read().map_err(|_| {
                     Error::storage_failed("Failed to acquire read lock on account state")
                 })?;
-                
+
                 let epoch = state.get_epoch();
-                
+
                 Ok(serde_json::json!({
                     "operation": "get_epoch",
                     "epoch": epoch,
                     "success": true
                 }))
             }
-            
         }
     }
 }

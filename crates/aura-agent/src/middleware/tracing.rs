@@ -164,30 +164,36 @@ impl TraceEvent {
 
     /// Format as structured log line
     pub fn format(&self) -> String {
-        let timestamp_str = self.timestamp
+        let timestamp_str = self
+            .timestamp
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or(0);
 
-        let duration_str = self.duration
+        let duration_str = self
+            .duration
             .map(|d| format!(" duration={}ms", d.as_millis()))
             .unwrap_or_default();
 
-        let success_str = self.success
+        let success_str = self
+            .success
             .map(|s| format!(" success={}", s))
             .unwrap_or_default();
 
-        let session_str = self.session_id
+        let session_str = self
+            .session_id
             .as_ref()
             .map(|s| format!(" session_id={}", s))
             .unwrap_or_default();
 
-        let parent_str = self.parent_span_id
+        let parent_str = self
+            .parent_span_id
             .map(|p| format!(" parent_span={}", p))
             .unwrap_or_default();
 
         let metadata_str = if !self.metadata.is_empty() {
-            let pairs: Vec<String> = self.metadata
+            let pairs: Vec<String> = self
+                .metadata
                 .iter()
                 .map(|(k, v)| format!("{}={}", k, v))
                 .collect();
@@ -286,8 +292,20 @@ impl TraceStorage {
     }
 
     /// Start a new span
-    pub fn start_span(&mut self, span_id: SpanId, trace_id: TraceId, operation: String, parent_span_id: Option<SpanId>) {
-        let span = ActiveSpan::new(span_id, trace_id, operation.clone(), self.device_id, parent_span_id);
+    pub fn start_span(
+        &mut self,
+        span_id: SpanId,
+        trace_id: TraceId,
+        operation: String,
+        parent_span_id: Option<SpanId>,
+    ) {
+        let span = ActiveSpan::new(
+            span_id,
+            trace_id,
+            operation.clone(),
+            self.device_id,
+            parent_span_id,
+        );
         self.active_spans.insert(span_id, span);
 
         // Create span start event
@@ -298,14 +316,17 @@ impl TraceStorage {
             "span_start".to_string(),
             operation,
             self.device_id,
-        ).with_parent(parent_span_id.unwrap_or(span_id));
+        )
+        .with_parent(parent_span_id.unwrap_or(span_id));
 
         self.add_event(event);
     }
 
     /// End a span
     pub fn end_span(&mut self, span_id: SpanId, success: bool) -> Result<()> {
-        let span = self.active_spans.remove(&span_id)
+        let span = self
+            .active_spans
+            .remove(&span_id)
             .ok_or_else(|| AuraError::not_found("Span not found"))?;
 
         let duration = span.elapsed();
@@ -330,14 +351,16 @@ impl TraceStorage {
 
     /// Get events for a specific trace
     pub fn get_trace_events(&self, trace_id: TraceId) -> Vec<&TraceEvent> {
-        self.events.iter()
+        self.events
+            .iter()
             .filter(|e| e.trace_id == trace_id)
             .collect()
     }
 
     /// Get events for a specific operation
     pub fn get_operation_events(&self, operation: &str) -> Vec<&TraceEvent> {
-        self.events.iter()
+        self.events
+            .iter()
             .filter(|e| e.operation == operation)
             .collect()
     }
@@ -411,9 +434,9 @@ impl OperationTracer {
         let trace_id = self.current_trace.unwrap_or_else(|| self.start_trace());
         let span_id = SpanId::new();
         let parent_span_id = self.current_span;
-        
+
         self.current_span = Some(span_id);
-        
+
         span_id
     }
 
@@ -481,20 +504,18 @@ impl TracingMiddleware {
     }
 
     /// Log an event in the current trace context
-    pub async fn log_event(&self, level: LogLevel, message: String, operation: String) -> Result<()> {
+    pub async fn log_event(
+        &self,
+        level: LogLevel,
+        message: String,
+        operation: String,
+    ) -> Result<()> {
         let tracer = self.tracer.read().await;
-        
+
         let trace_id = tracer.current_trace().unwrap_or_else(TraceId::new);
         let span_id = tracer.current_span().unwrap_or_else(SpanId::new);
 
-        let event = TraceEvent::new(
-            trace_id,
-            span_id,
-            level,
-            message,
-            operation,
-            self.device_id,
-        );
+        let event = TraceEvent::new(trace_id, span_id, level, message, operation, self.device_id);
 
         let mut storage = self.storage.write().await;
         storage.add_event(event);
@@ -505,13 +526,21 @@ impl TracingMiddleware {
     /// Get recent trace events
     pub async fn get_recent_events(&self, limit: usize) -> Vec<TraceEvent> {
         let storage = self.storage.read().await;
-        storage.get_recent_events(limit).into_iter().cloned().collect()
+        storage
+            .get_recent_events(limit)
+            .into_iter()
+            .cloned()
+            .collect()
     }
 
     /// Get events for a specific operation
     pub async fn get_operation_events(&self, operation: &str) -> Vec<TraceEvent> {
         let storage = self.storage.read().await;
-        storage.get_operation_events(operation).into_iter().cloned().collect()
+        storage
+            .get_operation_events(operation)
+            .into_iter()
+            .cloned()
+            .collect()
     }
 
     /// Get storage statistics
@@ -531,15 +560,15 @@ impl TracingMiddleware {
     pub async fn export_traces(&self) -> Result<String> {
         let storage = self.storage.read().await;
         let recent_events = storage.get_recent_events(1000);
-        
+
         // Simple JSON export - could use serde for more sophisticated serialization
         let mut export = String::from("[\n");
-        
+
         for (i, event) in recent_events.iter().enumerate() {
             if i > 0 {
                 export.push_str(",\n");
             }
-            
+
             export.push_str(&format!(
                 "  {{\"event_id\":\"{}\",\"trace_id\":\"{}\",\"span_id\":\"{}\",\"timestamp\":{},\"level\":\"{}\",\"message\":\"{}\",\"operation\":\"{}\"}}",
                 event.event_id,
@@ -551,7 +580,7 @@ impl TracingMiddleware {
                 event.operation
             ));
         }
-        
+
         export.push_str("\n]");
         Ok(export)
     }
@@ -566,7 +595,7 @@ mod tests {
         let device_id = DeviceId::new();
         let trace_id = TraceId::new();
         let span_id = SpanId::new();
-        
+
         let event = TraceEvent::new(
             trace_id,
             span_id,
@@ -588,7 +617,7 @@ mod tests {
         let device_id = DeviceId::new();
         let trace_id = TraceId::new();
         let span_id = SpanId::new();
-        
+
         let event = TraceEvent::new(
             trace_id,
             span_id,
@@ -596,7 +625,9 @@ mod tests {
             "Error occurred".to_string(),
             "error_op".to_string(),
             device_id,
-        ).with_success(false).with_duration(Duration::from_millis(100));
+        )
+        .with_success(false)
+        .with_duration(Duration::from_millis(100));
 
         let formatted = event.format();
         assert!(formatted.contains("ERROR"));
@@ -633,13 +664,16 @@ mod tests {
 
         // Start an operation
         let trace_id = middleware.start_operation("test_operation").await.unwrap();
-        
+
         // Log an event
-        middleware.log_event(
-            LogLevel::Info,
-            "Operation started".to_string(),
-            "test_operation".to_string(),
-        ).await.unwrap();
+        middleware
+            .log_event(
+                LogLevel::Info,
+                "Operation started".to_string(),
+                "test_operation".to_string(),
+            )
+            .await
+            .unwrap();
 
         // End the operation
         middleware.end_operation(trace_id, true).await.unwrap();

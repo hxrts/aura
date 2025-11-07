@@ -3,7 +3,7 @@
 //! This module provides high-level assertion macros and helper functions that
 //! reduce duplication of common validation patterns across tests.
 
-use aura_journal::AccountState;
+use aura_journal::semilattice::account_state::AccountState;
 use aura_types::DeviceId;
 
 /// Assert that an account state has the expected number of devices
@@ -11,11 +11,11 @@ use aura_types::DeviceId;
 macro_rules! assert_device_count {
     ($account_state:expr, $expected:expr) => {
         assert_eq!(
-            $account_state.devices.len(),
+            $account_state.device_registry.devices.len(),
             $expected,
             "Expected {} devices in account state, found {}",
             $expected,
-            $account_state.devices.len()
+            $account_state.device_registry.devices.len()
         )
     };
 }
@@ -25,7 +25,10 @@ macro_rules! assert_device_count {
 macro_rules! assert_device_exists {
     ($account_state:expr, $device_id:expr) => {
         assert!(
-            $account_state.devices.contains_key(&$device_id),
+            $account_state
+                .device_registry
+                .devices
+                .contains_key(&$device_id),
             "Device {:?} not found in account state",
             $device_id
         )
@@ -37,27 +40,27 @@ macro_rules! assert_device_exists {
 macro_rules! assert_device_not_exists {
     ($account_state:expr, $device_id:expr) => {
         assert!(
-            !$account_state.devices.contains_key(&$device_id),
+            !$account_state
+                .device_registry
+                .devices
+                .contains_key(&$device_id),
             "Device {:?} should not exist in account state",
             $device_id
         )
     };
 }
 
-/// Assert that the account has the expected threshold configuration
+/// Assert that the account has active devices
+///
+/// Note: This replaces the deprecated threshold assertion since modern AccountState
+/// doesn't track threshold/total_participants directly.
 #[macro_export]
-macro_rules! assert_threshold {
-    ($account_state:expr, $expected_threshold:expr, $expected_total:expr) => {
-        assert_eq!(
-            $account_state.threshold, $expected_threshold,
-            "Expected threshold {}, found {}",
-            $expected_threshold, $account_state.threshold
-        );
-        assert_eq!(
-            $account_state.total_participants, $expected_total,
-            "Expected {} total participants, found {}",
-            $expected_total, $account_state.total_participants
-        );
+macro_rules! assert_has_devices {
+    ($account_state:expr) => {
+        assert!(
+            !$account_state.device_registry.devices.is_empty(),
+            "Account must have at least one device"
+        )
     };
 }
 
@@ -79,7 +82,11 @@ pub fn assert_device_key(
     expected_key: &ed25519_dalek::VerifyingKey,
 ) {
     assert_device_exists!(account_state, device_id);
-    let device = &account_state.devices[&device_id];
+    let device = account_state
+        .device_registry
+        .devices
+        .get(&device_id)
+        .expect("Device not found in registry");
     assert_eq!(
         &device.public_key, expected_key,
         "Device {:?} has unexpected public key",
@@ -89,7 +96,7 @@ pub fn assert_device_key(
 
 /// Helper function to assert all devices have been initialized
 pub fn assert_all_devices_initialized(account_state: &AccountState) {
-    for device in account_state.devices.values() {
+    for device in account_state.device_registry.devices.values() {
         assert!(
             device.public_key.to_bytes().len() == 32,
             "Device not properly initialized with public key"
@@ -101,33 +108,26 @@ pub fn assert_all_devices_initialized(account_state: &AccountState) {
 ///
 /// Performs basic sanity checks on account state.
 pub fn assert_account_valid(account_state: &AccountState) {
-    // Check that threshold is reasonable
+    // Check that we have at least one device
     assert!(
-        account_state.threshold > 0,
-        "Threshold must be greater than 0"
-    );
-    assert!(
-        account_state.threshold <= account_state.total_participants,
-        "Threshold cannot exceed total participants"
-    );
-
-    // Check that we have some devices
-    assert!(
-        !account_state.devices.is_empty(),
+        !account_state.device_registry.devices.is_empty(),
         "Account must have at least one device"
     );
 
-    // Check that device count matches
-    assert_eq!(
-        account_state.devices.len() as u16,
-        account_state.total_participants,
-        "Device count does not match total participants"
+    // Check account ID is valid
+    assert!(
+        !account_state.account_id.to_string().is_empty(),
+        "Account must have a valid account ID"
     );
 }
 
 /// Helper function to assert device metadata is properly configured
 pub fn assert_device_metadata_valid(account_state: &AccountState, device_id: DeviceId) {
-    let device = &account_state.devices[&device_id];
+    let device = account_state
+        .device_registry
+        .devices
+        .get(&device_id)
+        .expect("Device not found in registry");
     assert!(
         !device.device_name.is_empty(),
         "Device name cannot be empty"
@@ -194,9 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn test_assert_threshold_macro() {
+    fn test_assert_has_devices_macro() {
         let fixture = crate::fixtures::AccountTestFixture::with_devices(3, 2);
-        assert_threshold!(fixture.account_state, 2, 3);
+        assert_has_devices!(fixture.account_state);
     }
 
     #[test]

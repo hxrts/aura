@@ -13,7 +13,10 @@ pub struct JournalGraph;
 
 impl JournalGraph {
     /// Check if adding an edge would create a cycle in the Contains subgraph
-    pub fn would_create_cycle(journal: &KeyJournal, new_edge: &KeyEdge) -> Result<bool, GraphError> {
+    pub fn would_create_cycle(
+        journal: &KeyJournal,
+        new_edge: &KeyEdge,
+    ) -> Result<bool, GraphError> {
         if new_edge.kind != EdgeKind::Contains {
             // Only Contains edges participate in cycle detection
             return Ok(false);
@@ -178,7 +181,10 @@ impl JournalGraph {
     }
 
     /// Get topological ordering of nodes for derivation
-    pub fn topological_order(journal: &KeyJournal, root: NodeId) -> Result<Vec<NodeId>, GraphError> {
+    pub fn topological_order(
+        journal: &KeyJournal,
+        root: NodeId,
+    ) -> Result<Vec<NodeId>, GraphError> {
         let mut graph = Graph::new();
         let mut node_indices = BTreeMap::new();
         let mut visited = BTreeSet::new();

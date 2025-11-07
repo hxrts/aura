@@ -43,6 +43,9 @@ pub type Result<T> = AuraResult<T>;
 // Re-export complete middleware system
 pub use middleware::*;
 
+// Re-export effects system
+pub use effects::{CryptoEffects, CryptoEffectsExt, Effects, TimeEffects};
+
 // Re-export merkle utilities
 pub use merkle::{
     build_commitment_tree, build_merkle_root, verify_merkle_proof, SimpleMerkleProof,
@@ -65,7 +68,7 @@ pub use frost_ed25519::{
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KeyShare {
     pub identifier: u16,
-    pub key_package: Vec<u8>, // Serialized FrostKeyPackage
+    pub key_package: Vec<u8>,        // Serialized FrostKeyPackage
     pub public_key_package: Vec<u8>, // Serialized FrostPublicKeyPackage
 }
 
@@ -78,17 +81,17 @@ impl KeyShare {
             public_key_package,
         }
     }
-    
+
     /// Get the identifier
     pub fn identifier(&self) -> u16 {
         self.identifier
     }
-    
+
     /// Get the key package bytes
     pub fn key_package(&self) -> &[u8] {
         &self.key_package
     }
-    
+
     /// Get the public key package bytes
     pub fn public_key_package(&self) -> &[u8] {
         &self.public_key_package
@@ -96,6 +99,9 @@ impl KeyShare {
 }
 
 /// Generate a UUID for compatibility
+///
+/// TODO: This should use an effect handler for deterministic testing
+#[allow(clippy::disallowed_methods)]
 pub fn generate_uuid() -> uuid::Uuid {
     uuid::Uuid::new_v4()
 }
@@ -114,19 +120,19 @@ impl HpkeKeyPair {
         let mut public_key = [0u8; 32];
         rng.fill_bytes(&mut private_key);
         rng.fill_bytes(&mut public_key);
-        
+
         Self {
             private_key,
             public_key,
         }
     }
-    
+
     /// Get the private key
     pub fn private_key(&self) -> &HpkePrivateKey {
         &self.private_key
     }
-    
-    /// Get the public key  
+
+    /// Get the public key
     pub fn public_key(&self) -> &HpkePublicKey {
         &self.public_key
     }

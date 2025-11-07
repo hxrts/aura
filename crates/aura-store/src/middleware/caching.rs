@@ -1,9 +1,9 @@
 //! Caching Middleware
 
-use super::stack::StorageMiddleware;
 use super::handler::{StorageHandler, StorageOperation, StorageResult};
+use super::stack::StorageMiddleware;
 use aura_protocol::effects::AuraEffects;
-use aura_types::{MiddlewareContext, MiddlewareResult};
+use aura_protocol::middleware::{MiddlewareContext, MiddlewareResult};
 use std::collections::{HashMap, VecDeque};
 
 pub struct CachingMiddleware {
@@ -46,10 +46,15 @@ impl StorageMiddleware for CachingMiddleware {
                     })
                 } else {
                     let result = next.execute(operation, effects)?;
-                    if let StorageResult::Retrieved { ref data, chunk_id: ref retrieved_chunk_id, .. } = result {
+                    if let StorageResult::Retrieved {
+                        ref data,
+                        chunk_id: ref retrieved_chunk_id,
+                        ..
+                    } = result
+                    {
                         self.cache.insert(retrieved_chunk_id.clone(), data.clone());
                         self.access_order.push_back(retrieved_chunk_id.clone());
-                        
+
                         // Simple LRU eviction
                         while self.cache.len() > self.max_cache_size {
                             if let Some(old_key) = self.access_order.pop_front() {
@@ -63,7 +68,7 @@ impl StorageMiddleware for CachingMiddleware {
             _ => next.execute(operation, effects),
         }
     }
-    
+
     fn middleware_name(&self) -> &'static str {
         "CachingMiddleware"
     }

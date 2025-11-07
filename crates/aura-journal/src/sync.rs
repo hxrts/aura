@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_sync_manager_basic() {
-        let effects = Effects::test(42);
+        let effects = Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
         let device_id = DeviceId::new_with_effects(&effects);
         let peer_id = DeviceId::new_with_effects(&effects);
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_sync_orchestrator() {
-        let effects = Effects::test(42);
+        let effects = Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
         let device_id = DeviceId::new_with_effects(&effects);
         let peer_id = DeviceId::new_with_effects(&effects);

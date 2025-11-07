@@ -151,10 +151,12 @@ impl CryptoEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
         _data: &[u8],
         _key: &SigningKey,
     ) -> Result<Signature, CryptoError> {
-        Err(AuraError::Crypto(aura_types::CryptoError::OperationFailed {
-            message: "ed25519_sign requires direct handler access".to_string(),
-            context: "typed_bridge".to_string(),
-        }))
+        Err(AuraError::Crypto(
+            aura_types::CryptoError::OperationFailed {
+                message: "ed25519_sign requires direct handler access".to_string(),
+                context: "typed_bridge".to_string(),
+            },
+        ))
     }
 
     async fn ed25519_verify(
@@ -163,17 +165,21 @@ impl CryptoEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
         _signature: &Signature,
         _public_key: &VerifyingKey,
     ) -> Result<bool, CryptoError> {
-        Err(AuraError::Crypto(aura_types::CryptoError::OperationFailed {
-            message: "ed25519_verify requires direct handler access".to_string(),
-            context: "typed_bridge".to_string(),
-        }))
+        Err(AuraError::Crypto(
+            aura_types::CryptoError::OperationFailed {
+                message: "ed25519_verify requires direct handler access".to_string(),
+                context: "typed_bridge".to_string(),
+            },
+        ))
     }
 
     async fn ed25519_generate_keypair(&self) -> Result<(SigningKey, VerifyingKey), CryptoError> {
-        Err(AuraError::Crypto(aura_types::CryptoError::OperationFailed {
-            message: "ed25519_generate_keypair requires direct handler access".to_string(),
-            context: "typed_bridge".to_string(),
-        }))
+        Err(AuraError::Crypto(
+            aura_types::CryptoError::OperationFailed {
+                message: "ed25519_generate_keypair requires direct handler access".to_string(),
+                context: "typed_bridge".to_string(),
+            },
+        ))
     }
 
     async fn ed25519_public_key(&self, key: &SigningKey) -> VerifyingKey {
@@ -298,10 +304,12 @@ impl TimeEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
             &mut ctx,
         )
         .await
-        .map_err(|e| AuraError::Infrastructure(aura_types::InfrastructureError::ConfigError {
-            message: format!("Sleep failed: {}", e),
-            context: "typed_bridge".to_string(),
-        }))
+        .map_err(|e| {
+            AuraError::Infrastructure(aura_types::InfrastructureError::ConfigError {
+                message: format!("Sleep failed: {}", e),
+                context: "typed_bridge".to_string(),
+            })
+        })
     }
 
     async fn yield_until(&self, _condition: WakeCondition) -> Result<(), TimeError> {
@@ -309,10 +317,12 @@ impl TimeEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
     }
 
     async fn wait_until(&self, _condition: WakeCondition) -> Result<(), AuraError> {
-        Err(AuraError::Infrastructure(aura_types::InfrastructureError::ConfigError {
-            message: "wait_until not implemented through bridge".to_string(),
-            context: "typed_bridge".to_string(),
-        }))
+        Err(AuraError::Infrastructure(
+            aura_types::InfrastructureError::ConfigError {
+                message: "wait_until not implemented through bridge".to_string(),
+                context: "typed_bridge".to_string(),
+            },
+        ))
     }
 
     async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
@@ -345,14 +355,8 @@ impl TimeEffects for Arc<RwLock<Box<dyn AuraHandler>>> {
         .map_err(|_| TimeError::ServiceUnavailable)
     }
 
-    async fn timeout<F, T>(&self, future: F, _duration_ms: u64) -> Result<T, AuraError>
-    where
-        F: std::future::Future<Output = T> + Send + 'async_trait,
-        T: Send + 'async_trait,
-    {
-        // For now, just execute the future without timeout
-        Ok(future.await)
-    }
+    // timeout method removed to make TimeEffects dyn-compatible
+    // Use tokio::time::timeout directly where needed
 
     fn is_simulated(&self) -> bool {
         false // Bridge implementations assume production mode

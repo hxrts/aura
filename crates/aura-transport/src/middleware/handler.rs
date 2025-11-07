@@ -2,8 +2,8 @@
 //!
 //! Defines the core transport operations that can be wrapped with middleware.
 
-use aura_protocol::effects::AuraEffects;
-use aura_types::MiddlewareResult;
+use aura_protocol::effects::{AuraEffects, TimeEffects};
+use aura_protocol::middleware::MiddlewareResult;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
@@ -54,22 +54,16 @@ pub enum TransportOperation {
         options: ConnectionOptions,
     },
     /// Disconnect from a peer
-    Disconnect {
-        address: NetworkAddress,
-    },
+    Disconnect { address: NetworkAddress },
     /// Listen for incoming connections
     Listen {
         address: NetworkAddress,
         options: ListenOptions,
     },
     /// Discover available peers
-    Discover {
-        criteria: DiscoveryCriteria,
-    },
+    Discover { criteria: DiscoveryCriteria },
     /// Get connection status
-    Status {
-        address: Option<NetworkAddress>,
-    },
+    Status { address: Option<NetworkAddress> },
 }
 
 /// Connection options
@@ -118,22 +112,16 @@ pub enum TransportResult {
         connection_id: String,
     },
     /// Disconnection completed
-    Disconnected {
-        address: NetworkAddress,
-    },
+    Disconnected { address: NetworkAddress },
     /// Listening started
     Listening {
         address: NetworkAddress,
         listener_id: String,
     },
     /// Peers discovered
-    Discovered {
-        peers: Vec<PeerInfo>,
-    },
+    Discovered { peers: Vec<PeerInfo> },
     /// Status retrieved
-    Status {
-        connections: Vec<ConnectionInfo>,
-    },
+    Status { connections: Vec<ConnectionInfo> },
 }
 
 /// Information about a discovered peer
@@ -202,7 +190,7 @@ pub trait TransportHandler: Send + Sync {
         operation: TransportOperation,
         effects: &dyn AuraEffects,
     ) -> MiddlewareResult<TransportResult>;
-    
+
     /// Get handler metadata for observability
     fn handler_info(&self) -> HashMap<String, String> {
         HashMap::new()
@@ -224,7 +212,7 @@ impl BaseTransportHandler {
             next_connection_id: 1,
         }
     }
-    
+
     fn generate_connection_id(&mut self) -> String {
         let id = format!("conn_{}", self.next_connection_id);
         self.next_connection_id += 1;
@@ -239,20 +227,31 @@ impl TransportHandler for BaseTransportHandler {
         effects: &dyn AuraEffects,
     ) -> MiddlewareResult<TransportResult> {
         match operation {
-            TransportOperation::Send { destination, data, metadata: _ } => {
+            TransportOperation::Send {
+                destination,
+                data,
+                metadata: _,
+            } => {
                 // Simulate sending data
                 effects.log_info(
-                    &format!("Sending {} bytes to {}", data.len(), destination.as_string()),
-                    &[]
+                    &format!(
+                        "Sending {} bytes to {}",
+                        data.len(),
+                        destination.as_string()
+                    ),
+                    &[],
                 );
-                
+
                 Ok(TransportResult::Sent {
                     destination,
                     bytes_sent: data.len(),
                 })
             }
-            
-            TransportOperation::Receive { source: _, timeout_ms: _ } => {
+
+            TransportOperation::Receive {
+                source: _,
+                timeout_ms: _,
+            } => {
                 // Placeholder - return empty data
                 Ok(TransportResult::Received {
                     source: self.local_address.clone(),
@@ -260,8 +259,11 @@ impl TransportHandler for BaseTransportHandler {
                     metadata: HashMap::new(),
                 })
             }
-            
-            TransportOperation::Connect { address, options: _ } => {
+
+            TransportOperation::Connect {
+                address,
+                options: _,
+            } => {
                 let connection_id = self.generate_connection_id();
                 let connection_info = ConnectionInfo {
                     address: address.clone(),
@@ -269,55 +271,69 @@ impl TransportHandler for BaseTransportHandler {
                     state: ConnectionState::Connected,
                     bytes_sent: 0,
                     bytes_received: 0,
-                    created_at: effects.current_timestamp(),
-                    last_activity: effects.current_timestamp(),
+                    created_at: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    last_activity: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
                 };
-                
-                self.connections.insert(connection_id.clone(), connection_info);
-                
+
+                self.connections
+                    .insert(connection_id.clone(), connection_info);
+
                 Ok(TransportResult::Connected {
                     address,
                     connection_id,
                 })
             }
-            
+
             TransportOperation::Disconnect { address } => {
                 // Find and remove connection
                 self.connections.retain(|_, conn| conn.address != address);
-                
+
                 Ok(TransportResult::Disconnected { address })
             }
-            
-            TransportOperation::Listen { address, options: _ } => {
+
+            TransportOperation::Listen {
+                address,
+                options: _,
+            } => {
                 let listener_id = format!("listener_{}", self.next_connection_id);
                 self.next_connection_id += 1;
-                
+
                 Ok(TransportResult::Listening {
                     address,
                     listener_id,
                 })
             }
-            
+
             TransportOperation::Discover { criteria: _ } => {
                 // Placeholder - return empty peer list
-                Ok(TransportResult::Discovered {
-                    peers: Vec::new(),
-                })
+                Ok(TransportResult::Discovered { peers: Vec::new() })
             }
-            
+
             TransportOperation::Status { address: _ } => {
                 let connections: Vec<ConnectionInfo> = self.connections.values().cloned().collect();
-                
+
                 Ok(TransportResult::Status { connections })
             }
         }
     }
-    
+
     fn handler_info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();
-        info.insert("handler_type".to_string(), "BaseTransportHandler".to_string());
+        info.insert(
+            "handler_type".to_string(),
+            "BaseTransportHandler".to_string(),
+        );
         info.insert("local_address".to_string(), self.local_address.as_string());
-        info.insert("active_connections".to_string(), self.connections.len().to_string());
+        info.insert(
+            "active_connections".to_string(),
+            self.connections.len().to_string(),
+        );
         info
     }
 }

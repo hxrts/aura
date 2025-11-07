@@ -1,7 +1,7 @@
 //! Journal-specific types for ledger operations
 
-use super::tree_op::Epoch;
 use super::intent::IntentId;
+use super::tree_op::Epoch;
 use serde::{Deserialize, Serialize};
 
 /// Journal operation errors
@@ -9,20 +9,20 @@ use serde::{Deserialize, Serialize};
 pub enum JournalError {
     /// Tree operation failed at specific epoch
     #[error("Tree operation failed at epoch {epoch}: {reason}")]
-    TreeOperationFailed { 
+    TreeOperationFailed {
         /// Epoch where failure occurred
-        epoch: Epoch, 
+        epoch: Epoch,
         /// Description of failure
-        reason: String 
+        reason: String,
     },
 
     /// Invalid threshold signature
     #[error("Invalid signature for epoch {epoch}: {reason}")]
-    InvalidSignature { 
+    InvalidSignature {
         /// Epoch of invalid signature
-        epoch: Epoch, 
+        epoch: Epoch,
         /// Reason for invalidity
-        reason: String 
+        reason: String,
     },
 
     /// Invalid intent operation

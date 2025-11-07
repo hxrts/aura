@@ -77,9 +77,13 @@ pub enum ValidationRuleType {
 }
 
 /// Configuration validator with rule-based validation
+/// Type alias for custom validator functions to reduce complexity
+pub type CustomValidator = Box<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// Configuration validator that applies rules to validate configuration values
 pub struct ConfigValidator {
     rules: Vec<ValidationRule>,
-    custom_validators: HashMap<String, Box<dyn Fn(&str) -> bool + Send + Sync>>,
+    custom_validators: HashMap<String, CustomValidator>,
 }
 
 impl ConfigValidator {
@@ -142,7 +146,7 @@ impl ConfigValidator {
             ValidationRuleType::Custom(validator_name) => self
                 .custom_validators
                 .get(validator_name)
-                .map_or(false, |validator| validator(value)),
+                .is_some_and(|validator| validator(value)),
             ValidationRuleType::OneOf(options) => options.contains(&value.to_string()),
             ValidationRuleType::MinLength(min_len) => value.len() >= *min_len,
             ValidationRuleType::MaxLength(max_len) => value.len() <= *max_len,
@@ -150,7 +154,7 @@ impl ConfigValidator {
                 // Simple check - would use proper parsing in real implementation
                 value.contains(':') && !value.is_empty()
             }
-            ValidationRuleType::PositiveNumber => value.parse::<f64>().map_or(false, |n| n > 0.0),
+            ValidationRuleType::PositiveNumber => value.parse::<f64>().is_ok_and(|n| n > 0.0),
             ValidationRuleType::ValidPath => {
                 // Simple path validation - would use std::path in real implementation
                 !value.is_empty() && !value.contains('\0')

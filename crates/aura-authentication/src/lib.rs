@@ -20,7 +20,7 @@ pub mod threshold;
 
 // Domain modules moved from aura-types
 pub mod capabilities;
-pub mod relationships;
+// Re-export relationships from aura_types
 
 // Integration tests
 #[cfg(test)]
@@ -39,8 +39,8 @@ pub use event_validation::{
 };
 
 // Re-export domain types
+pub use aura_types::relationships::*;
 pub use capabilities::*;
-pub use relationships::*;
 
 // EventAuthorization and ThresholdSig are defined in this module and exported by default
 

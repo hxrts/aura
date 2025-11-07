@@ -3,10 +3,7 @@
 //! Provides telemetry and metrics collection for agent operations, enabling
 //! monitoring, performance analysis, and operational insights.
 
-use aura_types::{
-    identifiers::DeviceId,
-    AuraError, AuraResult as Result,
-};
+use aura_types::{identifiers::DeviceId, AuraError, AuraResult as Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -63,7 +60,7 @@ impl OperationMetrics {
     /// Update duration statistics
     fn update_duration_stats(&mut self, duration: Duration) {
         self.total_duration += duration;
-        
+
         let total_count = self.success_count + self.error_count;
         if total_count > 0 {
             self.avg_duration = self.total_duration / total_count as u32;
@@ -90,7 +87,7 @@ impl OperationMetrics {
         if total_ops == 0 || window.is_zero() {
             return 0.0;
         }
-        
+
         total_ops as f64 / window.as_secs_f64()
     }
 }
@@ -127,7 +124,8 @@ impl AgentMetrics {
 
     /// Record an operation execution
     pub fn record_operation(&mut self, operation: &str, duration: Duration, success: bool) {
-        let metrics = self.operations
+        let metrics = self
+            .operations
             .entry(operation.to_string())
             .or_insert_with(|| OperationMetrics::new(operation.to_string()));
 
@@ -162,7 +160,11 @@ impl AgentMetrics {
         let avg_success_rate = if self.operations.is_empty() {
             0.0
         } else {
-            self.operations.values().map(|m| m.success_rate()).sum::<f64>() / self.operations.len() as f64
+            self.operations
+                .values()
+                .map(|m| m.success_rate())
+                .sum::<f64>()
+                / self.operations.len() as f64
         };
 
         MetricsSummary {
@@ -210,9 +212,17 @@ Active Connections: {}",
             self.uptime,
             self.total_operations,
             self.total_success,
-            if self.total_operations > 0 { (self.total_success as f64 / self.total_operations as f64) * 100.0 } else { 0.0 },
+            if self.total_operations > 0 {
+                (self.total_success as f64 / self.total_operations as f64) * 100.0
+            } else {
+                0.0
+            },
             self.total_errors,
-            if self.total_operations > 0 { (self.total_errors as f64 / self.total_operations as f64) * 100.0 } else { 0.0 },
+            if self.total_operations > 0 {
+                (self.total_errors as f64 / self.total_operations as f64) * 100.0
+            } else {
+                0.0
+            },
             self.unique_operations,
             self.memory_usage_mb,
             self.active_connections
@@ -232,7 +242,7 @@ impl MetricsMiddleware {
     /// Create new metrics middleware
     pub async fn new(device_id: DeviceId) -> Result<Self> {
         let metrics = AgentMetrics::new(device_id);
-        
+
         Ok(Self {
             metrics: Arc::new(RwLock::new(metrics)),
             device_id,
@@ -240,7 +250,12 @@ impl MetricsMiddleware {
     }
 
     /// Record an operation execution
-    pub async fn record_operation(&self, operation: &str, duration: Duration, success: bool) -> Result<()> {
+    pub async fn record_operation(
+        &self,
+        operation: &str,
+        duration: Duration,
+        success: bool,
+    ) -> Result<()> {
         let mut metrics = self.metrics.write().await;
         metrics.record_operation(operation, duration, success);
         Ok(())
@@ -289,41 +304,78 @@ impl MetricsMiddleware {
     pub async fn export_metrics(&self) -> Result<String> {
         let metrics = self.metrics.read().await;
         let summary = metrics.summary();
-        
+
         // Export in a simple format - could be enhanced for Prometheus, etc.
         let mut export = String::new();
-        
+
         export.push_str(&format!("# Agent Metrics Export\n"));
         export.push_str(&format!("# Device: {}\n", summary.device_id));
-        export.push_str(&format!("# Generated: {}\n", 
-            SystemTime::now().duration_since(UNIX_EPOCH)
+        export.push_str(&format!(
+            "# Generated: {}\n",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
-                .unwrap_or(0)));
+                .unwrap_or(0)
+        ));
         export.push_str(&format!("\n"));
-        
-        export.push_str(&format!("aura_agent_uptime_seconds {}\n", summary.uptime.as_secs()));
-        export.push_str(&format!("aura_agent_total_operations {}\n", summary.total_operations));
-        export.push_str(&format!("aura_agent_success_operations {}\n", summary.total_success));
-        export.push_str(&format!("aura_agent_error_operations {}\n", summary.total_errors));
-        export.push_str(&format!("aura_agent_success_rate {:.4}\n", summary.avg_success_rate / 100.0));
-        export.push_str(&format!("aura_agent_memory_usage_mb {}\n", summary.memory_usage_mb));
-        export.push_str(&format!("aura_agent_active_connections {}\n", summary.active_connections));
-        
+
+        export.push_str(&format!(
+            "aura_agent_uptime_seconds {}\n",
+            summary.uptime.as_secs()
+        ));
+        export.push_str(&format!(
+            "aura_agent_total_operations {}\n",
+            summary.total_operations
+        ));
+        export.push_str(&format!(
+            "aura_agent_success_operations {}\n",
+            summary.total_success
+        ));
+        export.push_str(&format!(
+            "aura_agent_error_operations {}\n",
+            summary.total_errors
+        ));
+        export.push_str(&format!(
+            "aura_agent_success_rate {:.4}\n",
+            summary.avg_success_rate / 100.0
+        ));
+        export.push_str(&format!(
+            "aura_agent_memory_usage_mb {}\n",
+            summary.memory_usage_mb
+        ));
+        export.push_str(&format!(
+            "aura_agent_active_connections {}\n",
+            summary.active_connections
+        ));
+
         // Per-operation metrics
         for (op_name, op_metrics) in &metrics.operations {
             let clean_name = op_name.replace(' ', "_").replace('-', "_");
-            export.push_str(&format!("aura_agent_operation_success_total{{operation=\"{}\"}} {}\n", 
-                clean_name, op_metrics.success_count));
-            export.push_str(&format!("aura_agent_operation_error_total{{operation=\"{}\"}} {}\n", 
-                clean_name, op_metrics.error_count));
-            export.push_str(&format!("aura_agent_operation_duration_avg_seconds{{operation=\"{}\"}} {:.6}\n", 
-                clean_name, op_metrics.avg_duration.as_secs_f64()));
-            export.push_str(&format!("aura_agent_operation_duration_min_seconds{{operation=\"{}\"}} {:.6}\n", 
-                clean_name, op_metrics.min_duration.as_secs_f64()));
-            export.push_str(&format!("aura_agent_operation_duration_max_seconds{{operation=\"{}\"}} {:.6}\n", 
-                clean_name, op_metrics.max_duration.as_secs_f64()));
+            export.push_str(&format!(
+                "aura_agent_operation_success_total{{operation=\"{}\"}} {}\n",
+                clean_name, op_metrics.success_count
+            ));
+            export.push_str(&format!(
+                "aura_agent_operation_error_total{{operation=\"{}\"}} {}\n",
+                clean_name, op_metrics.error_count
+            ));
+            export.push_str(&format!(
+                "aura_agent_operation_duration_avg_seconds{{operation=\"{}\"}} {:.6}\n",
+                clean_name,
+                op_metrics.avg_duration.as_secs_f64()
+            ));
+            export.push_str(&format!(
+                "aura_agent_operation_duration_min_seconds{{operation=\"{}\"}} {:.6}\n",
+                clean_name,
+                op_metrics.min_duration.as_secs_f64()
+            ));
+            export.push_str(&format!(
+                "aura_agent_operation_duration_max_seconds{{operation=\"{}\"}} {:.6}\n",
+                clean_name,
+                op_metrics.max_duration.as_secs_f64()
+            ));
         }
-        
+
         Ok(export)
     }
 }
@@ -348,7 +400,7 @@ impl SystemMetricsCollector {
         {
             // Could use Windows APIs
         }
-        
+
         // Placeholder: return 0 for now
         0
     }
@@ -374,14 +426,14 @@ mod tests {
     #[tokio::test]
     async fn test_operation_metrics() {
         let mut metrics = OperationMetrics::new("test_op".to_string());
-        
+
         assert_eq!(metrics.success_count, 0);
         assert_eq!(metrics.error_count, 0);
-        
+
         metrics.record_success(Duration::from_millis(100));
         assert_eq!(metrics.success_count, 1);
         assert_eq!(metrics.avg_duration, Duration::from_millis(100));
-        
+
         metrics.record_error(Duration::from_millis(200));
         assert_eq!(metrics.error_count, 1);
         assert_eq!(metrics.avg_duration, Duration::from_millis(150));
@@ -392,16 +444,16 @@ mod tests {
     async fn test_agent_metrics() {
         let device_id = DeviceId::new();
         let mut metrics = AgentMetrics::new(device_id);
-        
+
         metrics.record_operation("test_op", Duration::from_millis(100), true);
         metrics.record_operation("test_op", Duration::from_millis(200), false);
-        
+
         assert_eq!(metrics.total_operations, 2);
-        
+
         let op_metrics = metrics.get_operation_metrics("test_op").unwrap();
         assert_eq!(op_metrics.success_count, 1);
         assert_eq!(op_metrics.error_count, 1);
-        
+
         let summary = metrics.summary();
         assert_eq!(summary.total_operations, 2);
         assert_eq!(summary.total_success, 1);
@@ -412,15 +464,18 @@ mod tests {
     async fn test_metrics_middleware() {
         let device_id = DeviceId::new();
         let middleware = MetricsMiddleware::new(device_id).await.unwrap();
-        
-        middleware.record_operation("test", Duration::from_millis(100), true).await.unwrap();
-        
+
+        middleware
+            .record_operation("test", Duration::from_millis(100), true)
+            .await
+            .unwrap();
+
         let metrics = middleware.get_metrics().await;
         assert_eq!(metrics.total_operations, 1);
-        
+
         let summary = middleware.get_summary().await;
         assert_eq!(summary.total_success, 1);
-        
+
         // Test export
         let export = middleware.export_metrics().await.unwrap();
         assert!(export.contains("aura_agent_total_operations"));
@@ -441,7 +496,7 @@ mod tests {
             memory_usage_mb: 128,
             active_connections: 3,
         };
-        
+
         let report = summary.report();
         assert!(report.contains("95 (95.0%)"));
         assert!(report.contains("5 (5.0%)"));

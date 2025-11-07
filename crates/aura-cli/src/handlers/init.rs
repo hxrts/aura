@@ -1,0 +1,130 @@
+//! Init Command Handler
+//!
+//! Effect-based implementation of the init command.
+
+use anyhow::Result;
+use aura_protocol::{AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects};
+use std::path::PathBuf;
+
+/// Handle initialization through effects
+pub async fn handle_init(
+    effects: &AuraEffectSystem, 
+    num_devices: u32, 
+    threshold: u32, 
+    output: &PathBuf
+) -> Result<()> {
+    // Log initialization start
+    effects.log_info(&format!(
+        "Initializing {}-of-{} threshold account", 
+        threshold, num_devices
+    ), &[]);
+    
+    effects.log_info(&format!(
+        "Output directory: {}", 
+        output.display()
+    ), &[]);
+    
+    // Validate parameters through effects
+    if threshold > num_devices {
+        effects.log_error("Threshold cannot be greater than number of devices", &[]);
+        return Err(anyhow::anyhow!(
+            "Invalid parameters: threshold ({}) > num_devices ({})", 
+            threshold, num_devices
+        ));
+    }
+    
+    if threshold == 0 {
+        effects.log_error("Threshold must be greater than 0", &[]);
+        return Err(anyhow::anyhow!("Invalid threshold: 0"));
+    }
+    
+    // Create directory structure through storage effects
+    let configs_dir = output.join("configs");
+    create_directory_through_effects(effects, output).await?;
+    create_directory_through_effects(effects, &configs_dir).await?;
+    
+    // Create placeholder ledger through storage effects
+    let ledger_path = output.join("ledger.cbor");
+    let ledger_data = create_placeholder_ledger(effects, threshold, num_devices).await?;
+    
+    effects.store(
+        &ledger_path.display().to_string(), 
+        ledger_data
+    ).await.map_err(|e| anyhow::anyhow!("Failed to create ledger: {}", e))?;
+    
+    // Create device config files through storage effects
+    for i in 1..=num_devices {
+        let config_content = create_device_config(i, threshold, num_devices);
+        let config_path = configs_dir.join(format!("device_{}.toml", i));
+        
+        effects.store(
+            &config_path.display().to_string(),
+            config_content.as_bytes().to_vec()
+        ).await.map_err(|e| anyhow::anyhow!("Failed to create device config {}: {}", i, e))?;
+        
+        effects.log_info(&format!("Created device_{}.toml", i), &[]);
+    }
+    
+    // Success message
+    effects.log_info("Account initialized successfully!", &[]);
+    
+    Ok(())
+}
+
+/// Create directory marker through storage effects
+async fn create_directory_through_effects(
+    effects: &AuraEffectSystem, 
+    path: &PathBuf
+) -> Result<()> {
+    let dir_marker_path = path.join(".aura_directory");
+    let timestamp = effects.current_timestamp().await;
+    
+    effects.store(
+        &dir_marker_path.display().to_string(),
+        timestamp.to_le_bytes().to_vec()
+    ).await.map_err(|e| anyhow::anyhow!("Failed to create directory {}: {}", path.display(), e))
+}
+
+/// Create placeholder ledger data
+async fn create_placeholder_ledger(
+    effects: &AuraEffectSystem,
+    threshold: u32,
+    num_devices: u32
+) -> Result<Vec<u8>> {
+    let timestamp = effects.current_timestamp().await;
+    
+    // Create a simple CBOR-like structure
+    let ledger_data = format!(
+        "placeholder_ledger:threshold={},devices={},created={}",
+        threshold, num_devices, timestamp
+    );
+    
+    effects.log_info("Created placeholder ledger", &[]);
+    
+    Ok(ledger_data.into_bytes())
+}
+
+/// Create device configuration content
+fn create_device_config(device_num: u32, threshold: u32, total_devices: u32) -> String {
+    format!(
+        r#"# Device {} configuration
+device_id = "device_{}"
+threshold = {}
+total_devices = {}
+
+[logging]
+level = "info"
+structured = false
+
+[network]
+default_port = {}
+timeout = 30
+max_retries = 3
+"#,
+        device_num, 
+        device_num, 
+        threshold, 
+        total_devices,
+        58835 + device_num - 1  // Different port for each device
+    )
+}

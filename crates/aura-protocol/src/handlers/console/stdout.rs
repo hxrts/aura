@@ -7,6 +7,7 @@ use std::future::Future;
 pub struct StdoutConsoleHandler;
 
 impl StdoutConsoleHandler {
+    /// Create a new stdout console handler
     pub fn new() -> Self {
         Self
     }
@@ -58,10 +59,8 @@ fn format_fields(fields: &[(&str, &str)]) -> String {
     if fields.is_empty() {
         String::new()
     } else {
-        let field_strings: Vec<String> = fields
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect();
+        let field_strings: Vec<String> =
+            fields.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
         format!("[{}]", field_strings.join(" "))
     }
 }

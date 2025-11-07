@@ -19,15 +19,15 @@ pub mod time_control;
 
 // Re-export for convenience
 pub use handler::{
-    ChaosStrategy, NoOpSimulatorHandler, SimulationOutcome, SimulatorHandler, 
-    SimulatorOperation, StateQuery, TimeControlAction,
+    ChaosStrategy, NoOpSimulatorHandler, SimulationOutcome, SimulatorHandler, SimulatorOperation,
+    StateQuery, TimeControlAction,
 };
 pub use stack::{SimulatorMiddlewareStack, SimulatorStackBuilder};
 
 // Re-export middleware components
 pub use chaos_coordination::{
-    ChaosAction, ChaosCoordinationMiddleware, ChaosRecoverySettings, ChaosRule,
-    ChaosRuleAction, ChaosRuleCondition, ChaosRuleOperator, ChaosStrategyTemplate,
+    ChaosAction, ChaosCoordinationMiddleware, ChaosRecoverySettings, ChaosRule, ChaosRuleAction,
+    ChaosRuleCondition, ChaosRuleOperator, ChaosStrategyTemplate,
 };
 pub use fault_simulation::{
     FaultCondition, FaultInjectionRule, FaultRecoverySettings, FaultSimulationMiddleware,

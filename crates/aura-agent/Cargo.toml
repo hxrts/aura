@@ -19,6 +19,7 @@ aura-crypto = { path = "../aura-crypto" }
 aura-transport = { path = "../aura-transport" }
 aura-store = { path = "../aura-store" }
 aura-choreography = { path = "../aura-choreography" }
+aura-authentication = { path = "../aura-authentication" }
 
 # TODO: Re-enable cryptography when dependencies compile
 # frost-ed25519 = { workspace = true }

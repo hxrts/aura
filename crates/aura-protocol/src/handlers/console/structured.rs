@@ -9,6 +9,7 @@ use std::future::Future;
 pub struct StructuredConsoleHandler;
 
 impl StructuredConsoleHandler {
+    /// Create a new structured console handler
     pub fn new() -> Self {
         Self
     }
@@ -26,7 +27,7 @@ impl ConsoleEffects for StructuredConsoleHandler {
             .iter()
             .map(|(k, v)| (k.to_string(), json!(v)))
             .collect();
-        
+
         let log_entry = json!({
             "level": "trace",
             "message": message,
@@ -41,7 +42,7 @@ impl ConsoleEffects for StructuredConsoleHandler {
             .iter()
             .map(|(k, v)| (k.to_string(), json!(v)))
             .collect();
-        
+
         let log_entry = json!({
             "level": "debug",
             "message": message,
@@ -56,7 +57,7 @@ impl ConsoleEffects for StructuredConsoleHandler {
             .iter()
             .map(|(k, v)| (k.to_string(), json!(v)))
             .collect();
-        
+
         let log_entry = json!({
             "level": "info",
             "message": message,
@@ -71,7 +72,7 @@ impl ConsoleEffects for StructuredConsoleHandler {
             .iter()
             .map(|(k, v)| (k.to_string(), json!(v)))
             .collect();
-        
+
         let log_entry = json!({
             "level": "warn",
             "message": message,
@@ -86,7 +87,7 @@ impl ConsoleEffects for StructuredConsoleHandler {
             .iter()
             .map(|(k, v)| (k.to_string(), json!(v)))
             .collect();
-        
+
         let log_entry = json!({
             "level": "error",
             "message": message,

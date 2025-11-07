@@ -459,6 +459,8 @@ impl RotationTracker {
             .collect()
     }
 
+    // [VERIFIED] Uses SystemTime::now() for rotation cancellation timestamp
+    #[allow(clippy::disallowed_methods)]
     fn cancel_rotation(&mut self, session_id: &str) -> Result<()> {
         if let Some(session) = self.sessions.get_mut(session_id) {
             if session.status == RotationStatus::InProgress {

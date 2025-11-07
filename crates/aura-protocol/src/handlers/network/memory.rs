@@ -9,11 +9,16 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use uuid::Uuid;
 
+/// Type alias for complex peer map to reduce type complexity
+type PeerMap = Arc<RwLock<HashMap<Uuid, PeerConnection>>>;
+/// Type alias for complex message queue to reduce type complexity  
+type MessageQueue = Arc<Mutex<VecDeque<(Uuid, Vec<u8>)>>>;
+
 /// In-memory network handler for testing
 pub struct MemoryNetworkHandler {
     device_id: Uuid,
-    peers: Arc<RwLock<HashMap<Uuid, PeerConnection>>>,
-    messages: Arc<Mutex<VecDeque<(Uuid, Vec<u8>)>>>,
+    peers: PeerMap,
+    messages: MessageQueue,
     event_sender: Arc<Mutex<Option<mpsc::UnboundedSender<PeerEvent>>>>,
 }
 
@@ -80,10 +85,16 @@ impl NetworkEffects for MemoryNetworkHandler {
                 // For testing, we just simulate success
                 Ok(())
             } else {
-                Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
+                Err(NetworkError::ConnectionFailed(format!(
+                    "Peer not connected: {}",
+                    peer_id
+                )))
             }
         } else {
-            Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
+            Err(NetworkError::ConnectionFailed(format!(
+                "Peer not connected: {}",
+                peer_id
+            )))
         }
     }
 
@@ -114,6 +125,7 @@ impl NetworkEffects for MemoryNetworkHandler {
 
         // Find message from specific peer
         if let Some(pos) = messages.iter().position(|(from, _)| *from == peer_id) {
+            #[allow(clippy::unwrap_used)] // Safe: position() just confirmed pos exists
             let (_, message) = messages.remove(pos).unwrap();
             Ok(message)
         } else {

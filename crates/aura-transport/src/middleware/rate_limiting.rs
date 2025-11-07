@@ -1,9 +1,10 @@
 //! Rate Limiting Middleware
 
+use super::handler::{NetworkAddress, TransportHandler, TransportOperation, TransportResult};
 use super::stack::TransportMiddleware;
-use super::handler::{TransportHandler, TransportOperation, TransportResult, NetworkAddress};
 use aura_protocol::effects::AuraEffects;
-use aura_types::{MiddlewareContext, MiddlewareResult, AuraError};
+use aura_protocol::middleware::{MiddlewareContext, MiddlewareError, MiddlewareResult};
+use aura_types::AuraError;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -37,10 +38,10 @@ impl RateLimiter {
             config,
         }
     }
-    
+
     fn try_acquire(&mut self, current_time: u64) -> bool {
         self.refill_tokens(current_time);
-        
+
         if self.tokens > 0 {
             self.tokens -= 1;
             true
@@ -48,18 +49,18 @@ impl RateLimiter {
             false
         }
     }
-    
+
     fn refill_tokens(&mut self, current_time: u64) {
         if self.last_refill == 0 {
             self.last_refill = current_time;
             return;
         }
-        
+
         let elapsed_ms = current_time.saturating_sub(self.last_refill);
         if elapsed_ms >= self.config.window_size_ms {
             let windows_passed = elapsed_ms / self.config.window_size_ms;
             let tokens_to_add = (windows_passed * self.config.requests_per_second as u64) as u32;
-            
+
             self.tokens = (self.tokens + tokens_to_add).min(self.config.burst_size);
             self.last_refill = current_time;
         }
@@ -81,7 +82,7 @@ impl RateLimitingMiddleware {
             config,
         }
     }
-    
+
     pub fn with_config(config: RateLimitConfig) -> Self {
         Self {
             global_limiter: RateLimiter::new(config.clone()),
@@ -105,52 +106,75 @@ impl TransportMiddleware for RateLimitingMiddleware {
         effects: &dyn AuraEffects,
         next: &mut dyn TransportHandler,
     ) -> MiddlewareResult<TransportResult> {
-        let current_time = effects.current_timestamp() * 1000; // Convert to milliseconds
-        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64; // Get timestamp in milliseconds
+
         // Check rate limits for operations that count against limits
         match &operation {
-            TransportOperation::Send { destination, .. } |
-            TransportOperation::Connect { address: destination, .. } => {
+            TransportOperation::Send { destination, .. }
+            | TransportOperation::Connect {
+                address: destination,
+                ..
+            } => {
                 // Check global rate limit
                 if !self.global_limiter.try_acquire(current_time) {
-                    return Err(AuraError::Infrastructure(aura_types::InfrastructureError::Transport {
-                        message: "Rate limit exceeded".to_string(),
-                        context: format!("destination: {}", destination.as_string()),
-                    }));
+                    return Err(MiddlewareError::General {
+                        message: format!(
+                            "Rate limit exceeded for destination: {}",
+                            destination.as_string()
+                        ),
+                    });
                 }
-                
+
                 // Check per-host rate limit
-                let host_limiter = self.per_host_limiters
+                let host_limiter = self
+                    .per_host_limiters
                     .entry(destination.clone())
                     .or_insert_with(|| RateLimiter::new(self.config.clone()));
-                
+
                 if !host_limiter.try_acquire(current_time) {
-                    return Err(AuraError::Infrastructure(aura_types::InfrastructureError::Transport {
-                        message: "Rate limit exceeded".to_string(),
-                        context: format!("destination: {}", destination.as_string()),
-                    }));
+                    return Err(MiddlewareError::General {
+                        message: format!(
+                            "Rate limit exceeded for destination: {}",
+                            destination.as_string()
+                        ),
+                    });
                 }
             }
             _ => {
                 // Other operations don't count against rate limits
             }
         }
-        
+
         // Rate limit passed, execute the operation
         next.execute(operation, effects)
     }
-    
+
     fn middleware_name(&self) -> &'static str {
         "RateLimitingMiddleware"
     }
-    
+
     fn middleware_info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();
-        info.insert("requests_per_second".to_string(), self.config.requests_per_second.to_string());
+        info.insert(
+            "requests_per_second".to_string(),
+            self.config.requests_per_second.to_string(),
+        );
         info.insert("burst_size".to_string(), self.config.burst_size.to_string());
-        info.insert("window_size_ms".to_string(), self.config.window_size_ms.to_string());
-        info.insert("global_tokens".to_string(), self.global_limiter.tokens.to_string());
-        info.insert("tracked_hosts".to_string(), self.per_host_limiters.len().to_string());
+        info.insert(
+            "window_size_ms".to_string(),
+            self.config.window_size_ms.to_string(),
+        );
+        info.insert(
+            "global_tokens".to_string(),
+            self.global_limiter.tokens.to_string(),
+        );
+        info.insert(
+            "tracked_hosts".to_string(),
+            self.per_host_limiters.len().to_string(),
+        );
         info
     }
 }

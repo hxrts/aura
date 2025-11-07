@@ -29,7 +29,7 @@ The project is divided into several logical groups of crates:
 
 These crates form the backbone of the Aura platform's logic.
 
-- **`aura-agent`**: The main entry point for an Aura identity. It manages an agent's lifecycle, services, and interactions with the underlying protocol, storage, and transport layers. It implements a clean service-layer architecture.
+- **`aura-agent`**: The main entry point for Aura users. It manages an agent's lifecycle, services, and interactions with the underlying protocol, storage, and transport layers.
 - **`aura-protocol`**: Coordinates the distributed cryptographic protocols like Distributed Key Derivation (DKD), resharing, and recovery. This is the heart of the system's security logic.
 - **`aura-journal`**: Implements an event-sourced, CRDT-based log for each agent. This journal is the source of truth for an agent's state, and its CRDT nature ensures eventual consistency across devices.
 - **`aura-crypto`**: A dedicated crate for common cryptographic primitives, providing a consistent and secure interface for hashing, encryption (sealing), and key derivation.

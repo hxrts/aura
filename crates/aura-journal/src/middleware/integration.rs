@@ -3,9 +3,9 @@
 use super::{JournalContext, JournalHandler};
 use crate::effects::{ActorId, LedgerEffect, LedgerResult, LedgerValue};
 use crate::error::{Error, Result};
+use crate::middleware::JournalMiddlewareStack;
 use crate::operations::JournalOperation;
 use crate::state::AccountState;
-use crate::JournalMiddlewareStack;
 use aura_types::DeviceId;
 use std::sync::{Arc, RwLock};
 
@@ -55,7 +55,10 @@ impl EffectSystemHandler {
                 RateLimitingConfig::default(),
             )))
             .with_middleware(Arc::new(RetryMiddleware::new(RetryConfig::default())))
-            .with_middleware(Arc::new(CachingMiddleware::new(CachingConfig::default())))
+            .with_middleware(Arc::new(CachingMiddleware::new(
+                CachingConfig::default(),
+                Arc::new(aura_types::effects::SystemTimeEffects::new()),
+            )))
             .with_middleware(Arc::new(ObservabilityMiddleware::new(
                 ObservabilityConfig::default(),
             )))
@@ -381,7 +384,10 @@ impl JournalHandlerBuilder {
         }
 
         if let Some(config) = self.middleware_configs.caching {
-            stack = stack.with_middleware(Arc::new(super::CachingMiddleware::new(config)));
+            stack = stack.with_middleware(Arc::new(super::CachingMiddleware::new(
+                config,
+                Arc::new(aura_types::effects::SystemTimeEffects::new()),
+            )));
         }
 
         if let Some(config) = self.middleware_configs.observability {

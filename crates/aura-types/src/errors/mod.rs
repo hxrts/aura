@@ -2071,7 +2071,6 @@ impl AuraError {
         })
     }
 
-
     pub fn session_limit_exceeded(message: impl Into<String>) -> Self {
         Self::Agent(AgentError::OperationNotAllowed {
             message: format!("Session limit exceeded: {}", message.into()),

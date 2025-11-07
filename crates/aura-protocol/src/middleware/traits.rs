@@ -1,12 +1,17 @@
 //! Core middleware traits and interfaces
 
-use super::{MiddlewareContext, MiddlewareResult, HandlerMetadata};
+use super::{HandlerMetadata, MiddlewareContext};
 use crate::handlers::AuraHandler;
 use std::future::Future;
 use std::pin::Pin;
 
+/// Type alias for complex future return type to reduce complexity
+type HandlerFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
+/// Type alias for complex health check future to reduce complexity
+type HealthFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
+
 /// Core middleware handler trait
-pub trait MiddlewareHandler<Req, Resp, Err>: Send + Sync 
+pub trait MiddlewareHandler<Req, Resp, Err>: Send + Sync
 where
     Req: Send + Sync,
     Resp: Send + Sync,
@@ -30,10 +35,10 @@ where
 pub trait ProtocolHandler: Send + Sync {
     /// The type of requests this handler processes
     type Request: Send + Sync;
-    
+
     /// The type of responses this handler produces
     type Response: Send + Sync;
-    
+
     /// The type of errors this handler can produce
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -42,7 +47,7 @@ pub trait ProtocolHandler: Send + Sync {
         &'a mut self,
         request: Self::Request,
         effects: &'a dyn AuraHandler,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'a>>;
+    ) -> HandlerFuture<'a, Self::Response, Self::Error>;
 
     /// Get the protocol name this handler supports
     fn protocol_name(&self) -> &str;
@@ -64,7 +69,7 @@ pub trait ProtocolHandler: Send + Sync {
 }
 
 /// Request preprocessing trait
-pub trait RequestHandler<Req>: Send + Sync 
+pub trait RequestHandler<Req>: Send + Sync
 where
     Req: Send + Sync,
 {
@@ -81,7 +86,7 @@ where
 }
 
 /// Response postprocessing trait
-pub trait ResponseHandler<Resp>: Send + Sync 
+pub trait ResponseHandler<Resp>: Send + Sync
 where
     Resp: Send + Sync,
 {
@@ -98,7 +103,7 @@ where
 }
 
 /// Bidirectional middleware trait that can process both requests and responses
-pub trait BidirectionalHandler<Req, Resp>: Send + Sync 
+pub trait BidirectionalHandler<Req, Resp>: Send + Sync
 where
     Req: Send + Sync,
     Resp: Send + Sync,
@@ -127,7 +132,7 @@ where
 pub trait StatefulHandler: Send + Sync {
     /// The type of state this handler maintains
     type State: Send + Sync;
-    
+
     /// The type of errors this handler can produce
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -146,17 +151,23 @@ pub trait StatefulHandler: Send + Sync {
     fn reset_state(&mut self) -> Result<(), Self::Error>;
 
     /// Save the handler's state
-    fn save_state<'a>(&'a self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
+    fn save_state<'a>(
+        &'a self,
+        effects: &'a dyn AuraHandler,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
 
     /// Load the handler's state
-    fn load_state<'a>(&'a mut self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
+    fn load_state<'a>(
+        &'a mut self,
+        effects: &'a dyn AuraHandler,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
 }
 
 /// Configurable middleware trait for handlers with runtime configuration
 pub trait ConfigurableHandler: Send + Sync {
     /// The type of configuration this handler uses
     type Config: Send + Sync;
-    
+
     /// The type of errors this handler can produce
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -179,32 +190,57 @@ pub trait LifecycleHandler: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Called when the handler is first created
-    fn on_create(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
+    fn on_create(
+        &mut self,
+        _context: &MiddlewareContext,
+        _effects: &dyn AuraHandler,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called when the handler starts processing requests
-    fn on_start(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
+    fn on_start(
+        &mut self,
+        _context: &MiddlewareContext,
+        _effects: &dyn AuraHandler,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called when the handler stops processing requests
-    fn on_stop(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
+    fn on_stop(
+        &mut self,
+        _context: &MiddlewareContext,
+        _effects: &dyn AuraHandler,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called when the handler is being destroyed
-    fn on_destroy(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
+    fn on_destroy(
+        &mut self,
+        _context: &MiddlewareContext,
+        _effects: &dyn AuraHandler,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called on configuration changes
-    fn on_config_change(&mut self, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
+    fn on_config_change(
+        &mut self,
+        _context: &MiddlewareContext,
+        _effects: &dyn AuraHandler,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Called on error conditions
-    fn on_error(&mut self, error: &dyn std::error::Error, context: &MiddlewareContext, effects: &dyn AuraHandler) -> Result<(), Self::Error> {
+    fn on_error(
+        &mut self,
+        _error: &dyn std::error::Error,
+        _context: &MiddlewareContext,
+        _effects: &dyn AuraHandler,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -212,20 +248,44 @@ pub trait LifecycleHandler: Send + Sync {
 /// Metrics-aware middleware trait
 pub trait MetricsHandler: Send + Sync {
     /// Record a metric event
-    fn record_metric(&self, name: &str, value: f64, labels: &[(&str, &str)], effects: &dyn AuraHandler);
+    fn record_metric(
+        &self,
+        name: &str,
+        value: f64,
+        labels: &[(&str, &str)],
+        effects: &dyn AuraHandler,
+    );
 
     /// Record a timing metric
-    fn record_timing(&self, name: &str, duration: std::time::Duration, labels: &[(&str, &str)], effects: &dyn AuraHandler) {
+    fn record_timing(
+        &self,
+        name: &str,
+        duration: std::time::Duration,
+        labels: &[(&str, &str)],
+        effects: &dyn AuraHandler,
+    ) {
         self.record_metric(name, duration.as_secs_f64(), labels, effects);
     }
 
     /// Record a counter metric
-    fn record_counter(&self, name: &str, count: u64, labels: &[(&str, &str)], effects: &dyn AuraHandler) {
+    fn record_counter(
+        &self,
+        name: &str,
+        count: u64,
+        labels: &[(&str, &str)],
+        effects: &dyn AuraHandler,
+    ) {
         self.record_metric(name, count as f64, labels, effects);
     }
 
     /// Record a gauge metric
-    fn record_gauge(&self, name: &str, value: f64, labels: &[(&str, &str)], effects: &dyn AuraHandler) {
+    fn record_gauge(
+        &self,
+        name: &str,
+        value: f64,
+        labels: &[(&str, &str)],
+        effects: &dyn AuraHandler,
+    ) {
         self.record_metric(name, value, labels, effects);
     }
 }
@@ -234,28 +294,37 @@ pub trait MetricsHandler: Send + Sync {
 pub trait HealthCheckHandler: Send + Sync {
     /// The type of health check result
     type HealthStatus: Send + Sync;
-    
+
     /// The type of errors this handler can produce
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Perform a health check
-    fn health_check<'a>(&'a self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<Self::HealthStatus, Self::Error>> + Send + 'a>>;
+    fn health_check<'a>(
+        &'a self,
+        effects: &'a dyn AuraHandler,
+    ) -> HealthFuture<'a, Self::HealthStatus, Self::Error>;
 
     /// Check if the handler is ready to process requests
-    fn readiness_check<'a>(&'a self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + Send + 'a>>;
+    fn readiness_check<'a>(
+        &'a self,
+        effects: &'a dyn AuraHandler,
+    ) -> HealthFuture<'a, bool, Self::Error>;
 
     /// Check if the handler is alive
-    fn liveness_check<'a>(&'a self, effects: &'a dyn AuraHandler) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + Send + 'a>>;
+    fn liveness_check<'a>(
+        &'a self,
+        effects: &'a dyn AuraHandler,
+    ) -> HealthFuture<'a, bool, Self::Error>;
 }
 
 /// Combined trait for handlers that support all middleware features
-pub trait FullHandler<Req, Resp, Err>: 
-    MiddlewareHandler<Req, Resp, Err> +
-    StatefulHandler<Error = Err> +
-    ConfigurableHandler<Error = Err> +
-    LifecycleHandler<Error = Err> +
-    MetricsHandler +
-    HealthCheckHandler<Error = Err>
+pub trait FullHandler<Req, Resp, Err>:
+    MiddlewareHandler<Req, Resp, Err>
+    + StatefulHandler<Error = Err>
+    + ConfigurableHandler<Error = Err>
+    + LifecycleHandler<Error = Err>
+    + MetricsHandler
+    + HealthCheckHandler<Error = Err>
 where
     Req: Send + Sync,
     Resp: Send + Sync,
@@ -264,7 +333,7 @@ where
 }
 
 /// Middleware chain trait for composing multiple handlers
-pub trait MiddlewareChain<Req, Resp>: Send + Sync 
+pub trait MiddlewareChain<Req, Resp>: Send + Sync
 where
     Req: Send + Sync,
     Resp: Send + Sync,

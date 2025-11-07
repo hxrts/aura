@@ -1,8 +1,8 @@
 //! Storage effects for key-value operations
 
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use async_trait::async_trait;
 
 /// Storage location wrapper (kept for backwards compatibility)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -96,7 +96,10 @@ pub trait StorageEffects: Send + Sync {
     async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError>;
 
     /// Retrieve multiple values by keys
-    async fn retrieve_batch(&self, keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError>;
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError>;
 
     /// Clear all stored data
     async fn clear_all(&self) -> Result<(), StorageError>;

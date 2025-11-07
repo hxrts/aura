@@ -1,8 +1,8 @@
 //! Derive macros for Aura middleware patterns
-//! 
+//!
 //! This crate provides procedural macros that eliminate boilerplate code
 //! in the Aura middleware architecture:
-//! 
+//!
 //! - `#[derive(AuraHandler)]` - Generates middleware-compatible handler implementations
 //! - `#[derive(AuraConfig)]` - Generates configuration validation, loading, and merging
 //! - `#[derive(CrdtState)]` - Generates CRDT state synchronization patterns
@@ -10,18 +10,18 @@
 
 use proc_macro::TokenStream;
 
-mod handler;
 mod config;
-mod crdt;
+mod handler;
 mod middleware;
+mod semilattice;
 
 /// Generate a middleware-compatible handler implementation
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// use aura_macros::AuraHandler;
-/// 
+///
 /// #[derive(AuraHandler)]
 /// #[handler(async_trait, error = "AuraError")]
 /// struct StorageHandler {
@@ -37,12 +37,12 @@ pub fn derive_aura_handler(input: TokenStream) -> TokenStream {
 }
 
 /// Generate configuration validation, loading, and merging logic
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// use aura_macros::AuraConfig;
-/// 
+///
 /// #[derive(AuraConfig)]
 /// #[config(validate, merge, defaults, file_format = "toml")]
 /// struct StorageConfig {
@@ -58,12 +58,12 @@ pub fn derive_aura_config(input: TokenStream) -> TokenStream {
 }
 
 /// Generate CRDT state synchronization patterns
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// use aura_macros::CrdtState;
-/// 
+///
 /// #[derive(CrdtState)]
 /// #[crdt(automerge, conflict_resolution = "last_write_wins")]
 /// struct ComponentState {
@@ -77,16 +77,16 @@ pub fn derive_aura_config(input: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_derive(CrdtState, attributes(crdt))]
 pub fn derive_crdt_state(input: TokenStream) -> TokenStream {
-    crdt::derive_crdt_state_impl(input)
+    semilattice::derive_crdt_state_impl(input)
 }
 
 /// Generate middleware wrapper boilerplate
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// use aura_macros::AuraMiddleware;
-/// 
+///
 /// #[derive(AuraMiddleware)]
 /// #[middleware(handler = "StorageHandler", config = "ObservabilityConfig")]
 /// struct ObservabilityMiddleware<H> {

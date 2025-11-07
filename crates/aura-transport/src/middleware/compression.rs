@@ -1,15 +1,15 @@
 //! Compression Middleware
 
-use super::stack::TransportMiddleware;
 use super::handler::{TransportHandler, TransportOperation, TransportResult};
+use super::stack::TransportMiddleware;
 use aura_protocol::effects::AuraEffects;
-use aura_types::{MiddlewareContext, MiddlewareResult};
+use aura_protocol::middleware::{MiddlewareContext, MiddlewareResult};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct CompressionConfig {
     pub algorithm: CompressionAlgorithm,
-    pub level: u8, // 1-9, where 9 is highest compression
+    pub level: u8,             // 1-9, where 9 is highest compression
     pub min_size_bytes: usize, // Don't compress data smaller than this
 }
 
@@ -76,12 +76,12 @@ impl CompressionAlgorithm {
             }
         }
     }
-    
+
     fn decompress(&self, data: &[u8]) -> Result<Vec<u8>, String> {
         if data.len() < 8 {
             return Err("Invalid compressed data".to_string());
         }
-        
+
         let header = &data[0..4];
         let expected_header = match self {
             CompressionAlgorithm::Gzip => b"GZIP",
@@ -89,14 +89,16 @@ impl CompressionAlgorithm {
             CompressionAlgorithm::Brotli => b"BROT",
             CompressionAlgorithm::Lz4 => b"LZ4\0",
         };
-        
+
         if header != expected_header {
-            return Err(format!("Invalid compression header: expected {:?}, got {:?}", 
-                              expected_header, header));
+            return Err(format!(
+                "Invalid compression header: expected {:?}, got {:?}",
+                expected_header, header
+            ));
         }
-        
+
         let original_size = u32::from_be_bytes([data[4], data[5], data[6], data[7]]) as usize;
-        
+
         // Simulate decompression by creating data of original size
         Ok(vec![0; original_size])
     }
@@ -122,23 +124,29 @@ impl CompressionMiddleware {
             stats: CompressionStats::default(),
         }
     }
-    
+
     pub fn with_config(config: CompressionConfig) -> Self {
         Self {
             config,
             stats: CompressionStats::default(),
         }
     }
-    
+
     fn should_compress(&self, data: &[u8]) -> bool {
         data.len() >= self.config.min_size_bytes
     }
-    
+
     fn add_compression_metadata(&self, metadata: &mut HashMap<String, String>) {
-        metadata.insert("compression".to_string(), format!("{:?}", self.config.algorithm));
-        metadata.insert("compression_level".to_string(), self.config.level.to_string());
+        metadata.insert(
+            "compression".to_string(),
+            format!("{:?}", self.config.algorithm),
+        );
+        metadata.insert(
+            "compression_level".to_string(),
+            self.config.level.to_string(),
+        );
     }
-    
+
     fn is_compressed(&self, metadata: &HashMap<String, String>) -> bool {
         metadata.contains_key("compression")
     }
@@ -159,50 +167,65 @@ impl TransportMiddleware for CompressionMiddleware {
         next: &mut dyn TransportHandler,
     ) -> MiddlewareResult<TransportResult> {
         match operation {
-            TransportOperation::Send { destination, data, mut metadata } => {
+            TransportOperation::Send {
+                destination,
+                data,
+                mut metadata,
+            } => {
                 let processed_data = if self.should_compress(&data) {
                     match self.config.algorithm.compress(&data, self.config.level) {
                         Ok(compressed) => {
                             self.add_compression_metadata(&mut metadata);
                             self.stats.bytes_compressed += data.len() as u64;
                             self.stats.operations += 1;
-                            
+
                             let ratio = compressed.len() as f64 / data.len() as f64;
-                            self.stats.compression_ratio = 
-                                (self.stats.compression_ratio * (self.stats.operations - 1) as f64 + ratio) 
+                            self.stats.compression_ratio = (self.stats.compression_ratio
+                                * (self.stats.operations - 1) as f64
+                                + ratio)
                                 / self.stats.operations as f64;
-                            
+
                             effects.log_info(
-                                &format!("Compressed {} bytes to {} bytes (ratio: {:.2})", 
-                                        data.len(), compressed.len(), ratio),
-                                &[]
+                                &format!(
+                                    "Compressed {} bytes to {} bytes (ratio: {:.2})",
+                                    data.len(),
+                                    compressed.len(),
+                                    ratio
+                                ),
+                                &[],
                             );
-                            
+
                             compressed
                         }
                         Err(e) => {
-                            effects.log_error(
-                                &format!("Compression failed: {}", e),
-                                &[]
-                            );
+                            effects.log_error(&format!("Compression failed: {}", e), &[]);
                             data
                         }
                     }
                 } else {
                     data
                 };
-                
-                next.execute(TransportOperation::Send {
-                    destination,
-                    data: processed_data,
-                    metadata,
-                }, effects)
+
+                next.execute(
+                    TransportOperation::Send {
+                        destination,
+                        data: processed_data,
+                        metadata,
+                    },
+                    effects,
+                )
             }
-            
+
             TransportOperation::Receive { source, timeout_ms } => {
-                let result = next.execute(TransportOperation::Receive { source, timeout_ms }, effects)?;
-                
-                if let TransportResult::Received { source, data, metadata } = result {
+                let result =
+                    next.execute(TransportOperation::Receive { source, timeout_ms }, effects)?;
+
+                if let TransportResult::Received {
+                    source,
+                    data,
+                    metadata,
+                } = result
+                {
                     let processed_data = if self.is_compressed(&metadata) {
                         if let Some(algorithm_str) = metadata.get("compression") {
                             let algorithm = match algorithm_str.as_str() {
@@ -212,28 +235,35 @@ impl TransportMiddleware for CompressionMiddleware {
                                 "Lz4" => CompressionAlgorithm::Lz4,
                                 _ => {
                                     effects.log_error(
-                                        &format!("Unknown compression algorithm: {}", algorithm_str),
-                                        &[]
+                                        &format!(
+                                            "Unknown compression algorithm: {}",
+                                            algorithm_str
+                                        ),
+                                        &[],
                                     );
-                                    return Ok(TransportResult::Received { source, data, metadata });
+                                    return Ok(TransportResult::Received {
+                                        source,
+                                        data,
+                                        metadata,
+                                    });
                                 }
                             };
-                            
+
                             match algorithm.decompress(&data) {
                                 Ok(decompressed) => {
                                     self.stats.bytes_decompressed += decompressed.len() as u64;
                                     effects.log_info(
-                                        &format!("Decompressed {} bytes to {} bytes", 
-                                                data.len(), decompressed.len()),
-                                        &[]
+                                        &format!(
+                                            "Decompressed {} bytes to {} bytes",
+                                            data.len(),
+                                            decompressed.len()
+                                        ),
+                                        &[],
                                     );
                                     decompressed
                                 }
                                 Err(e) => {
-                                    effects.log_error(
-                                        &format!("Decompression failed: {}", e),
-                                        &[]
-                                    );
+                                    effects.log_error(&format!("Decompression failed: {}", e), &[]);
                                     data
                                 }
                             }
@@ -243,7 +273,7 @@ impl TransportMiddleware for CompressionMiddleware {
                     } else {
                         data
                     };
-                    
+
                     Ok(TransportResult::Received {
                         source,
                         data: processed_data,
@@ -253,23 +283,38 @@ impl TransportMiddleware for CompressionMiddleware {
                     Ok(result)
                 }
             }
-            
+
             _ => next.execute(operation, effects),
         }
     }
-    
+
     fn middleware_name(&self) -> &'static str {
         "CompressionMiddleware"
     }
-    
+
     fn middleware_info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();
-        info.insert("algorithm".to_string(), format!("{:?}", self.config.algorithm));
+        info.insert(
+            "algorithm".to_string(),
+            format!("{:?}", self.config.algorithm),
+        );
         info.insert("level".to_string(), self.config.level.to_string());
-        info.insert("min_size_bytes".to_string(), self.config.min_size_bytes.to_string());
-        info.insert("bytes_compressed".to_string(), self.stats.bytes_compressed.to_string());
-        info.insert("bytes_decompressed".to_string(), self.stats.bytes_decompressed.to_string());
-        info.insert("avg_compression_ratio".to_string(), format!("{:.3}", self.stats.compression_ratio));
+        info.insert(
+            "min_size_bytes".to_string(),
+            self.config.min_size_bytes.to_string(),
+        );
+        info.insert(
+            "bytes_compressed".to_string(),
+            self.stats.bytes_compressed.to_string(),
+        );
+        info.insert(
+            "bytes_decompressed".to_string(),
+            self.stats.bytes_decompressed.to_string(),
+        );
+        info.insert(
+            "avg_compression_ratio".to_string(),
+            format!("{:.3}", self.stats.compression_ratio),
+        );
         info.insert("operations".to_string(), self.stats.operations.to_string());
         info
     }

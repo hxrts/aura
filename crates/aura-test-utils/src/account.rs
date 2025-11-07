@@ -4,14 +4,14 @@
 //! Consolidates the account creation pattern found in 18 test files.
 
 use aura_crypto::Effects;
-use aura_journal::{AccountState, DeviceMetadata, DeviceType};
+use aura_journal::{DeviceMetadata, DeviceType, ModernAccountState as AccountState};
 use aura_types::{AccountId, AccountIdExt, DeviceId};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
 /// Helper function to create test device metadata with effects
 fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
     let device_key_bytes = effects.random_bytes::<32>();
-    let device_signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&device_key_bytes);
+    let device_signing_key = SigningKey::from_bytes(&device_key_bytes);
     let device_public_key = device_signing_key.verifying_key();
 
     DeviceMetadata {
@@ -46,18 +46,17 @@ fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
 /// ```
 pub fn test_account_with_effects(effects: &Effects) -> AccountState {
     let key_bytes = effects.random_bytes::<32>();
-    let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&key_bytes);
+    let signing_key = SigningKey::from_bytes(&key_bytes);
     let group_public_key = signing_key.verifying_key();
 
     let device_metadata = test_device_with_effects(effects);
 
-    AccountState::new(
-        AccountId::new_with_effects(effects),
-        group_public_key,
-        device_metadata,
-        2, // threshold
-        3, // total participants
-    )
+    let mut state = AccountState::new(AccountId::new_with_effects(effects), group_public_key);
+
+    // Add the initial device
+    state.add_device(device_metadata);
+
+    state
 }
 
 /// Create a test account with seed
@@ -93,18 +92,15 @@ pub fn test_account_with_threshold(effects: &Effects, threshold: u16, total: u16
 
     let device_metadata = test_device_with_effects(effects);
 
-    let mut state = AccountState::new(
-        AccountId::new_with_effects(effects),
-        group_public_key,
-        device_metadata,
-        threshold,
-        total,
-    );
+    let mut state = AccountState::new(AccountId::new_with_effects(effects), group_public_key);
+
+    // Add the initial device
+    state.add_device(device_metadata);
 
     // Add remaining devices to match total
     for _ in 1..total {
         let additional_device = test_device_with_effects(effects);
-        state.add_device(additional_device, effects).ok();
+        state.add_device(additional_device);
     }
 
     state
@@ -124,7 +120,9 @@ pub fn test_account_with_id(account_id: AccountId, effects: &Effects) -> Account
 
     let device_metadata = test_device_with_effects(effects);
 
-    AccountState::new(account_id, group_public_key, device_metadata, 2, 3)
+    let mut state = AccountState::new(account_id, group_public_key);
+    state.add_device(device_metadata);
+    state
 }
 
 /// Create a test account with specific group public key
@@ -140,11 +138,7 @@ pub fn test_account_with_group_key(
 ) -> AccountState {
     let device_metadata = test_device_with_effects(effects);
 
-    AccountState::new(
-        AccountId::new_with_effects(effects),
-        group_public_key,
-        device_metadata,
-        2,
-        3,
-    )
+    let mut state = AccountState::new(AccountId::new_with_effects(effects), group_public_key);
+    state.add_device(device_metadata);
+    state
 }

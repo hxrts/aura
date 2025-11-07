@@ -3,7 +3,8 @@
 use super::handler::{StorageHandler, StorageOperation, StorageResult};
 use super::stack::StorageMiddleware;
 use aura_protocol::effects::AuraEffects;
-use aura_types::{AuraError, MiddlewareContext, MiddlewareResult};
+use aura_protocol::middleware::{MiddlewareContext, MiddlewareError, MiddlewareResult};
+use aura_types::AuraError;
 
 pub struct IntegrityMiddleware {
     check_on_retrieve: bool,
@@ -65,9 +66,9 @@ impl StorageMiddleware for IntegrityMiddleware {
                         if let Some(stored_checksum) = metadata.get("checksum") {
                             let calculated_checksum = self.calculate_checksum(data);
                             if stored_checksum != &calculated_checksum {
-                                return Err(AuraError::hash_mismatch_error(
-                                    "Checksum mismatch detected",
-                                ));
+                                return Err(MiddlewareError::General {
+                                    message: "Checksum mismatch detected".to_string(),
+                                });
                             }
                         }
                     }

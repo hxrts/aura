@@ -14,8 +14,22 @@ pub struct OperationId(pub Uuid);
 
 impl OperationId {
     /// Create a new random operation ID
+    ///
+    /// Note: This uses system randomness. For testable code, use `from_bytes` with
+    /// bytes from a RandomEffects handler instead.
+    #[allow(clippy::disallowed_methods)] // Low-level ID type, callers should use from_bytes for testing
     pub fn new() -> Self {
         Self(Uuid::new_v4())
+    }
+
+    /// Create an operation ID from random bytes (for use with effects)
+    pub fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self(Uuid::from_bytes(bytes))
+    }
+
+    /// Create an operation ID from a UUID
+    pub fn from_uuid(uuid: Uuid) -> Self {
+        Self(uuid)
     }
 }
 

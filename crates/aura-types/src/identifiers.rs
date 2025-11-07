@@ -303,6 +303,15 @@ impl DeviceId {
         uuid_bytes.copy_from_slice(&bytes[..16]);
         Self(Uuid::from_bytes(uuid_bytes))
     }
+
+    /// Convert to 32 bytes (compatible with from_bytes)
+    pub fn to_bytes(&self) -> Result<[u8; 32], &'static str> {
+        let uuid_bytes = self.0.as_bytes();
+        let mut result = [0u8; 32];
+        result[..16].copy_from_slice(uuid_bytes);
+        // Fill rest with zeros for consistent 32-byte format
+        Ok(result)
+    }
 }
 
 impl Default for DeviceId {
@@ -588,4 +597,3 @@ impl From<&str> for DataId {
         Self(id.to_string())
     }
 }
-

@@ -5,8 +5,8 @@
 //! Note: This trait works with serialized event data to avoid circular dependencies
 //! with aura-journal. Implementations can internally use richer types like AccountState.
 
-use aura_types::DeviceId;
 use async_trait::async_trait;
+use aura_types::DeviceId;
 
 /// Ledger effects for account state management
 ///

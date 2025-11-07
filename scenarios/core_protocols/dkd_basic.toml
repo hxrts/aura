@@ -64,4 +64,3 @@ property_type = "safety"
 [[properties]]
 name = "derivation_completes"
 property_type = "liveness"
-

@@ -259,10 +259,48 @@ pub mod helpers {
         std::collections::BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::KeyPackage>,
         frost_ed25519::keys::PublicKeyPackage,
     ) {
+        use rand::CryptoRng;
         use std::collections::BTreeMap;
 
-        // Use the effects RNG directly
-        let mut rng = effects.rng();
+        // Use a deterministic RNG from effects - it implements CryptoRng for testing
+        let mut rng = {
+            // Create a seed from the effects
+            let seed = effects.random_bytes::<8>();
+            let seed_u64 = u64::from_le_bytes(seed);
+
+            // Create a deterministic RNG that also implements CryptoRng
+            struct TestRng {
+                state: u64,
+            }
+
+            impl rand::RngCore for TestRng {
+                fn next_u32(&mut self) -> u32 {
+                    self.state = self.state.wrapping_mul(1103515245).wrapping_add(12345);
+                    (self.state / 65536) as u32
+                }
+
+                fn next_u64(&mut self) -> u64 {
+                    let high = self.next_u32() as u64;
+                    let low = self.next_u32() as u64;
+                    (high << 32) | low
+                }
+
+                fn fill_bytes(&mut self, dest: &mut [u8]) {
+                    for byte in dest.iter_mut() {
+                        *byte = (self.next_u32() % 256) as u8;
+                    }
+                }
+
+                fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+                    self.fill_bytes(dest);
+                    Ok(())
+                }
+            }
+
+            impl CryptoRng for TestRng {}
+
+            TestRng { state: seed_u64 }
+        };
 
         // Generate key shares using FROST DKG
         let (secret_shares, pubkey_package) = frost_ed25519::keys::generate_with_dealer(

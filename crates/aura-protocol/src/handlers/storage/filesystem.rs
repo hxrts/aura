@@ -12,6 +12,7 @@ pub struct FilesystemStorageHandler {
 }
 
 impl FilesystemStorageHandler {
+    /// Create a new filesystem storage handler
     pub fn new(base_path: PathBuf) -> Result<Self, StorageError> {
         Ok(Self { base_path })
     }

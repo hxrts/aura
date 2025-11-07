@@ -4,12 +4,36 @@
 //! (CRDT-based account ledgers) across the Aura test suite.
 
 use aura_crypto::Effects;
-use aura_journal::{AccountLedger, AccountState, DeviceMetadata, DeviceType};
+use aura_journal::{DeviceMetadata, DeviceType, ModernAccountState as AccountState};
 use aura_types::{AccountId, DeviceId};
 use ed25519_dalek::SigningKey;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+
+/// Simple AccountLedger replacement for testing
+/// This wraps AccountState to provide the expected interface for tests
+#[derive(Debug, Clone)]
+pub struct AccountLedger {
+    state: AccountState,
+}
+
+impl AccountLedger {
+    /// Create a new AccountLedger with the given initial state
+    pub fn new(state: AccountState) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self { state })
+    }
+
+    /// Get the current account state
+    pub fn state(&self) -> &AccountState {
+        &self.state
+    }
+
+    /// Get mutable access to the account state
+    pub fn state_mut(&mut self) -> &mut AccountState {
+        &mut self.state
+    }
+}
 
 /// Ledger test fixture for consistent test ledger creation
 #[derive(Debug, Clone)]
@@ -41,7 +65,8 @@ impl LedgerTestFixture {
             used_nonces: Default::default(),
         };
 
-        let initial_state = AccountState::new(account_id, group_public_key, device_metadata, 2, 3);
+        let mut initial_state = AccountState::new(account_id, group_public_key);
+        initial_state.add_device(device_metadata);
         let ledger = Arc::new(RwLock::new(
             AccountLedger::new(initial_state).expect("Failed to create AccountLedger"),
         ));
@@ -117,8 +142,8 @@ impl LedgerTestFixture {
         let ledger = self.ledger.read().await;
         let state = ledger.state();
 
-        // Find device in account state (devices is a BTreeMap)
-        Ok(state.devices.get(&device_id).cloned())
+        // Find device in account state device registry
+        Ok(state.device_registry.devices.get(&device_id).cloned())
     }
 
     /// Get account state from the ledger

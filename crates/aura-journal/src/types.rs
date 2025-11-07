@@ -37,7 +37,7 @@ impl Cid {
 ///
 /// Tracks device information, cryptographic keys, and replay protection state.
 /// Reference: 080 spec Part 3: Ledger Compaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceMetadata {
     /// Unique identifier for this device
     pub device_id: DeviceId,
@@ -79,7 +79,7 @@ pub enum DeviceType {
 /// Guardian metadata
 ///
 /// Tracks information about a guardian who can help recover account access.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuardianMetadata {
     /// Unique identifier for this guardian
     pub guardian_id: GuardianId,
@@ -98,7 +98,7 @@ pub struct GuardianMetadata {
 /// Guardian policy configuration
 ///
 /// Controls how a guardian can participate in account recovery.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuardianPolicy {
     /// Whether this guardian's recovery actions require explicit approval
     pub requires_approval: bool,

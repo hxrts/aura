@@ -14,14 +14,13 @@ graph TD
     %% Cryptography Layer
     crypto[aura-crypto]
     
-    %% Authentication & Authorization
+    %% Authentication Layer
     auth[aura-authentication]
-    authz[aura-authorization]
     
     %% Protocol Infrastructure
     journal[aura-journal]
     protocol[aura-protocol]
-    coordination[aura-coordination]
+    choreography[aura-choreography]
     
     %% Storage & Transport
     transport[aura-transport]
@@ -51,38 +50,37 @@ graph TD
     crypto --> types
     auth --> types
     auth --> crypto
-    authz --> types
-    authz --> crypto
-    authz --> auth
+    auth --> protocol
     journal --> types
     journal --> crypto
     journal --> auth
-    journal --> authz
     transport --> types
     transport --> messages
+    transport --> protocol
     store --> journal
     store --> crypto
     store --> types
-    store --> authz
+    store --> protocol
     protocol --> crypto
     protocol --> journal
     protocol --> types
     protocol --> auth
-    protocol --> authz
     protocol --> messages
-    protocol -.-> transport
-    coordination --> crypto
-    coordination --> journal
-    coordination --> types
-    coordination --> protocol
-    transport --> coordination
+    choreography --> protocol
+    choreography --> journal
+    choreography --> crypto
+    choreography --> types
+    choreography --> messages
+    choreography --> simulator
+    choreography --> test_utils
     agent --> types
     agent --> protocol
-    agent --> coordination
     agent --> journal
     agent --> crypto
     agent --> transport
     agent --> store
+    agent --> choreography
+    agent --> auth
     test_utils --> agent
     test_utils --> crypto
     test_utils --> journal
@@ -95,13 +93,14 @@ graph TD
     cli --> journal
     cli --> simulator
     cli --> transport
+    cli --> store
     cli --> types
     simulator --> agent
     simulator --> journal
     simulator --> transport
     simulator --> crypto
     simulator --> protocol
-    simulator --> coordination
+    simulator --> choreography
     simulator --> console_types
     simulator --> types
     simulator --> aura_quint_api
@@ -129,7 +128,10 @@ graph TD
     classDef sim fill:#e0f2f1
     classDef wasm fill:#e8eaf6
     
-    class journal,protocol,coordination protocol
+    class types,messages,console_types foundation
+    class crypto crypto
+    class auth auth
+    class journal,protocol,choreography protocol
     class transport,store storage
     class agent app
     class test_utils,cli dev
@@ -150,14 +152,13 @@ graph TD
     %% Cryptography Layer
     crypto[aura-crypto]
     
-    %% Authentication & Authorization
+    %% Authentication Layer
     auth[aura-authentication]
-    authz[aura-authorization]
     
     %% Protocol Infrastructure
     journal[aura-journal]
     protocol[aura-protocol]
-    coordination[aura-coordination]
+    choreography[aura-choreography]
     
     %% Storage & Transport
     transport[aura-transport]
@@ -177,32 +178,35 @@ graph TD
     crypto --> types
     auth --> types
     auth --> crypto
-    authz --> types
-    authz --> crypto
-    authz --> auth
+    auth --> protocol
     journal --> types
     journal --> crypto
     journal --> auth
-    journal --> authz
     transport --> types
     transport --> messages
+    transport --> protocol
     store --> journal
     store --> crypto
     store --> types
-    store --> authz
+    store --> protocol
     protocol --> crypto
     protocol --> journal
     protocol --> types
     protocol --> auth
-    protocol --> authz
     protocol --> messages
-    protocol -.-> transport
+    choreography --> protocol
+    choreography --> journal
+    choreography --> crypto
+    choreography --> types
+    choreography --> messages
     agent --> types
     agent --> protocol
     agent --> journal
     agent --> crypto
     agent --> transport
     agent --> store
+    agent --> choreography
+    agent --> auth
     cli --> agent
     cli --> auth
     cli --> protocol
@@ -210,13 +214,14 @@ graph TD
     cli --> journal
     cli --> simulator
     cli --> transport
+    cli --> store
     cli --> types
     simulator --> agent
     simulator --> journal
     simulator --> transport
     simulator --> crypto
     simulator --> protocol
-    simulator --> coordination
+    simulator --> choreography
     simulator --> types
     
     %% Styling
@@ -231,8 +236,8 @@ graph TD
     
     class types,messages foundation
     class crypto crypto
-    class auth,authz auth
-    class journal,protocol,coordination protocol
+    class auth auth
+    class journal,protocol,choreography protocol
     class transport,store storage
     class agent app
     class cli dev
@@ -249,17 +254,16 @@ graph TD
 ### Cryptography Layer (Purple)
 - **aura-crypto**: Cryptographic primitives and utilities
 
-### Authentication & Authorization Layer (Orange)
+### Authentication Layer (Orange)
 - **aura-authentication**: Identity verification and signature checking
-- **aura-authorization**: Access control and capability evaluation
 
 ### Protocol Infrastructure Layer (Green)
 - **aura-journal**: CRDT-based state management and event ledger
-- **aura-protocol**: Defines choreographic protocol abstractions and implementations.
-- **aura-coordination**: Handles the orchestration and execution of distributed protocols.
+- **aura-protocol**: Effect system and middleware for protocol operations
+- **aura-choreography**: Choreographic protocol implementations using session types
 
 ### Storage & Transport Layer (Yellow)
-- **aura-transport**: P2P communication abstractions
+- **aura-transport**: P2P communication abstractions with middleware
 - **aura-store**: Encrypted capability-driven storage
 
 ### Application Layer (Pink)
@@ -268,6 +272,7 @@ graph TD
 ### Development Tools (Light Green)
 - **aura-test-utils**: Testing utilities and mocks
 - **aura-cli**: Command-line interface
+- **aura-macros**: Macro utilities for choreography
 
 ### Simulation & Analysis (Teal)
 - **aura-quint-api**: Quint formal verification integration
@@ -295,15 +300,16 @@ graph TD
 - **Capabilities**: `CapabilityId`, `CapabilityScope`, `CapabilityResource`, `Permission`, `CapabilityExpiration`, `CapabilityToken`
 - **Content**: `ContentId`, `ChunkId`, `ManifestId`
 - **Peers**: `PeerInfo`, `RelationshipType`, `ContextType`
-- **Errors**: `AuraError`, `ErrorCode`, `ErrorSeverity`, `ErrorContext`, `ProtocolError` (with detailed variants)
+- **Errors**: `AuraError`, `ErrorCode`, `ErrorSeverity`, `ErrorContext`, `ProtocolError`
 - **Encoding**: `ToBase64`, `FromBase64`, `ToHex`, `FromHex`
+- **Semilattice**: `JoinSemiLattice`, `MeetSemiLattice`, `Bottom`, `Top`, `MvState` traits
 
 **Dependencies**: None (foundation crate)
 
 **Type Consolidation Notes**:
-- `ProtocolType` is the canonical enum used across aura-protocol, aura-types, and domain-specific implementations
-- `SessionStatus` is the single source of truth for session lifecycle (unified from aura-simulator and aura-cli duplicates)
-- `CapabilityToken` provides the lightweight canonical type; domain-specific layers (aura-authorization, aura-journal) extend as needed
+- `ProtocolType` is the canonical enum used across aura-protocol and domain-specific implementations
+- `SessionStatus` is the single source of truth for session lifecycle (unified from aura-simulator and aura-cli)
+- `CapabilityToken` provides the lightweight canonical type; domain-specific layers extend as needed
 - `Permission` enum supports both canonical variants and Custom(String) for domain-specific permissions
 
 ---
@@ -327,49 +333,30 @@ graph TD
 **Purpose**: Cryptographic primitives and threshold cryptography implementation
 
 **Key Exports**:
-- **FROST**: Threshold signatures (`FrostSignature`, `FrostKeyShare`)
-- **DKD**: Deterministic Key Derivation (`derive_key`, `DkdContext`)
-- **Encryption**: `encrypt_data`, `decrypt_data`, `EncryptionKey`
-- **Signatures**: `Ed25519SigningKey`, `Ed25519VerifyingKey`, `Ed25519Signature`
-- **Hash**: `Blake3Hash`, `hash_data`
-- **HPKE**: `hpke_encrypt`, `hpke_decrypt` for guardian shares
+- **FROST**: Threshold signatures (`FrostSignature`, `FrostKeyShare`, `KeyShare`)
+- **DKD**: Deterministic Key Derivation
+- **Encryption**: Ed25519 signatures, HPKE encryption
+- **Hash**: Blake3 hashing utilities
 - **Effects**: `CryptoEffects` for injectable time/randomness
-- **Sealing**: `seal_data`, `unseal_data` for sensitive storage
+- **Middleware**: Comprehensive middleware system for crypto operations (security levels, audit logging, hardware integration)
 
 **Dependencies**: `aura-types`
 
 ---
 
 ### aura-authentication
-**Purpose**: Identity verification and signature checking (Layer 2 security)
+**Purpose**: Identity verification and signature checking
 
 **Key Exports**:
-- **Device Authentication**: `verify_device_signature`, `verify_signature`
-- **Threshold Authentication**: `verify_threshold_signature`
-- **Guardian Authentication**: `verify_guardian_signature`
-- **Session Authentication**: `verify_session_ticket`
-- **Event Validation**: `validate_device_signature`, `validate_threshold_signature`
+- **Device Authentication**: Signature verification for device operations
+- **Threshold Authentication**: Threshold signature verification
+- **Guardian Authentication**: Guardian signature verification
+- **Session Authentication**: Session ticket verification
 - **Context**: `AuthenticationContext` with public keys and threshold configs
-- **Types**: `ThresholdConfig`, `EventAuthorization`, `ThresholdSig`
-- **Errors**: `AuthenticationError`, `Result<T>`
+- **Types**: `ThresholdConfig`, `EventAuthorization`
+- **Errors**: `AuthenticationError`
 
-**Dependencies**: `aura-types`, `aura-crypto`
-
----
-
-### aura-authorization
-**Purpose**: Access control and permission decisions (Layer 3 security)
-
-**Key Exports**:
-- **Capabilities**: `CapabilityToken`, `CapabilityChain`, `CapabilityScope`
-- **Access Control**: `authorize_event`, `AccessDecision`
-- **Policy Evaluation**: `AuthorityGraph`, `PolicyEvaluation`
-- **Subjects**: `Subject` enum (Device, Guardian, ThresholdGroup, Session)
-- **Resources**: `Resource` enum (Account, Device, StorageObject, ProtocolSession)
-- **Actions**: `Action` enum (Read, Write, Delete, Execute, Delegate, Revoke, Admin)
-- **Errors**: `AuthorizationError`, `Result<T>`
-
-**Dependencies**: `aura-types`, `aura-crypto`, `aura-authentication`
+**Dependencies**: `aura-types`, `aura-crypto`, `aura-protocol`
 
 ---
 
@@ -382,55 +369,54 @@ graph TD
 - **Bootstrap**: Account initialization and genesis ceremony
 - **Capabilities**: Capability-based authorization system
 - **Session Types**: Simple session management for journal operations
+- **CRDT Types**: Convergent and Meet semilattice implementations
 - **Serialization**: CRDT event serialization utilities
-- **Errors**: `JournalError`, `Result<T>`
+- **Errors**: `JournalError`
 
-**Dependencies**: `aura-types`, `aura-crypto`, `aura-authentication`, `aura-authorization`
+**Dependencies**: `aura-types`, `aura-crypto`, `aura-authentication`
 
 ---
 
 ### aura-protocol
-**Purpose**: Defines choreographic protocol abstractions and implementations with a middleware architecture. This crate provides the building blocks for distributed protocols, which are then orchestrated by `aura-coordination`.
-
-**Naming Note**: Other documents may refer to this crate as `protocol-core`. The name should be standardized to `aura-protocol` in the future.
+**Purpose**: Unified effect system and middleware architecture for protocol operations
 
 **Key Exports**:
-- **Middleware**: `AuraProtocolHandler`, `EffectsMiddleware`, `TracingMiddleware`
-- **Effects**: Protocol effects and side-effect injection system
+- **Effects**: Core effect traits and implementations (`AuraEffects`, `CryptoEffects`, `TimeEffects`)
+- **Handlers**: Effect handler registry and composition
+- **Middleware**: Middleware system for effect composition (tracing, metrics, security, caching)
 - **Context**: Protocol execution context and infrastructure
-- **Protocols**: Protocol-specific implementations and message types (DKD, Counter, Resharing, Locking, Recovery, Compaction)
-- **Handlers**: Base protocol implementations
-- **Types**: `IdentifierMapping`, `ProtocolType` (Dkd, Counter, Resharing, Locking, Recovery, Compaction), `ProtocolConfig`, `ProtocolError`
-- **Instructions**: `Instruction`, `InstructionResult` for protocol coordination
-- **Prelude**: Common imports (`prelude` module)
+- **Types**: Protocol configuration and error types
+- **Prelude**: Common imports and utility re-exports
 
-**Dependencies**: `aura-crypto`, `aura-journal`, `aura-types`, `aura-authentication`, `aura-authorization`, `aura-messages`, `aura-transport` (optional)
+**Dependencies**: `aura-crypto`, `aura-journal`, `aura-types`, `aura-authentication`, `aura-messages`
 
 ---
 
-### aura-coordination
-**Purpose**: Handles the orchestration and execution of distributed protocols. Contains the `LocalSessionRuntime` and `LifecycleScheduler` which manage the state and progression of choreographic protocols.
+### aura-choreography
+**Purpose**: Choreographic protocol implementations using session types for compile-time safety
 
 **Key Exports**:
-- **Runtime**: `LocalSessionRuntime`, `LifecycleScheduler`
-- **Protocol Lifecycles**: Implementations for DKD, Resharing, Recovery, etc.
-- **Session Types**: Compile-time safety for protocol states.
+- **Protocol Implementations**: DKD, FROST, resharing, recovery, and other distributed protocols
+- **Session Types**: Session type definitions for compile-time protocol state safety
+- **Handlers**: Protocol-specific effect handlers and coordinators
+- **Tree-based Coordination**: Tree-structured protocol coordination and consensus
+- **Recovery Protocols**: Byzantine fault tolerance and account recovery mechanisms
 
-**Dependencies**: `aura-types`, `aura-crypto`, `aura-journal`, `aura-protocol`
+**Dependencies**: `aura-protocol`, `aura-journal`, `aura-crypto`, `aura-types`, `aura-messages`, `aura-test-utils`, `aura-simulator`
 
 ---
 
 ### aura-transport
-**Purpose**: Unified transport layer with layered architecture
+**Purpose**: P2P communication layer with middleware-based architecture
 
 **Key Exports**:
-- **Core Transport**: `Transport` trait, `TransportFactory`, `MemoryTransport`
-- **Adapters**: `ChoreographicAdapter`, `ProtocolAdapter`
-- **Handlers**: Legacy handler layer (transitional)
-- **Types**: `TransportEnvelope`, `MessageMetadata`, `MessagePriority`, `TransportConfig`
-- **Errors**: `TransportError`, `TransportErrorBuilder`, `TransportResult<T>`
+- **Core Transport**: `TransportHandler`, `TransportOperation`, `TransportResult`
+- **Middleware System**: Composable middleware stack for transport operations
+- **Network Address**: Unified `NetworkAddress` type supporting TCP, UDP, HTTP, Memory, and Peer variants
+- **Types**: Message envelope and metadata types
+- **Errors**: `TransportError` and `TransportResult<T>`
 
-**Dependencies**: `aura-types`
+**Dependencies**: `aura-types`, `aura-messages`, `aura-protocol`
 
 ---
 
@@ -438,14 +424,14 @@ graph TD
 **Purpose**: Capability-driven encrypted storage layer
 
 **Key Exports**:
-- **Access Control**: `CapabilityChecker`, `CapabilityManager`, `CapabilityToken`
-- **Content Processing**: `chunking`, `encryption`, `erasure` modules
-- **Manifest**: `ObjectManifest`, `AccessControl`, `ChunkingParams`, `KeyDerivationSpec`
-- **Storage**: `ChunkStore`, `ChunkId`, `Indexer`, `QuotaTracker`
+- **Access Control**: Capability-based access control and enforcement
+- **Content Processing**: Chunking, encryption, and erasure coding
+- **Manifest**: Object manifest with access control and key derivation specifications
+- **Storage**: Chunk store and content indexing
 - **Replication**: Static and social replication strategies
-- **Errors**: `StoreError`, `StoreErrorBuilder`, `Result<T>`
+- **Errors**: `StoreError` and `Result<T>`
 
-**Dependencies**: `aura-journal`, `aura-crypto`, `aura-types`, `aura-authorization`
+**Dependencies**: `aura-journal`, `aura-crypto`, `aura-types`, `aura-protocol`
 
 ---
 
@@ -456,14 +442,12 @@ graph TD
 - **Agent Interface**: `Agent` trait with state-specific implementations
 - **Session States**: `Uninitialized`, `Idle`, `Coordinating`, `Failed`
 - **Factory**: `AgentFactory` for creating agents
-- **Configuration**: `BootstrapConfig` for agent initialization
-- **Identity**: `DerivedIdentity`, identity derivation protocols
+- **Configuration**: Bootstrap and initialization configuration
+- **Identity**: Device identity and key derivation
 - **Storage**: Platform-specific secure storage abstractions
-- **Traits**: `IdentityAgent`, `StorageAgent`, `Storage`, `Transport`, `TransportAdapter`
-- **Adapters**: `CoordinationTransportAdapter`, `ProductionStorage`
-- **Errors**: `AgentError`, `Result<T>`
+- **Errors**: `AgentError` and `Result<T>`
 
-**Dependencies**: `aura-types`, `aura-protocol`, `aura-journal`, `aura-crypto`, `aura-transport`, `aura-store`
+**Dependencies**: `aura-types`, `aura-protocol`, `aura-journal`, `aura-crypto`, `aura-transport`, `aura-store`, `aura-choreography`, `aura-authentication`
 
 ---
 
@@ -471,10 +455,10 @@ graph TD
 **Purpose**: Console-specific message and response types
 
 **Key Exports**:
-- **Commands**: Console command types
-- **Responses**: Console response types
-- **Network**: Network visualization types
-- **Trace**: Tracing and debugging types
+- **Commands**: Console command types for debugging and analysis
+- **Responses**: Console response types for visualization
+- **Network**: Network state visualization types
+- **Trace**: Execution trace and debugging types
 
 **Dependencies**: None
 
@@ -484,10 +468,10 @@ graph TD
 **Purpose**: Testing utilities and mocks for development
 
 **Key Exports**:
-- **Factories**: Test data factories
+- **Factories**: Test data factories and fixtures
 - **Mocks**: Mock implementations of core traits
-- **Fixtures**: Test fixtures and sample data
-- **Assertions**: Testing assertion helpers
+- **Assertions**: Testing helpers and assertion macros
+- **Crypto Utilities**: Test key and signature generation
 
 **Dependencies**: `aura-agent`, `aura-crypto`, `aura-journal`, `aura-transport`, `aura-types`
 
@@ -497,16 +481,23 @@ graph TD
 **Purpose**: Command-line interface for account management and testing
 
 **Key Exports**:
-- **Commands**: CLI command implementations (debug, scenarios, account management)
-- **Configuration**: CLI configuration management
-- **Testing**: Development and testing utilities
-- **SessionStatus**: Re-exported from aura-types (canonical single source of truth)
+- **Commands**: CLI command implementations for account and protocol testing
+- **Configuration**: CLI configuration and argument parsing
+- **Utilities**: Development and testing utilities
+- **Prelude**: Common imports
 
-**Dependencies**: `aura-agent`, `aura-authentication`, `aura-protocol`, `aura-crypto`, `aura-journal`, `aura-simulator`, `aura-transport`, `aura-types`
+**Dependencies**: `aura-agent`, `aura-authentication`, `aura-protocol`, `aura-crypto`, `aura-journal`, `aura-simulator`, `aura-transport`, `aura-store`, `aura-types`
 
-**Type Consolidation Notes**:
-- Uses canonical `SessionStatus` from aura-types
-- Removed duplicate SessionStatus definition; now imports from aura-types
+---
+
+### aura-macros
+**Purpose**: Macro utilities for protocol development and choreography
+
+**Key Exports**:
+- **Derive Macros**: Procedural macros for choreographic protocol definitions
+- **Attribute Macros**: Attributes for protocol configuration
+
+**Dependencies**: Procedural macro crate (derives)
 
 ---
 
@@ -514,12 +505,12 @@ graph TD
 **Purpose**: Quint formal verification integration
 
 **Key Exports**:
-- **Evaluator**: Quint specification evaluator
+- **Evaluator**: Quint specification evaluator interface
 - **Properties**: Property verification utilities
-- **Runner**: Quint execution runner
+- **Runner**: Quint execution and trace analysis
 - **Types**: Quint-specific type definitions
 
-**Dependencies**: None (external Quint integration)
+**Dependencies**: External Quint integration
 
 ---
 
@@ -527,19 +518,18 @@ graph TD
 **Purpose**: Deterministic protocol simulation and testing framework
 
 **Key Exports**:
-- **Simulation Engine**: Core simulation runtime
-- **Adversary**: Byzantine failure and network attack simulation
-- **Analysis**: Trace recording and failure analysis
-- **Builder**: Simulation configuration builder
-- **Network**: Simulated network journal
-- **Observability**: Debugging and monitoring tools
-- **SessionStatus**: Re-exported from aura-types (canonical single source of truth)
+- **Simulation Engine**: Core simulation runtime with deterministic execution
+- **Adversary Models**: Byzantine failure and network attack simulation
+- **Analysis**: Trace recording and post-mortem failure analysis
+- **Builder**: Simulation configuration and scenario builder
+- **Observability**: Debugging tools and event monitoring
+- **Middleware System**: Property checking, state inspection, and chaos injection
 
-**Dependencies**: `aura-agent`, `aura-journal`, `aura-transport`, `aura-crypto`, `aura-protocol`, `aura-console-types`, `aura-types`, `aura-quint-api`
+**Dependencies**: `aura-agent`, `aura-journal`, `aura-transport`, `aura-crypto`, `aura-protocol`, `aura-choreography`, `aura-console-types`, `aura-types`, `aura-quint-api`
 
 **Type Consolidation Notes**:
-- Uses canonical `SessionStatus` from aura-types (supports Initializing, Active, Waiting, Completed, Failed, Expired, TimedOut, Cancelled)
-- Removed duplicate SessionStatus definition; now imports from aura-types
+- Uses canonical `SessionStatus` from aura-types
+- Removed duplicate definitions; imports from aura-types
 
 ---
 
@@ -548,7 +538,7 @@ graph TD
 
 **Key Exports**:
 - **WASM Bindings**: WebAssembly interface exports
-- **Browser Integration**: Browser-specific utilities
+- **Browser Integration**: Browser-specific utilities and APIs
 - **Logging**: WASM-compatible logging infrastructure
 
 **Dependencies**: None
@@ -559,9 +549,9 @@ graph TD
 **Purpose**: Web-based debugging and visualization console
 
 **Key Exports**:
-- **Components**: React-style UI components
-- **Services**: Data processing and WebSocket services
-- **Visualization**: Network and timeline visualization
+- **Components**: UI components for protocol visualization
+- **Services**: Data processing and WebSocket communication
+- **Visualization**: Network topology and execution trace visualization
 
 **Dependencies**: `aura-wasm`, `aura-console-types`
 
@@ -571,9 +561,9 @@ graph TD
 **Purpose**: Analysis and property monitoring client
 
 **Key Exports**:
-- **Analyzer**: Protocol analysis utilities
+- **Analyzer**: Protocol analysis and verification utilities
 - **Property Monitor**: Property monitoring and violation detection
-- **Causality**: Causal relationship analysis
+- **Causality**: Causal relationship and ordering analysis
 
 **Dependencies**: `aura-console-types`, `aura-types`, `aura-wasm`, `aura-quint-api`
 
@@ -583,8 +573,8 @@ graph TD
 **Purpose**: Live network debugging and monitoring
 
 **Key Exports**:
-- **Live Network Interface**: Real-time network debugging
-- **Monitoring**: Live system monitoring utilities
+- **Live Network Interface**: Real-time network debugging interface
+- **Monitoring**: Live system state monitoring and visualization
 
 **Dependencies**: `aura-console-types`, `aura-wasm`
 
@@ -594,10 +584,10 @@ graph TD
 **Purpose**: Simulation client interface
 
 **Key Exports**:
-- **Simulation Client**: Client interface for simulation backend
-- **Event Buffer**: Simulation event buffering
+- **Simulation Client**: Client interface for simulation backend communication
+- **Event Buffer**: Simulation event buffering and management
 
-**Dependencies**: `app-console-types`, `app-wasm`
+**Dependencies**: `app-console-types`, `aura-wasm`
 
 ---
 
@@ -606,8 +596,8 @@ graph TD
 
 **Key Exports**:
 - **Simulation Server**: WebSocket-based simulation server
-- **Command Handler**: Simulation command processing
-- **Branch Manager**: Simulation state branch management
+- **Command Handler**: Simulation command processing and execution
+- **Branch Manager**: Simulation state branch management for exploration
 
 **Dependencies**: `aura-console-types`, `aura-simulator`
 
@@ -617,11 +607,12 @@ graph TD
 
 1. **Layered Architecture**: Clean separation from foundation types through protocols to applications
 2. **Dependency Injection**: Effects system allows injectable side effects for testing
-3. **Session Types**: Compile-time state safety in agent implementations
-4. **Choreographic Programming**: Protocol coordination through global viewpoints
-5. **CRDT-Based State**: Eventually consistent state management in journal
+3. **Session Types**: Compile-time state safety in choreographic protocols
+4. **Choreographic Programming**: Protocol coordination through global viewpoints with session types
+5. **CRDT-Based State**: Eventually consistent state management with semilattice operations
 6. **Capability-Based Security**: Unified access control across storage and communication
-7. **Platform Abstraction**: Unified interfaces with platform-specific implementations
+7. **Middleware System**: Composable cross-cutting concerns for effects and transport
+8. **Platform Abstraction**: Unified interfaces with platform-specific implementations
 
 ---
 
@@ -648,7 +639,8 @@ graph TD
 **Usage Across Crates**:
 - `aura-types`: Canonical definition with all methods
 - `aura-protocol`: Re-exports and uses canonical definition
-- `aura-simulator`: Domain-specific ProtocolType for TOML serialization (intentionally separate for format compatibility)
+- `aura-choreography`: Uses canonical definition for protocol implementations
+- `aura-simulator`: Uses canonical definition with simulation-specific extensions
 
 ### SessionStatus Consolidation
 
@@ -665,34 +657,28 @@ graph TD
 8. `Cancelled` - Session was cancelled
 
 **Unified From**:
-- Removed duplicate from `aura-simulator::world_state` (had 7 variants, including `Failed { reason: String }`)
-- Removed duplicate from `aura-cli::commands::debug` (had 4 variants, including `Paused`)
-- Extended aura-types to include missing variants (Initializing, Waiting, Cancelled)
+- Removed duplicate from `aura-simulator` (had 7 variants with different semantics)
+- Removed duplicate from `aura-cli` (had 4 variants)
+- Extended aura-types to include all necessary lifecycle states
 
 **Usage Across Crates**:
 - `aura-types`: Single source of truth
 - `aura-simulator`: Imports from aura-types
 - `aura-cli`: Imports from aura-types
-- `aura-protocol`: Uses indirectly through aura-types
+- `aura-choreography`: Uses indirectly through aura-types
 
 ### Capability System Layering
 
 **Design Decision**: Intentional layering with no consolidation needed
 
-The capability system uses **4 distinct architectural layers**, each serving legitimate purposes:
-
-| Layer | Type | Module | Purpose |
-|-------|------|--------|---------|
-| **Canonical** | `CapabilityToken`, `Permission`, `CapabilityScope`, `CapabilityResource`, `CapabilityExpiration` | `aura-types::capabilities` | Universal reference type - lightweight, generic |
-| **Authorization** | `CapabilityToken`, `CapabilityScope`, `CapabilityCondition`, `PermissionLevel` | `aura-authorization::capability` | Policy enforcement - rich features (signatures, conditions, delegation depth) |
-| **Ledger** | `DeviceAuthentication`, `CapabilityToken`, `Permission` (domain-specific) | `aura-journal::capability` | Event validation - separates auth from authz with Storage/Communication/Relay operations |
-| **Storage** | Uses aura-authorization types | `aura-store::access_control` | Object access - integrates authorization capabilities |
+The capability system uses **multiple architectural layers**, each serving legitimate purposes with appropriate abstractions for their use cases.
 
 **Key Design Principles**:
-- Each layer answers different architectural questions (reference, enforcement, validation, access)
-- Custom variants support domain-specific extensions without breaking canonical definitions
+- Canonical types in aura-types provide lightweight references
+- Authorization layer adds policy enforcement features
+- Domain-specific layers (journal, storage) implement access control
 - Clear conversion paths between layers enable inter-layer communication
-- No breaking changes needed; layers are complementary not duplicate
+- Custom variants support domain-specific extensions
 
 ### ProtocolError Separation
 
@@ -700,25 +686,21 @@ The capability system uses **4 distinct architectural layers**, each serving leg
 
 **Definitions**:
 
-1. **aura-types::ProtocolError (mod.rs)** - Simple, high-level protocol errors
+1. **aura-types::ProtocolError** - High-level protocol errors
    - Used by: Application and coordination layers
-   - Variants: DkdFailed, FrostFailed, EpochMismatch, CgkaFailed, etc.
-   - Fields: message, context
+   - Variants: Domain-specific protocol failure reasons
+   - Purpose: Application-level error handling
 
-2. **aura-types::ProtocolError (protocol.rs)** - Detailed, context-rich errors (currently unused)
-   - More detailed field information (phase, round, threshold, etc.)
-   - Helper methods for error codes and severity
-   - Candidate for promotion as canonical detailed version
-
-3. **aura-protocol::middleware::handler::ProtocolError** - Middleware-specific errors
-   - Used by: Transport and handler layers
-   - Variants: Transport, Serialization, Authorization, Session, Timeout, Protocol, Internal
-   - Purpose: Low-level operational error handling
+2. **aura-protocol::ProtocolError** - Low-level operational errors
+   - Used by: Middleware and effect system
+   - Variants: Operational concerns (serialization, authorization, timeout)
+   - Purpose: Effect system error handling
 
 **Design Rationale**:
-- Different layers need different granularity and context
-- High-level errors for protocol state; low-level errors for transport
-- Clear separation prevents mixing concerns between coordination and middleware
+- Different layers need different error models
+- High-level errors for protocol semantics
+- Low-level errors for operational concerns
+- Clear separation prevents mixing architectural concerns
 
 ### Type Consolidation Summary
 
@@ -726,10 +708,9 @@ The capability system uses **4 distinct architectural layers**, each serving leg
 |------|--------|--------|-------|
 | `ProtocolType` | ✅ Consolidated | aura-types | Single canonical enum with 6 variants |
 | `SessionStatus` | ✅ Consolidated | aura-types | Single canonical enum with 8 variants |
-| `CapabilityToken` | ✅ Layered | Multiple (intentional) | 4-layer architecture, no consolidation needed |
+| `CapabilityToken` | ✅ Layered | Multiple (intentional) | Generic in aura-types, extended in authorization and storage |
 | `Permission` | ✅ Layered | Multiple (intentional) | Canonical + domain-specific variants |
-| `ProtocolError` | ⚠️ Separated | Multiple (intentional) | Different layers have different needs |
-| `CapabilityScope` | ⚠️ Separated | Multiple (intentional) | Generic vs. authorization-specific |
+| `ProtocolError` | ✅ Separated | Multiple (intentional) | Different layers have different concerns |
 
 ---
 
@@ -741,22 +722,23 @@ The capability system uses **4 distinct architectural layers**, each serving leg
 4. **Better Type Safety**: `ProtocolType` ensures all protocol variants are handled
 5. **Preserved Flexibility**: Custom variants allow domain-specific extensions
 6. **Backward Compatibility**: SessionStatus enum extensions are additive, no breaking changes
+7. **Unified Effect System**: Centralized effects management through aura-protocol
 
 ---
 
 ## Future Consolidation Opportunities
 
 ### Short-term (Low Risk)
-1. Promote detailed `ProtocolError` from protocol.rs as primary canonical version
-2. Add explicit conversion traits between Permission enum variants
-3. Document when to use each CapabilityToken variant
+1. Standardize error conversion patterns between layers
+2. Document canonical vs. extended type usage patterns
+3. Add explicit conversion traits for capability variants
 
 ### Medium-term (Considered Design)
-1. Standardize on CapabilityId ([u8; 32]) instead of Uuid for all capability types
-2. Create unified scope hierarchy (generic Read/Write/Execute/Admin + resource-specific)
-3. Add conversion methods between capability token types
+1. Enhance middleware system with additional observability features
+2. Add protocol composition utilities to aura-protocol
+3. Expand choreography support for more complex coordination patterns
 
 ### Long-term (Major Refactoring)
-1. Create `AuthorityToken` wrapper supporting multiple token variants
-2. Merge ProtocolError definitions with clear layer separation
-3. Unify state machine patterns across protocols
+1. Unified middleware framework across all subsystems
+2. Enhanced protocol composition and reusability
+3. Formalized type conversion and adapter patterns

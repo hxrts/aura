@@ -3,10 +3,15 @@
 //! This module provides simplified placeholder implementations of journal effects
 //! for the Phase 1 MVP. This allows the journal module to compile and demonstrate
 //! the overall architecture while external library integrations are refined.
+//!
+//! TODO: this entire file needs to be removed. the production implementation must
+//! integrate with the injectable effects system from aura-types and aura-protocol crates
 
-use async_trait::async_trait;
-use aura_types::{AuraError, DeviceId};
 use crate::journal::*;
+use async_trait::async_trait;
+use aura_types::effects::TimeEffects;
+use aura_types::{AuraError, DeviceId};
+use std::sync::Arc;
 
 /// Simplified effects trait for KeyJournal operations
 #[async_trait]
@@ -41,20 +46,25 @@ pub trait SimpleJournalEffects: Send + Sync {
 }
 
 /// Simple production implementation
-pub struct SimpleJournalEffectsAdapter {
+pub struct SimpleJournalEffectsAdapter<T: TimeEffects> {
     /// Device ID for this effects adapter
     device_id: DeviceId,
+    /// Time effects handler
+    time_effects: Arc<T>,
 }
 
-impl SimpleJournalEffectsAdapter {
-    /// Create a new simple journal effects adapter with the given device ID
-    pub fn new(device_id: DeviceId) -> Self {
-        Self { device_id }
+impl<T: TimeEffects> SimpleJournalEffectsAdapter<T> {
+    /// Create a new simple journal effects adapter with the given device ID and time effects
+    pub fn new(device_id: DeviceId, time_effects: Arc<T>) -> Self {
+        Self {
+            device_id,
+            time_effects,
+        }
     }
 }
 
 #[async_trait]
-impl SimpleJournalEffects for SimpleJournalEffectsAdapter {
+impl<T: TimeEffects> SimpleJournalEffects for SimpleJournalEffectsAdapter<T> {
     async fn would_create_cycle(
         &self,
         edges: &[(NodeId, NodeId)],
@@ -117,10 +127,7 @@ impl SimpleJournalEffects for SimpleJournalEffectsAdapter {
     }
 
     async fn current_timestamp(&self) -> Result<u64, AuraError> {
-        Ok(std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs())
+        self.time_effects.now()
     }
 
     async fn device_id(&self) -> Result<DeviceId, AuraError> {
@@ -132,16 +139,39 @@ impl SimpleJournalEffects for SimpleJournalEffectsAdapter {
 mod tests {
     use super::*;
 
+    /// Mock time effects for testing
+    struct MockTimeEffects {
+        timestamp: u64,
+    }
+
+    impl MockTimeEffects {
+        fn new(timestamp: u64) -> Self {
+            Self { timestamp }
+        }
+    }
+
+    impl TimeEffects for MockTimeEffects {
+        fn now(&self) -> Result<u64, AuraError> {
+            Ok(self.timestamp)
+        }
+
+        fn advance_time(&self, _seconds: u64) -> Result<(), AuraError> {
+            // No-op for simple mock
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn test_simple_effects() {
         let device_id = DeviceId::new_v4();
-        let effects = SimpleJournalEffectsAdapter::new(device_id);
+        let time_effects = Arc::new(MockTimeEffects::new(1234567890));
+        let effects = SimpleJournalEffectsAdapter::new(device_id, time_effects);
 
         // Test basic operations
         assert_eq!(effects.device_id().await.unwrap(), device_id);
 
         let timestamp = effects.current_timestamp().await.unwrap();
-        assert!(timestamp > 0);
+        assert_eq!(timestamp, 1234567890);
 
         // Test secret sharing
         let secret = b"test_secret";

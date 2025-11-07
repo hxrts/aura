@@ -38,11 +38,8 @@ pub use metrics::{AgentMetrics, MetricsMiddleware, OperationMetrics};
 pub use tracing::{OperationTracer, TracingMiddleware};
 pub use validation::{InputValidator, ValidationMiddleware, ValidationRule};
 
-use crate::agent::AuraEffectSystem;
-use aura_types::{
-    identifiers::DeviceId,
-    AuraError, AuraResult as Result,
-};
+use aura_protocol::effects::AuraEffectSystem;
+use aura_types::{identifiers::DeviceId, AuraError, AuraResult as Result};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -95,7 +92,11 @@ impl AgentMiddlewareStack {
     }
 
     /// Execute an operation through the middleware stack
-    pub async fn execute_operation<T, F, Fut>(&self, operation_name: &str, operation: F) -> Result<T>
+    pub async fn execute_operation<T, F, Fut>(
+        &self,
+        operation_name: &str,
+        operation: F,
+    ) -> Result<T>
     where
         F: FnOnce(Arc<RwLock<AuraEffectSystem>>) -> Fut + Send,
         Fut: std::future::Future<Output = Result<T>> + Send,
@@ -127,7 +128,9 @@ impl AgentMiddlewareStack {
         if let (Some(metrics), Some(start_time)) = (&self.metrics, start_time) {
             let duration = start_time.elapsed();
             let success = result.is_ok();
-            metrics.record_operation(operation_name, duration, success).await?;
+            metrics
+                .record_operation(operation_name, duration, success)
+                .await?;
         }
 
         // End tracing if enabled
@@ -241,7 +244,7 @@ impl MiddlewareStackBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::AuraEffectSystem;
+    use aura_protocol::effects::AuraEffectSystem;
 
     #[tokio::test]
     async fn test_middleware_stack_creation() {

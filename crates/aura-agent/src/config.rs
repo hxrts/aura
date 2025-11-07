@@ -3,13 +3,13 @@
 //! This module defines configuration types that are pure data structures.
 //! All configuration I/O is performed through effects, not direct file access.
 
-use aura_types::{DeviceId, AccountId};
+use aura_types::{AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
 /// Complete agent configuration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentConfig {
     /// Device-specific settings
     pub device: DeviceSettings,
@@ -69,7 +69,7 @@ pub struct JournalSettings {
 }
 
 /// General agent settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentSettings {
     /// Log level (error, warn, info, debug, trace)
     pub log_level: LogLevel,
@@ -112,7 +112,7 @@ pub enum LogLevel {
 }
 
 /// Retry configuration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RetryConfig {
     /// Maximum retry attempts
     pub max_attempts: u32,
@@ -220,13 +220,13 @@ impl AgentConfigBuilder {
 
         // Apply overrides
         for (key, value) in self.overrides {
-            self.apply_override(&mut config, &key, value);
+            Self::apply_override_static(&mut config, &key, value);
         }
 
         config
     }
 
-    fn apply_override(&self, config: &mut AgentConfig, key: &str, value: serde_json::Value) {
+    fn apply_override_static(config: &mut AgentConfig, key: &str, value: serde_json::Value) {
         match key {
             "device.encryption_enabled" => {
                 if let Ok(val) = serde_json::from_value(value) {
@@ -252,6 +252,10 @@ impl AgentConfigBuilder {
                 // Ignore unknown overrides
             }
         }
+    }
+
+    fn apply_override(&self, config: &mut AgentConfig, key: &str, value: serde_json::Value) {
+        Self::apply_override_static(config, key, value);
     }
 }
 
@@ -322,7 +326,7 @@ impl Default for CacheSettings {
     fn default() -> Self {
         Self {
             max_size_bytes: 10 * 1024 * 1024, // 10MB
-            ttl_seconds: 3600, // 1 hour
+            ttl_seconds: 3600,                // 1 hour
             compression_enabled: true,
         }
     }

@@ -1,13 +1,34 @@
 //! Mock implementations for testing
 //!
 //! This module provides mock Storage implementation for testing.
-//! For transport mocking, use `aura_transport::MemoryTransport` directly.
+//! For transport mocking, use the aura_transport middleware system.
 
 use async_trait::async_trait;
-use aura_agent::{Result, Storage, StorageStats};
-use aura_types::AccountId;
+use aura_types::{AccountId, AuraResult};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+/// Storage interface for testing
+///
+/// This provides a simple storage interface that mocks can implement
+#[async_trait]
+pub trait Storage: Send + Sync {
+    fn account_id(&self) -> AccountId;
+    async fn store(&self, key: &str, data: &[u8]) -> AuraResult<()>;
+    async fn retrieve(&self, key: &str) -> AuraResult<Option<Vec<u8>>>;
+    async fn exists(&self, key: &str) -> AuraResult<bool>;
+    async fn delete(&self, key: &str) -> AuraResult<()>;
+    async fn list_keys(&self) -> AuraResult<Vec<String>>;
+    async fn get_stats(&self) -> AuraResult<StorageStats>;
+}
+
+/// Storage statistics for testing
+#[derive(Debug, Clone, Default)]
+pub struct StorageStats {
+    pub total_keys: usize,
+    pub total_size_bytes: u64,
+    pub available_space_bytes: Option<u64>,
+}
 
 /// Mock storage implementation for testing
 #[derive(Debug)]
@@ -42,36 +63,36 @@ impl Storage for MockStorage {
         self.account_id
     }
 
-    async fn store(&self, key: &str, data: &[u8]) -> Result<()> {
+    async fn store(&self, key: &str, data: &[u8]) -> AuraResult<()> {
         let mut storage = self.data.write().await;
         storage.insert(key.to_string(), data.to_vec());
         Ok(())
     }
 
-    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>> {
+    async fn retrieve(&self, key: &str) -> AuraResult<Option<Vec<u8>>> {
         let storage = self.data.read().await;
         Ok(storage.get(key).cloned())
     }
 
-    async fn delete(&self, key: &str) -> Result<()> {
+    async fn delete(&self, key: &str) -> AuraResult<()> {
         let mut storage = self.data.write().await;
         storage.remove(key);
         Ok(())
     }
 
-    async fn list_keys(&self) -> Result<Vec<String>> {
+    async fn list_keys(&self) -> AuraResult<Vec<String>> {
         let storage = self.data.read().await;
         Ok(storage.keys().cloned().collect())
     }
 
-    async fn exists(&self, key: &str) -> Result<bool> {
+    async fn exists(&self, key: &str) -> AuraResult<bool> {
         let storage = self.data.read().await;
         Ok(storage.contains_key(key))
     }
 
-    async fn stats(&self) -> Result<StorageStats> {
+    async fn get_stats(&self) -> AuraResult<StorageStats> {
         let storage = self.data.read().await;
-        let total_keys = storage.len() as u64;
+        let total_keys = storage.len();
         let total_size_bytes = storage.values().map(|v| v.len() as u64).sum();
 
         Ok(StorageStats {
@@ -120,7 +141,7 @@ mod tests {
         storage.store("key1", b"data1").await.unwrap();
         storage.store("key2", b"data2").await.unwrap();
 
-        let stats = storage.stats().await.unwrap();
+        let stats = storage.get_stats().await.unwrap();
         assert_eq!(stats.total_keys, 2);
         assert_eq!(stats.total_size_bytes, 10); // "data1" + "data2"
     }

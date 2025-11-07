@@ -30,7 +30,7 @@
 //! async fn execute_protocol_phase<E>(
 //!     state: ProtocolState,
 //!     effects: &E,
-//! ) -> Result<ProtocolState, ProtocolError> 
+//! ) -> Result<ProtocolState, ProtocolError>
 //! where
 //!     E: NetworkEffects + CryptoEffects + TimeEffects,
 //! {
@@ -52,21 +52,27 @@ pub mod ledger;
 pub mod network;
 pub mod params;
 pub mod random;
+pub mod semilattice;
 pub mod storage;
 pub mod system;
 pub mod time;
 
 // Re-export core effect traits
 pub use choreographic::{
-    ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, ChoreographyMetrics,
+    ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
+    ChoreographyMetrics,
 };
-pub use console::{ConsoleEvent, ConsoleEffects, LogLevel};
+pub use console::{ConsoleEffects, ConsoleEvent, LogLevel};
 pub use crypto::{CryptoEffects, CryptoError};
 pub use journal::JournalEffects;
 pub use ledger::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEvent, LedgerEventStream};
-pub use network::{NetworkEffects, NetworkError, NetworkAddress, PeerEvent, PeerEventStream};
+pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 pub use params::*; // Re-export all parameter types
 pub use random::RandomEffects;
+pub use semilattice::{
+    CausalContext, CmHandler, CvHandler, DeliveryConfig, DeliveryEffect, DeliveryGuarantee,
+    DeltaHandler, GossipStrategy, HandlerFactory, TopicId,
+};
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
 pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 
@@ -76,4 +82,24 @@ pub use aura_types::{AuraError, AuraResult, ErrorCode, ErrorSeverity};
 // Re-export unified effect system
 pub use system::{AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats};
 
+/// Composite trait that combines all effect traits
+///
+/// This trait combines all individual effect traits into a single trait object
+/// that can be used by middleware and other components that need access to
+/// multiple effect categories.
+pub trait AuraEffects:
+    CryptoEffects
+    + NetworkEffects
+    + StorageEffects
+    + TimeEffects
+    + ConsoleEffects
+    + RandomEffects
+    + LedgerEffects
+    + JournalEffects
+    + ChoreographicEffects
+    + Send
+    + Sync
+{
+}
 
+// Note: AuraEffects trait is already defined above, no need to re-export

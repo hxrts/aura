@@ -1,6 +1,6 @@
 //! Integration tests for WASM foundation WebSocket and client modes
 
-use app_wasm::websocket::{ClientMode, WasmClientEnvelope, UnifiedWebSocketClient};
+use app_wasm::websocket::{ClientMode, UnifiedWebSocketClient, WasmClientEnvelope};
 use serde_json::json;
 use wasm_bindgen_test::*;
 

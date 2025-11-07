@@ -4,9 +4,8 @@
 //! These errors wrap underlying effect system errors and provide
 //! agent-specific context.
 
-use aura_protocol::effects::{
-    AuthError, ConfigError, DeviceStorageError, JournalError, SessionError,
-};
+use aura_authentication::AuthenticationError;
+use aura_protocol::effects::{CryptoError, LedgerError, NetworkError, StorageError, TimeError};
 use aura_types::{AuraError, ErrorCode, ErrorSeverity};
 use thiserror::Error;
 
@@ -22,23 +21,27 @@ pub enum AgentError {
 
     /// Device storage operation failed
     #[error("Storage operation failed: {0}")]
-    StorageError(#[from] DeviceStorageError),
+    StorageError(#[from] StorageError),
 
-    /// Configuration operation failed
-    #[error("Configuration error: {0}")]
-    ConfigError(#[from] ConfigError),
+    /// Network operation failed
+    #[error("Network error: {0}")]
+    NetworkError(#[from] NetworkError),
+
+    /// Cryptographic operation failed
+    #[error("Crypto error: {0}")]
+    CryptoError(#[from] CryptoError),
+
+    /// Time operation failed
+    #[error("Time error: {0}")]
+    TimeError(#[from] TimeError),
+
+    /// Ledger operation failed
+    #[error("Ledger error: {0}")]
+    LedgerError(#[from] LedgerError),
 
     /// Authentication operation failed
     #[error("Authentication error: {0}")]
-    AuthError(#[from] AuthError),
-
-    /// Session management operation failed
-    #[error("Session error: {0}")]
-    SessionError(#[from] SessionError),
-
-    /// Journal operation failed
-    #[error("Journal error: {0}")]
-    JournalError(#[from] JournalError),
+    AuthError(#[from] AuthenticationError),
 
     /// Agent initialization failed
     #[error("Initialization failed: {0}")]
@@ -86,8 +89,8 @@ impl AgentError {
     pub fn severity(&self) -> ErrorSeverity {
         match self {
             AgentError::EffectSystemError(_) => ErrorSeverity::Critical,
-            AgentError::StorageError(DeviceStorageError::PermissionDenied) => ErrorSeverity::High,
-            AgentError::AuthError(AuthError::AuthenticationFailed) => ErrorSeverity::High,
+            AgentError::StorageError(StorageError::PermissionDenied(_)) => ErrorSeverity::High,
+            AgentError::AuthError(_) => ErrorSeverity::High,
             AgentError::InitializationFailed(_) => ErrorSeverity::High,
             AgentError::NotInitialized => ErrorSeverity::Medium,
             AgentError::InvalidDeviceId(_) => ErrorSeverity::Medium,
@@ -103,22 +106,23 @@ impl AgentError {
     /// Get error code for this error
     pub fn error_code(&self) -> ErrorCode {
         match self {
-            AgentError::EffectSystemError(_) => ErrorCode::SystemError,
-            AgentError::StorageError(_) => ErrorCode::StorageError,
-            AgentError::ConfigError(_) => ErrorCode::ConfigurationError,
-            AgentError::AuthError(_) => ErrorCode::AuthenticationError,
-            AgentError::SessionError(_) => ErrorCode::SessionError,
-            AgentError::JournalError(_) => ErrorCode::ProtocolError,
-            AgentError::InitializationFailed(_) => ErrorCode::InitializationError,
-            AgentError::NotInitialized => ErrorCode::StateError,
-            AgentError::InvalidDeviceId(_) => ErrorCode::ValidationError,
-            AgentError::InvalidAccountId(_) => ErrorCode::ValidationError,
-            AgentError::OperationTimeout(_) => ErrorCode::TimeoutError,
-            AgentError::PermissionDenied(_) => ErrorCode::PermissionError,
-            AgentError::NotFound(_) => ErrorCode::NotFoundError,
-            AgentError::InvalidState(_) => ErrorCode::StateError,
-            AgentError::ValidationFailed(_) => ErrorCode::ValidationError,
-            AgentError::InternalError(_) => ErrorCode::InternalError,
+            AgentError::EffectSystemError(_) => ErrorCode::SystemConfigurationError,
+            AgentError::StorageError(_) => ErrorCode::InfraStorageReadFailed,
+            AgentError::NetworkError(_) => ErrorCode::InfraTransportConnectionFailed,
+            AgentError::CryptoError(_) => ErrorCode::CryptoKeyDerivationFailed,
+            AgentError::TimeError(_) => ErrorCode::SystemTimeError,
+            AgentError::LedgerError(_) => ErrorCode::ProtocolExecutionFailed,
+            AgentError::AuthError(_) => ErrorCode::AgentInsufficientPermissions,
+            AgentError::InitializationFailed(_) => ErrorCode::AgentBootstrapRequired,
+            AgentError::NotInitialized => ErrorCode::AgentInvalidState,
+            AgentError::InvalidDeviceId(_) => ErrorCode::AgentDeviceNotFound,
+            AgentError::InvalidAccountId(_) => ErrorCode::AgentAccountNotFound,
+            AgentError::OperationTimeout(_) => ErrorCode::ProtocolSessionTimeout,
+            AgentError::PermissionDenied(_) => ErrorCode::SystemPermissionDenied,
+            AgentError::NotFound(_) => ErrorCode::AgentDeviceNotFound,
+            AgentError::InvalidState(_) => ErrorCode::AgentInvalidState,
+            AgentError::ValidationFailed(_) => ErrorCode::DataInvalidContext,
+            AgentError::InternalError(_) => ErrorCode::GenericUnknown,
         }
     }
 
@@ -151,23 +155,26 @@ impl AgentError {
 impl From<AgentError> for AuraError {
     fn from(err: AgentError) -> Self {
         match err {
-            AgentError::EffectSystemError(msg) => AuraError::system_error(msg),
-            AgentError::StorageError(e) => AuraError::system_error(e.to_string()),
-            AgentError::ConfigError(e) => AuraError::configuration_error(e.to_string()),
-            AgentError::AuthError(e) => AuraError::permission_denied(e.to_string()),
-            AgentError::SessionError(e) => AuraError::session_error(e.to_string()),
-            AgentError::JournalError(e) => AuraError::coordination_failed(e.to_string()),
-            AgentError::InitializationFailed(msg) => AuraError::initialization_failed(msg),
-            AgentError::NotInitialized => AuraError::invalid_state("Agent not initialized"),
-            AgentError::InvalidDeviceId(msg) => AuraError::validation_failed(msg),
-            AgentError::InvalidAccountId(msg) => AuraError::validation_failed(msg),
+            AgentError::EffectSystemError(msg) => AuraError::internal_error(msg),
+            AgentError::StorageError(e) => AuraError::internal_error(e.to_string()),
+            AgentError::NetworkError(e) => AuraError::connection_error(e.to_string()),
+            AgentError::CryptoError(e) => AuraError::crypto_operation_failed(e.to_string()),
+            AgentError::TimeError(e) => AuraError::system_time_error(e.to_string()),
+            AgentError::LedgerError(e) => AuraError::coordination_failed(e.to_string()),
+            AgentError::AuthError(e) => AuraError::capability_authorization_error(e.to_string()),
+            AgentError::InitializationFailed(msg) => AuraError::configuration_error(msg),
+            AgentError::NotInitialized => AuraError::configuration_error("Agent not initialized"),
+            AgentError::InvalidDeviceId(msg) => AuraError::serialization_error(msg),
+            AgentError::InvalidAccountId(msg) => AuraError::serialization_error(msg),
             AgentError::OperationTimeout(secs) => {
-                AuraError::timeout(format!("Operation timed out after {}s", secs))
+                AuraError::timeout_error(format!("Operation timed out after {}s", secs))
             }
-            AgentError::PermissionDenied(msg) => AuraError::permission_denied(msg),
-            AgentError::NotFound(resource) => AuraError::not_found(resource),
-            AgentError::InvalidState(msg) => AuraError::invalid_state(msg),
-            AgentError::ValidationFailed(msg) => AuraError::validation_failed(msg),
+            AgentError::PermissionDenied(msg) => AuraError::capability_authorization_error(msg),
+            AgentError::NotFound(resource) => {
+                AuraError::internal_error(format!("Not found: {}", resource))
+            }
+            AgentError::InvalidState(msg) => AuraError::configuration_error(msg),
+            AgentError::ValidationFailed(msg) => AuraError::serialization_error(msg),
             AgentError::InternalError(msg) => AuraError::internal_error(msg),
         }
     }

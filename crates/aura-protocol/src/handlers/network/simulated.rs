@@ -9,11 +9,14 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use uuid::Uuid;
 
+/// Type alias for complex message queue to reduce type complexity
+type GlobalMessageQueue = Arc<Mutex<VecDeque<(Uuid, Uuid, Vec<u8>)>>>;
+
 /// Simulated network handler with controllable behavior
 pub struct SimulatedNetworkHandler {
     device_id: Uuid,
     peers: Arc<RwLock<HashMap<Uuid, SimulatedPeer>>>,
-    global_message_queue: Arc<Mutex<VecDeque<(Uuid, Uuid, Vec<u8>)>>>, // (from, to, message)
+    global_message_queue: GlobalMessageQueue, // (from, to, message)
     network_conditions: Arc<RwLock<NetworkConditions>>,
     event_sender: Arc<Mutex<Option<mpsc::UnboundedSender<PeerEvent>>>>,
 }
@@ -28,6 +31,7 @@ struct SimulatedPeer {
 }
 
 #[derive(Debug, Clone)]
+/// Network simulation conditions for testing
 pub struct NetworkConditions {
     /// Base latency in milliseconds
     pub base_latency_ms: u64,
@@ -112,7 +116,7 @@ impl SimulatedNetworkHandler {
     /// Deliver a message with simulated network conditions
     async fn simulate_message_delivery(&self, from: Uuid, to: Uuid, message: Vec<u8>) -> bool {
         let conditions = self.network_conditions.read().await;
-        
+
         // Check if network is partitioned
         if conditions.partitioned {
             return false;
@@ -121,6 +125,7 @@ impl SimulatedNetworkHandler {
         // Simulate message drop
         if conditions.drop_rate > 0.0 {
             use rand::Rng;
+            #[allow(clippy::disallowed_methods)] // Needed for network simulation
             let mut rng = rand::thread_rng();
             if rng.gen::<f64>() < conditions.drop_rate {
                 return false;
@@ -128,9 +133,10 @@ impl SimulatedNetworkHandler {
         }
 
         // Simulate latency (in a real simulation, this would involve time control)
-        let _total_latency = conditions.base_latency_ms + 
-            if conditions.latency_variance_ms > 0 {
+        let _total_latency = conditions.base_latency_ms
+            + if conditions.latency_variance_ms > 0 {
                 use rand::Rng;
+                #[allow(clippy::disallowed_methods)] // Needed for network simulation
                 let mut rng = rand::thread_rng();
                 rng.gen_range(0..=conditions.latency_variance_ms)
             } else {
@@ -138,7 +144,10 @@ impl SimulatedNetworkHandler {
             };
 
         // Add to global message queue
-        self.global_message_queue.lock().await.push_back((from, to, message));
+        self.global_message_queue
+            .lock()
+            .await
+            .push_back((from, to, message));
         true
     }
 }
@@ -150,18 +159,28 @@ impl NetworkEffects for SimulatedNetworkHandler {
         if let Some(peer) = peers.get(&peer_id) {
             if peer.connected {
                 // Simulate network conditions
-                let delivered = self.simulate_message_delivery(self.device_id, peer_id, message).await;
+                let delivered = self
+                    .simulate_message_delivery(self.device_id, peer_id, message)
+                    .await;
                 if delivered {
                     Ok(())
                 } else {
                     // Message was dropped due to network conditions
-                    Err(NetworkError::SendFailed("Message dropped due to network conditions".to_string()))
+                    Err(NetworkError::SendFailed(
+                        "Message dropped due to network conditions".to_string(),
+                    ))
                 }
             } else {
-                Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
+                Err(NetworkError::ConnectionFailed(format!(
+                    "Peer not connected: {}",
+                    peer_id
+                )))
             }
         } else {
-            Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
+            Err(NetworkError::ConnectionFailed(format!(
+                "Peer not connected: {}",
+                peer_id
+            )))
         }
     }
 
@@ -178,25 +197,34 @@ impl NetworkEffects for SimulatedNetworkHandler {
 
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
         let mut queue = self.global_message_queue.lock().await;
-        
+
         // Find any message for this device
         if let Some(pos) = queue.iter().position(|(_, to, _)| *to == self.device_id) {
+            #[allow(clippy::unwrap_used)] // Safe: position() just confirmed pos exists
             let (from, _, message) = queue.remove(pos).unwrap();
             Ok((from, message))
         } else {
-            Err(NetworkError::ReceiveFailed("Timeout waiting for message".to_string()))
+            Err(NetworkError::ReceiveFailed(
+                "Timeout waiting for message".to_string(),
+            ))
         }
     }
 
     async fn receive_from(&self, peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         let mut queue = self.global_message_queue.lock().await;
-        
+
         // Find message from specific peer to this device
-        if let Some(pos) = queue.iter().position(|(from, to, _)| *from == peer_id && *to == self.device_id) {
+        if let Some(pos) = queue
+            .iter()
+            .position(|(from, to, _)| *from == peer_id && *to == self.device_id)
+        {
+            #[allow(clippy::unwrap_used)] // Safe: position() just confirmed pos exists
             let (_, _, message) = queue.remove(pos).unwrap();
             Ok(message)
         } else {
-            Err(NetworkError::ReceiveFailed("Timeout waiting for message".to_string()))
+            Err(NetworkError::ReceiveFailed(
+                "Timeout waiting for message".to_string(),
+            ))
         }
     }
 
@@ -220,7 +248,7 @@ impl NetworkEffects for SimulatedNetworkHandler {
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
         let (sender, receiver) = mpsc::unbounded_channel();
         *self.event_sender.lock().await = Some(sender);
-        
+
         Ok(Box::pin(
             tokio_stream::wrappers::UnboundedReceiverStream::new(receiver),
         ))

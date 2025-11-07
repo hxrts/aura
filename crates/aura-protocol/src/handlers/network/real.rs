@@ -57,10 +57,16 @@ impl NetworkEffects for RealNetworkHandler {
                 // This would use the real transport layer to send the message
                 Ok(())
             } else {
-                Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
+                Err(NetworkError::ConnectionFailed(format!(
+                    "Peer not connected: {}",
+                    peer_id
+                )))
             }
         } else {
-            Err(NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id)))
+            Err(NetworkError::ConnectionFailed(format!(
+                "Peer not connected: {}",
+                peer_id
+            )))
         }
     }
 

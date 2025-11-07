@@ -1,162 +1,40 @@
-//! Shared Middleware Architecture for Aura
+//! Middleware Architecture for Aura
 //!
-//! This module provides the foundational middleware traits and patterns that enable
-//! the algebraic effect-style middleware architecture across all Aura components.
+//! This module provides the foundational middleware traits and patterns for the unified
+//! AuraHandler architecture. The middleware system has been simplified to work with the
+//! new effect system architecture.
 //!
 //! ## Design Principles
 //!
-//! 1. **Composable Middleware**: Middleware can be composed and stacked
+//! 1. **Unified Architecture**: All middleware works through the AuraHandler trait
 //! 2. **Type-Level Safety**: Middleware composition is checked at compile time
-//! 3. **Effect Isolation**: Effects are passed through middleware layers
+//! 3. **Effect Integration**: Direct integration with the AuraEffectSystem
 //! 4. **Zero-Cost Abstractions**: Middleware compiles to efficient code
 //! 5. **Protocol Agnostic**: Works with any protocol or component
-//!
-//! ## Architecture Overview
-//!
-//! The middleware system uses algebraic effects and handlers to provide:
-//! - **Request/Response Processing**: Handle incoming and outgoing requests
-//! - **Effect Injection**: Provide effects (time, crypto, storage) to handlers
-//! - **State Management**: Maintain middleware-specific state
-//! - **Error Handling**: Consistent error handling across layers
-//! - **Metrics and Observability**: Built-in metrics collection
-//!
-//! ## Usage Pattern
-//!
-//! ```rust
-//! use aura_types::middleware::*;
-//! // Removed old Effects reference
-//!
-//! // Define a protocol handler using derive macro
-//! #[derive(AuraHandler)]
-//! #[handler(protocol = "dkd", middleware = "default")]
-//! struct DkdHandler {
-//!     threshold: u32,
-//!     participants: Vec<DeviceId>,
-//! }
-//!
-//! // Implement the handler trait
-//! impl ProtocolHandler for DkdHandler {
-//!     type Request = DkdRequest;
-//!     type Response = DkdResponse;
-//!     type Error = ProtocolError;
-//!
-//!     async fn handle(&mut self, request: Self::Request, effects: &dyn Effects) -> Result<Self::Response, Self::Error> {
-//!         // Handle the DKD protocol request
-//!         todo!()
-//!     }
-//! }
-//!
-//! // Create middleware stack
-//! let middleware_stack = MiddlewareStack::new()
-//!     .with_metrics()
-//!     .with_auth()
-//!     .with_rate_limiting()
-//!     .with_logging();
-//!
-//! // Use with handler
-//! let handler = DkdHandler::new(3, participants);
-//! let result = middleware_stack.execute(handler, request, effects).await?;
-//! ```
 
 pub mod traits;
-// Temporarily commented out legacy middleware modules
-// pub mod stack;
-// pub mod effects;
-// pub mod auth;
-// pub mod metrics;
-// pub mod logging;
-// pub mod errors;
-
-// Re-export core middleware types (temporarily commented out)
-// pub use traits::{
-//     MiddlewareHandler, ProtocolHandler, RequestHandler, ResponseHandler
-// };
-// Note: MiddlewareContext, MiddlewareResult, HandlerMetadata, PerformanceProfile 
-// are defined later in this module and don't need re-export
-// pub use stack::{
-//     MiddlewareStack, MiddlewareLayer, LayerConfig, StackBuilder
-// };
-// pub use effects::{
-//     EffectMiddleware, EffectInjector, EffectContext, EffectScope
-// };
-// Temporarily commented out legacy middleware exports
-// pub use auth::{
-//     AuthMiddleware, AuthContext, AuthPolicy, Permission
-// };
-// pub use metrics::{
-//     MetricsMiddleware, MetricsCollector, MetricEvent, MetricType
-// };
-// pub use logging::{
-//     LoggingMiddleware, LogContext, LogLevel, StructuredLogger
-// };
-// pub use errors::{
-//     MiddlewareError, HandlerError, ErrorContext, ErrorHandler
-// };
-
-// Removed unused imports
-use std::future::Future;
-use std::pin::Pin;
-
-/// Universal middleware interface for all Aura components
-pub trait AuraMiddleware: Send + Sync {
-    /// The type of requests this middleware processes
-    type Request: Send + Sync;
-    
-    /// The type of responses this middleware produces
-    type Response: Send + Sync;
-    
-    /// The type of errors this middleware can produce
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Process a request through this middleware layer
-    /// TEMPORARILY COMMENTED OUT - incompatible with new unified architecture
-    /*
-    fn process<'a>(
-        &'a self,
-        request: Self::Request,
-        context: &'a MiddlewareContext,
-        effects: &'a dyn Effects,
-        next: Box<dyn MiddlewareHandler<Self::Request, Self::Response, Self::Error>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'a>>;
-    */
-
-    /// Get metadata about this middleware
-    fn metadata(&self) -> HandlerMetadata {
-        HandlerMetadata::default()
-    }
-
-    /// Initialize the middleware (called once at startup)
-    fn initialize(&mut self, _context: &MiddlewareContext) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// Shutdown the middleware (called once at shutdown)
-    fn shutdown(&mut self, _context: &MiddlewareContext) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
 
 /// Middleware execution context
 #[derive(Debug, Clone)]
 pub struct MiddlewareContext {
     /// Unique execution ID for this request
     pub execution_id: String,
-    
+
     /// Component that initiated this request
     pub component: String,
-    
+
     /// Protocol being executed
     pub protocol: Option<String>,
-    
+
     /// Session information
     pub session_id: Option<String>,
-    
+
     /// Device ID
     pub device_id: Option<String>,
-    
+
     /// Request timestamp
     pub timestamp: std::time::Instant,
-    
+
     /// Additional context data
     pub metadata: std::collections::HashMap<String, String>,
 }
@@ -165,6 +43,7 @@ impl MiddlewareContext {
     /// Create a new middleware context
     pub fn new(component: &str) -> Self {
         Self {
+            #[allow(clippy::disallowed_methods)] // Needed for execution ID generation
             execution_id: format!("exec_{}", std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -173,6 +52,7 @@ impl MiddlewareContext {
             protocol: None,
             session_id: None,
             device_id: None,
+            #[allow(clippy::disallowed_methods)] // Needed for timestamp generation
             timestamp: std::time::Instant::now(),
             metadata: std::collections::HashMap::new(),
         }
@@ -219,23 +99,39 @@ impl Default for MiddlewareContext {
     }
 }
 
-/// Result type for middleware operations
 /// Middleware operation errors
 #[derive(Debug, thiserror::Error)]
 pub enum MiddlewareError {
     /// Generic middleware error
     #[error("Middleware error: {message}")]
-    General { message: String },
-    
+    General {
+        /// Error message
+        message: String,
+    },
+
     /// Configuration error
     #[error("Configuration error: {reason}")]
-    Configuration { reason: String },
-    
+    Configuration {
+        /// Configuration failure reason
+        reason: String,
+    },
+
     /// Handler not found
     #[error("Handler not found: {handler_type}")]
-    HandlerNotFound { handler_type: String },
+    HandlerNotFound {
+        /// Type of handler that was not found
+        handler_type: String,
+    },
+
+    /// Timeout error
+    #[error("Timeout after {duration:?}")]
+    TimeoutError {
+        /// Duration that caused the timeout
+        duration: std::time::Duration,
+    },
 }
 
+/// Type alias for middleware operation results
 pub type MiddlewareResult<T> = Result<T, MiddlewareError>;
 
 /// Handler metadata for describing middleware capabilities
@@ -243,22 +139,22 @@ pub type MiddlewareResult<T> = Result<T, MiddlewareError>;
 pub struct HandlerMetadata {
     /// Name of the handler/middleware
     pub name: String,
-    
+
     /// Version of the handler
     pub version: String,
-    
+
     /// Description of what this handler does
     pub description: String,
-    
+
     /// Supported protocols
     pub supported_protocols: Vec<String>,
-    
+
     /// Required effects
     pub required_effects: Vec<String>,
-    
+
     /// Performance characteristics
     pub performance_profile: PerformanceProfile,
-    
+
     /// Configuration schema
     pub config_schema: Option<serde_json::Value>,
 }
@@ -268,19 +164,19 @@ pub struct HandlerMetadata {
 pub struct PerformanceProfile {
     /// Expected latency in microseconds
     pub expected_latency_us: Option<u64>,
-    
+
     /// Memory usage in bytes
     pub memory_usage_bytes: Option<u64>,
-    
+
     /// CPU usage percentage
     pub cpu_usage_percent: Option<f64>,
-    
+
     /// Throughput requests per second
     pub throughput_rps: Option<u64>,
-    
+
     /// Whether this handler blocks
     pub is_blocking: bool,
-    
+
     /// Whether this handler is stateful
     pub is_stateful: bool,
 }
@@ -307,20 +203,6 @@ macro_rules! middleware_context {
                 ctx = ctx.with_metadata($key, $value);
             )+
             ctx
-        }
-    };
-}
-
-/// Convenience macro for creating middleware stacks
-#[macro_export]
-macro_rules! middleware_stack {
-    ($($middleware:expr),+ $(,)?) => {
-        {
-            let mut stack = MiddlewareStack::new();
-            $(
-                stack = stack.add_layer($middleware);
-            )+
-            stack
         }
     };
 }

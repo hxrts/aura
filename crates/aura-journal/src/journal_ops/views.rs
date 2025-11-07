@@ -4,8 +4,8 @@
 //! Uses petgraph for efficient graph queries and maintains eventually consistent views.
 
 use super::derivation::{DerivationEffects, DerivationEngine};
-use aura_types::{errors::DataError, AuraError, DeviceId};
 use crate::journal::*;
+use aura_types::{errors::DataError, AuraError, DeviceId};
 use std::collections::{BTreeMap, HashSet};
 
 /// View effects trait for external dependency injection

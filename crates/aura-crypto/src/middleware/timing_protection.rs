@@ -296,6 +296,7 @@ impl Default for TimingConfig {
 struct TimingInfo {
     execution_time: Duration,
     success: bool,
+    #[allow(dead_code)] // Stored for temporal analysis and debugging
     timestamp: u64,
 }
 

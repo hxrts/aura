@@ -21,23 +21,30 @@ mod sync;
 mod types;
 
 // Domain modules moved from aura-types
-pub mod crdt;
 pub mod journal;
 pub mod ledger;
+pub mod semilattice;
 pub mod tree;
 
 // Re-exports
 pub use effects::*;
 pub use error::{Error, Result};
-pub use journal_ops::*;
-pub use middleware::*;
 pub use operations::*;
 pub use state::*;
 pub use sync::*;
-pub use types::*;
 
 // Domain re-exports
-pub use crdt::*;
 pub use journal::*;
-pub use ledger::*;
+pub use ledger::{
+    CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, JournalMap, Priority, TreeOp,
+    TreeOpRecord,
+};
+pub use semilattice::{
+    integration, DeviceRegistry, EpochLog, GuardianRegistry, IntentPool,
+    JournalMap as CRDTJournalMap, MaxCounter, ModernAccountState,
+};
 pub use tree::*;
+
+// Selective re-exports to avoid conflicts
+pub use middleware::{JournalHandler, JournalMiddleware};
+pub use types::{DeviceMetadata, DeviceType, GuardianMetadata, Session};

@@ -45,26 +45,39 @@ impl MockCryptoHandler {
 
     /// Set a pre-configured signature for specific data
     pub fn set_signature_result(&self, data: Vec<u8>, signature: Vec<u8>) {
-        self.responses.lock().unwrap().signatures.insert(data, signature);
+        self.responses
+            .lock()
+            .unwrap()
+            .signatures
+            .insert(data, signature);
     }
 
     /// Set a pre-configured verification result
     pub fn set_verification_result(&self, data: Vec<u8>, signature: Vec<u8>, result: bool) {
-        self.responses.lock().unwrap().verifications.insert((data, signature), result);
+        self.responses
+            .lock()
+            .unwrap()
+            .verifications
+            .insert((data, signature), result);
     }
 
     /// Generate deterministic "random" bytes based on seed and counter
     fn deterministic_bytes(&self, len: usize) -> Vec<u8> {
         let mut counter = self.counter.lock().unwrap();
         let mut bytes = Vec::with_capacity(len);
-        
+
         for i in 0..len {
             // Simple deterministic pseudo-random generator
-            let value = (self.seed.wrapping_mul(1103515245).wrapping_add(*counter).wrapping_add(i as u64)) % 256;
+            let value = (self
+                .seed
+                .wrapping_mul(1103515245)
+                .wrapping_add(*counter)
+                .wrapping_add(i as u64))
+                % 256;
             bytes.push(value as u8);
             *counter = counter.wrapping_add(1);
         }
-        
+
         bytes
     }
 }
@@ -91,12 +104,12 @@ impl CryptoEffects for MockCryptoHandler {
     async fn random_range(&self, range: std::ops::Range<u64>) -> u64 {
         let mut counter = self.counter.lock().unwrap();
         *counter = counter.wrapping_add(1);
-        
+
         let range_size = range.end - range.start;
         if range_size == 0 {
             return range.start;
         }
-        
+
         // Deterministic value within range
         let value = (self.seed.wrapping_add(*counter)) % range_size;
         range.start + value
@@ -107,30 +120,30 @@ impl CryptoEffects for MockCryptoHandler {
         if let Some(hash) = self.responses.lock().unwrap().hashes.get(data) {
             return *hash;
         }
-        
+
         // Generate deterministic hash-like value
         let mut hash = [0u8; 32];
         for (i, &byte) in data.iter().enumerate() {
             hash[i % 32] ^= byte.wrapping_add(i as u8);
         }
-        
+
         // Mix with seed for determinism
         for (i, h) in hash.iter_mut().enumerate() {
             *h = h.wrapping_add((self.seed >> (i % 8)) as u8);
         }
-        
+
         hash
     }
 
     async fn sha256_hash(&self, data: &[u8]) -> [u8; 32] {
         // For mock, just use the same logic as blake3_hash but with different mixing
         let mut hash = self.blake3_hash(data).await;
-        
+
         // Add some differentiation from blake3
         for h in hash.iter_mut() {
             *h = h.wrapping_add(0x5A);
         }
-        
+
         hash
     }
 
@@ -143,12 +156,12 @@ impl CryptoEffects for MockCryptoHandler {
                 return Ok(Signature::from_bytes(&sig_array));
             }
         }
-        
+
         // Generate deterministic signature
         let sig_bytes = self.deterministic_bytes(64);
         let mut sig_array = [0u8; 64];
         sig_array.copy_from_slice(&sig_bytes);
-        
+
         Ok(Signature::from_bytes(&sig_array))
     }
 
@@ -160,10 +173,16 @@ impl CryptoEffects for MockCryptoHandler {
     ) -> Result<bool, CryptoError> {
         // Check for pre-configured response
         let sig_bytes = signature.to_bytes().to_vec();
-        if let Some(result) = self.responses.lock().unwrap().verifications.get(&(data.to_vec(), sig_bytes)) {
+        if let Some(result) = self
+            .responses
+            .lock()
+            .unwrap()
+            .verifications
+            .get(&(data.to_vec(), sig_bytes))
+        {
             return Ok(*result);
         }
-        
+
         // Default to successful verification for mock
         Ok(true)
     }
@@ -173,10 +192,10 @@ impl CryptoEffects for MockCryptoHandler {
         let key_bytes = self.deterministic_bytes(32);
         let mut key_array = [0u8; 32];
         key_array.copy_from_slice(&key_bytes);
-        
+
         let signing_key = SigningKey::from_bytes(&key_array);
         let verifying_key = signing_key.verifying_key();
-        
+
         Ok((signing_key, verifying_key))
     }
 

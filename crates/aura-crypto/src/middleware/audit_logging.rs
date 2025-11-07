@@ -662,6 +662,7 @@ impl AuditLogStorage {
     }
 
     fn cleanup_old_logs(&mut self, retention_period: Duration) -> usize {
+        #[allow(clippy::disallowed_methods)] // [VERIFIED] Acceptable in log retention cleanup
         let cutoff = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

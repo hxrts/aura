@@ -4,9 +4,9 @@
 //! - LeafNode: Devices and Guardians
 //! - BranchNode: Interior nodes carrying policies
 
-use aura_types::identifiers::{DeviceId, GuardianId};
 use crate::tree::commitment::Commitment;
 use crate::tree::indexing::{LeafIndex, NodeIndex};
+use aura_types::identifiers::{DeviceId, GuardianId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

@@ -32,7 +32,7 @@ impl ConfigFormat {
             "yaml" | "yml" => Ok(ConfigFormat::Yaml),
             "ron" => Ok(ConfigFormat::Ron),
             "env" => Ok(ConfigFormat::Env),
-            _ => Err(AuraError::config_failed(&format!(
+            _ => Err(AuraError::config_failed(format!(
                 "Unsupported config format: {}",
                 extension
             ))),
@@ -69,19 +69,19 @@ impl TomlFormat {
     /// Serialize to TOML string
     pub fn serialize<T: serde::Serialize>(value: &T) -> Result<String, AuraError> {
         toml::to_string_pretty(value)
-            .map_err(|e| AuraError::config_failed(&format!("TOML serialization failed: {}", e)))
+            .map_err(|e| AuraError::config_failed(format!("TOML serialization failed: {}", e)))
     }
 
     /// Deserialize from TOML string
     pub fn deserialize<T: serde::de::DeserializeOwned>(content: &str) -> Result<T, AuraError> {
         toml::from_str(content)
-            .map_err(|e| AuraError::config_failed(&format!("TOML deserialization failed: {}", e)))
+            .map_err(|e| AuraError::config_failed(format!("TOML deserialization failed: {}", e)))
     }
 
     /// Load from TOML file
     pub fn load_from_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, AuraError> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| AuraError::config_failed(&format!("Failed to read file: {}", e)))?;
+            .map_err(|e| AuraError::config_failed(format!("Failed to read file: {}", e)))?;
         Self::deserialize(&content)
     }
 
@@ -89,7 +89,7 @@ impl TomlFormat {
     pub fn save_to_file<T: serde::Serialize>(value: &T, path: &Path) -> Result<(), AuraError> {
         let content = Self::serialize(value)?;
         std::fs::write(path, content)
-            .map_err(|e| AuraError::config_failed(&format!("Failed to write file: {}", e)))
+            .map_err(|e| AuraError::config_failed(format!("Failed to write file: {}", e)))
     }
 }
 
@@ -100,19 +100,19 @@ impl JsonFormat {
     /// Serialize to JSON string with pretty printing
     pub fn serialize<T: serde::Serialize>(value: &T) -> Result<String, AuraError> {
         serde_json::to_string_pretty(value)
-            .map_err(|e| AuraError::config_failed(&format!("JSON serialization failed: {}", e)))
+            .map_err(|e| AuraError::config_failed(format!("JSON serialization failed: {}", e)))
     }
 
     /// Deserialize from JSON string
     pub fn deserialize<T: serde::de::DeserializeOwned>(content: &str) -> Result<T, AuraError> {
         serde_json::from_str(content)
-            .map_err(|e| AuraError::config_failed(&format!("JSON deserialization failed: {}", e)))
+            .map_err(|e| AuraError::config_failed(format!("JSON deserialization failed: {}", e)))
     }
 
     /// Load from JSON file
     pub fn load_from_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, AuraError> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| AuraError::config_failed(&format!("Failed to read file: {}", e)))?;
+            .map_err(|e| AuraError::config_failed(format!("Failed to read file: {}", e)))?;
         Self::deserialize(&content)
     }
 
@@ -120,7 +120,7 @@ impl JsonFormat {
     pub fn save_to_file<T: serde::Serialize>(value: &T, path: &Path) -> Result<(), AuraError> {
         let content = Self::serialize(value)?;
         std::fs::write(path, content)
-            .map_err(|e| AuraError::config_failed(&format!("Failed to write file: {}", e)))
+            .map_err(|e| AuraError::config_failed(format!("Failed to write file: {}", e)))
     }
 }
 
@@ -143,7 +143,7 @@ impl YamlFormat {
     /// Load from YAML file
     pub fn load_from_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, AuraError> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| AuraError::config_failed(&format!("Failed to read file: {}", e)))?;
+            .map_err(|e| AuraError::config_failed(format!("Failed to read file: {}", e)))?;
         Self::deserialize(&content)
     }
 
@@ -151,7 +151,7 @@ impl YamlFormat {
     pub fn save_to_file<T: serde::Serialize>(value: &T, path: &Path) -> Result<(), AuraError> {
         let content = Self::serialize(value)?;
         std::fs::write(path, content)
-            .map_err(|e| AuraError::config_failed(&format!("Failed to write file: {}", e)))
+            .map_err(|e| AuraError::config_failed(format!("Failed to write file: {}", e)))
     }
 }
 

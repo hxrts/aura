@@ -4,14 +4,14 @@ use super::{CryptoContext, CryptoHandler, SecurityLevel};
 use crate::middleware::CryptoOperation;
 use crate::Result;
 // Use effects system instead of legacy crypto modules
-use crate::effects::{Effects, CryptoEffectsExt};
+use crate::effects::{CryptoEffectsExt, EffectsInterface};
 use aura_types::AuraError;
 use std::sync::Arc;
 
 /// Main crypto handler that processes operations using the crypto library
 pub struct CoreCryptoHandler {
     /// Effects for time and randomness
-    effects: Arc<dyn Effects>,
+    effects: Arc<dyn EffectsInterface>,
 
     /// Device ID for threshold operations
     device_id: Option<aura_types::identifiers::DeviceId>,
@@ -19,7 +19,7 @@ pub struct CoreCryptoHandler {
 
 impl CoreCryptoHandler {
     /// Create a new core crypto handler
-    pub fn new(effects: Arc<dyn Effects>) -> Self {
+    pub fn new(effects: Arc<dyn EffectsInterface>) -> Self {
         Self {
             effects,
             device_id: None,
@@ -234,8 +234,8 @@ impl CryptoHandler for NoOpHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::middleware::SecurityLevel;
     use crate::effects::{Effects, TestCryptoEffects};
+    use crate::middleware::SecurityLevel;
     use aura_types::{AccountIdExt, DeviceIdExt};
 
     #[test]

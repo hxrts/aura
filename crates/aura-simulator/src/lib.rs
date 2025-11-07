@@ -76,75 +76,35 @@ pub mod scenario;
 
 // Re-export core middleware types for external usage
 pub use middleware::{
-    SimulatorMiddlewareStack,
-    SimulatorStackBuilder,
-    SimulatorHandler,
-    SimulatorOperation,
-    SimulatorContext,
-    SimulatorConfig,
-    SimulatorMiddleware,
-    ScenarioInjectionMiddleware,
-    FaultSimulationMiddleware,
-    TimeControlMiddleware,
-    StateInspectionMiddleware,
-    PropertyCheckingMiddleware,
-    ChaosCoordinationMiddleware,
-    LogLevel,
-    NetworkConfig,
-    TimeConfig,
-    FaultType,
-    ByzantineStrategy,
-    PropertyViolationType,
-    TimeControlAction,
-    StateQuery,
-    ChaosStrategy,
-    SimulationOutcome,
-    SimulatorError,
-    Result,
+    ByzantineStrategy, ChaosCoordinationMiddleware, ChaosStrategy, FaultSimulationMiddleware,
+    FaultType, LogLevel, NetworkConfig, PropertyCheckingMiddleware, PropertyViolationType, Result,
+    ScenarioInjectionMiddleware, SimulationOutcome, SimulatorConfig, SimulatorContext,
+    SimulatorError, SimulatorHandler, SimulatorMiddleware, SimulatorMiddlewareStack,
+    SimulatorOperation, SimulatorStackBuilder, StateInspectionMiddleware, StateQuery, TimeConfig,
+    TimeControlAction, TimeControlMiddleware,
 };
 
 // Re-export handler implementations
 pub use middleware::handler::{CoreSimulatorHandler, NoOpSimulatorHandler};
 
 // Re-export specific middleware types for convenience
-pub use middleware::scenario_injection::{
-    ScenarioDefinition,
-    InjectionAction,
-    TriggerCondition,
-};
+pub use middleware::scenario_injection::{InjectionAction, ScenarioDefinition, TriggerCondition};
 
-pub use middleware::fault_simulation::{
-    FaultInjectionRule,
-    FaultCondition,
-    FaultRecoverySettings,
-};
+pub use middleware::fault_simulation::{FaultCondition, FaultInjectionRule, FaultRecoverySettings};
 
-pub use middleware::time_control::{
-    RealtimeSync,
-};
+pub use middleware::time_control::RealtimeSync;
 
 pub use middleware::state_inspection::{
-    StateWatcher,
-    WatcherCondition,
-    StateTrigger,
-    TriggerAction,
+    StateTrigger, StateWatcher, TriggerAction, WatcherCondition,
 };
 
 pub use middleware::property_checking::{
-    PropertyChecker,
-    PropertyType,
-    PropertyCheckResult,
-    PropertyViolation,
+    PropertyCheckResult, PropertyChecker, PropertyType, PropertyViolation,
 };
 
 pub use middleware::chaos_coordination::{
-    ChaosStrategyTemplate,
-    ChaosRule,
-    ChaosRuleCondition,
-    ChaosRuleOperator,
-    ChaosRuleAction,
-    ChaosAction,
-    ChaosRecoverySettings,
+    ChaosAction, ChaosRecoverySettings, ChaosRule, ChaosRuleAction, ChaosRuleCondition,
+    ChaosRuleOperator, ChaosStrategyTemplate,
 };
 
 // Re-export Duration for convenience

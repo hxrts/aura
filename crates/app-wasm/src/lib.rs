@@ -16,7 +16,7 @@ pub use error::{WasmError, WasmResult};
 pub use handlers::{AnalysisHandler, LiveNetworkHandler, SimulationHandler};
 pub use setup::{init_manually, initialize_wasm};
 pub use websocket::{
-    ClientHandler, ClientMode, WasmClientEnvelope, UnifiedWebSocketClient, WebSocketClientJs,
+    ClientHandler, ClientMode, UnifiedWebSocketClient, WasmClientEnvelope, WebSocketClientJs,
 };
 
 #[cfg(feature = "leptos")]

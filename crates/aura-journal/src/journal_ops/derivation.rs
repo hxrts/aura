@@ -3,8 +3,8 @@
 //! Implements key derivation along Contains edges with policy-aware commitment computation.
 //! Uses petgraph for graph traversal and Blake3 for commitment hashing.
 
-use aura_types::{errors::DataError, AuraError};
 use crate::journal::*;
+use aura_types::{errors::DataError, AuraError};
 use blake3::Hasher;
 use std::collections::{BTreeMap, HashSet};
 

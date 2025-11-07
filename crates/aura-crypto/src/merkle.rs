@@ -2,8 +2,8 @@
 //!
 //! Simple merkle tree utilities using the effects system for hashing.
 
-use crate::Result;
 use crate::effects::CryptoEffects;
+use crate::Result;
 
 /// Simple Merkle proof structure
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -9,6 +9,50 @@ use super::types::{PropertyEvaluationResult, QuintValue, SimulationState, Valida
 // Note: WorldState to be imported when module structure is finalized
 // use crate::world_state::WorldState;
 
+// Additional types needed by the test code
+#[derive(Debug, Clone)]
+pub struct ProtocolExecutionState {
+    pub active_sessions: HashMap<String, String>,
+    pub completed_sessions: Vec<String>,
+    pub execution_queue: VecDeque<String>,
+    pub global_state: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SimulationConfiguration {
+    pub max_ticks: u64,
+    pub max_time: u64,
+    pub tick_duration_ms: u64,
+    pub scenario_name: Option<String>,
+    pub rng_state: Vec<u8>,
+    pub properties: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NetworkJournal {
+    pub partitions: Vec<String>,
+    pub message_delays: HashMap<String, u64>,
+    pub in_flight_messages: VecDeque<String>,
+    pub failure_config: NetworkFailureConfig,
+    pub connections: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NetworkFailureConfig {
+    pub drop_rate: f64,
+    pub latency_range: (u64, u64),
+    pub jitter_ms: u64,
+    pub bandwidth_limits: HashMap<String, u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ByzantineAdversaryState {
+    pub byzantine_participants: Vec<String>,
+    pub active_strategies: HashMap<String, String>,
+    pub strategy_parameters: HashMap<String, String>,
+    pub targets: HashMap<String, String>,
+}
+
 // Placeholder WorldState type until module is available
 #[derive(Debug, Clone)]
 pub struct WorldState {
@@ -16,10 +60,13 @@ pub struct WorldState {
     pub state_variables: HashMap<String, String>,
     pub current_time: u64,
     pub current_tick: u64,
-    pub byzantine: ByzantineState,
-    pub network: NetworkState,
+    pub byzantine: ByzantineAdversaryState,
+    pub network: NetworkJournal,
+    pub protocols: ProtocolExecutionState,
+    pub config: SimulationConfiguration,
     pub simulation_id: String,
     pub seed: u64,
+    pub last_tick_events: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -950,21 +997,16 @@ impl<'a> SimulationState for WorldStateAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::quint::types::PropertyPriority;
-    use crate::world_state::{
-        ByzantineAdversaryState, NetworkJournal, NetworkFailureConfig, ProtocolExecutionState,
-        SimulationConfiguration, WorldState,
-    };
     use std::collections::{HashMap, VecDeque};
-    use uuid::Uuid;
 
     fn create_test_world_state() -> WorldState {
         WorldState {
-            simulation_id: uuid::Uuid::from_u128(42), // Fixed UUID for deterministic testing
+            simulation_id: uuid::Uuid::from_u128(42).to_string(), // Fixed UUID for deterministic testing
             current_tick: 100,
             current_time: 1000000,
             seed: 12345,
             participants: HashMap::new(),
+            state_variables: HashMap::new(),
             network: NetworkJournal {
                 partitions: Vec::new(),
                 message_delays: HashMap::new(),

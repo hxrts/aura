@@ -1,9 +1,12 @@
 //! Connection Pooling Middleware
 
+use super::handler::{
+    ConnectionInfo, ConnectionState, NetworkAddress, TransportHandler, TransportOperation,
+    TransportResult,
+};
 use super::stack::TransportMiddleware;
-use super::handler::{TransportHandler, TransportOperation, TransportResult, NetworkAddress, ConnectionInfo, ConnectionState};
 use aura_protocol::effects::AuraEffects;
-use aura_types::{MiddlewareContext, MiddlewareResult};
+use aura_protocol::middleware::{MiddlewareContext, MiddlewareResult};
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone)]
@@ -17,7 +20,7 @@ impl Default for PoolConfig {
     fn default() -> Self {
         Self {
             max_connections_per_host: 10,
-            idle_timeout_ms: 30000, // 30 seconds
+            idle_timeout_ms: 30000,      // 30 seconds
             connection_timeout_ms: 5000, // 5 seconds
         }
     }
@@ -37,7 +40,7 @@ impl ConnectionPoolingMiddleware {
             active_connections: HashMap::new(),
         }
     }
-    
+
     pub fn with_config(config: PoolConfig) -> Self {
         Self {
             config,
@@ -75,10 +78,16 @@ impl TransportMiddleware for ConnectionPoolingMiddleware {
                         }
                     }
                 }
-                
+
                 // No available connection, create new one
-                let result = next.execute(TransportOperation::Connect { address: address.clone(), options }, effects)?;
-                
+                let result = next.execute(
+                    TransportOperation::Connect {
+                        address: address.clone(),
+                        options,
+                    },
+                    effects,
+                )?;
+
                 if let TransportResult::Connected { connection_id, .. } = &result {
                     // Track the new connection
                     let conn_info = ConnectionInfo {
@@ -87,15 +96,22 @@ impl TransportMiddleware for ConnectionPoolingMiddleware {
                         state: ConnectionState::Connected,
                         bytes_sent: 0,
                         bytes_received: 0,
-                        created_at: effects.current_timestamp(),
-                        last_activity: effects.current_timestamp(),
+                        created_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        last_activity: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
                     };
-                    self.active_connections.insert(connection_id.clone(), conn_info);
+                    self.active_connections
+                        .insert(connection_id.clone(), conn_info);
                 }
-                
+
                 Ok(result)
             }
-            
+
             TransportOperation::Disconnect { address } => {
                 // Instead of actually disconnecting, return connection to pool
                 if let Some(pool) = self.pools.get_mut(&address) {
@@ -110,26 +126,38 @@ impl TransportMiddleware for ConnectionPoolingMiddleware {
                         return Ok(TransportResult::Disconnected { address });
                     }
                 }
-                
+
                 // Pool is full, actually disconnect
                 next.execute(TransportOperation::Disconnect { address }, effects)
             }
-            
+
             _ => next.execute(operation, effects),
         }
     }
-    
+
     fn middleware_name(&self) -> &'static str {
         "ConnectionPoolingMiddleware"
     }
-    
+
     fn middleware_info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();
-        info.insert("max_connections_per_host".to_string(), self.config.max_connections_per_host.to_string());
-        info.insert("idle_timeout_ms".to_string(), self.config.idle_timeout_ms.to_string());
+        info.insert(
+            "max_connections_per_host".to_string(),
+            self.config.max_connections_per_host.to_string(),
+        );
+        info.insert(
+            "idle_timeout_ms".to_string(),
+            self.config.idle_timeout_ms.to_string(),
+        );
         info.insert("active_pools".to_string(), self.pools.len().to_string());
-        info.insert("total_pooled_connections".to_string(), 
-                   self.pools.values().map(|pool| pool.len()).sum::<usize>().to_string());
+        info.insert(
+            "total_pooled_connections".to_string(),
+            self.pools
+                .values()
+                .map(|pool| pool.len())
+                .sum::<usize>()
+                .to_string(),
+        );
         info
     }
 }
