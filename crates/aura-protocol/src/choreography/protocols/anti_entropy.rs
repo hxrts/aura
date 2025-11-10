@@ -182,7 +182,7 @@ async fn requester_session(
     // Phase 3: Calculate missing operations (TODO fix - Simplified - use hash of bloom filter)
     let local_bloom = adapter.effects().random_bytes(32).await;
     let combined = [&local_bloom[..], &digest_response.bloom_filter[..]].concat();
-    let diff_hash = adapter.effects().blake3_hash(&combined).await;
+    let diff_hash = adapter.effects().hash(&combined).await;
 
     // Simulate missing CIDs based on difference
     let missing_cids = vec![diff_hash.to_vec()];

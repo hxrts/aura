@@ -18,6 +18,38 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 
+/// Metrics collected during recovery session
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoverySessionMetrics {
+    /// Guardians contacted
+    pub guardians_contacted: usize,
+    /// Guardians that approved
+    pub guardians_approved: usize,
+    /// Guardians blocked by cooldown
+    pub cooldown_blocked: usize,
+    /// Time when session started
+    pub started_at: u64,
+    /// Time when session ended (if completed)
+    pub completed_at: u64,
+    /// Number of disputes filed
+    pub dispute_count: usize,
+}
+
+impl Default for RecoverySessionMetrics {
+    fn default() -> Self {
+        Self {
+            guardians_contacted: 0,
+            guardians_approved: 0,
+            cooldown_blocked: 0,
+            started_at: 0,
+            completed_at: 0,
+            dispute_count: 0,
+        }
+    }
+}
+
+// RecoverySessionResult defined later with full implementation
+
 /// Messages exchanged during G_recovery (documentation / logging only).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RecoveryMessage {
@@ -421,32 +453,7 @@ pub struct RecoverySessionResult {
     pub metrics: RecoverySessionMetrics,
 }
 
-/// Instrumentation captured during the recovery flow.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RecoverySessionMetrics {
-    /// Guardians contacted.
-    pub guardians_contacted: usize,
-    /// Guardians that approved.
-    pub guardians_approved: usize,
-    /// Guardians blocked by cooldown.
-    pub cooldown_blocked: usize,
-    /// Timestamp when the session started.
-    pub started_at: u64,
-    /// Timestamp when the session completed.
-    pub completed_at: u64,
-}
-
-impl Default for RecoverySessionMetrics {
-    fn default() -> Self {
-        Self {
-            guardians_contacted: 0,
-            guardians_approved: 0,
-            cooldown_blocked: 0,
-            started_at: 0,
-            completed_at: 0,
-        }
-    }
-}
+// Removed duplicate RecoverySessionMetrics - using unified version above
 
 fn derive_recovered_key(shares: &[RecoveryShare], request: &GuardianRecoveryRequest) -> Vec<u8> {
     let mut hasher = Hasher::new();

@@ -38,6 +38,34 @@
 
 ---
 
+## Core Terms
+
+**ContextId (κ)** - Relationship- or group-scoped identifier derived via DKD that defines a privacy boundary. Concrete forms include `RID` (pairwise) and `GID` (group). Messages and budgets are scoped to a single `ContextId`.
+
+**Epoch** - Monotone, context-scoped counter used to gate FlowBudget replenishment and bind receipts. Epoch updates converge by meet on the maximum observed epoch.
+
+**FlowBudget** - Journal fact regulating observable communication per `(ctx, peer)`:
+```
+FlowBudget { limit: u64, spent: u64, epoch: Epoch }
+```
+- `limit` merges by meet; `spent` merges by join (max). Charged by `FlowGuard` before any transport side effect.
+
+**Receipt** - Per-hop proof of a successful budget charge bound to `(ctx, src, dst, epoch, cost)` with anti‑replay chaining and signature. Required for relays to forward.
+
+**Capability (Cap)** - Meet-semilattice element representing authorization. Enforcement checks the guard `need(m) ≤ Caps(ctx)`.
+
+**Fact** - Join-semilattice element representing durable knowledge. Journal commits are join‑only (no negative facts).
+
+**Guard Chain** - Mandatory order of checks for transport effects: `CapGuard` → `FlowGuard` → `JournalCoupler`. Named invariants: Charge‑Before‑Send; No‑Observable‑Without‑Charge; Deterministic‑Replenishment.
+
+**Choreography** - Global protocol specification written with `choreography!`. Source of truth for distributed protocol intent.
+
+**Projection** - Compilation step from a choreography to per‑role local session types (MPST). Denoted π(G, ρ).
+
+**Session Type** - Local, role-specific protocol type ensuring safety properties (e.g., deadlock freedom). Executed via the effect system interpreter/bridge.
+
+---
+
 ## Data Layer
 
 ### Journal vs Ledger

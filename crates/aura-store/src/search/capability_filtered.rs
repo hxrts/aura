@@ -540,7 +540,7 @@ impl CapabilityFilteredSearchEngine {
         // Hash all matching CIDs for verification
         let mut hasher = Hasher::new();
         for content in authorized_content {
-            hasher.update(content.content_id.as_str().as_bytes());
+            hasher.update(content.content_id.to_hex().as_bytes());
         }
         let matches_hash = *hasher.finalize().as_bytes();
 
@@ -571,7 +571,7 @@ impl CapabilityFilteredSearchEngine {
         // Create Merkle tree root of checked content
         let mut content_hashes = Vec::new();
         for content in authorized_content {
-            content_hashes.push(blake3::hash(content.content_id.as_str().as_bytes()));
+            content_hashes.push(blake3::hash(content.content_id.to_hex().as_bytes()));
         }
         let checked_content_root = *self.compute_merkle_root(content_hashes).as_bytes();
 

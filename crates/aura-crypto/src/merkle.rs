@@ -52,10 +52,10 @@ pub async fn build_commitment_tree(
     // Simple placeholder: create a proof with the first commitment as the leaf
     let mut proof_path = Vec::new();
 
-    // Add path elements using blake3 hashing
+    // Add path elements using SHA256 hashing
     for i in 0..commitments.len().min(8) {
         let hash = if i < commitments.len() {
-            effects.blake3_hash_async(&commitments[i]).await
+            effects.hash_async(&commitments[i]).await
         } else {
             [0u8; 32]
         };
@@ -87,7 +87,7 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
         combined.extend_from_slice(leaf);
     }
 
-    effects.blake3_hash_async(&combined).await
+    effects.hash_async(&combined).await
 }
 
 /// Verify a Merkle proof against a root hash (TODO fix - Simplified)
@@ -108,11 +108,11 @@ pub async fn verify_merkle_proof(
 ) -> bool {
     // TODO fix - Simplified verification
     if proof.proof_path.is_empty() {
-        return effects.blake3_hash_async(leaf).await == *root;
+        return effects.hash_async(leaf).await == *root;
     }
 
     // TODO fix - In a real implementation, this would compute the path to the root
     // TODO fix - For now, just check if the leaf hash matches any in the proof path
-    let leaf_hash = effects.blake3_hash_async(leaf).await;
+    let leaf_hash = effects.hash_async(leaf).await;
     proof.proof_path.contains(&leaf_hash)
 }

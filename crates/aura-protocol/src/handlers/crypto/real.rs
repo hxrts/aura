@@ -59,27 +59,20 @@ impl RandomEffects for RealCryptoHandler {
 impl CryptoEffects for RealCryptoHandler {
     // ====== Hash Functions ======
 
-    async fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
-        blake3::hash(data).into()
-    }
-
-    async fn sha256_hash(&self, data: &[u8]) -> [u8; 32] {
+    async fn hash(&self, data: &[u8]) -> [u8; 32] {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(data);
         hasher.finalize().into()
     }
 
-    async fn blake3_hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
-        // Use BLAKE3 keyed hash as HMAC equivalent
-        let key_array = if key.len() >= 32 {
-            key[..32].try_into().unwrap_or([0u8; 32])
-        } else {
-            let mut k = [0u8; 32];
-            k[..key.len().min(32)].copy_from_slice(&key[..key.len().min(32)]);
-            k
-        };
-        blake3::keyed_hash(&key_array, data).into()
+    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
+        use hmac::{Hmac, Mac};
+        type HmacSha256 = Hmac<Sha256>;
+
+        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+        mac.update(data);
+        mac.finalize().into_bytes().into()
     }
 
     // ====== Key Derivation ======

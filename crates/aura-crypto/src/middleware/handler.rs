@@ -49,7 +49,7 @@ impl CryptoHandler for CoreCryptoHandler {
                 derivation_path: _,
             } => {
                 // TODO fix - Simplified key derivation for middleware
-                let key_material = self.effects.blake3_hash(
+                let key_material = self.effects.hash(
                     format!("{}:{}:{}", context.account_id, app_id, derivation_context).as_bytes(),
                 );
 
@@ -168,7 +168,7 @@ impl CryptoHandler for CoreCryptoHandler {
 
             CryptoOperation::Hash { data, algorithm } => {
                 let hash_result = match algorithm.as_str() {
-                    "blake3" => self.effects.blake3_hash(&data).to_vec(),
+                    "sha256" => self.effects.hash(&data).to_vec(),
                     _ => {
                         return Err(AuraError::internal(format!(
                             "Unsupported algorithm: {}",
@@ -304,7 +304,7 @@ mod tests {
         );
         let operation = CryptoOperation::Hash {
             data: b"hello world".to_vec(),
-            algorithm: "blake3".to_string(),
+            algorithm: "sha256".to_string(),
         };
 
         let result = handler.handle(operation, &context);
@@ -312,6 +312,6 @@ mod tests {
 
         let response = result.unwrap();
         assert_eq!(response.get("success").unwrap(), true);
-        assert_eq!(response.get("algorithm").unwrap(), "blake3");
+        assert_eq!(response.get("algorithm").unwrap(), "sha256");
     }
 }

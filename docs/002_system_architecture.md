@@ -4,7 +4,7 @@ This document describes how to implement systems using Aura's theoretical founda
 
 ## Overview
 
-Aura's system architecture translates mathematical foundations into practical implementation patterns through:
+Aura's system architecture translates mathematical foundations into practical implementation patterns through (formal definitions live in `docs/001_theoretical_foundations.md`):
 
 1. **Unified Effect System** - Composable effect handlers with middleware support
 2. **CRDT Implementation Architecture** - 4-layer system for conflict-free replication
@@ -173,9 +173,33 @@ Protocols that complete a rendezvous or recovery handshake return a `SecureChann
 - Is managed by the transport layer so higher-level protocols obtain channels via `TransportEffects`
 - Enforces a single active channel per `(context, peer_device)` and tears it down when FlowBudget reservations or epochs change
 
-See `docs/104_rendezvous.md` for the lifecycle details.
+Lifecycle and invariants:
+- Single active channel per `(ContextId, peer_device)`.
+- Channel teardown on: `epoch(ctx)` rotation, capability shrink that invalidates `need(message) ≤ Caps(ctx)`, or context invalidation.
+- Reconnect behavior: re-run rendezvous; budget reservations and receipts do not carry across epochs.
+- Receipt scope: per-hop receipts are bound to `(ctx, src, dst, epoch)` and are never reused across channels or epochs.
 
-### 1.5 Hybrid Typed/Type-Erased Architecture
+See `docs/104_rendezvous.md` for full lifecycle details.
+
+### 1.6 Guard Chain and Predicate
+
+All transport side effects must pass the following guard chain, in order:
+
+1. CapGuard — authorization: `need(message) ≤ Caps(ctx)`
+2. FlowGuard — budgeting: `headroom(ctx, cost)` (charge-before-send)
+3. JournalCoupler — atomic commit of attested facts on success
+
+Observable behavior:
+- If CapGuard fails: deny locally, no packet emitted.
+- If FlowGuard fails: block locally, no packet emitted (no observable without charge).
+- If JournalCoupler fails: do not emit; the commit and send are coupled.
+
+Definitions:
+- `headroom(ctx, cost)` succeeds iff charging `(ctx, peer)` by `cost` in the current `epoch(ctx)` keeps `spent ≤ limit` and yields a signed receipt bound to the epoch.
+
+See `docs/001_theoretical_foundations.md` §5.3 for the formal contract and `docs/004_info_flow_model.md` for receipt/epoch details.
+
+### 1.6 Hybrid Typed/Type-Erased Architecture
 
 Aura uses a hybrid architecture that provides both typed effect traits and type-erased handlers:
 
@@ -193,7 +217,14 @@ Aura uses a hybrid architecture that provides both typed effect traits and type-
 
 The type-erased side is formalized in `crates/aura-protocol/src/handlers/erased.rs` as the `AuraHandler` trait. Concrete handlers (for testing, production, simulation) implement this trait, and `crates/aura-protocol/src/handlers/typed_bridge.rs` provides blanket implementations of every effect trait for `Arc<RwLock<Box<dyn AuraHandler>>>`. That bridge is what lets you call `CryptoEffects`/`NetworkEffects` on a type-erased handler without rewriting effect-specific glue. If you need to inspect or extend the dispatch surface, start with those two files.
 
-### 1.6 Middleware Architecture
+Decision rule:
+- Use typed traits directly on hot paths (zero overhead).
+- Use `dyn AuraHandler` when you need middleware stacking, dynamic composition, or late binding.
+
+Umbrella surface:
+- Prefer an `AuraEffects` umbrella trait (re-exporting the core effect traits) in new code to keep call sites uniform. The typed bridge provides a blanket impl for `Arc<RwLock<Box<dyn AuraHandler>>>`.
+
+### 1.7 Middleware Architecture
 
 Middleware provides optional cross-cutting enhancements without affecting core protocols:
 ```rust
@@ -201,7 +232,7 @@ let with_retry = RetryMiddleware::new(base_handler, 3);
 ```
 This wrapper provides retry functionality for transient failures. Common middleware includes retry logic, metrics collection, distributed tracing, and circuit breakers.
 
-### 1.7 Context Management
+### 1.8 Context Management
 
 Context flows through handlers as internal state:
 ```rust
@@ -211,7 +242,7 @@ let bytes = handler.random_bytes(32).await;
 
 `AuraContext` enforces privacy isolation by preventing cross-context communication. Each handler instance owns context state including relationship IDs, DKD namespaces, and leakage counters. Messages are blocked unless sender and receiver contexts match.
 
-### 1.8 Execution Modes
+### 1.9 Execution Modes
 
 Effect systems support three execution modes:
 ```rust
@@ -221,9 +252,15 @@ let sim_system = AuraEffectSystem::for_simulation(device_id, 42);
 ```
 Testing mode provides deterministic behavior. Production mode uses real implementations. Simulation mode enables controlled fault injection with seeded randomness.
 
-### 1.9 Flow Budget Enforcement
+### 1.10 Flow Budget Enforcement
 
 Flow budgets prevent spam while maintaining privacy. Each context-peer pair has a `FlowBudget` with spent and limit counters stored in the journal. Transport effects check budgets before sending messages. Choreographies annotate operations with flow costs that are charged against available budgets.
+
+Canonical type:
+```
+FlowBudget { limit: u64, spent: u64, epoch: Epoch }
+```
+Invariants: charge-before-send; no observable without charge; deterministic replenishment per epoch (see `docs/004_info_flow_model.md`). Cover traffic is explicitly deferred in 1.0; see `docs/004_info_flow_model.md` §Cover Traffic Strategy.
 
 ---
 
@@ -407,7 +444,7 @@ Leakage Budgets track privacy costs with annotations specifying external, neighb
 
 ## 4. Protocol Stack Architecture
 
-### 3.1 Three-Layer Protocol Stack
+### 4.1 Three-Layer Protocol Stack
 
 Aura's protocol layer implements a three-tier architecture that separates global specifications from local implementations:
 
@@ -430,7 +467,7 @@ Protocols       ───┤ async fn execute_dkd_alice(...)     │  Working Co
                    └─────────────────────────────────────┘
 ```
 
-### 3.2 Current Implementation Status
+### 4.2 Current Implementation Status
 
 **Choreographies** - Global protocol specifications using `choreography!` macro:
 - **Location**: [`crates/aura-protocol/src/choreography/protocols/`](../crates/aura-protocol/src/choreography/protocols/)
@@ -449,7 +486,7 @@ Protocols       ───┤ async fn execute_dkd_alice(...)     │  Working Co
 - **Pattern**: Manual async functions that execute the choreographic intent
 - **Integration**: Protocols use effect system for all operations
 
-### 3.3 Architecture Evolution Path
+### 4.3 Architecture Evolution Path
 
 **Current (Phase 1)**: Manual protocols with choreographies as documentation
 ```rust
@@ -475,7 +512,7 @@ let session_type = FrostThreshold::project_to_coordinator();
 let result = execute_session(session_type, &effects).await?;
 ```
 
-### 3.4 MPST Extensions Integration
+### 4.4 MPST Extensions Integration
 
 The session type infrastructure includes Aura-specific extensions:
 
@@ -485,15 +522,15 @@ The session type infrastructure includes Aura-specific extensions:
 
 **Leakage Budgets** track privacy costs per operation with fine-grained external, neighbor, and group leakage accounting.
 
-### 3.5 Effect System Integration
+### 4.5 Effect System Integration
 
 Choreographic protocols execute through the unified effect system for operations like message transmission, journal updates, and signature verification. This provides testability through mock effects, deterministic simulation, and clean protocol composition.
 
 ---
 
-## 4. Authentication vs Authorization Flow
+## 5. Authentication vs Authorization Flow
 
-### 4.1 Architecture Overview
+### 5.1 Architecture Overview
 
 Aura maintains strict separation between authentication (WHO) and authorization (WHAT) while providing clean integration patterns. This separation enables independent testing, flexible policy evolution, and clear security boundaries.
 
@@ -507,7 +544,7 @@ Aura maintains strict separation between authentication (WHO) and authorization 
 **Integration Layer**:
 - **authorization_bridge** ([`crates/aura-protocol/src/authorization_bridge.rs`](../crates/aura-protocol/src/authorization_bridge.rs)) - Clean composition without coupling
 
-### 4.2 Data Flow Architecture
+### 5.2 Data Flow Architecture
 
 ```
 Identity Proof → Authentication → Authorization → Permission Grant
@@ -518,6 +555,10 @@ Signature          (WHO verified)     Evaluation    Operation
 
 **Linear Data Flow**:
 1. **Input**: `IdentityProof` (device signature, guardian signature, or threshold signature)
+2. **AuthorizationContext**: evaluated capabilities for the active `ContextId`
+3. **Predicate at send sites**: `need(m) ≤ Caps(ctx) ∧ headroom(ctx, cost)`
+
+`AuthorizationContext` flows through sessions/effects so that each send site can evaluate the same predicate uniformly. Cap failures or headroom failures are handled locally with no network observable.
 2. **Authentication**: `aura-verify::verify_identity_proof()` → `VerifiedIdentity`
 3. **Authorization**: `aura-wot::evaluate_authorization()` → `PermissionGrant`
 4. **Integration**: `authorization_bridge::authenticate_and_authorize()` orchestrates both layers

@@ -76,12 +76,12 @@ async fn perform_dkd_test(
 
     // Step 3: Perform key derivation through crypto effects
     effects.log_info("Step 3: Performing key derivation", &[]);
-    let derived_key = effects.blake3_hash(&derivation_input).await;
+    let derived_key = effects.hash(&derivation_input).await;
 
     // Step 4: Generate commitment through crypto effects
     effects.log_info("Step 4: Generating commitment", &[]);
     let commitment_data = [&randomness[..], &derived_key[..]].concat();
-    let commitment = effects.blake3_hash(&commitment_data).await;
+    let commitment = effects.hash(&commitment_data).await;
 
     // Step 5: Simulate threshold operations
     effects.log_info("Step 5: Simulating threshold operations", &[]);
@@ -113,15 +113,15 @@ async fn create_derivation_input(
     let mut input = Vec::new();
 
     // Add app_id
-    let app_id_hash = effects.blake3_hash(app_id.as_bytes()).await;
+    let app_id_hash = effects.hash(app_id.as_bytes()).await;
     input.extend_from_slice(&app_id_hash);
 
     // Add context
-    let context_hash = effects.blake3_hash(context.as_bytes()).await;
+    let context_hash = effects.hash(context.as_bytes()).await;
     input.extend_from_slice(&context_hash);
 
     // Add device_id
-    let device_id_hash = effects.blake3_hash(device_id.as_bytes()).await;
+    let device_id_hash = effects.hash(device_id.as_bytes()).await;
     input.extend_from_slice(&device_id_hash);
 
     effects.log_info(
@@ -152,13 +152,13 @@ async fn simulate_threshold_operations(
 
         // Create device-specific input
         let device_input = format!("device_{}_key_share", i);
-        let device_hash = effects.blake3_hash(device_input.as_bytes()).await;
+        let device_hash = effects.hash(device_input.as_bytes()).await;
 
         // Combine with derived key (simulating threshold cryptography)
         let mut combined = Vec::new();
         combined.extend_from_slice(derived_key);
         combined.extend_from_slice(&device_hash);
-        let _share_result = effects.blake3_hash(&combined).await;
+        let _share_result = effects.hash(&combined).await;
 
         effects.log_info(&format!("Device {} share computed", i), &[]);
     }

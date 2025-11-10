@@ -11,9 +11,11 @@ aura-core = { path = "../aura-core" }
 aura-mpst = { path = "../aura-mpst" }
 aura-wot = { path = "../aura-wot" }
 aura-crypto = { path = "../aura-crypto" }
+aura-protocol = { path = "../aura-protocol" }
 
 # Standard dependencies
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 indexmap = "2.0"

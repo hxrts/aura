@@ -20,24 +20,67 @@ The system implements three core principles:
 
 ## Unified Information‑Flow Budget (Privacy + Spam)
 
-Aura enforces privacy leakage limits and spam resistance with the same monotone mechanism. For each `(context, peer)` pair, the journal stores a budget fact:
+Aura enforces privacy leakage limits and spam resistance with the same monotone mechanism. For each `(context, peer)` pair, the journal stores a budget fact (canonical type):
 
 ```
-FlowBudget { spent: u64, limit: u64, epoch: Epoch }
+FlowBudget { limit: u64, spent: u64, epoch: Epoch }
 ```
 
-- `spent` is join‑monotone (merges as max); `limit` is meet‑monotone (merges as min). Epochs gate replenishment.
-- Before any transport effect, a `FlowGuard` charges `cost` to `(context, peer)`. If `spent + cost > limit`, the send is blocked locally and no packet is emitted.
+- `spent` is join‑monotone (merge = max); `limit` is meet‑monotone (merge = min). Epochs gate replenishment.
+- Before any transport effect, `FlowGuard` charges `cost` to `(context, peer)`. If `spent + cost > limit`, the send is blocked locally and no packet is emitted (no observable without charge).
 - For multi‑hop forwarding, relays validate a signed per‑hop receipt from the previous hop, then charge their own budget before forwarding.
 - Limits update deterministically (via journal facts) using web‑of‑trust inputs; all replicas converge on the same values.
+
+### Budget Formulas (Deterministic)
+
+Let `limit(ctx, peer)` be computed as the meet over deterministic components:
+
+```
+limit(ctx, peer) = base(ctx) ⊓ policy(ctx) ⊓ role(ctx, peer) ⊓ relay_factor(ctx) ⊓ device_health(peer)
+```
+
+- `base(ctx)`: context class default (relationship/group/rendezvous)
+- `policy(ctx)`: local sovereign policy set by the account (can only shrink)
+- `role(ctx, peer)`: per‑peer role within ctx (e.g., owner, member, guest)
+- `relay_factor(ctx)`: reduces limit for high‑degree hubs to mitigate amplification (meet‑only)
+- `device_health(peer)`: shrinks when peer is marked unhealthy/overloaded
+
+Each term is encoded as a lattice element with a natural order and merges via meet. This ensures convergence and prevents widening through reorgs.
+
+### Receipts and Epochs
+
+Per‑hop receipts are required for forwarding and are bound to the epoch:
+
+```
+Receipt {
+  ctx: ContextId,
+  src: DeviceId,
+  dst: DeviceId,
+  epoch: Epoch,
+  cost: u32,
+  nonce: u64,
+  prev: Hash32,   // anti‑replay chaining within epoch
+  sig: Signature,
+}
+```
+
+- Acceptance window = current epoch only.
+- Rotation triggers: journal fact `Epoch(ctx)` increments due to time‑based policy or administrative event; rotations are monotone and converge by meet on the max epoch.
+- On rotation: `spent(ctx, *)` resets; receipts cannot be reused across epochs.
+
+### Fairness and Liveness
+
+- At most one outstanding reservation per `(ctx, device)`.
+- Provide a minimum headroom floor for active relationships to prevent starvation under hub throttling.
+- Optional jitter on sensitive protocols (≥2s) reduces timing correlation without violating monotonicity.
 
 This unifies "who may talk, how often, and with how much metadata leakage" under the same laws as capabilities and facts. See `docs/103_info_flow_budget.md` for full details.
 
 ## Privacy Boundaries
 
-Aura defines three distinct privacy boundaries, each with different visibility properties:
+Aura defines four distinct privacy boundaries, each with different visibility properties and budget dimensions:
 
-### Within Relationship Boundary
+### Relationship Boundary
 
 When you establish a direct relationship with another device or join a group, you cross into the relationship boundary. Within this boundary, both parties have consented to share information necessary for coordination.
 
@@ -49,7 +92,7 @@ When you establish a direct relationship with another device or join a group, yo
 
 **Flow Budget Role**: Each `(context, peer)` pair maintains a flow budget in the journal. Every send charges `spent` before any transport effect; if `spent + cost > limit`, the send is blocked locally and no packet is emitted. This bounds metadata exposure for the relationship and prevents spam by construction.
 
-### Within Neighborhood Boundary
+### Neighborhood Boundary
 
 Your neighborhood consists of devices that forward gossip traffic for you. These are either direct relationships or transitive connections through the web of trust. They see encrypted envelopes but cannot decrypt them.
 
@@ -61,7 +104,11 @@ Your neighborhood consists of devices that forward gossip traffic for you. These
 
 **Flow Budget Role**: Forwarding uses per-hop receipts. A relay only forwards after validating the upstream receipt and charging its own `(context, next_hop)` budget; otherwise it drops locally. Receipts and counters are scoped to the same context, so budget state does not leak to unrelated observers.
 
-### External Observer Boundary
+### Group Boundary
+
+Group participants see group‑scoped identities, content, and threshold operations. Leakage accounting uses the group dimension and is constrained by `limit(ctx).group` where applicable.
+
+### External Boundary
 
 External observers have no relationship with you and are not part of your gossip neighborhood. In Aura's threat model, external observers should learn nothing.
 

@@ -154,34 +154,15 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
 
 #[async_trait]
 impl CryptoEffects for TypedHandlerBridge {
-    async fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
+    async fn hash(&self, data: &[u8]) -> [u8; 32] {
         let mut handler = self.0.write().await;
         let mut ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<[u8; 32]>(
             &mut **handler,
             EffectType::Crypto,
-            "blake3_hash",
-            Blake3HashParams {
-                data: data.to_vec(),
-            },
-            &mut ctx,
-        )
-        .await
-        .unwrap_or([0u8; 32])
-    }
-
-    async fn sha256_hash(&self, data: &[u8]) -> [u8; 32] {
-        let mut handler = self.0.write().await;
-        let mut ctx = get_context();
-
-        HandlerUtils::execute_typed_effect::<[u8; 32]>(
-            &mut **handler,
-            EffectType::Crypto,
-            "sha256_hash",
-            Sha256HashParams {
-                data: data.to_vec(),
-            },
+            "hash",
+            data.to_vec(),
             &mut ctx,
         )
         .await
@@ -291,14 +272,14 @@ impl CryptoEffects for TypedHandlerBridge {
     }
 
     // Add all missing CryptoEffects methods
-    async fn blake3_hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
+    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
         let mut handler = self.0.write().await;
         let mut ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<[u8; 32]>(
             &mut **handler,
             EffectType::Crypto,
-            "blake3_hmac",
+            "hmac",
             (key.to_vec(), data.to_vec()),
             &mut ctx,
         )
@@ -721,7 +702,7 @@ mod tests {
         let bytes = handler.random_bytes(32).await;
         assert_eq!(bytes.len(), 32);
 
-        let hash = handler.blake3_hash(b"test data").await;
+        let hash = handler.hash(b"test data").await;
         assert_eq!(hash.len(), 32);
     }
 

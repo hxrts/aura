@@ -233,15 +233,20 @@ impl CryptoEffects for MockCrypto {
         range.start + (range.end - range.start) / 2
     }
 
-    async fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
-        blake3::hash(data).into()
-    }
-
-    async fn sha256_hash(&self, data: &[u8]) -> [u8; 32] {
+    async fn hash(&self, data: &[u8]) -> [u8; 32] {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(data);
         hasher.finalize().into()
+    }
+
+    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+        mac.update(data);
+        mac.finalize().into_bytes().into()
     }
 
     async fn ed25519_sign(
@@ -392,7 +397,7 @@ mod tests {
 
         // Test hash
         let data = b"test data";
-        let hash = crypto.blake3_hash(data).await;
+        let hash = crypto.hash(data).await;
         assert_eq!(hash.len(), 32);
 
         // Test keypair generation

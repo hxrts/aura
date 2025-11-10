@@ -129,6 +129,9 @@ struct Journal {
 struct ContextId;   // derived (DKD) identifiers
 struct RID;         // pairwise secret context (X25519-derived)
 struct GID;         // group secret context (threshold-derived)
+struct Epoch(u64);  // monotone, context-scoped
+struct FlowBudget { limit: u64, spent: u64, epoch: Epoch };
+struct Receipt { ctx: ContextId, src: DeviceId, dst: DeviceId, epoch: Epoch, cost: u32, nonce: u64, prev: Hash32, sig: Signature };
 
 // Typed messages carry effects and proofs under a context.
 struct Msg<Ctx, Payload, Version> {
@@ -181,6 +184,19 @@ effect TransportEffects {
   recv    : () -> Msg<Ctx, Any, V>
   connect : PeerId -> Channel
 }
+
+### 2.4 Guards and Observability Invariants
+
+Every observable side effect is mediated by a guard chain:
+
+1. CapGuard: `need(σ) ≤ Caps(ctx)`
+2. FlowGuard: `headroom(ctx, cost)` where `charge(ctx, peer, cost, epoch)` succeeds and yields a `Receipt`
+3. JournalCoupler: commit of attested facts is atomic with the send
+
+Named invariants used across documents:
+- Charge‑Before‑Send: FlowGuard must succeed before any transport send.
+- No‑Observable‑Without‑Charge: there is no `send(ctx, peer, …)` event without a preceding successful `charge(ctx, peer, cost, epoch)`.
+- Deterministic‑Replenishment: `limit(ctx)` updates via meet on deterministic journal facts; `spent` is join‑monotone; epochs gate resets.
 
 // Time & randomness for simulation/proofs
 effect TimeEffects   { now : () -> Instant; sleep : Duration -> () }
@@ -494,7 +510,11 @@ For any trace `τ` of observable messages:
    I_o(τ₁) ≤ I_o(τ₂)  iff  C_o(τ₁) ≤ C_o(τ₂)
    ```
 3. **Leakage Bound:** For each observer `o`, `L(τ,o) ≤ Budget(o)`.
-4. **Flow Budget Soundness:** For any context `κ` and replica `r`, at all times `spent_κ^r ≤ limit_κ^r`. Limits are meet-monotone and spends are join-monotone; to avoid overshoot when limits shrink, spending is scoped to epochs and each spend carries a receipt bound to the current epoch's limit. Upon convergence within an epoch, `spent_κ ≤ min_r limit_κ^r`.
+4. **Flow Budget Soundness (Named):**
+   - Charge‑Before‑Send
+   - No‑Observable‑Without‑Charge
+   - Deterministic‑Replenishment
+   - Convergence: Within a fixed epoch and after convergence, `spent_κ ≤ min_r limit_κ^r` across replicas `r`.
 
 ### 5.2 Web-of-Trust Model
 
@@ -516,9 +536,9 @@ Let `W = (V, E)` where vertices are accounts; edges carry relationship contexts 
 
 The unified information‑flow budget regulates emission rate/volume and observable leakage using the same semilattice laws as capabilities and facts. For any context `κ` and peer `p`:
 
-1. Charge‑before‑send: A send or forward is permitted only if a budget charge succeeds first. If charging fails, the step blocks locally and emits no network observable.
-2. No observable without charge: For any trace `τ`, there is no event labeled `send(κ, p, …)` without a preceding successful charge for `(κ, p)` in the same epoch.
-3. Receipt soundness: A relay accepts a packet only with a valid per‑hop receipt (context‑scoped, epoch‑bound, signed) and sufficient local headroom; otherwise it drops locally.
+1. Charge‑Before‑Send: A send or forward is permitted only if a budget charge succeeds first. If charging fails, the step blocks locally and emits no network observable.
+2. No‑Observable‑Without‑Charge: For any trace `τ`, there is no event labeled `send(κ, p, …)` without a preceding successful charge for `(κ, p)` in the same epoch.
+3. Receipt soundness: A relay accepts a packet only with a valid per‑hop `Receipt` (context‑scoped, epoch‑bound, signed) and sufficient local headroom; otherwise it drops locally.
 4. Deterministic replenishment: `limit_κ` updates are deterministic functions of journal facts and converge via meet; `spent_κ` is join‑monotone. Upon epoch rotation, `spent_κ` resets and receipts rebind to the new epoch.
 5. Context scope: Budget facts and receipts are scoped to `κ`; they neither leak nor apply across distinct contexts (non‑interference).
 6. Composition with caps: A transport effect requires both `need(m) ≤ C` and `headroom(κ, cost, F, C)` (see §1.3). Either guard failing blocks the effect.

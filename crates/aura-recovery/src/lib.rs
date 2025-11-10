@@ -68,7 +68,10 @@ pub use aura_mpst::{
 pub use aura_wot::{CapabilitySet, TreePolicy as TrustPolicy};
 
 // Re-export recovery domain types
-pub use types::{GuardianProfile as Guardian, GuardianSet, RecoveryEvidence, RecoveryShare};
+pub use types::{GuardianProfile as Guardian, GuardianSet, RecoveryEvidence, RecoveryShare, RecoveryDispute};
+
+// Re-export guardian recovery types
+pub use guardian_recovery::{GuardianRecoveryCoordinator, GuardianRecoveryResponse, RecoveryStatus};
 
 // Re-export choreography implementations
 pub use choreography_impl::{

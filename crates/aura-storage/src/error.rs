@@ -109,10 +109,10 @@ impl From<StorageError> for aura_core::AuraError {
                 aura_core::AuraError::not_found(err.to_string())
             }
             StorageError::QuotaExceeded { .. } => {
-                aura_core::AuraError::resource_exhausted(err.to_string())
+                aura_core::AuraError::storage(err.to_string())
             }
             StorageError::ContentCorruption { .. } => {
-                aura_core::AuraError::data_corruption(err.to_string())
+                aura_core::AuraError::storage(err.to_string())
             }
             StorageError::InvalidContentType { .. } => {
                 aura_core::AuraError::invalid(err.to_string())
@@ -120,8 +120,11 @@ impl From<StorageError> for aura_core::AuraError {
             StorageError::CapabilityVerificationFailed { .. } => {
                 aura_core::AuraError::permission_denied(err.to_string())
             }
-            StorageError::CryptographicFailure { .. } | StorageError::CompressionFailure { .. } => {
-                aura_core::AuraError::internal(err.to_string())
+            StorageError::CryptographicFailure { .. } => {
+                aura_core::AuraError::crypto(err.to_string())
+            }
+            StorageError::CompressionFailure { .. } => {
+                aura_core::AuraError::storage(err.to_string())
             }
         }
     }

@@ -446,10 +446,10 @@ with optional architecture-specific hardware acceleration
       };
       "aho-corasick" = rec {
         crateName = "aho-corasick";
-        version = "1.1.3";
+        version = "1.1.4";
         edition = "2021";
         description = "Fast multiple substring searching.";
-        sha256 = "05mrpkvdgp5d20y2p989f187ry9diliijgwrs254fs9s1m1x6q4f";
+        sha256 = "00a32wb2h07im3skkikc495jvncf62jl6s96vwc7bhi70h9imlyx";
         libName = "aho_corasick";
         authors = [
           "Andrew Gallant <jamslam@gmail.com>"
@@ -696,7 +696,7 @@ with optional architecture-specific hardware acceleration
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
           }
         ];
         features = {
@@ -778,7 +778,7 @@ with optional architecture-specific hardware acceleration
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             usesDefaultFeatures = false;
             features = [ "full" "visit-mut" "parsing" "printing" "proc-macro" "clone-impls" ];
           }
@@ -833,7 +833,7 @@ with optional architecture-specific hardware acceleration
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" "visit-mut" ];
           }
         ];
@@ -861,7 +861,7 @@ with optional architecture-specific hardware acceleration
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "full" "parsing" "printing" "proc-macro" "visit-mut" ];
           }
@@ -961,6 +961,10 @@ with optional architecture-specific hardware acceleration
             name = "keyutils";
             packageId = "keyutils";
             target = { target, features }: ("linux" == target."os" or null);
+          }
+          {
+            name = "once_cell";
+            packageId = "once_cell";
           }
           {
             name = "security-framework";
@@ -1135,12 +1139,24 @@ with optional architecture-specific hardware acceleration
             packageId = "aura-agent";
           }
           {
+            name = "aura-authenticate";
+            packageId = "aura-authenticate";
+          }
+          {
             name = "aura-core";
             packageId = "aura-core";
           }
           {
+            name = "aura-invitation";
+            packageId = "aura-invitation";
+          }
+          {
             name = "aura-protocol";
             packageId = "aura-protocol";
+          }
+          {
+            name = "aura-recovery";
+            packageId = "aura-recovery";
           }
           {
             name = "clap";
@@ -1150,6 +1166,10 @@ with optional architecture-specific hardware acceleration
           {
             name = "hex";
             packageId = "hex";
+          }
+          {
+            name = "once_cell";
+            packageId = "once_cell";
           }
           {
             name = "serde";
@@ -2423,6 +2443,10 @@ with optional architecture-specific hardware acceleration
             packageId = "aura-mpst";
           }
           {
+            name = "aura-protocol";
+            packageId = "aura-protocol";
+          }
+          {
             name = "aura-wot";
             packageId = "aura-wot";
           }
@@ -2434,6 +2458,10 @@ with optional architecture-specific hardware acceleration
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
           }
           {
             name = "tokio";
@@ -3745,13 +3773,13 @@ constant-time operation and embedded-friendly no_std support
       };
       "cc" = rec {
         crateName = "cc";
-        version = "1.2.43";
+        version = "1.2.45";
         edition = "2018";
         description = "A build-time dependency for Cargo build scripts to assist in invoking the native
 C compiler to compile native C code into a static archive to be linked into Rust
 code.
 ";
-        sha256 = "1hpg1f1srgd5bfivvln1s3kcajdxpqvjsvd8m4y4nmap8pwv17kk";
+        sha256 = "1ziazvka63d434b4wdhvn3wc5vm9x9xf46k7akcb37vhimn0p41m";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -4057,11 +4085,11 @@ ChaCha8Poly1305 and ChaCha12Poly1305 lightweight variants.
       };
       "clap" = rec {
         crateName = "clap";
-        version = "4.5.50";
+        version = "4.5.51";
         edition = "2021";
         description = "A simple to use, efficient, and full-featured Command Line Argument Parser";
         crateBin = [];
-        sha256 = "08qna2mzl9irqp0p3lbbn06pjiym0dsgwbz3lkd7s0d6z1xzsb0c";
+        sha256 = "1xg5fa4lcl2pmdhlns1qzw5dpz1yz6hxk6x6j7qra0hf2whxf9jc";
         dependencies = [
           {
             name = "clap_builder";
@@ -4100,10 +4128,10 @@ ChaCha8Poly1305 and ChaCha12Poly1305 lightweight variants.
       };
       "clap_builder" = rec {
         crateName = "clap_builder";
-        version = "4.5.50";
+        version = "4.5.51";
         edition = "2021";
         description = "A simple to use, efficient, and full-featured Command Line Argument Parser";
-        sha256 = "1867h9y6fxbh35bv3f45m40grmm7ddxsv07hgqxcsp0cx2whak0a";
+        sha256 = "06h10byk8dl8b4nypil6aad9kshgfrjyji5ybb8bz0gngc65z0vm";
         dependencies = [
           {
             name = "anstream";
@@ -4160,7 +4188,7 @@ ChaCha8Poly1305 and ChaCha12Poly1305 lightweight variants.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" ];
           }
         ];
@@ -4714,7 +4742,7 @@ no_std-friendly implementations of modern formulas using const generics.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" ];
           }
         ];
@@ -4784,7 +4812,7 @@ implementing custom derives. Use https://crates.io/crates/darling in your code.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" "extra-traits" ];
           }
         ];
@@ -4818,7 +4846,7 @@ implementing custom derives. Use https://crates.io/crates/darling in your code.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
           }
         ];
 
@@ -4882,7 +4910,7 @@ implementing custom derives. Use https://crates.io/crates/darling in your code.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             usesDefaultFeatures = false;
             features = [ "parsing" "proc-macro" ];
           }
@@ -5132,7 +5160,7 @@ full support for heapless no_std targets
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
           }
         ];
         features = {
@@ -6284,7 +6312,7 @@ composability, and iterator-like interfaces.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" ];
           }
         ];
@@ -9198,10 +9226,10 @@ turbofish syntax.
       };
       "openssl" = rec {
         crateName = "openssl";
-        version = "0.10.74";
+        version = "0.10.75";
         edition = "2021";
         description = "OpenSSL bindings";
-        sha256 = "0m5nxchp0lmkqclgxs4ym3sg9w340s7sslhglghnj8j18pfi9b94";
+        sha256 = "0a238gvrzjq0r62a7472i685hi5jjzgfj72kp1xd32ir46qqv0q8";
         authors = [
           "Steven Fackler <sfackler@gmail.com>"
         ];
@@ -9264,7 +9292,7 @@ turbofish syntax.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" ];
           }
         ];
@@ -9285,11 +9313,11 @@ turbofish syntax.
       };
       "openssl-sys" = rec {
         crateName = "openssl-sys";
-        version = "0.9.110";
+        version = "0.9.111";
         edition = "2021";
         description = "FFI bindings to OpenSSL";
         links = "openssl";
-        sha256 = "1qnqrvgahzn9yfxjz3v4i29x860x9dc2c84bisgv089wp9sh17qa";
+        sha256 = "08f3mpsabivfi3fd0qv9231qidqy68lr8a4qi32y6xda43av5jl2";
         build = "build/main.rs";
         libName = "openssl_sys";
         authors = [
@@ -9683,7 +9711,7 @@ cryptographic private keys.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
           }
         ];
         features = {
@@ -10155,7 +10183,7 @@ equation coefficients
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -10163,7 +10191,7 @@ equation coefficients
         devDependencies = [
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" ];
           }
         ];
@@ -10515,10 +10543,10 @@ equation coefficients
       };
       "quote" = rec {
         crateName = "quote";
-        version = "1.0.41";
+        version = "1.0.42";
         edition = "2018";
         description = "Quasi-quoting macro quote!(...)";
-        sha256 = "1lg108nb57lwbqlnpsii89cchk6i8pkcvrv88xh1p7a9gdz7c9ff";
+        sha256 = "0zq6yc7dhpap669m27rb4qfbiywxfah17z6fwvfccv3ys90wqf53";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
         ];
@@ -10919,7 +10947,7 @@ equation coefficients
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
           }
         ];
 
@@ -11442,10 +11470,10 @@ Digital Signature Algorithm (DSA) and Elliptic Curve Digital Signature Algorithm
       };
       "rumpsteak-aura" = rec {
         crateName = "rumpsteak-aura";
-        version = "0.2.0";
+        version = "0.2.1";
         edition = "2021";
         description = "Session types for asynchronous communication between multiple parties (Aura flavored).";
-        sha256 = "06j4mzyp49l2xvr3jjhcz3n0vlsp79ygvxswmh6137c2rnghj36h";
+        sha256 = "1f15xazlr0561wc78s3nwvfff40zh2x62xzmqlg3yr2nl6zfh3n4";
         libName = "rumpsteak_aura";
         authors = [
           "Zak Cutner <me@zakcutner.uk>"
@@ -11510,7 +11538,7 @@ Digital Signature Algorithm (DSA) and Elliptic Curve Digital Signature Algorithm
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             target = { target, features }: ("wasm32" == target."arch" or null);
             features = [ "full" "extra-traits" ];
           }
@@ -11583,10 +11611,10 @@ Digital Signature Algorithm (DSA) and Elliptic Curve Digital Signature Algorithm
       };
       "rumpsteak-aura-choreography" = rec {
         crateName = "rumpsteak-aura-choreography";
-        version = "0.2.0";
+        version = "0.2.1";
         edition = "2021";
         description = "Choreographic programming for Rumpsteak - effect-based distributed protocols";
-        sha256 = "1b13qvvw2a7bwv5cdspr6r948wwzp96znlzdsf7z3ma8k7r7d1nf";
+        sha256 = "1d2mnz45j2ajsi212k2haz43np4rkymgkmam8x8zyfhs1a0k1pqi";
         libName = "rumpsteak_aura_choreography";
         authors = [
           "Zak Cutner <me@zakcutner.uk>"
@@ -11658,7 +11686,7 @@ Digital Signature Algorithm (DSA) and Elliptic Curve Digital Signature Algorithm
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" "extra-traits" ];
           }
           {
@@ -11717,10 +11745,10 @@ Digital Signature Algorithm (DSA) and Elliptic Curve Digital Signature Algorithm
       };
       "rumpsteak-aura-macros" = rec {
         crateName = "rumpsteak-aura-macros";
-        version = "0.2.0";
+        version = "0.2.1";
         edition = "2021";
         description = "Procedural macros for Rumpsteak session types (Aura flavored).";
-        sha256 = "1j3ym60kmcwz4kd0qyrdy653k5zashs3r7i81aji7gbyriy32xyi";
+        sha256 = "0ycs31pwyldwqq7kaja7mwb070vgbl48w4spnmbfrni3q4x3gsbx";
         procMacro = true;
         libName = "rumpsteak_aura_macros";
         authors = [
@@ -11737,7 +11765,7 @@ Digital Signature Algorithm (DSA) and Elliptic Curve Digital Signature Algorithm
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" "extra-traits" "parsing" ];
           }
         ];
@@ -12131,12 +12159,12 @@ fork-like interface.
         };
         resolvedDefaultFeatures = [ "std" ];
       };
-      "schemars 1.0.4" = rec {
+      "schemars 1.1.0" = rec {
         crateName = "schemars";
-        version = "1.0.4";
+        version = "1.1.0";
         edition = "2021";
         description = "Generate JSON Schemas from Rust code";
-        sha256 = "1l7w773jfk6mz0v8wpahp60aslksjijlbm65ysi4y5mwj520rll2";
+        sha256 = "12bjw76926x47l3fpmm3harq8gyn5i5hr1wpp8v3flz8sirf2n4m";
         authors = [
           "Graham Esau <gesau@hotmail.co.uk>"
         ];
@@ -12562,7 +12590,7 @@ Elliptic-Curve-Point-to-Octet-String encoding
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "derive" "parsing" "printing" "proc-macro" ];
           }
@@ -12818,7 +12846,7 @@ Elliptic-Curve-Point-to-Octet-String encoding
           }
           {
             name = "schemars";
-            packageId = "schemars 1.0.4";
+            packageId = "schemars 1.1.0";
             rename = "schemars_1";
             optional = true;
             usesDefaultFeatures = false;
@@ -12856,7 +12884,7 @@ Elliptic-Curve-Point-to-Octet-String encoding
           }
           {
             name = "schemars";
-            packageId = "schemars 1.0.4";
+            packageId = "schemars 1.1.0";
             rename = "schemars_1";
           }
           {
@@ -12914,7 +12942,7 @@ Elliptic-Curve-Point-to-Octet-String encoding
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "extra-traits" "full" "parsing" ];
           }
         ];
@@ -13627,12 +13655,12 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
         };
         resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "extra-traits" "full" "parsing" "printing" "proc-macro" "quote" ];
       };
-      "syn 2.0.108" = rec {
+      "syn 2.0.110" = rec {
         crateName = "syn";
-        version = "2.0.108";
+        version = "2.0.110";
         edition = "2021";
         description = "Parser for Rust source code";
-        sha256 = "05z908svb0yw5wzrlv27l2i8j1d8l16hd5r8bjh809146myr2n6s";
+        sha256 = "1sha51dh3rh3jlsn8ijah7ja9zk8jf8wb2667z7y9v9lpnsh3659";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
         ];
@@ -13697,7 +13725,7 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             usesDefaultFeatures = false;
             features = [ "derive" "parsing" "printing" "clone-impls" "visit" "extra-traits" ];
           }
@@ -13864,7 +13892,7 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
           }
         ];
 
@@ -13891,7 +13919,7 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
           }
         ];
 
@@ -14250,7 +14278,7 @@ backed applications.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" ];
           }
         ];
@@ -14474,11 +14502,11 @@ for nonblocking I/O streams.
       };
       "tokio-util" = rec {
         crateName = "tokio-util";
-        version = "0.7.16";
+        version = "0.7.17";
         edition = "2021";
         description = "Additional utilities for working with Tokio.
 ";
-        sha256 = "1r9wdrg1k5hna3m0kc8kcb8jdb6n52g7vnw93kw2xxw4cyc7qc0l";
+        sha256 = "152m2rp40bjphca5j581csczarvvr974zvwpzpldcwv0wygi9yif";
         libName = "tokio_util";
         authors = [
           "Tokio Contributors <team@tokio.rs>"
@@ -14741,7 +14769,7 @@ facilitate deserializing and serializing Rust structures.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             usesDefaultFeatures = false;
             features = [ "full" "parsing" "printing" "visit-mut" "clone-impls" "extra-traits" "proc-macro" ];
           }
@@ -15068,10 +15096,10 @@ facilitate deserializing and serializing Rust structures.
       };
       "unicode-ident" = rec {
         crateName = "unicode-ident";
-        version = "1.0.20";
+        version = "1.0.22";
         edition = "2018";
         description = "Determine whether characters have the XID_Start or XID_Continue properties according to Unicode Standard Annex #31";
-        sha256 = "01lafj17xwizrlvn006zz8ip99hqisf77kjk0a8flfmpmrsynbj6";
+        sha256 = "1x8xrz17vqi6qmkkcqr8cyf0an76ig7390j9cnqnk47zyv2gf4lk";
         libName = "unicode_ident";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
@@ -15381,7 +15409,7 @@ time in order to be used in Cargo build scripts.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" ];
           }
         ];
@@ -15637,7 +15665,7 @@ Windows platforms.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "visit" "visit-mut" "full" ];
           }
           {
@@ -17893,7 +17921,7 @@ dependency.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             usesDefaultFeatures = false;
             features = [ "parsing" "proc-macro" "printing" "full" "clone-impls" ];
           }
@@ -17921,7 +17949,7 @@ dependency.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             usesDefaultFeatures = false;
             features = [ "parsing" "proc-macro" "printing" "full" "clone-impls" ];
           }
@@ -20417,7 +20445,7 @@ Used when compiling Rust programs to the component model.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "fold" ];
           }
           {
@@ -20487,7 +20515,7 @@ Used when compiling Rust programs to the component model.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" ];
           }
         ];
@@ -20538,7 +20566,7 @@ Used when compiling Rust programs to the component model.
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "fold" ];
           }
           {
@@ -20599,7 +20627,7 @@ even WASM!
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "full" "extra-traits" "visit" ];
           }
         ];
@@ -20704,7 +20732,7 @@ even WASM!
           }
           {
             name = "syn";
-            packageId = "syn 2.0.108";
+            packageId = "syn 2.0.110";
             features = [ "extra-traits" ];
           }
         ];

@@ -7,9 +7,9 @@ use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::{AccountId, DeviceId};
 use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects, TimeEffects};
 use aura_recovery::guardian_recovery::{
-    guardian_from_device, GuardianRecoveryRequest, RecoveryPriority, DEFAULT_DISPUTE_WINDOW_SECS,
+    guardian_from_device, GuardianRecoveryCoordinator, GuardianRecoveryRequest, RecoveryPriority, DEFAULT_DISPUTE_WINDOW_SECS,
 };
-use aura_recovery::{GuardianRecoveryCoordinator, GuardianSet};
+use aura_recovery::{GuardianSet};
 use std::{fs, str::FromStr, sync::Arc};
 use tokio::sync::RwLock;
 

@@ -387,7 +387,7 @@ async fn signer_session(
 
     // Phase 2: Generate and send nonce commitment
     let nonce = adapter.effects().random_bytes(32).await;
-    let commitment = adapter.effects().blake3_hash(&nonce).await;
+    let commitment = adapter.effects().hash(&nonce).await;
 
     let nonce_commit = ThresholdNonceCommit {
         session_id: sign_request.session_id.clone(),
@@ -421,7 +421,7 @@ async fn signer_session(
         sig_input.extend_from_slice(comm);
     }
 
-    let signature = adapter.effects().blake3_hash(&sig_input).await;
+    let signature = adapter.effects().hash(&sig_input).await;
 
     let partial_sig = ThresholdPartialSig {
         session_id: sign_request.session_id.clone(),
@@ -479,7 +479,7 @@ async fn aggregate_partial_signatures(
         combined.extend_from_slice(&partial.signature);
     }
 
-    let aggregated = adapter.effects().blake3_hash(&combined).await;
+    let aggregated = adapter.effects().hash(&combined).await;
     Ok(aggregated.to_vec())
 }
 

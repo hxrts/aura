@@ -439,13 +439,13 @@ impl aura_core::effects::RandomEffects for AuraEffectSystem {
 
 #[async_trait]
 impl CryptoEffects for AuraEffectSystem {
-    async fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
+    async fn hash(&self, data: &[u8]) -> [u8; 32] {
         // Delegate to middleware stack through type-erased interface
         let params = serde_json::to_vec(&data).unwrap_or_default();
         let mut context = self.context().await;
 
         match self
-            .execute_effect_with_context(EffectType::Crypto, "blake3_hash", &params, &mut context)
+            .execute_effect_with_context(EffectType::Crypto, "hash", &params, &mut context)
             .await
         {
             Ok(result) => {
@@ -458,34 +458,14 @@ impl CryptoEffects for AuraEffectSystem {
         }
     }
 
-    async fn sha256_hash(&self, data: &[u8]) -> [u8; 32] {
-        let params = serde_json::to_vec(&data).unwrap_or_default();
-        let mut context = self.context().await;
+    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
 
-        match self
-            .execute_effect_with_context(EffectType::Crypto, "sha256_hash", &params, &mut context)
-            .await
-        {
-            Ok(result) => {
-                let hash_vec: Vec<u8> = serde_json::from_slice(&result).unwrap_or(vec![0; 32]);
-                let mut hash = [0u8; 32];
-                hash.copy_from_slice(&hash_vec[..32.min(hash_vec.len())]);
-                hash
-            }
-            Err(_) => [0u8; 32], // Fallback
-        }
-    }
-
-    async fn blake3_hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
-        // Use BLAKE3 keyed hash as HMAC equivalent
-        let key_array = if key.len() >= 32 {
-            key[..32].try_into().unwrap_or([0u8; 32])
-        } else {
-            let mut k = [0u8; 32];
-            k[..key.len().min(32)].copy_from_slice(&key[..key.len().min(32)]);
-            k
-        };
-        blake3::keyed_hash(&key_array, data).into()
+        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+        mac.update(data);
+        mac.finalize().into_bytes().into()
     }
 
     async fn derive_key(
@@ -728,9 +708,8 @@ impl CryptoEffects for AuraEffectSystem {
 
     fn crypto_capabilities(&self) -> Vec<String> {
         vec![
-            "blake3_hash".to_string(),
-            "sha256_hash".to_string(),
-            "blake3_hmac".to_string(),
+            "hash".to_string(),
+            "hmac".to_string(),
             "hkdf_derive".to_string(),
             "derive_key".to_string(),
             "ed25519_generate_keypair".to_string(),
@@ -1464,8 +1443,8 @@ impl LedgerEffects for AuraEffectSystem {
     }
 
     async fn hash_blake3(&self, data: &[u8]) -> Result<[u8; 32], crate::effects::LedgerError> {
-        // Delegate to crypto effects
-        Ok(self.blake3_hash(data).await)
+        // Delegate to crypto effects (now using SHA256)
+        Ok(self.hash(data).await)
     }
 
     async fn current_timestamp(&self) -> Result<u64, crate::effects::LedgerError> {

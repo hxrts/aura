@@ -436,6 +436,14 @@ async fn test_leakage_budgets() {
 }
 ```
 
+### 3.6 Verification Matrix
+
+Link core invariants from `docs/001_theoretical_foundations.md` to tests in this document:
+- Charge‑Before‑Send / No‑Observable‑Without‑Charge → Transport tests that assert no packet emission on budget or cap denial.
+- Deterministic‑Replenishment → Epoch rotation/property tests that demonstrate meet/join merge behavior and convergence.
+- Meet‑before‑Join discipline → Session tests that only commit attested facts; no rollback/negative facts compile.
+- Convergence Bound → Multi‑replica tests showing `spent(ctx) ≤ min_r limit_r(ctx)` after convergence within an epoch.
+
 ---
 
 ## 4. System Integration Patterns
@@ -612,7 +620,7 @@ Telemetry, flow control, chunk transfer windows, backpressure signals—these ar
 
 So: semilattices are the **boundary discipline** for durable, mergeable state; MPST sessions are the **engine** for rich multi-party coordination. Use both, and glue them with the pattern: **meet-guarded preconditions, join-only commits.**
 
-Flow budgets live right beside these facts: every `(context, peer)` pair stores `FlowBudget { spent, limit }` in the journal. Because `spent` is a join (max) and `limit` is a meet (min), budgeting fits seamlessly into this decision tree—rate limiting spam and bounding metadata leak both boil down to guarding effect calls with the same monotone data.
+Flow budgets live right beside these facts: every `(context, peer)` pair stores `FlowBudget { limit, spent, epoch }` in the journal. Because `spent` is a join (max) and `limit` is a meet (min), budgeting fits seamlessly into this decision tree—rate limiting spam and bounding metadata leak both boil down to guarding effect calls with the same monotone data. See `docs/004_info_flow_model.md` for receipt structure, epoch rotation, fairness, and liveness guidance.
 
 ---
 

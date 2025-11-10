@@ -428,7 +428,7 @@ async fn aggregate_frost_shares(
         combined.extend_from_slice(&share_msg.signature_share);
     }
 
-    let aggregated = adapter.effects().blake3_hash(&combined).await;
+    let aggregated = adapter.effects().hash(&combined).await;
     Ok(aggregated.to_vec())
 }
 
@@ -444,7 +444,7 @@ async fn derive_group_public_key(
         combined.extend_from_slice(&commitment.binding_commitment);
     }
 
-    let group_key = adapter.effects().blake3_hash(&combined).await;
+    let group_key = adapter.effects().hash(&combined).await;
     Ok(group_key.to_vec())
 }
 
@@ -457,7 +457,7 @@ async fn verify_frost_signature(
     // Verify signature (TODO fix - Simplified TODO fix - For now)
     // In production, this would use frost_verify_aggregate() with proper VerifyingKey
     let verification_input = [signature, message, public_key].concat();
-    let hash = adapter.effects().blake3_hash(&verification_input).await;
+    let hash = adapter.effects().hash(&verification_input).await;
 
     // TODO fix - Simplified check - in reality this would verify the Schnorr signature
     Ok(!hash.iter().all(|&b| b == 0))

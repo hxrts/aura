@@ -27,12 +27,55 @@
           targets = [ "wasm32-unknown-unknown" ];
         };
 
-        # Import generated Cargo.nix with crate2nix's built-in overrides
+        # Import generated Cargo.nix with CC crate fix and other overrides
         cargoNix = import ./Cargo.nix {
           inherit pkgs;
           buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate;
-          # Use crate2nix's default overrides which now include the CC crate fix
-          defaultCrateOverrides = pkgs.defaultCrateOverrides;
+          # Apply CC crate fix for macOS builds and other common overrides
+          defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+            # Override for cc crate - fix Apple target detection on macOS
+            cc = attrs: pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+              # Fix CC crate Apple target detection: it expects "darwin" but Nix reports "macos"
+              preBuild = ''
+                export CARGO_CFG_TARGET_OS="darwin"
+              '';
+            } // attrs;
+
+            # Override for blake3 (crypto library)
+            blake3 = attrs: {
+              # Ensure consistent deployment target to avoid CC crate issues  
+              MACOSX_DEPLOYMENT_TARGET = "11.0";
+              # Set explicit Rust target for CC crate compatibility
+              TARGET_OS = "darwin";
+              CARGO_CFG_TARGET_OS = "darwin";
+              # Override Rust target detection
+              preBuild = ''
+                export TARGET_OS="darwin"
+                export CARGO_CFG_TARGET_OS="darwin"
+                # Ensure cargo sees darwin target
+                export RUST_TARGET_PATH=${pkgs.stdenv.targetPlatform.config}
+              '';
+            } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+              buildInputs = [ pkgs.libiconv ];
+            };
+
+            # Override for ring (crypto library)
+            ring = attrs: {
+              nativeBuildInputs = [ pkgs.perl ];
+              # Ensure consistent deployment target to avoid CC crate issues
+              MACOSX_DEPLOYMENT_TARGET = "11.0";
+              # Set explicit Rust target for CC crate compatibility
+              TARGET_OS = "darwin";
+              CARGO_CFG_TARGET_OS = "darwin";
+              # Override Rust target detection
+              preBuild = ''
+                export TARGET_OS="darwin"
+                export CARGO_CFG_TARGET_OS="darwin"
+                # Ensure cargo sees darwin target
+                export RUST_TARGET_PATH=${pkgs.stdenv.targetPlatform.config}
+              '';
+            };
+          };
         };
       in
       {

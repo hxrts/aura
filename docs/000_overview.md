@@ -144,7 +144,24 @@ If 20 close friends use this system twice weekly for identity and recovery, the 
 
 ## Architecture: Whole System + Application Layers
 
-Aura is divided into two architectural layers:
+Aura is divided into two architectural layers, and three implementation layers:
+
+### Layer Map (Canonical)
+
+- Data Layer (Semilattices + Journal)
+  - What: CRDT facts (⊔) and capabilities (⊓), journal state, GC/snapshots
+  - Where: `docs/001_theoretical_foundations.md` (§2, §4), `docs/002_system_architecture.md` (§2), `docs/105_journal.md`
+  - Invariants: join‑only commits, meet‑only constraints, convergence
+
+- Process Layer (Sessions + Effects)
+  - What: MPST choreographies, projection, guard chain, effect execution
+  - Where: `docs/001_theoretical_foundations.md` (§3, §2.4), `docs/002_system_architecture.md` (§1, §4), `docs/003_distributed_applications.md` (§3)
+  - Invariants: CapGuard → FlowGuard → JournalCoupler; charge‑before‑send
+
+- Edge Layer (Transport + SecureChannel)
+  - What: Rendezvous, forwarding, per‑hop receipts, epoch rotation
+  - Where: `docs/104_rendezvous.md`, `docs/004_info_flow_model.md` (receipts/epochs), `docs/002_system_architecture.md` (§1.5)
+  - Invariants: one channel per (ContextId, peer), receipts don’t cross epochs
 
 ### Whole System Model (Foundation)
 

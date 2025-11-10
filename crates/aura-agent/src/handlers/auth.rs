@@ -83,7 +83,7 @@ impl AuthenticationHandler {
 
         // Test basic crypto operations
         let test_data = b"health_check_data";
-        let _hash_result = effects.blake3_hash(test_data).await;
+        let _hash_result = effects.hash(test_data).await;
 
         // Test storage access
         let storage_result = effects.stats().await;
@@ -293,7 +293,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         // TODO fix - For now, we perform a basic validation
 
         // Hash the capability and compare with stored value (TODO fix - Simplified)
-        let capability_hash = effects.blake3_hash(capability).await;
+        let capability_hash = effects.hash(capability).await;
 
         // TODO fix - In a real implementation, we would compare this hash with stored capability hashes
         // For testing, we'll return true if the hash is not all zeros
@@ -319,7 +319,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         // Generate device attestation (simulated)
         // In real implementation would use platform attestation APIs
         let device_id_bytes = self.device_id.to_string().as_bytes().to_vec();
-        let attestation_data = effects.blake3_hash(&device_id_bytes).await;
+        let attestation_data = effects.hash(&device_id_bytes).await;
         let attestation = attestation_data.to_vec();
 
         // TODO fix - In a real implementation, this would be a proper device attestation

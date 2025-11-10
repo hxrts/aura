@@ -6,7 +6,7 @@
 use aura_core::{AccountId, AuraResult, ChunkId, ContentId, DeviceId, Hash32};
 use aura_wot::{Capability, StoragePermission};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Content store managing addressed content
 #[derive(Debug, Clone)]
@@ -212,7 +212,7 @@ impl ContentStore {
             if let Some(chunk_data) = self.chunk_store.retrieve_chunk(&chunk_request).await? {
                 content_data.extend(chunk_data.data);
             } else {
-                return Err(aura_core::AuraError::data_corruption("Missing chunk"));
+                return Err(aura_core::AuraError::storage("Missing chunk"));
             }
         }
 
@@ -531,7 +531,7 @@ impl ChunkStore {
             // Verify content hash
             let computed_hash = ContentAddressing::hash_content(&chunk_data.data)?;
             if computed_hash != chunk_data.content_hash {
-                return Err(aura_core::AuraError::data_corruption("Chunk hash mismatch"));
+                return Err(aura_core::AuraError::storage("Chunk hash mismatch"));
             }
 
             Ok(Some(chunk_data.clone()))
@@ -563,7 +563,7 @@ impl ChunkStore {
             .filter_map(
                 |(chunk_id, &count)| {
                     if count == 0 {
-                        Some(*chunk_id)
+                        Some(chunk_id.clone())
                     } else {
                         None
                     }

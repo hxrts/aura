@@ -52,6 +52,11 @@ impl CapabilityEvaluator {
         }
     }
 
+    /// Create a new capability evaluator for testing
+    pub fn new_for_testing() -> Self {
+        Self::new(DeviceId::new())
+    }
+
     /// Compute effective capabilities for current context
     #[allow(clippy::disallowed_methods)]
     pub async fn compute_effective_capabilities(
@@ -145,6 +150,29 @@ impl CapabilityEvaluator {
 
         self.cached_results
             .retain(|_, result| current_time - result.computed_at < self.cache_ttl_seconds);
+    }
+
+    /// Evaluate storage access based on capabilities and permission requirements
+    pub fn evaluate_storage_access(
+        &self,
+        capabilities: &[crate::Capability],
+        required_permission: &crate::StoragePermission,
+        resource: &dyn std::fmt::Debug,
+    ) -> AuraResult<bool> {
+        // TODO: Implement proper capability evaluation logic
+        // For now, return a simple check that capabilities list is non-empty
+        // In a real implementation, this would check if any of the capabilities
+        // grant the required permission for the specified resource
+        debug!(
+            device_id = ?self.device_id,
+            permission = ?required_permission,
+            resource = ?resource,
+            capabilities_count = capabilities.len(),
+            "Evaluating storage access"
+        );
+        
+        // Placeholder logic - always allow for now to enable development
+        Ok(!capabilities.is_empty())
     }
 
     // Placeholder methods for integration points

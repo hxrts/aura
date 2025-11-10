@@ -72,7 +72,7 @@ pub async fn generate_test_dkd_context<C: CryptoEffects>(
     let mut data = Vec::new();
     data.extend_from_slice(app_id.as_bytes());
     data.extend_from_slice(context.as_bytes());
-    crypto.blake3_hash(&data).await
+    crypto.hash(&data).await
 }
 
 /// Create deterministic Ed25519 key for testing using random effects
@@ -97,5 +97,5 @@ pub async fn hash_test_data<C: CryptoEffects>(data: &[&[u8]], crypto: &C) -> [u8
     for d in data {
         combined.extend_from_slice(d);
     }
-    crypto.blake3_hash(&combined).await
+    crypto.hash(&combined).await
 }

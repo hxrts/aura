@@ -53,14 +53,17 @@ pub struct FrostSigningPackage {
 pub trait CryptoEffects: RandomEffects + Send + Sync {
     // ====== Hash Functions ======
 
-    /// BLAKE3 hash function
-    async fn blake3_hash(&self, data: &[u8]) -> [u8; 32];
+    /// Unified hash function using SHA256
+    ///
+    /// This is the primary hashing method used throughout Aura. It uses SHA256
+    /// uniformly across the system for content addressing, fingerprinting, and
+    /// cryptographic commitments.
+    async fn hash(&self, data: &[u8]) -> [u8; 32];
 
-    /// SHA256 hash function (for compatibility)
-    async fn sha256_hash(&self, data: &[u8]) -> [u8; 32];
-
-    /// HMAC using BLAKE3
-    async fn blake3_hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32];
+    /// HMAC using SHA256
+    ///
+    /// Computes HMAC-SHA256 for authenticated hashing with a key.
+    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32];
 
     // Note: Random methods (random_bytes, random_bytes_32, random_range)
     // are inherited from RandomEffects trait

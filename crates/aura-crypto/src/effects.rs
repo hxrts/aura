@@ -11,15 +11,15 @@ use uuid::Uuid;
 
 /// Basic crypto effects needed by aura-crypto
 pub trait CryptoEffects: Send + Sync {
-    /// Hash data using Blake3
-    fn blake3_hash(&self, data: &[u8]) -> [u8; 32];
+    /// Hash data using SHA256
+    fn hash(&self, data: &[u8]) -> [u8; 32];
 
-    /// Hash data using Blake3 (async version)
-    fn blake3_hash_async<'a>(
+    /// Hash data using SHA256 (async version)
+    fn hash_async<'a>(
         &'a self,
         data: &'a [u8],
     ) -> Pin<Box<dyn Future<Output = [u8; 32]> + Send + '_>> {
-        Box::pin(async move { self.blake3_hash(data) })
+        Box::pin(async move { self.hash(data) })
     }
 
     /// Generate random bytes (single byte version for object safety)
@@ -99,7 +99,11 @@ impl Effects {
 
     /// Create named test effects for debugging
     pub fn for_test(name: &str) -> Self {
-        let seed = blake3::hash(name.as_bytes()).as_bytes()[0] as u64;
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(name.as_bytes());
+        let hash = hasher.finalize();
+        let seed = hash[0] as u64;
         Self::deterministic(seed, 1000)
     }
 
@@ -132,9 +136,9 @@ impl Effects {
         self.inner.advance_time(seconds)
     }
 
-    /// Hash data using Blake3
-    pub fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
-        self.inner.blake3_hash(data)
+    /// Hash data using SHA256
+    pub fn hash(&self, data: &[u8]) -> [u8; 32] {
+        self.inner.hash(data)
     }
 
     /// Generate a UUID
@@ -218,8 +222,11 @@ impl DeterministicEffects {
 }
 
 impl CryptoEffects for DeterministicEffects {
-    fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
-        blake3::hash(data).into()
+    fn hash(&self, data: &[u8]) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        hasher.finalize().into()
     }
 
     fn random_byte(&self) -> u8 {
@@ -318,8 +325,11 @@ impl Default for ProductionEffects {
 }
 
 impl CryptoEffects for ProductionEffects {
-    fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
-        blake3::hash(data).into()
+    fn hash(&self, data: &[u8]) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        hasher.finalize().into()
     }
 
     #[allow(clippy::disallowed_methods)]

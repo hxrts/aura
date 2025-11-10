@@ -12,6 +12,24 @@ use aura_verify::session::SessionTicket;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_DISPUTE_WINDOW_SECS: u64 = 48 * 60 * 60;
+
+// GuardianRecoveryCoordinator defined later with full implementation
+
+/// Recovery status enumeration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RecoveryStatus {
+    /// Recovery is pending guardian approvals
+    Pending,
+    /// Recovery is active and processing
+    Active,
+    /// Recovery completed successfully
+    Complete,
+    /// Recovery was cancelled or failed
+    Failed,
+}
+
+// GuardianRecoveryResponse defined later with full implementation
+
 /// Guardian recovery request emitted by agents/CLI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianRecoveryRequest {

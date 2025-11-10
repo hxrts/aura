@@ -99,7 +99,7 @@ mod middleware_tests {
         let message = b"test message to hash";
 
         // Test crypto operations
-        let hash_result = handler.blake3_hash(message).await;
+        let hash_result = handler.hash(message).await;
         assert_eq!(hash_result.len(), 32);
 
         // Test random generation
@@ -138,7 +138,7 @@ mod session_safety_tests {
         // These should compile without type errors (compile-time safety)
         let _peers: Vec<Uuid> = handler.connected_peers().await;
         let _exists: Result<bool, StorageError> = handler.exists("test").await;
-        let _hash: [u8; 32] = handler.blake3_hash(b"test").await;
+        let _hash: [u8; 32] = handler.hash(b"test").await;
 
         // Type safety verified by compilation
         assert!(true);

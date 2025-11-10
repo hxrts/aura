@@ -153,13 +153,13 @@ async fn test_crypto_effects() {
 
     // Test hashing
     let test_data = b"test data for hashing";
-    let blake3_hash = real_handler.blake3_hash(test_data).await;
+    let blake3_hash = real_handler.hash(test_data).await;
     let sha256_hash = real_handler.sha256_hash(test_data).await;
     assert_eq!(blake3_hash.len(), 32);
     assert_eq!(sha256_hash.len(), 32);
 
     // Test that same input produces same hash
-    let blake3_hash2 = real_handler.blake3_hash(test_data).await;
+    let blake3_hash2 = real_handler.hash(test_data).await;
     assert_eq!(blake3_hash, blake3_hash2);
 
     // Test ED25519 operations
@@ -378,7 +378,7 @@ async fn test_composite_handler_delegation() {
     assert_eq!(random_bytes.len(), 8);
 
     let test_data = b"delegation test";
-    let hash = composite.blake3_hash(test_data).await;
+    let hash = composite.hash(test_data).await;
     assert_eq!(hash.len(), 32);
 
     // Test time delegation

@@ -295,12 +295,8 @@ impl aura_core::effects::RandomEffects for CompositeHandler {
 
 #[async_trait]
 impl CryptoEffects for CompositeHandler {
-    async fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
-        self.crypto.blake3_hash(data).await
-    }
-
-    async fn sha256_hash(&self, data: &[u8]) -> [u8; 32] {
-        self.crypto.sha256_hash(data).await
+    async fn hash(&self, data: &[u8]) -> [u8; 32] {
+        self.crypto.hash(data).await
     }
 
     async fn ed25519_sign(&self, data: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
@@ -344,8 +340,8 @@ impl CryptoEffects for CompositeHandler {
         self.crypto.hkdf_derive(ikm, salt, info, output_len).await
     }
 
-    async fn blake3_hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
-        self.crypto.blake3_hmac(key, data).await
+    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
+        self.crypto.hmac(key, data).await
     }
 
     async fn derive_key(
@@ -767,7 +763,7 @@ impl LedgerEffects for CompositeHandler {
     }
 
     async fn hash_blake3(&self, _data: &[u8]) -> Result<[u8; 32], LedgerError> {
-        let hash = self.crypto.blake3_hash(_data).await;
+        let hash = self.crypto.hash(_data).await;
         Ok(hash)
     }
 
@@ -1329,7 +1325,7 @@ impl CompositeHandler {
                         message: format!("Failed to deserialize {} parameters: {}", operation, e),
                     }
                 })?;
-                let result = self.crypto.blake3_hash(&data).await;
+                let result = self.crypto.hash(&data).await;
                 Ok(serde_json::to_vec(&result).unwrap_or_default())
             }
             _ => Err(AuraHandlerError::UnknownOperation {

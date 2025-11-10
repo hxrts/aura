@@ -43,6 +43,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
+once_cell = { workspace = true }
 
 # Platform-specific secure storage
 [target.'cfg(target_os = "macos")'.dependencies]

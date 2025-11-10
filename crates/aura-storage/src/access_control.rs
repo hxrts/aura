@@ -7,6 +7,7 @@ use aura_core::{AccountId, AuraResult, Cap, ChunkId, ContentId, DeviceId};
 use aura_wot::{Capability, CapabilityEvaluator, StoragePermission};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 
 /// Storage access control manager
 #[derive(Debug, Clone)]
@@ -51,6 +52,18 @@ pub enum StorageOperation {
         /// Proposed snapshot point
         snapshot_root: ChunkId,
     },
+}
+
+impl fmt::Display for StorageOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StorageOperation::Read => write!(f, "read"),
+            StorageOperation::Write => write!(f, "write"),
+            StorageOperation::Delete => write!(f, "delete"),
+            StorageOperation::Search { .. } => write!(f, "search"),
+            StorageOperation::GarbageCollect { .. } => write!(f, "garbage_collect"),
+        }
+    }
 }
 
 /// Storage resources requiring access control
@@ -188,7 +201,7 @@ impl StorageAccessControl {
         match decision {
             AccessDecision::Allow => {
                 Ok(aura_mpst::CapabilityGuard::new(
-                    format!("{:?}", request.operation),
+                    request.operation.to_string(),
                     Cap::default(), // Would use actual capability representation
                 ))
             }
@@ -214,7 +227,7 @@ impl StorageAccessControl {
             let request = StorageAccessRequest {
                 device_id,
                 operation: StorageOperation::Read,
-                resource: StorageResource::Content(content_id),
+                resource: StorageResource::Content(content_id.clone()),
                 capabilities: vec![], // Use registered capabilities
             };
 

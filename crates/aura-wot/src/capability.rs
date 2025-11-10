@@ -38,6 +38,35 @@ impl TrustLevel {
     }
 }
 
+/// Storage permission capabilities
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StoragePermission {
+    /// Can read content
+    ContentRead,
+    /// Can write content
+    ContentWrite,
+    /// Can delete content
+    ContentDelete,
+    /// Can list content
+    ContentList,
+    /// Can create directories
+    DirectoryCreate,
+    /// Can read chunks
+    ChunkRead,
+    /// Can write chunks
+    ChunkWrite,
+    /// Can delete chunks
+    ChunkDelete,
+    /// Can read namespace
+    NamespaceRead,
+    /// Can write namespace
+    NamespaceWrite,
+    /// Can perform search queries
+    SearchQuery,
+    /// Can trigger garbage collection
+    GarbageCollect,
+}
+
 /// Relay permission capabilities
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RelayPermission {
@@ -236,6 +265,32 @@ impl Capability {
             // Different capability types generally result in None
             // unless there's a specific intersection rule
             _ => None,
+        }
+    }
+
+    /// Check if this capability grants a specific storage permission
+    pub fn grants_storage_permission(&self, permission: &StoragePermission) -> bool {
+        use Capability::*;
+        
+        match (self, permission) {
+            (All, _) => true,
+            (None, _) => false,
+            
+            // Read capabilities grant storage read permissions
+            (Read { resource_pattern }, StoragePermission::ContentRead) => {
+                // For now, any read capability grants content read
+                resource_pattern == "*" || resource_pattern.contains("content")
+            }
+            
+            // Write capabilities grant storage write/delete permissions
+            (Write { resource_pattern }, StoragePermission::ContentWrite | StoragePermission::ContentDelete | StoragePermission::DirectoryCreate) => {
+                resource_pattern == "*" || resource_pattern.contains("content")
+            }
+            
+            // Admin capabilities grant all storage permissions
+            (Admin { scope }, _) => scope == "*" || scope.contains("storage"),
+            
+            _ => false,
         }
     }
 }

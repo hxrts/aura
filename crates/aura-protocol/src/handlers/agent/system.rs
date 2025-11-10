@@ -238,8 +238,8 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
         }
 
         // Encrypt the backup data
-        let encrypted_credentials = effects.blake3_hash(&backup_data).await.to_vec();
-        let backup_hash = effects.blake3_hash(&encrypted_credentials).await;
+        let encrypted_credentials = effects.hash(&backup_data).await.to_vec();
+        let backup_hash = effects.hash(&encrypted_credentials).await;
 
         Ok(CredentialBackup {
             device_id: self.device_id,
@@ -253,7 +253,7 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
     async fn restore_credentials(&self, backup: &CredentialBackup) -> Result<()> {
         // Verify backup integrity
         let effects = self.core_effects.read().await;
-        let computed_hash = effects.blake3_hash(&backup.encrypted_credentials).await;
+        let computed_hash = effects.hash(&backup.encrypted_credentials).await;
 
         if computed_hash != backup.backup_hash {
             return Err(aura_core::AuraError::invalid(

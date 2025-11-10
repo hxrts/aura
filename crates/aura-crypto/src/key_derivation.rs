@@ -1,11 +1,11 @@
 //! Key Derivation for Aura
 //!
-//! This module implements secure key derivation using BLAKE3-based KDF following
+//! This module implements secure key derivation using SHA256-based KDF following
 //! the principles outlined in the key derivation security tests. It provides
 //! context-aware key derivation for identity and permission keys with proper
 //! separation and collision resistance.
 
-use blake3;
+use sha2::{Digest, Sha256};
 
 /// Context for identity key derivation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -178,7 +178,9 @@ pub fn derive_key_material(
     extract_input.extend_from_slice(root_key);
     extract_input.extend_from_slice(&context_bytes);
 
-    let prk = blake3::hash(&extract_input);
+    let mut hasher = Sha256::new();
+    hasher.update(&extract_input);
+    let prk = hasher.finalize();
 
     // Expand: Generate output material using HKDF-like expansion
     let mut output = Vec::with_capacity(output_length);
@@ -186,12 +188,14 @@ pub fn derive_key_material(
 
     for i in 0..num_blocks {
         let mut expand_input = Vec::new();
-        expand_input.extend_from_slice(prk.as_bytes());
+        expand_input.extend_from_slice(&prk);
         expand_input.extend_from_slice(&context_bytes);
         expand_input.push(i as u8 + 1); // HKDF counter (1-indexed)
 
-        let block = blake3::hash(&expand_input);
-        output.extend_from_slice(block.as_bytes());
+        let mut block_hasher = Sha256::new();
+        block_hasher.update(&expand_input);
+        let block = block_hasher.finalize();
+        output.extend_from_slice(&block);
     }
 
     // Truncate to requested length

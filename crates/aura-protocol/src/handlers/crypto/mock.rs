@@ -127,13 +127,13 @@ impl RandomEffects for MockCryptoHandler {
 // Then implement CryptoEffects (which inherits from RandomEffects)
 #[async_trait]
 impl CryptoEffects for MockCryptoHandler {
-    async fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
+    async fn hash(&self, data: &[u8]) -> [u8; 32] {
         // Check for pre-configured response
         if let Some(hash) = self.responses.lock().unwrap().hashes.get(data) {
             return *hash;
         }
 
-        // Generate deterministic hash-like value
+        // Generate deterministic hash-like value using SHA256-like mixing
         let mut hash = [0u8; 32];
         for (i, &byte) in data.iter().enumerate() {
             hash[i % 32] ^= byte.wrapping_add(i as u8);
@@ -142,18 +142,6 @@ impl CryptoEffects for MockCryptoHandler {
         // Mix with seed for determinism
         for (i, h) in hash.iter_mut().enumerate() {
             *h = h.wrapping_add((self.seed >> (i % 8)) as u8);
-        }
-
-        hash
-    }
-
-    async fn sha256_hash(&self, data: &[u8]) -> [u8; 32] {
-        // For mock, just use the same logic as blake3_hash but with different mixing
-        let mut hash = self.blake3_hash(data).await;
-
-        // Add some differentiation from blake3
-        for h in hash.iter_mut() {
-            *h = h.wrapping_add(0x5A);
         }
 
         hash
@@ -208,7 +196,7 @@ impl CryptoEffects for MockCryptoHandler {
         let mut combined = Vec::new();
         combined.extend_from_slice(b"pubkey_derive");
         combined.extend_from_slice(private_key);
-        let hash = self.blake3_hash(&combined).await;
+        let hash = self.hash(&combined).await;
 
         Ok(hash.to_vec())
     }
@@ -238,24 +226,24 @@ impl CryptoEffects for MockCryptoHandler {
             .copied()
             .collect();
 
-        let hash = blake3::hash(&combined);
+        let hash = self.hash(&combined).await;
         let mut output = vec![0u8; output_len];
 
         // Expand the hash to fill the output length
         for (i, byte) in output.iter_mut().enumerate() {
-            *byte = hash.as_bytes()[i % 32] ^ (i as u8);
+            *byte = hash[i % 32] ^ (i as u8);
         }
 
         Ok(output)
     }
 
-    async fn blake3_hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
+    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
         // Mock HMAC using deterministic approach
         let mut combined = Vec::new();
         combined.extend_from_slice(key);
         combined.extend_from_slice(data);
         combined.extend_from_slice(b"HMAC");
-        self.blake3_hash(&combined).await
+        self.hash(&combined).await
     }
 
     async fn derive_key(
