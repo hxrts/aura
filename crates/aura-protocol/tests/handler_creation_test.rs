@@ -6,9 +6,9 @@
 
 mod common;
 
+use aura_core::identifiers::DeviceId;
 use aura_protocol::handlers::erased::AuraHandlerFactory;
 use aura_protocol::handlers::{AuraContext, ExecutionMode};
-use aura_types::identifiers::DeviceId;
 use uuid::Uuid;
 
 /// Test basic handler creation

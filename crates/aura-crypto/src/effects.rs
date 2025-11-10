@@ -3,7 +3,7 @@
 //! This module provides both the effect traits and concrete implementations
 //! that aura-crypto needs for testing and production use.
 
-use aura_types::EffectsLike;
+use aura_core::EffectsLike;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -67,12 +67,24 @@ pub trait EffectsInterface: CryptoEffects + TimeEffects + Send + Sync {
 #[derive(Clone)]
 pub struct Effects {
     inner: Arc<dyn EffectsInterface>,
+    is_simulated: bool,
 }
 
 impl Effects {
     /// Create a new Effects instance with the given implementation
     pub fn new(inner: Arc<dyn EffectsInterface>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            is_simulated: true,
+        }
+    }
+
+    /// Create a new Effects instance with the given implementation and simulation flag
+    pub fn new_with_simulation_flag(inner: Arc<dyn EffectsInterface>, is_simulated: bool) -> Self {
+        Self {
+            inner,
+            is_simulated,
+        }
     }
 
     /// Create deterministic effects for testing with seed and timestamp
@@ -91,19 +103,14 @@ impl Effects {
         Self::deterministic(seed, 1000)
     }
 
-    /// Create production effects (placeholder for now)
+    /// Create production effects using system entropy and time
     ///
-    /// TODO: This is a placeholder that uses system RNG and time directly.
-    /// In production, these should come from proper effect handlers.
+    /// This implementation uses proper system resources for cryptographically secure
+    /// random number generation and system time. For deterministic testing, use
+    /// `deterministic()` or `test()` methods instead.
     #[allow(clippy::disallowed_methods)]
     pub fn production() -> Self {
-        use rand::RngCore;
-        let seed = rand::thread_rng().next_u64();
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        Self::deterministic(seed, timestamp)
+        Self::new_with_simulation_flag(Arc::new(ProductionEffects::new()), false)
     }
 
     /// Generate random bytes array
@@ -118,6 +125,10 @@ impl Effects {
 
     /// Advance time by the given number of seconds (for testing)
     pub fn advance_time(&self, seconds: u64) -> crate::Result<()> {
+        if !self.is_simulated {
+            // In production mode, time advancement is a no-op
+            return Ok(());
+        }
         self.inner.advance_time(seconds)
     }
 
@@ -134,6 +145,49 @@ impl Effects {
     /// Get a random number generator for use with external libraries
     pub fn rng(&self) -> impl rand::RngCore {
         DeterministicRng::new(self.inner.random_byte() as u64)
+    }
+
+    /// Set time to a specific value (for testing)
+    pub fn set_time(&self, timestamp: u64) -> crate::Result<()> {
+        if !self.is_simulated {
+            return Err(crate::AuraError::invalid(
+                "Cannot set time in production mode",
+            ));
+        }
+
+        // For deterministic effects, we need to access the underlying implementation
+        // This is a bit of a hack, but necessary for the current test interface
+        self.inner.advance_time(0)?; // Reset to check it's deterministic
+        let current = self.inner.now()?;
+        if timestamp >= current {
+            self.inner.advance_time(timestamp - current)
+        } else {
+            // Time travel backwards - need to create new instance
+            // TODO fix - For now, just fail as this is complex
+            Err(crate::AuraError::invalid("Cannot travel backwards in time"))
+        }
+    }
+
+    /// Check if this is a simulated/deterministic effects instance
+    pub fn is_simulated(&self) -> bool {
+        self.is_simulated
+    }
+
+    /// Fill a buffer with random bytes
+    pub fn fill_random(&self, buffer: &mut [u8]) {
+        for byte in buffer.iter_mut() {
+            *byte = self.inner.random_byte();
+        }
+    }
+
+    /// Generate a session ID
+    pub fn gen_session_id(&self) -> String {
+        self.inner.gen_uuid().to_string()
+    }
+
+    /// Get the inner effects interface for compatibility
+    pub fn inner(&self) -> Arc<dyn EffectsInterface> {
+        self.inner.clone()
     }
 }
 
@@ -169,7 +223,8 @@ impl CryptoEffects for DeterministicEffects {
     }
 
     fn random_byte(&self) -> u8 {
-        let mut state = self.rng_state.lock().unwrap();
+        #[allow(clippy::expect_used)]
+        let mut state = self.rng_state.lock().expect("rng_state mutex poisoned");
         *state = state.wrapping_mul(1103515245).wrapping_add(12345);
         (*state / 65536) as u8
     }
@@ -182,11 +237,20 @@ impl CryptoEffects for DeterministicEffects {
 
 impl TimeEffects for DeterministicEffects {
     fn now(&self) -> crate::Result<u64> {
-        Ok(*self.current_time.lock().unwrap())
+        #[allow(clippy::expect_used)]
+        let time = *self
+            .current_time
+            .lock()
+            .expect("current_time mutex poisoned");
+        Ok(time)
     }
 
     fn advance_time(&self, seconds: u64) -> crate::Result<()> {
-        let mut time = self.current_time.lock().unwrap();
+        #[allow(clippy::expect_used)]
+        let mut time = self
+            .current_time
+            .lock()
+            .expect("current_time mutex poisoned");
         *time += seconds;
         Ok(())
     }
@@ -237,32 +301,63 @@ impl rand::RngCore for DeterministicRng {
 /// This is safe for testing but NOT for production use
 impl rand::CryptoRng for DeterministicRng {}
 
-/// Legacy test implementation of crypto effects (for backward compatibility)
-pub struct TestCryptoEffects {
-    seed: u64,
-}
+/// Production effects implementation that uses system entropy and time
+pub struct ProductionEffects;
 
-impl TestCryptoEffects {
-    pub fn new(seed: u64) -> Self {
-        Self { seed }
+impl ProductionEffects {
+    /// Create a new ProductionEffects instance
+    pub fn new() -> Self {
+        Self
     }
 }
 
-impl CryptoEffects for TestCryptoEffects {
+impl Default for ProductionEffects {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CryptoEffects for ProductionEffects {
     fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
         blake3::hash(data).into()
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn random_byte(&self) -> u8 {
-        ((self.seed) % 256) as u8
+        rand::random::<u8>()
     }
 
     fn gen_uuid(&self) -> Uuid {
-        // Generate deterministic UUID based on seed
-        let mut data = [0u8; 16];
-        for (i, byte) in data.iter_mut().enumerate() {
-            *byte = ((self.seed + i as u64) % 256) as u8;
-        }
-        Uuid::from_bytes(data)
+        let bytes = self.random_bytes_array::<16>();
+        Uuid::from_bytes(bytes)
+    }
+}
+
+impl TimeEffects for ProductionEffects {
+    #[allow(clippy::disallowed_methods)]
+    fn now(&self) -> crate::Result<u64> {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| crate::AuraError::internal(format!("System time error: {}", e)))?
+            .as_secs();
+        Ok(timestamp)
+    }
+
+    fn advance_time(&self, _seconds: u64) -> crate::Result<()> {
+        // In production mode, time advancement is a no-op (time is controlled by the system)
+        Ok(())
+    }
+}
+
+impl EffectsInterface for ProductionEffects {
+    fn clone_box(&self) -> Box<dyn EffectsInterface> {
+        Box::new(ProductionEffects::new())
+    }
+}
+
+impl Clone for ProductionEffects {
+    #[allow(clippy::disallowed_methods)]
+    fn clone(&self) -> Self {
+        Self::new()
     }
 }

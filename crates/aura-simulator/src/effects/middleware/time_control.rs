@@ -10,8 +10,8 @@ use std::time::Duration;
 use aura_protocol::handlers::{
     AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
 };
-use aura_types::identifiers::DeviceId;
-use aura_types::sessions::LocalSessionType;
+use aura_core::identifiers::DeviceId;
+use aura_core::sessions::LocalSessionType;
 
 /// Time control middleware for simulation effect system
 pub struct TimeControlMiddleware {

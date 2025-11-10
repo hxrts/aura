@@ -9,31 +9,26 @@ use blake3;
 use proptest::prelude::*;
 use std::collections::HashSet;
 
-// Reuse types from key_derivation.rs
-// TODO: Move these to aura-crypto/src/types.rs
+// Use types from aura-crypto
+use aura_crypto::{IdentityKeyContext, PermissionKeyContext};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum IdentityKeyContext {
-    RelationshipKeys { relationship_id: Vec<u8> },
-    GuardianKeys { guardian_id: Vec<u8> },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PermissionKeyContext {
-    StorageAccess { operation: String, resource: String },
-    Communication { capability_id: Vec<u8> },
-}
-
+/// Types of derived cryptographic keys
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DerivedKeyType {
+    /// Box key for NaCl-style public-key encryption
     BoxKey,
+    /// Tag key for message authentication
     TagKey,
+    /// Pre-shared key
     PskKey,
+    /// Encryption key
     EncryptionKey,
+    /// Signing key
     SigningKey,
 }
 
 impl DerivedKeyType {
+    #[allow(dead_code)] // Kept for potential future use
     fn context_string(&self) -> &[u8] {
         match self {
             DerivedKeyType::BoxKey => b"aura.relationship.box_key.v1",
@@ -45,36 +40,23 @@ impl DerivedKeyType {
     }
 }
 
+use aura_crypto::{derive_encryption_key, KeyDerivationSpec};
+
 fn derive_identity_key(
     root_seed: &[u8],
     context: &IdentityKeyContext,
     key_type: DerivedKeyType,
 ) -> [u8; 32] {
-    let mut context_bytes = Vec::new();
-    context_bytes.extend_from_slice(b"identity:");
-
-    match context {
-        IdentityKeyContext::RelationshipKeys { relationship_id } => {
-            context_bytes.extend_from_slice(b"relationship:");
-            context_bytes.extend_from_slice(relationship_id);
-        }
-        IdentityKeyContext::GuardianKeys { guardian_id } => {
-            context_bytes.extend_from_slice(b"guardian:");
-            context_bytes.extend_from_slice(guardian_id);
-        }
-    }
-
-    context_bytes.extend_from_slice(b":");
-    context_bytes.extend_from_slice(key_type.context_string());
-
-    let combined = blake3::hash(&context_bytes);
-    let hash_bytes = combined.as_bytes();
-
-    let mut final_input = Vec::new();
-    final_input.extend_from_slice(root_seed);
-    final_input.extend_from_slice(hash_bytes);
-
-    *blake3::hash(&final_input).as_bytes()
+    // Use key type as version to differentiate different key types
+    let key_version = match key_type {
+        DerivedKeyType::BoxKey => 1,
+        DerivedKeyType::TagKey => 2,
+        DerivedKeyType::PskKey => 3,
+        DerivedKeyType::EncryptionKey => 4,
+        DerivedKeyType::SigningKey => 5,
+    };
+    let spec = KeyDerivationSpec::identity_only(context.clone()).with_version(key_version);
+    derive_encryption_key(root_seed, &spec).expect("Key derivation should succeed")
 }
 
 fn derive_permission_key(
@@ -82,36 +64,21 @@ fn derive_permission_key(
     context: &PermissionKeyContext,
     key_type: DerivedKeyType,
 ) -> [u8; 32] {
-    let mut context_bytes = Vec::new();
-    context_bytes.extend_from_slice(b"permission:");
-
-    match context {
-        PermissionKeyContext::StorageAccess {
-            operation,
-            resource,
-        } => {
-            context_bytes.extend_from_slice(b"storage:");
-            context_bytes.extend_from_slice(operation.as_bytes());
-            context_bytes.extend_from_slice(b":");
-            context_bytes.extend_from_slice(resource.as_bytes());
-        }
-        PermissionKeyContext::Communication { capability_id } => {
-            context_bytes.extend_from_slice(b"communication:");
-            context_bytes.extend_from_slice(capability_id);
-        }
-    }
-
-    context_bytes.extend_from_slice(b":");
-    context_bytes.extend_from_slice(key_type.context_string());
-
-    let combined = blake3::hash(&context_bytes);
-    let hash_bytes = combined.as_bytes();
-
-    let mut final_input = Vec::new();
-    final_input.extend_from_slice(root_seed);
-    final_input.extend_from_slice(hash_bytes);
-
-    *blake3::hash(&final_input).as_bytes()
+    // Use a default identity context for permission keys
+    let identity_context = IdentityKeyContext::DeviceEncryption {
+        device_id: b"default-device".to_vec(),
+    };
+    // Use key type as version to differentiate different key types
+    let key_version = match key_type {
+        DerivedKeyType::BoxKey => 1,
+        DerivedKeyType::TagKey => 2,
+        DerivedKeyType::PskKey => 3,
+        DerivedKeyType::EncryptionKey => 4,
+        DerivedKeyType::SigningKey => 5,
+    };
+    let spec = KeyDerivationSpec::with_permission(identity_context, context.clone())
+        .with_version(key_version);
+    derive_encryption_key(root_seed, &spec).expect("Key derivation should succeed")
 }
 
 // Proptest generators
@@ -130,6 +97,8 @@ fn arb_guardian_id() -> impl Strategy<Value = Vec<u8>> {
 
 fn arb_identity_context() -> impl Strategy<Value = IdentityKeyContext> {
     prop_oneof![
+        arb_relationship_id().prop_map(|id| IdentityKeyContext::AccountRoot { account_id: id }),
+        arb_relationship_id().prop_map(|id| IdentityKeyContext::DeviceEncryption { device_id: id }),
         arb_relationship_id().prop_map(|id| IdentityKeyContext::RelationshipKeys {
             relationship_id: id
         }),
@@ -138,11 +107,15 @@ fn arb_identity_context() -> impl Strategy<Value = IdentityKeyContext> {
 }
 
 fn arb_operation() -> impl Strategy<Value = String> {
-    prop::string::string_regex("(read|write|delete|admin)").unwrap()
+    #[allow(clippy::unwrap_used)]
+    let regex = prop::string::string_regex("(read|write|delete|admin)").unwrap();
+    regex
 }
 
 fn arb_resource() -> impl Strategy<Value = String> {
-    prop::string::string_regex("(/[a-z]+)+").unwrap()
+    #[allow(clippy::unwrap_used)]
+    let regex = prop::string::string_regex("(/[a-z]+)+").unwrap();
+    regex
 }
 
 fn arb_capability_id() -> impl Strategy<Value = Vec<u8>> {
@@ -357,8 +330,6 @@ proptest! {
 
 #[cfg(test)]
 mod manual_tests {
-    use super::*;
-
     #[test]
     fn test_property_tests_compile_and_run() {
         println!("[OK] Key derivation property tests compile successfully");

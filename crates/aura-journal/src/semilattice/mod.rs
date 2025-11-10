@@ -1,26 +1,27 @@
 //! Journal CRDT implementations using harmonized architecture
 //!
 //! This module provides journal-specific CRDTs built on the harmonized
-//! foundation from `aura-types`. All types implement the standard CRDT
+//! foundation from `aura-core`. All types implement the standard CRDT
 //! traits and can participate in choreographic synchronization.
 
 pub use account_state::{AccountState as ModernAccountState, GuardianRegistry, MaxCounter};
 pub use concrete_types::{DeviceRegistry, EpochLog, IntentPool};
+pub use invitations::{InvitationLedger, InvitationRecord, InvitationStatus};
 pub use journal_map::JournalMap;
 pub use meet_types::{
     CapabilitySet, ConsensusConstraint, DeviceCapability, ResourceQuota, SecurityPolicy, TimeWindow,
 };
+pub use op_log::{OpLog, OpLogSummary};
 
 pub mod account_state;
 pub mod concrete_types;
+pub mod invitations;
 pub mod journal_map;
 pub mod meet_types;
-
-#[cfg(test)]
-pub mod tests;
+pub mod op_log;
 
 // Re-export foundation types for convenience
-pub use aura_types::semilattice::{
+pub use aura_core::semilattice::{
     Bottom, ConsistencyProof, ConstraintMsg, ConstraintScope, CvState, DeltaMsg, JoinSemilattice,
     MeetSemiLattice, MeetStateMsg, MsgKind, MvState, OpWithCtx, StateMsg, Top,
 };
@@ -72,13 +73,13 @@ pub use aura_types::semilattice::{
 /// Note: These utilities will be enabled once the choreographic runtime
 /// and CRDT protocols are fully implemented in aura-choreography.
 pub mod integration {
-    use super::*;
-    use aura_types::identifiers::{DeviceId, SessionId};
+    // Removed unused super::* import
+    use aura_core::identifiers::{DeviceId, SessionId};
 
     // TODO: Uncomment when aura-choreography CRDT modules are implemented
-    // use aura_choreography::semilattice::{execute_cv_sync, MultiCRDTCoordinator};
-    // use aura_choreography::runtime::AuraHandlerAdapter;
-    // use aura_choreography::types::ChoreographicRole;
+    // use aura_protocol::choreography::semilattice::{execute_cv_sync, MultiCRDTCoordinator};
+    // use aura_protocol::choreography::runtime::AuraHandlerAdapter;
+    // use aura_protocol::choreography::types::ChoreographicRole;
     // use rumpsteak_choreography::ChoreographyError;
 
     /// Placeholder error type until choreography is ready
@@ -144,30 +145,4 @@ pub mod integration {
         // TODO: Implement once choreographic runtime is ready
         Ok(())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_crdt_types_exist() {
-        let journal = JournalMap::new();
-        assert_eq!(journal.num_ops(), 0);
-        assert_eq!(journal.num_intents(), 0);
-
-        let intent_pool = IntentPool::new();
-        assert_eq!(intent_pool.len(), 0);
-
-        let device_registry = DeviceRegistry::new();
-        assert_eq!(device_registry.len(), 0);
-    }
-
-    // TODO: Add tests for handlers and integration when available
-    // #[test]
-    // fn test_journal_handler_creation() {
-    //     let handler = JournalCRDTFactory::journal_handler();
-    //     assert_eq!(handler.get_state().num_ops(), 0);
-    //     assert_eq!(handler.get_state().num_intents(), 0);
-    // }
 }

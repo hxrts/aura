@@ -218,7 +218,7 @@ impl ChaosGenerator {
 
         // Sort by target property priority and chaos type
         result.sort_by(|a, b| {
-            // Extract priority from property name (simplified approach)
+            // Extract priority from property name (TODO fix - Simplified approach)
             let a_priority = self.extract_property_priority(&a.target_property);
             let b_priority = self.extract_property_priority(&b.target_property);
 
@@ -541,9 +541,9 @@ impl ChaosGenerator {
         }
     }
 
-    /// Extract property priority from property name (simplified heuristic)
+    /// Extract property priority from property name (TODO fix - Simplified heuristic)
     fn extract_property_priority(&self, _property_name: &str) -> PropertyPriority {
-        // Simplified approach - in practice would look up actual property
+        // TODO fix - Simplified approach - in practice would look up actual property
         PropertyPriority::Medium
     }
 
@@ -688,25 +688,25 @@ impl ChaosGenerator {
         }
     }
 
-    /// Create other base scenario templates (simplified implementations)
+    /// Create other base scenario templates (TODO fix - Simplified implementations)
     fn create_base_timing_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // Simplified
+        Self::create_base_byzantine_scenario() // TODO fix - Simplified
     }
 
     fn create_base_resource_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // Simplified
+        Self::create_base_byzantine_scenario() // TODO fix - Simplified
     }
 
     fn create_base_corruption_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // Simplified
+        Self::create_base_byzantine_scenario() // TODO fix - Simplified
     }
 
     fn create_base_crypto_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // Simplified
+        Self::create_base_byzantine_scenario() // TODO fix - Simplified
     }
 
     fn create_base_consensus_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // Simplified
+        Self::create_base_byzantine_scenario() // TODO fix - Simplified
     }
 }
 

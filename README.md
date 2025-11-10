@@ -17,3 +17,15 @@ The system coordinates multi-device threshold protocols through choreographic pr
 ### Session Types & Choreographic Programming:
 
 These complementary techniques provide both local and global protocol safety. Choreographic programming describes protocols from a global viewpoint across all participants, automatically generating deadlock-free coordination patterns and local projections for each device. Session types then enforce local protocol correctness through typestate, ensuring individual devices follow their projected protocol steps correctly at compile-time (e.g., preventing message sends before prerequisite states are reached). Runtime witnesses verify distributed invariants that span multiple participants, such as threshold quorum requirements or epoch synchronization.
+
+## Crate Organization
+
+The workspace implements clean architectural boundaries with unified calculus:
+
+**Foundation**: `aura-core` (single source of truth for domain concepts)  
+**Infrastructure**: `aura-protocol` (effects + choreography), `aura-crypto`, `aura-transport`, `aura-store`  
+**Business Logic**: `aura-agent`, `aura-journal`, `aura-authentication`, `aura-wot`  
+**Runtime**: `aura-simulator`, `aura-cli`, `aura-testkit`  
+**Applications**: Console + API crates
+
+See [docs/000_overview.md](docs/000_overview.md) for complete crate breakdown and design principles.

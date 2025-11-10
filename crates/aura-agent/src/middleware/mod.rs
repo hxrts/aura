@@ -38,8 +38,8 @@ pub use metrics::{AgentMetrics, MetricsMiddleware, OperationMetrics};
 pub use tracing::{OperationTracer, TracingMiddleware};
 pub use validation::{InputValidator, ValidationMiddleware, ValidationRule};
 
+use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
 use aura_protocol::effects::AuraEffectSystem;
-use aura_types::{identifiers::DeviceId, AuraError, AuraResult as Result};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

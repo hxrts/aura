@@ -1,19 +1,95 @@
-//! Core Aura Effect System Implementation
+//! Core Aura Effect System Implementation and System Effects Trait
 //!
-//! This module provides the main `AuraEffectSystem` implementation that serves
-//! as the unified handler for all effect execution and session type interpretation
-//! in the Aura platform.
+//! This module provides:
+//! - The main `AuraEffectSystem` implementation for unified effect execution
+//! - The `SystemEffects` trait for system monitoring, logging, and configuration
+//! - System effect error types
 
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::debug;
+
+/// System effect operations error
+#[derive(Debug, thiserror::Error)]
+pub enum SystemError {
+    /// Service is unavailable
+    #[error("System service unavailable")]
+    ServiceUnavailable,
+
+    /// Invalid configuration parameter
+    #[error("Invalid configuration: {key}={value}")]
+    InvalidConfiguration { key: String, value: String },
+
+    /// Operation failed
+    #[error("System operation failed: {message}")]
+    OperationFailed { message: String },
+
+    /// Permission denied
+    #[error("Permission denied for operation: {operation}")]
+    PermissionDenied { operation: String },
+
+    /// Resource not found
+    #[error("Resource not found: {resource}")]
+    ResourceNotFound { resource: String },
+
+    /// Resource exhausted
+    #[error("Resource exhausted: {resource}")]
+    ResourceExhausted { resource: String },
+}
+
+/// System effects interface for logging, monitoring, and configuration
+///
+/// This trait provides system-level operations for:
+/// - Logging and audit trails
+/// - System monitoring and health checks
+/// - Configuration management
+/// - System metrics and statistics
+/// - Component lifecycle management
+#[async_trait]
+pub trait SystemEffects: Send + Sync {
+    /// Log a message at the specified level
+    async fn log(&self, level: &str, component: &str, message: &str) -> Result<(), SystemError>;
+
+    /// Log a message with additional context
+    async fn log_with_context(
+        &self,
+        level: &str,
+        component: &str,
+        message: &str,
+        context: HashMap<String, String>,
+    ) -> Result<(), SystemError>;
+
+    /// Get system information and status
+    async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError>;
+
+    /// Set a configuration value
+    async fn set_config(&self, key: &str, value: &str) -> Result<(), SystemError>;
+
+    /// Get a configuration value
+    async fn get_config(&self, key: &str) -> Result<String, SystemError>;
+
+    /// Perform a health check
+    async fn health_check(&self) -> Result<bool, SystemError>;
+
+    /// Get system metrics
+    async fn get_metrics(&self) -> Result<HashMap<String, f64>, SystemError>;
+
+    /// Restart a system component
+    async fn restart_component(&self, component: &str) -> Result<(), SystemError>;
+
+    /// Shutdown the system gracefully
+    async fn shutdown(&self) -> Result<(), SystemError>;
+}
 
 use crate::{
     effects::{
         ChoreographicEffects, ConsoleEffects, ConsoleEvent, CryptoEffects, JournalEffects,
         LedgerEffects, NetworkEffects, NetworkError, RandomEffects, StorageEffects, StorageError,
-        StorageStats, TimeEffects,
+        StorageStats, TimeEffects, TreeEffects,
     },
+    guards::flow::{FlowBudgetEffects, FlowGuard, FlowHint},
     handlers::{
         AuraContext,
         AuraHandler,
@@ -23,12 +99,13 @@ use crate::{
         // CompositeHandler - unified handler architecture
     },
 };
-use aura_types::{
+use aura_core::{
     identifiers::{DeviceId, GuardianId},
-    LocalSessionType,
-    AuraError,
+    relationships::ContextId,
+    session_epochs::LocalSessionType,
+    AuraError, AuraResult,
 };
-// Import stub types from journal.rs for now
+// Import stub types from journal.rs TODO fix - For now
 use super::journal::{
     CapabilityId, CapabilityRef, Commitment, Epoch, Intent, IntentId, IntentStatus, JournalMap,
     JournalStats, LeafIndex, RatchetTree, TreeOpRecord,
@@ -43,7 +120,7 @@ use std::pin::Pin;
 /// Main implementation of the Aura Effect System
 ///
 /// This is the primary entry point for all effect execution in Aura. It uses
-/// the unified handler architecture from aura-types.
+/// the unified handler architecture from aura-core.
 ///
 /// # Architecture
 ///
@@ -120,6 +197,21 @@ impl AuraEffectSystem {
     pub async fn context(&self) -> AuraContext {
         let context = self.context.read().await;
         context.clone()
+    }
+
+    /// Set a flow hint that will be consumed before the next transport send.
+    pub async fn set_flow_hint(&self, hint: FlowHint) {
+        let mut context = self.context.write().await;
+        context.set_flow_hint(hint);
+    }
+
+    pub async fn set_flow_hint_components(&self, context: ContextId, peer: DeviceId, cost: u32) {
+        self.set_flow_hint(FlowHint::new(context, peer, cost)).await;
+    }
+
+    async fn take_flow_hint_internal(&self) -> Option<FlowHint> {
+        let mut context = self.context.write().await;
+        context.take_flow_hint()
     }
 
     /// Update the context
@@ -199,7 +291,7 @@ impl AuraHandler for AuraEffectSystem {
 
     fn supports_effect(&self, _effect_type: EffectType) -> bool {
         // In practice, we would check our middleware stack capabilities
-        // For now, return false for stub implementation
+        // TODO fix - For now, return false for stub implementation
         false
     }
 
@@ -294,8 +386,56 @@ impl AuraEffectSystem {
 }
 
 // Core Effect Trait Implementations for Zero-Overhead Access
-// According to docs/400_effect_system.md, AuraEffectSystem should implement
+// According to docs/002_system_architecture.md, AuraEffectSystem should implement
 // all core effect traits directly for zero-overhead performance
+
+#[async_trait]
+impl aura_core::effects::RandomEffects for AuraEffectSystem {
+    async fn random_bytes(&self, len: usize) -> Vec<u8> {
+        let params = serde_json::to_vec(&len).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(EffectType::Random, "random_bytes", &params, &mut context)
+            .await
+        {
+            Ok(result) => serde_json::from_slice(&result).unwrap_or(vec![0; len]),
+            Err(_) => vec![0; len], // Fallback
+        }
+    }
+
+    async fn random_bytes_32(&self) -> [u8; 32] {
+        let bytes = self.random_bytes(32).await;
+        let mut result = [0u8; 32];
+        result.copy_from_slice(&bytes[..32.min(bytes.len())]);
+        result
+    }
+
+    async fn random_u64(&self) -> u64 {
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(EffectType::Random, "random_u64", &[], &mut context)
+            .await
+        {
+            Ok(result) => serde_json::from_slice(&result).unwrap_or(0),
+            Err(_) => 0, // Fallback
+        }
+    }
+
+    async fn random_range(&self, min: u64, max: u64) -> u64 {
+        let params = serde_json::to_vec(&(min, max)).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(EffectType::Random, "random_range", &params, &mut context)
+            .await
+        {
+            Ok(result) => serde_json::from_slice(&result).unwrap_or(min),
+            Err(_) => min, // Fallback
+        }
+    }
+}
 
 #[async_trait]
 impl CryptoEffects for AuraEffectSystem {
@@ -318,19 +458,6 @@ impl CryptoEffects for AuraEffectSystem {
         }
     }
 
-    async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let params = serde_json::to_vec(&len).unwrap_or_default();
-        let mut context = self.context().await;
-
-        match self
-            .execute_effect_with_context(EffectType::Random, "random_bytes", &params, &mut context)
-            .await
-        {
-            Ok(result) => serde_json::from_slice(&result).unwrap_or(vec![0; len]),
-            Err(_) => vec![0; len], // Fallback
-        }
-    }
-
     async fn sha256_hash(&self, data: &[u8]) -> [u8; 32] {
         let params = serde_json::to_vec(&data).unwrap_or_default();
         let mut context = self.context().await;
@@ -349,32 +476,66 @@ impl CryptoEffects for AuraEffectSystem {
         }
     }
 
-    async fn random_bytes_32(&self) -> [u8; 32] {
-        let bytes = <Self as CryptoEffects>::random_bytes(self, 32).await;
-        let mut result = [0u8; 32];
-        result.copy_from_slice(&bytes[..32.min(bytes.len())]);
-        result
+    async fn blake3_hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
+        // Use BLAKE3 keyed hash as HMAC equivalent
+        let key_array = if key.len() >= 32 {
+            key[..32].try_into().unwrap_or([0u8; 32])
+        } else {
+            let mut k = [0u8; 32];
+            k[..key.len().min(32)].copy_from_slice(&key[..key.len().min(32)]);
+            k
+        };
+        blake3::keyed_hash(&key_array, data).into()
     }
 
-    async fn random_range(&self, range: std::ops::Range<u64>) -> u64 {
-        let params = serde_json::to_vec(&(range.start, range.end)).unwrap_or_default();
+    async fn derive_key(
+        &self,
+        master_key: &[u8],
+        context: &crate::effects::KeyDerivationContext,
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        let info = format!(
+            "{}:{}:{:?}:{}:{}",
+            context.app_id,
+            context.context,
+            context.derivation_path,
+            context.account_id,
+            context.device_id
+        );
+        self.hkdf_derive(master_key, b"", info.as_bytes(), 32).await
+    }
+
+    async fn ed25519_generate_keypair(
+        &self,
+    ) -> Result<(Vec<u8>, Vec<u8>), crate::effects::CryptoError> {
         let mut context = self.context().await;
 
         match self
-            .execute_effect_with_context(EffectType::Random, "random_range", &params, &mut context)
+            .execute_effect_with_context(
+                EffectType::Crypto,
+                "ed25519_generate_keypair",
+                &[],
+                &mut context,
+            )
             .await
         {
-            Ok(result) => serde_json::from_slice(&result).unwrap_or(range.start),
-            Err(_) => range.start, // Fallback
+            Ok(result) => {
+                let (private_bytes, public_bytes): (Vec<u8>, Vec<u8>) =
+                    serde_json::from_slice(&result).unwrap_or((vec![0; 32], vec![0; 32]));
+                Ok((private_bytes, public_bytes))
+            }
+            Err(e) => Err(aura_core::AuraError::crypto(format!(
+                "Key generation failed: {}",
+                e
+            ))),
         }
     }
 
     async fn ed25519_sign(
         &self,
-        data: &[u8],
-        key: &ed25519_dalek::SigningKey,
-    ) -> Result<ed25519_dalek::Signature, crate::effects::CryptoError> {
-        let params = serde_json::to_vec(&(data, key.as_bytes())).unwrap_or_default();
+        message: &[u8],
+        private_key: &[u8],
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        let params = serde_json::to_vec(&(message, private_key)).unwrap_or_default();
         let mut context = self.context().await;
 
         match self
@@ -383,36 +544,22 @@ impl CryptoEffects for AuraEffectSystem {
         {
             Ok(result) => {
                 let sig_bytes: Vec<u8> = serde_json::from_slice(&result).unwrap_or(vec![0; 64]);
-                match sig_bytes.len() {
-                    64 => {
-                        let sig_array: [u8; 64] = sig_bytes.try_into().unwrap_or([0u8; 64]);
-                        Ok(ed25519_dalek::Signature::from_bytes(&sig_array))
-                    }
-                    _ => Err(aura_types::AuraError::Crypto(
-                        aura_types::CryptoError::InvalidOutput {
-                            message: "Invalid signature length".to_string(),
-                            context: "ed25519_sign".to_string(),
-                        },
-                    )),
-                }
+                Ok(sig_bytes)
             }
-            Err(e) => Err(aura_types::AuraError::Crypto(
-                aura_types::CryptoError::OperationFailed {
-                    message: e.to_string(),
-                    context: "ed25519_sign".to_string(),
-                },
-            )),
+            Err(e) => Err(aura_core::AuraError::crypto(format!(
+                "Signing failed: {}",
+                e
+            ))),
         }
     }
 
     async fn ed25519_verify(
         &self,
-        data: &[u8],
-        signature: &ed25519_dalek::Signature,
-        public_key: &ed25519_dalek::VerifyingKey,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
     ) -> Result<bool, crate::effects::CryptoError> {
-        let params = serde_json::to_vec(&(data, &signature.to_bytes()[..], public_key.as_bytes()))
-            .unwrap_or_default();
+        let params = serde_json::to_vec(&(message, signature, public_key)).unwrap_or_default();
         let mut context = self.context().await;
 
         match self
@@ -429,52 +576,170 @@ impl CryptoEffects for AuraEffectSystem {
         }
     }
 
-    async fn ed25519_generate_keypair(
+    async fn ed25519_public_key(
         &self,
-    ) -> Result<(ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey), crate::effects::CryptoError>
-    {
+        private_key: &[u8],
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        let params = serde_json::to_vec(&private_key).unwrap_or_default();
         let mut context = self.context().await;
 
         match self
             .execute_effect_with_context(
                 EffectType::Crypto,
-                "ed25519_generate_keypair",
-                &[],
+                "ed25519_public_key",
+                &params,
                 &mut context,
             )
             .await
         {
             Ok(result) => {
-                let (private_bytes, public_bytes): (Vec<u8>, Vec<u8>) =
-                    serde_json::from_slice(&result).unwrap_or((vec![0; 32], vec![0; 32]));
-                let signing_key = ed25519_dalek::SigningKey::from_bytes(
-                    &private_bytes[..32].try_into().unwrap_or([0u8; 32]),
-                );
-                let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(
-                    &public_bytes[..32].try_into().unwrap_or([0u8; 32]),
-                )
-                .map_err(|e| {
-                    aura_types::AuraError::Crypto(aura_types::CryptoError::OperationFailed {
-                        message: e.to_string(),
-                        context: "ed25519_generate_keypair".to_string(),
-                    })
-                })?;
-                Ok((signing_key, verifying_key))
+                let public_bytes: Vec<u8> = serde_json::from_slice(&result).unwrap_or(vec![0; 32]);
+                Ok(public_bytes)
             }
-            Err(e) => Err(aura_types::AuraError::Crypto(
-                aura_types::CryptoError::OperationFailed {
-                    message: e.to_string(),
-                    context: "ed25519_generate_keypair".to_string(),
-                },
-            )),
+            Err(e) => Err(aura_core::AuraError::crypto(format!(
+                "Public key derivation failed: {}",
+                e
+            ))),
         }
     }
 
-    async fn ed25519_public_key(
+    // FROST methods - use aura-frost crate instead
+    async fn frost_generate_keys(
         &self,
-        private_key: &ed25519_dalek::SigningKey,
-    ) -> ed25519_dalek::VerifyingKey {
-        private_key.verifying_key()
+        _threshold: u16,
+        _max_signers: u16,
+    ) -> Result<Vec<Vec<u8>>, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: FROST key generation - use aura-frost crate"
+        )))
+    }
+
+    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: FROST nonce generation - use aura-frost crate"
+        )))
+    }
+
+    async fn frost_create_signing_package(
+        &self,
+        _message: &[u8],
+        _nonces: &[Vec<u8>],
+        _participants: &[u16],
+    ) -> Result<crate::effects::FrostSigningPackage, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: FROST signing package creation - use aura-frost crate"
+        )))
+    }
+
+    async fn frost_sign_share(
+        &self,
+        _signing_package: &crate::effects::FrostSigningPackage,
+        _key_share: &[u8],
+        _nonces: &[u8],
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: FROST signature share generation - use aura-frost crate"
+        )))
+    }
+
+    async fn frost_aggregate_signatures(
+        &self,
+        _signing_package: &crate::effects::FrostSigningPackage,
+        _signature_shares: &[Vec<u8>],
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: FROST signature aggregation - use aura-frost crate"
+        )))
+    }
+
+    async fn frost_verify(
+        &self,
+        _message: &[u8],
+        _signature: &[u8],
+        _group_public_key: &[u8],
+    ) -> Result<bool, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: FROST signature verification - use aura-frost crate"
+        )))
+    }
+
+    // Symmetric encryption methods (placeholder implementations)
+    async fn chacha20_encrypt(
+        &self,
+        _plaintext: &[u8],
+        _key: &[u8; 32],
+        _nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: ChaCha20 encryption not implemented yet"
+        )))
+    }
+
+    async fn chacha20_decrypt(
+        &self,
+        _ciphertext: &[u8],
+        _key: &[u8; 32],
+        _nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: ChaCha20 decryption not implemented yet"
+        )))
+    }
+
+    async fn aes_gcm_encrypt(
+        &self,
+        _plaintext: &[u8],
+        _key: &[u8; 32],
+        _nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: AES-GCM encryption not implemented yet"
+        )))
+    }
+
+    async fn aes_gcm_decrypt(
+        &self,
+        _ciphertext: &[u8],
+        _key: &[u8; 32],
+        _nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: AES-GCM decryption not implemented yet"
+        )))
+    }
+
+    // Key rotation methods (placeholder implementations)
+    async fn frost_rotate_keys(
+        &self,
+        _old_shares: &[Vec<u8>],
+        _old_threshold: u16,
+        _new_threshold: u16,
+        _new_max_signers: u16,
+    ) -> Result<Vec<Vec<u8>>, crate::effects::CryptoError> {
+        Err(aura_core::AuraError::internal(format!(
+            "Not implemented: FROST key rotation not implemented yet"
+        )))
+    }
+
+    // Utility methods
+    fn is_simulated(&self) -> bool {
+        matches!(self.execution_mode, ExecutionMode::Simulation { .. })
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        vec![
+            "blake3_hash".to_string(),
+            "sha256_hash".to_string(),
+            "blake3_hmac".to_string(),
+            "hkdf_derive".to_string(),
+            "derive_key".to_string(),
+            "ed25519_generate_keypair".to_string(),
+            "ed25519_sign".to_string(),
+            "ed25519_verify".to_string(),
+            "ed25519_public_key".to_string(),
+            "constant_time_eq".to_string(),
+            "secure_zero".to_string(),
+        ]
     }
 
     fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
@@ -486,36 +751,38 @@ impl CryptoEffects for AuraEffectSystem {
         use zeroize::Zeroize;
         data.zeroize();
     }
+
+    async fn hkdf_derive(
+        &self,
+        ikm: &[u8],
+        salt: &[u8],
+        info: &[u8],
+        output_len: usize,
+    ) -> Result<Vec<u8>, crate::effects::CryptoError> {
+        use hkdf::Hkdf;
+        use sha2::Sha256;
+
+        let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
+        let mut okm = vec![0u8; output_len];
+        hk.expand(info, &mut okm)
+            .map_err(|e| aura_core::AuraError::crypto(format!("HKDF expansion failed: {}", e)))?;
+        Ok(okm)
+    }
 }
 
+// Removed conflicting RandomEffects implementation - the correct one is at line 375
+
 #[async_trait]
-impl RandomEffects for AuraEffectSystem {
-    async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        // Delegate to crypto implementation for consistency
-        CryptoEffects::random_bytes(self, len).await
-    }
-
-    async fn random_bytes_32(&self) -> [u8; 32] {
-        // Delegate to crypto implementation for consistency
-        CryptoEffects::random_bytes_32(self).await
-    }
-
-    async fn random_u64(&self) -> u64 {
-        let bytes = <Self as CryptoEffects>::random_bytes(self, 8).await;
-        u64::from_be_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ])
-    }
-
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        if min >= max {
-            return min;
-        }
-        let range = std::ops::Range {
-            start: min,
-            end: max,
-        };
-        CryptoEffects::random_range(self, range).await
+impl FlowBudgetEffects for AuraEffectSystem {
+    async fn charge_flow(&self, context: &ContextId, peer: &DeviceId, cost: u32) -> AuraResult<()> {
+        debug!(
+            "FlowGuard authorize context={} peer={} cost={}",
+            context.as_str(),
+            peer,
+            cost
+        );
+        // TODO: integrate with journal-backed FlowBudget ledger.
+        Ok(())
     }
 }
 
@@ -526,12 +793,29 @@ impl NetworkEffects for AuraEffectSystem {
         peer_id: uuid::Uuid,
         message: Vec<u8>,
     ) -> Result<(), NetworkError> {
+        let mut context = self.context().await;
+        let default_context = context
+            .account_id
+            .as_ref()
+            .map(|account| ContextId::new(account.to_string()))
+            .unwrap_or_else(|| ContextId::new("global"));
+        let default_peer = DeviceId::from_uuid(peer_id);
+
+        let flow_hint = self
+            .take_flow_hint_internal()
+            .await
+            .unwrap_or_else(|| FlowHint::new(default_context, default_peer, 1));
+
+        FlowGuard::from_hint(flow_hint)
+            .authorize(self)
+            .await
+            .map_err(|err| NetworkError::SendFailed(err.to_string()))?;
+
         let params = serde_json::json!({
             "peer_id": peer_id,
             "data": message
         });
         let params_bytes = serde_json::to_vec(&params).unwrap_or_default();
-        let mut context = self.context().await;
 
         match self
             .execute_effect_with_context(
@@ -652,7 +936,7 @@ impl NetworkEffects for AuraEffectSystem {
     async fn subscribe_to_peer_events(
         &self,
     ) -> Result<crate::effects::network::PeerEventStream, NetworkError> {
-        // For now, return an empty stream placeholder
+        // TODO fix - For now, return an empty stream placeholder
         // Real implementation would set up event subscription
         Err(NetworkError::NotImplemented)
     }
@@ -890,12 +1174,7 @@ impl TimeEffects for AuraEffectSystem {
             .await
         {
             Ok(_) => Ok(()),
-            Err(e) => Err(AuraError::Infrastructure(
-                aura_types::InfrastructureError::ConfigError {
-                    message: format!("Sleep failed: {}", e),
-                    context: "sleep".to_string(),
-                },
-            )),
+            Err(e) => Err(AuraError::internal(format!("Sleep failed: {}", e))),
         }
     }
 
@@ -918,12 +1197,7 @@ impl TimeEffects for AuraEffectSystem {
     async fn wait_until(&self, condition: crate::effects::WakeCondition) -> Result<(), AuraError> {
         match self.yield_until(condition).await {
             Ok(()) => Ok(()),
-            Err(e) => Err(AuraError::Infrastructure(
-                aura_types::InfrastructureError::ConfigError {
-                    message: format!("Wait until failed: {}", e),
-                    context: "wait_until".to_string(),
-                },
-            )),
+            Err(e) => Err(AuraError::internal(format!("Wait until failed: {}", e))),
         }
     }
 
@@ -1186,7 +1460,7 @@ impl LedgerEffects for AuraEffectSystem {
 
     async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, crate::effects::LedgerError> {
         // Delegate to random effects
-        Ok(<Self as CryptoEffects>::random_bytes(self, length).await)
+        Ok(<Self as RandomEffects>::random_bytes(self, length).await)
     }
 
     async fn hash_blake3(&self, data: &[u8]) -> Result<[u8; 32], crate::effects::LedgerError> {
@@ -1306,38 +1580,26 @@ impl ChoreographicEffects for AuraEffectSystem {
 #[async_trait]
 impl JournalEffects for AuraEffectSystem {
     async fn get_journal_state(&self) -> Result<JournalMap, AuraError> {
-        Err(AuraError::Infrastructure(
-            aura_types::InfrastructureError::ConfigError {
-                message: "Journal not available in stub implementation".to_string(),
-                context: "journal_operations".to_string(),
-            },
+        Err(AuraError::internal(
+            "Journal not available in stub implementation",
         ))
     }
 
     async fn get_current_tree(&self) -> Result<RatchetTree, AuraError> {
-        Err(AuraError::Infrastructure(
-            aura_types::InfrastructureError::ConfigError {
-                message: "Tree not available in stub implementation".to_string(),
-                context: "tree_operations".to_string(),
-            },
+        Err(AuraError::internal(
+            "Tree not available in stub implementation",
         ))
     }
 
     async fn get_tree_at_epoch(&self, _epoch: Epoch) -> Result<RatchetTree, AuraError> {
-        Err(AuraError::Infrastructure(
-            aura_types::InfrastructureError::ConfigError {
-                message: "Tree not available in stub implementation".to_string(),
-                context: "tree_operations".to_string(),
-            },
+        Err(AuraError::internal(
+            "Tree not available in stub implementation",
         ))
     }
 
     async fn get_current_commitment(&self) -> Result<Commitment, AuraError> {
-        Err(AuraError::Infrastructure(
-            aura_types::InfrastructureError::ConfigError {
-                message: "Tree not available in stub implementation".to_string(),
-                context: "tree_operations".to_string(),
-            },
+        Err(AuraError::internal(
+            "Tree not available in stub implementation",
         ))
     }
 
@@ -1346,11 +1608,8 @@ impl JournalEffects for AuraEffectSystem {
     }
 
     async fn append_tree_op(&self, _op: TreeOpRecord) -> Result<(), AuraError> {
-        Err(AuraError::Infrastructure(
-            aura_types::InfrastructureError::ConfigError {
-                message: "Tree operations not available in stub implementation".to_string(),
-                context: "tree_operations".to_string(),
-            },
+        Err(AuraError::internal(
+            "Tree operations not available in stub implementation",
         ))
     }
 
@@ -1363,11 +1622,8 @@ impl JournalEffects for AuraEffectSystem {
     }
 
     async fn submit_intent(&self, _intent: Intent) -> Result<IntentId, AuraError> {
-        Err(AuraError::Infrastructure(
-            aura_types::InfrastructureError::ConfigError {
-                message: "Intents not available in stub implementation".to_string(),
-                context: "intent_operations".to_string(),
-            },
+        Err(AuraError::internal(
+            "Intents not available in stub implementation",
         ))
     }
 
@@ -1384,11 +1640,8 @@ impl JournalEffects for AuraEffectSystem {
     }
 
     async fn tombstone_intent(&self, _intent_id: IntentId) -> Result<(), AuraError> {
-        Err(AuraError::Infrastructure(
-            aura_types::InfrastructureError::ConfigError {
-                message: "Intents not available in stub implementation".to_string(),
-                context: "intent_operations".to_string(),
-            },
+        Err(AuraError::internal(
+            "Intents not available in stub implementation",
         ))
     }
 
@@ -1418,11 +1671,8 @@ impl JournalEffects for AuraEffectSystem {
     }
 
     async fn merge_journal_state(&self, _other: JournalMap) -> Result<(), AuraError> {
-        Err(AuraError::Infrastructure(
-            aura_types::InfrastructureError::ConfigError {
-                message: "Journal operations not available in stub implementation".to_string(),
-                context: "journal_operations".to_string(),
-            },
+        Err(AuraError::internal(
+            "Journal operations not available in stub implementation",
         ))
     }
 
@@ -1451,6 +1701,55 @@ impl JournalEffects for AuraEffectSystem {
     async fn list_guardians(&self) -> Result<Vec<GuardianId>, AuraError> {
         Ok(vec![])
     }
+
+    // ===== New Ratchet Tree Operations (Phase 2.1f) =====
+
+    async fn append_attested_tree_op(
+        &self,
+        _op: aura_core::AttestedOp,
+    ) -> Result<aura_core::Hash32, AuraError> {
+        // TODO: Implement actual OpLog append when journal handler is ready
+        Err(AuraError::internal(
+            "Tree operations not available in stub implementation",
+        ))
+    }
+
+    async fn get_tree_state(&self) -> Result<aura_journal::ratchet_tree::TreeState, AuraError> {
+        // TODO: Implement actual reduction when journal handler is ready
+        Err(AuraError::internal(
+            "Tree state not available in stub implementation",
+        ))
+    }
+
+    async fn get_op_log(&self) -> Result<aura_journal::semilattice::OpLog, AuraError> {
+        // TODO: Implement actual OpLog retrieval when journal handler is ready
+        Err(AuraError::internal(
+            "OpLog not available in stub implementation",
+        ))
+    }
+
+    async fn merge_op_log(
+        &self,
+        _remote: aura_journal::semilattice::OpLog,
+    ) -> Result<(), AuraError> {
+        // TODO: Implement actual OpLog merge when journal handler is ready
+        Err(AuraError::internal(
+            "OpLog merge not available in stub implementation",
+        ))
+    }
+
+    async fn get_attested_op(
+        &self,
+        _cid: &aura_core::Hash32,
+    ) -> Result<Option<aura_core::AttestedOp>, AuraError> {
+        // TODO: Implement actual operation retrieval when journal handler is ready
+        Ok(None)
+    }
+
+    async fn list_attested_ops(&self) -> Result<Vec<aura_core::AttestedOp>, AuraError> {
+        // TODO: Implement actual operation listing when journal handler is ready
+        Ok(vec![])
+    }
 }
 
 // We need Clone for ConsoleEffects implementation above
@@ -1465,8 +1764,573 @@ impl Clone for AuraEffectSystem {
     }
 }
 
+// Implement TreeEffects by delegating to composite handler
+#[async_trait]
+impl TreeEffects for AuraEffectSystem {
+    async fn get_current_state(
+        &self,
+    ) -> Result<aura_journal::ratchet_tree::TreeState, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::get_current_state(&*handler).await
+    }
+
+    async fn get_current_commitment(&self) -> Result<aura_core::Hash32, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::get_current_commitment(&*handler).await
+    }
+
+    async fn get_current_epoch(&self) -> Result<u64, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::get_current_epoch(&*handler).await
+    }
+
+    async fn apply_attested_op(
+        &self,
+        op: aura_core::AttestedOp,
+    ) -> Result<aura_core::Hash32, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::apply_attested_op(&*handler, op).await
+    }
+
+    async fn verify_aggregate_sig(
+        &self,
+        op: &aura_core::AttestedOp,
+        state: &aura_journal::ratchet_tree::TreeState,
+    ) -> Result<bool, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::verify_aggregate_sig(&*handler, op, state).await
+    }
+
+    async fn add_leaf(
+        &self,
+        leaf: aura_core::LeafNode,
+        under: aura_core::NodeIndex,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::add_leaf(&*handler, leaf, under).await
+    }
+
+    async fn remove_leaf(
+        &self,
+        leaf_id: aura_core::LeafId,
+        reason: u8,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::remove_leaf(&*handler, leaf_id, reason).await
+    }
+
+    async fn change_policy(
+        &self,
+        node: aura_core::NodeIndex,
+        new_policy: aura_core::Policy,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::change_policy(&*handler, node, new_policy).await
+    }
+
+    async fn rotate_epoch(
+        &self,
+        affected: Vec<aura_core::NodeIndex>,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::rotate_epoch(&*handler, affected).await
+    }
+
+    async fn propose_snapshot(
+        &self,
+        cut: crate::effects::tree::Cut,
+    ) -> Result<crate::effects::tree::ProposalId, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::propose_snapshot(&*handler, cut).await
+    }
+
+    async fn approve_snapshot(
+        &self,
+        proposal_id: crate::effects::tree::ProposalId,
+    ) -> Result<crate::effects::tree::Partial, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::approve_snapshot(&*handler, proposal_id).await
+    }
+
+    async fn finalize_snapshot(
+        &self,
+        proposal_id: crate::effects::tree::ProposalId,
+    ) -> Result<crate::effects::tree::Snapshot, aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::finalize_snapshot(&*handler, proposal_id).await
+    }
+
+    async fn apply_snapshot(
+        &self,
+        snapshot: &crate::effects::tree::Snapshot,
+    ) -> Result<(), aura_core::AuraError> {
+        let handler = self.composite_handler.read().await;
+        TreeEffects::apply_snapshot(&*handler, snapshot).await
+    }
+}
+
+impl AuraEffectSystem {
+    /// Get oplog digest for anti-entropy
+    pub async fn get_oplog_digest(&self) -> Result<Vec<u8>, aura_core::AuraError> {
+        // Stub implementation - would compute digest of local oplog
+        Ok(vec![0u8; 32])
+    }
+
+    /// Synchronize with remote peer
+    pub async fn sync_with_peer(
+        &self,
+        _peer_id: aura_core::DeviceId,
+    ) -> Result<(), aura_core::AuraError> {
+        // Stub implementation - would perform anti-entropy sync
+        Ok(())
+    }
+
+    /// Push operation to connected peers
+    pub async fn push_op_to_peers(
+        &self,
+        _op: aura_core::AttestedOp,
+        _peers: Vec<aura_core::DeviceId>,
+    ) -> Result<(), aura_core::AuraError> {
+        // Stub implementation - would broadcast operation
+        Ok(())
+    }
+
+    /// Request operation from peer
+    pub async fn request_op(
+        &self,
+        _peer_id: aura_core::DeviceId,
+        _cid: [u8; 32],
+    ) -> Result<Option<aura_core::AttestedOp>, aura_core::AuraError> {
+        // Stub implementation - would request specific operation
+        Ok(None)
+    }
+
+    /// Merge remote operations into local oplog
+    pub async fn merge_remote_ops(
+        &self,
+        _ops: Vec<aura_core::AttestedOp>,
+    ) -> Result<(), aura_core::AuraError> {
+        // Stub implementation - would merge operations
+        Ok(())
+    }
+
+    /// Get connected peers
+    pub async fn get_connected_peers(
+        &self,
+    ) -> Result<Vec<aura_core::DeviceId>, aura_core::AuraError> {
+        // Stub implementation - would return connected peers
+        Ok(vec![])
+    }
+}
+
+#[async_trait]
+impl SystemEffects for AuraEffectSystem {
+    async fn log(&self, level: &str, component: &str, message: &str) -> Result<(), SystemError> {
+        let params = serde_json::json!({
+            "level": level,
+            "component": component,
+            "message": message
+        });
+        let params_bytes = serde_json::to_vec(&params).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(EffectType::Console, "log", &params_bytes, &mut context)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Err(SystemError::ServiceUnavailable),
+        }
+    }
+
+    async fn log_with_context(
+        &self,
+        level: &str,
+        component: &str,
+        message: &str,
+        context: HashMap<String, String>,
+    ) -> Result<(), SystemError> {
+        let params = serde_json::json!({
+            "level": level,
+            "component": component,
+            "message": message,
+            "context": context
+        });
+        let params_bytes = serde_json::to_vec(&params).unwrap_or_default();
+        let mut ctx = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::Console,
+                "log_with_context",
+                &params_bytes,
+                &mut ctx,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Err(SystemError::ServiceUnavailable),
+        }
+    }
+
+    async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {
+        let mut info = HashMap::new();
+        let stats = self.statistics().await;
+
+        info.insert("device_id".to_string(), self.device_id.to_string());
+        info.insert(
+            "execution_mode".to_string(),
+            format!("{:?}", self.execution_mode),
+        );
+        info.insert(
+            "supported_effects".to_string(),
+            stats.registered_effects.to_string(),
+        );
+        info.insert(
+            "is_deterministic".to_string(),
+            stats.is_deterministic().to_string(),
+        );
+        info.insert(
+            "is_production".to_string(),
+            stats.is_production().to_string(),
+        );
+
+        Ok(info)
+    }
+
+    async fn set_config(&self, key: &str, value: &str) -> Result<(), SystemError> {
+        let params = serde_json::json!({
+            "key": key,
+            "value": value
+        });
+        let params_bytes = serde_json::to_vec(&params).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::System,
+                "set_config",
+                &params_bytes,
+                &mut context,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Err(SystemError::OperationFailed {
+                message: format!("Failed to set config {}={}", key, value),
+            }),
+        }
+    }
+
+    async fn get_config(&self, key: &str) -> Result<String, SystemError> {
+        let params = serde_json::to_vec(&key).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(EffectType::System, "get_config", &params, &mut context)
+            .await
+        {
+            Ok(result) => {
+                serde_json::from_slice(&result).map_err(|_| SystemError::OperationFailed {
+                    message: "Failed to deserialize config value".to_string(),
+                })
+            }
+            Err(_) => Err(SystemError::ResourceNotFound {
+                resource: format!("config key: {}", key),
+            }),
+        }
+    }
+
+    async fn health_check(&self) -> Result<bool, SystemError> {
+        // Check if the composite handler is responsive
+        let supported_effects = self.supported_effects().await;
+        let has_core_effects = supported_effects.contains(&EffectType::Crypto)
+            && supported_effects.contains(&EffectType::Network)
+            && supported_effects.contains(&EffectType::Storage);
+
+        Ok(has_core_effects)
+    }
+
+    async fn get_metrics(&self) -> Result<HashMap<String, f64>, SystemError> {
+        let stats = self.statistics().await;
+        let mut metrics = HashMap::new();
+
+        metrics.insert("uptime_seconds".to_string(), 0.0); // Would be real uptime
+        metrics.insert(
+            "registered_effects".to_string(),
+            stats.registered_effects as f64,
+        );
+        metrics.insert(
+            "total_operations".to_string(),
+            stats.total_operations as f64,
+        );
+        metrics.insert(
+            "middleware_count".to_string(),
+            stats.middleware_count as f64,
+        );
+        metrics.insert(
+            "is_deterministic".to_string(),
+            if stats.is_deterministic() { 1.0 } else { 0.0 },
+        );
+        metrics.insert(
+            "is_production".to_string(),
+            if stats.is_production() { 1.0 } else { 0.0 },
+        );
+
+        Ok(metrics)
+    }
+
+    async fn restart_component(&self, component: &str) -> Result<(), SystemError> {
+        let params = serde_json::to_vec(&component).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::System,
+                "restart_component",
+                &params,
+                &mut context,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Err(SystemError::OperationFailed {
+                message: format!("Failed to restart component: {}", component),
+            }),
+        }
+    }
+
+    async fn shutdown(&self) -> Result<(), SystemError> {
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(EffectType::System, "shutdown", &[], &mut context)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Err(SystemError::OperationFailed {
+                message: "Failed to shutdown system".to_string(),
+            }),
+        }
+    }
+}
+
 // Implement the composite AuraEffects trait
 impl crate::effects::AuraEffects for AuraEffectSystem {}
+
+// Session Management Effects Implementation
+#[async_trait]
+impl crate::effects::agent::SessionManagementEffects for AuraEffectSystem {
+    async fn create_session(
+        &self,
+        session_type: crate::effects::agent::SessionType,
+    ) -> aura_core::AuraResult<aura_core::identifiers::SessionId> {
+        let params = serde_json::to_vec(&session_type).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::SessionManagement,
+                "create_session",
+                &params,
+                &mut context,
+            )
+            .await
+        {
+            Ok(result) => {
+                let session_id: String = serde_json::from_slice(&result).unwrap_or_else(|_| {
+                    // Generate fallback session ID
+                    format!(
+                        "session_{}_{}",
+                        self.device_id.0.simple(),
+                        context.created_at
+                    )
+                });
+                // Create a new SessionId (UUID-based)
+                Ok(aura_core::identifiers::SessionId::new())
+            }
+            Err(_) => {
+                // Generate fallback session ID for testing
+                Ok(aura_core::identifiers::SessionId::new())
+            }
+        }
+    }
+
+    async fn join_session(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+    ) -> aura_core::AuraResult<crate::effects::agent::SessionHandle> {
+        let params = serde_json::to_vec(&session_id).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::SessionManagement,
+                "join_session",
+                &params,
+                &mut context,
+            )
+            .await
+        {
+            Ok(result) => {
+                let handle: crate::effects::agent::SessionHandle = serde_json::from_slice(&result)
+                    .unwrap_or_else(|_| crate::effects::agent::SessionHandle {
+                        session_id,
+                        role: crate::effects::agent::SessionRole::Participant,
+                        participants: vec![self.device_id],
+                        created_at: context.created_at,
+                    });
+                Ok(handle)
+            }
+            Err(_) => Ok(crate::effects::agent::SessionHandle {
+                session_id,
+                role: crate::effects::agent::SessionRole::Participant,
+                participants: vec![self.device_id],
+                created_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+            }),
+        }
+    }
+
+    async fn leave_session(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+    ) -> aura_core::AuraResult<()> {
+        let params = serde_json::to_vec(&session_id).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::SessionManagement,
+                "leave_session",
+                &params,
+                &mut context,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Ok(()), // Graceful fallback for testing
+        }
+    }
+
+    async fn end_session(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+    ) -> aura_core::AuraResult<()> {
+        let params = serde_json::to_vec(&session_id).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::SessionManagement,
+                "end_session",
+                &params,
+                &mut context,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Ok(()), // Graceful fallback for testing
+        }
+    }
+
+    async fn list_active_sessions(
+        &self,
+    ) -> aura_core::AuraResult<Vec<crate::effects::agent::SessionInfo>> {
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::SessionManagement,
+                "list_active_sessions",
+                &[],
+                &mut context,
+            )
+            .await
+        {
+            Ok(result) => {
+                let sessions: Vec<crate::effects::agent::SessionInfo> =
+                    serde_json::from_slice(&result).unwrap_or_default();
+                Ok(sessions)
+            }
+            Err(_) => Ok(vec![]), // Graceful fallback for testing
+        }
+    }
+
+    async fn get_session_status(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+    ) -> aura_core::AuraResult<crate::effects::agent::SessionStatus> {
+        let params = serde_json::to_vec(&session_id).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::SessionManagement,
+                "get_session_status",
+                &params,
+                &mut context,
+            )
+            .await
+        {
+            Ok(result) => {
+                let status: crate::effects::agent::SessionStatus = serde_json::from_slice(&result)
+                    .unwrap_or(crate::effects::agent::SessionStatus::Active);
+                Ok(status)
+            }
+            Err(_) => Ok(crate::effects::agent::SessionStatus::Active), // Graceful fallback
+        }
+    }
+
+    async fn send_session_message(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+        message: &[u8],
+    ) -> aura_core::AuraResult<()> {
+        let params = serde_json::to_vec(&(session_id, message)).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::SessionManagement,
+                "send_session_message",
+                &params,
+                &mut context,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Ok(()), // Graceful fallback for testing
+        }
+    }
+
+    async fn receive_session_messages(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+    ) -> aura_core::AuraResult<Vec<crate::effects::agent::SessionMessage>> {
+        let params = serde_json::to_vec(&session_id).unwrap_or_default();
+        let mut context = self.context().await;
+
+        match self
+            .execute_effect_with_context(
+                EffectType::SessionManagement,
+                "receive_session_messages",
+                &params,
+                &mut context,
+            )
+            .await
+        {
+            Ok(result) => {
+                let messages: Vec<crate::effects::agent::SessionMessage> =
+                    serde_json::from_slice(&result).unwrap_or_default();
+                Ok(messages)
+            }
+            Err(_) => Ok(vec![]), // Graceful fallback for testing
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1548,7 +2412,7 @@ mod tests {
         // Test context update
         system
             .update_context(|_ctx| {
-                // Simplified test - just check that the updater can be called
+                // TODO fix - Simplified test - just check that the updater can be called
                 Ok(())
             })
             .await

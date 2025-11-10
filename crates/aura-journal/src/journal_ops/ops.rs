@@ -4,7 +4,7 @@
 //! native Automerge CRDT operations without custom reducers.
 
 use crate::journal::*;
-use aura_types::AuraError;
+use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 
 /// KeyJournal operation enumeration
@@ -473,7 +473,7 @@ mod tests {
 
     #[test]
     fn test_journal_op_type() {
-        let node = KeyNode::new(NodeId::new_v4(), NodeKind::Device, NodePolicy::Any);
+        let node = KeyNode::new(NodeId::new(), NodeKind::Device, NodePolicy::Any);
         let op = JournalOp::AddNode { node };
 
         assert_eq!(op.op_type(), "add_node");
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn test_automerge_mapping() {
-        let node = KeyNode::new(NodeId::new_v4(), NodeKind::Device, NodePolicy::Any);
+        let node = KeyNode::new(NodeId::new(), NodeKind::Device, NodePolicy::Any);
         let op = JournalOp::AddNode { node: node.clone() };
 
         let automerge_ops = AutomergeOperations::map_to_automerge(&op);
@@ -512,8 +512,8 @@ mod tests {
 
     #[test]
     fn test_edge_operations() {
-        let from_id = NodeId::new_v4();
-        let to_id = NodeId::new_v4();
+        let from_id = NodeId::new();
+        let to_id = NodeId::new();
         let edge = KeyEdge::new(from_id, to_id, EdgeKind::Contains);
         let op = JournalOp::AddEdge { edge: edge.clone() };
 

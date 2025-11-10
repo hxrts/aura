@@ -2,8 +2,8 @@
 
 use crate::error::{Error, Result};
 use crate::types::{DeviceMetadata, DeviceType, GuardianMetadata};
+use aura_core::{AccountId, DeviceId};
 use aura_crypto::Ed25519VerifyingKey;
-use aura_types::{AccountId, DeviceId};
 use automerge::{transaction::Transactable, AutoCommit, Automerge, ReadDoc};
 
 /// Account state backed by Automerge CRDT
@@ -209,7 +209,7 @@ impl AccountState {
                 .put(
                     &device_obj,
                     "removed_at",
-                    aura_types::time::current_unix_timestamp() as i64,
+                    aura_core::time::current_unix_timestamp() as i64,
                 )
                 .map_err(|e| Error::storage_failed(format!("Failed to set removed_at: {}", e)))?;
         } else {
@@ -401,7 +401,7 @@ impl AccountState {
         }
 
         // Convert the value at this path to JSON
-        // This is a simplified implementation - in practice you'd want more sophisticated conversion
+        // This is a TODO fix - Simplified implementation - in practice you'd want more sophisticated conversion
         if path.is_empty() {
             return Ok(serde_json::json!({
                 "account_id": self.account_id.to_string(),
@@ -410,7 +410,7 @@ impl AccountState {
             }));
         }
 
-        // For now, return a basic representation
+        // TODO fix - For now, return a basic representation
         Ok(serde_json::json!({
             "path": path,
             "available": true
@@ -426,7 +426,7 @@ impl AccountState {
 
     /// Check if an operation has been applied
     pub fn has_operation(&self, op_id: &crate::operations::OperationId) -> bool {
-        // For now, we'll check if the operation ID exists in a simple way
+        // TODO fix - For now, we'll check if the operation ID exists in a simple way
         // In practice, you'd maintain a separate index of applied operations
         let op_str = format!("{:?}", op_id);
 
@@ -542,8 +542,8 @@ impl AccountState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::{AccountIdExt, DeviceIdExt};
     use aura_crypto::Effects;
-    use aura_types::{AccountIdExt, DeviceIdExt};
 
     #[test]
     fn test_automerge_state_creation() {

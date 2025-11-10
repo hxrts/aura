@@ -95,6 +95,9 @@ pub enum EffectType {
     /// Choreographic protocol coordination
     Choreographic,
 
+    /// System monitoring, logging, and configuration
+    System,
+
     /// Device-local storage
     DeviceStorage,
     /// Device authentication and sessions
@@ -128,6 +131,7 @@ impl fmt::Display for EffectType {
             Self::Ledger => write!(f, "ledger"),
             Self::Journal => write!(f, "journal"),
             Self::Choreographic => write!(f, "choreographic"),
+            Self::System => write!(f, "system"),
             Self::DeviceStorage => write!(f, "device_storage"),
             Self::Authentication => write!(f, "authentication"),
             Self::Configuration => write!(f, "configuration"),
@@ -303,6 +307,7 @@ impl EffectType {
             Self::Ledger,
             Self::Journal,
             Self::Choreographic,
+            Self::System,
             Self::DeviceStorage,
             Self::Authentication,
             Self::Configuration,
@@ -328,6 +333,7 @@ impl EffectType {
                 | Self::Ledger
                 | Self::Journal
                 | Self::Choreographic
+                | Self::System
         )
     }
 
@@ -356,7 +362,7 @@ impl EffectType {
 }
 
 // Re-export types from submodules (selective to avoid ambiguous re-exports)
-pub use crate::middleware::traits::{MiddlewareChain, MiddlewareHandler, ProtocolHandler};
+// pub use crate::middleware::traits::{MiddlewareChain, MiddlewareHandler, ProtocolHandler}; // TODO: Implement when middleware traits are defined
 pub use composite::CompositeHandler;
 pub use context::{
     AgentContext, AuraContext, ChoreographicContext, MiddlewareContext, PlatformInfo,
@@ -429,10 +435,15 @@ mod tests {
 }
 
 // Additional handler modules (others already declared above)
+pub mod agent;
 pub mod choreographic;
 pub mod console;
 pub mod crypto;
+pub mod journal;
 pub mod ledger;
 pub mod network;
 pub mod storage;
+pub mod sync;
+pub mod system;
 pub mod time;
+pub mod tree;

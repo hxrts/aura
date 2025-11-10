@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::time::SystemTime;
 
+use aura_core::identifiers::DeviceId;
+use aura_core::sessions::LocalSessionType;
 use aura_protocol::handlers::{
     AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
 };
-use aura_types::identifiers::DeviceId;
-use aura_types::sessions::LocalSessionType;
 
 /// Property definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,8 +148,8 @@ impl PropertyCheckingMiddleware {
                 .unwrap_or(false),
             PropertyCondition::AlwaysTrue => true,
             PropertyCondition::Custom { expression: _ } => {
-                // For now, custom expressions always return true
-                // In a real implementation, this would parse and evaluate the expression
+                // TODO fix - For now, custom expressions always return true
+                // TODO fix - In a real implementation, this would parse and evaluate the expression
                 true
             }
         }

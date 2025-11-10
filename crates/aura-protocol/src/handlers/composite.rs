@@ -14,7 +14,7 @@ use super::{
 };
 use crate::effects::*;
 use async_trait::async_trait;
-use aura_types::LocalSessionType;
+use aura_core::LocalSessionType;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use serde_json;
 use std::future::Future;
@@ -61,7 +61,7 @@ impl TimeEffects for DummyTimeHandler {
         tokio::time::sleep(duration).await;
     }
 
-    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_types::AuraError> {
+    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_core::AuraError> {
         self.sleep_ms(duration_ms).await;
         Ok(())
     }
@@ -70,13 +70,10 @@ impl TimeEffects for DummyTimeHandler {
         Ok(()) // Stub - immediately returns
     }
 
-    async fn wait_until(&self, condition: WakeCondition) -> Result<(), aura_types::AuraError> {
-        self.yield_until(condition).await.map_err(|e| {
-            aura_types::AuraError::Infrastructure(aura_types::InfrastructureError::ConfigError {
-                message: format!("Wait until failed: {}", e),
-                context: "wait_until".to_string(),
-            })
-        })
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), aura_core::AuraError> {
+        self.yield_until(condition)
+            .await
+            .map_err(|e| aura_core::AuraError::internal(&format!("Wait until failed: {}", e)))
     }
 
     async fn set_timeout(&self, _timeout_ms: u64) -> TimeoutHandle {
@@ -120,12 +117,29 @@ pub struct CompositeHandler {
     crypto: Box<dyn CryptoEffects>,
     time: DummyTimeHandler,
     console: Box<dyn ConsoleEffects>,
+    journal: Box<dyn JournalEffects>,
+    tree: Box<dyn TreeEffects>,
     // Note: LedgerEffects and ChoreographicEffects will be added when their handlers are implemented
 }
 
 impl CompositeHandler {
+    /// Create a composite handler based on execution mode
+    pub fn for_mode(mode: ExecutionMode, device_id: Uuid) -> Self {
+        match mode {
+            ExecutionMode::Testing => Self::for_testing(device_id),
+            ExecutionMode::Production => Self::for_production(device_id),
+            ExecutionMode::Simulation { seed: _seed } => {
+                // TODO fix - For now, simulation mode uses the same as testing
+                // TODO: Create simulation-specific handlers with the seed
+                Self::for_testing(device_id)
+            }
+        }
+    }
+
     /// Create a composite handler for testing with all mock/memory implementations
     pub fn for_testing(device_id: Uuid) -> Self {
+        let journal = super::journal::MemoryJournalHandler::new();
+        let journal_arc = std::sync::Arc::new(journal);
         Self {
             device_id,
             is_simulation: true,
@@ -134,11 +148,15 @@ impl CompositeHandler {
             crypto: Box::new(MockCryptoHandler::new(42)),
             time: DummyTimeHandler::new(),
             console: Box::new(SilentConsoleHandler::new()),
+            journal: Box::new(super::journal::MemoryJournalHandler::new()),
+            tree: Box::new(super::tree::MemoryTreeHandler::new(journal_arc)),
         }
     }
 
     /// Create a composite handler for production with real implementations
     pub fn for_production(device_id: Uuid) -> Self {
+        let journal = super::journal::MemoryJournalHandler::new();
+        let journal_arc = std::sync::Arc::new(journal);
         Self {
             device_id,
             is_simulation: false,
@@ -150,11 +168,15 @@ impl CompositeHandler {
             crypto: Box::new(RealCryptoHandler::new()),
             time: DummyTimeHandler::new(),
             console: Box::new(StdoutConsoleHandler::new()),
+            journal: Box::new(super::journal::MemoryJournalHandler::new()),
+            tree: Box::new(super::tree::MemoryTreeHandler::new(journal_arc)),
         }
     }
 
     /// Create a composite handler for simulation/deterministic testing
     pub fn for_simulation(device_id: Uuid) -> Self {
+        let journal = super::journal::MemoryJournalHandler::new();
+        let journal_arc = std::sync::Arc::new(journal);
         Self {
             device_id,
             is_simulation: true,
@@ -163,6 +185,8 @@ impl CompositeHandler {
             crypto: Box::new(MockCryptoHandler::new(device_id.as_u128() as u64)),
             time: DummyTimeHandler::new(),
             console: Box::new(SilentConsoleHandler::new()),
+            journal: Box::new(super::journal::MemoryJournalHandler::new()),
+            tree: Box::new(super::tree::MemoryTreeHandler::new(journal_arc)),
         }
     }
 
@@ -251,7 +275,7 @@ impl StorageEffects for CompositeHandler {
 }
 
 #[async_trait]
-impl CryptoEffects for CompositeHandler {
+impl aura_core::effects::RandomEffects for CompositeHandler {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         self.crypto.random_bytes(len).await
     }
@@ -260,10 +284,17 @@ impl CryptoEffects for CompositeHandler {
         self.crypto.random_bytes_32().await
     }
 
-    async fn random_range(&self, range: std::ops::Range<u64>) -> u64 {
-        self.crypto.random_range(range).await
+    async fn random_u64(&self) -> u64 {
+        self.crypto.random_u64().await
     }
 
+    async fn random_range(&self, min: u64, max: u64) -> u64 {
+        self.crypto.random_range(min, max).await
+    }
+}
+
+#[async_trait]
+impl CryptoEffects for CompositeHandler {
     async fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
         self.crypto.blake3_hash(data).await
     }
@@ -272,26 +303,26 @@ impl CryptoEffects for CompositeHandler {
         self.crypto.sha256_hash(data).await
     }
 
-    async fn ed25519_sign(&self, data: &[u8], key: &SigningKey) -> Result<Signature, CryptoError> {
-        self.crypto.ed25519_sign(data, key).await
+    async fn ed25519_sign(&self, data: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.ed25519_sign(data, private_key).await
     }
 
     async fn ed25519_verify(
         &self,
         data: &[u8],
-        signature: &Signature,
-        public_key: &VerifyingKey,
+        signature: &[u8],
+        public_key: &[u8],
     ) -> Result<bool, CryptoError> {
         self.crypto
             .ed25519_verify(data, signature, public_key)
             .await
     }
 
-    async fn ed25519_generate_keypair(&self) -> Result<(SigningKey, VerifyingKey), CryptoError> {
+    async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
         self.crypto.ed25519_generate_keypair().await
     }
 
-    async fn ed25519_public_key(&self, private_key: &SigningKey) -> VerifyingKey {
+    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
         self.crypto.ed25519_public_key(private_key).await
     }
 
@@ -301,6 +332,141 @@ impl CryptoEffects for CompositeHandler {
 
     fn secure_zero(&self, data: &mut [u8]) {
         self.crypto.secure_zero(data)
+    }
+
+    async fn hkdf_derive(
+        &self,
+        ikm: &[u8],
+        salt: &[u8],
+        info: &[u8],
+        output_len: usize,
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.hkdf_derive(ikm, salt, info, output_len).await
+    }
+
+    async fn blake3_hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
+        self.crypto.blake3_hmac(key, data).await
+    }
+
+    async fn derive_key(
+        &self,
+        master_key: &[u8],
+        context: &aura_core::effects::crypto::KeyDerivationContext,
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.derive_key(master_key, context).await
+    }
+
+    async fn frost_generate_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+        self.crypto
+            .frost_generate_keys(threshold, max_signers)
+            .await
+    }
+
+    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.frost_generate_nonces().await
+    }
+
+    async fn frost_create_signing_package(
+        &self,
+        message: &[u8],
+        nonces: &[Vec<u8>],
+        participants: &[u16],
+    ) -> Result<aura_core::effects::crypto::FrostSigningPackage, CryptoError> {
+        self.crypto
+            .frost_create_signing_package(message, nonces, participants)
+            .await
+    }
+
+    async fn frost_sign_share(
+        &self,
+        signing_package: &aura_core::effects::crypto::FrostSigningPackage,
+        key_share: &[u8],
+        nonces: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto
+            .frost_sign_share(signing_package, key_share, nonces)
+            .await
+    }
+
+    async fn frost_aggregate_signatures(
+        &self,
+        signing_package: &aura_core::effects::crypto::FrostSigningPackage,
+        signature_shares: &[Vec<u8>],
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto
+            .frost_aggregate_signatures(signing_package, signature_shares)
+            .await
+    }
+
+    async fn frost_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        group_public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
+        self.crypto
+            .frost_verify(message, signature, group_public_key)
+            .await
+    }
+
+    async fn chacha20_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.chacha20_encrypt(plaintext, key, nonce).await
+    }
+
+    async fn chacha20_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.chacha20_decrypt(ciphertext, key, nonce).await
+    }
+
+    async fn aes_gcm_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.aes_gcm_encrypt(plaintext, key, nonce).await
+    }
+
+    async fn aes_gcm_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.aes_gcm_decrypt(ciphertext, key, nonce).await
+    }
+
+    async fn frost_rotate_keys(
+        &self,
+        old_shares: &[Vec<u8>],
+        old_threshold: u16,
+        new_threshold: u16,
+        new_max_signers: u16,
+    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+        self.crypto
+            .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
+            .await
+    }
+
+    fn is_simulated(&self) -> bool {
+        self.crypto.is_simulated()
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        self.crypto.crypto_capabilities()
     }
 }
 
@@ -362,11 +528,11 @@ impl TimeEffects for CompositeHandler {
         self.time.delay(duration).await
     }
 
-    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_types::AuraError> {
+    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_core::AuraError> {
         self.time.sleep(duration_ms).await
     }
 
-    async fn wait_until(&self, condition: WakeCondition) -> Result<(), aura_types::AuraError> {
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), aura_core::AuraError> {
         self.time.wait_until(condition).await
     }
 
@@ -415,6 +581,8 @@ pub struct CompositeHandlerBuilder {
     crypto: Option<Box<dyn CryptoEffects>>,
     time: Option<DummyTimeHandler>,
     console: Option<Box<dyn ConsoleEffects>>,
+    journal: Option<Box<dyn JournalEffects>>,
+    tree: Option<Box<dyn TreeEffects>>,
 }
 
 impl CompositeHandlerBuilder {
@@ -427,6 +595,8 @@ impl CompositeHandlerBuilder {
             crypto: None,
             time: None,
             console: None,
+            journal: None,
+            tree: None,
         }
     }
 
@@ -506,6 +676,13 @@ impl CompositeHandlerBuilder {
                     Box::new(StdoutConsoleHandler::new())
                 }
             }),
+            journal: self
+                .journal
+                .unwrap_or_else(|| Box::new(super::journal::MemoryJournalHandler::new())),
+            tree: self.tree.unwrap_or_else(|| {
+                let journal_arc = std::sync::Arc::new(super::journal::MemoryJournalHandler::new());
+                Box::new(super::tree::MemoryTreeHandler::new(journal_arc))
+            }),
         }
     }
 }
@@ -529,7 +706,7 @@ impl LedgerEffects for CompositeHandler {
 
     async fn is_device_authorized(
         &self,
-        _device_id: aura_types::DeviceId,
+        _device_id: aura_core::DeviceId,
         _operation: &str,
     ) -> Result<bool, LedgerError> {
         Ok(true) // Placeholder - always authorized
@@ -537,14 +714,14 @@ impl LedgerEffects for CompositeHandler {
 
     async fn get_device_metadata(
         &self,
-        _device_id: aura_types::DeviceId,
+        _device_id: aura_core::DeviceId,
     ) -> Result<Option<DeviceMetadata>, LedgerError> {
         Ok(None)
     }
 
     async fn update_device_activity(
         &self,
-        _device_id: aura_types::DeviceId,
+        _device_id: aura_core::DeviceId,
     ) -> Result<(), LedgerError> {
         Ok(())
     }
@@ -599,7 +776,7 @@ impl LedgerEffects for CompositeHandler {
         Ok(timestamp)
     }
 
-    async fn ledger_device_id(&self) -> Result<aura_types::DeviceId, LedgerError> {
+    async fn ledger_device_id(&self) -> Result<aura_core::DeviceId, LedgerError> {
         Ok(self.device_id.into())
     }
 
@@ -695,6 +872,290 @@ impl ChoreographicEffects for CompositeHandler {
             retry_count: 0,
             total_duration_ms: 0,
         }
+    }
+}
+
+// Implement JournalEffects by delegating to the journal handler
+#[async_trait]
+impl JournalEffects for CompositeHandler {
+    async fn append_attested_tree_op(
+        &self,
+        op: aura_core::AttestedOp,
+    ) -> Result<aura_core::Hash32, aura_core::AuraError> {
+        self.journal.append_attested_tree_op(op).await
+    }
+
+    async fn get_tree_state(
+        &self,
+    ) -> Result<aura_journal::ratchet_tree::TreeState, aura_core::AuraError> {
+        self.journal.get_tree_state().await
+    }
+
+    async fn get_op_log(&self) -> Result<aura_journal::semilattice::OpLog, aura_core::AuraError> {
+        self.journal.get_op_log().await
+    }
+
+    async fn merge_op_log(
+        &self,
+        remote: aura_journal::semilattice::OpLog,
+    ) -> Result<(), aura_core::AuraError> {
+        self.journal.merge_op_log(remote).await
+    }
+
+    async fn get_attested_op(
+        &self,
+        cid: &aura_core::Hash32,
+    ) -> Result<Option<aura_core::AttestedOp>, aura_core::AuraError> {
+        self.journal.get_attested_op(cid).await
+    }
+
+    async fn list_attested_ops(&self) -> Result<Vec<aura_core::AttestedOp>, aura_core::AuraError> {
+        self.journal.list_attested_ops().await
+    }
+
+    // Delegate other JournalEffects methods to the journal handler
+    async fn get_journal_state(
+        &self,
+    ) -> Result<crate::effects::journal::JournalMap, aura_core::AuraError> {
+        self.journal.get_journal_state().await
+    }
+
+    async fn get_current_tree(
+        &self,
+    ) -> Result<crate::effects::journal::RatchetTree, aura_core::AuraError> {
+        self.journal.get_current_tree().await
+    }
+
+    async fn get_tree_at_epoch(
+        &self,
+        epoch: crate::effects::journal::Epoch,
+    ) -> Result<crate::effects::journal::RatchetTree, aura_core::AuraError> {
+        self.journal.get_tree_at_epoch(epoch).await
+    }
+
+    async fn get_current_commitment(
+        &self,
+    ) -> Result<crate::effects::journal::Commitment, aura_core::AuraError> {
+        self.journal.get_current_commitment().await
+    }
+
+    async fn get_latest_epoch(
+        &self,
+    ) -> Result<Option<crate::effects::journal::Epoch>, aura_core::AuraError> {
+        self.journal.get_latest_epoch().await
+    }
+
+    async fn append_tree_op(
+        &self,
+        op: crate::effects::journal::TreeOpRecord,
+    ) -> Result<(), aura_core::AuraError> {
+        self.journal.append_tree_op(op).await
+    }
+
+    async fn get_tree_op(
+        &self,
+        epoch: crate::effects::journal::Epoch,
+    ) -> Result<Option<crate::effects::journal::TreeOpRecord>, aura_core::AuraError> {
+        self.journal.get_tree_op(epoch).await
+    }
+
+    async fn list_tree_ops(
+        &self,
+    ) -> Result<Vec<crate::effects::journal::TreeOpRecord>, aura_core::AuraError> {
+        self.journal.list_tree_ops().await
+    }
+
+    async fn submit_intent(
+        &self,
+        intent: crate::effects::journal::Intent,
+    ) -> Result<crate::effects::journal::IntentId, aura_core::AuraError> {
+        self.journal.submit_intent(intent).await
+    }
+
+    async fn get_intent(
+        &self,
+        intent_id: crate::effects::journal::IntentId,
+    ) -> Result<Option<crate::effects::journal::Intent>, aura_core::AuraError> {
+        self.journal.get_intent(intent_id).await
+    }
+
+    async fn get_intent_status(
+        &self,
+        intent_id: crate::effects::journal::IntentId,
+    ) -> Result<crate::effects::journal::IntentStatus, aura_core::AuraError> {
+        self.journal.get_intent_status(intent_id).await
+    }
+
+    async fn list_pending_intents(
+        &self,
+    ) -> Result<Vec<crate::effects::journal::Intent>, aura_core::AuraError> {
+        self.journal.list_pending_intents().await
+    }
+
+    async fn tombstone_intent(
+        &self,
+        intent_id: crate::effects::journal::IntentId,
+    ) -> Result<(), aura_core::AuraError> {
+        self.journal.tombstone_intent(intent_id).await
+    }
+
+    async fn prune_stale_intents(
+        &self,
+        current_commitment: crate::effects::journal::Commitment,
+    ) -> Result<usize, aura_core::AuraError> {
+        self.journal.prune_stale_intents(current_commitment).await
+    }
+
+    async fn validate_capability(
+        &self,
+        capability: &crate::effects::journal::CapabilityRef,
+    ) -> Result<bool, aura_core::AuraError> {
+        self.journal.validate_capability(capability).await
+    }
+
+    async fn is_capability_revoked(
+        &self,
+        capability_id: &crate::effects::journal::CapabilityId,
+    ) -> Result<bool, aura_core::AuraError> {
+        self.journal.is_capability_revoked(capability_id).await
+    }
+
+    async fn list_capabilities_in_op(
+        &self,
+        epoch: crate::effects::journal::Epoch,
+    ) -> Result<Vec<crate::effects::journal::CapabilityRef>, aura_core::AuraError> {
+        self.journal.list_capabilities_in_op(epoch).await
+    }
+
+    async fn merge_journal_state(
+        &self,
+        other: crate::effects::journal::JournalMap,
+    ) -> Result<(), aura_core::AuraError> {
+        self.journal.merge_journal_state(other).await
+    }
+
+    async fn get_journal_stats(
+        &self,
+    ) -> Result<crate::effects::journal::JournalStats, aura_core::AuraError> {
+        self.journal.get_journal_stats().await
+    }
+
+    async fn is_device_member(
+        &self,
+        device_id: aura_core::identifiers::DeviceId,
+    ) -> Result<bool, aura_core::AuraError> {
+        self.journal.is_device_member(device_id).await
+    }
+
+    async fn get_device_leaf_index(
+        &self,
+        device_id: aura_core::identifiers::DeviceId,
+    ) -> Result<Option<crate::effects::journal::LeafIndex>, aura_core::AuraError> {
+        self.journal.get_device_leaf_index(device_id).await
+    }
+
+    async fn list_devices(
+        &self,
+    ) -> Result<Vec<aura_core::identifiers::DeviceId>, aura_core::AuraError> {
+        self.journal.list_devices().await
+    }
+
+    async fn list_guardians(
+        &self,
+    ) -> Result<Vec<aura_core::identifiers::GuardianId>, aura_core::AuraError> {
+        self.journal.list_guardians().await
+    }
+}
+
+// Implement TreeEffects by delegating to the tree handler
+#[async_trait]
+impl TreeEffects for CompositeHandler {
+    async fn get_current_state(
+        &self,
+    ) -> Result<aura_journal::ratchet_tree::TreeState, aura_core::AuraError> {
+        self.tree.get_current_state().await
+    }
+
+    async fn get_current_commitment(&self) -> Result<aura_core::Hash32, aura_core::AuraError> {
+        self.tree.get_current_commitment().await
+    }
+
+    async fn get_current_epoch(&self) -> Result<u64, aura_core::AuraError> {
+        self.tree.get_current_epoch().await
+    }
+
+    async fn apply_attested_op(
+        &self,
+        op: aura_core::AttestedOp,
+    ) -> Result<aura_core::Hash32, aura_core::AuraError> {
+        self.tree.apply_attested_op(op).await
+    }
+
+    async fn verify_aggregate_sig(
+        &self,
+        op: &aura_core::AttestedOp,
+        state: &aura_journal::ratchet_tree::TreeState,
+    ) -> Result<bool, aura_core::AuraError> {
+        self.tree.verify_aggregate_sig(op, state).await
+    }
+
+    async fn add_leaf(
+        &self,
+        leaf: aura_core::LeafNode,
+        under: aura_core::NodeIndex,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        self.tree.add_leaf(leaf, under).await
+    }
+
+    async fn remove_leaf(
+        &self,
+        leaf_id: aura_core::LeafId,
+        reason: u8,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        self.tree.remove_leaf(leaf_id, reason).await
+    }
+
+    async fn change_policy(
+        &self,
+        node: aura_core::NodeIndex,
+        new_policy: aura_core::Policy,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        self.tree.change_policy(node, new_policy).await
+    }
+
+    async fn rotate_epoch(
+        &self,
+        affected: Vec<aura_core::NodeIndex>,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        self.tree.rotate_epoch(affected).await
+    }
+
+    async fn propose_snapshot(
+        &self,
+        cut: crate::effects::tree::Cut,
+    ) -> Result<crate::effects::tree::ProposalId, aura_core::AuraError> {
+        self.tree.propose_snapshot(cut).await
+    }
+
+    async fn approve_snapshot(
+        &self,
+        proposal_id: crate::effects::tree::ProposalId,
+    ) -> Result<crate::effects::tree::Partial, aura_core::AuraError> {
+        self.tree.approve_snapshot(proposal_id).await
+    }
+
+    async fn finalize_snapshot(
+        &self,
+        proposal_id: crate::effects::tree::ProposalId,
+    ) -> Result<crate::effects::tree::Snapshot, aura_core::AuraError> {
+        self.tree.finalize_snapshot(proposal_id).await
+    }
+
+    async fn apply_snapshot(
+        &self,
+        snapshot: &crate::effects::tree::Snapshot,
+    ) -> Result<(), aura_core::AuraError> {
+        self.tree.apply_snapshot(snapshot).await
     }
 }
 

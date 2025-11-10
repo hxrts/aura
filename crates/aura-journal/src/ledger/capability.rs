@@ -4,9 +4,12 @@
 //! Capabilities are time-limited, attenuatable tokens that grant specific permissions
 //! for specific resources.
 
-use aura_types::identifiers::DeviceId;
+use aura_core::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+// Timestamp type (Unix milliseconds)
+pub type Timestamp = u64;
 
 /// Unique identifier for a capability
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -146,7 +149,7 @@ pub struct CapabilityRef {
     pub resource: ResourceRef,
 
     /// Expiration timestamp (Unix milliseconds)
-    pub expires_at: super::tree_op::Timestamp,
+    pub expires_at: Timestamp,
 
     /// Signature proving issuance by authorized device
     pub signature: CapabilitySignature,
@@ -160,7 +163,7 @@ impl CapabilityRef {
     pub fn new(
         id: CapabilityId,
         resource: ResourceRef,
-        expires_at: super::tree_op::Timestamp,
+        expires_at: Timestamp,
         signature: CapabilitySignature,
     ) -> Self {
         Self {
@@ -179,20 +182,17 @@ impl CapabilityRef {
     }
 
     /// Check if this capability has expired
-    pub fn is_expired(&self, current_time: super::tree_op::Timestamp) -> bool {
+    pub fn is_expired(&self, current_time: Timestamp) -> bool {
         current_time >= self.expires_at
     }
 
     /// Check if this capability is valid at the given time
-    pub fn is_valid_at(&self, timestamp: super::tree_op::Timestamp) -> bool {
+    pub fn is_valid_at(&self, timestamp: Timestamp) -> bool {
         !self.is_expired(timestamp)
     }
 
     /// Get time until expiration (returns 0 if already expired)
-    pub fn time_until_expiration(
-        &self,
-        current_time: super::tree_op::Timestamp,
-    ) -> super::tree_op::Timestamp {
+    pub fn time_until_expiration(&self, current_time: Timestamp) -> Timestamp {
         if self.is_expired(current_time) {
             0
         } else {
@@ -214,7 +214,7 @@ pub struct Attenuation {
     pub allowed_operations: Option<Vec<String>>,
 
     /// Further restricted expiration time
-    pub restricted_expires_at: Option<super::tree_op::Timestamp>,
+    pub restricted_expires_at: Option<Timestamp>,
 
     /// Additional metadata
     pub metadata: std::collections::BTreeMap<String, String>,
@@ -244,7 +244,7 @@ impl Attenuation {
     }
 
     /// Set restricted expiration
-    pub fn with_expiration(mut self, expires_at: super::tree_op::Timestamp) -> Self {
+    pub fn with_expiration(mut self, expires_at: Timestamp) -> Self {
         self.restricted_expires_at = Some(expires_at);
         self
     }
@@ -414,7 +414,7 @@ impl RecoveryCapability {
         target_device: DeviceId,
         issuing_guardians: Vec<DeviceId>,
         guardian_threshold: usize,
-        expires_at: super::tree_op::Timestamp,
+        expires_at: Timestamp,
         leaf_index: usize,
         epoch: u64,
         signature: CapabilitySignature,
@@ -442,7 +442,7 @@ impl RecoveryCapability {
     }
 
     /// Check if this recovery capability is valid
-    pub fn is_valid(&self, current_time: super::tree_op::Timestamp) -> bool {
+    pub fn is_valid(&self, current_time: Timestamp) -> bool {
         // Check expiration
         if self.capability.is_expired(current_time) {
             return false;

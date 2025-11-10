@@ -4,7 +4,7 @@
 //! Uses petgraph for graph traversal and Blake3 for commitment hashing.
 
 use crate::journal::*;
-use aura_types::{errors::DataError, AuraError};
+use aura_core::AuraError;
 use blake3::Hasher;
 use std::collections::{BTreeMap, HashSet};
 
@@ -26,6 +26,7 @@ pub trait DerivationEffects: Send + Sync {
 }
 
 /// Simple derivation effects adapter for MVP
+/// TODO: complete complete implementation
 pub struct SimpleDerivationEffects;
 
 #[async_trait::async_trait]
@@ -140,27 +141,24 @@ impl DerivationEngine {
         Box::pin(async move {
             // Check traversal limits
             if !self.effects.should_continue_traversal(depth).await? {
-                return Err(AuraError::Data(DataError::LedgerOperationFailed {
-                    message: "Derivation traversal depth exceeded".to_string(),
-                    context: format!("Node: {}, Depth: {}", node_id, depth),
-                }));
+                return Err(AuraError::invalid(format!(
+                    "Derivation traversal depth exceeded - Node: {}, Depth: {}",
+                    node_id, depth
+                )));
             }
 
             // Cycle detection
             if visited.contains(&node_id) {
-                return Err(AuraError::Data(DataError::LedgerOperationFailed {
-                    message: "Cycle detected in derivation graph".to_string(),
-                    context: format!("Node: {}", node_id),
-                }));
+                return Err(AuraError::invalid(format!(
+                    "Cycle detected in derivation graph - Node: {}",
+                    node_id
+                )));
             }
             visited.insert(node_id);
 
             // Get the node
             let node = nodes.get(&node_id).ok_or_else(|| {
-                AuraError::Data(DataError::LedgerOperationFailed {
-                    message: "Node not found".to_string(),
-                    context: format!("Node ID: {}", node_id),
-                })
+                AuraError::not_found(format!("Node not found - Node ID: {}", node_id))
             })?;
 
             // Get children via Contains edges
@@ -214,7 +212,7 @@ mod tests {
     use crate::journal::{NodeKind, NodePolicy};
 
     fn create_test_node(kind: NodeKind, policy: NodePolicy) -> KeyNode {
-        KeyNode::new(NodeId::new_v4(), kind, policy)
+        KeyNode::new(NodeId::new(), kind, policy)
     }
 
     #[tokio::test]
@@ -294,18 +292,8 @@ mod tests {
         nodes.insert(device2.id, device2.clone());
 
         let mut edges = BTreeMap::new();
-        let edge1 = KeyEdge::new(
-            EdgeId::new_v4(),
-            identity.id,
-            device1.id,
-            EdgeKind::Contains,
-        );
-        let edge2 = KeyEdge::new(
-            EdgeId::new_v4(),
-            identity.id,
-            device2.id,
-            EdgeKind::Contains,
-        );
+        let edge1 = KeyEdge::new(identity.id, device1.id, EdgeKind::Contains);
+        let edge2 = KeyEdge::new(identity.id, device2.id, EdgeKind::Contains);
         edges.insert(edge1.id, edge1);
         edges.insert(edge2.id, edge2);
 

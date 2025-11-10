@@ -3,7 +3,7 @@
 //! Provides distributed tracing and logging capabilities for agent operations,
 //! enabling debugging, monitoring, and audit trails.
 
-use aura_types::{
+use aura_core::{
     identifiers::{DeviceId, SessionId},
     AuraError, AuraResult as Result,
 };

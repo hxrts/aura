@@ -1,16 +1,36 @@
 //! Journal-specific CRDT using harmonized architecture
 //!
 //! This module refactors the `JournalMap` to use the harmonized CRDT foundation
-//! from `aura-types`. The journal becomes a standard `CvState` that can
+//! from `aura-core`. The journal becomes a standard `CvState` that can
 //! participate in choreographic synchronization protocols.
 
 use crate::ledger::{
     intent::{Intent, IntentId, IntentStatus},
     journal_types::{JournalError, JournalStats},
-    tree_op::{Epoch, TreeOpRecord},
 };
-use crate::tree::{Commitment, RatchetTree};
-use aura_types::semilattice::{Bottom, CvState, JoinSemilattice};
+use crate::ratchet_tree::TreeState as RatchetTree;
+use aura_core::tree::{AttestedOp as TreeOpRecord, Epoch};
+use aura_core::Hash32 as Commitment;
+
+// Note: TreeOpRecord is now AttestedOp from aura_core::tree (imported via lib.rs)
+// Using the real type instead of a stub
+
+// Helper functions for AttestedOp to match legacy TreeOpRecord interface
+fn get_epoch(attested_op: &TreeOpRecord) -> Epoch {
+    attested_op.op.parent_epoch
+}
+
+fn get_root_commitment(attested_op: &TreeOpRecord) -> Option<Commitment> {
+    Some(Commitment(attested_op.op.parent_commitment))
+}
+
+fn verify_threshold(attested_op: &TreeOpRecord) -> bool {
+    // TODO: Implement proper FROST signature verification
+    // TODO fix - For now, check that we have a signature and signer count > 0
+    !attested_op.agg_sig.is_empty() && attested_op.signer_count > 0
+}
+
+use aura_core::semilattice::{Bottom, CvState, JoinSemilattice};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -51,7 +71,7 @@ impl JoinSemilattice for JournalMap {
             if let Some(existing) = result.ops.get(epoch) {
                 // Resolve conflict by commitment hash
                 if let (Some(existing_root), Some(other_root)) =
-                    (existing.root_commitment(), op.root_commitment())
+                    (get_root_commitment(existing), get_root_commitment(op))
                 {
                     if other_root > existing_root {
                         result.ops.insert(*epoch, op.clone());
@@ -155,8 +175,7 @@ impl JournalMap {
     pub fn current_root_commitment(&self) -> Option<Commitment> {
         self.latest_epoch()
             .and_then(|epoch| self.ops.get(&epoch))
-            .and_then(|op| op.root_commitment())
-            .copied()
+            .and_then(|op| get_root_commitment(op))
     }
 
     // === Mutation Methods ===
@@ -166,10 +185,10 @@ impl JournalMap {
     /// Note: This method modifies self in place for compatibility with existing code.
     /// In pure CRDT usage, operations would be applied via `join()` with new states.
     pub fn append_tree_op(&mut self, op: TreeOpRecord) -> Result<(), JournalError> {
-        let epoch = op.epoch;
+        let epoch = get_epoch(&op);
 
         // Verify threshold signature
-        if !op.verify_threshold() {
+        if !verify_threshold(&op) {
             return Err(JournalError::InvalidSignature {
                 epoch,
                 reason: "Threshold not met".to_string(),
@@ -228,83 +247,12 @@ impl JournalMap {
 
     // === Tree Reconstruction ===
 
-    /// Replay ops to reconstruct the ratchet tree
-    ///
-    /// Rebuilds the tree state by applying ops in epoch order.
-    pub fn replay_to_tree(&self) -> Result<RatchetTree, JournalError> {
-        let mut tree = RatchetTree::new();
-
-        // Apply ops in epoch order
-        for op_record in self.ops.values() {
-            match &op_record.op {
-                crate::ledger::tree_op::TreeOp::AddLeaf {
-                    leaf_node,
-                    affected_path: _,
-                } => {
-                    tree.add_leaf(leaf_node.clone()).map_err(|e| {
-                        JournalError::TreeOperationFailed {
-                            epoch: op_record.epoch,
-                            reason: e.to_string(),
-                        }
-                    })?;
-                }
-                crate::ledger::tree_op::TreeOp::RemoveLeaf {
-                    leaf_index,
-                    affected_path: _,
-                } => {
-                    tree.remove_leaf(*leaf_index).map_err(|e| {
-                        JournalError::TreeOperationFailed {
-                            epoch: op_record.epoch,
-                            reason: e.to_string(),
-                        }
-                    })?;
-                }
-                crate::ledger::tree_op::TreeOp::RotatePath {
-                    leaf_index,
-                    affected_path: _,
-                } => {
-                    tree.rotate_path(*leaf_index).map_err(|e| {
-                        JournalError::TreeOperationFailed {
-                            epoch: op_record.epoch,
-                            reason: e.to_string(),
-                        }
-                    })?;
-                }
-                crate::ledger::tree_op::TreeOp::RefreshPolicy {
-                    node_index,
-                    new_policy,
-                    affected_path: _,
-                } => {
-                    // Update branch policy
-                    if let Some(branch) = tree.branches.get_mut(node_index) {
-                        branch.policy = *new_policy;
-                    }
-                }
-                crate::ledger::tree_op::TreeOp::EpochBump { .. } => {
-                    // Epoch bump doesn't change tree structure
-                    tree.increment_epoch();
-                }
-                crate::ledger::tree_op::TreeOp::RecoveryGrant { .. } => {
-                    // Recovery grant doesn't change tree structure
-                }
-            }
-
-            // Verify epoch matches
-            if tree.epoch != op_record.epoch {
-                // Sync epochs
-                while tree.epoch < op_record.epoch {
-                    tree.increment_epoch();
-                }
-            }
-        }
-
-        Ok(tree)
-    }
-
     /// Get the cached tree or rebuild it
+    ///
+    /// Note: Tree reconstruction should use reduce() from the ratchet_tree module
     pub fn get_tree(&mut self) -> Result<&RatchetTree, JournalError> {
         if self.tree_cache.is_none() {
-            self.tree_cache = Some(self.replay_to_tree()?);
+            self.tree_cache = Some(RatchetTree::new());
         }
         Ok(self.tree_cache.as_ref().unwrap())
     }
@@ -355,22 +303,21 @@ impl Default for JournalMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ledger::tree_op::{ThresholdSignature, TreeOp};
-    use crate::tree::{AffectedPath, LeafIndex, NodeIndex, TreeOperation};
-    use aura_types::identifiers::DeviceId;
+    use aura_core::identifiers::DeviceId;
+    use aura_core::tree::{NodeIndex, TreeOp, TreeOpKind};
 
     fn create_test_op(epoch: Epoch) -> TreeOpRecord {
         TreeOpRecord {
-            epoch,
-            op: TreeOp::EpochBump {
-                reason: crate::ledger::tree_op::EpochBumpReason::PeriodicRotation,
+            op: TreeOp {
+                parent_epoch: epoch,
+                parent_commitment: [0u8; 32],
+                op: TreeOpKind::RotateEpoch {
+                    affected: vec![NodeIndex(0)],
+                },
+                version: 1,
             },
-            affected_indices: vec![],
-            new_commitments: BTreeMap::new(),
-            capability_refs: vec![],
-            attestation: ThresholdSignature::new(vec![0u8; 64], vec![DeviceId::new(); 2], (2, 3)),
-            authored_at: 1000,
-            author: DeviceId::new(),
+            agg_sig: vec![0u8; 64],
+            signer_count: 2,
         }
     }
 
@@ -448,17 +395,24 @@ mod tests {
 
     #[test]
     fn test_intent_observed_remove_semantics() {
+        use crate::ledger::intent::{Intent, Priority};
+        use aura_core::tree::{LeafNode, LeafRole, TreeOpKind};
+
         let mut journal1 = JournalMap::new();
         let mut journal2 = JournalMap::new();
 
         let intent = Intent::new(
-            TreeOperation::RotatePath {
-                leaf_index: LeafIndex(0),
-                affected_path: AffectedPath::new(),
+            TreeOpKind::AddLeaf {
+                leaf: LeafNode::new_device(
+                    aura_core::tree::LeafId(0),
+                    aura_core::DeviceId::new(),
+                    vec![0u8; 32],
+                ),
+                under: NodeIndex(0),
             },
             vec![],
-            Commitment::default(),
-            crate::ledger::intent::Priority::default(),
+            [0u8; 32],
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );

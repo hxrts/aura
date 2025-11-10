@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 83d7eee64fb4635001c67062a1ba55c9adf43433939b5720a7e974a1602d82eb # shrinks to a = TimeWindow { start: 1000, end: 10000, timezone_offset: Some(3) }, b = TimeWindow { start: 1000, end: 10000, timezone_offset: Some(0) }

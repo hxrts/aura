@@ -16,9 +16,7 @@ workspace = true
 
 [dependencies]
 # Workspace crates
-aura-types = { path = "../aura-types" }
-aura-messages = { path = "../aura-messages" }
-aura-protocol = { path = "../aura-protocol" }
+aura-core = { path = "../aura-core" }
 # session_types removed during refactor - implementation moved to coordination
 # Removed circular dependency: transport no longer depends on coordination
 # aura-coordination = { path = "../coordination" }
@@ -27,9 +25,10 @@ aura-protocol = { path = "../aura-protocol" }
 reqwest = { workspace = true }
 snow = { workspace = true }
 async-trait = { workspace = true }
+tokio-tungstenite = "0.20"
 
 # Choreographic programming
-rumpsteak = { workspace = true }
+rumpsteak-aura = "0.2.0"
 
 # Cryptography provided through aura-crypto
 ed25519-dalek = { workspace = true }

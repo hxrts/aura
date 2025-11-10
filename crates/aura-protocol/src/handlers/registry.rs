@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use super::context::AuraContext;
 use super::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
-use aura_types::LocalSessionType;
+use aura_core::LocalSessionType;
 
 /// Error type for registry operations
 #[derive(Debug, Error)]
@@ -231,7 +231,7 @@ impl EffectRegistry {
         _session: LocalSessionType,
         _ctx: &mut AuraContext,
     ) -> Result<(), RegistryError> {
-        // Simplified stub - session execution would normally use choreographic handlers
+        // TODO fix - Simplified stub - session execution would normally use choreographic handlers
         Ok(())
     }
 
@@ -287,7 +287,7 @@ impl AuraHandler for EffectRegistry {
         _session: LocalSessionType,
         _ctx: &mut AuraContext,
     ) -> Result<(), AuraHandlerError> {
-        // Simplified stub - session execution would normally route to choreographic handlers
+        // TODO fix - Simplified stub - session execution would normally route to choreographic handlers
         Ok(())
     }
 

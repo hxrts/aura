@@ -294,7 +294,7 @@ impl PropertyCheckingMiddleware {
 
     /// Check safety property
     fn check_safety_property(&self, condition: &Value, context: &SimulatorContext) -> bool {
-        // Simplified safety check - in practice this would be more sophisticated
+        // TODO fix - Simplified safety check - in practice this would be more sophisticated
         if let Some(threshold) = condition.get("max_participants") {
             if let Some(max) = threshold.as_u64() {
                 return context.participant_count <= max as usize;
@@ -306,7 +306,7 @@ impl PropertyCheckingMiddleware {
 
     /// Check liveness property
     fn check_liveness_property(&self, condition: &Value, context: &SimulatorContext) -> bool {
-        // Simplified liveness check
+        // TODO fix - Simplified liveness check
         if let Some(min_tick) = condition.get("min_progress_tick") {
             if let Some(min) = min_tick.as_u64() {
                 return context.tick >= min;
@@ -318,7 +318,7 @@ impl PropertyCheckingMiddleware {
 
     /// Check consistency property
     fn check_consistency_property(&self, condition: &Value, context: &SimulatorContext) -> bool {
-        // Simplified consistency check
+        // TODO fix - Simplified consistency check
         if let Some(threshold_check) = condition.get("threshold_consistency") {
             if let Some(required) = threshold_check.as_u64() {
                 return context.threshold >= required as usize;
@@ -335,7 +335,7 @@ impl PropertyCheckingMiddleware {
         condition: &Value,
         context: &SimulatorContext,
     ) -> (bool, f64) {
-        // Simplified performance check
+        // TODO fix - Simplified performance check
         let current_value = match metric {
             "tick_rate" => context.tick as f64,
             "participant_ratio" => {
@@ -354,7 +354,7 @@ impl PropertyCheckingMiddleware {
         evaluator: &str,
         context: &SimulatorContext,
     ) -> (bool, Value) {
-        // Simplified custom evaluation - in practice this would use a proper expression evaluator
+        // TODO fix - Simplified custom evaluation - in practice this would use a proper expression evaluator
         match evaluator {
             "always_true" => (true, json!(true)),
             "tick_even" => {

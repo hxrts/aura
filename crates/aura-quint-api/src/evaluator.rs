@@ -25,7 +25,7 @@ impl QuintEvaluator {
         Self { quint_path }
     }
 
-    /// Parse a Quint file via subprocess (simplified interface)
+    /// Parse a Quint file via subprocess (TODO fix - Simplified interface)
     pub async fn parse_file(&self, file_path: &str) -> QuintResult<String> {
         let quint_cmd = self.quint_path.as_deref().unwrap_or("quint");
 

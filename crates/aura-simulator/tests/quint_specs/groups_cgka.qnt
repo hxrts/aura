@@ -3,22 +3,22 @@
 
 module GroupsCGKA {
     import SessionTypes.*
-    
+
     // ========== CGKA Types ==========
-    
+
     type GroupId = str
     type MemberId = str
     type TreePosition = int
     type PublicKey = bytes
     type ApplicationSecret = bytes
-    
+
     // BeeKEM tree node
     type TreeNode = {
         position: TreePosition,
         publicKey: PublicKey,
         isEmpty: bool
     }
-    
+
     // Group member roster
     type Roster = {
         epoch: Epoch,
@@ -26,14 +26,14 @@ module GroupsCGKA {
         positions: MemberId -> TreePosition,
         size: int
     }
-    
+
     // Roster delta for updates
     type RosterDelta = {
         previousSize: int,
         addedMembers: Set[MemberId],
         removedMembers: Set[MemberId]
     }
-    
+
     // Key package for joining
     type KeyPackage = {
         memberId: MemberId,
@@ -41,27 +41,27 @@ module GroupsCGKA {
         leafKey: PublicKey,
         credentialKey: PublicKey
     }
-    
+
     // Tree update types
     type TreeUpdateType =
         | AddLeaf(memberId: MemberId, keyPackage: KeyPackage)
         | RemoveLeaf(memberId: MemberId)
         | UpdateNode(newPublicKey: PublicKey)
-    
+
     // Path update for tree healing
     type PathUpdate = {
         position: TreePosition,
         publicKey: PublicKey,
         encryptedSecret: bytes  // For siblings on path
     }
-    
+
     // Tree update operation
     type TreeUpdate = {
         position: TreePosition,
         updateType: TreeUpdateType,
         pathUpdates: List[PathUpdate]
     }
-    
+
     // CGKA operation
     type CGKAOperation = {
         operationId: str,
@@ -72,14 +72,14 @@ module GroupsCGKA {
         treeUpdates: List[TreeUpdate],
         sender: MemberId
     }
-    
+
     // BeeKEM tree state
     type BeeKemTree = {
         nodes: TreePosition -> TreeNode,
         size: int,
         rootSecret: bytes
     }
-    
+
     // CGKA group state
     type CGKAState = {
         groupId: GroupId,
@@ -90,34 +90,34 @@ module GroupsCGKA {
         applicationSecrets: Epoch -> ApplicationSecret,
         lastUpdated: int
     }
-    
+
     // ========== State Variables ==========
-    
+
     var groups: GroupId -> CGKAState
     var memberGroups: MemberId -> Set[GroupId]
     var operationLog: List[CGKAOperation]
     var currentTime: int
-    
+
     // ========== Helper Functions ==========
-    
+
     // Check if position is a leaf
     pure def isLeaf(position: TreePosition): bool = {
         // In binary tree, leaves have no children
-        // Simplified check
+        // TODO fix - Simplified check
         position >= 0
     }
-    
+
     // Get parent position
     pure def parentPosition(position: TreePosition): TreePosition = {
         // Binary tree parent calculation
         (position - 1) / 2
     }
-    
+
     // Get sibling position
     pure def siblingPosition(position: TreePosition): TreePosition = {
         if (position % 2 == 1) position + 1 else position - 1
     }
-    
+
     // Get co-path (path to root excluding self)
     pure def coPath(position: TreePosition): List[TreePosition] = {
         if (position == 0) [] else {
@@ -125,30 +125,30 @@ module GroupsCGKA {
             [siblingPosition(position)].concat(coPath(parent))
         }
     }
-    
+
     // Find empty leaf position
     pure def findEmptyLeaf(tree: BeeKemTree): TreePosition = {
         // Find first empty leaf position
-        tree.nodes.keys().filter(pos => 
+        tree.nodes.keys().filter(pos =>
             isLeaf(pos) and tree.nodes.get(pos).isEmpty
         ).fold(-1, (acc, pos) => if (acc == -1) pos else acc)
     }
-    
+
     // Validate roster delta
     pure def isValidRosterDelta(delta: RosterDelta, roster: Roster): bool = {
         delta.previousSize == roster.size and
         delta.removedMembers.isSubsetOf(roster.members) and
         delta.addedMembers.intersect(roster.members).size() == 0
     }
-    
+
     // Derive application secret from tree
     pure def deriveApplicationSecret(tree: BeeKemTree, groupId: GroupId, epoch: Epoch): ApplicationSecret = {
         // KDF(root_secret || group_id || epoch)
         ApplicationSecret("app_secret_" + epoch.toString())
     }
-    
+
     // ========== Actions ==========
-    
+
     // Create new CGKA group
     action createGroup(
         groupId: GroupId,
@@ -193,7 +193,7 @@ module GroupsCGKA {
             groups' = groups.put(groupId, state),
             // Update member mappings
             memberGroups' = initialMembers.fold(memberGroups, (acc, memberId) =>
-                val currentGroups = if (memberId.in(acc.keys())) 
+                val currentGroups = if (memberId.in(acc.keys()))
                     acc.get(memberId) else Set(),
                 acc.put(memberId, currentGroups.union(Set(groupId)))
             ),
@@ -201,7 +201,7 @@ module GroupsCGKA {
             currentTime' = currentTime + 1
         }
     }
-    
+
     // Add member to group
     action addMember(
         groupId: GroupId,
@@ -246,7 +246,7 @@ module GroupsCGKA {
             applyOperation(groupId, operation)
         }
     }
-    
+
     // Remove member from group
     action removeMember(
         groupId: GroupId,
@@ -289,7 +289,7 @@ module GroupsCGKA {
             applyOperation(groupId, operation)
         }
     }
-    
+
     // Update member's key (for forward secrecy)
     action updateMemberKey(
         groupId: GroupId,
@@ -329,7 +329,7 @@ module GroupsCGKA {
             applyOperation(groupId, operation)
         }
     }
-    
+
     // Apply CGKA operation
     action applyOperation(groupId: GroupId, operation: CGKAOperation): bool = {
         all {
@@ -348,13 +348,13 @@ module GroupsCGKA {
             val newRoster = {
                 epoch: operation.targetEpoch,
                 members: newMembers,
-                positions: state.roster.positions  // Simplified: would need recomputation
+                positions: state.roster.positions  // TODO fix - Simplified: would need recomputation
                     .filter((m, _) => m.in(newMembers)),
                 size: newMembers.size()
             },
-            // Apply tree updates (simplified)
+            // Apply tree updates (TODO fix - Simplified)
             val newTree = operation.treeUpdates.foldl(state.tree, (tree, update) =>
-                tree  // Simplified: would actually update nodes
+                tree  // TODO fix - Simplified: would actually update nodes
             ),
             // Derive new application secret
             val newAppSecret = deriveApplicationSecret(newTree, groupId, operation.targetEpoch),
@@ -370,12 +370,12 @@ module GroupsCGKA {
             // Update member groups
             memberGroups' = operation.rosterDelta.removedMembers.fold(
                 operation.rosterDelta.addedMembers.fold(memberGroups, (acc, added) =>
-                    val currentGroups = if (added.in(acc.keys())) 
+                    val currentGroups = if (added.in(acc.keys()))
                         acc.get(added) else Set(),
                     acc.put(added, currentGroups.union(Set(groupId)))
                 ),
                 (acc, removed) =>
-                    val currentGroups = if (removed.in(acc.keys())) 
+                    val currentGroups = if (removed.in(acc.keys()))
                         acc.get(removed) else Set(),
                     acc.put(removed, currentGroups.exclude(Set(groupId)))
             ),
@@ -383,7 +383,7 @@ module GroupsCGKA {
             currentTime' = currentTime + 1
         }
     }
-    
+
     // Get application secret for encryption/decryption
     action getApplicationSecret(
         groupId: GroupId,
@@ -405,9 +405,9 @@ module GroupsCGKA {
             currentTime' = currentTime
         }
     }
-    
+
     // ========== Invariants ==========
-    
+
     // Member consistency: members in roster match member groups
     invariant memberConsistency = {
         groups.values().forall(state =>
@@ -417,15 +417,15 @@ module GroupsCGKA {
             )
         )
     }
-    
+
     // Epoch monotonicity
     invariant epochMonotonicity = {
         operationLog.indices().forall(i =>
-            i > 0 implies 
+            i > 0 implies
                 operationLog[i].targetEpoch >= operationLog[i-1].targetEpoch
         )
     }
-    
+
     // Tree size consistency
     invariant treeSizeConsistency = {
         groups.values().forall(state =>
@@ -433,7 +433,7 @@ module GroupsCGKA {
             state.tree.nodes.keys().filter(pos => isLeaf(pos)).size() >= state.roster.size
         )
     }
-    
+
     // Application secret availability
     invariant applicationSecretAvailability = {
         groups.values().forall(state =>
@@ -441,7 +441,7 @@ module GroupsCGKA {
             state.currentEpoch.in(state.applicationSecrets.keys())
         )
     }
-    
+
     // No orphan members
     invariant noOrphanMembers = {
         memberGroups.keys().forall(memberId =>
@@ -452,22 +452,22 @@ module GroupsCGKA {
                 )
         )
     }
-    
+
     // ========== Properties ==========
-    
+
     // Forward secrecy: old epochs can't decrypt new messages
     property forwardSecrecy = {
         always(groups.values().forall(state =>
             operationLog.forall(op =>
                 // After epoch advance, old secrets are distinct
-                (op.groupId == state.groupId and 
+                (op.groupId == state.groupId and
                  op.targetEpoch > op.currentEpoch) implies
-                    state.applicationSecrets.get(op.currentEpoch) != 
+                    state.applicationSecrets.get(op.currentEpoch) !=
                     state.applicationSecrets.get(op.targetEpoch)
             )
         ))
     }
-    
+
     // Post-compromise security: key update heals compromise
     property postCompromiseSecurity = {
         always(groups.values().forall(state =>
@@ -485,7 +485,7 @@ module GroupsCGKA {
                 eventually(state.applicationSecrets.keys().size() > 1)
         ))
     }
-    
+
     // Concurrent operations: all valid ops can be applied
     property concurrentOperations = {
         always(groups.values().forall(state =>
@@ -493,11 +493,11 @@ module GroupsCGKA {
             state.roster.members.size() > 1 implies
                 state.roster.members.forall(member =>
                     // Each member can create valid operation
-                    true  // Simplified: would check operation validity
+                    true  // TODO fix - Simplified: would check operation validity
                 )
         ))
     }
-    
+
     // Group agreement: all members see same state
     property groupAgreement = {
         always(groups.values().forall(state =>
@@ -509,7 +509,7 @@ module GroupsCGKA {
             )
         ))
     }
-    
+
     // Membership authorization: only members can modify group
     property membershipAuthorization = {
         always(operationLog.forall(op =>
@@ -518,9 +518,9 @@ module GroupsCGKA {
                 op.sender.in(groups.get(op.groupId).roster.members)
         ))
     }
-    
+
     // ========== Initial State ==========
-    
+
     action init = {
         all {
             groups' = Map(),

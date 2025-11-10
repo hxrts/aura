@@ -1,7 +1,7 @@
 //! Journal-specific types for ledger operations
 
 use super::intent::IntentId;
-use super::tree_op::Epoch;
+use aura_core::tree::Epoch;
 use serde::{Deserialize, Serialize};
 
 /// Journal operation errors

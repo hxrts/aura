@@ -1,6 +1,6 @@
 //! Console effects for logging and debugging
 
-use aura_types::DeviceId;
+use aura_core::DeviceId;
 use std::future::Future;
 
 /// Log levels for console output

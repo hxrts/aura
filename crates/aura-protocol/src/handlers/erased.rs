@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use super::context::AuraContext;
 use super::{AuraHandlerError, EffectType, ExecutionMode};
-use aura_types::LocalSessionType;
+use aura_core::LocalSessionType;
 
 /// Primary interface for all Aura handlers
 ///
@@ -54,21 +54,21 @@ pub struct AuraHandlerFactory;
 
 impl AuraHandlerFactory {
     /// Create a handler for testing
-    pub fn for_testing(device_id: aura_types::DeviceId) -> Box<dyn AuraHandler> {
+    pub fn for_testing(device_id: aura_core::DeviceId) -> Box<dyn AuraHandler> {
         let handler = crate::handlers::CompositeHandler::for_testing(device_id.into());
         Box::new(handler)
     }
 
     /// Create a handler for production
     pub fn for_production(
-        device_id: aura_types::DeviceId,
+        device_id: aura_core::DeviceId,
     ) -> Result<Box<dyn AuraHandler>, AuraHandlerError> {
         let handler = crate::handlers::CompositeHandler::for_production(device_id.into());
         Ok(Box::new(handler))
     }
 
     /// Create a handler for simulation
-    pub fn for_simulation(device_id: aura_types::DeviceId, _seed: u64) -> Box<dyn AuraHandler> {
+    pub fn for_simulation(device_id: aura_core::DeviceId, _seed: u64) -> Box<dyn AuraHandler> {
         let handler = crate::handlers::CompositeHandler::for_simulation(device_id.into());
         Box::new(handler)
     }
@@ -118,7 +118,7 @@ impl HandlerUtils {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use aura_types::identifiers::DeviceId;
+    use aura_core::identifiers::DeviceId;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -140,7 +140,7 @@ mod tests {
         );
 
         // Test session execution - may fail if session type system is not fully implemented
-        // This is acceptable for now as we're testing the handler infrastructure, not sessions
+        // This is acceptable TODO fix - For now as we're testing the handler infrastructure, not sessions
         let session = LocalSessionType::new("test".to_string(), vec![]);
         let _result = handler.execute_session(session, &mut ctx).await;
         // Note: We don't assert result.is_ok() because session execution depends on

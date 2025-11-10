@@ -5,7 +5,7 @@
 
 use super::derivation::{DerivationEffects, DerivationEngine};
 use crate::journal::*;
-use aura_types::{errors::DataError, AuraError, DeviceId};
+use aura_core::{AuraError, DeviceId};
 use std::collections::{BTreeMap, HashSet};
 
 /// View effects trait for external dependency injection
@@ -114,19 +114,16 @@ impl ViewHandler {
         let identity_node = nodes
             .get(&root_id)
             .ok_or_else(|| {
-                AuraError::Data(DataError::LedgerOperationFailed {
-                    message: "Identity node not found".to_string(),
-                    context: format!("Node ID: {}", root_id),
-                })
+                AuraError::internal(format!("Identity node not found: Node ID: {}", root_id))
             })?
             .clone();
 
         // Verify it's actually an identity node
         if !matches!(identity_node.kind, NodeKind::Identity) {
-            return Err(AuraError::Data(DataError::LedgerOperationFailed {
-                message: "Node is not an identity".to_string(),
-                context: format!("Node kind: {:?}", identity_node.kind),
-            }));
+            return Err(AuraError::internal(format!(
+                "Node is not an identity: Node kind: {:?}",
+                identity_node.kind
+            )));
         }
 
         // Compute commitment for the identity
@@ -171,19 +168,16 @@ impl ViewHandler {
         let group_node = nodes
             .get(&root_id)
             .ok_or_else(|| {
-                AuraError::Data(DataError::LedgerOperationFailed {
-                    message: "Group node not found".to_string(),
-                    context: format!("Node ID: {}", root_id),
-                })
+                AuraError::internal(format!("Group node not found: Node ID: {}", root_id))
             })?
             .clone();
 
         // Verify it's actually a group node
         if !matches!(group_node.kind, NodeKind::Group) {
-            return Err(AuraError::Data(DataError::LedgerOperationFailed {
-                message: "Node is not a group".to_string(),
-                context: format!("Node kind: {:?}", group_node.kind),
-            }));
+            return Err(AuraError::internal(format!(
+                "Node is not a group: Node kind: {:?}",
+                group_node.kind
+            )));
         }
 
         // Compute commitment for the group
@@ -254,10 +248,10 @@ impl ViewHandler {
             visited.insert(node_id);
 
             let node = nodes.get(&node_id).ok_or_else(|| {
-                AuraError::Data(DataError::LedgerOperationFailed {
-                    message: "Node not found during collection".to_string(),
-                    context: format!("Node ID: {}", node_id),
-                })
+                AuraError::internal(format!(
+                    "Node not found during collection: Node ID: {}",
+                    node_id
+                ))
             })?;
 
             // If this node matches the target kind, add it
@@ -413,12 +407,58 @@ mod tests {
     use crate::journal::{NodeKind, NodePolicy};
 
     fn create_test_node(kind: NodeKind, policy: NodePolicy) -> KeyNode {
-        KeyNode::new(NodeId::new_v4(), kind, policy)
+        KeyNode::new(NodeId::new(), kind, policy)
+    }
+
+    /// Test-specific ViewEffects that owns its data for lifetime compatibility
+    struct TestViewEffects {
+        nodes: BTreeMap<NodeId, KeyNode>,
+        edges: BTreeMap<EdgeId, KeyEdge>,
+        device_id: DeviceId,
+    }
+
+    impl TestViewEffects {
+        fn new(
+            nodes: BTreeMap<NodeId, KeyNode>,
+            edges: BTreeMap<EdgeId, KeyEdge>,
+            device_id: DeviceId,
+        ) -> Self {
+            Self {
+                nodes,
+                edges,
+                device_id,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ViewEffects for TestViewEffects {
+        async fn get_nodes(&self) -> Result<&BTreeMap<NodeId, KeyNode>, AuraError> {
+            Ok(&self.nodes)
+        }
+
+        async fn get_edges(&self) -> Result<&BTreeMap<EdgeId, KeyEdge>, AuraError> {
+            Ok(&self.edges)
+        }
+
+        async fn log_view_materialization(
+            &self,
+            view_type: &str,
+            root_id: NodeId,
+        ) -> Result<(), AuraError> {
+            tracing::debug!(
+                device_id = %self.device_id,
+                view_type = view_type,
+                root_id = %root_id,
+                "Materializing journal view"
+            );
+            Ok(())
+        }
     }
 
     #[tokio::test]
     async fn test_identity_view_materialization() {
-        let device_id = DeviceId::new_v4();
+        let device_id = DeviceId::new();
 
         // Create identity with devices
         let identity = create_test_node(NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 3 });
@@ -433,30 +473,15 @@ mod tests {
         nodes.insert(device3.id, device3.clone());
 
         let mut edges = BTreeMap::new();
-        let edge1 = KeyEdge::new(
-            EdgeId::new_v4(),
-            identity.id,
-            device1.id,
-            EdgeKind::Contains,
-        );
-        let edge2 = KeyEdge::new(
-            EdgeId::new_v4(),
-            identity.id,
-            device2.id,
-            EdgeKind::Contains,
-        );
-        let edge3 = KeyEdge::new(
-            EdgeId::new_v4(),
-            identity.id,
-            device3.id,
-            EdgeKind::Contains,
-        );
+        let edge1 = KeyEdge::new(identity.id, device1.id, EdgeKind::Contains);
+        let edge2 = KeyEdge::new(identity.id, device2.id, EdgeKind::Contains);
+        let edge3 = KeyEdge::new(identity.id, device3.id, EdgeKind::Contains);
         edges.insert(edge1.id, edge1);
         edges.insert(edge2.id, edge2);
         edges.insert(edge3.id, edge3);
 
         // Create view handler
-        let view_effects = Box::new(SimpleViewEffects::new(&nodes, &edges, device_id));
+        let view_effects = Box::new(TestViewEffects::new(nodes, edges, device_id));
         let derivation_effects = Box::new(SimpleDerivationEffects);
         let handler = ViewHandler::new(view_effects, derivation_effects);
 
@@ -474,7 +499,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_with_guardians() {
-        let device_id = DeviceId::new_v4();
+        let device_id = DeviceId::new();
 
         // Create identity with devices and guardians
         let identity = create_test_node(NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 4 });
@@ -491,37 +516,17 @@ mod tests {
         nodes.insert(guardian2.id, guardian2.clone());
 
         let mut edges = BTreeMap::new();
-        let edge1 = KeyEdge::new(
-            EdgeId::new_v4(),
-            identity.id,
-            device1.id,
-            EdgeKind::Contains,
-        );
-        let edge2 = KeyEdge::new(
-            EdgeId::new_v4(),
-            identity.id,
-            device2.id,
-            EdgeKind::Contains,
-        );
-        let edge3 = KeyEdge::new(
-            EdgeId::new_v4(),
-            identity.id,
-            guardian1.id,
-            EdgeKind::Contains,
-        );
-        let edge4 = KeyEdge::new(
-            EdgeId::new_v4(),
-            identity.id,
-            guardian2.id,
-            EdgeKind::Contains,
-        );
+        let edge1 = KeyEdge::new(identity.id, device1.id, EdgeKind::Contains);
+        let edge2 = KeyEdge::new(identity.id, device2.id, EdgeKind::Contains);
+        let edge3 = KeyEdge::new(identity.id, guardian1.id, EdgeKind::Contains);
+        let edge4 = KeyEdge::new(identity.id, guardian2.id, EdgeKind::Contains);
         edges.insert(edge1.id, edge1);
         edges.insert(edge2.id, edge2);
         edges.insert(edge3.id, edge3);
         edges.insert(edge4.id, edge4);
 
         // Create view handler
-        let view_effects = Box::new(SimpleViewEffects::new(&nodes, &edges, device_id));
+        let view_effects = Box::new(TestViewEffects::new(nodes, edges, device_id));
         let derivation_effects = Box::new(SimpleDerivationEffects);
         let handler = ViewHandler::new(view_effects, derivation_effects);
 
@@ -539,16 +544,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_view_materialization() {
-        let device_id = DeviceId::new_v4();
+        let device_id = DeviceId::new();
 
         // Create group with member references
         let group = create_test_node(NodeKind::Group, NodePolicy::Threshold { m: 2, n: 3 });
-        let member1_id = NodeId::new_v4();
-        let member2_id = NodeId::new_v4();
-        let member3_id = NodeId::new_v4();
+
+        // Create member identity nodes for the group
+        let member1 = create_test_node(NodeKind::Identity, NodePolicy::Any);
+        let member2 = create_test_node(NodeKind::Identity, NodePolicy::Any);
+        let member3 = create_test_node(NodeKind::Identity, NodePolicy::Any);
+
+        // Use the member nodes' actual IDs
+        let member1_id = member1.id;
+        let member2_id = member2.id;
+        let member3_id = member3.id;
 
         let mut nodes = BTreeMap::new();
         nodes.insert(group.id, group.clone());
+        nodes.insert(member1_id, member1);
+        nodes.insert(member2_id, member2);
+        nodes.insert(member3_id, member3);
 
         let mut edges = BTreeMap::new();
         #[allow(clippy::disallowed_methods)]
@@ -562,7 +577,7 @@ mod tests {
         edges.insert(edge3.id, edge3);
 
         // Create view handler
-        let view_effects = Box::new(SimpleViewEffects::new(&nodes, &edges, device_id));
+        let view_effects = Box::new(TestViewEffects::new(nodes, edges, device_id));
         let derivation_effects = Box::new(SimpleDerivationEffects);
         let handler = ViewHandler::new(view_effects, derivation_effects);
 

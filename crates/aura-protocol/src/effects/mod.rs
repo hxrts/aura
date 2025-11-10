@@ -14,7 +14,7 @@
 //! ## Effect Categories
 //!
 //! - **Network Effects**: Peer communication, message passing
-//! - **Storage Effects**: Data persistence, key-value operations  
+//! - **Storage Effects**: Data persistence, key-value operations
 //! - **Crypto Effects**: Cryptographic operations, random generation
 //! - **Time Effects**: Scheduling, timeouts, temporal coordination
 //! - **Console Effects**: Logging, debugging, visualization
@@ -37,13 +37,14 @@
 //!     // Use effects for side-effect operations
 //!     let signature = effects.ed25519_sign(&data, &key).await?;
 //!     effects.send_to_peer(peer_id, message).await?;
-//!     
+//!
 //!     // Pure logic using the effect results
 //!     Ok(state.with_signature(signature))
 //! }
 //! ```
 
 // Effect trait definitions
+pub mod agent;
 pub mod choreographic;
 pub mod console;
 pub mod crypto;
@@ -54,16 +55,25 @@ pub mod params;
 pub mod random;
 pub mod semilattice;
 pub mod storage;
+pub mod sync;
 pub mod system;
 pub mod time;
+pub mod tree;
+pub mod tree_coordination;
 
 // Re-export core effect traits
+pub use agent::{
+    AgentEffects, AgentHealthStatus, AuthMethod, AuthenticationEffects, AuthenticationResult,
+    BiometricType, ConfigValidationError, ConfigurationEffects, CredentialBackup, DeviceConfig,
+    DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
+    SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
+};
 pub use choreographic::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics,
 };
 pub use console::{ConsoleEffects, ConsoleEvent, LogLevel};
-pub use crypto::{CryptoEffects, CryptoError};
+pub use crypto::{CryptoEffects, CryptoError, FrostSigningPackage, KeyDerivationContext};
 pub use journal::JournalEffects;
 pub use ledger::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEvent, LedgerEventStream};
 pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
@@ -74,13 +84,23 @@ pub use semilattice::{
     DeltaHandler, GossipStrategy, HandlerFactory, TopicId,
 };
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
+pub use sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
 pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
+pub use tree::TreeEffects;
+pub use tree_coordination::{
+    ApprovalStatus, ApprovalVote, CloseReason, CoordinationConfig, CoordinationError,
+    CoordinationEvent, ReconcileResult, SessionId, SessionInfo as TreeSessionInfo,
+    SessionRole as TreeSessionRole, SessionStatus as TreeSessionStatus, SyncPhase, SyncProgress,
+    TreeCoordinationEffects, TreeDigest, ValidationContext, ValidationResult, VoteDecision,
+};
 
 // Re-export unified error system
-pub use aura_types::{AuraError, AuraResult, ErrorCode, ErrorSeverity};
+pub use aura_core::{AuraError, AuraResult};
 
 // Re-export unified effect system
-pub use system::{AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats};
+pub use system::{
+    AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats, SystemEffects, SystemError,
+};
 
 /// Composite trait that combines all effect traits
 ///
@@ -96,7 +116,9 @@ pub trait AuraEffects:
     + RandomEffects
     + LedgerEffects
     + JournalEffects
+    + TreeEffects
     + ChoreographicEffects
+    + SystemEffects
     + Send
     + Sync
 {

@@ -5,21 +5,21 @@ module DKDProtocol {
     // Basic types
     type DeviceId = str
     type SessionId = str
-    
+
     // ========== DKD-Specific Types ==========
-    
-    type DKDState = 
+
+    type DKDState =
         | "DKDInit"
-        | "DKDCommitment" 
+        | "DKDCommitment"
         | "DKDReveal"
         | "DKDFinalization"
         | "DKDComplete"
         | "DKDFailure"
-    
+
     type Commitment = str  // Blake3 hash of point
-    type Point = str       // Ed25519 curve point  
+    type Point = str       // Ed25519 curve point
     type DerivedKey = str  // Final derived key
-    
+
     type DKDParticipant = {
         deviceId: DeviceId,
         shareBytes: str,
@@ -28,7 +28,7 @@ module DKDProtocol {
         hasCommitted: bool,
         hasRevealed: bool
     }
-    
+
     type DKDSession = {
         sessionId: SessionId,
         contextId: str,
@@ -42,37 +42,37 @@ module DKDProtocol {
         startEpoch: int,
         ttlEpochs: int
     }
-    
+
     // ========== State Variables ==========
-    
+
     var dkdSessions: SessionId -> DKDSession
     var dkdParticipants: (SessionId, DeviceId) -> DKDParticipant
     var currentEpoch: int
-    
+
     // ========== Helper Functions ==========
-    
+
     // Hash share to scalar and compute point
-    pure def computePoint(shareBytes: str, contextId: str): Point = 
-        shareBytes + "_point"  // Simplified
-    
+    pure def computePoint(shareBytes: str, contextId: str): Point =
+        shareBytes + "_point"  // TODO fix - Simplified
+
     // Compute commitment from point
-    pure def computeCommitment(point: Point): Commitment = 
+    pure def computeCommitment(point: Point): Commitment =
         "commit_" + point
-    
+
     // Verify reveal matches commitment
-    pure def verifyReveal(commitment: Commitment, point: Point): bool = 
+    pure def verifyReveal(commitment: Commitment, point: Point): bool =
         commitment == computeCommitment(point)
-    
+
     // Aggregate points to derive key
-    pure def aggregatePoints(points: Set[Point]): DerivedKey = 
+    pure def aggregatePoints(points: Set[Point]): DerivedKey =
         "key_" + points.size().toString()
-    
+
     // Check if we have threshold commitments
-    pure def hasThresholdCommitments(session: DKDSession): bool = 
+    pure def hasThresholdCommitments(session: DKDSession): bool =
         session.commitments.keys().size() >= session.threshold
-    
+
     // Check if we have matching reveals for all commitments
-    pure def hasMatchingReveals(session: DKDSession): bool = 
+    pure def hasMatchingReveals(session: DKDSession): bool =
         session.commitments.keys().forall(deviceId =>
             session.reveals.keys().contains(deviceId) and
             verifyReveal(
@@ -80,9 +80,9 @@ module DKDProtocol {
                 session.reveals.get(deviceId)
             )
         )
-    
+
     // ========== Actions ==========
-    
+
     // Initialize DKD session
     action initiateDKDSession(
         sessionId: SessionId,
@@ -110,11 +110,11 @@ module DKDProtocol {
             startEpoch: currentEpoch,
             ttlEpochs: 50
         }),
-        // Initialize participants - simplified
+        // Initialize participants - TODO fix - Simplified
         dkdParticipants' = dkdParticipants,
         currentEpoch' = currentEpoch
     }
-    
+
     // Record commitment from participant
     action recordCommitment(sessionId: SessionId, deviceId: DeviceId): bool = all {
         // Session exists and is in correct state
@@ -128,14 +128,14 @@ module DKDProtocol {
         // Update session with new commitment
         val newCommitments = session.commitments.put(deviceId, commitment),
         val newState = if (newCommitments.keys().size() >= session.threshold) "DKDReveal" else "DKDCommitment",
-        dkdSessions' = dkdSessions.put(sessionId, { ...session, 
+        dkdSessions' = dkdSessions.put(sessionId, { ...session,
             commitments: newCommitments,
             state: newState
         }),
         dkdParticipants' = dkdParticipants,
         currentEpoch' = currentEpoch + 1
     }
-    
+
     // Reveal point from participant
     action revealPoint(sessionId: SessionId, deviceId: DeviceId): bool = all {
         // Session exists and is in reveal phase
@@ -149,7 +149,7 @@ module DKDProtocol {
         val point = computePoint(shareBytes, session.contextId),
         // Update session with reveal
         val newReveals = session.reveals.put(deviceId, point),
-        val allRevealed = session.commitments.keys().forall(id => 
+        val allRevealed = session.commitments.keys().forall(id =>
             newReveals.keys().contains(id)
         ),
         val newState = if (allRevealed) "DKDFinalization" else "DKDReveal",
@@ -160,7 +160,7 @@ module DKDProtocol {
         dkdParticipants' = dkdParticipants,
         currentEpoch' = currentEpoch + 1
     }
-    
+
     // Finalize DKD and derive key
     action finalizeDKD(sessionId: SessionId): bool = all {
         // Session exists and is ready for finalization
@@ -180,19 +180,19 @@ module DKDProtocol {
         dkdParticipants' = dkdParticipants,
         currentEpoch' = currentEpoch + 1
     }
-    
+
     // ========== Invariants ==========
-    
+
     // Threshold property: can't finalize without threshold participants
-    val thresholdRequirement = 
+    val thresholdRequirement =
         dkdSessions.values().forall(session =>
             session.state == "DKDComplete" implies
                 session.commitments.keys().size() >= session.threshold and
                 session.reveals.keys().size() >= session.threshold
         )
-    
+
     // Reveal verification: all reveals must match commitments
-    val revealIntegrity = 
+    val revealIntegrity =
         dkdSessions.values().forall(session =>
             session.reveals.keys().forall(deviceId =>
                 session.commitments.keys().contains(deviceId) implies
@@ -202,15 +202,15 @@ module DKDProtocol {
                     )
             )
         )
-    
+
     // No reveals without commitments
-    val noOrphanReveals = 
+    val noOrphanReveals =
         dkdSessions.values().forall(session =>
             session.reveals.keys().isSubsetOf(session.commitments.keys())
         )
-    
+
     // ========== Temporal Properties ==========
-    
+
     // Eventually completes or fails
     temporal eventualCompletion = always(
         dkdSessions.values().forall(session =>
@@ -218,9 +218,9 @@ module DKDProtocol {
                 eventually(session.state == "DKDComplete" or session.state == "DKDFailure")
         )
     )
-    
+
     // ========== Initial State ==========
-    
+
     action init = all {
         dkdSessions' = Map(),
         dkdParticipants' = Map(),

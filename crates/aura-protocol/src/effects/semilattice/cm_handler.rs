@@ -4,7 +4,7 @@
 //! deduplication laws in operation-based CRDTs. The handler buffers operations
 //! until causal dependencies are satisfied, then applies them idempotently.
 
-use aura_types::semilattice::{CausalOp, CmApply, Dedup, OpWithCtx};
+use aura_core::semilattice::{CausalOp, CmApply, Dedup, OpWithCtx};
 use std::collections::VecDeque;
 
 /// Operation-based CRDT effect handler
@@ -65,7 +65,7 @@ where
     /// - Verify dependency sets are satisfied
     /// - Use Lamport timestamps or other ordering mechanisms
     fn is_causal_ready(&self, _ctx: &Ctx) -> bool {
-        // For now, assume all operations are ready
+        // TODO fix - For now, assume all operations are ready
         // TODO: Implement proper causal ordering based on context type
         true
     }

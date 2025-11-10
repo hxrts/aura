@@ -7,22 +7,24 @@
 //!
 //! ## Core Components
 //!
-//! - **Middleware System**: Type-safe middleware composition for crypto operations
-//! - **Security Levels**: Hierarchical security enforcement (Basic → Critical)
-//! - **Operation Tracking**: Comprehensive audit logging and monitoring
-//! - **Hardware Integration**: TEE/HSM support with attestation
-//! - **Performance Optimization**: Intelligent caching and rate limiting
+//! - **Effects System**: Clean abstraction layer for cryptographic operations
+//! - **Middleware System**: TODO fix - Simplified validation and parameter checking
+//! - **FROST Integration**: Re-exported types for compatibility (see aura-frost crate)
+//! - **Merkle Utilities**: Tree operations for commitment verification
 //!
-//! ## Essential Crypto Library Components
+//! ## TODO fix - Simplified Architecture
 //!
-//!
-//! All cryptographic operations are now provided through the composable middleware system
-//! which provides security, monitoring, and compliance features.
+//! The crypto crate now focuses on essential functionality with validation middleware.
+//! Complex features like audit logging, hardware security, and caching have been
+//! removed or moved to appropriate layers (effects system, choreographic protocols).
 
 #![allow(clippy::result_large_err)]
 
 // Effects system for crypto operations
 pub mod effects;
+
+// Key derivation system
+pub mod key_derivation;
 
 // Merkle tree utilities
 pub mod merkle;
@@ -30,11 +32,17 @@ pub mod merkle;
 // Middleware system (complete implementation)
 pub mod middleware;
 
+// FROST threshold signing primitives
+pub mod frost;
+
 // Re-export commonly used types for convenience
-pub use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey as Ed25519VerifyingKey};
+pub use ed25519_dalek::{
+    Signature as Ed25519Signature, SigningKey as Ed25519SigningKey,
+    VerifyingKey as Ed25519VerifyingKey,
+};
 
 // Error types - unified error system
-pub use aura_types::{AuraError, AuraResult, ErrorCode, ErrorSeverity};
+pub use aura_core::{AuraError, Result as AuraResult};
 /// General cryptographic operation error alias
 pub type CryptoError = AuraError;
 /// Crypto result type alias
@@ -44,72 +52,43 @@ pub type Result<T> = AuraResult<T>;
 pub use middleware::*;
 
 // Re-export effects system
-pub use effects::{CryptoEffects, CryptoEffectsExt, Effects, TimeEffects};
+pub use effects::{CryptoEffects, CryptoEffectsExt, Effects, EffectsInterface, TimeEffects};
+
+// Re-export key derivation functions and types
+pub use key_derivation::{
+    derive_encryption_key, derive_key_material, IdentityKeyContext, KeyDerivationSpec,
+    PermissionKeyContext,
+};
 
 // Re-export merkle utilities
 pub use merkle::{
     build_commitment_tree, build_merkle_root, verify_merkle_proof, SimpleMerkleProof,
 };
 
-// Type aliases for HPKE functionality (placeholder implementations)
+/// HPKE private key - 32 bytes for X25519
 pub type HpkePrivateKey = [u8; 32];
+/// HPKE public key - 32 bytes for X25519
 pub type HpkePublicKey = [u8; 32];
+/// Merkle proof using simple node hashes
 pub type MerkleProof = SimpleMerkleProof;
-
-// FROST threshold cryptography types (re-exported for compatibility)
-pub use frost_ed25519::{
-    keys::{KeyPackage as FrostKeyPackage, PublicKeyPackage as FrostPublicKeyPackage},
-    round1::SigningCommitments as FrostSigningCommitments,
-    round2::SignatureShare as FrostSignatureShare,
-    Signature as FrostSignature,
-};
-
-/// Legacy KeyShare type for agent compatibility
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct KeyShare {
-    pub identifier: u16,
-    pub key_package: Vec<u8>,        // Serialized FrostKeyPackage
-    pub public_key_package: Vec<u8>, // Serialized FrostPublicKeyPackage
-}
-
-impl KeyShare {
-    /// Create a new KeyShare from FROST components
-    pub fn new(identifier: u16, key_package: Vec<u8>, public_key_package: Vec<u8>) -> Self {
-        Self {
-            identifier,
-            key_package,
-            public_key_package,
-        }
-    }
-
-    /// Get the identifier
-    pub fn identifier(&self) -> u16 {
-        self.identifier
-    }
-
-    /// Get the key package bytes
-    pub fn key_package(&self) -> &[u8] {
-        &self.key_package
-    }
-
-    /// Get the public key package bytes
-    pub fn public_key_package(&self) -> &[u8] {
-        &self.public_key_package
-    }
-}
 
 /// Generate a UUID for compatibility
 ///
-/// TODO: This should use an effect handler for deterministic testing
-#[allow(clippy::disallowed_methods)]
+/// This function now uses the effects system for proper abstraction.
+/// For deterministic testing, use `Effects::deterministic()` or `Effects::test()`.
+/// For production use, use `Effects::production()`.
 pub fn generate_uuid() -> uuid::Uuid {
-    uuid::Uuid::new_v4()
+    // Use production effects by default for backwards compatibility
+    let effects = Effects::production();
+    effects.gen_uuid()
 }
 
 /// Simple HPKE key pair implementation (placeholder)
 #[derive(Debug, Clone)]
 pub struct HpkeKeyPair {
+    /// Private key for decryption (X25519)
     pub private_key: HpkePrivateKey,
+    /// Public key for encryption (X25519)
     pub public_key: HpkePublicKey,
 }
 
@@ -149,7 +128,7 @@ pub fn ed25519_verify(
     signature: &Ed25519Signature,
 ) -> Result<()> {
     use ed25519_dalek::Verifier;
-    public_key.verify(message, signature).map_err(|e| {
-        AuraError::crypto_operation_failed(format!("Signature verification failed: {}", e))
-    })
+    public_key
+        .verify(message, signature)
+        .map_err(|e| AuraError::crypto(format!("Signature verification failed: {}", e)))
 }

@@ -1,19 +1,19 @@
-//! Simplified KeyJournal Effects for MVP Implementation
+//! TODO fix - Simplified KeyJournal Effects for MVP Implementation
 //!
-//! This module provides simplified placeholder implementations of journal effects
+//! This module provides TODO fix - Simplified placeholder implementations of journal effects
 //! for the Phase 1 MVP. This allows the journal module to compile and demonstrate
 //! the overall architecture while external library integrations are refined.
 //!
 //! TODO: this entire file needs to be removed. the production implementation must
-//! integrate with the injectable effects system from aura-types and aura-protocol crates
+//! integrate with the injectable effects system from aura-core and aura-protocol crates
 
 use crate::journal::*;
 use async_trait::async_trait;
-use aura_types::effects::TimeEffects;
-use aura_types::{AuraError, DeviceId};
+use aura_core::effects::TimeEffects;
+use aura_core::{AuraError, DeviceId};
 use std::sync::Arc;
 
-/// Simplified effects trait for KeyJournal operations
+/// TODO fix - Simplified effects trait for KeyJournal operations
 #[async_trait]
 pub trait SimpleJournalEffects: Send + Sync {
     /// Check if adding an edge would create a cycle
@@ -105,7 +105,7 @@ impl<T: TimeEffects> SimpleJournalEffects for SimpleJournalEffectsAdapter<T> {
         // MVP placeholder: return original secret (minus share index)
         if shares.is_empty() {
             return Err(AuraError::Crypto(
-                aura_types::errors::CryptoError::OperationFailed {
+                aura_core::errors::CryptoError::OperationFailed {
                     message: "No shares provided".to_string(),
                     context: "Secret reconstruction".to_string(),
                 },
@@ -115,7 +115,7 @@ impl<T: TimeEffects> SimpleJournalEffects for SimpleJournalEffectsAdapter<T> {
         let first_share = &shares[0];
         if first_share.is_empty() {
             return Err(AuraError::Crypto(
-                aura_types::errors::CryptoError::InvalidInput {
+                aura_core::errors::CryptoError::InvalidInput {
                     message: "Invalid share".to_string(),
                     context: "Empty share provided".to_string(),
                 },

@@ -1,14 +1,22 @@
-//! Agent-Specific Handler Implementations
+//! Agent Handler Re-exports
 //!
-//! This module contains handler implementations for agent-specific effects.
-//! These handlers compose core system effects (from aura-protocol) into
-//! higher-level device workflows and capabilities.
-//!
-//! Each handler focuses on a specific area of device functionality:
-//!
-//! - `auth`: Authentication and biometric operations
+//! This module re-exports agent handler implementations from aura-protocol.
+//! Agent handler implementations have been moved to aura-protocol as per the
+//! unified architecture.
 
-pub mod auth;
+// Local agent handlers
+pub mod invitations;
+pub mod recovery;
+pub mod sessions;
+pub mod storage;
 
-// Re-export all handler implementations
-pub use auth::AuthenticationHandler;
+// Re-export agent handlers from aura-protocol
+pub use aura_protocol::handlers::agent::{
+    auth::AuthenticationHandler, session::MemorySessionHandler, system::AgentEffectSystemHandler,
+};
+
+// Re-export local agent handlers
+pub use invitations::InvitationOperations;
+pub use recovery::{RecoveryOperations, RecoveryStatus};
+pub use sessions::SessionOperations;
+pub use storage::StorageOperations;

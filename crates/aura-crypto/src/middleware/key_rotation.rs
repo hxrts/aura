@@ -3,7 +3,7 @@
 use super::{CryptoContext, CryptoHandler, CryptoMiddleware, SecurityLevel};
 use crate::middleware::CryptoOperation;
 use crate::{CryptoError, Result};
-use aura_types::DeviceId;
+use aura_core::DeviceId;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -220,7 +220,7 @@ impl KeyRotationMiddleware {
     }
 
     fn check_rotation_permissions(&self, _device_id: &DeviceId) -> Result<()> {
-        // Simplified permission check - in real implementation would check:
+        // TODO fix - Simplified permission check - in real implementation would check:
         // - Device authorization level
         // - Multi-party approval requirements
         // - Governance policies
@@ -523,16 +523,17 @@ pub struct RotationStats {
 mod tests {
     use super::*;
     use crate::middleware::handler::NoOpHandler;
-    use aura_crypto::Effects;
-    use aura_types::{AccountIdExt, DeviceIdExt};
+    use crate::Effects;
+    use aura_core::{AccountIdExt, DeviceIdExt};
 
     #[test]
     fn test_key_rotation_middleware() {
-        let effects = Effects::test(42);
-        let account_id = aura_types::AccountId::new_with_effects(&effects);
-        let device_id = aura_types::DeviceId::new_with_effects(&effects);
-        let participant1 = aura_types::DeviceId::new_with_effects(&effects);
-        let participant2 = aura_types::DeviceId::new_with_effects(&effects);
+        let effects = Effects::test();
+        let account_id = aura_core::AccountId::new_with_effects(&effects);
+        let device_id = aura_core::DeviceId::new_with_effects(&effects);
+        let participant1 = aura_core::DeviceId::new_with_effects(&effects);
+        let participant2 = aura_core::DeviceId::new_with_effects(&effects);
+        let participant3 = aura_core::DeviceId::new_with_effects(&effects);
 
         let middleware = KeyRotationMiddleware::new(RotationConfig::default());
         let handler = NoOpHandler;
@@ -545,10 +546,13 @@ mod tests {
         let operation = CryptoOperation::RotateKeys {
             old_threshold: 2,
             new_threshold: 3,
-            new_participants: vec![participant1, participant2],
+            new_participants: vec![participant1, participant2, participant3],
         };
 
         let result = middleware.process(operation, &context, &handler);
+        if let Err(ref e) = result {
+            println!("Key rotation failed with error: {:?}", e);
+        }
         assert!(result.is_ok());
 
         let stats = middleware.stats();
@@ -557,9 +561,9 @@ mod tests {
 
     #[test]
     fn test_rotation_validation() {
-        let effects = Effects::test(42);
-        let account_id = aura_types::AccountId::new_with_effects(&effects);
-        let device_id = aura_types::DeviceId::new_with_effects(&effects);
+        let effects = Effects::test();
+        let account_id = aura_core::AccountId::new_with_effects(&effects);
+        let device_id = aura_core::DeviceId::new_with_effects(&effects);
 
         let middleware = KeyRotationMiddleware::new(RotationConfig::default());
         let context = CryptoContext::new(
@@ -569,19 +573,23 @@ mod tests {
             SecurityLevel::Critical,
         );
 
-        // Valid rotation
+        let participant1 = aura_core::DeviceId::new_with_effects(&effects);
+        let participant2 = aura_core::DeviceId::new_with_effects(&effects);
+        let participants = vec![device_id.clone(), participant1, participant2];
+
+        // Valid rotation (2 out of 3 participants)
         assert!(middleware
-            .validate_rotation_request(2, 3, &[device_id.clone()], &context)
+            .validate_rotation_request(2, 2, &participants, &context)
             .is_ok());
 
         // Invalid zero threshold
         assert!(middleware
-            .validate_rotation_request(0, 3, &[device_id.clone()], &context)
+            .validate_rotation_request(0, 2, &participants, &context)
             .is_err());
 
         // Invalid threshold exceeds participants
         assert!(middleware
-            .validate_rotation_request(2, 5, &[device_id.clone()], &context)
+            .validate_rotation_request(2, 5, &participants, &context)
             .is_err());
 
         // Invalid empty participants
@@ -605,9 +613,9 @@ mod tests {
 
     #[test]
     fn test_insufficient_security_level() {
-        let effects = Effects::test(42);
-        let account_id = aura_types::AccountId::new_with_effects(&effects);
-        let device_id = aura_types::DeviceId::new_with_effects(&effects);
+        let effects = Effects::test();
+        let account_id = aura_core::AccountId::new_with_effects(&effects);
+        let device_id = aura_core::DeviceId::new_with_effects(&effects);
 
         let middleware = KeyRotationMiddleware::new(RotationConfig::default());
         let context = CryptoContext::new(

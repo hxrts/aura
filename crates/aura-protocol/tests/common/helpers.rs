@@ -5,6 +5,7 @@
 //!
 //! NOTE: Many functions are disabled as they depend on modules not yet implemented.
 
+use aura_core::{AccountId, DeviceId, SessionId};
 use aura_protocol::{
     handlers::CompositeHandler,
     // Note: middleware and runtime modules not yet fully implemented
@@ -12,7 +13,6 @@ use aura_protocol::{
     // runtime::{ExecutionContext, ContextBuilder},
     // effects::ProtocolEffects,
 };
-use aura_types::{AccountId, DeviceId, SessionId};
 use uuid::Uuid;
 
 /// Create a test DeviceId
@@ -62,7 +62,7 @@ pub fn create_test_data(size: usize) -> Vec<u8> {
     (0..size).map(|i| (i % 256) as u8).collect()
 }
 
-/// Create a test keypair (returns dummy values for now)
+/// Create a test keypair (returns dummy values TODO fix - For now)
 pub fn create_test_keypair() -> ([u8; 32], [u8; 32]) {
     let private_key = [0u8; 32];
     let public_key = [1u8; 32];

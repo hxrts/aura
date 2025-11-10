@@ -1,7 +1,7 @@
 //! Middleware Architecture for Aura
 //!
 //! This module provides the foundational middleware traits and patterns for the unified
-//! AuraHandler architecture. The middleware system has been simplified to work with the
+//! AuraHandler architecture. The middleware system has been TODO fix - Simplified to work with the
 //! new effect system architecture.
 //!
 //! ## Design Principles
@@ -12,7 +12,7 @@
 //! 4. **Zero-Cost Abstractions**: Middleware compiles to efficient code
 //! 5. **Protocol Agnostic**: Works with any protocol or component
 
-pub mod traits;
+// pub mod traits; // TODO: Implement middleware traits if needed
 
 /// Middleware execution context
 #[derive(Debug, Clone)]

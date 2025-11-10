@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 /// Type alias for complex peer map to reduce type complexity
 type PeerMap = Arc<RwLock<HashMap<Uuid, PeerConnection>>>;
-/// Type alias for complex message queue to reduce type complexity  
+/// Type alias for complex message queue to reduce type complexity
 type MessageQueue = Arc<Mutex<VecDeque<(Uuid, Vec<u8>)>>>;
 
 /// In-memory network handler for testing
@@ -81,7 +81,7 @@ impl NetworkEffects for MemoryNetworkHandler {
         let peers = self.peers.read().await;
         if let Some(peer) = peers.get(&peer_id) {
             if peer.connected {
-                // In a real implementation, this would send to the actual peer
+                // TODO fix - In a real implementation, this would send to the actual peer
                 // For testing, we just simulate success
                 Ok(())
             } else {
@@ -114,7 +114,7 @@ impl NetworkEffects for MemoryNetworkHandler {
         if let Some((from_peer, message)) = messages.pop_front() {
             Ok((from_peer, message))
         } else {
-            // In a real implementation, this would block until a message arrives
+            // TODO fix - In a real implementation, this would block until a message arrives
             // For testing, we return a timeout error
             Err(NetworkError::ReceiveFailed("Timeout".to_string()))
         }

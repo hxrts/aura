@@ -16,34 +16,37 @@ mod error;
 pub mod journal_ops;
 pub mod middleware;
 mod operations;
-mod state;
-mod sync;
+pub mod sync;
 mod types;
 
-// Domain modules moved from aura-types
+// Domain modules moved from aura-core
 pub mod journal;
 pub mod ledger;
 pub mod semilattice;
-pub mod tree;
+
+// New ratchet tree implementation (Phase 2)
+pub mod ratchet_tree;
 
 // Re-exports
 pub use effects::*;
-pub use error::{Error, Result};
+pub use error::{AuraError, Result};
 pub use operations::*;
-pub use state::*;
 pub use sync::*;
 
 // Domain re-exports
 pub use journal::*;
 pub use ledger::{
-    CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, JournalMap, Priority, TreeOp,
-    TreeOpRecord,
+    CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, JournalMap, Priority,
 };
+// Note: TreeOp and TreeOpRecord are now aura_core::tree::TreeOpKind and aura_core::tree::AttestedOp
+pub use aura_core::tree::{AttestedOp as TreeOpRecord, TreeOpKind as TreeOp};
 pub use semilattice::{
     integration, DeviceRegistry, EpochLog, GuardianRegistry, IntentPool,
-    JournalMap as CRDTJournalMap, MaxCounter, ModernAccountState,
+    JournalMap as CRDTJournalMap, MaxCounter, ModernAccountState as AccountState, OpLog,
 };
-pub use tree::*;
+
+// New ratchet tree re-exports
+pub use ratchet_tree::{reduce, TreeState};
 
 // Selective re-exports to avoid conflicts
 pub use middleware::{JournalHandler, JournalMiddleware};

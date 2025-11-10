@@ -2,16 +2,13 @@
 
 use async_trait::async_trait;
 
-use aura_types::{
-    handlers::{
-        AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
-        context::AuraContext,
-    },
-    sessions::LocalSessionType,
+use aura_core::{
+    handlers::{context::AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode},
     identifiers::DeviceId,
+    sessions::LocalSessionType,
 };
 
-/// Simulation-specific effect system (simplified)
+/// Simulation-specific effect system (TODO fix - Simplified)
 pub struct SimulationEffectSystem {
     device_id: DeviceId,
     execution_mode: ExecutionMode,
@@ -29,7 +26,7 @@ impl SimulationEffectSystem {
             ExecutionMode::Simulation { seed } => seed,
             _ => 42, // Default seed for non-simulation modes
         };
-        
+
         Ok(Self {
             device_id,
             execution_mode,
@@ -49,12 +46,13 @@ impl SimulationEffectSystem {
 
     /// Check if this system supports simulation-specific effects
     pub fn supports_simulation_effect(&self, effect_type: EffectType) -> bool {
-        matches!(effect_type,
-            EffectType::FaultInjection |
-            EffectType::TimeControl |
-            EffectType::StateInspection |
-            EffectType::PropertyChecking |
-            EffectType::ChaosCoordination
+        matches!(
+            effect_type,
+            EffectType::FaultInjection
+                | EffectType::TimeControl
+                | EffectType::StateInspection
+                | EffectType::PropertyChecking
+                | EffectType::ChaosCoordination
         )
     }
 }
@@ -89,20 +87,21 @@ impl AuraHandler for SimulationEffectSystem {
         _session: LocalSessionType,
         _ctx: &mut AuraContext,
     ) -> Result<(), AuraHandlerError> {
-        // Simplified session handling for simulation
+        // TODO fix - Simplified session handling for simulation
         Ok(())
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
-        self.supports_simulation_effect(effect_type) || 
-        matches!(effect_type,
-            EffectType::Crypto |
-            EffectType::Network |
-            EffectType::Storage |
-            EffectType::Time |
-            EffectType::Console |
-            EffectType::Random
-        )
+        self.supports_simulation_effect(effect_type)
+            || matches!(
+                effect_type,
+                EffectType::Crypto
+                    | EffectType::Network
+                    | EffectType::Storage
+                    | EffectType::Time
+                    | EffectType::Console
+                    | EffectType::Random
+            )
     }
 
     fn execution_mode(&self) -> ExecutionMode {
@@ -129,7 +128,10 @@ impl SimulationEffectSystemFactory {
     }
 
     /// Create a simulation effect system for simulation mode
-    pub fn for_simulation(device_id: DeviceId, seed: u64) -> Result<Box<dyn AuraHandler>, AuraHandlerError> {
+    pub fn for_simulation(
+        device_id: DeviceId,
+        seed: u64,
+    ) -> Result<Box<dyn AuraHandler>, AuraHandlerError> {
         Self::create(device_id, ExecutionMode::Simulation { seed })
     }
 }
@@ -154,36 +156,41 @@ pub struct SimulationEffectSystemStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_types::identifiers::DeviceId;
+    use aura_core::identifiers::DeviceId;
 
     #[tokio::test]
     async fn test_simulation_system_creation() {
         let device_id = DeviceId::new();
-        let system = SimulationEffectSystem::new(device_id, ExecutionMode::Simulation { seed: 12345 });
+        let system =
+            SimulationEffectSystem::new(device_id, ExecutionMode::Simulation { seed: 12345 });
         assert!(system.is_ok());
-        
+
         let system = system.unwrap();
         assert_eq!(system.device_id(), device_id);
         assert_eq!(system.simulation_seed(), 12345);
-        assert_eq!(system.execution_mode(), ExecutionMode::Simulation { seed: 12345 });
+        assert_eq!(
+            system.execution_mode(),
+            ExecutionMode::Simulation { seed: 12345 }
+        );
     }
 
     #[tokio::test]
     async fn test_simulation_effect_support() {
         let device_id = DeviceId::new();
-        let system = SimulationEffectSystem::new(device_id, ExecutionMode::Simulation { seed: 42 }).unwrap();
-        
+        let system =
+            SimulationEffectSystem::new(device_id, ExecutionMode::Simulation { seed: 42 }).unwrap();
+
         // Should support simulation-specific effects
         assert!(system.supports_simulation_effect(EffectType::FaultInjection));
         assert!(system.supports_simulation_effect(EffectType::TimeControl));
         assert!(system.supports_simulation_effect(EffectType::StateInspection));
         assert!(system.supports_simulation_effect(EffectType::PropertyChecking));
         assert!(system.supports_simulation_effect(EffectType::ChaosCoordination));
-        
+
         // Should not support non-simulation effects directly via simulation middleware
         assert!(!system.supports_simulation_effect(EffectType::Crypto));
         assert!(!system.supports_simulation_effect(EffectType::Network));
-        
+
         // But should support them via the overall system
         assert!(system.supports_effect(EffectType::Crypto));
         assert!(system.supports_effect(EffectType::Network));
@@ -192,11 +199,11 @@ mod tests {
     #[test]
     fn test_factory_creation() {
         let device_id = DeviceId::new();
-        
+
         // Testing mode should work
         let handler = SimulationEffectSystemFactory::for_testing(device_id);
         assert!(handler.is_ok());
-        
+
         // Simulation mode should work
         let handler = SimulationEffectSystemFactory::for_simulation(device_id, 42);
         assert!(handler.is_ok());

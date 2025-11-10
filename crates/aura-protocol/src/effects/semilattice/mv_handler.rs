@@ -3,8 +3,8 @@
 //! This module provides effect handlers for meet semi-lattices that enable
 //! constraint satisfaction and capability restriction through meet operations.
 
-use aura_types::identifiers::DeviceId;
-use aura_types::semilattice::{
+use aura_core::identifiers::DeviceId;
+use aura_core::semilattice::{
     ConsistencyProof, ConstraintMsg, ConstraintScope, MeetStateMsg, MvState, Top,
 };
 use serde::{Deserialize, Serialize};
@@ -254,7 +254,7 @@ mod tests {
     struct TestSet(BTreeSet<String>);
 
     // Implement MeetSemiLattice for TestSet
-    impl aura_types::semilattice::MeetSemiLattice for TestSet {
+    impl aura_core::semilattice::MeetSemiLattice for TestSet {
         fn meet(&self, other: &Self) -> Self {
             // Set intersection as meet operation
             TestSet(self.0.intersection(&other.0).cloned().collect())

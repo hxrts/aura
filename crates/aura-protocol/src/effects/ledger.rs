@@ -6,7 +6,7 @@
 //! with aura-journal. Implementations can internally use richer types like AccountState.
 
 use async_trait::async_trait;
-use aura_types::DeviceId;
+use aura_core::DeviceId;
 
 /// Ledger effects for account state management
 ///

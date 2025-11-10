@@ -219,7 +219,7 @@ impl SimulatorMiddleware for ScenarioInjectionMiddleware {
         context: &SimulatorContext,
         next: &dyn SimulatorHandler,
     ) -> Result<Value> {
-        // For this demonstration, we'll use interior mutability in a real implementation
+        // For this demonstration, we'll use interior mutability TODO fix - In a real implementation
         // Here we simulate the injection logic
 
         match &operation {
@@ -227,7 +227,7 @@ impl SimulatorMiddleware for ScenarioInjectionMiddleware {
                 // Check if we should inject a scenario
                 if self.should_inject_scenario(context) {
                     if let Some(scenario) = self.select_scenario(context) {
-                        // In a real implementation, we would inject the scenario
+                        // TODO fix - In a real implementation, we would inject the scenario
                         let injection_result = json!({
                             "scenario_injection": {
                                 "scenario_id": scenario.id,

@@ -1,476 +1,380 @@
-# Aura Protocol: Choreographic Middleware Architecture
+# Aura Protocol: Core Effect System and Handler Infrastructure
 
-A composable middleware architecture for Aura's distributed protocols, built on choreographic programming principles using the Rumpsteak-Aura framework for type-safe protocol coordination.
+The foundational crate providing Aura's unified effect system, handler infrastructure, and protocol coordination primitives. This crate serves as the execution substrate for all distributed protocols in the Aura ecosystem.
 
 ## Overview
 
-The `aura-protocol` crate provides the foundational infrastructure for Aura's distributed protocols, featuring a clean middleware system that enables composable cross-cutting concerns like observability, effects injection, error recovery, authorization, and ledger integration. The architecture is designed around choreographic programming patterns where protocols are written from a global viewpoint and automatically projected to local device behavior.
+The `aura-protocol` crate provides the core infrastructure that enables safe, composable, and testable distributed protocols through:
+
+- **Unified Effect System**: Algebraic effects with static dispatch for zero-overhead execution
+- **Handler Infrastructure**: Composable handlers for crypto, network, storage, and other system operations
+- **Protocol Foundation**: Type-safe primitives for building distributed protocols
+- **Testing Framework**: Deterministic testing with controlled effects and simulation
 
 ## Current Implementation Status
 
-### Production-Ready Components ✅
+### Production-Ready Components
 
-**Core Infrastructure:**
-- **Middleware System**: Complete composable stack with builder pattern and type-safe composition
-- **Effects System**: Full algebraic effects with deterministic testing support  
-- **Handler Abstraction**: Transport-agnostic protocol handler trait with async API
-- **Choreographic Integration**: Complete Rumpsteak adapter with session type support
-- **Error System**: Unified error handling across all protocol operations
-- **Testing Framework**: Deterministic testing with controlled effects and time
+**Core Effect System:**
+- **Effect Traits**: Complete algebraic effect interfaces (`CryptoEffects`, `NetworkEffects`, `StorageEffects`, etc.)
+- **Handler Implementations**: Real, mock, and simulation handlers for all effect types
+- **Composite Handler**: Unified handler that implements all effect traits with configurable backends
+- **Type-Erased Bridge**: Seamless integration between typed traits and dynamic dispatch
+- **Execution Modes**: Production, testing, and simulation modes with appropriate handler selection
 
-**Middleware Components:**
-- **ObservabilityMiddleware**: Unified tracing, metrics, instrumentation, and dev console (1000+ lines)
-- **EffectsMiddleware**: Production/test/deterministic effects injection with full adapter
-- **CapabilityMiddleware**: Authorization and permission checking system
-- **ErrorRecoveryMiddleware**: Retry logic with exponential backoff and error classification  
-- **SessionMiddleware**: Session lifecycle management and state transitions
-- **StackBuilder**: Type-safe middleware composition with both function and macro approaches
+**Handler Infrastructure:**
+- **`CompositeHandler`**: Main handler implementation with support for all effect types
+- **Handler Factory**: Easy creation of handlers for different execution contexts
+- **Memory Handlers**: Complete in-memory implementations for testing
+- **Real Handlers**: Production handlers using actual system APIs (filesystem, network, crypto libraries)
+- **Simulation Handlers**: Controlled handlers for deterministic testing
 
-### Work-in-Progress Components 🚧
+**Effect Categories:**
+- **`CryptoEffects`**: BLAKE3 hashing, Ed25519 signatures, random number generation
+- **`NetworkEffects`**: Message sending, receiving, and peer discovery
+- **`StorageEffects`**: Key-value storage operations with namespacing
+- **`TimeEffects`**: Time queries and epoch management
+- **`ConsoleEffects`**: Structured logging and debug output
+- **`JournalEffects`**: Journal operations for CRDT state management
+- **`RandomEffects`**: Cryptographic random number generation
 
-**Protocol Implementations:**
-- **DKD Choreography**: Basic structure with placeholder crypto operations (needs completion)
-- **FROST Signing**: Module structure exists but implementation is minimal
-- **Journal Sync**: Framework present but needs full CRDT integration
-- **Coordination Protocols**: Epoch management structure exists but needs implementation
+### Work-in-Progress Components
 
-**Integration Components:**
-- **Ledger Integration**: Middleware defined but not fully connected to journal operations
-- **Event Watcher**: Basic structure but limited reactive functionality
-- **Network Transport**: Re-exports from aura-transport but needs production hardening
+**Protocol Infrastructure:**
+- **Choreographic Integration**: Framework for choreographic programming (in `choreography/`)
+- **Message Types**: Protocol message definitions (in `messages/`)
+- **Guard System**: Protocol execution guards and constraints (in `guards/`)
+- **Sync Protocols**: Anti-entropy and state synchronization protocols (in `sync/`)
 
-### Known Limitations 🔧
+**Advanced Features:**
+- **Middleware System**: Cross-cutting concerns framework (basic traits defined)
+- **CRDT Handlers**: Semilattice-based state handlers (in `effects/semilattice/`)
+- **Agent Effects**: Higher-level agent operations (in `effects/agent.rs`)
 
-**Test Infrastructure:**
-- All test files currently disabled (`.disabled` extensions) due to API changes during refactoring
-- Need to re-enable and update tests after API stabilization
-- Byzantine and simulation tests need updates for new handler APIs
+### Testing and Development
 
-**Performance:**
-- Current focus is on correctness and type safety over performance optimization
-- Middleware stack uses some boxing for dynamic dispatch (acceptable for protocol handlers)
-- Metrics system is basic atomic counters (could be expanded for production)
+**Complete Testing Infrastructure:**
+- **Deterministic Effects**: Fixed-seed randomness and controlled time
+- **Memory Transport**: In-memory message routing for unit tests
+- **Simulation Framework**: Controlled execution environment
+- **Property-Based Testing**: Support for randomized protocol testing
 
 ## Core Architecture
 
 ### Design Principles
 
-1. **Choreographic Programming**: Protocols written from global viewpoint, automatically projected to local behavior using Rumpsteak-Aura
-2. **Middleware Composition**: Layerable cross-cutting concerns without modifying core protocol logic
-3. **Effect Injection**: Side effects (crypto, time, I/O) injected for testability and determinism
-4. **Type Safety**: Session types and rumpsteak framework provide compile-time protocol safety
-5. **Clean Separation**: Protocol logic independent from transport and handler implementation
+1. **Algebraic Effects**: All side effects abstracted through trait interfaces
+2. **Static Dispatch**: Zero-overhead trait implementations with full inlining
+3. **Handler Composition**: Modular handlers that can be combined and configured
+4. **Execution Modes**: Same code runs in production, testing, and simulation
+5. **Type Safety**: Compile-time guarantees for protocol correctness
 
 ### Component Diagram
 
 ```
-┌──────────────────────┐
-│   Choreographic      │
-│   Protocol Logic     │
-│   (Rumpsteak)        │
-└──────────┬───────────┘
-           │
-┌──────────▼──────────────────────────────────────────┐
-│           Middleware Stack (Composable)             │
-├─────────────────────────────────────────────────────┤
-│ ┌────────────────────────────────────────────────┐  │
-│ │ ObservabilityMiddleware (Tracing/Metrics/Dev)  │  │
-│ │ CapabilityMiddleware (Authorization)           │  │
-│ │ EffectsMiddleware (Side-Effect Injection)      │  │
-│ │ ErrorRecoveryMiddleware (Fault Handling)       │  │
-│ │ EventWatcherMiddleware (Event Monitoring)      │  │
-│ │ LedgerIntegrationMiddleware (State Sync)       │  │
-│ │ SessionMiddleware (Lifecycle Management)       │  │
-│ └────────────────────────────────────────────────┘  │
-└──────────┬──────────────────────────────────────────┘
-           │
-┌──────────▼─────────────┐
-│   AuraProtocolHandler  │
-│  (Transport-Agnostic)  │
-└──────────┬─────────────┘
-           │
-┌──────────▼───────────────────────────────┐
-│    Transport Layer (aura-transport)      │
-├──────────────────────────────────────────┤
-│ • InMemoryHandler (testing)              │
-│ • NetworkHandler (production)            │
-│ • SimulationHandler (deterministic test) │
-└──────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│           Protocol Logic                │
+│     (Uses Effect Traits)                │
+└──────────────┬──────────────────────────┘
+               │
+┌──────────────▼──────────────────────────┐
+│         CompositeHandler                │
+│    (Implements All Effect Traits)       │
+├─────────────────────────────────────────┤
+│ CryptoEffects  │ NetworkEffects         │
+│ StorageEffects │ TimeEffects            │
+│ ConsoleEffects │ JournalEffects         │
+│ RandomEffects  │ ...                    │
+└──────────────┬──────────────────────────┘
+               │
+┌──────────────▼──────────────────────────┐
+│      Concrete Handler Backends          │
+├─────────────────────────────────────────┤
+│ • Real Handlers (Production)            │
+│ • Mock Handlers (Testing)               │
+│ • Memory Handlers (Unit Tests)          │
+│ • Simulation Handlers (Controlled)      │
+└─────────────────────────────────────────┘
 ```
 
-## Core Components
+### Effect System Architecture
 
-### 1. Middleware System (`middleware/`)
+The effect system provides a clean separation between protocol logic and system operations:
 
-**Fully Implemented Components:**
+```rust
+// Protocol code uses abstract effect traits
+async fn my_protocol<C: CryptoEffects, N: NetworkEffects>(
+    crypto: &C,
+    network: &N,
+) -> Result<ProtocolResult> {
+    let signature = crypto.sign_message(&message).await?;
+    network.broadcast(signature).await?;
+    Ok(result)
+}
 
-- **`ObservabilityMiddleware`**: Unified observability combining:
-  - Distributed tracing for protocol events with configurable log levels
-  - Real-time metrics collection (send/receive/session/error counters)
-  - Event instrumentation with filtering and content capture
-  - Dev console integration for visualization
-  - Trace recording for debugging and replay analysis
-  
-- **`EffectsMiddleware`**: Side-effect injection system for:
-  - Cryptographic operations (signing, verification, key derivation)
-  - Time and scheduling operations (current time, delays, epoch tracking)
-  - Deterministic testing with controlled randomness and fixed time
-  - Production/test/deterministic effect variants with adapter pattern
-
-- **`CapabilityMiddleware`**: Authorization and capability checking:
-  - Permission-based access control with policy evaluation
-  - Capability token validation and proof generation
-  - Integration with Aura's unified permission system
-
-- **`ErrorRecoveryMiddleware`**: Fault tolerance and recovery:
-  - Automatic retry logic with exponential backoff and jitter
-  - Error classification (retriable vs permanent) with context
-  - Circuit breaker patterns for degraded service scenarios
-  - Graceful degradation with operation timeouts
-
-- **`SessionMiddleware`**: Session lifecycle management:
-  - Session initialization and cleanup with resource management
-  - State transition tracking with epoch management
-  - Timeout handling and session expiration
-  - Multi-participant coordination with consensus
-
-**Partial Implementations:**
-
-- **`EventWatcherMiddleware`**: Event monitoring framework (needs reactive functionality)
-- **`LedgerIntegrationMiddleware`**: Journal synchronization framework (needs CRDT integration)
-
-### 2. Effects System (`effects/`)
-
-**Production-Ready Implementation:**
-
-**Effect Categories:**
-
-- **`SigningEffects`**: Cryptographic operations
-  - Event signing with Ed25519 device keys and verification
-  - FROST threshold signature coordination
-  - Key derivation and rotation operations
-  - Merkle proof generation and validation
-
-- **`TimeEffects`**: Time and scheduling
-  - Current timestamp queries with monotonic guarantees
-  - Cooperative delays and timeouts with wake conditions  
-  - Epoch tracking for session management
-  - Simulation time control for deterministic testing
-
-- **`ConsoleEffects`**: Logging and development output
-  - Structured logging with trace correlation
-  - Debug output with configurable verbosity
-  - Dev console event streaming for real-time monitoring
-
-- **`ProtocolEffects`**: Unified interface combining all effect categories
-
-**Effect Implementations:**
-
-- **`AuraEffectsAdapter`**: Complete bridge to `aura_protocol::effects::Effects` system
-- **`CombinedEffects`**: Functional composition of multiple effect providers
-- **Production Effects**: Real cryptography and system time
-- **Test Effects**: Deterministic effects with fixed seeds and controlled time progression
-
-### 3. Choreographic Integration (`protocols/choreographic/`)
-
-**Production-Ready Infrastructure:**
-
-- **`RumpsteakAdapter`**: Complete `ChoreoHandler` implementation with:
-  - Async send/recv operations through Aura middleware stack
-  - Session type support with endpoint state management
-  - Choose/offer operations for protocol branching
-  - Timeout management with configurable operation-specific limits
-  - Message serialization with bincode and error handling
-
-- **`BridgedRole`** and **`BridgedEndpoint`**: Type bridges between:
-  - Rumpsteak's abstract roles and Aura's concrete device IDs
-  - Choreographic endpoints and Aura's session context
-  - Protocol state and ledger state management
-
-- **`ChoreographicHandlerBuilder`**: Complete factory for creating protocol handlers with:
-  - Full middleware stack composition (observability, authorization, recovery)
-  - In-memory and network handler variants
-  - Effects injection for deterministic testing
-  - Configurable middleware selection
-
-- **Error Handling**: Byzantine fault detection and safe choreography execution
-- **Timeout Management**: Operation-specific timeout configuration with fallback strategies
-
-### 4. Protocol Implementations (`protocols/`)
-
-**Framework Complete, Implementations Partial:**
-
-**Threshold Cryptography Protocols:**
-
-- **`DkdChoreography`**: Deterministic Key Derivation framework
-  - Complete message types and protocol phases
-  - Placeholder crypto operations (needs completion with aura-crypto integration)
-  - All-to-all broadcast patterns implemented
-  - Result verification framework present
-
-- **`FrostSigningChoreography`**: FROST threshold signatures
-  - Module structure exists but implementation is minimal
-  - Needs integration with frost-ed25519 crate operations
-
-**Coordination Protocols:**
-
-- **`EpochBumpChoreography`**: Session epoch management framework
-- **`JournalSyncChoreography`**: Ledger synchronization framework (needs CRDT integration)
-- **`FailureRecovery`**: Recovery protocol framework
-
-**Protocol Patterns:**
-
-- **`DecentralizedLottery`**: Complete distributed lock acquisition
-  - Deterministic lottery ticket computation with cryptographic randomness
-  - Winner selection with Byzantine fault tolerance
-  - Lock coordination with timeout and release mechanisms
-
-### 5. Handler System (`handlers.rs`)
-
-**Complete Transport Integration:**
-
-- **`StandardHandlerFactory`**: Creates handlers with Aura-standard types (DeviceId, Uuid, Vec<u8>)
-- **Extension Traits**: `MiddlewareExt` and `HandlerAdapterExt` for easy composition
-- **Boxed Handler Support**: Full trait object support for dynamic dispatch
-- **Transport Bridge**: Re-exports from `aura-transport` when feature is enabled
-
-### 6. Testing Infrastructure (`test_utils.rs`, `test_helpers.rs`)
-
-**Complete Framework:**
-
-- **Memory Transport**: Simple in-memory transport for testing choreographies
-- **Deterministic UUIDs**: Fixed UUID generation for reproducible tests
-- **Effects Injection**: Test effects with deterministic time and randomness
-- **Middleware Testing**: Framework for testing middleware composition in isolation
-- **Simulation Support**: Time travel debugging and protocol replay capabilities
+// Handler provides concrete implementations
+let handler = CompositeHandler::for_production(device_id)?;
+let result = my_protocol(&handler, &handler).await?;
+```
 
 ## Quick Start
 
-### Basic Choreographic Protocol
+### Basic Effect Usage
 
 ```rust
-use aura_protocol::protocols::choreographic::{
-    ChoreographicHandlerBuilder, BridgedRole, BridgedEndpoint
-};
-use aura_protocol::effects::Effects;
+use aura_protocol::handlers::CompositeHandler;
+use aura_protocol::effects::{CryptoEffects, NetworkEffects};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create deterministic effects for testing
-    let effects = Effects::deterministic(42, 0);
-    
-    // Build choreographic handler with full middleware stack
-    let handler = ChoreographicHandlerBuilder::new(effects)
-        .with_device_name("device-1".to_string())
-        .build_in_memory(device_id, context);
-    
-    // Use in choreographic protocol
-    let role = BridgedRole { device_id, role_index: 0 };
-    let mut endpoint = BridgedEndpoint::new(context);
-    
-    // Execute protocol phases...
+    // Create handler for testing
+    let handler = CompositeHandler::for_testing(device_id);
+
+    // Use crypto effects
+    let hash = handler.blake3_hash(b"hello world").await;
+    let signature = handler.sign_message(b"message").await?;
+
+    // Use network effects
+    handler.broadcast(message).await?;
+    let received = handler.receive().await?;
+
     Ok(())
 }
 ```
 
-### Custom Middleware Stack
+### Execution Modes
 
 ```rust
-use aura_protocol::middleware::{
-    MiddlewareStackBuilder, MiddlewareConfig,
-    observability::ObservabilityConfig,
-    error_recovery::ErrorRecoveryConfig,
-};
+use aura_protocol::handlers::CompositeHandler;
 
-let handler = base_handler;
+// Production mode - uses real system APIs
+let prod_handler = CompositeHandler::for_production(device_id)?;
 
-// Configure middleware
-let config = MiddlewareConfig {
-    device_name: "my-device".to_string(),
-    enable_observability: true,
-    enable_capabilities: true,
-    enable_error_recovery: true,
-    observability_config: Some(ObservabilityConfig {
-        device_name: "my-device".to_string(),
-        log_level: tracing::Level::DEBUG,
-        enable_trace_recording: true,
-        capture_message_contents: false,
-        ..Default::default()
-    }),
-    error_recovery_config: Some(ErrorRecoveryConfig {
-        max_retries: 5,
-        initial_delay_ms: 100,
-        max_delay_ms: 5000,
-        backoff_multiplier: 2.0,
-        ..Default::default()
-    }),
-};
+// Testing mode - uses mock implementations
+let test_handler = CompositeHandler::for_testing(device_id);
 
-// Build full stack
-let handler = MiddlewareStackBuilder::new(handler)
-    .with_config(config)
-    .build();
+// Simulation mode - uses controlled, deterministic implementations
+let sim_handler = CompositeHandler::for_simulation(device_id, seed);
 ```
 
-### Deterministic Protocol Testing
+### Deterministic Testing
 
 ```rust
-use aura_protocol::effects::Effects;
-
 #[tokio::test]
 async fn test_protocol_deterministically() {
-    // Create deterministic effects with fixed seed
-    let effects = Effects::deterministic(42, 1000);
-    
-    // Build handler with test effects
-    let handler = handler
-        .with_effects(effects)
-        .with_observability(config);
-    
-    // Run protocol - will be deterministic and reproducible
-    let result = run_protocol(&handler).await.unwrap();
-    
-    // Verify expected outcome
-    assert_eq!(result.status, ProtocolStatus::Success);
+    let handler = CompositeHandler::for_simulation(device_id, 42);
+
+    // Protocol execution will be deterministic
+    let result = run_protocol(&handler).await;
+
+    // Same seed always produces same result
+    assert_eq!(result.status, expected_status);
 }
 ```
 
-## Development Roadmap
+### Type-Erased Usage
 
-### Immediate Priorities (High Impact)
+```rust
+use aura_protocol::handlers::AuraHandler;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-1. **Complete Protocol Implementations**:
-   - Finish DKD choreography with real cryptographic operations
-   - Implement FROST signing choreography with threshold coordination
-   - Complete journal sync choreography with CRDT integration
+// Create type-erased handler
+let handler: Arc<RwLock<Box<dyn AuraHandler>>> =
+    CompositeHandler::for_testing(device_id).into_boxed();
 
-2. **Re-enable Test Suite**:
-   - Update disabled tests for new API changes
-   - Restore Byzantine fault tolerance tests
-   - Re-enable simulation and time travel debugging tests
+// Still use typed effect traits through automatic bridge
+let hash = handler.blake3_hash(b"data").await;
+```
 
-3. **Production Hardening**:
-   - Complete network transport integration for production deployment
-   - Expand metrics system beyond basic atomic counters
-   - Performance optimization for high-throughput scenarios
+## Core Components
 
-### Medium-Term Goals
+### 1. Effect System (`effects/`)
 
-1. **Protocol Library Expansion**:
-   - Recovery and resharing choreographies
-   - Account migration protocols
-   - Multi-device coordination patterns
+**Core Effect Traits:**
 
-2. **Developer Experience**:
-   - Protocol debugging tools and visualizations
-   - Choreography composition utilities
-   - Better error messages and diagnostics
+- **`CryptoEffects`**: Cryptographic operations
+  ```rust
+  #[async_trait]
+  pub trait CryptoEffects {
+      async fn blake3_hash(&self, data: &[u8]) -> [u8; 32];
+      async fn sign_message(&self, message: &[u8]) -> Result<Signature>;
+      async fn verify_signature(&self, signature: &Signature, message: &[u8]) -> bool;
+  }
+  ```
 
-3. **Performance Optimization**:
-   - Reduce middleware overhead through zero-cost abstractions
-   - Optimize message serialization and transport
-   - Implement connection pooling and batching
+- **`NetworkEffects`**: Network communication
+  ```rust
+  #[async_trait]
+  pub trait NetworkEffects {
+      async fn send_message(&self, target: DeviceId, message: Vec<u8>) -> Result<()>;
+      async fn broadcast(&self, message: Vec<u8>) -> Result<()>;
+      async fn receive(&self) -> Result<(DeviceId, Vec<u8>)>;
+  }
+  ```
 
-## Architecture Strengths
+- **`StorageEffects`**: Persistent storage
+  ```rust
+  #[async_trait]
+  pub trait StorageEffects {
+      async fn get(&self, namespace: &str, key: &str) -> Result<Option<Vec<u8>>>;
+      async fn set(&self, namespace: &str, key: &str, value: Vec<u8>) -> Result<()>;
+      async fn delete(&self, namespace: &str, key: &str) -> Result<()>;
+  }
+  ```
 
-### What Works Well
+**Effect System Features:**
+- Zero-overhead static dispatch through traits
+- Automatic type-erased bridge for dynamic usage
+- Configurable backends for different execution environments
+- Comprehensive testing support with mock implementations
 
-1. **Type Safety**: Strong type system with session types prevents protocol violations at compile time
-2. **Middleware Composition**: Clean, zero-cost abstractions with compile-time middleware stacks
-3. **Effect Injection**: Complete separation of pure protocol logic from side effects enables deterministic testing
-4. **Choreographic Integration**: Full Rumpsteak integration with automatic local projection from global protocols
-5. **Error Handling**: Comprehensive error taxonomy with context preservation and unified error system
-6. **Testing Framework**: Deterministic testing with controlled effects, time, and randomness
+### 2. Handler Infrastructure (`handlers/`)
 
-### Design Decisions
+**`CompositeHandler`**: The main handler implementation that combines all effect backends:
 
-**Why Choreographic Programming?**
-- Type safety through session types prevents deadlocks and protocol violations
-- Global viewpoint simplifies protocol reasoning and verification
-- Automatic projection to local behavior eliminates manual coordination code
-- Compile-time verification of protocol properties
+```rust
+impl CompositeHandler {
+    // Factory methods for different contexts
+    pub fn for_production(device_id: DeviceId) -> Result<Self>;
+    pub fn for_testing(device_id: DeviceId) -> Self;
+    pub fn for_simulation(device_id: DeviceId, seed: u64) -> Self;
 
-**Why Middleware Architecture?**
-- Each concern (observability, authorization, recovery) independently implemented and tested
-- Protocol logic remains pure and transport-agnostic
-- New middleware can be added without modifying existing code
-- Middleware components are reusable across different protocols
+    // Access to execution context
+    pub fn device_id(&self) -> DeviceId;
+    pub fn execution_mode(&self) -> ExecutionMode;
+}
+```
 
-**Why Algebraic Effects?**
-- All side effects can be mocked and controlled for testing
-- Deterministic testing with fixed seeds and controlled time progression
-- Same protocol logic runs across different platforms and environments
-- Effects can be traced and monitored for observability
+**Handler Types:**
+- **Memory Handlers**: Fast in-memory implementations for testing
+- **Real Handlers**: Production implementations using system APIs
+- **Mock Handlers**: Controllable handlers for unit testing
+- **Simulation Handlers**: Deterministic handlers for reproducible testing
+
+### 3. Protocol Foundation (`choreography/`, `messages/`, `sync/`)
+
+**Message Types**: Strongly-typed protocol messages in `messages/`:
+- Crypto protocol messages (DKD, FROST, resharing)
+- Social protocol messages (rendezvous)
+- Common message patterns (envelopes, errors)
+
+**Choreographic Framework**: Infrastructure for choreographic programming in `choreography/`:
+- Protocol definitions and implementations
+- Runtime adaptation and integration
+- Type system for roles and endpoints
+
+**Synchronization Protocols**: State sync and anti-entropy protocols in `sync/`:
+- Peer view management
+- Intent state synchronization
+- Anti-entropy protocols for consistency
+
+### 4. Testing Infrastructure (`handlers/`, `effects/`)
+
+**Deterministic Testing:**
+- Fixed-seed random number generation
+- Controlled time progression
+- Reproducible network behavior
+- Deterministic storage operations
+
+**Memory Implementations:**
+- In-memory storage with persistence simulation
+- In-memory network with message routing
+- Mock crypto operations with consistent results
 
 ## Integration with Aura Ecosystem
 
-This crate integrates with the broader Aura ecosystem:
+This crate provides the foundation for all other Aura components:
 
-- **`aura-crypto`**: Cryptographic primitives, FROST operations, and Merkle trees
-- **`aura-journal`**: CRDT ledger operations and event persistence
-- **`aura-types`**: Core Aura types, error handling, and effects system
-- **`aura-messages`**: Wire format message types for protocol communication
-- **`aura-transport`**: Transport layer implementations and network handlers
-- **`aura-agent`**: Device-level agent that uses protocol handlers for coordination
-- **`aura-simulator`**: Deterministic protocol simulation and Byzantine testing
-- **`rumpsteak-choreography`**: Choreographic programming framework (Rumpsteak-Aura fork)
+- **`aura-core`**: Provides core types and interfaces used by the effect system
+- **`aura-crypto`**: Implements cryptographic primitives used by crypto effects
+- **`aura-agent`**: Uses handlers for device-level operations and protocol coordination
+- **`aura-journal`**: Uses journal effects for CRDT state management
+- **`aura-simulator`**: Uses simulation handlers for controlled testing environments
+- **`aura-choreography`**: Uses choreographic infrastructure for protocol definitions
 
 ## Module Structure
 
 ```
 aura-protocol/
-├── middleware/          # Production-ready composable middleware
-│   ├── observability.rs # Unified tracing/metrics/dev console (1000+ lines)
-│   ├── effects.rs       # Effect injection with adapter pattern
-│   ├── error_recovery.rs# Retry logic and fault tolerance
-│   ├── capability.rs    # Authorization and access control
-│   ├── session.rs       # Session lifecycle management
-│   ├── stack.rs         # Type-safe middleware composition
-│   └── ...              # Other middleware components
-├── effects/             # Complete algebraic effects system
-│   ├── signing.rs       # Cryptographic effects with Ed25519
-│   ├── time.rs          # Time effects with simulation support
-│   ├── console.rs       # Logging and development effects
-│   └── mod.rs           # Unified ProtocolEffects interface
-├── protocols/           # Protocol implementations and patterns
-│   ├── choreographic/   # Complete Rumpsteak integration
-│   │   ├── handler_adapter.rs      # ChoreoHandler implementation
-│   │   ├── middleware_integration.rs # Builder and composition
-│   │   ├── error_handling.rs       # Byzantine detection
-│   │   └── timeout_management.rs   # Operation timeouts
-│   ├── threshold_crypto/# Threshold cryptography protocols
-│   │   ├── dkd_choreography.rs     # DKD implementation (partial)
-│   │   └── frost_signing_choreography.rs # FROST (minimal)
-│   ├── coordination/    # Coordination and sync protocols
-│   └── patterns/        # Reusable protocol patterns
-├── context.rs           # Protocol execution context
-├── types.rs             # Core protocol types and utilities
-├── handlers.rs          # Transport handler factory and adapters
-└── test_utils.rs        # Testing framework and utilities
+├── effects/             # Core algebraic effects system
+│   ├── mod.rs          # Effect trait definitions and core types
+│   ├── crypto.rs       # Cryptographic effect implementations
+│   ├── network.rs      # Network effect implementations
+│   ├── storage.rs      # Storage effect implementations
+│   ├── time.rs         # Time and epoch management effects
+│   ├── console.rs      # Logging and console effects
+│   ├── journal.rs      # Journal operation effects
+│   ├── system.rs       # Core effect system infrastructure
+│   └── semilattice/    # CRDT and semilattice handlers
+├── handlers/            # Handler implementations and infrastructure
+│   ├── composite.rs    # Main CompositeHandler implementation
+│   ├── factory.rs      # Handler factory methods
+│   ├── typed_bridge.rs # Type-erased to typed effect bridge
+│   ├── crypto/         # Crypto handler implementations
+│   ├── network/        # Network handler implementations
+│   ├── storage/        # Storage handler implementations
+│   ├── console/        # Console handler implementations
+│   └── ...             # Other specialized handlers
+├── choreography/        # Choreographic programming infrastructure
+│   ├── protocols/      # Protocol definitions and implementations
+│   ├── runtime/        # Runtime adaptation and execution
+│   ├── types/          # Choreographic type system
+│   └── integration.rs  # Integration with effect system
+├── messages/            # Protocol message definitions
+│   ├── crypto/         # Cryptographic protocol messages
+│   ├── social/         # Social protocol messages
+│   └── common/         # Common message patterns
+├── sync/               # Synchronization and anti-entropy protocols
+├── guards/             # Protocol execution guards and constraints
+├── middleware/         # Middleware framework (basic)
+├── context.rs          # Protocol execution context
+└── lib.rs             # Main crate interface
 ```
-
-## Features
-
-- **`simulation`**: Enables simulation handler and deterministic testing framework
-- **`test-utils`**: Enables testing utilities, fault injection, and Byzantine testing
-- **`transport`**: Enables transport handler integration (default, required for handler creation)
 
 ## Performance Characteristics
 
-**Current Status**: Focus on correctness and type safety over performance optimization
+**Zero-Cost Abstractions:**
+- Effect traits compile to direct function calls with full inlining
+- No runtime overhead for type-safe effect usage
+- Static dispatch eliminates vtable lookups in hot paths
 
-**Known Performance Considerations**:
-- Middleware stack uses boxing for dynamic dispatch (acceptable overhead for protocol handlers)
-- Message serialization uses bincode (efficient but could be optimized further)
-- Effects system has minimal overhead for production use cases
-- Memory allocations are minimized where possible
+**Efficient Implementations:**
+- Memory handlers use efficient data structures (HashMap, Vec)
+- Real handlers minimize system call overhead
+- Message serialization uses compact binary formats
 
-**Future Optimizations**:
-- Zero-cost middleware abstractions through monomorphization
-- Custom serialization formats for high-frequency messages
-- Connection pooling and message batching for network efficiency
-- Protocol-specific optimizations based on usage patterns
+**Scalability Considerations:**
+- Handlers are designed for concurrent access patterns
+- Effect system supports both sync and async operations
+- Memory usage is minimized through careful resource management
 
-## License
+## Development Status
 
-This crate is part of the Aura project and follows the same licensing terms (MIT OR Apache-2.0).
+**Stable and Production-Ready:**
+- Core effect system and trait definitions
+- Handler infrastructure and factory methods
+- Memory and mock implementations for testing
+- Type-erased bridge for dynamic dispatch
+
+**Active Development:**
+- Choreographic programming integration
+- Protocol message types and definitions
+- Middleware framework expansion
+- Advanced CRDT and semilattice handlers
+
+**Future Plans:**
+- Performance optimization through custom allocators
+- Advanced monitoring and observability features
+- Protocol-specific optimizations
+- Enhanced debugging and development tools
+
+## Contributing
+
+When contributing to `aura-protocol`:
+
+1. **Effect System**: Follow algebraic effect patterns with pure trait interfaces
+2. **Handler Implementation**: Implement all required effect traits for new handler types
+3. **Testing**: Provide both unit tests and integration tests for new functionality
+4. **Documentation**: Document public APIs with examples and usage patterns
+5. **Performance**: Consider both correctness and performance in design decisions

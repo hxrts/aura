@@ -2,8 +2,10 @@
 //!
 //! Provides different implementations of TimeEffects for various execution contexts.
 
-// Temporarily commented out - incomplete implementations
-// pub mod real;
-// pub mod simulated;
-// pub use real::RealTimeHandler;
-// pub use simulated::SimulatedTimeHandler;
+pub mod enhanced;
+pub mod real;
+pub mod simulated;
+
+pub use enhanced::EnhancedTimeHandler;
+pub use real::RealTimeHandler;
+pub use simulated::SimulatedTimeHandler;

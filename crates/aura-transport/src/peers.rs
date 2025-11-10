@@ -3,8 +3,8 @@
 //! Core data structures for peer discovery, capability management, and network coordination.
 //! These types are shared across storage, communication, and coordination subsystems.
 
-use aura_types::identifiers::{AccountId, DeviceId};
-use aura_types::relationships::TrustLevel;
+use aura_core::identifiers::{AccountId, DeviceId};
+use aura_core::relationships::TrustLevel;
 use serde::{Deserialize, Serialize};
 
 /// Unique identifier for a peer in the network
@@ -254,7 +254,7 @@ impl SelectionCriteria {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_types::identifiers::{AccountId, DeviceId};
+    use aura_core::identifiers::{AccountId, DeviceId};
 
     fn create_test_peer_info(
         reliability: u32,

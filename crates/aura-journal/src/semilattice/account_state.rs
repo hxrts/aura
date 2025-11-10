@@ -6,11 +6,11 @@
 
 use super::{DeviceRegistry, EpochLog};
 use crate::types::{DeviceMetadata, GuardianMetadata};
-use aura_crypto::Ed25519VerifyingKey;
-use aura_types::{
+use aura_core::{
     identifiers::{AccountId, DeviceId},
     semilattice::{Bottom, CvState, JoinSemilattice},
 };
+use aura_crypto::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -74,7 +74,7 @@ impl AccountState {
 
     /// Remove a device (using tombstone in the registry)
     pub fn remove_device(&mut self, device_id: DeviceId) {
-        // For now, devices are grow-only. In practice, you'd implement
+        // TODO fix - For now, devices are grow-only. In practice, you'd implement
         // observed-remove semantics in DeviceRegistry if needed
         if let Some(mut device) = self.device_registry.devices.get(&device_id).cloned() {
             device.last_seen = 0; // Mark as removed with timestamp 0
@@ -88,8 +88,12 @@ impl AccountState {
     }
 
     /// Get all active devices
-    pub fn get_devices(&self) -> Vec<&DeviceMetadata> {
-        self.device_registry.list_devices()
+    pub fn get_devices(&self) -> Vec<DeviceMetadata> {
+        self.device_registry
+            .list_devices()
+            .iter()
+            .map(|device| (*device).clone())
+            .collect()
     }
 
     // Epoch Management
@@ -125,8 +129,8 @@ impl AccountState {
     }
 
     /// Get all guardians
-    pub fn get_guardians(&self) -> Vec<&GuardianMetadata> {
-        self.guardian_registry.guardians.values().collect()
+    pub fn get_guardians(&self) -> Vec<GuardianMetadata> {
+        self.guardian_registry.guardians.values().cloned().collect()
     }
 
     // Operation Tracking
@@ -302,50 +306,11 @@ impl Default for MaxCounter {
     }
 }
 
-// Compatibility layer for migration from legacy AccountState
-
-/// Migration utilities for transitioning from legacy Automerge-based AccountState
-pub mod migration {
-    use super::*;
-    use crate::state::AccountState as LegacyAccountState;
-
-    /// Convert from legacy AccountState to modern semilattice-based AccountState
-    pub fn from_legacy(legacy: &LegacyAccountState) -> AccountState {
-        let mut modern = AccountState::new(legacy.account_id, legacy.group_public_key);
-
-        // Migrate devices
-        for device in legacy.get_devices() {
-            modern.add_device(device);
-        }
-
-        // Migrate epoch and lamport clock
-        modern.epoch_counter.set_max(legacy.get_epoch());
-        modern.lamport_clock.set_max(legacy.get_lamport_clock());
-
-        modern
-    }
-
-    /// Convert from modern semilattice AccountState to legacy (for backward compatibility)
-    pub fn to_legacy(modern: &AccountState) -> Result<LegacyAccountState, crate::error::Error> {
-        let mut legacy = LegacyAccountState::new(modern.account_id, modern.group_public_key)?;
-
-        // Migrate devices
-        for device in modern.get_devices() {
-            legacy.add_device(device.clone())?;
-        }
-
-        // Set epoch if higher
-        legacy.set_epoch_if_higher(modern.get_epoch())?;
-
-        Ok(legacy)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::{AccountIdExt, DeviceIdExt};
     use aura_crypto::Effects;
-    use aura_types::{AccountIdExt, DeviceIdExt};
 
     #[test]
     fn test_account_state_creation() {

@@ -238,18 +238,16 @@ proptest! {
             IdentityKeyContext::AccountRoot {
                 account_id: relationship.clone(),
             },
-            PermissionKeyContext::CommunicationScope {
-                operation: operation1,
-                relationship: "rel1".to_string(),
+            PermissionKeyContext::Communication {
+                capability_id: operation1.as_bytes().to_vec(),
             }
         );
         let spec2 = KeyDerivationSpec::with_permission(
             IdentityKeyContext::AccountRoot {
                 account_id: relationship,
             },
-            PermissionKeyContext::CommunicationScope {
-                operation: operation2,
-                relationship: "rel2".to_string(),
+            PermissionKeyContext::Communication {
+                capability_id: operation2.as_bytes().to_vec(),
             }
         );
 

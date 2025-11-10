@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aura WebSocket Transport Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.connecting {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .messages {
+            height: 300px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        input[type="text"] {
+            width: 400px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Aura WebSocket Transport Test</h1>
+        <p>This page tests WebSocket connectivity to the Aura transport server.</p>
+        
+        <div class="controls">
+            <label for="serverUrl">Server URL:</label>
+            <input type="text" id="serverUrl" value="ws://localhost:8081/ws" placeholder="ws://localhost:8081/ws">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+
+        <div id="status" class="status disconnected">Disconnected</div>
+
+        <div class="controls">
+            <label for="messageInput">Message:</label>
+            <input type="text" id="messageInput" value="Hello from browser!" placeholder="Enter message to send">
+            <button id="sendBtn" onclick="sendMessage()" disabled>Send Message</button>
+            <button onclick="sendTestEnvelope()">Send Test Envelope</button>
+        </div>
+
+        <div class="controls">
+            <h3>Message Log</h3>
+            <div id="messages" class="messages"></div>
+            <button onclick="clearLog()">Clear Log</button>
+        </div>
+    </div>
+
+    <script>
+        let websocket = null;
+        let deviceId = "browser-client-" + Math.random().toString(36).substring(7);
+
+        function updateStatus(message, type) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = 'status ' + type;
+        }
+
+        function log(message) {
+            const messagesEl = document.getElementById('messages');
+            const timestamp = new Date().toISOString();
+            messagesEl.textContent += `[${timestamp}] ${message}\n`;
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function connect() {
+            const url = document.getElementById('serverUrl').value;
+            updateStatus('Connecting...', 'connecting');
+            log(`Connecting to ${url}`);
+
+            try {
+                websocket = new WebSocket(url);
+
+                websocket.onopen = function(event) {
+                    updateStatus('Connected', 'connected');
+                    log('WebSocket connection established');
+                    document.getElementById('connectBtn').disabled = true;
+                    document.getElementById('disconnectBtn').disabled = false;
+                    document.getElementById('sendBtn').disabled = false;
+                };
+
+                websocket.onmessage = function(event) {
+                    log('Received: ' + event.data);
+                    
+                    // Try to parse as JSON (if it's a text message)
+                    try {
+                        if (typeof event.data === 'string') {
+                            const parsed = JSON.parse(event.data);
+                            log('Parsed JSON: ' + JSON.stringify(parsed, null, 2));
+                        }
+                    } catch (e) {
+                        // Not JSON, that's fine
+                        if (event.data instanceof ArrayBuffer) {
+                            log('Received binary data: ' + event.data.byteLength + ' bytes');
+                        }
+                    }
+                };
+
+                websocket.onerror = function(error) {
+                    updateStatus('Error', 'disconnected');
+                    log('WebSocket error: ' + error);
+                };
+
+                websocket.onclose = function(event) {
+                    updateStatus('Disconnected', 'disconnected');
+                    log('WebSocket connection closed: ' + event.code + ' ' + event.reason);
+                    document.getElementById('connectBtn').disabled = false;
+                    document.getElementById('disconnectBtn').disabled = true;
+                    document.getElementById('sendBtn').disabled = true;
+                };
+
+            } catch (error) {
+                updateStatus('Connection failed', 'disconnected');
+                log('Failed to connect: ' + error);
+            }
+        }
+
+        function disconnect() {
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
+        }
+
+        function sendMessage() {
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                log('ERROR: WebSocket not connected');
+                return;
+            }
+
+            const message = document.getElementById('messageInput').value;
+            log('Sending: ' + message);
+            websocket.send(message);
+        }
+
+        function sendTestEnvelope() {
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                log('ERROR: WebSocket not connected');
+                return;
+            }
+
+            // Create a test envelope that matches the Aura WebSocketEnvelope format
+            const envelope = {
+                from: deviceId,
+                to: "server-device",
+                payload: Array.from(new TextEncoder().encode("Test message from browser")),
+                sequence: Math.floor(Math.random() * 1000),
+                timestamp: Math.floor(Date.now() / 1000)
+            };
+
+            try {
+                // Send as JSON (in real implementation this would be CBOR)
+                const jsonData = JSON.stringify(envelope);
+                log('Sending test envelope: ' + jsonData);
+                websocket.send(jsonData);
+            } catch (error) {
+                log('ERROR sending envelope: ' + error);
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('messages').textContent = '';
+        }
+
+        // Auto-connect on page load
+        window.onload = function() {
+            log('Browser WebSocket test page loaded');
+            log('Device ID: ' + deviceId);
+            
+            // Check if WebSocket is supported
+            if (typeof WebSocket !== 'undefined') {
+                log('WebSocket is supported by this browser');
+            } else {
+                log('ERROR: WebSocket is not supported by this browser');
+                updateStatus('WebSocket not supported', 'disconnected');
+            }
+        };
+    </script>
+</body>
+</html>

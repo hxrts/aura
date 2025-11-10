@@ -1,13 +1,13 @@
 //! Memory-based ledger handler for testing
 
-use crate::effects::{LedgerEffects, LedgerError, LedgerEventStream, DeviceMetadata};
+use crate::effects::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEventStream};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Memory-based ledger handler for testing
 pub struct MemoryLedgerHandler {
-    // For now, use placeholder data structures
+    // TODO fix - For now, use placeholder data structures
     _events: Vec<Vec<u8>>,
 }
 
@@ -41,15 +41,25 @@ impl LedgerEffects for MemoryLedgerHandler {
         Ok(vec![])
     }
 
-    async fn is_device_authorized(&self, _device_id: aura_types::DeviceId, _operation: &str) -> Result<bool, LedgerError> {
+    async fn is_device_authorized(
+        &self,
+        _device_id: aura_core::DeviceId,
+        _operation: &str,
+    ) -> Result<bool, LedgerError> {
         Ok(true)
     }
 
-    async fn get_device_metadata(&self, _device_id: aura_types::DeviceId) -> Result<Option<DeviceMetadata>, LedgerError> {
+    async fn get_device_metadata(
+        &self,
+        _device_id: aura_core::DeviceId,
+    ) -> Result<Option<DeviceMetadata>, LedgerError> {
         Ok(None)
     }
 
-    async fn update_device_activity(&self, _device_id: aura_types::DeviceId) -> Result<(), LedgerError> {
+    async fn update_device_activity(
+        &self,
+        _device_id: aura_core::DeviceId,
+    ) -> Result<(), LedgerError> {
         Ok(())
     }
 

@@ -3,9 +3,9 @@
 
 module FROSTProtocol {
     import SessionTypes.*
-    
+
     // ========== FROST Types ==========
-    
+
     type Identifier = int  // FROST participant identifier
     type SigningShare = bytes
     type VerifyingKey = bytes
@@ -13,20 +13,20 @@ module FROSTProtocol {
     type Nonce = bytes
     type SigningCommitment = bytes
     type SignatureShare = bytes
-    
+
     type FROSTKeyShare = {
         identifier: Identifier,
         signingShare: SigningShare,
         verifyingKey: VerifyingKey
     }
-    
-    type FROSTRound = 
+
+    type FROSTRound =
         | Round1_Commitment
         | Round2_Signing
         | Aggregation
         | Complete
         | Failed
-    
+
     type FROSTSession = {
         sessionId: SessionId,
         message: bytes,
@@ -40,7 +40,7 @@ module FROSTProtocol {
         finalSignature: Signature,
         groupVerifyingKey: VerifyingKey
     }
-    
+
     type FROSTParticipant = {
         identifier: Identifier,
         keyShare: FROSTKeyShare,
@@ -49,15 +49,15 @@ module FROSTProtocol {
         hasCommitted: bool,
         hasSigned: bool
     }
-    
+
     // ========== State Variables ==========
-    
+
     var frostSessions: SessionId -> FROSTSession
     var frostParticipants: (SessionId, Identifier) -> FROSTParticipant
     var keyPackages: Identifier -> FROSTKeyShare  // Long-lived key shares
-    
+
     // ========== Helper Functions ==========
-    
+
     // Generate nonce and commitment (Round 1)
     pure def generateCommitment(keyShare: FROSTKeyShare): (Nonce, SigningCommitment) = {
         // Abstract representation of:
@@ -67,7 +67,7 @@ module FROSTProtocol {
         val commitment = SigningCommitment("commit_" + keyShare.identifier.toString())
         (nonce, commitment)
     }
-    
+
     // Create signature share (Round 2)
     pure def createSignatureShare(
         message: bytes,
@@ -78,7 +78,7 @@ module FROSTProtocol {
         // Abstract representation of FROST round 2 signing
         SignatureShare("share_" + keyShare.identifier.toString())
     }
-    
+
     // Aggregate signature shares
     pure def aggregateSignatures(
         message: bytes,
@@ -89,7 +89,7 @@ module FROSTProtocol {
         // Abstract representation of FROST aggregation
         Signature("final_sig")
     }
-    
+
     // Verify signature
     pure def verifySignature(
         message: bytes,
@@ -97,21 +97,21 @@ module FROSTProtocol {
         publicKey: VerifyingKey
     ): bool = {
         // Abstract Ed25519 signature verification
-        true  // Simplified
+        true  // TODO fix - Simplified
     }
-    
+
     // Check if we have threshold commitments
     pure def hasThresholdCommitments(session: FROSTSession): bool = {
         session.commitments.keys().size() >= session.threshold
     }
-    
+
     // Check if we have threshold shares
     pure def hasThresholdShares(session: FROSTSession): bool = {
         session.signatureShares.keys().size() >= session.threshold
     }
-    
+
     // ========== Actions ==========
-    
+
     // Initialize FROST signing session
     action initiateFROSTSession(
         sessionId: SessionId,
@@ -156,7 +156,7 @@ module FROSTProtocol {
             keyPackages' = keyPackages
         }
     }
-    
+
     // Round 1: Generate and submit commitment
     action submitCommitment(sessionId: SessionId, participantId: Identifier): bool = {
         all {
@@ -192,7 +192,7 @@ module FROSTProtocol {
             keyPackages' = keyPackages
         }
     }
-    
+
     // Round 2: Create and submit signature share
     action submitSignatureShare(sessionId: SessionId, participantId: Identifier): bool = {
         all {
@@ -225,7 +225,7 @@ module FROSTProtocol {
             keyPackages' = keyPackages
         }
     }
-    
+
     // Aggregate shares into final signature
     action aggregateSignature(sessionId: SessionId): bool = {
         all {
@@ -254,7 +254,7 @@ module FROSTProtocol {
             keyPackages' = keyPackages
         }
     }
-    
+
     // Fail signing session
     action failSession(sessionId: SessionId): bool = {
         all {
@@ -269,9 +269,9 @@ module FROSTProtocol {
             keyPackages' = keyPackages
         }
     }
-    
+
     // ========== Invariants ==========
-    
+
     // Threshold requirement: can't complete without threshold participants
     invariant thresholdInvariant = {
         frostSessions.values().forall(session =>
@@ -281,21 +281,21 @@ module FROSTProtocol {
             )
         )
     }
-    
+
     // Commitment before signing
     invariant commitmentBeforeSigning = {
         frostParticipants.values().forall(participant =>
             participant.hasSigned implies participant.hasCommitted
         )
     }
-    
+
     // Shares only from committed participants
     invariant sharesFromCommitted = {
         frostSessions.values().forall(session =>
             session.signatureShares.keys().isSubsetOf(session.commitments.keys())
         )
     }
-    
+
     // Valid signature when complete
     invariant validSignature = {
         frostSessions.values().forall(session =>
@@ -303,21 +303,21 @@ module FROSTProtocol {
                 verifySignature(session.message, session.finalSignature, session.groupVerifyingKey)
         )
     }
-    
+
     // ========== Properties ==========
-    
+
     // Threshold property: any t-of-n subset can sign
     property thresholdSigningProperty = {
         always(frostSessions.values().forall(session =>
             // If any threshold subset participates
             val participatingSubset = session.commitments.keys().intersect(session.signatureShares.keys()),
-            (participatingSubset.size() >= session.threshold and 
+            (participatingSubset.size() >= session.threshold and
              session.currentRound == Aggregation) implies
                 // Then signature can be produced
                 eventually(frostSessions.get(session.sessionId).currentRound == Complete)
         ))
     }
-    
+
     // Unforgeability: can't create signature without threshold shares
     property unforgeabilityProperty = {
         always(frostSessions.values().forall(session =>
@@ -325,7 +325,7 @@ module FROSTProtocol {
                 session.signatureShares.keys().size() >= session.threshold
         ))
     }
-    
+
     // Determinism: same shares produce same signature
     property signatureDeterminism = {
         always(frostSessions.values().forall(session1 =>
@@ -341,16 +341,16 @@ module FROSTProtocol {
             )
         ))
     }
-    
+
     // Non-interactive aggregation: aggregator doesn't need secret
     property nonInteractiveAggregation = {
         // The aggregation step doesn't require any participant secrets
         // (This is captured by the fact that aggregateSignature only uses public data)
         always(true)  // Structural property, always holds by design
     }
-    
+
     // ========== Initial State ==========
-    
+
     action init = {
         all {
             frostSessions' = Map(),

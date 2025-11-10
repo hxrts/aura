@@ -4,6 +4,7 @@
 
 use crate::effects::{CryptoEffects, CryptoError};
 use async_trait::async_trait;
+use aura_core::effects::RandomEffects;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -88,8 +89,9 @@ impl Default for MockCryptoHandler {
     }
 }
 
+// First implement RandomEffects
 #[async_trait]
-impl CryptoEffects for MockCryptoHandler {
+impl RandomEffects for MockCryptoHandler {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         self.deterministic_bytes(len)
     }
@@ -101,20 +103,30 @@ impl CryptoEffects for MockCryptoHandler {
         array
     }
 
-    async fn random_range(&self, range: std::ops::Range<u64>) -> u64 {
+    async fn random_u64(&self) -> u64 {
+        let mut counter = self.counter.lock().unwrap();
+        *counter = counter.wrapping_add(1);
+        self.seed.wrapping_add(*counter)
+    }
+
+    async fn random_range(&self, min: u64, max: u64) -> u64 {
         let mut counter = self.counter.lock().unwrap();
         *counter = counter.wrapping_add(1);
 
-        let range_size = range.end - range.start;
-        if range_size == 0 {
-            return range.start;
+        if min >= max {
+            return min;
         }
 
+        let range_size = max - min;
         // Deterministic value within range
         let value = (self.seed.wrapping_add(*counter)) % range_size;
-        range.start + value
+        min + value
     }
+}
 
+// Then implement CryptoEffects (which inherits from RandomEffects)
+#[async_trait]
+impl CryptoEffects for MockCryptoHandler {
     async fn blake3_hash(&self, data: &[u8]) -> [u8; 32] {
         // Check for pre-configured response
         if let Some(hash) = self.responses.lock().unwrap().hashes.get(data) {
@@ -147,38 +159,34 @@ impl CryptoEffects for MockCryptoHandler {
         hash
     }
 
-    async fn ed25519_sign(&self, data: &[u8], _key: &SigningKey) -> Result<Signature, CryptoError> {
+    async fn ed25519_sign(&self, data: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // Check for pre-configured response
         if let Some(sig_bytes) = self.responses.lock().unwrap().signatures.get(data) {
-            if sig_bytes.len() == 64 {
-                let mut sig_array = [0u8; 64];
-                sig_array.copy_from_slice(sig_bytes);
-                return Ok(Signature::from_bytes(&sig_array));
-            }
+            return Ok(sig_bytes.clone());
         }
 
-        // Generate deterministic signature
+        // Generate deterministic signature from data and key
+        let mut combined = Vec::new();
+        combined.extend_from_slice(data);
+        combined.extend_from_slice(private_key);
         let sig_bytes = self.deterministic_bytes(64);
-        let mut sig_array = [0u8; 64];
-        sig_array.copy_from_slice(&sig_bytes);
 
-        Ok(Signature::from_bytes(&sig_array))
+        Ok(sig_bytes)
     }
 
     async fn ed25519_verify(
         &self,
         data: &[u8],
-        signature: &Signature,
-        _public_key: &VerifyingKey,
+        signature: &[u8],
+        _public_key: &[u8],
     ) -> Result<bool, CryptoError> {
         // Check for pre-configured response
-        let sig_bytes = signature.to_bytes().to_vec();
         if let Some(result) = self
             .responses
             .lock()
             .unwrap()
             .verifications
-            .get(&(data.to_vec(), sig_bytes))
+            .get(&(data.to_vec(), signature.to_vec()))
         {
             return Ok(*result);
         }
@@ -187,20 +195,22 @@ impl CryptoEffects for MockCryptoHandler {
         Ok(true)
     }
 
-    async fn ed25519_generate_keypair(&self) -> Result<(SigningKey, VerifyingKey), CryptoError> {
+    async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
         // Generate deterministic keypair
-        let key_bytes = self.deterministic_bytes(32);
-        let mut key_array = [0u8; 32];
-        key_array.copy_from_slice(&key_bytes);
+        let private_key = self.deterministic_bytes(32);
+        let public_key = self.deterministic_bytes(32); // TODO fix - Simplified - would derive from private in real impl
 
-        let signing_key = SigningKey::from_bytes(&key_array);
-        let verifying_key = signing_key.verifying_key();
-
-        Ok((signing_key, verifying_key))
+        Ok((private_key, public_key))
     }
 
-    async fn ed25519_public_key(&self, private_key: &SigningKey) -> VerifyingKey {
-        private_key.verifying_key()
+    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // Generate deterministic public key from private key
+        let mut combined = Vec::new();
+        combined.extend_from_slice(b"pubkey_derive");
+        combined.extend_from_slice(private_key);
+        let hash = self.blake3_hash(&combined).await;
+
+        Ok(hash.to_vec())
     }
 
     fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
@@ -211,5 +221,200 @@ impl CryptoEffects for MockCryptoHandler {
     fn secure_zero(&self, data: &mut [u8]) {
         // For mock, just zero the data normally
         data.fill(0);
+    }
+
+    async fn hkdf_derive(
+        &self,
+        ikm: &[u8],
+        salt: &[u8],
+        info: &[u8],
+        output_len: usize,
+    ) -> Result<Vec<u8>, CryptoError> {
+        // Mock HKDF using deterministic approach
+        let combined: Vec<u8> = ikm
+            .iter()
+            .chain(salt.iter())
+            .chain(info.iter())
+            .copied()
+            .collect();
+
+        let hash = blake3::hash(&combined);
+        let mut output = vec![0u8; output_len];
+
+        // Expand the hash to fill the output length
+        for (i, byte) in output.iter_mut().enumerate() {
+            *byte = hash.as_bytes()[i % 32] ^ (i as u8);
+        }
+
+        Ok(output)
+    }
+
+    async fn blake3_hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
+        // Mock HMAC using deterministic approach
+        let mut combined = Vec::new();
+        combined.extend_from_slice(key);
+        combined.extend_from_slice(data);
+        combined.extend_from_slice(b"HMAC");
+        self.blake3_hash(&combined).await
+    }
+
+    async fn derive_key(
+        &self,
+        master_key: &[u8],
+        context: &aura_core::effects::crypto::KeyDerivationContext,
+    ) -> Result<Vec<u8>, CryptoError> {
+        // Mock key derivation using deterministic approach
+        let context_bytes = bincode::serialize(context).unwrap_or_default();
+        self.hkdf_derive(master_key, &[], &context_bytes, 32).await
+    }
+
+    async fn frost_generate_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+        // Mock FROST key generation
+        let mut key_shares = Vec::new();
+        for i in 0..max_signers {
+            let share = self.deterministic_bytes(64); // Mock key share
+            key_shares.push(share);
+        }
+        Ok(key_shares)
+    }
+
+    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
+        // Mock FROST nonce generation
+        Ok(self.deterministic_bytes(64))
+    }
+
+    async fn frost_create_signing_package(
+        &self,
+        message: &[u8],
+        nonces: &[Vec<u8>],
+        participants: &[u16],
+    ) -> Result<aura_core::effects::crypto::FrostSigningPackage, CryptoError> {
+        // Mock FROST signing package
+        let package_bytes = self.deterministic_bytes(128); // Mock package data
+        Ok(aura_core::effects::crypto::FrostSigningPackage {
+            message: message.to_vec(),
+            package: package_bytes,
+            participants: participants.to_vec(),
+        })
+    }
+
+    async fn frost_sign_share(
+        &self,
+        signing_package: &aura_core::effects::crypto::FrostSigningPackage,
+        key_share: &[u8],
+        nonces: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        // Mock FROST partial signature
+        let mut combined = Vec::new();
+        combined.extend_from_slice(&signing_package.message);
+        combined.extend_from_slice(key_share);
+        combined.extend_from_slice(nonces);
+
+        Ok(self.deterministic_bytes(64))
+    }
+
+    async fn frost_aggregate_signatures(
+        &self,
+        signing_package: &aura_core::effects::crypto::FrostSigningPackage,
+        signature_shares: &[Vec<u8>],
+    ) -> Result<Vec<u8>, CryptoError> {
+        // Mock FROST signature aggregation
+        let mut combined = Vec::new();
+        combined.extend_from_slice(&signing_package.message);
+        for share in signature_shares {
+            combined.extend_from_slice(share);
+        }
+
+        Ok(self.deterministic_bytes(64))
+    }
+
+    async fn frost_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        group_public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
+        // Mock FROST verification - always succeed for testing
+        Ok(true)
+    }
+
+    async fn chacha20_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        // Mock ChaCha20 encryption - just XOR with deterministic stream
+        let mut ciphertext = Vec::new();
+        let mut keystream_seed = Vec::new();
+        keystream_seed.extend_from_slice(key);
+        keystream_seed.extend_from_slice(nonce);
+
+        for (i, &byte) in plaintext.iter().enumerate() {
+            let keystream_byte = (keystream_seed[(i % keystream_seed.len())] ^ (i as u8));
+            ciphertext.push(byte ^ keystream_byte);
+        }
+
+        Ok(ciphertext)
+    }
+
+    async fn chacha20_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        // Mock ChaCha20 decryption - symmetric with encryption for XOR cipher
+        self.chacha20_encrypt(ciphertext, key, nonce).await
+    }
+
+    async fn aes_gcm_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        // Mock AES-GCM encryption - reuse ChaCha20 logic for simplicity
+        self.chacha20_encrypt(plaintext, key, nonce).await
+    }
+
+    async fn aes_gcm_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        // Mock AES-GCM decryption - reuse ChaCha20 logic for simplicity
+        self.chacha20_decrypt(ciphertext, key, nonce).await
+    }
+
+    async fn frost_rotate_keys(
+        &self,
+        old_shares: &[Vec<u8>],
+        old_threshold: u16,
+        new_threshold: u16,
+        new_max_signers: u16,
+    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+        // Mock FROST key rotation
+        self.frost_generate_keys(new_threshold, new_max_signers)
+            .await
+    }
+
+    fn is_simulated(&self) -> bool {
+        true // Mock handler is always simulated
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        vec![
+            "mock_ed25519".to_string(),
+            "mock_blake3".to_string(),
+            "mock_frost".to_string(),
+            "mock_chacha20".to_string(),
+            "mock_aes_gcm".to_string(),
+        ]
     }
 }

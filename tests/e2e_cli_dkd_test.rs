@@ -19,10 +19,10 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::{timeout, Duration};
 
 use aura_cli::{create_test_cli_handler, CliHandler};
-use aura_choreography::protocols::dkd::{execute_dkd, DkdConfig, DkdResult, DkdError};
+use aura_protocol::choreography::protocols::dkd::{execute_dkd, DkdConfig, DkdResult, DkdError};
 use aura_protocol::AuraEffectSystem;
 use aura_simulator::context::SimulatorContext;
-use aura_types::{DeviceId, identifiers::SessionId};
+use aura_core::{DeviceId, identifiers::SessionId};
 
 // Additional imports for test functionality
 extern crate hex;
@@ -108,7 +108,7 @@ impl MultiAgentTestHarness {
             // Create effect system for testing with deterministic seed
             let effect_system = AuraEffectSystem::for_testing(*device_id);
             let cli_handler = create_test_cli_handler(*device_id);
-            
+
             effect_systems.insert(*device_id, effect_system);
             cli_handlers.insert(*device_id, cli_handler);
         }
@@ -156,7 +156,7 @@ impl MultiAgentTestHarness {
 
         println!();
         println!("🎉 E2E CLI DKD Test completed successfully!");
-        
+
         Ok(final_results)
     }
 
@@ -165,9 +165,9 @@ impl MultiAgentTestHarness {
         // Create a temporary scenario file for testing
         let scenario_content = self.create_test_scenario_toml();
         let scenario_path = std::env::temp_dir().join("e2e_dkd_test_scenario.toml");
-        
+
         tokio::fs::write(&scenario_path, scenario_content).await?;
-        
+
         if self.config.verbose {
             println!("  📄 Created test scenario: {}", scenario_path.display());
             println!("  🔍 Validating scenario through CLI...");
@@ -177,18 +177,18 @@ impl MultiAgentTestHarness {
         let first_device = &self.device_ids[0];
         let cli_handler = self.cli_handlers.get(first_device).unwrap();
 
-        // Simulate CLI validation (in a real implementation, this would call the actual CLI scenarios command)
-        // For now, we'll validate the structure manually
+        // Simulate CLI validation (TODO fix - In a real implementation, this would call the actual CLI scenarios command)
+        // TODO fix - For now, we'll validate the structure manually
         let scenario_content_validated = tokio::fs::read_to_string(&scenario_path).await?;
         let scenario: toml::Value = toml::from_str(&scenario_content_validated)?;
 
         // Verify required fields are present
         let metadata = scenario.get("metadata")
             .ok_or("Missing metadata section in scenario")?;
-        
+
         let setup = scenario.get("setup")
             .ok_or("Missing setup section in scenario")?;
-            
+
         let phases = scenario.get("phases")
             .ok_or("Missing phases section in scenario")?
             .as_array()
@@ -208,7 +208,7 @@ impl MultiAgentTestHarness {
         let participants = setup.get("participants")
             .and_then(|v| v.as_integer())
             .ok_or("Missing or invalid participants in setup")? as usize;
-        
+
         let threshold = setup.get("threshold")
             .and_then(|v| v.as_integer())
             .ok_or("Missing or invalid threshold in setup")? as u32;
@@ -312,7 +312,7 @@ impl MultiAgentTestHarness {
                 if self.config.verbose {
                     println!("  ✅ All agents completed choreography successfully");
                     for (device_id, result) in &choreography_results {
-                        println!("    - Device {}: session={}, success={}, time={}ms", 
+                        println!("    - Device {}: session={}, success={}, time={}ms",
                             device_id, result.session_id, result.success, result.execution_time_ms);
                     }
                 }
@@ -367,7 +367,7 @@ impl MultiAgentTestHarness {
         if config.verbose {
             match &result {
                 Ok(dkd_result) => {
-                    println!("    ✅ Agent {} completed successfully (session={}, keys={})", 
+                    println!("    ✅ Agent {} completed successfully (session={}, keys={})",
                         device_id, dkd_result.session_id, dkd_result.derived_keys.len());
                 },
                 Err(e) => {
@@ -478,7 +478,7 @@ impl MultiAgentTestHarness {
 
     /// Verify that the derivation is deterministic by re-running it
     async fn verify_deterministic_derivation(&self, _results: &HashMap<DeviceId, DkdResult>) -> Result<bool, Box<dyn std::error::Error>> {
-        // For now, assume deterministic (would need to re-run the actual derivation)
+        // TODO fix - For now, assume deterministic (would need to re-run the actual derivation)
         // In a full implementation, this would re-execute the DKD with the same parameters
         // and verify the keys are identical
         if self.config.verbose {
@@ -489,8 +489,8 @@ impl MultiAgentTestHarness {
 
     /// Generate final test results
     async fn generate_final_results(
-        &self, 
-        choreography_results: HashMap<DeviceId, DkdResult>, 
+        &self,
+        choreography_results: HashMap<DeviceId, DkdResult>,
         validation_results: ValidationResults
     ) -> Result<E2ETestResults, Box<dyn std::error::Error>> {
         let total_execution_time = choreography_results.values()
@@ -581,7 +581,7 @@ property_type = "safety"
 [[properties]]
 name = "derivation_completes"
 property_type = "liveness"
-"#, 
+"#,
             self.config.participants,
             self.config.threshold,
             self.config.app_id,
@@ -651,13 +651,13 @@ fn keys_match(keys1: &HashMap<DeviceId, [u8; 32]>, keys2: &HashMap<DeviceId, [u8
 #[tokio::test]
 async fn test_e2e_cli_dkd_integration() {
     let config = E2ETestConfig::default();
-    
+
     let mut harness = MultiAgentTestHarness::new(config);
-    
+
     match harness.execute_test().await {
         Ok(results) => {
             assert!(results.success, "E2E test failed: validation did not pass");
-            
+
             println!();
             println!("📈 Final Test Results");
             println!("====================");
@@ -665,17 +665,17 @@ async fn test_e2e_cli_dkd_integration() {
             println!("👥 Participants: {}", results.participants);
             println!("⏱️  Total Execution Time: {}ms", results.total_execution_time_ms);
             println!("🔑 Derived Keys: {}", results.choreography_results.len());
-            
+
             // Verify specific properties
-            assert!(results.validation_results.derived_keys_match, 
+            assert!(results.validation_results.derived_keys_match,
                 "Derived keys do not match across participants");
-            assert!(results.validation_results.derivation_deterministic, 
+            assert!(results.validation_results.derivation_deterministic,
                 "Derivation is not deterministic");
-            assert!(results.validation_results.session_consistency, 
+            assert!(results.validation_results.session_consistency,
                 "Session IDs are not consistent");
-            assert!(results.validation_results.derivation_completes, 
+            assert!(results.validation_results.derivation_completes,
                 "Not all participants completed derivation");
-            
+
             println!("✅ All property validations passed");
         },
         Err(e) => {
@@ -696,15 +696,15 @@ async fn test_e2e_cli_dkd_with_custom_config() {
         test_timeout: Duration::from_secs(60),
         verbose: false, // Less verbose for automated testing
     };
-    
+
     let mut harness = MultiAgentTestHarness::new(config);
-    
+
     let results = harness.execute_test().await
         .expect("E2E test with custom config failed");
-    
+
     assert!(results.success);
     assert_eq!(results.participants, 2);
-    
+
     // Verify the custom configuration was used
     assert_eq!(results.test_config.app_id, "custom_app");
     assert_eq!(results.test_config.context, "custom_context");
@@ -712,26 +712,26 @@ async fn test_e2e_cli_dkd_with_custom_config() {
 }
 
 /// Test that demonstrates failure detection
-#[tokio::test] 
+#[tokio::test]
 async fn test_e2e_cli_dkd_failure_detection() {
     // This test would demonstrate how the system detects and handles failures
-    // For now, it's a placeholder that shows the structure
-    
+    // TODO fix - For now, it's a placeholder that shows the structure
+
     let config = E2ETestConfig {
         test_timeout: Duration::from_millis(100), // Very short timeout to trigger failure
         ..Default::default()
     };
-    
+
     let mut harness = MultiAgentTestHarness::new(config);
-    
+
     // This test should fail due to timeout, demonstrating error handling
     let result = harness.execute_test().await;
-    
+
     // We expect this to fail due to the short timeout
     assert!(result.is_err(), "Test should have failed due to short timeout");
-    
+
     let error_message = format!("{}", result.unwrap_err());
-    assert!(error_message.contains("timeout") || error_message.contains("time"), 
+    assert!(error_message.contains("timeout") || error_message.contains("time"),
         "Error should mention timeout: {}", error_message);
 }
 
@@ -740,7 +740,7 @@ async fn test_e2e_scenario_validation_only() {
     // Test that validates scenario files without executing the full choreography
     let config = E2ETestConfig::default();
     let mut harness = MultiAgentTestHarness::new(config);
-    
+
     // Only run scenario validation
     let result = harness.validate_scenario_via_cli().await;
     assert!(result.is_ok(), "Scenario validation should succeed: {:?}", result.err());

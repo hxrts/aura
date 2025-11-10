@@ -1,31 +1,31 @@
 # Top-level workspace for Aura - threshold identity and encrypted storage platform
 [workspace]
 resolver = "2"
-exclude = ["ext/*", "vendored/*"]  # ext/* are external dependencies, vendored/* are vendored forks
+exclude = ["ext/*"]  # ext/* are temporary external repos
 # Note: ext/quint/evaluator still shows profile warnings due to path dependency in quint-api
 members = [
     "crates/aura-agent",
-    "crates/aura-authentication",
-    "crates/aura-choreography",
-    "crates/aura-macros",
-    "crates/aura-messages",
+    "crates/aura-verify",
     "crates/aura-protocol",
     "crates/aura-crypto",
     "crates/aura-journal",
     "crates/aura-store",
     "crates/aura-transport",
-    "crates/aura-test-utils",
+    "crates/aura-testkit",
     "crates/aura-cli",
     "crates/aura-simulator",
-    "crates/app-console-types",
-    "crates/app-sim-server",
-    "crates/app-sim-client",
-    "crates/app-live-client",
-    "crates/app-analysis-client",
-    "crates/app-wasm",
+    "crates/aura-wot",
+    "crates/aura-mpst",
     "crates/aura-quint-api",
-    "crates/aura-types",
-    "crates/app-console",
+    "crates/aura-core",
+    "crates/aura-authenticate",
+    "crates/aura-identity",
+    "crates/aura-sync",
+    "crates/aura-frost",
+    "crates/aura-invitation",
+    "crates/aura-storage",
+    "crates/aura-recovery",
+    "crates/aura-rendezvous",
 ]
 
 
@@ -60,6 +60,7 @@ serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 serde_cbor = "0.11"
 bincode = "1.3"
+serde_ipld_dagcbor = "0.6"
 
 # Async runtime & networking
 tokio = { version = "1.35", features = ["full"] }
@@ -80,7 +81,6 @@ anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-
 # CLI
 clap = { version = "4.4", features = ["derive"] }
 toml = "0.8"
@@ -94,7 +94,7 @@ proptest = "1.4"
 dirs = "5.0"
 
 # Session types & choreographic programming
-rumpsteak = { git = "https://github.com/hxrts/rumpsteak-aura", package = "rumpsteak-aura" }
+rumpsteak-aura = "0.2.0"
 
 # Additional dependencies for cryptography
 x25519-dalek = { version = "2.0", features = ["serde", "reusable_secrets", "static_secrets"] }
@@ -108,6 +108,10 @@ biscuit-auth = "6.0"    # For OCAP capability tokens
 
 # WASM Core
 app-wasm = { path = "crates/app-wasm" }
+
+
+[patch."https://github.com/informalsystems/quint"]
+quint_evaluator = { path = "ext/quint/evaluator" }
 
 [profile.release]
 opt-level = 3

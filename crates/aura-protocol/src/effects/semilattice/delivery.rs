@@ -5,7 +5,7 @@
 //! - At-least-once delivery with deduplication
 //! - Gossip ticking for periodic synchronization
 
-use aura_types::identifiers::{DeviceId, SessionId};
+use aura_core::identifiers::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

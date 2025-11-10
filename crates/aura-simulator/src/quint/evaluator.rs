@@ -688,7 +688,7 @@ impl PropertyEvaluator {
         world_state: &WorldState,
         validation_result: &mut ValidationResult,
     ) -> Result<(), EvaluationError> {
-        // For now, fall back to sequential evaluation
+        // TODO fix - For now, fall back to sequential evaluation
         // In a full implementation, this would use rayon or similar for parallel execution
         self.evaluate_properties_sequential(properties, world_state, validation_result)
     }
@@ -780,19 +780,19 @@ impl PropertyEvaluator {
         property: &VerifiableProperty,
         _world_state: &WorldState,
     ) -> Result<bool, EvaluationError> {
-        // Simplified invariant evaluation - would use actual Quint evaluator in production
+        // TODO fix - Simplified invariant evaluation - would use actual Quint evaluator in production
         let expression = &property.expression.to_lowercase();
 
         // Basic pattern matching for common invariant patterns
         if expression.contains("no_double_spending") {
             // Check for double spending in current state
-            Ok(true) // Simplified - always passes in basic simulation
+            Ok(true) // TODO fix - Simplified - always passes in basic simulation
         } else if expression.contains("key") && expression.contains("consistent") {
             // Check key consistency across participants
-            Ok(true) // Simplified
+            Ok(true) // TODO fix - Simplified
         } else if expression.contains("all") && expression.contains("agree") {
             // Check agreement property
-            Ok(true) // Simplified
+            Ok(true) // TODO fix - Simplified
         } else {
             // Default evaluation for unknown invariants
             Ok(true)
@@ -814,7 +814,7 @@ impl PropertyEvaluator {
             Ok(byzantine_count < total_participants / 3) // f < n/3 for byzantine tolerance
         } else if expression.contains("consistency") {
             // Check state consistency
-            Ok(true) // Simplified - would check CRDT convergence
+            Ok(true) // TODO fix - Simplified - would check CRDT convergence
         } else {
             Ok(true)
         }
@@ -838,8 +838,8 @@ impl PropertyEvaluator {
                 ));
             }
 
-            // Simplified liveness check - property should hold in at least one recent state
-            Ok(recent_snapshots.len() > 5) // Simplified - assumes liveness if we have enough history
+            // TODO fix - Simplified liveness check - property should hold in at least one recent state
+            Ok(recent_snapshots.len() > 5) // TODO fix - Simplified - assumes liveness if we have enough history
         } else {
             Ok(true)
         }
@@ -856,10 +856,10 @@ impl PropertyEvaluator {
         if expression.contains("always") {
             // Universal temporal property - must hold in all states
             let all_snapshots = self.history.get_recent(self.config.max_history_length);
-            Ok(!all_snapshots.is_empty()) // Simplified - true if we have any history
+            Ok(!all_snapshots.is_empty()) // TODO fix - Simplified - true if we have any history
         } else if expression.contains("until") {
             // Until property - complex temporal logic
-            Ok(true) // Simplified
+            Ok(true) // TODO fix - Simplified
         } else {
             Ok(true)
         }
@@ -875,10 +875,10 @@ impl PropertyEvaluator {
 
         if expression.contains("auth") {
             // Check authentication properties
-            Ok(true) // Simplified - would check signature validation
+            Ok(true) // TODO fix - Simplified - would check signature validation
         } else if expression.contains("encrypt") {
             // Check encryption properties
-            Ok(true) // Simplified - would check encryption state
+            Ok(true) // TODO fix - Simplified - would check encryption state
         } else {
             Ok(true)
         }
@@ -900,11 +900,11 @@ impl PropertyEvaluator {
                 .filter(|(id, _)| !world_state.byzantine.byzantine_participants.contains(id))
                 .collect();
 
-            Ok(!honest_participants.is_empty()) // Simplified
+            Ok(!honest_participants.is_empty()) // TODO fix - Simplified
         } else if expression.contains("threshold") {
             // Check threshold requirements
             let active_participants = world_state.participants.len();
-            Ok(active_participants >= 3) // Simplified - minimum for threshold
+            Ok(active_participants >= 3) // TODO fix - Simplified - minimum for threshold
         } else {
             Ok(true)
         }
@@ -920,10 +920,10 @@ impl PropertyEvaluator {
 
         if expression.contains("latency") {
             // Check latency requirements
-            Ok(world_state.current_tick < 1000) // Simplified - under 1000 ticks
+            Ok(world_state.current_tick < 1000) // TODO fix - Simplified - under 1000 ticks
         } else if expression.contains("throughput") {
             // Check throughput requirements
-            Ok(true) // Simplified
+            Ok(true) // TODO fix - Simplified
         } else {
             Ok(true)
         }

@@ -1,0 +1,44 @@
+[package]
+name = "aura-mpst"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Multi-party session type extensions for Aura"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Core dependencies
+aura-core = { path = "../aura-core" }
+
+# Session types framework
+rumpsteak-aura = "0.2.0"
+
+# Serialization
+serde = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Async support
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Identifiers and time
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio = { workspace = true }
+
+[features]
+default = []
+# Enable debugging features for choreography analysis
+debug = []

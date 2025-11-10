@@ -127,7 +127,7 @@ impl QuintAstParser {
             module_name: "main".to_string(),
             version: "1.0".to_string(),
             description: "Parsed from Quint CLI output".to_string(),
-            modules: vec![], // We're storing parsed modules separately for now
+            modules: vec![], // We're storing parsed modules separately TODO fix - For now
             metadata: HashMap::new(),
             invariants,
             temporal_properties,

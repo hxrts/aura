@@ -1,168 +1,257 @@
-//! Aura Storage Layer - Middleware-Based Architecture
+//! Aura Storage Layer - Pure Effect Interface
 //!
-//! This crate implements the storage layer for Aura using the algebraic effect-style
-//! middleware pattern. All storage functionality is provided through composable
-//! middleware layers that can be stacked and configured for different use cases.
+//! This crate implements the storage layer for Aura as a simple effect interface,
+//! aligned with the formal system model defined in docs/001_theoretical_foundations.md.
 //!
 //! ## Architecture
 //!
-//! The storage layer follows these principles:
-//! - **Composable Middleware**: Stack storage concerns like encryption, compression, deduplication
-//! - **Effects-Based**: All I/O operations go through the effects system for testability
-//! - **Type-Safe Composition**: Middleware stacks are validated at compile time
-//! - **Zero Legacy Code**: Clean implementation using foundation patterns from aura-types
+//! The storage layer provides two core capabilities:
+//! 1. **Content-addressed storage**: Store and retrieve chunks by content ID (CID)
+//! 2. **Capability-filtered search**: Privacy-preserving search over stored content
+//!
+//! ## Model Alignment
+//!
+//! From the formal model (Section C.2):
+//! ```
+//! Storage is simply an effect family:
+//!   store_chunk : (ChunkId, Bytes) → ()
+//!   fetch_chunk : ChunkId → Bytes?
+//! ```
+//!
+//! Search is defined as capability-filtered queries over join-semilattice indices (Section E.1).
 //!
 //! ## Example Usage
 //!
-//! ```rust
-//! use aura_store::middleware::*;
-//! use aura_protocol::effects::DefaultEffects;
-//! use std::collections::HashMap;
+//! ```rust,ignore
+//! use aura_store::{StorageEffects, ChunkId};
 //!
-//! // Create a storage handler with middleware stack
-//! let mut storage = BaseStorageHandler::new("/tmp/storage".to_string())
-//!     .layer(EncryptionMiddleware::new().add_key("key1".to_string(), vec![0x42; 32]))
-//!     .add_middleware(Box::new(CompressionMiddleware::new()))
-//!     .add_middleware(Box::new(DeduplicationMiddleware::new()))
-//!     .add_middleware(Box::new(QuotaMiddleware::new()));
+//! // Store a chunk
+//! let chunk_id = ChunkId::from_bytes(b"hello world");
+//! effects.store_chunk(chunk_id.clone(), b"hello world".to_vec()).await?;
 //!
-//! // Execute storage operations
-//! let effects = DefaultEffects::new("storage-device".into());
-//! let operation = StorageOperation::Store {
-//!     chunk_id: "chunk-123".to_string(),
-//!     data: b"Hello, World!".to_vec(),
-//!     metadata: HashMap::new(),
-//! };
-//!
-//! let result = storage.execute(operation, &effects)?;
+//! // Retrieve a chunk
+//! let data = effects.fetch_chunk(chunk_id).await?;
 //! ```
-//!
-//! ## Available Middleware
-//!
-//! - **EncryptionMiddleware**: Transparent encryption/decryption with multiple algorithms
-//! - **CompressionMiddleware**: Data compression with configurable algorithms and thresholds
-//! - **DeduplicationMiddleware**: Content-based deduplication to save storage space
-//! - **QuotaMiddleware**: Storage quota enforcement and usage tracking
-//! - **CachingMiddleware**: LRU caching for frequently accessed data
-//! - **AccessControlMiddleware**: Permission-based access control
-//! - **ReplicationMiddleware**: Data replication across multiple nodes
-//! - **IntegrityMiddleware**: Data integrity verification with checksums
 
-pub mod content;
-pub mod middleware;
+pub mod search;
 
-// Re-export core types for convenience
-pub use content::{ChunkId, ContentSize};
-pub use middleware::{
-    AccessControlMiddleware,
-    // Base handler
-    BaseStorageHandler,
-
-    CachingMiddleware,
-    ChunkInfo,
-    CompressionMiddleware,
-    DeduplicationMiddleware,
-    // Middleware implementations
-    EncryptionMiddleware,
-    IntegrityMiddleware,
-
-    QuotaMiddleware,
-    ReplicationMiddleware,
-    // Core traits and types
-    StorageHandler,
-    // Extension trait for fluent composition
-    StorageHandlerExt,
-    StorageMiddleware,
-    StorageMiddlewareStack,
-    StorageOperation,
-    StorageResult,
-    StorageStackBuilder,
+// Re-export core types
+pub use aura_core::{ChunkId, ContentSize};
+pub use search::{
+    AccessLevel, CapabilityFilteredQuery, CapabilityFilteredSearchEngine, FilteredSearchResult,
+    SearchError, SearchQuery, SearchScope,
 };
 
-// Re-export foundation types
-pub use aura_protocol::effects::AuraEffects;
-pub use aura_protocol::middleware::{MiddlewareContext, MiddlewareResult};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-/// Storage layer error type
-pub use middleware::handler::StorageError;
+/// Storage operation errors
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StorageError {
+    /// Chunk not found
+    NotFound(ChunkId),
+    /// I/O error
+    IoError(String),
+    /// Serialization error
+    SerializationError(String),
+    /// Invalid chunk ID
+    InvalidChunkId(String),
+    /// Storage quota exceeded
+    QuotaExceeded,
+    /// Permission denied
+    PermissionDenied,
+}
 
-/// Convenience function to create a standard storage stack
-pub fn create_standard_storage_stack(
-    storage_path: String,
-    encryption_key: Option<Vec<u8>>,
-) -> StorageMiddlewareStack {
-    let base_handler = BaseStorageHandler::new(storage_path);
-    let mut stack_builder = StorageStackBuilder::new();
+impl std::fmt::Display for StorageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StorageError::NotFound(id) => write!(f, "Chunk not found: {}", id),
+            StorageError::IoError(msg) => write!(f, "I/O error: {}", msg),
+            StorageError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+            StorageError::InvalidChunkId(msg) => write!(f, "Invalid chunk ID: {}", msg),
+            StorageError::QuotaExceeded => write!(f, "Storage quota exceeded"),
+            StorageError::PermissionDenied => write!(f, "Permission denied"),
+        }
+    }
+}
 
-    // Add standard middleware layers in order
-    stack_builder = stack_builder.add_layer(Box::new(IntegrityMiddleware::new()));
-    stack_builder = stack_builder.add_layer(Box::new(DeduplicationMiddleware::new()));
-    stack_builder = stack_builder.add_layer(Box::new(CompressionMiddleware::new()));
+impl std::error::Error for StorageError {}
 
-    if let Some(key) = encryption_key {
-        let encryption = EncryptionMiddleware::new().add_key("default".to_string(), key);
-        stack_builder = stack_builder.add_layer(Box::new(encryption));
+/// Storage effects interface - aligned with formal model Section C.2
+///
+/// This is the core abstraction for content-addressed storage.
+/// Implementations handle the actual I/O, while this interface
+/// remains pure and effect-based.
+#[async_trait::async_trait]
+pub trait StorageEffects: Send + Sync {
+    /// Store a chunk with the given content ID
+    ///
+    /// Model: `store_chunk : (ChunkId, Bytes) → ()`
+    async fn store_chunk(&mut self, chunk_id: ChunkId, data: Vec<u8>) -> Result<(), StorageError>;
+
+    /// Fetch a chunk by content ID
+    ///
+    /// Model: `fetch_chunk : ChunkId → Bytes?`
+    async fn fetch_chunk(&self, chunk_id: &ChunkId) -> Result<Option<Vec<u8>>, StorageError>;
+
+    /// Check if a chunk exists (optimization over fetch)
+    async fn chunk_exists(&self, chunk_id: &ChunkId) -> Result<bool, StorageError> {
+        Ok(self.fetch_chunk(chunk_id).await?.is_some())
     }
 
-    stack_builder = stack_builder.add_layer(Box::new(QuotaMiddleware::new()));
-    stack_builder = stack_builder.add_layer(Box::new(CachingMiddleware::new(1024 * 1024))); // 1MB cache
+    /// Delete a chunk (for maintenance/garbage collection)
+    async fn delete_chunk(&mut self, chunk_id: &ChunkId) -> Result<(), StorageError>;
 
-    stack_builder.build(Box::new(base_handler))
+    /// Get storage statistics
+    async fn stats(&self) -> Result<StorageStats, StorageError>;
 }
 
-/// Convenience function to create a high-performance storage stack
-pub fn create_performance_storage_stack(
-    storage_path: String,
-    cache_size: usize,
-) -> StorageMiddlewareStack {
-    let base_handler = BaseStorageHandler::new(storage_path);
-
-    StorageStackBuilder::new()
-        .add_layer(Box::new(CachingMiddleware::new(cache_size)))
-        .add_layer(Box::new(DeduplicationMiddleware::new()))
-        .add_layer(Box::new(CompressionMiddleware::new()))
-        .build(Box::new(base_handler))
+/// Storage statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageStats {
+    /// Total number of chunks stored
+    pub chunk_count: u64,
+    /// Total bytes stored
+    pub total_bytes: u64,
+    /// Storage backend type
+    pub backend_type: String,
 }
 
-/// Convenience function to create a secure storage stack
-pub fn create_secure_storage_stack(
-    storage_path: String,
-    encryption_key: Vec<u8>,
-) -> StorageMiddlewareStack {
-    let base_handler = BaseStorageHandler::new(storage_path);
-    let encryption = EncryptionMiddleware::new().add_key("secure".to_string(), encryption_key);
+/// Simple in-memory storage implementation (for testing)
+#[derive(Debug, Clone)]
+pub struct MemoryStorage {
+    chunks: HashMap<ChunkId, Vec<u8>>,
+}
 
-    StorageStackBuilder::new()
-        .add_layer(Box::new(AccessControlMiddleware::new()))
-        .add_layer(Box::new(IntegrityMiddleware::new()))
-        .add_layer(Box::new(encryption))
-        .add_layer(Box::new(ReplicationMiddleware::new(3)))
-        .build(Box::new(base_handler))
+impl MemoryStorage {
+    /// Create a new in-memory storage
+    pub fn new() -> Self {
+        Self {
+            chunks: HashMap::new(),
+        }
+    }
+
+    /// Get number of stored chunks
+    pub fn len(&self) -> usize {
+        self.chunks.len()
+    }
+
+    /// Check if storage is empty
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+
+    /// Clear all stored chunks
+    pub fn clear(&mut self) {
+        self.chunks.clear();
+    }
+}
+
+impl Default for MemoryStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl StorageEffects for MemoryStorage {
+    async fn store_chunk(&mut self, chunk_id: ChunkId, data: Vec<u8>) -> Result<(), StorageError> {
+        self.chunks.insert(chunk_id, data);
+        Ok(())
+    }
+
+    async fn fetch_chunk(&self, chunk_id: &ChunkId) -> Result<Option<Vec<u8>>, StorageError> {
+        Ok(self.chunks.get(chunk_id).cloned())
+    }
+
+    async fn delete_chunk(&mut self, chunk_id: &ChunkId) -> Result<(), StorageError> {
+        self.chunks.remove(chunk_id);
+        Ok(())
+    }
+
+    async fn stats(&self) -> Result<StorageStats, StorageError> {
+        let total_bytes: u64 = self.chunks.values().map(|v| v.len() as u64).sum();
+        Ok(StorageStats {
+            chunk_count: self.chunks.len() as u64,
+            total_bytes,
+            backend_type: "memory".to_string(),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
-    #[test]
-    fn test_storage_middleware_composition() {
-        let storage =
-            create_standard_storage_stack("/tmp/test-storage".to_string(), Some(vec![0x42; 32]));
+    #[tokio::test]
+    async fn test_memory_storage_basic() {
+        let mut storage = MemoryStorage::new();
 
-        let info = storage.stack_info();
-        assert!(info.contains_key("middleware_count"));
-        assert!(info.contains_key("middleware_layers"));
+        // Store a chunk
+        let chunk_id = ChunkId::from_bytes(b"test data");
+        storage
+            .store_chunk(chunk_id.clone(), b"test data".to_vec())
+            .await
+            .unwrap();
+
+        // Retrieve the chunk
+        let data = storage.fetch_chunk(&chunk_id).await.unwrap();
+        assert_eq!(data, Some(b"test data".to_vec()));
+
+        // Check stats
+        let stats = storage.stats().await.unwrap();
+        assert_eq!(stats.chunk_count, 1);
+        assert_eq!(stats.total_bytes, 9);
     }
 
-    #[test]
-    fn test_fluent_middleware_composition() {
-        use middleware::handler::BaseStorageHandler;
-        use middleware::StorageHandlerExt;
+    #[tokio::test]
+    async fn test_memory_storage_not_found() {
+        let storage = MemoryStorage::new();
+        let chunk_id = ChunkId::from_bytes(b"nonexistent");
 
-        let _storage =
-            BaseStorageHandler::new("/tmp/test".to_string()).layer(CompressionMiddleware::new());
+        let data = storage.fetch_chunk(&chunk_id).await.unwrap();
+        assert_eq!(data, None);
+    }
 
-        // Test compiles successfully
+    #[tokio::test]
+    async fn test_memory_storage_delete() {
+        let mut storage = MemoryStorage::new();
+
+        let chunk_id = ChunkId::from_bytes(b"test data");
+        storage
+            .store_chunk(chunk_id.clone(), b"test data".to_vec())
+            .await
+            .unwrap();
+
+        // Delete the chunk
+        storage.delete_chunk(&chunk_id).await.unwrap();
+
+        // Verify it's gone
+        let data = storage.fetch_chunk(&chunk_id).await.unwrap();
+        assert_eq!(data, None);
+    }
+
+    #[tokio::test]
+    async fn test_chunk_id_content_addressing() {
+        let mut storage = MemoryStorage::new();
+
+        // Same content should produce same chunk ID
+        let data1 = b"identical content";
+        let data2 = b"identical content";
+
+        let chunk_id1 = ChunkId::from_bytes(data1);
+        let chunk_id2 = ChunkId::from_bytes(data2);
+
+        assert_eq!(chunk_id1, chunk_id2);
+
+        // Store once
+        storage
+            .store_chunk(chunk_id1.clone(), data1.to_vec())
+            .await
+            .unwrap();
+
+        // Should be retrievable by either ID
+        let retrieved = storage.fetch_chunk(&chunk_id2).await.unwrap();
+        assert_eq!(retrieved, Some(data1.to_vec()));
     }
 }

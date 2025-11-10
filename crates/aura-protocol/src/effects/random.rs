@@ -1,28 +1,7 @@
 //! Random effects trait definitions
 //!
-//! This module defines the trait interface for random number generation.
-//! Implementations are provided in aura-protocol handlers.
+//! This module re-exports the RandomEffects trait from aura-core to provide
+//! a unified interface for random number generation across the system.
 
-use async_trait::async_trait;
-
-/// Random effects interface for generating random values
-///
-/// This trait provides cryptographically secure random number generation
-/// for the Aura effects system. Implementations in handlers provide:
-/// - Production: System cryptographic RNG
-/// - Testing: Deterministic seeded RNG for reproducible tests
-/// - Simulation: Controlled randomness for scenario testing
-#[async_trait]
-pub trait RandomEffects: Send + Sync {
-    /// Generate random bytes of specified length
-    async fn random_bytes(&self, len: usize) -> Vec<u8>;
-
-    /// Generate 32 random bytes as array
-    async fn random_bytes_32(&self) -> [u8; 32];
-
-    /// Generate a random u64 value
-    async fn random_u64(&self) -> u64;
-
-    /// Generate a random number in the specified range
-    async fn random_range(&self, min: u64, max: u64) -> u64;
-}
+// Re-export the RandomEffects trait from aura-core
+pub use aura_core::effects::RandomEffects;

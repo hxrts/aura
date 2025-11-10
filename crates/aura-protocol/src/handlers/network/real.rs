@@ -18,7 +18,7 @@ pub struct RealNetworkHandler {
 
 struct PeerConnection {
     // This would contain actual network connection details
-    // For now, this is a placeholder
+    // TODO fix - For now, this is a placeholder
     peer_id: Uuid,
     connected: bool,
 }

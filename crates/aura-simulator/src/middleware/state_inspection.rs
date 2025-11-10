@@ -228,7 +228,7 @@ impl StateInspectionMiddleware {
             SimulatorError::StateInspectionFailed(format!("To snapshot not found: {}", to))
         })?;
 
-        // Simple diff - in a real implementation this would be more sophisticated
+        // Simple diff - TODO fix - In a real implementation this would be more sophisticated
         let mut changes = Vec::new();
 
         // Check for changed values
@@ -301,7 +301,7 @@ impl StateInspectionMiddleware {
 
         // Cleanup old snapshots if we exceed the limit
         if self.state_snapshots.len() > self.max_snapshots {
-            // Remove oldest snapshots (simplified - would use a more efficient data structure in practice)
+            // Remove oldest snapshots (TODO fix - Simplified - would use a more efficient data structure in practice)
             let mut snapshots: Vec<_> = self.state_snapshots.iter().collect();
             snapshots.sort_by_key(|(_, snapshot)| snapshot.tick);
 
@@ -380,8 +380,8 @@ impl StateInspectionMiddleware {
             }
 
             WatcherCondition::Custom { expression } => {
-                // Simplified custom expression evaluation
-                // In a real implementation, this would use a proper expression evaluator
+                // TODO fix - Simplified custom expression evaluation
+                // TODO fix - In a real implementation, this would use a proper expression evaluator
                 Some(WatcherAlert {
                     watcher_id: watcher.id.clone(),
                     message: format!("Custom condition triggered: {}", expression),

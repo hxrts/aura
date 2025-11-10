@@ -1,7 +1,7 @@
 //! Operations for the Automerge ledger
 
 use crate::types::{DeviceMetadata, GuardianMetadata};
-use aura_types::{DeviceId, GuardianId, ProtocolType, SessionId};
+use aura_core::{DeviceId, GuardianId, ProtocolType, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -30,6 +30,12 @@ impl OperationId {
     /// Create an operation ID from a UUID
     pub fn from_uuid(uuid: Uuid) -> Self {
         Self(uuid)
+    }
+}
+
+impl std::fmt::Display for OperationId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -294,21 +300,27 @@ impl Operation {
 /// Validation errors for operations
 #[derive(Debug, thiserror::Error)]
 pub enum ValidationError {
+    /// Device not found in account state
     #[error("Device not found: {0}")]
     DeviceNotFound(DeviceId),
 
+    /// Guardian not found in account state
     #[error("Guardian not found: {0}")]
     GuardianNotFound(GuardianId),
 
+    /// Cryptographic signature verification failed
     #[error("Invalid signature")]
     InvalidSignature,
 
+    /// Operation not authorized for this actor
     #[error("Unauthorized operation")]
     Unauthorized,
 
+    /// Referenced protocol session not found
     #[error("Protocol not found: {0}")]
     ProtocolNotFound(Uuid),
 
+    /// General operation validation failure
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
 }
@@ -317,13 +329,22 @@ pub enum ValidationError {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum JournalOperation {
     /// Add a device to the account
-    AddDevice { device: DeviceMetadata },
+    AddDevice {
+        /// The device metadata to add
+        device: DeviceMetadata,
+    },
 
     /// Remove a device from the account
-    RemoveDevice { device_id: DeviceId },
+    RemoveDevice {
+        /// The ID of the device to remove
+        device_id: DeviceId,
+    },
 
     /// Add a guardian to the account
-    AddGuardian { guardian: GuardianMetadata },
+    AddGuardian {
+        /// The guardian metadata to add
+        guardian: GuardianMetadata,
+    },
 
     /// Increment the account epoch
     IncrementEpoch,
@@ -338,8 +359,8 @@ pub enum JournalOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::{DeviceIdExt, GuardianIdExt};
     use aura_crypto::Effects;
-    use aura_types::{DeviceIdExt, GuardianIdExt};
 
     #[test]
     fn test_operation_id_deterministic() {
@@ -351,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_operation_conflicts() {
-        let effects = Effects::test(42);
+        let effects = Effects::test();
         let device_id = DeviceId::new_with_effects(&effects);
 
         let add_op = Operation::AddDevice {

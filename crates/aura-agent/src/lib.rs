@@ -36,15 +36,25 @@ pub mod agent;
 pub mod config;
 pub mod errors;
 
+// Authorization integration (Phase 5)
+pub mod operations;
+
 // Effect system integration
 pub mod effects;
 pub mod handlers;
+pub mod maintenance;
 pub mod middleware;
 
 // Re-export public API
 pub use agent::AuraAgent;
-pub use config::{AgentConfig, AgentConfigBuilder};
-pub use errors::{AgentError, Result as AgentResult};
+pub use config::AgentConfig;
+pub use errors::Result as AgentResult;
+
+// Re-export authorization operations (Phase 5)
+pub use operations::{
+    AgentOperation, AgentOperationContext, AgentOperationRequest, AgentOperationResult,
+    AuthenticationOperation, AuthorizedAgentOperations, SessionOperation, StorageOperation,
+};
 
 // Re-export effect traits for documentation
 pub use effects::*;
@@ -54,11 +64,15 @@ pub use middleware::{
     OperationMetrics, TracingMiddleware, ValidationMiddleware, ValidationRule,
 };
 
-// Re-export core types from aura-types for convenience
-pub use aura_types::{
+pub use maintenance::{MaintenanceController, SnapshotOutcome};
+
+// Re-export core types from aura-core for convenience
+pub use aura_core::{
     identifiers::{AccountId, DeviceId, SessionId},
     AuraError, AuraResult,
 };
+
+// Integration tests removed due to API changes - see tests/integration_tests.rs
 
 /// Create an agent with production effects
 ///

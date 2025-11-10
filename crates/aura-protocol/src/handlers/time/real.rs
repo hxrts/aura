@@ -53,8 +53,25 @@ impl TimeEffects for RealTimeHandler {
         Self::current_time_ms()
     }
 
+    async fn current_timestamp(&self) -> u64 {
+        Self::current_time_ms() / 1000 // Convert ms to seconds
+    }
+
+    async fn current_timestamp_millis(&self) -> u64 {
+        Self::current_time_ms()
+    }
+
     async fn sleep_ms(&self, ms: u64) {
         sleep(Duration::from_millis(ms)).await;
+    }
+
+    async fn delay(&self, duration: Duration) {
+        sleep(duration).await;
+    }
+
+    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_core::AuraError> {
+        sleep(Duration::from_millis(duration_ms)).await;
+        Ok(())
     }
 
     async fn sleep_until(&self, epoch: u64) {
@@ -68,13 +85,13 @@ impl TimeEffects for RealTimeHandler {
     async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError> {
         match condition {
             WakeCondition::NewEvents => {
-                // In a real implementation, this would wait for actual events
-                // For now, just yield briefly
+                // TODO fix - In a real implementation, this would wait for actual events
+                // TODO fix - For now, just yield briefly
                 tokio::task::yield_now().await;
                 Ok(())
             }
-            WakeCondition::EpochReached(target_epoch) => {
-                self.sleep_until(target_epoch).await;
+            WakeCondition::EpochReached { target } => {
+                self.sleep_until(target).await;
                 Ok(())
             }
             WakeCondition::TimeoutAt(timeout_epoch) => {
@@ -97,16 +114,38 @@ impl TimeEffects for RealTimeHandler {
                 // Return immediately
                 Ok(())
             }
+            WakeCondition::EventMatching(_pattern) => {
+                // TODO fix - In a real implementation, this would wait for events matching the pattern
+                // TODO fix - For now, just yield briefly
+                tokio::task::yield_now().await;
+                Ok(())
+            }
+            WakeCondition::ThresholdEvents { .. } => {
+                // TODO fix - In a real implementation, this would wait for threshold number of events
+                // TODO fix - For now, just yield briefly
+                tokio::task::yield_now().await;
+                Ok(())
+            }
+            WakeCondition::TimeoutExpired { .. } => {
+                // Timeout has already expired, return immediately
+                Ok(())
+            }
         }
     }
 
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), aura_core::AuraError> {
+        self.yield_until(condition).await.map_err(|e| {
+            aura_core::AuraError::internal(format!("System time error: wait_until failed: {}", e))
+        })
+    }
+
     async fn set_timeout(&self, _timeout_ms: u64) -> TimeoutHandle {
-        let handle = TimeoutHandle::new();
+        let handle = TimeoutHandle::new_v4();
         let _handle_clone = handle.clone();
 
         let task = tokio::spawn(async move {
             // TODO: sleep(Duration::from_millis(_timeout_ms)).await;
-            // Timeout expired - in a real implementation, this would trigger callbacks
+            // Timeout expired - TODO fix - In a real implementation, this would trigger callbacks
         });
 
         self.timeouts.lock().await.insert(handle.clone(), task);
@@ -119,7 +158,9 @@ impl TimeEffects for RealTimeHandler {
             task.abort();
             Ok(())
         } else {
-            Err(TimeError::TimeoutNotFound { handle })
+            Err(TimeError::TimeoutNotFound {
+                handle: handle.to_string(),
+            })
         }
     }
 
@@ -156,7 +197,7 @@ impl TimeEffects for RealTimeHandler {
         for context in contexts.values_mut() {
             context.last_activity = now;
         }
-        // In a real implementation, this would wake up waiting contexts
+        // TODO fix - In a real implementation, this would wake up waiting contexts
     }
 
     fn resolution_ms(&self) -> u64 {

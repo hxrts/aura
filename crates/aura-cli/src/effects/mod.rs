@@ -3,8 +3,8 @@
 //! CLI-specific effect traits that compose core effects for command-line operations.
 //! These effects follow the unified effect system architecture.
 
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 use std::path::PathBuf;
 
 pub mod cli;
@@ -21,28 +21,28 @@ pub use output::*;
 pub trait CliEffects: Send + Sync {
     /// Log an informational message
     async fn log_info(&self, message: &str);
-    
+
     /// Log a warning message
     async fn log_warning(&self, message: &str);
-    
+
     /// Log an error message
     async fn log_error(&self, message: &str);
-    
+
     /// Create a directory and all parent directories
     async fn create_dir_all(&self, path: &PathBuf) -> Result<()>;
-    
+
     /// Write content to a file
     async fn write_file(&self, path: &PathBuf, content: &[u8]) -> Result<()>;
-    
+
     /// Read content from a file
     async fn read_file(&self, path: &PathBuf) -> Result<Vec<u8>>;
-    
+
     /// Check if a file exists
     async fn file_exists(&self, path: &PathBuf) -> bool;
-    
+
     /// Format output for display
     async fn format_output(&self, data: &str) -> String;
-    
+
     /// Get current timestamp for operations
     async fn current_timestamp(&self) -> u64;
 }
@@ -52,13 +52,13 @@ pub trait CliEffects: Send + Sync {
 pub trait ConfigEffects: Send + Sync {
     /// Load configuration from file
     async fn load_config(&self, path: &PathBuf) -> Result<CliConfig>;
-    
+
     /// Save configuration to file
     async fn save_config(&self, path: &PathBuf, config: &CliConfig) -> Result<()>;
-    
+
     /// Validate configuration structure
     async fn validate_config(&self, config: &CliConfig) -> Result<()>;
-    
+
     /// Get default configuration directory
     async fn default_config_dir(&self) -> PathBuf;
 }
@@ -68,19 +68,19 @@ pub trait ConfigEffects: Send + Sync {
 pub trait OutputEffects: Send + Sync {
     /// Display formatted output to user
     async fn display(&self, content: &str);
-    
+
     /// Display error message to user
     async fn display_error(&self, error: &str);
-    
+
     /// Display success message to user
     async fn display_success(&self, message: &str);
-    
+
     /// Display progress information
     async fn display_progress(&self, message: &str, progress: f64);
-    
+
     /// Format data as JSON
     async fn format_json(&self, data: &serde_json::Value) -> Result<String>;
-    
+
     /// Format data as human-readable text
     async fn format_text(&self, data: &str) -> String;
 }
@@ -90,19 +90,19 @@ pub trait OutputEffects: Send + Sync {
 pub struct CliConfig {
     /// Default device ID
     pub device_id: Option<String>,
-    
+
     /// Default threshold for operations
     pub threshold: Option<u32>,
-    
+
     /// Default number of devices
     pub num_devices: Option<u32>,
-    
+
     /// Default output directory
     pub output_dir: Option<PathBuf>,
-    
+
     /// Logging configuration
     pub logging: LoggingConfig,
-    
+
     /// Network configuration
     pub network: NetworkConfig,
 }
@@ -112,10 +112,10 @@ pub struct CliConfig {
 pub struct LoggingConfig {
     /// Log level (debug, info, warn, error)
     pub level: String,
-    
+
     /// Enable structured logging
     pub structured: bool,
-    
+
     /// Log file path
     pub file: Option<PathBuf>,
 }
@@ -125,10 +125,10 @@ pub struct LoggingConfig {
 pub struct NetworkConfig {
     /// Default port for node operations
     pub default_port: u16,
-    
+
     /// Connection timeout in seconds
     pub timeout: u64,
-    
+
     /// Maximum number of retries
     pub max_retries: u32,
 }

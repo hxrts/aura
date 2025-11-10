@@ -1,12 +1,27 @@
-//! Transport Middleware System
+//! Transport Middleware System (TODO fix - Simplified)
 //!
-//! This crate provides a composable middleware system for transport operations.
-//! All transport functionality is implemented as middleware layers that can be
-//! stacked to create custom transport behaviors.
+//! **CLEANUP**: Removed over-engineered middleware layers as part of Week 11 cleanup.
+//! This crate now provides essential transport abstractions with privacy-preserving
+//! leakage budget tracking for the Aura threshold identity platform.
+//!
+//! **REMOVED**: Over-engineered middleware (-3,197 lines) that duplicated functionality
+//! available in effect system, journal middleware, and aura-crypto.
 
-pub mod middleware;
+pub mod memory;
+// pub mod middleware; // Removed over-engineered middleware per Week 11 cleanup
+pub mod hole_punch;
+pub mod network;
 pub mod peers;
+pub mod privacy;
+pub mod stun;
+pub mod websocket;
 
-// Re-export all middleware components
-pub use middleware::*;
+// Re-export essential components
+pub use memory::*;
+// pub use middleware::*; // Removed over-engineered middleware per Week 11 cleanup
+pub use hole_punch::*;
+pub use network::*;
 pub use peers::*;
+pub use privacy::*;
+pub use stun::*;
+pub use websocket::*;

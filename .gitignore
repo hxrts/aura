@@ -31,6 +31,7 @@ AGENTS.md
 *.sealed
 *.dat
 outcomes/
+*.txt
 
 # Nix
 result
@@ -49,4 +50,5 @@ result-*
 
 # Working
 work/
+scripts/
 ext/

@@ -17,11 +17,14 @@
 pub mod capability;
 pub mod intent;
 pub mod journal_types;
-pub mod tree_op;
 
 // Re-export key types
 pub use crate::semilattice::JournalMap; // Use harmonized CRDT implementation
 pub use capability::{CapabilityId, CapabilityRef, ResourceRef};
 pub use intent::{Intent, IntentBatch, IntentId, IntentStatus, Priority};
 pub use journal_types::{JournalError, JournalStats};
-pub use tree_op::{ThresholdSignature, TreeOp, TreeOpRecord};
+
+// Note: Old tree_op module removed - use aura_core::tree types instead:
+// - AttestedOp (replaces TreeOpRecord)
+// - TreeOpKind (replaces TreeOp enum)
+// Aggregate signatures are now part of AttestedOp (no separate ThresholdSignature type)

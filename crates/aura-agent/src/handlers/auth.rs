@@ -7,9 +7,9 @@ use crate::effects::{
     AuthMethod, AuthenticationEffects, AuthenticationResult, BiometricType, HealthStatus,
 };
 use async_trait::async_trait;
+use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
 use aura_protocol::effects::AuraEffectSystem;
 use aura_protocol::effects::{ConsoleEffects, CryptoEffects, StorageEffects, TimeEffects};
-use aura_types::{identifiers::DeviceId, AuraError, AuraResult as Result};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -108,7 +108,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         );
 
         // Try to get device identity through core effects
-        // Simplified device authentication - in real implementation would check device credentials
+        // TODO fix - Simplified device authentication - in real implementation would check device credentials
         let identity_result: Result<DeviceId> = Ok(self.device_id);
 
         match identity_result {
@@ -217,12 +217,12 @@ impl AuthenticationEffects for AuthenticationHandler {
         // Always support device credential authentication
         methods.push(AuthMethod::DeviceCredential);
 
-        // Check for hardware security capabilities (simplified check)
+        // Check for hardware security capabilities (TODO fix - Simplified check)
         if effects.stats().await.is_ok() {
             methods.push(AuthMethod::HardwareKey);
         }
 
-        // Check for biometric capabilities (simplified check)
+        // Check for biometric capabilities (TODO fix - Simplified check)
         // In real implementation would check platform biometric APIs
         methods.push(AuthMethod::Biometric(BiometricType::Fingerprint));
 
@@ -239,8 +239,8 @@ impl AuthenticationEffects for AuthenticationHandler {
 
         effects.log_info(&format!("Enrolling biometric: {:?}", biometric_type), &[]);
 
-        // In a real implementation, this would interface with platform biometric APIs
-        // For now, we simulate the enrollment process
+        // TODO fix - In a real implementation, this would interface with platform biometric APIs
+        // TODO fix - For now, we simulate the enrollment process
 
         // Generate a biometric template (simulated)
         let template_data = effects.random_bytes(64).await;
@@ -251,7 +251,7 @@ impl AuthenticationEffects for AuthenticationHandler {
             .store(&template_key, template_data)
             .await
             .map_err(|e| {
-                AuraError::quota_error(format!("Failed to store biometric template: {}", e))
+                AuraError::permission_denied(format!("Failed to store biometric template: {}", e))
             })?;
 
         effects.log_info(
@@ -270,7 +270,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         // Remove the stored template
         let template_key = format!("biometric_template_{:?}", biometric_type);
         effects.remove(&template_key).await.map_err(|e| {
-            AuraError::quota_error(format!("Failed to remove biometric template: {}", e))
+            AuraError::permission_denied(format!("Failed to remove biometric template: {}", e))
         })?;
 
         effects.log_info(
@@ -284,18 +284,18 @@ impl AuthenticationEffects for AuthenticationHandler {
     async fn verify_capability(&self, capability: &[u8]) -> Result<bool> {
         let effects = self.core_effects.read().await;
 
-        // Parse capability (simplified)
+        // Parse capability (TODO fix - Simplified)
         if capability.len() < 16 {
             return Ok(false);
         }
 
-        // In a real implementation, this would parse and verify a proper capability token
-        // For now, we perform a basic validation
+        // TODO fix - In a real implementation, this would parse and verify a proper capability token
+        // TODO fix - For now, we perform a basic validation
 
-        // Hash the capability and compare with stored value (simplified)
+        // Hash the capability and compare with stored value (TODO fix - Simplified)
         let capability_hash = effects.blake3_hash(capability).await;
 
-        // In a real implementation, we would compare this hash with stored capability hashes
+        // TODO fix - In a real implementation, we would compare this hash with stored capability hashes
         // For testing, we'll return true if the hash is not all zeros
         let is_valid = capability_hash != [0u8; 32];
 
@@ -322,7 +322,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         let attestation_data = effects.blake3_hash(&device_id_bytes).await;
         let attestation = attestation_data.to_vec();
 
-        // In a real implementation, this would be a proper device attestation
+        // TODO fix - In a real implementation, this would be a proper device attestation
         // that proves the device identity and integrity
 
         effects.log_info("Device attestation generated successfully", &[]);

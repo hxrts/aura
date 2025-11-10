@@ -4,9 +4,9 @@
 
 use crate::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 use async_trait::async_trait;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock, watch};
+use tokio::sync::{watch, Mutex, RwLock};
 use uuid::Uuid;
 
 /// Simulated time handler for deterministic testing
@@ -38,7 +38,7 @@ impl SimulatedTimeHandler {
     /// Create a new simulated time handler starting at a specific time
     pub fn new_at_time(start_time: u64) -> Self {
         let (sender, receiver) = watch::channel(start_time);
-        
+
         Self {
             current_time: Arc::new(RwLock::new(start_time)),
             contexts: Arc::new(RwLock::new(HashMap::new())),
@@ -56,7 +56,7 @@ impl SimulatedTimeHandler {
         }
 
         *current = target_time;
-        
+
         // Notify all watchers of time change
         if let Ok(sender) = self.time_sender.try_lock() {
             let _ = sender.send(target_time);
@@ -64,7 +64,7 @@ impl SimulatedTimeHandler {
 
         // Process expired timeouts
         self.process_expired_timeouts(target_time).await;
-        
+
         Ok(())
     }
 
@@ -82,17 +82,17 @@ impl SimulatedTimeHandler {
     /// Process timeouts that have expired at the given time
     async fn process_expired_timeouts(&self, current_time: u64) {
         let mut timeouts = self.timeouts.lock().await;
-        
+
         // Find all expired timeouts
         let expired_times: Vec<u64> = timeouts
             .range(..=current_time)
             .map(|(time, _)| *time)
             .collect();
-        
+
         // Remove expired timeouts
         for expired_time in expired_times {
             timeouts.remove(&expired_time);
-            // In a real implementation, this would trigger timeout callbacks
+            // TODO fix - In a real implementation, this would trigger timeout callbacks
         }
     }
 
@@ -127,15 +127,22 @@ impl SimulatedTimeHandler {
     fn conditions_match(&self, waiting: &WakeCondition, occurred: &WakeCondition) -> bool {
         match (waiting, occurred) {
             (WakeCondition::NewEvents, WakeCondition::NewEvents) => true,
-            (WakeCondition::EpochReached(target), WakeCondition::EpochReached(current)) => {
-                *current >= *target
-            }
+            (
+                WakeCondition::EpochReached { target },
+                WakeCondition::EpochReached { target: current },
+            ) => current >= target,
             (WakeCondition::TimeoutAt(target), WakeCondition::TimeoutAt(current)) => {
                 *current >= *target
             }
-            (WakeCondition::Custom(expected), WakeCondition::Custom(actual)) => {
-                expected == actual
-            }
+            (WakeCondition::Custom(expected), WakeCondition::Custom(actual)) => expected == actual,
+            (
+                WakeCondition::TimeoutExpired {
+                    timeout_id: expected_id,
+                },
+                WakeCondition::TimeoutExpired {
+                    timeout_id: actual_id,
+                },
+            ) => expected_id == actual_id,
             (WakeCondition::Immediate, _) => true,
             _ => false,
         }
@@ -154,10 +161,18 @@ impl TimeEffects for SimulatedTimeHandler {
         *self.current_time.read().await
     }
 
+    async fn current_timestamp(&self) -> u64 {
+        (*self.current_time.read().await) / 1000 // Convert ms to seconds
+    }
+
+    async fn current_timestamp_millis(&self) -> u64 {
+        *self.current_time.read().await
+    }
+
     async fn sleep_ms(&self, ms: u64) {
         let current = *self.current_time.read().await;
         let target = current + ms;
-        
+
         // In simulation, sleeping means waiting for time to advance to target
         let mut receiver = self.time_receiver.clone();
         loop {
@@ -165,12 +180,21 @@ impl TimeEffects for SimulatedTimeHandler {
             if current_time >= target {
                 break;
             }
-            
+
             // Wait for time change
             if receiver.changed().await.is_err() {
                 break; // Time sender was dropped
             }
         }
+    }
+
+    async fn delay(&self, duration: std::time::Duration) {
+        self.sleep_ms(duration.as_millis() as u64).await;
+    }
+
+    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_core::AuraError> {
+        self.sleep_ms(duration_ms).await;
+        Ok(())
     }
 
     async fn sleep_until(&self, epoch: u64) {
@@ -180,7 +204,7 @@ impl TimeEffects for SimulatedTimeHandler {
             if current_time >= epoch {
                 break;
             }
-            
+
             // Wait for time change
             if receiver.changed().await.is_err() {
                 break; // Time sender was dropped
@@ -190,8 +214,8 @@ impl TimeEffects for SimulatedTimeHandler {
 
     async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError> {
         match condition {
-            WakeCondition::EpochReached(target_epoch) => {
-                self.sleep_until(target_epoch).await;
+            WakeCondition::EpochReached { target } => {
+                self.sleep_until(target).await;
                 Ok(())
             }
             WakeCondition::TimeoutAt(timeout_epoch) => {
@@ -214,20 +238,29 @@ impl TimeEffects for SimulatedTimeHandler {
         }
     }
 
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), aura_core::AuraError> {
+        self.yield_until(condition).await.map_err(|e| {
+            aura_core::AuraError::internal(format!("System time error: wait_until failed: {}", e))
+        })
+    }
+
     async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
-        let handle = TimeoutHandle::new();
+        let handle = TimeoutHandle::new_v4();
         let current = self.current_epoch().await;
         let timeout_time = current + timeout_ms;
-        
+
         let mut timeouts = self.timeouts.lock().await;
-        timeouts.entry(timeout_time).or_default().push(handle.clone());
-        
+        timeouts
+            .entry(timeout_time)
+            .or_default()
+            .push(handle.clone());
+
         handle
     }
 
     async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
         let mut timeouts = self.timeouts.lock().await;
-        
+
         // Find and remove the timeout handle
         for (_, handles) in timeouts.iter_mut() {
             if let Some(pos) = handles.iter().position(|h| *h == handle) {
@@ -235,8 +268,10 @@ impl TimeEffects for SimulatedTimeHandler {
                 return Ok(());
             }
         }
-        
-        Err(TimeError::TimeoutNotFound { handle })
+
+        Err(TimeError::TimeoutNotFound {
+            handle: handle.to_string(),
+        })
     }
 
     fn is_simulated(&self) -> bool {
@@ -246,7 +281,7 @@ impl TimeEffects for SimulatedTimeHandler {
     fn register_context(&self, context_id: Uuid) {
         let contexts = self.contexts.clone();
         let current_time = self.current_time.clone();
-        
+
         tokio::spawn(async move {
             let time = *current_time.read().await;
             let mut contexts = contexts.write().await;
@@ -263,7 +298,7 @@ impl TimeEffects for SimulatedTimeHandler {
 
     fn unregister_context(&self, context_id: Uuid) {
         let contexts = self.contexts.clone();
-        
+
         tokio::spawn(async move {
             let mut contexts = contexts.write().await;
             contexts.remove(&context_id);
@@ -277,7 +312,7 @@ impl TimeEffects for SimulatedTimeHandler {
         for context in contexts.values_mut() {
             context.last_activity = current;
         }
-        
+
         // Wake up contexts waiting for new events
         let waiting_contexts: Vec<Uuid> = contexts
             .iter()
@@ -289,7 +324,7 @@ impl TimeEffects for SimulatedTimeHandler {
                 }
             })
             .collect();
-        
+
         // Clear waiting conditions for contexts that should wake up
         for context_id in waiting_contexts {
             if let Some(context) = contexts.get_mut(&context_id) {

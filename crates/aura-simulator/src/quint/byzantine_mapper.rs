@@ -832,13 +832,13 @@ impl ByzantineMapper {
         }
     }
 
-    // Additional strategy creation methods (simplified for brevity)
+    // Additional strategy creation methods (TODO fix - Simplified for brevity)
     fn create_signature_forgery_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_key_corruption_strategy() // Simplified
+        self.create_key_corruption_strategy() // TODO fix - Simplified
     }
 
     fn create_key_substitution_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_key_corruption_strategy() // Simplified
+        self.create_key_corruption_strategy() // TODO fix - Simplified
     }
 
     fn create_threshold_denial_strategy(&self) -> EnhancedByzantineStrategy {
@@ -850,7 +850,7 @@ impl ByzantineMapper {
     }
 
     fn create_threshold_manipulation_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_threshold_denial_strategy() // Simplified
+        self.create_threshold_denial_strategy() // TODO fix - Simplified
     }
 
     fn create_coalition_attack_strategy(&self) -> EnhancedByzantineStrategy {
@@ -874,11 +874,11 @@ impl ByzantineMapper {
     }
 
     fn create_epoch_confusion_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_session_hijacking_strategy() // Simplified
+        self.create_session_hijacking_strategy() // TODO fix - Simplified
     }
 
     fn create_state_forking_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_session_hijacking_strategy() // Simplified
+        self.create_session_hijacking_strategy() // TODO fix - Simplified
     }
 
     fn create_coordinated_attack_strategy(&self) -> EnhancedByzantineStrategy {

@@ -5,21 +5,21 @@ module DKDProtocol {
     // Basic types
     type DeviceId = str
     type SessionId = str
-    
+
     // ========== DKD-Specific Types ==========
-    
-    type DKDState = 
+
+    type DKDState =
         | "DKDInit"
-        | "DKDCommitment" 
+        | "DKDCommitment"
         | "DKDReveal"
         | "DKDFinalization"
         | "DKDComplete"
         | "DKDFailure"
-    
+
     type Commitment = str  // Blake3 hash of point
-    type Point = str       // Ed25519 curve point  
+    type Point = str       // Ed25519 curve point
     type DerivedKey = str  // Final derived key
-    
+
     type DKDParticipant = {
         deviceId: DeviceId,
         shareBytes: str,
@@ -28,7 +28,7 @@ module DKDProtocol {
         hasCommitted: bool,
         hasRevealed: bool
     }
-    
+
     type DKDSession = {
         sessionId: SessionId,
         contextId: str,
@@ -42,36 +42,36 @@ module DKDProtocol {
         startEpoch: int,
         ttlEpochs: int
     }
-    
+
     // ========== State Variables ==========
-    
+
     var dkdSessions: SessionId -> DKDSession
     var dkdParticipants: (SessionId, DeviceId) -> DKDParticipant
     var currentEpoch: int
-    
+
     // ========== Helper Functions ==========
-    
+
     // Hash share to scalar and compute point
-    pure def computePoint(shareBytes: str, contextId: str): Point = 
-        shareBytes + "_point"  // Simplified
-    
+    pure def computePoint(shareBytes: str, contextId: str): Point =
+        shareBytes + "_point"  // TODO fix - Simplified
+
     // Compute commitment from point
-    pure def computeCommitment(point: Point): Commitment = 
+    pure def computeCommitment(point: Point): Commitment =
         "commit_" + point
-    
+
     // Verify reveal matches commitment
-    pure def verifyReveal(commitment: Commitment, point: Point): bool = 
+    pure def verifyReveal(commitment: Commitment, point: Point): bool =
         commitment == computeCommitment(point)
-    
+
     // Aggregate points to derive key
-    pure def aggregatePoints(points: Set[Point]): DerivedKey = 
+    pure def aggregatePoints(points: Set[Point]): DerivedKey =
         "key_" + points.size().toString()
-    
+
     // Check if we have threshold commitments
     pure def hasThresholdCommitments(session: DKDSession): bool = {
         session.commitments.keys().size() >= session.threshold
     }
-    
+
     // Check if we have matching reveals for all commitments
     pure def hasMatchingReveals(session: DKDSession): bool = {
         session.commitments.keys().forall(deviceId =>
@@ -82,9 +82,9 @@ module DKDProtocol {
             )
         )
     }
-    
+
     // ========== Actions ==========
-    
+
     // Initialize DKD session
     action initiateDKDSession(
         sessionId: SessionId,
@@ -117,7 +117,7 @@ module DKDProtocol {
             dkdParticipants' = participants.fold(dkdParticipants, (acc, deviceId) =>
                 acc.put((sessionId, deviceId), {
                     deviceId: deviceId,
-                    shareBytes: bytes("share_" + deviceId),  // Simplified
+                    shareBytes: bytes("share_" + deviceId),  // TODO fix - Simplified
                     commitment: Commitment(""),
                     point: Point(""),
                     hasCommitted: false,
@@ -127,7 +127,7 @@ module DKDProtocol {
             currentEpoch' = currentEpoch
         }
     }
-    
+
     // Record commitment from participant
     action recordCommitment(sessionId: SessionId, deviceId: DeviceId): bool = {
         all {
@@ -150,7 +150,7 @@ module DKDProtocol {
             dkdParticipants' = dkdParticipants.put((sessionId, deviceId), newParticipant),
             // Update session
             val newCommitments = session.commitments.put(deviceId, commitment),
-            val newState = if (newCommitments.keys().size() >= session.threshold) 
+            val newState = if (newCommitments.keys().size() >= session.threshold)
                 DKDReveal else DKDCommitment,
             val newSession = session
                 .with("commitments", newCommitments)
@@ -159,7 +159,7 @@ module DKDProtocol {
             currentEpoch' = currentEpoch + 1
         }
     }
-    
+
     // Reveal point from participant
     action revealPoint(sessionId: SessionId, deviceId: DeviceId): bool = {
         all {
@@ -189,7 +189,7 @@ module DKDProtocol {
             currentEpoch' = currentEpoch + 1
         }
     }
-    
+
     // Finalize DKD and derive key
     action finalizeDKD(sessionId: SessionId): bool = {
         all {
@@ -211,7 +211,7 @@ module DKDProtocol {
             currentEpoch' = currentEpoch + 1
         }
     }
-    
+
     // Fail DKD session
     action failDKD(sessionId: SessionId): bool = {
         all {
@@ -229,16 +229,16 @@ module DKDProtocol {
             currentEpoch' = currentEpoch + 1
         }
     }
-    
+
     // ========== Invariants ==========
-    
+
     // Commitment before reveal
     invariant commitmentBeforeReveal = {
         dkdParticipants.values().forall(participant =>
             participant.hasRevealed implies participant.hasCommitted
         )
     }
-    
+
     // Threshold property: can't finalize without threshold participants
     invariant thresholdRequirement = {
         dkdSessions.values().forall(session =>
@@ -247,7 +247,7 @@ module DKDProtocol {
                 session.reveals.keys().size() >= session.threshold
         )
     }
-    
+
     // Reveal verification: all reveals must match commitments
     invariant revealIntegrity = {
         dkdSessions.values().forall(session =>
@@ -260,16 +260,16 @@ module DKDProtocol {
             )
         )
     }
-    
+
     // No reveals without commitments
     invariant noOrphanReveals = {
         dkdSessions.values().forall(session =>
             session.reveals.keys().isSubsetOf(session.commitments.keys())
         )
     }
-    
+
     // ========== Properties ==========
-    
+
     // Byzantine fault tolerance: honest threshold can complete
     property byzantineFaultTolerance = {
         always(dkdSessions.values().forall(session =>
@@ -281,7 +281,7 @@ module DKDProtocol {
                 eventually(dkdSessions.get(session.sessionId).state == DKDComplete)
         ))
     }
-    
+
     // Timeout property: sessions eventually terminate
     property timeoutProperty = {
         always(dkdSessions.values().forall(session =>
@@ -289,7 +289,7 @@ module DKDProtocol {
                 eventually(session.state == DKDComplete or session.state == DKDFailure)
         ))
     }
-    
+
     // Determinism: same inputs produce same key
     property determinismProperty = {
         always(dkdSessions.values().forall(session1 =>
@@ -304,9 +304,9 @@ module DKDProtocol {
             )
         ))
     }
-    
+
     // ========== Initial State ==========
-    
+
     action init = {
         all {
             dkdSessions' = Map(),

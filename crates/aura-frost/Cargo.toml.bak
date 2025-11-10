@@ -1,0 +1,28 @@
+[package]
+name = "aura-frost"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+aura-core = { path = "../aura-core" }
+aura-mpst = { path = "../aura-mpst" }
+aura-crypto = { path = "../aura-crypto" }
+rumpsteak-aura = { git = "https://github.com/hxrts/rumpsteak-aura" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+tracing = "0.1"
+async-trait = "0.1"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+futures = "0.3"
+tokio = { version = "1.0", features = ["sync"] }
+rand = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full"] }
+
+[lints]
+workspace = true

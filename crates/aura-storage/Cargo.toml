@@ -1,0 +1,27 @@
+[package]
+name = "aura-storage"
+version = "0.1.0"
+edition = "2021"
+description = "Capability-based storage layer with choreographic search protocols"
+license = "MIT"
+
+[dependencies]
+# Core Aura crates
+aura-core = { path = "../aura-core" }
+aura-mpst = { path = "../aura-mpst" }
+aura-wot = { path = "../aura-wot" }
+aura-crypto = { path = "../aura-crypto" }
+
+# Standard dependencies
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+indexmap = "2.0"
+
+[dev-dependencies]
+proptest = "1.0"
+tokio-test = "0.4"
+
+[features]
+default = []
+testing = []

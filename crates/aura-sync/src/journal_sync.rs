@@ -1,0 +1,474 @@
+//! G_sync: Main Journal Synchronization Choreography
+//!
+//! This module implements the G_sync choreography for distributed journal
+//! synchronization using the rumpsteak-aura choreographic programming framework.
+
+use crate::{
+    anti_entropy::{
+        AntiEntropyChoreography, AntiEntropyReport, AntiEntropyRequest, DigestStatus, JournalDigest,
+    },
+    snapshot::WriterFence,
+};
+use aura_core::{tree::AttestedOp, AuraResult, DeviceId, Journal};
+use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tokio::sync::Mutex;
+
+const DEFAULT_BATCH_SIZE: usize = 128;
+
+/// Journal synchronization request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalSyncRequest {
+    /// Source device requesting sync
+    pub requester: DeviceId,
+    /// Target devices to sync with
+    pub targets: Vec<DeviceId>,
+    /// Account to synchronize
+    pub account_id: aura_core::AccountId,
+    /// Maximum operations per batch
+    pub max_batch_size: Option<usize>,
+    /// Local journal snapshot for digest computation
+    pub local_journal: Journal,
+    /// Local attested operations (oplog)
+    pub local_operations: Vec<AttestedOp>,
+}
+
+/// Journal synchronization response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalSyncResponse {
+    /// Operations synchronized
+    pub operations_synced: usize,
+    /// Peers that participated
+    pub peers_synced: Vec<DeviceId>,
+    /// Success indicator
+    pub success: bool,
+    /// Error message if any
+    pub error: Option<String>,
+}
+
+/// Message types for the G_sync choreography
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SyncMessage {
+    /// Request journal digest for comparison
+    DigestRequest {
+        /// Account to get digest for
+        account_id: aura_core::AccountId,
+        /// Requester's digest
+        requester_digest: JournalDigest,
+    },
+
+    /// Response with journal digest
+    DigestResponse {
+        /// Provider device ID
+        provider: DeviceId,
+        /// Provider digest payload
+        provider_digest: JournalDigest,
+    },
+
+    /// Request missing operations
+    OperationsRequest {
+        /// Target provider
+        provider: DeviceId,
+        /// Anti-entropy request plan
+        request: AntiEntropyRequest,
+    },
+
+    /// Response with operations
+    OperationsResponse {
+        /// The operations being sent
+        operations: Vec<AttestedOp>,
+        /// More operations available
+        has_more: bool,
+    },
+
+    /// Sync completion notification
+    SyncComplete {
+        /// Final operation count
+        final_count: usize,
+        /// Success status
+        success: bool,
+    },
+}
+
+/// Roles in the G_sync choreography
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SyncRole {
+    /// The device requesting synchronization
+    Requester,
+    /// A device providing sync data
+    Provider(u32),
+    /// Coordinator managing the sync process
+    Coordinator,
+}
+
+impl SyncRole {
+    /// Get the name of this role
+    pub fn name(&self) -> String {
+        match self {
+            SyncRole::Requester => "Requester".to_string(),
+            SyncRole::Provider(id) => format!("Provider_{}", id),
+            SyncRole::Coordinator => "Coordinator".to_string(),
+        }
+    }
+}
+
+/// G_sync choreography state
+#[derive(Debug)]
+pub struct SyncChoreographyState {
+    /// Current sync request being processed
+    current_request: Option<JournalSyncRequest>,
+    /// Cached local digest
+    local_digest: Option<JournalDigest>,
+    /// Collected digest responses
+    digests: HashMap<DeviceId, JournalDigest>,
+    /// Operations received during sync
+    received_operations: Vec<AttestedOp>,
+    /// Sync progress tracking
+    sync_progress: HashMap<DeviceId, usize>,
+    /// Cached local journal for anti-entropy comparisons
+    local_journal: Journal,
+    /// Cached local operations (oplog)
+    local_operations: Vec<AttestedOp>,
+    /// Desired batch size
+    batch_size: usize,
+}
+
+impl SyncChoreographyState {
+    /// Create new choreography state
+    pub fn new() -> Self {
+        Self {
+            current_request: None,
+            local_digest: None,
+            digests: HashMap::new(),
+            received_operations: Vec::new(),
+            sync_progress: HashMap::new(),
+            local_journal: Journal::new(),
+            local_operations: Vec::new(),
+            batch_size: DEFAULT_BATCH_SIZE,
+        }
+    }
+
+    /// Check if we have received all expected digest responses
+    pub fn has_all_digests(&self) -> bool {
+        if let Some(request) = &self.current_request {
+            self.digests.len() >= request.targets.len()
+        } else {
+            false
+        }
+    }
+
+    /// Find the device with the most operations (likely most up-to-date)
+    pub fn find_best_provider(&self) -> Option<DeviceId> {
+        self.digests
+            .iter()
+            .max_by_key(|(_, digest)| digest.operation_count)
+            .map(|(device_id, _)| *device_id)
+    }
+
+    /// Get total operations received
+    pub fn total_operations_received(&self) -> usize {
+        self.received_operations.len()
+    }
+
+    /// Update cached local journal/operations view.
+    pub fn set_local_view(&mut self, journal: Journal, operations: Vec<AttestedOp>) {
+        self.local_journal = journal;
+        self.local_operations = operations;
+    }
+
+    /// Record the local digest calculated for this sync session.
+    pub fn set_local_digest(&mut self, digest: JournalDigest) {
+        self.local_digest = Some(digest);
+    }
+
+    /// Configure the preferred anti-entropy batch size.
+    pub fn set_batch_size(&mut self, batch_size: usize) {
+        self.batch_size = batch_size.max(1);
+    }
+
+    fn anti_entropy_engine(&self) -> AntiEntropyChoreography {
+        AntiEntropyChoreography::new(self.batch_size)
+    }
+
+    /// Store a peer digest and compute the corresponding anti-entropy request, if any.
+    pub fn record_peer_digest(
+        &mut self,
+        peer: DeviceId,
+        digest: JournalDigest,
+    ) -> Option<AntiEntropyRequest> {
+        self.digests.insert(peer, digest.clone());
+        self.local_digest
+            .as_ref()
+            .and_then(|local| self.anti_entropy_engine().next_request(local, &digest))
+    }
+
+    /// Apply remote operations and update local cache.
+    pub fn apply_remote_operations(
+        &mut self,
+        operations: Vec<AttestedOp>,
+    ) -> AuraResult<AntiEntropyReport> {
+        self.anti_entropy_engine()
+            .merge_batch(&mut self.received_operations, operations)
+    }
+
+    /// Compare a digest with the cached local digest.
+    pub fn compare_with_local(&self, digest: &JournalDigest) -> Option<DigestStatus> {
+        self.local_digest
+            .as_ref()
+            .map(|local| AntiEntropyChoreography::compare(local, digest))
+    }
+}
+
+/// G_sync choreography implementation
+///
+/// This choreography coordinates distributed journal synchronization with:
+/// - Capability guards for authorization: `[guard: journal_sync ≤ caps]`
+/// - Journal coupling for CRDT integration: `[▷ Δjournal_sync]`
+/// - Leakage tracking for privacy: `[leak: sync_metadata]`
+#[derive(Debug)]
+pub struct SyncChoreography {
+    /// Local device role
+    role: SyncRole,
+    /// Choreography state
+    state: Mutex<SyncChoreographyState>,
+    /// MPST runtime
+    runtime: AuraRuntime,
+    /// Optional writer fence (activated during snapshots)
+    writer_fence: Option<WriterFence>,
+}
+
+impl SyncChoreography {
+    /// Create a new G_sync choreography
+    pub fn new(role: SyncRole, runtime: AuraRuntime) -> Self {
+        Self {
+            role,
+            state: Mutex::new(SyncChoreographyState::new()),
+            runtime,
+            writer_fence: None,
+        }
+    }
+
+    /// Attach a writer fence used during snapshot proposals.
+    pub fn with_writer_fence(mut self, fence: WriterFence) -> Self {
+        self.writer_fence = Some(fence);
+        self
+    }
+
+    /// Execute the choreography
+    pub async fn execute(&self, request: JournalSyncRequest) -> AuraResult<JournalSyncResponse> {
+        if let Some(fence) = &self.writer_fence {
+            fence.ensure_open("journal sync")?;
+        }
+        let mut state = self.state.lock().await;
+        state.current_request = Some(request.clone());
+        drop(state);
+
+        match self.role {
+            SyncRole::Requester => self.execute_requester(request).await,
+            SyncRole::Provider(_) => self.execute_provider().await,
+            SyncRole::Coordinator => self.execute_coordinator().await,
+        }
+    }
+
+    /// Execute as requester
+    async fn execute_requester(
+        &self,
+        request: JournalSyncRequest,
+    ) -> AuraResult<JournalSyncResponse> {
+        tracing::info!(
+            "Executing G_sync as requester for account: {}",
+            request.account_id
+        );
+
+        // Apply capability guard: [guard: journal_sync ≤ caps]
+        let sync_cap = aura_core::Cap::new(); // TODO: Create proper journal sync capability
+        let guard = CapabilityGuard::new(sync_cap);
+        guard.enforce(self.runtime.capabilities()).map_err(|e| {
+            aura_core::AuraError::permission_denied(format!(
+                "Insufficient capabilities for journal sync: {}",
+                e
+            ))
+        })?;
+
+        let batch_size = request.max_batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
+        let anti_entropy = AntiEntropyChoreography::new(batch_size);
+        let local_digest =
+            anti_entropy.compute_digest(&request.local_journal, &request.local_operations)?;
+
+        {
+            let mut state = self.state.lock().await;
+            state.set_batch_size(batch_size);
+            state.set_local_view(
+                request.local_journal.clone(),
+                request.local_operations.clone(),
+            );
+            state.set_local_digest(local_digest.clone());
+        }
+
+        tracing::debug!(
+            "Local digest computed (ops={}, last_epoch={:?}, fact_hash={:02x?})",
+            local_digest.operation_count,
+            local_digest.last_epoch,
+            &local_digest.fact_hash[..4]
+        );
+
+        // Send digest requests to all targets
+        tracing::info!(
+            "Sending digest requests to {} targets",
+            request.targets.len()
+        );
+        // TODO: Implement actual message sending
+
+        // Wait for digest responses
+        // TODO: Implement digest collection
+
+        // Apply journal annotation: [▷ Δjournal_sync]
+        let journal_annotation =
+            JournalAnnotation::add_facts("Journal sync digest request".to_string());
+        tracing::info!("Applied journal annotation: {:?}", journal_annotation);
+
+        // TODO fix - For now, return a placeholder response
+        Ok(JournalSyncResponse {
+            operations_synced: 0,
+            peers_synced: request.targets,
+            success: false,
+            error: Some("G_sync choreography execution not fully implemented".to_string()),
+        })
+    }
+
+    /// Execute as provider
+    async fn execute_provider(&self) -> AuraResult<JournalSyncResponse> {
+        tracing::info!("Executing G_sync as provider");
+
+        // Wait for digest request
+        // TODO: Implement message receiving
+
+        // Compute and send journal digest
+        // TODO: Implement digest computation
+
+        // Wait for operations request and send operations
+        // TODO: Implement operation serving
+
+        Ok(JournalSyncResponse {
+            operations_synced: 0,
+            peers_synced: Vec::new(),
+            success: false,
+            error: Some("G_sync choreography execution not fully implemented".to_string()),
+        })
+    }
+
+    /// Execute as coordinator
+    async fn execute_coordinator(&self) -> AuraResult<JournalSyncResponse> {
+        tracing::info!("Executing G_sync as coordinator");
+
+        // Coordinate the sync process across multiple peers
+        // TODO: Implement coordination logic
+
+        // Aggregate results and handle conflicts
+        // TODO: Implement result aggregation
+
+        Ok(JournalSyncResponse {
+            operations_synced: 0,
+            peers_synced: Vec::new(),
+            success: false,
+            error: Some("G_sync choreography execution not fully implemented".to_string()),
+        })
+    }
+}
+
+/// Journal synchronization coordinator
+#[derive(Debug)]
+pub struct JournalSyncCoordinator {
+    /// Local runtime
+    runtime: AuraRuntime,
+    /// Current choreography
+    choreography: Option<SyncChoreography>,
+}
+
+impl JournalSyncCoordinator {
+    /// Create a new journal sync coordinator
+    pub fn new(runtime: AuraRuntime) -> Self {
+        Self {
+            runtime,
+            choreography: None,
+        }
+    }
+
+    /// Execute journal synchronization using the G_sync choreography
+    pub async fn sync_journal(
+        &mut self,
+        request: JournalSyncRequest,
+    ) -> AuraResult<JournalSyncResponse> {
+        tracing::info!("Starting journal sync for account: {}", request.account_id);
+
+        // Create choreography with requester role
+        let choreography = SyncChoreography::new(SyncRole::Requester, self.runtime.clone());
+
+        // Execute the choreography
+        let result = choreography.execute(request).await;
+
+        // Store choreography for potential follow-up operations
+        self.choreography = Some(choreography);
+
+        result
+    }
+
+    /// Get the current runtime
+    pub fn runtime(&self) -> &AuraRuntime {
+        &self.runtime
+    }
+
+    /// Check if a choreography is currently active
+    pub fn has_active_choreography(&self) -> bool {
+        self.choreography.is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::{AccountId, Cap, DeviceId, Journal};
+
+    #[tokio::test]
+    async fn test_choreography_state_creation() {
+        let state = SyncChoreographyState::new();
+
+        assert!(!state.has_all_digests());
+        assert_eq!(state.total_operations_received(), 0);
+        assert!(state.find_best_provider().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_choreography_creation() {
+        let device_id = DeviceId::new();
+        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+
+        let choreography = SyncChoreography::new(SyncRole::Requester, runtime);
+
+        assert_eq!(choreography.role, SyncRole::Requester);
+    }
+
+    #[tokio::test]
+    async fn test_sync_coordinator() {
+        let device_id = DeviceId::new();
+        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+
+        let mut coordinator = JournalSyncCoordinator::new(runtime);
+        assert!(!coordinator.has_active_choreography());
+
+        let request = JournalSyncRequest {
+            requester: device_id,
+            targets: vec![DeviceId::new()],
+            account_id: AccountId::new(),
+            max_batch_size: Some(100),
+            local_journal: Journal::new(),
+            local_operations: Vec::new(),
+        };
+
+        // Note: This will return an error since choreography is not fully implemented
+        let result = coordinator.sync_journal(request).await;
+        assert!(result.is_err());
+        assert!(coordinator.has_active_choreography());
+    }
+}

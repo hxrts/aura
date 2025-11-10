@@ -3,20 +3,20 @@
 
 module TransportSBB {
     import SessionTypes.*
-    
+
     // ========== SBB Types ==========
-    
+
     type PeerId = str
     type Cid = str  // Content identifier
     type RoutingTag = bytes
     type RelationshipId = str
-    
+
     // Trust levels for peer relationships
-    type TrustLevel = 
+    type TrustLevel =
         | Direct      // Direct trust relationship
         | OneDegree   // Friend of friend
         | TwoDegree   // Two degrees of separation
-    
+
     // Envelope header
     type EnvelopeHeader = {
         version: int,
@@ -26,13 +26,13 @@ module TransportSBB {
         ttlEpochs: int,
         cid: Cid
     }
-    
+
     // Sealed envelope
     type Envelope = {
         header: EnvelopeHeader,
         ciphertext: bytes  // Encrypted payload
     }
-    
+
     // Peer authentication info
     type PeerAuthentication = {
         deviceId: DeviceId,
@@ -40,7 +40,7 @@ module TransportSBB {
         lastAuthenticated: int,
         trustLevel: TrustLevel
     }
-    
+
     // Peer permissions
     type PeerPermissions = {
         relayPermissions: Set[str],
@@ -48,7 +48,7 @@ module TransportSBB {
         storagePermissions: Set[str],
         grantedCapabilities: Set[bytes]
     }
-    
+
     // Neighbor info for active gossip partners
     type NeighborInfo = {
         peerId: PeerId,
@@ -56,7 +56,7 @@ module TransportSBB {
         permissions: PeerPermissions,
         addedAt: int
     }
-    
+
     // Merge history for rate limiting
     type MergeHistory = {
         lastMergeAt: int,
@@ -64,7 +64,7 @@ module TransportSBB {
         consecutiveFailures: int,
         backoffUntil: int
     }
-    
+
     // Envelope metadata
     type EnvelopeMetadata = {
         cid: Cid,
@@ -73,7 +73,7 @@ module TransportSBB {
         sizeBytes: int,
         receivedFrom: PeerId
     }
-    
+
     // SBB node state
     type SbbNode = {
         nodeId: PeerId,
@@ -85,46 +85,46 @@ module TransportSBB {
         maxActiveNeighbors: int,
         minMergeIntervalMs: int
     }
-    
+
     // ========== State Variables ==========
-    
+
     var nodes: PeerId -> SbbNode
     var envelopes: Cid -> Envelope
     var inTransit: Set[(Cid, PeerId, PeerId)]  // (envelope, from, to)
     var currentTime: int
     var currentEpoch: int
-    
+
     // ========== Helper Functions ==========
-    
+
     // Compute CID from envelope content
     pure def computeCid(envelope: Envelope): Cid = {
         // Blake3(header || ciphertext)
         "cid_" + envelope.header.counter.toString()
     }
-    
+
     // Check if peer can merge (rate limiting)
     pure def canMerge(history: MergeHistory, now: int, minInterval: int): bool = {
         now >= history.backoffUntil and
         now - history.lastMergeAt >= minInterval
     }
-    
+
     // Calculate exponential backoff
     pure def calculateBackoff(failures: int, now: int): int = {
         val backoffMs = 1000 * (2 ^ min(failures, 10)),
         now + backoffMs
     }
-    
+
     // Check if envelope is expired
     pure def isExpired(metadata: EnvelopeMetadata, epoch: int): bool = {
         epoch > metadata.expiresAtEpoch
     }
-    
+
     // Get envelope routing scope
     pure def getRoutingScope(routingTag: RoutingTag): Set[PeerId] = {
-        // Simplified: routing tag determines which peers should receive
+        // TODO fix - Simplified: routing tag determines which peers should receive
         Set()  // Would compute based on tag
     }
-    
+
     // Check trust transitivity
     pure def computeTrustLevel(direct: TrustLevel, intermediate: TrustLevel): TrustLevel = {
         match (direct, intermediate) {
@@ -134,9 +134,9 @@ module TransportSBB {
             | _ => TwoDegree  // Max distance
         }
     }
-    
+
     // ========== Actions ==========
-    
+
     // Publish new envelope
     action publishEnvelope(
         nodeId: PeerId,
@@ -172,7 +172,7 @@ module TransportSBB {
             currentEpoch' = currentEpoch
         }
     }
-    
+
     // Add active neighbor
     action addNeighbor(
         nodeId: PeerId,
@@ -214,7 +214,7 @@ module TransportSBB {
             currentEpoch' = currentEpoch
         }
     }
-    
+
     // Initiate merge with neighbor
     action initiateMerge(nodeId: PeerId, neighborId: PeerId): bool = {
         all {
@@ -244,7 +244,7 @@ module TransportSBB {
             currentEpoch' = currentEpoch
         }
     }
-    
+
     // Receive envelope from neighbor
     action receiveEnvelope(cid: Cid, fromPeer: PeerId, toPeer: PeerId): bool = {
         all {
@@ -276,7 +276,7 @@ module TransportSBB {
             currentEpoch' = currentEpoch
         }
     }
-    
+
     // Record merge failure
     action recordMergeFailure(nodeId: PeerId, neighborId: PeerId): bool = {
         all {
@@ -309,7 +309,7 @@ module TransportSBB {
             currentEpoch' = currentEpoch
         }
     }
-    
+
     // Garbage collect expired envelopes
     action gcExpiredEnvelopes(nodeId: PeerId): bool = {
         all {
@@ -329,7 +329,7 @@ module TransportSBB {
             currentEpoch' = currentEpoch
         }
     }
-    
+
     // Discover peers from neighbor
     action discoverPeers(nodeId: PeerId, neighborId: PeerId, discoveredPeers: Set[PeerId]): bool = {
         all {
@@ -360,16 +360,16 @@ module TransportSBB {
             currentEpoch' = currentEpoch
         }
     }
-    
+
     // ========== Invariants ==========
-    
+
     // Envelope integrity: CIDs match content
     invariant envelopeIntegrity = {
         envelopes.keys().forall(cid =>
             computeCid(envelopes.get(cid)) == cid
         )
     }
-    
+
     // Neighbor symmetry
     invariant neighborSymmetry = {
         nodes.values().forall(node =>
@@ -379,14 +379,14 @@ module TransportSBB {
             )
         )
     }
-    
+
     // Active neighbor limit
     invariant activeNeighborLimit = {
         nodes.values().forall(node =>
             node.activeNeighbors.keys().size() <= node.maxActiveNeighbors
         )
     }
-    
+
     // No duplicate envelopes in transit
     invariant noDuplicateTransit = {
         inTransit.forall(transit1 =>
@@ -396,7 +396,7 @@ module TransportSBB {
             )
         )
     }
-    
+
     // Trust level consistency
     invariant trustLevelConsistency = {
         nodes.values().forall(node =>
@@ -405,9 +405,9 @@ module TransportSBB {
             )
         )
     }
-    
+
     // ========== Properties ==========
-    
+
     // Eventual delivery: envelopes reach all neighbors
     property eventualDelivery = {
         always(envelopes.keys().forall(cid =>
@@ -424,7 +424,7 @@ module TransportSBB {
             )
         ))
     }
-    
+
     // Rate limiting effectiveness
     property rateLimitingProperty = {
         always(nodes.values().forall(node =>
@@ -436,7 +436,7 @@ module TransportSBB {
             )
         ))
     }
-    
+
     // Gossip convergence: all neighbors eventually have same envelopes
     property gossipConvergence = {
         always(nodes.keys().forall(nodeId1 =>
@@ -453,7 +453,7 @@ module TransportSBB {
             )
         ))
     }
-    
+
     // Exponential backoff on failures
     property exponentialBackoff = {
         always(nodes.values().forall(node =>
@@ -463,7 +463,7 @@ module TransportSBB {
             )
         ))
     }
-    
+
     // Peer discovery transitivity
     property peerDiscoveryTransitivity = {
         always(nodes.values().forall(node =>
@@ -473,9 +473,9 @@ module TransportSBB {
             )
         ))
     }
-    
+
     // ========== Initial State ==========
-    
+
     action init = {
         all {
             nodes' = Map(
@@ -506,8 +506,8 @@ module TransportSBB {
             currentEpoch' = 0
         }
     }
-    
+
     // ========== Utility Functions ==========
-    
+
     pure def min(a: int, b: int): int = if (a < b) a else b
 }

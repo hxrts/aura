@@ -4,7 +4,7 @@
 //! delta updates in delta-based CRDTs. The handler buffers deltas and
 //! periodically folds them into the state for bandwidth optimization.
 
-use aura_types::semilattice::{CvState, Delta, DeltaMsg, DeltaProduce, MsgKind};
+use aura_core::semilattice::{CvState, Delta, DeltaMsg, DeltaProduce, MsgKind};
 use std::collections::VecDeque;
 
 /// Delta-based CRDT effect handler
@@ -86,7 +86,7 @@ where
         if let Some(delta) = combined_delta {
             // Apply the combined delta to state
             // Note: This requires implementing delta application logic
-            // For now, we assume deltas can be converted to state updates
+            // TODO fix - For now, we assume deltas can be converted to state updates
             self.apply_delta_to_state(delta);
         }
     }
@@ -103,7 +103,7 @@ where
         // 2. Joining with current state
         // 3. Updating the state
 
-        // For now, this is a placeholder
+        // TODO fix - For now, this is a placeholder
         tracing::debug!("Applied delta to state (placeholder implementation)");
     }
 
@@ -202,7 +202,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_types::semilattice::{Bottom, JoinSemilattice};
+    use aura_core::semilattice::{Bottom, JoinSemilattice};
 
     // Test state type
     #[derive(Debug, Clone, PartialEq, Eq)]

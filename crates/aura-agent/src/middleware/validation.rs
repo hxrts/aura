@@ -3,7 +3,7 @@
 //! Provides configurable input validation for agent operations, ensuring that
 //! all inputs meet security and business requirements before being processed.
 
-use aura_types::{
+use aura_core::{
     identifiers::{AccountId, DeviceId, SessionId},
     AuraError, AuraResult as Result,
 };
@@ -109,7 +109,7 @@ impl ValidationMiddleware {
     pub async fn validate_session_id(&self, session_id: &SessionId) -> Result<()> {
         // Basic format validation
         if session_id.to_string().is_empty() {
-            return Err(AuraError::invalid_input("Session ID cannot be empty"));
+            return Err(AuraError::invalid("Session ID cannot be empty"));
         }
 
         // Apply session-specific rules
@@ -122,13 +122,13 @@ impl ValidationMiddleware {
                 // TODO: Check session state via effect system
                 if *require_active {
                     // Would check if session is active via effect system
-                    // For now, assume valid
+                    // TODO fix - For now, assume valid
                 }
 
                 // Check allowed types
                 if !allowed_types.is_empty() {
                     // Would check session type via effect system
-                    // For now, assume valid
+                    // TODO fix - For now, assume valid
                 }
             }
         }
@@ -151,7 +151,7 @@ impl ValidationMiddleware {
                     });
 
                 if field_matches && data.len() > *max_bytes {
-                    return Err(AuraError::invalid_input(format!(
+                    return Err(AuraError::invalid(format!(
                         "Input field '{}' size {} exceeds maximum {}",
                         field_name,
                         data.len(),
@@ -191,7 +191,7 @@ impl ValidationMiddleware {
             }
             ValidationRuleType::Custom { description } => {
                 // Custom validation would be implemented by specific business logic
-                // For now, just log that custom validation was requested
+                // TODO fix - For now, just log that custom validation was requested
                 tracing::debug!(
                     "Custom validation '{}' for operation '{}'",
                     description,
@@ -213,7 +213,7 @@ impl ValidationMiddleware {
         max_ops: u32,
         window: Duration,
     ) -> Result<()> {
-        // Note: This is a simplified in-memory rate limiter
+        // Note: This is a TODO fix - Simplified in-memory rate limiter
         // Production implementation would use persistent storage
 
         let now = Instant::now();
@@ -227,7 +227,7 @@ impl ValidationMiddleware {
             .unwrap_or(0);
 
         if recent_ops >= max_ops as usize {
-            return Err(AuraError::rate_limited(format!(
+            return Err(AuraError::invalid(format!(
                 "Operation '{}' rate limit exceeded: {} operations in {:?}",
                 operation_name, recent_ops, window
             )));
@@ -353,16 +353,16 @@ impl InputValidator {
     /// Validate account ID format
     pub fn validate_account_id(account_id: &AccountId) -> Result<()> {
         if account_id.to_string().is_empty() {
-            return Err(AuraError::invalid_input("Account ID cannot be empty"));
+            return Err(AuraError::invalid("Account ID cannot be empty"));
         }
         // Additional format validation could be added here
         Ok(())
     }
 
-    /// Validate device ID format  
+    /// Validate device ID format
     pub fn validate_device_id_format(device_id: &DeviceId) -> Result<()> {
         if device_id.to_string().is_empty() {
-            return Err(AuraError::invalid_input("Device ID cannot be empty"));
+            return Err(AuraError::invalid("Device ID cannot be empty"));
         }
         // Additional format validation could be added here
         Ok(())
@@ -371,7 +371,7 @@ impl InputValidator {
     /// Validate session ID format
     pub fn validate_session_id_format(session_id: &SessionId) -> Result<()> {
         if session_id.to_string().is_empty() {
-            return Err(AuraError::invalid_input("Session ID cannot be empty"));
+            return Err(AuraError::invalid("Session ID cannot be empty"));
         }
         // Additional format validation could be added here
         Ok(())
@@ -380,14 +380,14 @@ impl InputValidator {
     /// Validate string input for common issues
     pub fn validate_string_input(input: &str, field_name: &str, max_length: usize) -> Result<()> {
         if input.is_empty() {
-            return Err(AuraError::invalid_input(format!(
+            return Err(AuraError::invalid(format!(
                 "{} cannot be empty",
                 field_name
             )));
         }
 
         if input.len() > max_length {
-            return Err(AuraError::invalid_input(format!(
+            return Err(AuraError::invalid(format!(
                 "{} exceeds maximum length of {} characters",
                 field_name, max_length
             )));
@@ -395,7 +395,7 @@ impl InputValidator {
 
         // Check for common security issues
         if input.contains('\0') {
-            return Err(AuraError::invalid_input(format!(
+            return Err(AuraError::invalid(format!(
                 "{} contains null bytes",
                 field_name
             )));
@@ -407,14 +407,14 @@ impl InputValidator {
     /// Validate binary data input
     pub fn validate_binary_input(data: &[u8], field_name: &str, max_size: usize) -> Result<()> {
         if data.is_empty() {
-            return Err(AuraError::invalid_input(format!(
+            return Err(AuraError::invalid(format!(
                 "{} cannot be empty",
                 field_name
             )));
         }
 
         if data.len() > max_size {
-            return Err(AuraError::invalid_input(format!(
+            return Err(AuraError::invalid(format!(
                 "{} size {} exceeds maximum {} bytes",
                 field_name,
                 data.len(),
@@ -446,7 +446,7 @@ mod tests {
         assert!(middleware.validate_operation("test_op").await.is_ok());
         assert!(middleware.validate_operation("test_op").await.is_ok());
 
-        // Third operation should be rate limited (in a real implementation)
+        // Third operation should be rate limited (TODO fix - In a real implementation)
         // Note: Current implementation doesn't track state properly for testing
     }
 

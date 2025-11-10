@@ -6,7 +6,7 @@
 //! - Deterministic protocol simulations
 //! - Development and debugging
 
-use aura_types::{AuraError, DeviceId};
+use aura_core::{AuraError, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -125,7 +125,8 @@ impl MemoryTransport {
         drop(routing);
 
         for peer in peers.iter() {
-            self.send(*peer, payload.clone(), message_type.clone()).await?;
+            self.send(*peer, payload.clone(), message_type.clone())
+                .await?;
         }
 
         Ok(())

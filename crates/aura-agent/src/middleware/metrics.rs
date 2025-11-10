@@ -3,7 +3,7 @@
 //! Provides telemetry and metrics collection for agent operations, enabling
 //! monitoring, performance analysis, and operational insights.
 
-use aura_types::{identifiers::DeviceId, AuraError, AuraResult as Result};
+use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -82,7 +82,7 @@ impl OperationMetrics {
 
     /// Get operations per second based on recent activity
     pub fn ops_per_second(&self, window: Duration) -> f64 {
-        // Simplified calculation - would need more sophisticated tracking in production
+        // TODO fix - Simplified calculation - would need more sophisticated tracking in production
         let total_ops = self.success_count + self.error_count;
         if total_ops == 0 || window.is_zero() {
             return 0.0;
@@ -103,7 +103,7 @@ pub struct AgentMetrics {
     pub start_time: SystemTime,
     /// Total operations across all types
     pub total_operations: u64,
-    /// Memory usage statistics (simplified)
+    /// Memory usage statistics (TODO fix - Simplified)
     pub memory_usage_mb: u64,
     /// Active connections count
     pub active_connections: u32,
@@ -384,10 +384,10 @@ impl MetricsMiddleware {
 pub struct SystemMetricsCollector;
 
 impl SystemMetricsCollector {
-    /// Get current memory usage (simplified)
+    /// Get current memory usage (TODO fix - Simplified)
     pub fn get_memory_usage_mb() -> u64 {
-        // In a real implementation, this would use platform-specific APIs
-        // For now, return a placeholder
+        // TODO fix - In a real implementation, this would use platform-specific APIs
+        // TODO fix - For now, return a placeholder
         #[cfg(target_os = "linux")]
         {
             // Could read /proc/self/status on Linux
@@ -401,7 +401,7 @@ impl SystemMetricsCollector {
             // Could use Windows APIs
         }
 
-        // Placeholder: return 0 for now
+        // Placeholder: return 0 TODO fix - For now
         0
     }
 

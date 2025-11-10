@@ -1,6 +1,6 @@
-//! Concrete CRDT implementations aligned with 402_crdt_types.md
+//! Concrete CRDT implementations aligned with docs/001_theoretical_foundations.md
 
-use aura_types::semilattice::{JoinSemilattice, Bottom, CvState};
+use aura_core::semilattice::{Bottom, CvState, JoinSemilattice};
 use std::collections::{BTreeMap, HashSet};
 
 /// CRDT operation errors
@@ -42,7 +42,7 @@ pub type Replica = String;
 /// and the total value is the sum of all actor counters. Merging keeps the
 /// maximum value for each actor.
 ///
-/// See 402_crdt_types.md Section 6.1
+/// See docs/001_theoretical_foundations.md Section 4
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GCounter(pub BTreeMap<Replica, i64>);
 
@@ -99,7 +99,7 @@ impl CvState for GCounter {}
 /// the elements from both sets. Only supports elements that implement Clone,
 /// Eq, and Hash traits.
 ///
-/// Simplified version of OR-Set from 402_crdt_types.md Section 6.2
+/// TODO fix - Simplified version of OR-Set from docs/001_theoretical_foundations.md Section 4
 #[derive(Debug, Clone)]
 pub struct GSet<T: Clone + Eq + std::hash::Hash>(pub HashSet<T>);
 
@@ -157,7 +157,7 @@ impl<T: Clone + Eq + std::hash::Hash> CvState for GSet<T> {}
 /// from the write with the highest timestamp. If timestamps are equal,
 /// the actor ID is used as a tiebreaker.
 ///
-/// See 402_crdt_types.md for LWW semantics
+/// See docs/001_theoretical_foundations.md for LWW semantics
 #[derive(Debug, Clone)]
 pub struct LwwRegister<T: Clone> {
     value: Option<T>,

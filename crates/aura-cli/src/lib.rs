@@ -2,7 +2,7 @@
 //!
 //! This library provides the command-line interface for the Aura threshold identity platform.
 //! It uses the unified effect system architecture for all operations following the guidance
-//! from docs/400_effect_system.md.
+//! from docs/002_system_architecture.md.
 //!
 //! The aura-cli crate adheres to the unified effect system by:
 //! - Using AuraEffectSystem for all system interactions
@@ -19,8 +19,8 @@ pub mod handlers;
 pub use effects::{CliConfig, CliEffects, ConfigEffects, OutputEffects};
 pub use handlers::CliHandler;
 
+use aura_core::identifiers::DeviceId;
 use aura_protocol::AuraEffectSystem;
-use aura_types::identifiers::DeviceId;
 
 /// Create a CLI handler for the given device ID
 pub fn create_cli_handler(device_id: DeviceId) -> CliHandler {
@@ -111,6 +111,99 @@ pub enum ScenarioAction {
         /// Include detailed information
         #[arg(long)]
         detailed: bool,
+    },
+}
+
+/// Snapshot maintenance subcommands.
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum SnapshotAction {
+    /// Run the full Snapshot_v1 ceremony locally (propose + commit + GC).
+    Propose,
+}
+
+/// Admin maintenance subcommands.
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum AdminAction {
+    /// Replace the administrator for an account (stub, writes journal fact).
+    Replace {
+        /// Account identifier (UUID string).
+        #[arg(long)]
+        account: String,
+        /// Device ID of the new admin (UUID string).
+        #[arg(long)]
+        new_admin: String,
+        /// Epoch when the new admin becomes authoritative.
+        #[arg(long)]
+        activation_epoch: u64,
+    },
+}
+
+/// Recovery subcommands exposed via CLI.
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum RecoveryAction {
+    /// Initiate guardian recovery from the local device.
+    Start {
+        /// Account identifier to recover.
+        #[arg(long)]
+        account: String,
+        /// Comma separated guardian device IDs.
+        #[arg(long)]
+        guardians: String,
+        /// Required guardian threshold (defaults to 2).
+        #[arg(long, default_value = "2")]
+        threshold: u32,
+        /// Recovery priority (normal|urgent|emergency).
+        #[arg(long, default_value = "normal")]
+        priority: String,
+        /// Dispute window in hours (guardians can object before finalize).
+        #[arg(long, default_value = "48")]
+        dispute_hours: u64,
+        /// Optional human readable justification recorded in the request.
+        #[arg(long)]
+        justification: Option<String>,
+    },
+    /// Approve a guardian recovery request from this device.
+    Approve {
+        /// Path to a serialized recovery request (JSON).
+        #[arg(long)]
+        request_file: std::path::PathBuf,
+    },
+    /// Show local guardian recovery status and cooldown timers.
+    Status,
+    /// File a dispute against a recovery evidence record.
+    Dispute {
+        /// Evidence identifier returned by `aura recovery start`.
+        #[arg(long)]
+        evidence: String,
+        /// Human readable reason included in the dispute log.
+        #[arg(long)]
+        reason: String,
+    },
+}
+
+/// Invitation subcommands.
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum InvitationAction {
+    /// Create a device invitation envelope and broadcast it.
+    Create {
+        /// Account identifier.
+        #[arg(long)]
+        account: String,
+        /// Device ID of the invitee.
+        #[arg(long)]
+        invitee: String,
+        /// Role granted to the invitee.
+        #[arg(long, default_value = "device")]
+        role: String,
+        /// Optional TTL in seconds.
+        #[arg(long)]
+        ttl: Option<u64>,
+    },
+    /// Accept an invitation envelope serialized to disk.
+    Accept {
+        /// Path to the invitation envelope JSON file.
+        #[arg(long)]
+        envelope: std::path::PathBuf,
     },
 }
 

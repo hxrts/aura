@@ -36,7 +36,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Unique identifier for a journal node
-pub type NodeId = aura_types::identifiers::DeviceId; // Reuse DeviceId infrastructure
+pub type NodeId = aura_core::identifiers::DeviceId; // Reuse DeviceId infrastructure
 
 /// Unique identifier for a journal edge
 pub type EdgeId = uuid::Uuid;
@@ -276,7 +276,7 @@ impl KeyNode {
     /// - Suitable for ZK proofs and cross-domain verification
     pub fn compute_commitment(&self, _child_commitments: &[NodeCommitment]) -> NodeCommitment {
         // Implementation deferred to Phase 2
-        // For now, return a placeholder based on node ID
+        // TODO fix - For now, return a placeholder based on node ID
         let mut hash = [0u8; 32];
         let id_bytes = self.id.0.as_bytes();
         hash[..id_bytes.len().min(32)].copy_from_slice(&id_bytes[..id_bytes.len().min(32)]);

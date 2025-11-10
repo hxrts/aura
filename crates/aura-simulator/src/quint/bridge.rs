@@ -388,12 +388,12 @@ impl QuintBridge {
 
     /// Load a single Quint specification file
     ///
-    /// This is a placeholder implementation. In a real implementation, this would:
+    /// This is a placeholder implementation. TODO fix - In a real implementation, this would:
     /// 1. Parse the `.qnt` file using a Quint parser
     /// 2. Extract module definitions, invariants, and properties
     /// 3. Build the QuintSpec structure
     ///
-    /// For now, we'll create a basic parser that handles simple Quint syntax.
+    /// TODO fix - For now, we'll create a basic parser that handles simple Quint syntax.
     fn load_single_spec(&self, file_path: &Path) -> Result<QuintSpec> {
         let content = std::fs::read_to_string(file_path)?;
 
@@ -412,7 +412,7 @@ impl QuintBridge {
 
     /// Parse Quint specification content
     ///
-    /// This is a simplified parser for demonstration. A production implementation
+    /// This is a TODO fix - Simplified parser for demonstration. A production implementation
     /// would use a proper Quint AST parser.
     fn parse_quint_content(
         &self,

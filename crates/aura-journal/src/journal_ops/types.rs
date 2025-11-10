@@ -4,7 +4,7 @@
 //! including the main KeyJournal graph structure and its integration with Automerge.
 
 use crate::journal::*;
-use aura_types::{AuraError, DeviceId};
+use aura_core::{AuraError, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -45,12 +45,10 @@ impl KeyJournal {
 
         // Validate node policy
         if !node.policy.is_valid() {
-            return Err(AuraError::Data(
-                aura_types::errors::DataError::LedgerOperationFailed {
-                    message: "Invalid node policy".to_string(),
-                    context: format!("Node ID: {}", node_id),
-                },
-            ));
+            return Err(AuraError::invalid(format!(
+                "Invalid node policy for Node ID: {}",
+                node_id
+            )));
         }
 
         // Insert node
@@ -71,30 +69,24 @@ impl KeyJournal {
     pub fn add_edge(&mut self, edge: KeyEdge) -> Result<(), AuraError> {
         // Validate nodes exist
         if !self.nodes.contains_key(&edge.from) {
-            return Err(AuraError::Data(
-                aura_types::errors::DataError::LedgerOperationFailed {
-                    message: "Source node does not exist".to_string(),
-                    context: format!("Node ID: {}", edge.from),
-                },
-            ));
+            return Err(AuraError::internal(format!(
+                "Source node does not exist: Node ID: {}",
+                edge.from
+            )));
         }
         if !self.nodes.contains_key(&edge.to) {
-            return Err(AuraError::Data(
-                aura_types::errors::DataError::LedgerOperationFailed {
-                    message: "Target node does not exist".to_string(),
-                    context: format!("Node ID: {}", edge.to),
-                },
-            ));
+            return Err(AuraError::internal(format!(
+                "Target node does not exist: Node ID: {}",
+                edge.to
+            )));
         }
 
         // For Contains edges, check for cycles (basic check - full validation in graph module)
         if edge.kind == EdgeKind::Contains && edge.from == edge.to {
-            return Err(AuraError::Data(
-                aura_types::errors::DataError::LedgerOperationFailed {
-                    message: "Self-referential Contains edge not allowed".to_string(),
-                    context: format!("Edge: {} -> {}", edge.from, edge.to),
-                },
-            ));
+            return Err(AuraError::internal(format!(
+                "Self-referential Contains edge not allowed: Edge: {} -> {}",
+                edge.from, edge.to
+            )));
         }
 
         let edge_id = edge.id;
@@ -129,12 +121,10 @@ impl KeyJournal {
             }
             Ok(())
         } else {
-            Err(AuraError::Data(
-                aura_types::errors::DataError::LedgerOperationFailed {
-                    message: "Edge does not exist".to_string(),
-                    context: format!("Edge ID: {}", edge_id),
-                },
-            ))
+            Err(AuraError::internal(format!(
+                "Edge does not exist: Edge ID: {}",
+                edge_id
+            )))
         }
     }
 
@@ -197,32 +187,26 @@ impl KeyJournal {
         // Basic validation - more thorough validation in graph module
         for node in self.nodes.values() {
             if !node.policy.is_valid() {
-                return Err(AuraError::Data(
-                    aura_types::errors::DataError::LedgerOperationFailed {
-                        message: "Node has invalid policy".to_string(),
-                        context: format!("Node ID: {}", node.id),
-                    },
-                ));
+                return Err(AuraError::internal(format!(
+                    "Node has invalid policy: Node ID: {}",
+                    node.id
+                )));
             }
         }
 
         // Check edge consistency
         for edge in self.edges.values() {
             if !self.nodes.contains_key(&edge.from) {
-                return Err(AuraError::Data(
-                    aura_types::errors::DataError::LedgerOperationFailed {
-                        message: "Edge references non-existent source node".to_string(),
-                        context: format!("Edge ID: {}", edge.id),
-                    },
-                ));
+                return Err(AuraError::internal(format!(
+                    "Edge references non-existent source node: Edge ID: {}",
+                    edge.id
+                )));
             }
             if !self.nodes.contains_key(&edge.to) {
-                return Err(AuraError::Data(
-                    aura_types::errors::DataError::LedgerOperationFailed {
-                        message: "Edge references non-existent target node".to_string(),
-                        context: format!("Edge ID: {}", edge.id),
-                    },
-                ));
+                return Err(AuraError::internal(format!(
+                    "Edge references non-existent target node: Edge ID: {}",
+                    edge.id
+                )));
             }
         }
 
@@ -359,7 +343,7 @@ mod tests {
     #[test]
     fn test_node_addition() {
         let mut journal = KeyJournal::new();
-        let node_id = NodeId::new_v4();
+        let node_id = NodeId::new();
         let node = KeyNode::new(node_id, NodeKind::Device, NodePolicy::Any);
 
         assert!(journal.add_node(node).is_ok());
@@ -372,8 +356,8 @@ mod tests {
         let mut journal = KeyJournal::new();
 
         // Add two nodes
-        let parent_id = NodeId::new_v4();
-        let child_id = NodeId::new_v4();
+        let parent_id = NodeId::new();
+        let child_id = NodeId::new();
         let parent = KeyNode::new(
             parent_id,
             NodeKind::Identity,
@@ -401,17 +385,17 @@ mod tests {
     #[test]
     fn test_invalid_edge() {
         let mut journal = KeyJournal::new();
-        let node_id = NodeId::new_v4();
+        let node_id = NodeId::new();
 
         // Try to add edge to non-existent node
-        let edge = KeyEdge::new(node_id, NodeId::new_v4(), EdgeKind::Contains);
+        let edge = KeyEdge::new(node_id, NodeId::new(), EdgeKind::Contains);
         assert!(journal.add_edge(edge).is_err());
     }
 
     #[test]
     fn test_self_referential_edge() {
         let mut journal = KeyJournal::new();
-        let node_id = NodeId::new_v4();
+        let node_id = NodeId::new();
         let node = KeyNode::new(node_id, NodeKind::Device, NodePolicy::Any);
 
         journal.add_node(node).unwrap();

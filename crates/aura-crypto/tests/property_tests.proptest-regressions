@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 110551b3f2bbfd220f070da584027cd3a450187965eac1be54988304ec8b6619 # shrinks to root_key = [151, 59, 100, 130, 64, 212, 157, 68, 74, 211, 86, 116, 71, 81, 12, 21, 156, 175, 193, 167, 101, 172, 49, 153, 57, 104, 206, 148, 113, 45, 121, 85], device_id = [33, 218, 154, 100, 185, 102, 102, 71, 41, 142, 68, 70, 98, 236, 113, 32, 250, 209, 113, 146, 198, 170, 123, 61, 3, 175, 186, 100, 233]

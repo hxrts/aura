@@ -3,13 +3,353 @@
 //! This module provides a unified factory and builder system for creating
 //! handler instances with consistent configuration patterns across all
 //! execution modes and handler types.
+//!
+//! # Overview
+//!
+//! The Aura platform uses an algebraic effects architecture where business logic
+//! is written against abstract effect interfaces, and concrete implementations
+//! are provided by handlers. This factory system manages the complex task of
+//! creating and configuring these handlers for different execution contexts.
+//!
+//! # Architecture
+//!
+//! ```text
+//! ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+//! │   Application   │────│ Effect Interface │────│ Handler Factory │
+//! │     Logic       │    │   (abstract)     │    │   (concrete)    │
+//! └─────────────────┘    └──────────────────┘    └─────────────────┘
+//!                                                          │
+//!                        ┌─────────────────────────────────┼─────────────────────────────────┐
+//!                        │                                 │                                 │
+//!                  ┌──────▼──────┐                ┌────────▼────────┐               ┌────────▼────────┐
+//!                  │ Production  │                │    Testing      │               │  Simulation     │
+//!                  │  Handlers   │                │   Handlers      │               │   Handlers      │
+//!                  │             │                │                 │               │                 │
+//!                  │ • Real I/O  │                │ • Mock/Memory   │               │ • Deterministic │
+//!                  │ • Hardware  │                │ • Fast startup  │               │ • Fault inject. │
+//!                  │ • Security  │                │ • No side       │               │ • Time control  │
+//!                  │             │                │   effects       │               │                 │
+//!                  └─────────────┘                └─────────────────┘               └─────────────────┘
+//! ```
+//!
+//! # Usage Patterns
+//!
+//! ## Quick Start Examples
+//!
+//! ### Testing Setup
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{AuraHandlerFactory, DefaultHandlerFactory};
+//! use aura_core::DeviceId;
+//!
+//! // Simple testing handler - minimal configuration, fast startup
+//! let device_id = DeviceId::generate();
+//! let handler = DefaultHandlerFactory::for_testing(device_id)?;
+//!
+//! // Execute business logic against abstract interfaces
+//! handler.console().print("Testing mode active").await?;
+//! let random_bytes = handler.random().generate(32).await?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ### Production Setup
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{AuraHandlerFactory, DefaultHandlerFactory};
+//! use aura_core::DeviceId;
+//!
+//! // Production handler - full capabilities, hardware security
+//! let device_id = DeviceId::from_persistent_storage().await?;
+//! let handler = DefaultHandlerFactory::for_production(device_id)?;
+//!
+//! // Full cryptographic capabilities available
+//! let keypair = handler.crypto().generate_frost_keypair().await?;
+//! let encrypted_data = handler.crypto().encrypt(data, &key).await?;
+//! handler.storage().store_encrypted(&content_id, encrypted_data).await?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ## Advanced Configuration
+//!
+//! ### Custom Handler Configuration
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{AuraHandlerBuilder, AuraHandlerConfig, ExecutionMode, EffectType};
+//! use aura_core::DeviceId;
+//! use std::time::Duration;
+//!
+//! // Custom configuration with specific requirements
+//! let device_id = DeviceId::generate();
+//! let config = AuraHandlerBuilder::new(device_id)
+//!     .execution_mode(ExecutionMode::Production)
+//!     .require_effect(EffectType::Crypto)
+//!     .require_effect(EffectType::Storage)
+//!     .optional_effect(EffectType::Network)
+//!     .with_logging(true)
+//!     .with_metrics(true)
+//!     .with_timeout(Duration::from_secs(60))
+//!     .with_hardware_security(true)
+//!     .build_config()?;
+//!
+//! config.validate()?;
+//! let handler = DefaultHandlerFactory::create_handler(config)?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ### Simulation Configuration
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{AuraHandlerBuilder, SimulationConfig, ExecutionMode};
+//! use aura_core::DeviceId;
+//! use std::time::Duration;
+//!
+//! // Deterministic simulation with fault injection
+//! let device_id = DeviceId::generate();
+//! let simulation_config = SimulationConfig {
+//!     seed: 12345,
+//!     enable_fault_injection: true,
+//!     fault_injection_rate: 0.05, // 5% failure rate
+//!     enable_time_control: true,
+//!     enable_property_checking: true,
+//!     max_simulation_duration: Some(Duration::from_secs(3600)),
+//! };
+//!
+//! let handler = AuraHandlerBuilder::new(device_id)
+//!     .execution_mode(ExecutionMode::Simulation { seed: 12345 })
+//!     .with_simulation_config(simulation_config)
+//!     .build_with_factory::<DefaultHandlerFactory>()?;
+//!
+//! // All operations are now deterministic and repeatable
+//! handler.time().set_virtual_time(Duration::from_secs(1000)).await?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ## Middleware Configuration
+//!
+//! ### Standard Middleware Stack
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{AuraHandlerBuilder, MiddlewareConfig};
+//! use aura_core::DeviceId;
+//! use std::time::Duration;
+//! use std::collections::HashMap;
+//!
+//! let device_id = DeviceId::generate();
+//! let handler = AuraHandlerBuilder::new(device_id)
+//!     .with_logging(true)           // Request/response logging
+//!     .with_metrics(true)           // Performance metrics
+//!     .with_tracing(true)           // Distributed tracing
+//!     .with_timeout(Duration::from_secs(30))  // Global operation timeout
+//!     .build_with_factory::<DefaultHandlerFactory>()?;
+//!
+//! // Middleware automatically wraps all handler operations
+//! // Logging: All effect calls logged with context
+//! // Metrics: Latency and throughput measured
+//! // Tracing: Distributed traces across choreographic protocols
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ### Custom Middleware
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::AuraHandlerBuilder;
+//! use aura_core::DeviceId;
+//! use std::collections::HashMap;
+//!
+//! let device_id = DeviceId::generate();
+//! let mut custom_config = HashMap::new();
+//! custom_config.insert("rate_limit_per_second".to_string(), "100".to_string());
+//! custom_config.insert("burst_capacity".to_string(), "10".to_string());
+//!
+//! let handler = AuraHandlerBuilder::new(device_id)
+//!     .with_custom_middleware(
+//!         "rate_limiter".to_string(),
+//!         10, // Priority: lower numbers execute first
+//!         custom_config,
+//!     )
+//!     .build_with_factory::<DefaultHandlerFactory>()?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ## Platform-Specific Configuration
+//!
+//! ### Automatic Platform Detection
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{PlatformDetector, AuraHandlerBuilder};
+//! use aura_core::DeviceId;
+//!
+//! // Detect platform capabilities
+//! let platform = PlatformDetector::detect_platform()?;
+//! println!("Detected platform: {} on {}", platform.os, platform.arch);
+//! println!("Secure enclave available: {}", platform.has_secure_enclave);
+//! println!("Storage backends: {:?}", platform.available_storage_backends);
+//!
+//! // Configure based on platform capabilities
+//! let device_id = DeviceId::generate();
+//! let mut builder = AuraHandlerBuilder::new(device_id);
+//!
+//! if platform.has_secure_enclave {
+//!     builder = builder.with_hardware_security(true);
+//! }
+//!
+//! let handler = builder.build_with_factory::<DefaultHandlerFactory>()?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ### Platform-Specific Storage
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{AuraHandlerConfig, PlatformConfig};
+//! use aura_core::DeviceId;
+//!
+//! let device_id = DeviceId::generate();
+//! let mut config = AuraHandlerConfig::for_production(device_id);
+//!
+//! // Prefer platform-specific secure storage
+//! #[cfg(target_os = "macos")]
+//! {
+//!     config.platform.preferred_storage_backends = vec![
+//!         "keychain".to_string(),    // macOS Keychain
+//!         "filesystem".to_string(),  // Fallback
+//!     ];
+//! }
+//!
+//! #[cfg(target_os = "windows")]
+//! {
+//!     config.platform.preferred_storage_backends = vec![
+//!         "credential_store".to_string(), // Windows Credential Store
+//!         "filesystem".to_string(),       // Fallback
+//!     ];
+//! }
+//!
+//! let handler = DefaultHandlerFactory::create_handler(config)?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ## Error Handling
+//!
+//! ### Configuration Validation
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{AuraHandlerConfig, FactoryError};
+//! use aura_core::DeviceId;
+//!
+//! let device_id = DeviceId::generate();
+//! let mut config = AuraHandlerConfig::for_production(device_id);
+//!
+//! // Validation catches configuration errors early
+//! match config.validate() {
+//!     Ok(()) => println!("Configuration valid"),
+//!     Err(FactoryError::ConfigurationError { message }) => {
+//!         eprintln!("Configuration error: {}", message);
+//!         // Fix configuration and retry
+//!     }
+//!     Err(e) => eprintln!("Other error: {}", e),
+//! }
+//! ```
+//!
+//! ### Handler Creation Errors
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{DefaultHandlerFactory, FactoryError, EffectType};
+//! use aura_core::DeviceId;
+//!
+//! let device_id = DeviceId::generate();
+//! match DefaultHandlerFactory::for_production(device_id) {
+//!     Ok(handler) => {
+//!         // Handler created successfully
+//!         println!("Handler ready with effects: {:?}",
+//!                  DefaultHandlerFactory::supported_effect_types());
+//!     }
+//!     Err(FactoryError::RequiredEffectUnavailable { effect_type }) => {
+//!         eprintln!("Required effect {:?} not available on this platform", effect_type);
+//!         // Fallback to testing mode or fail gracefully
+//!     }
+//!     Err(FactoryError::HandlerCreationFailed { effect_type, source }) => {
+//!         eprintln!("Failed to create handler for {:?}: {}", effect_type, source);
+//!         // Platform-specific error handling
+//!     }
+//!     Err(e) => eprintln!("Handler creation failed: {}", e),
+//! }
+//! ```
+//!
+//! # Integration Patterns
+//!
+//! ## Application Integration
+//!
+//! ```rust,no_run
+//! use aura_protocol::handlers::factory::{AuraHandlerFactory, DefaultHandlerFactory};
+//! use aura_core::DeviceId;
+//!
+//! // Application-level handler management
+//! pub struct AuraApplication {
+//!     handler: Box<dyn aura_protocol::effects::AuraHandler>,
+//!     device_id: DeviceId,
+//! }
+//!
+//! impl AuraApplication {
+//!     pub async fn new(device_id: DeviceId) -> Result<Self, Box<dyn std::error::Error>> {
+//!         let handler = DefaultHandlerFactory::for_production(device_id)?;
+//!         Ok(Self { handler, device_id })
+//!     }
+//!
+//!     pub async fn initialize_account(&self) -> Result<(), Box<dyn std::error::Error>> {
+//!         // Business logic using abstract effect interfaces
+//!         let keypair = self.handler.crypto().generate_frost_keypair().await?;
+//!         let account_data = self.handler.agent().create_account(keypair).await?;
+//!         self.handler.storage().store_account(&account_data).await?;
+//!         Ok(())
+//!     }
+//! }
+//! ```
+//!
+//! ## Testing Integration
+//!
+//! ```rust,no_run
+//! #[cfg(test)]
+//! mod tests {
+//!     use super::*;
+//!     use aura_protocol::handlers::factory::{AuraHandlerFactory, DefaultHandlerFactory};
+//!     use aura_core::DeviceId;
+//!
+//!     #[tokio::test]
+//!     async fn test_account_creation() -> Result<(), Box<dyn std::error::Error>> {
+//!         // Fast, isolated testing
+//!         let device_id = DeviceId::generate();
+//!         let handler = DefaultHandlerFactory::for_testing(device_id)?;
+//!
+//!         let app = AuraApplication { handler, device_id };
+//!         app.initialize_account().await?;
+//!
+//!         // Verify using test-specific introspection
+//!         assert!(app.handler.storage().contains_account(&device_id).await?);
+//!         Ok(())
+//!     }
+//!
+//!     #[tokio::test]
+//!     async fn test_with_simulation() -> Result<(), Box<dyn std::error::Error>> {
+//!         // Deterministic simulation testing
+//!         let device_id = DeviceId::generate();
+//!         let handler = DefaultHandlerFactory::for_simulation(device_id, 42)?;
+//!
+//!         // Inject faults to test error handling
+//!         handler.fault_injection().set_failure_rate(0.1).await?;
+//!
+//!         // Test with time control for timeout scenarios
+//!         handler.time().advance_by(Duration::from_secs(3600)).await?;
+//!
+//!         Ok(())
+//!     }
+//! }
+//! ```
 
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
 
 use super::{EffectType, ExecutionMode};
-use aura_types::DeviceId;
+use aura_core::DeviceId;
 
 /// Error type for factory operations
 #[derive(Debug, Error)]
@@ -403,7 +743,106 @@ impl AuraHandlerConfig {
 /// Core factory trait for creating Aura handlers
 ///
 /// Provides a consistent interface for creating handlers across different
-/// execution modes and configurations.
+/// execution modes and configurations. This trait abstracts the complex
+/// process of handler creation, configuration, and dependency injection.
+///
+/// # Design Principles
+///
+/// - **Configuration-driven**: All behavior controlled through `AuraHandlerConfig`
+/// - **Platform-aware**: Adapts to platform capabilities and constraints
+/// - **Mode-specific**: Different implementations for production, testing, and simulation
+/// - **Effect-typed**: Clear declaration of supported effect types
+/// - **Fail-fast**: Configuration validation before expensive resource allocation
+///
+/// # Implementation Guidelines
+///
+/// When implementing this trait, factories should:
+///
+/// 1. **Validate Configuration**: Check all configuration parameters before allocation
+/// 2. **Platform Detection**: Adapt to available platform capabilities
+/// 3. **Resource Management**: Handle cleanup properly on creation failure
+/// 4. **Effect Composition**: Build effect handler composition correctly
+/// 5. **Middleware Integration**: Apply middleware in correct order
+///
+/// # Effect Dependencies
+///
+/// Factories must handle effect dependencies correctly:
+///
+/// ```text
+/// Storage ──┐
+///           ├──> Journal ──> Agent
+/// Crypto  ──┘
+///           ┌──> Network ──> Transport
+/// Random  ──┘
+/// ```
+///
+/// # Example Implementation
+///
+/// ```rust,no_run
+/// use aura_protocol::handlers::factory::{AuraHandlerFactory, AuraHandlerConfig, FactoryError};
+/// use aura_protocol::handlers::erased::BoxedHandler;
+/// use aura_protocol::effects::EffectType;
+///
+/// pub struct MyHandlerFactory;
+///
+/// impl AuraHandlerFactory for MyHandlerFactory {
+///     fn create_handler(config: AuraHandlerConfig) -> Result<BoxedHandler, FactoryError> {
+///         // 1. Validate configuration
+///         config.validate()?;
+///
+///         // 2. Check platform requirements
+///         let platform = detect_platform()?;
+///         for effect in &config.required_effects {
+///             if !Self::supports_effect_type(*effect) {
+///                 return Err(FactoryError::RequiredEffectUnavailable {
+///                     effect_type: *effect
+///                 });
+///             }
+///         }
+///
+///         // 3. Create effect handlers in dependency order
+///         let console_handler = create_console_handler(&config)?;
+///         let storage_handler = create_storage_handler(&config, &platform)?;
+///         let crypto_handler = create_crypto_handler(&config, &storage_handler)?;
+///
+///         // 4. Apply middleware
+///         let handler = apply_middleware(
+///             compose_handlers(console_handler, storage_handler, crypto_handler),
+///             &config.middleware
+///         )?;
+///
+///         Ok(Box::new(handler))
+///     }
+///
+///     fn supported_effect_types() -> Vec<EffectType> {
+///         vec![
+///             EffectType::Console,
+///             EffectType::Random,
+///             EffectType::Storage,
+///             EffectType::Crypto,
+///             // ... other supported effects
+///         ]
+///     }
+/// }
+/// ```
+///
+/// # Testing Support
+///
+/// Factories should provide special testing support:
+///
+/// - **Fast Creation**: Minimize startup time for test runs
+/// - **Isolated State**: No shared state between test instances
+/// - **Deterministic Behavior**: Reproducible results for property testing
+/// - **Introspection**: Additional methods for verifying internal state
+///
+/// # Error Handling
+///
+/// Factory implementations should provide detailed error information:
+///
+/// - **Configuration Errors**: Clear messages about invalid configuration
+/// - **Platform Errors**: Specific information about platform limitations
+/// - **Dependency Errors**: Details about missing or failed dependencies
+/// - **Resource Errors**: Information about resource allocation failures
 pub trait AuraHandlerFactory {
     /// Create a handler with the given configuration
     fn create_handler(
@@ -549,7 +988,7 @@ impl PlatformDetector {
     /// Detect if secure enclave is available
     fn detect_secure_enclave() -> bool {
         // Platform-specific detection logic would go here
-        // For now, conservative default
+        // TODO fix - For now, conservative default
         false
     }
 
@@ -575,7 +1014,7 @@ impl PlatformDetector {
 
     /// Detect available network interfaces
     fn detect_network_interfaces() -> Vec<String> {
-        // Simplified detection - real implementation would enumerate actual interfaces
+        // TODO fix - Simplified detection - real implementation would enumerate actual interfaces
         vec!["default".to_string(), "loopback".to_string()]
     }
 }

@@ -13,11 +13,11 @@ workspace = true
 [dependencies]
 
 # Internal crates
-aura-types = { path = "../aura-types" }
+aura-core = { path = "../aura-core" }
 aura-crypto = { path = "../aura-crypto" }
-aura-authentication = { path = "../aura-authentication" }
+# aura-verify = { path = "../aura-verify" }  # Temporarily disabled due to compilation issues
 # Note: Cannot import aura-protocol due to circular dependency (aura-protocol imports journal)
-# Protocol types are now available through aura-types
+# Protocol types are now available through aura-core
 # aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
 
 # CRDT
@@ -56,7 +56,8 @@ petgraph = { workspace = true }
 biscuit-auth = { workspace = true }
 
 [dev-dependencies]
-aura-test-utils = { path = "../aura-test-utils" }
+# aura-testkit = { path = "../aura-testkit" }  # Temporarily disabled due to aura-protocol compilation issues
+# aura-protocol = { path = "../aura-protocol" }  # Temporarily disabled due to circular dependency
 tokio-test = "0.4"
 rand_chacha = { workspace = true }
 proptest = { workspace = true }

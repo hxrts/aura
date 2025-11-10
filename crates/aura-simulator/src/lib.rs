@@ -65,11 +65,17 @@
 // Core middleware system
 pub mod middleware;
 
+// Privacy analysis and observer models
+pub mod privacy;
+
 // Quint integration for formal verification
 pub mod quint;
 
 // Utility functions
 pub mod utils;
+
+// Simulation context
+pub mod context;
 
 // Scenario definitions
 pub mod scenario;

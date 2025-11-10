@@ -23,8 +23,8 @@
 //! ## Usage Pattern
 //!
 //! ```rust,ignore
-//! use aura_protocol::effects::semilattice::{CvHandler, execute_cv_sync};
-//! use aura_types::semilattice::StateMsg;
+//! use crate::effects::semilattice::{CvHandler, execute_cv_sync};
+//! use aura_core::semilattice::StateMsg;
 //!
 //! // Create handler for state-based CRDT
 //! let mut handler = CvHandler::<JournalMap>::new();
@@ -52,8 +52,8 @@ pub mod delivery;
 pub mod delta_handler;
 pub mod mv_handler;
 
-use aura_types::identifiers::{DeviceId, SessionId};
-use aura_types::semilattice::{CausalOp, CmApply, CvState, Dedup, Delta, MvState, Top};
+use aura_core::identifiers::{DeviceId, SessionId};
+use aura_core::semilattice::{CausalOp, CmApply, CvState, Dedup, Delta, MvState, Top};
 
 /// Handler factory for creating CRDT effect handlers
 pub struct HandlerFactory;
@@ -110,7 +110,8 @@ impl HandlerFactory {
 /// Execution utilities for integrating handlers with choreographic protocols
 pub mod execution {
     use super::*;
-    use aura_types::semilattice::{DeltaMsg, OpWithCtx, StateMsg};
+    // Types available for future use if needed
+    // use aura_core::semilattice::{DeltaMsg, OpWithCtx, StateMsg};
 
     /// Execute state-based CRDT synchronization
     ///
@@ -251,7 +252,7 @@ pub mod composition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_types::semilattice::{Bottom, JoinSemilattice};
+    use aura_core::semilattice::{Bottom, JoinSemilattice};
 
     // Test CRDT type
     #[derive(Debug, Clone, PartialEq, Eq)]

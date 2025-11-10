@@ -295,7 +295,7 @@ impl Default for CoreSimulatorHandler {
 
 impl SimulatorHandler for CoreSimulatorHandler {
     fn handle(&self, operation: SimulatorOperation, context: &SimulatorContext) -> Result<Value> {
-        // Note: In a real implementation, we would use interior mutability (Arc<Mutex<...>>)
+        // Note: TODO fix - In a real implementation, we would use interior mutability (Arc<Mutex<...>>)
         // For this middleware demonstration, we'll simulate operations
         match operation {
             SimulatorOperation::InitializeScenario { scenario_id } => Ok(json!({

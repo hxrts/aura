@@ -8,7 +8,7 @@
 //! ## Quick Start
 //!
 //! ```rust,ignore
-//! use aura_protocol::prelude::*;
+//! use crate::prelude::*;
 //! use uuid::Uuid;
 //!
 //! // Create unified effect system for testing
@@ -42,13 +42,14 @@
 //! - **Observability**: Tracing, metrics, logging
 //! - **Resilience**: Retry, timeout, circuit breaker
 //! - **Security**: Authorization, capability checking
+//! - **Authorization Bridge**: Connect authentication with authorization
 //! - **Caching**: Result caching and memoization
 //!
 //! ## Examples
 //!
 //! ### Basic Usage
 //! ```rust,ignore
-//! use aura_protocol::prelude::*;
+//! use crate::prelude::*;
 //!
 //! // Create unified system with optional middleware
 //! let base = AuraEffectSystem::for_production(device_id)?;
@@ -80,20 +81,28 @@
 //! ```
 
 // Core modules following unified effect system architecture
+pub mod authorization_bridge;
+
+// Authorization bridge tests (TODO: implement tests when needed)
+// #[cfg(test)]
+// mod authorization_bridge_tests;
 pub mod effects;
+pub mod guards;
 pub mod handlers;
+pub mod messages;
 pub mod middleware;
+pub mod sync;
 
 // Unified AuraEffectSystem architecture only
 
 // Public API re-exports
 pub use effects::{
-    AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats, AuraEffects,
-    ChoreographicEffects, ChoreographicRole, ChoreographyEvent, ChoreographyMetrics,
-    ConsoleEffects, ConsoleEvent, CryptoEffects, DeviceMetadata, JournalEffects, LedgerEffects,
-    LedgerError, LedgerEvent, LedgerEventStream, LogLevel, NetworkAddress, NetworkEffects,
-    NetworkError, RandomEffects, StorageEffects, StorageError, StorageLocation, TimeEffects,
-    WakeCondition,
+    AntiEntropyConfig, AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats,
+    AuraEffects, BloomDigest, ChoreographicEffects, ChoreographicRole, ChoreographyEvent,
+    ChoreographyMetrics, ConsoleEffects, ConsoleEvent, CryptoEffects, DeviceMetadata,
+    JournalEffects, LedgerEffects, LedgerError, LedgerEvent, LedgerEventStream, LogLevel,
+    NetworkAddress, NetworkEffects, NetworkError, RandomEffects, StorageEffects, StorageError,
+    StorageLocation, SyncEffects, SyncError, TimeEffects, WakeCondition,
 };
 
 pub use handlers::{
@@ -106,6 +115,20 @@ pub use handlers::{
     EffectType,
     ExecutionMode,
     HandlerUtils,
+};
+
+pub use messages::{AuraMessage, CryptoMessage, CryptoPayload, WIRE_FORMAT_VERSION};
+
+pub use guards::{
+    apply_delta_facts, evaluate_guard, execute_guarded_operation, track_leakage_consumption,
+    ExecutionMetrics, GuardedExecutionResult, LeakageBudget, ProtocolGuard,
+};
+
+pub use sync::{IntentState, PeerView};
+
+pub use authorization_bridge::{
+    authenticate_and_authorize, evaluate_authorization, AuthorizationContext, AuthorizationError,
+    AuthorizationRequest, AuthorizedEvent, PermissionGrant,
 };
 
 // Clean API - no legacy compatibility
@@ -136,9 +159,15 @@ pub mod prelude {
         AuraHandler, AuraHandlerFactory, CompositeHandler, EffectType, ExecutionMode,
     };
 
+    // Authorization bridge
+    pub use crate::authorization_bridge::{
+        authenticate_and_authorize, evaluate_authorization, AuthorizationContext,
+        AuthorizationRequest, AuthorizedEvent, PermissionGrant,
+    };
+
     // Middleware types
     pub use crate::middleware::{
-        HandlerMetadata, MiddlewareContext, MiddlewareError, MiddlewareResult,
+        HandlerMetadata, MiddlewareContext, MiddlewareError, MiddlewareResult, PerformanceProfile,
     };
 
     // Context types
@@ -146,7 +175,7 @@ pub mod prelude {
 
     // External dependencies commonly used with this crate
     pub use async_trait::async_trait;
-    pub use aura_types::{AuraError, AuraResult, DeviceId};
+    pub use aura_core::{AuraError, AuraResult, DeviceId};
     pub use uuid::Uuid;
 
     // Common standard library types

@@ -32,7 +32,7 @@ impl Default for SimpleMerkleProof {
 
 /// Build a commitment tree from a list of commitment hashes
 ///
-/// This is a simplified implementation using the effects system for hashing.
+/// This is a TODO fix - Simplified implementation using the effects system for hashing.
 ///
 /// # Arguments
 /// * `commitments` - List of commitment hashes to build tree from
@@ -44,7 +44,7 @@ pub async fn build_commitment_tree(
     commitments: &[Vec<u8>],
     effects: &impl CryptoEffects,
 ) -> Result<SimpleMerkleProof> {
-    // Simplified implementation
+    // TODO fix - Simplified implementation
     if commitments.is_empty() {
         return Ok(SimpleMerkleProof::new());
     }
@@ -90,7 +90,7 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
     effects.blake3_hash_async(&combined).await
 }
 
-/// Verify a Merkle proof against a root hash (simplified)
+/// Verify a Merkle proof against a root hash (TODO fix - Simplified)
 ///
 /// # Arguments
 /// * `proof` - The merkle proof to verify
@@ -106,13 +106,13 @@ pub async fn verify_merkle_proof(
     leaf: &[u8; 32],
     effects: &impl CryptoEffects,
 ) -> bool {
-    // Simplified verification
+    // TODO fix - Simplified verification
     if proof.proof_path.is_empty() {
         return effects.blake3_hash_async(leaf).await == *root;
     }
 
-    // In a real implementation, this would compute the path to the root
-    // For now, just check if the leaf hash matches any in the proof path
+    // TODO fix - In a real implementation, this would compute the path to the root
+    // TODO fix - For now, just check if the leaf hash matches any in the proof path
     let leaf_hash = effects.blake3_hash_async(leaf).await;
     proof.proof_path.contains(&leaf_hash)
 }

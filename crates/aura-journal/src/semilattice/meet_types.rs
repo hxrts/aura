@@ -4,8 +4,8 @@
 //! for common use cases: capability restriction, time window intersection,
 //! security policy enforcement, and consensus constraints.
 
-use aura_types::identifiers::DeviceId;
-use aura_types::semilattice::{MeetSemiLattice, MvState, Top};
+// Removed unused DeviceId import
+use aura_core::semilattice::{MeetSemiLattice, MvState, Top};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -141,8 +141,13 @@ impl MeetSemiLattice for TimeWindow {
             start: self.start.max(other.start),
             // Earliest end time (more restrictive)
             end: self.end.min(other.end),
-            // Use first timezone if different
-            timezone_offset: self.timezone_offset.or(other.timezone_offset),
+            // For commutativity: use timezone_offset if both are the same,
+            // otherwise use None (requiring UTC)
+            timezone_offset: match (self.timezone_offset, other.timezone_offset) {
+                (Some(a), Some(b)) if a == b => Some(a),
+                (None, None) => None,
+                _ => Some(0), // Default to UTC when timezones differ
+            },
         }
     }
 }

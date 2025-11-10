@@ -4,32 +4,19 @@ use aura_crypto::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// Re-export shared types from crypto and aura-types
-use aura_types::{DeviceId, GuardianId};
+// Re-export shared types from crypto and aura-core
+use aura_core::{DeviceId, GuardianId};
 
 // Import authentication types (ThresholdSig is imported where needed)
 
-// Re-export consolidated types from aura-types
-pub use aura_types::{
-    Cid as AuraTypesCid, Epoch, EventNonce, OperationType, ParticipantId, ProtocolType,
-    SessionEpoch, SessionId, SessionOutcome, SessionStatus,
+// Re-export consolidated types from aura-core
+pub use aura_core::{
+    OperationType, ParticipantId, ProtocolType, SessionEpoch, SessionId, SessionOutcome,
+    SessionStatus,
 };
 
-/// Content Identifier for storage operations
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Cid(pub String);
-
-impl Cid {
-    /// Create a CID from bytes using Blake3 hash
-    pub fn from_bytes(data: &[u8]) -> Self {
-        Cid(hex::encode(blake3::hash(data).as_bytes()))
-    }
-
-    /// Create a CID from a string
-    pub fn from_string(s: &str) -> Self {
-        Cid(s.to_string())
-    }
-}
+// Use ContentId from aura-core
+pub use aura_core::ContentId;
 
 // Display for AccountId is implemented in aura-crypto crate
 
@@ -118,10 +105,11 @@ impl Default for GuardianPolicy {
     }
 }
 
-// ParticipantId is now imported from aura-types
+// ParticipantId is now imported from aura-core
 
-// SessionId is now imported from aura-types
+// SessionId is now imported from aura-core
 // Extensions for journal-specific functionality
+/// Provides effects-based session ID generation for journal operations
 pub trait SessionIdExt {
     fn new_with_effects(effects: &dyn aura_crypto::effects::CryptoEffects) -> Self;
 }
@@ -144,79 +132,16 @@ impl SessionIdExt for SessionId {
     }
 }
 
-// OperationType is now imported from aura-types
+// OperationType is now imported from aura-core
 
-// ProtocolType is now imported from aura-types
+// ProtocolType is now imported from aura-core
 
-/// Comprehensive audit trail for signature share verification
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignatureShareAuditTrail {
-    /// Hash of the message that was signed
-    pub message_hash: Vec<u8>,
-    /// Hash of the aggregated signature
-    pub signature_hash: Vec<u8>,
-    /// Total number of signature shares provided
-    pub total_shares: usize,
-    /// Details of valid signature shares
-    pub valid_shares: Vec<ValidShareDetail>,
-    /// Details of invalid signature shares
-    pub invalid_shares: Vec<InvalidShareDetail>,
-    /// All verification details for comprehensive audit
-    pub verification_details: Vec<ValidShareDetail>,
-    /// Calculated authority level based on valid shares
-    pub authority_level: f64,
-    /// Timestamp when verification was performed
-    pub verification_timestamp: u64,
-}
-
-/// Details of a valid signature share
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidShareDetail {
-    /// ID of the participant who created this share
-    pub signer_id: u8,
-    /// Index of this share in the share list
-    pub share_index: usize,
-    /// Hash of the signature share bytes
-    pub share_hash: Vec<u8>,
-    /// Verification status of this share
-    pub verification_status: ShareVerificationStatus,
-    /// Weight of this share's contribution to authority
-    pub contribution_weight: f64,
-    /// Timestamp when this share was verified
-    pub timestamp: u64,
-}
-
-/// Details of an invalid signature share
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InvalidShareDetail {
-    /// ID of the participant who created this share
-    pub signer_id: u8,
-    /// Index of this share in the share list
-    pub share_index: usize,
-    /// Reason why this share failed verification
-    pub error_reason: String,
-    /// Timestamp when verification failure was detected
-    pub timestamp: u64,
-}
-
-/// Status of signature share verification
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ShareVerificationStatus {
-    /// Share is structurally valid but not cryptographically verified
-    StructurallyValid,
-    /// Share is fully cryptographically verified
-    CryptographicallyVerified,
-    /// Share failed structural validation
-    StructurallyInvalid,
-    /// Share failed cryptographic verification
-    CryptographicallyInvalid,
-}
-
-// EventNonce is now imported from aura-types
+// EventNonce is now imported from aura-core
 
 /// Operation lock for distributed coordination
 ///
 /// Prevents concurrent execution of the same operation type across devices.
+/// Core to distributed locking protocol documented in 500_distributed_*.md specs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationLock {
     /// Type of operation being locked
@@ -235,74 +160,6 @@ pub struct OperationLock {
     pub granted_at_epoch: u64,
     /// Lottery ticket for fair lock acquisition
     pub lottery_ticket: [u8; 32],
-}
-
-/// DKD commitment root for verification
-///
-/// Stores the root hash of DKD commitments for a session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DkdCommitmentRoot {
-    /// Session ID for which commitments were made
-    pub session_id: SessionId,
-    /// Blake3 hash of all commitments (32 bytes)
-    pub root_hash: [u8; 32],
-    /// Number of individual commitments included in this root
-    pub commitment_count: u32,
-    /// Timestamp when root was created
-    pub created_at: u64,
-}
-
-/// Contact information for guardians
-///
-/// Stores communication details for reaching a guardian.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContactInfo {
-    /// Primary email address for guardian contact
-    pub email: String,
-    /// Optional phone number for guardian contact
-    pub phone: Option<String>,
-    /// Optional backup email address
-    pub backup_email: Option<String>,
-    /// Guardian's notification preferences
-    pub notification_preferences: NotificationPreferences,
-}
-
-/// Notification preferences
-///
-/// Controls how and when guardians receive notifications.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotificationPreferences {
-    /// Whether email notifications are enabled
-    pub email_enabled: bool,
-    /// Whether phone/SMS notifications are enabled
-    pub phone_enabled: bool,
-    /// Minimum urgency level required to send notifications
-    pub urgency_threshold: UrgencyLevel,
-}
-
-/// Urgency level for notifications
-///
-/// Categorizes operational events by their importance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum UrgencyLevel {
-    /// Low priority - routine updates
-    Low,
-    /// Medium priority - important updates requiring attention
-    Medium,
-    /// High priority - urgent security events
-    High,
-    /// Critical priority - immediate action required
-    Critical,
-}
-
-impl Default for NotificationPreferences {
-    fn default() -> Self {
-        Self {
-            email_enabled: true,
-            phone_enabled: false,
-            urgency_threshold: UrgencyLevel::Medium,
-        }
-    }
 }
 
 /// Session information
@@ -411,13 +268,14 @@ impl Session {
     }
 }
 
-// SessionStatus is now imported from aura-types
+// SessionStatus is now imported from aura-core
 
-// SessionOutcome is now imported from aura-types
+// SessionOutcome is now imported from aura-core
 
 /// Ed25519 signature share for threshold signatures
 ///
 /// Represents one participant's contribution to a threshold signature.
+/// Actively used in FROST crypto implementation across aura-crypto and aura-protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignatureShare {
     /// ID of the participant who created this share
@@ -428,24 +286,10 @@ pub struct SignatureShare {
     pub commitment: Vec<u8>,
 }
 
-/// Cooldown counter for rate limiting
-///
-/// Tracks how many times an operation has been performed recently.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CooldownCounter {
-    /// Participant being rate-limited
-    pub participant_id: ParticipantId,
-    /// Type of operation being counted
-    pub operation_type: OperationType,
-    /// Current count in this cooldown period
-    pub count: u32,
-    /// Timestamp when counter resets
-    pub reset_at: u64,
-}
-
 /// Presence ticket cache
 ///
 /// Caches presence tickets for efficient session participation.
+/// Part of session management documented in 001_identity_spec.md.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresenceTicketCache {
     /// Device holding this ticket
@@ -462,75 +306,12 @@ pub struct PresenceTicketCache {
     pub ticket_digest: [u8; 32],
 }
 
-/// Evidence of Byzantine behavior for logging and analysis
-///
-/// Documents detected misbehavior by system participants.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ByzantineEvidence {
-    /// Resource exhaustion attack detected
-    ResourceExhaustion {
-        /// Number of excessive requests
-        request_count: u64,
-        /// Time window of the attack in milliseconds
-        window_ms: u64,
-    },
-    /// Invalid protocol behavior
-    InvalidBehavior {
-        /// Description of the invalid behavior
-        description: String,
-        /// Raw evidence data
-        evidence: Vec<u8>,
-    },
-    /// Protocol deviation detected
-    ProtocolDeviation {
-        /// Expected protocol step
-        expected: String,
-        /// Actual behavior observed
-        actual: String,
-    },
-}
-
-/// Severity level for Byzantine behavior
-///
-/// Indicates the operational impact of detected misbehavior.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ByzantineSeverity {
-    /// Low impact, monitoring only
-    Low,
-    /// Medium impact, affects local operations
-    Medium,
-    /// High impact, affects protocol security
-    High,
-    /// Critical impact, system compromise
-    Critical,
-}
-
 // ========== Storage Types ==========
 
-/// Storage metadata for blobs managed by the system
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorageMetadata {
-    /// Content identifier
-    pub cid: Cid,
-    /// Size in bytes
-    pub size_bytes: u64,
-    /// Required capabilities for access
-    pub required_capabilities: Vec<String>,
-    /// Number of replicas to maintain
-    pub replication_factor: u8,
-    /// Encryption key derivation spec
-    pub encryption_key_spec: KeyDerivationSpec,
-    /// When the blob was stored
-    pub stored_at: u64,
-    /// Device that initiated storage
-    pub stored_by: DeviceId,
-    /// Current replication status
-    pub replication_status: ReplicationStatus,
-    /// Access control policy
-    pub access_policy: AccessPolicy,
-}
-
 /// Storage quota tracking for a device
+///
+/// Integrated with error handling system (StorageQuotaExceeded).
+/// Referenced in group storage documentation as foundational infrastructure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageQuota {
     /// Device this quota applies to
@@ -545,123 +326,10 @@ pub struct StorageQuota {
     pub updated_at: u64,
 }
 
-/// Replication status for a blob
-///
-/// Tracks the current state of blob replication across the network.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ReplicationStatus {
-    /// Still replicating to reach target factor
-    Replicating {
-        /// Current number of replicas
-        current: u8,
-        /// Target number of replicas
-        target: u8,
-    },
-    /// Successfully replicated
-    Complete {
-        /// Number of replicas achieved
-        replica_count: u8,
-    },
-    /// Replication degraded (lost replicas)
-    Degraded {
-        /// Current number of replicas
-        current: u8,
-        /// Target number of replicas
-        target: u8,
-    },
-    /// Replication failed
-    Failed {
-        /// Reason for replication failure
-        reason: String,
-    },
-}
-
-/// Access control policy for storage blobs
-///
-/// Specifies who can perform which operations on a blob.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccessPolicy {
-    /// Read access requirements (list of required capabilities)
-    pub read_permissions: Vec<String>,
-    /// Write access requirements (list of required capabilities)
-    pub write_permissions: Vec<String>,
-    /// Delete access requirements (list of required capabilities)
-    pub delete_permissions: Vec<String>,
-    /// Time-based access restrictions
-    pub time_restrictions: Option<TimeRestrictions>,
-}
-
-/// Time-based access restrictions
-///
-/// Controls when a blob can be accessed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimeRestrictions {
-    /// Access not allowed before this timestamp (seconds since epoch)
-    pub not_before: Option<u64>,
-    /// Access not allowed after this timestamp (seconds since epoch)
-    pub not_after: Option<u64>,
-}
-
-/// Access audit log entry
-///
-/// Records each access attempt to a storage blob.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccessAuditEntry {
-    /// Unique audit entry ID
-    pub entry_id: Uuid,
-    /// Content identifier that was accessed
-    pub cid: Cid,
-    /// Type of access operation performed
-    pub operation: AccessOperation,
-    /// Device that performed the access
-    pub device_id: DeviceId,
-    /// ID of the capability token used for access
-    pub capability_token_id: String,
-    /// Timestamp when access occurred (seconds since epoch)
-    pub accessed_at: u64,
-    /// Result of the access attempt
-    pub result: AccessResult,
-    /// Additional context about the access
-    pub context: Option<String>,
-}
-
-/// Type of storage access operation
-///
-/// Categorizes the different kinds of operations on storage blobs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AccessOperation {
-    /// Read operation - retrieve blob contents
-    Read,
-    /// Write/store operation - create or update blob
-    Write,
-    /// Delete operation - remove blob
-    Delete,
-    /// Metadata query - read blob metadata without content
-    Metadata,
-}
-
-/// Result of an access attempt
-///
-/// Indicates success or failure of an access operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AccessResult {
-    /// Access granted successfully
-    Granted,
-    /// Access denied due to insufficient permissions
-    Denied {
-        /// Reason why access was denied
-        reason: String,
-    },
-    /// Access failed due to technical error
-    Failed {
-        /// Error description
-        error: String,
-    },
-}
-
 /// Key derivation specification for encryption
 ///
 /// Specifies parameters for deriving encryption keys for storage blobs.
+/// Extensively used in crypto tests and core security infrastructure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyDerivationSpec {
     /// Context string for key derivation (e.g., blob ID, device ID)

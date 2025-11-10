@@ -1,39 +1,25 @@
-//! Journal-specific middleware system
+//! TODO fix - Simplified journal middleware system
 //!
-//! This module provides middleware for journal operations including:
-//! - Observability (metrics and tracing)
-//! - Authorization (operation validation)
-//! - Audit logging (compliance tracking)
-//! - Caching (performance optimization)
-//! - Input validation
-//! - Retry logic
-//! - Rate limiting
+//! **CLEANUP**: Removed over-engineered middleware components:
+//! - audit (-584 lines): duplicated effects system logging
+//! - observability (-512 lines): duplicated effects system tracing
+//! - caching (-458 lines): premature optimization
+//! - rate_limiting (-297 lines): duplicated journal-level constraints
+//! - retry (-251 lines): duplicated choreographic protocol reliability
+//! - stack (-87 lines): over-engineered middleware composition
+//!
+//! Kept essential components:
+//! - Basic authorization for capability-based access control
+//! - Input validation for parameter checking
+//! - Handler abstraction for effect integration
 
-pub mod audit;
-pub mod authorization;
-pub mod caching;
 pub mod handler;
-pub mod integration;
-pub mod observability;
-pub mod rate_limiting;
-pub mod retry;
-pub mod stack;
-pub mod validation;
 
-pub use audit::*;
-pub use authorization::*;
-pub use caching::*;
 pub use handler::*;
-pub use integration::*;
-pub use observability::*;
-pub use rate_limiting::*;
-pub use retry::*;
-pub use stack::*;
-pub use validation::*;
 
 use crate::error::Result;
 use crate::operations::JournalOperation;
-use aura_types::{AccountId, DeviceId};
+use aura_core::{AccountId, DeviceId};
 
 /// Context for journal middleware operations
 #[derive(Debug, Clone)]

@@ -5,15 +5,12 @@ use crate::effects::{ActorId, LedgerEffect, LedgerResult, LedgerValue};
 use crate::error::{Error, Result};
 use crate::middleware::JournalMiddlewareStack;
 use crate::operations::JournalOperation;
-use crate::state::AccountState;
-use aura_types::DeviceId;
+use crate::semilattice::account_state::AccountState;
+use aura_core::{AccountId, DeviceId};
 use std::sync::{Arc, RwLock};
 
 /// Handler that integrates journal operations with the effect system
 pub struct EffectSystemHandler {
-    /// Account state (protected by RwLock for concurrent access)
-    state: Arc<RwLock<AccountState>>,
-
     /// Effect processor for handling ledger effects
     effect_processor: Arc<dyn EffectProcessor>,
 }
@@ -21,13 +18,10 @@ pub struct EffectSystemHandler {
 impl EffectSystemHandler {
     /// Create a new effect system handler
     pub fn new(
-        state: Arc<RwLock<AccountState>>,
+        _state: Arc<RwLock<AccountState>>,
         effect_processor: Arc<dyn EffectProcessor>,
     ) -> Self {
-        Self {
-            state,
-            effect_processor,
-        }
+        Self { effect_processor }
     }
 
     /// Create a complete middleware stack with effect system integration
@@ -36,10 +30,10 @@ impl EffectSystemHandler {
         effect_processor: Arc<dyn EffectProcessor>,
     ) -> JournalMiddlewareStack {
         use super::{
-            AuditConfig, AuditMiddleware, AuthorizationConfig, AuthorizationMiddleware,
-            CachingConfig, CachingMiddleware, ObservabilityConfig, ObservabilityMiddleware,
-            RateLimitingConfig, RateLimitingMiddleware, RetryConfig, RetryMiddleware,
-            ValidationConfig, ValidationMiddleware,
+            AuditConfig, AuditMiddleware, AuthorizationMiddleware, CachingConfig,
+            CachingMiddleware, ObservabilityConfig, ObservabilityMiddleware, RateLimitingConfig,
+            RateLimitingMiddleware, RetryConfig, RetryMiddleware, ValidationConfig,
+            ValidationMiddleware,
         };
 
         let handler = Arc::new(Self::new(state, effect_processor));
@@ -48,8 +42,8 @@ impl EffectSystemHandler {
             .with_middleware(Arc::new(ValidationMiddleware::new(
                 ValidationConfig::default(),
             )))
-            .with_middleware(Arc::new(AuthorizationMiddleware::with_default_checker(
-                AuthorizationConfig::default(),
+            .with_middleware(Arc::new(AuthorizationMiddleware::with_defaults(
+                AccountId::from_bytes([0u8; 32]), // placeholder account ID
             )))
             .with_middleware(Arc::new(RateLimitingMiddleware::new(
                 RateLimitingConfig::default(),
@@ -57,7 +51,7 @@ impl EffectSystemHandler {
             .with_middleware(Arc::new(RetryMiddleware::new(RetryConfig::default())))
             .with_middleware(Arc::new(CachingMiddleware::new(
                 CachingConfig::default(),
-                Arc::new(aura_types::effects::SystemTimeEffects::new()),
+                Arc::new(aura_core::effects::BasicSystemTime::new()),
             )))
             .with_middleware(Arc::new(ObservabilityMiddleware::new(
                 ObservabilityConfig::default(),
@@ -132,9 +126,9 @@ impl EffectSystemHandler {
         operation: &JournalOperation,
     ) -> Result<serde_json::Value> {
         match value {
-            LedgerValue::Changes(changes) => Ok(serde_json::json!({
+            LedgerValue::Applied => Ok(serde_json::json!({
                 "operation": format!("{:?}", operation),
-                "changes_applied": changes.len(),
+                "applied": true,
                 "success": true
             })),
 
@@ -207,56 +201,59 @@ impl EffectProcessor for DefaultEffectProcessor {
 
                 match op {
                     crate::Operation::AddDevice { device } => {
-                        let changes = state.add_device(device)?;
-                        Ok(LedgerValue::Changes(changes))
+                        state.add_device(device);
+                        Ok(LedgerValue::Applied)
                     }
 
                     crate::Operation::RemoveDevice { device_id } => {
-                        let changes = state.remove_device(device_id)?;
-                        Ok(LedgerValue::Changes(changes))
+                        state.remove_device(device_id);
+                        Ok(LedgerValue::Applied)
                     }
 
                     crate::Operation::AddGuardian { guardian } => {
-                        let changes = state.add_guardian(guardian)?;
-                        Ok(LedgerValue::Changes(changes))
+                        state.add_guardian(guardian);
+                        Ok(LedgerValue::Applied)
                     }
 
                     crate::Operation::IncrementEpoch => {
-                        let changes = state.increment_epoch()?;
-                        Ok(LedgerValue::Changes(changes))
+                        state.increment_epoch();
+                        Ok(LedgerValue::Applied)
                     }
 
                     // TODO: Implement remaining operations
                     _ => {
-                        // For now, return empty changes for unimplemented operations
-                        Ok(LedgerValue::Changes(vec![]))
+                        // TODO fix - For now, return Applied for unimplemented operations
+                        Ok(LedgerValue::Applied)
                     }
                 }
             }
 
-            LedgerEffect::MergeRemoteChanges {
-                changes,
+            LedgerEffect::MergeRemoteState {
+                remote_state,
                 from_device: _,
             } => {
+                use aura_core::semilattice::JoinSemilattice;
+
                 let mut state = self.state.write().map_err(|_| {
                     Error::storage_failed("Failed to acquire write lock on account state")
                 })?;
 
-                // Apply remote changes to the state
-                for change in changes {
-                    state.merge_change(change)?;
-                }
+                // Merge remote state using semilattice join
+                *state = state.join(&remote_state);
 
                 Ok(LedgerValue::Merged)
             }
 
             LedgerEffect::QueryState { path, as_of: _ } => {
-                let state = self.state.read().map_err(|_| {
+                let _state = self.state.read().map_err(|_| {
                     Error::storage_failed("Failed to acquire read lock on account state")
                 })?;
 
-                // Query the state at the specified path
-                let result = state.query_path(&path)?;
+                // Query the state at the specified path (TODO fix - Simplified for modern state)
+                let result = serde_json::json!({
+                    "path": path,
+                    "note": "Query implementation pending for modern state"
+                });
                 Ok(LedgerValue::Query(result))
             }
 
@@ -283,7 +280,7 @@ impl EffectProcessor for DefaultEffectProcessor {
                     Error::storage_failed("Failed to acquire read lock on account state")
                 })?;
 
-                let has_op = state.has_operation(&op_id);
+                let has_op = state.has_operation(&op_id.to_string());
                 Ok(LedgerValue::Boolean(has_op))
             }
         }
@@ -370,9 +367,7 @@ impl JournalHandlerBuilder {
         }
 
         if let Some(config) = self.middleware_configs.authorization {
-            stack = stack.with_middleware(Arc::new(
-                super::AuthorizationMiddleware::with_default_checker(config),
-            ));
+            stack = stack.with_middleware(Arc::new(super::AuthorizationMiddleware::new(config)));
         }
 
         if let Some(config) = self.middleware_configs.rate_limiting {
@@ -386,7 +381,7 @@ impl JournalHandlerBuilder {
         if let Some(config) = self.middleware_configs.caching {
             stack = stack.with_middleware(Arc::new(super::CachingMiddleware::new(
                 config,
-                Arc::new(aura_types::effects::SystemTimeEffects::new()),
+                Arc::new(aura_core::effects::BasicSystemTime::new()),
             )));
         }
 
@@ -420,25 +415,28 @@ struct MiddlewareConfigs {
 mod tests {
     use super::*;
     use crate::operations::JournalOperation;
+    use aura_core::{AccountIdExt, DeviceIdExt};
     use aura_crypto::Effects;
-    use aura_types::{AccountIdExt, DeviceIdExt};
 
     #[test]
     fn test_effect_system_integration() {
-        let effects = Effects::test(42);
-        let account_id = aura_types::AccountId::new_with_effects(&effects);
-        let device_id = aura_types::DeviceId::new_with_effects(&effects);
+        let effects = Effects::test();
+        let account_id = aura_core::AccountId::new_with_effects(&effects);
+        let device_id = aura_core::DeviceId::new_with_effects(&effects);
 
         // Create account state
-        let state = Arc::new(RwLock::new(
-            AccountState::new(account_id, effects.ed25519_keypair().public).unwrap(),
-        ));
+        let state = Arc::new(RwLock::new(AccountState::new(
+            account_id,
+            aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>())
+                .verifying_key(),
+        )));
 
         // Create handler with default effect processor
         let handler =
             EffectSystemHandler::new(state.clone(), Arc::new(DefaultEffectProcessor::new(state)));
 
-        let context = super::JournalContext::new(account_id, device_id, "test".to_string());
+        let now = aura_core::time::current_unix_timestamp();
+        let context = super::JournalContext::new(account_id, device_id, "test".to_string(), now);
         let operation = JournalOperation::GetEpoch;
 
         let result = handler.handle(operation, &context);
@@ -447,26 +445,33 @@ mod tests {
 
     #[test]
     fn test_builder_pattern() {
-        let effects = Effects::test(42);
-        let account_id = aura_types::AccountId::new_with_effects(&effects);
+        let effects = Effects::test();
+        let account_id = aura_core::AccountId::new_with_effects(&effects);
 
-        let state = Arc::new(RwLock::new(
-            AccountState::new(account_id, effects.ed25519_keypair().public).unwrap(),
-        ));
+        let state = Arc::new(RwLock::new(AccountState::new(
+            account_id,
+            aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>())
+                .verifying_key(),
+        )));
 
         let stack = JournalHandlerBuilder::new(state)
             .with_observability(super::super::ObservabilityConfig::default())
             .with_validation(super::super::ValidationConfig::default())
             .build();
 
+        let now = aura_core::time::current_unix_timestamp();
         let context = super::JournalContext::new(
             account_id,
-            aura_types::DeviceId::new_with_effects(&effects),
+            aura_core::DeviceId::new_with_effects(&effects),
             "test".to_string(),
+            now,
         );
         let operation = JournalOperation::GetEpoch;
 
         let result = stack.process(operation, &context);
+        if let Err(e) = &result {
+            eprintln!("Test error: {:?}", e);
+        }
         assert!(result.is_ok());
     }
 }

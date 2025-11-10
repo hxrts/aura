@@ -224,8 +224,8 @@ async fn test_console_effects() {
     real_handler.log_debug("Debug message", &[("debug_level", "verbose")]);
 
     // Test event emission
+    use aura_core::DeviceId;
     use aura_protocol::effects::ConsoleEvent;
-    use aura_types::DeviceId;
 
     let device_id = create_test_device_id();
     let event = ConsoleEvent::ProtocolStarted {

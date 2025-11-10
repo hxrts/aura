@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Simplified scenario structure for smoke tests
+/// TODO fix - Simplified scenario structure for smoke tests
 ///
 /// This is a subset of the full scenario format, focusing on the essential
 /// fields needed for smoke testing. It closely mirrors the TOML structure

@@ -14,17 +14,17 @@
 //! - **Authorization**: Capabilities (what you can do)
 //!
 //! All operations are performed through this effects interface, following the
-//! algebraic effects pattern defined in docs/400_effect_system.md
+//! algebraic effects pattern defined in docs/002_system_architecture.md
 
-use aura_types::{
+use aura_core::{
     identifiers::{DeviceId, GuardianId},
     AuraError,
 };
-// TODO: These types should be defined in aura-types when implementing the actual journal functionality
+// TODO: These types should be defined in aura-core when implementing the actual journal functionality
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-// Stub types for compilation - should be moved to aura-types when implementing journal
+// Stub types for compilation - should be moved to aura-core when implementing journal
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapabilityId(pub String);
 
@@ -76,7 +76,7 @@ use async_trait::async_trait;
 /// - Business logic should consume this trait via dependency injection
 /// - Never implement this trait in business logic crates
 ///
-/// See: docs/400_effect_system.md for architectural guidelines
+/// See: docs/002_system_architecture.md for architectural guidelines
 #[async_trait]
 pub trait JournalEffects: Send + Sync {
     // ===== Journal State Queries =====
@@ -180,4 +180,87 @@ pub trait JournalEffects: Send + Sync {
 
     /// List all guardians in the current tree
     async fn list_guardians(&self) -> Result<Vec<GuardianId>, AuraError>;
+
+    // ===== New Ratchet Tree Operations (Phase 2.1f) =====
+
+    /// Append an attested tree operation to the OpLog
+    ///
+    /// This is the **authoritative write** for tree operations. The operation must:
+    /// - Include a valid FROST aggregate signature
+    /// - Have correct parent binding (epoch, commitment)
+    /// - Be attested by sufficient signers per policy
+    ///
+    /// ## Behavior (from docs/123_ratchet_tree.md):
+    ///
+    /// - Stores `AttestedOp` in OpLog CRDT (OR-set)
+    /// - Does **NOT** store shares, transcripts, or author identities
+    /// - Does **NOT** store TreeState (derived via reduction)
+    /// - Returns CID (content identifier) for the operation
+    ///
+    /// ## CRITICAL Invariants:
+    ///
+    /// - Journal stores **ONLY** attested operations
+    /// - TreeState is **NEVER** persisted (computed on-demand via reduce())
+    /// - OpLog is append-only (join-semilattice)
+    async fn append_attested_tree_op(
+        &self,
+        op: aura_core::AttestedOp,
+    ) -> Result<aura_core::Hash32, AuraError>;
+
+    /// Get the current materialized tree state
+    ///
+    /// This computes TreeState on-demand by reducing the OpLog.
+    /// TreeState is **NEVER** stored directly - always derived.
+    ///
+    /// ## Reduction Process:
+    ///
+    /// 1. Fetch all operations from OpLog
+    /// 2. Build parent-linked DAG
+    /// 3. Topologically sort with H(op) tie-breaker
+    /// 4. Apply operations in order
+    /// 5. Return materialized TreeState
+    ///
+    /// ## Performance:
+    ///
+    /// - May cache TreeState for performance (invalidate on append)
+    /// - Cache is transparent to callers (implementation detail)
+    async fn get_tree_state(&self) -> Result<aura_journal::ratchet_tree::TreeState, AuraError>;
+
+    /// Get the OpLog (all attested operations)
+    ///
+    /// Returns the complete OpLog CRDT. This is the **source of truth**
+    /// for all tree operations.
+    ///
+    /// Used for:
+    /// - Anti-entropy synchronization
+    /// - Manual reduction/inspection
+    /// - Snapshot creation
+    async fn get_op_log(&self) -> Result<aura_journal::semilattice::OpLog, AuraError>;
+
+    /// Merge a remote OpLog into local state
+    ///
+    /// Implements CRDT join-semilattice merge for anti-entropy.
+    /// Used during peer synchronization to converge OpLog state.
+    ///
+    /// ## Semantics (OR-set):
+    ///
+    /// - Union of all operations from both logs
+    /// - Deduplication by CID (Hash32)
+    /// - Deterministic convergence
+    async fn merge_op_log(&self, remote: aura_journal::semilattice::OpLog)
+        -> Result<(), AuraError>;
+
+    /// Get an attested operation by its CID
+    ///
+    /// Retrieves a specific operation from the OpLog by content identifier.
+    async fn get_attested_op(
+        &self,
+        cid: &aura_core::Hash32,
+    ) -> Result<Option<aura_core::AttestedOp>, AuraError>;
+
+    /// List all attested operations (unordered)
+    ///
+    /// Returns all operations in the OpLog. Order is not guaranteed.
+    /// For ordered traversal, use `get_tree_state()` which applies reduction.
+    async fn list_attested_ops(&self) -> Result<Vec<aura_core::AttestedOp>, AuraError>;
 }

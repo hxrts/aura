@@ -4,10 +4,17 @@
 //! Intents enable lock-free coordination where any online device can become the instigator
 //! for executing a batch of compatible intents.
 
-use crate::tree::{Commitment, NodeIndex, TreeOperation};
-use aura_types::identifiers::DeviceId;
+use aura_core::identifiers::DeviceId;
+use aura_core::{Hash32 as Commitment, NodeIndex};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+// Note: TreeOperation is now TreeOpKind from aura_core::tree
+// This module uses a placeholder until intent system is migrated to new tree types
+use aura_core::tree::TreeOpKind as TreeOperation;
+
+// Timestamp type (Unix milliseconds)
+pub type Timestamp = u64;
 
 /// Unique identifier for an intent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -136,7 +143,7 @@ pub struct Intent {
     pub author: DeviceId,
 
     /// Timestamp when this intent was created
-    pub created_at: super::tree_op::Timestamp,
+    pub created_at: Timestamp,
 
     /// Optional metadata
     pub metadata: std::collections::BTreeMap<String, String>,
@@ -150,7 +157,7 @@ impl Intent {
         snapshot_commitment: Commitment,
         priority: Priority,
         author: DeviceId,
-        created_at: super::tree_op::Timestamp,
+        created_at: Timestamp,
     ) -> Self {
         Self {
             intent_id: IntentId::new(),
@@ -204,7 +211,7 @@ impl Intent {
     }
 
     /// Get the age of this intent in milliseconds
-    pub fn age(&self, current_time: super::tree_op::Timestamp) -> super::tree_op::Timestamp {
+    pub fn age(&self, current_time: Timestamp) -> Timestamp {
         current_time.saturating_sub(self.created_at)
     }
 }
@@ -280,7 +287,8 @@ impl IntentBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::{AffectedPath, LeafIndex};
+    // Note: Tests commented out - need migration to new TreeOpKind from aura_core
+    // Old TreeOp variants (RotatePath, etc.) don't exist in new implementation
 
     #[test]
     fn test_intent_id_creation() {
@@ -297,45 +305,50 @@ mod tests {
 
     #[test]
     fn test_intent_creation() {
-        let op = TreeOperation::RotatePath {
-            leaf_index: LeafIndex(0),
-            affected_path: AffectedPath::new(),
+        use aura_core::tree::{LeafNode, LeafRole};
+
+        let op = TreeOperation::AddLeaf {
+            leaf: LeafNode::new_device(
+                aura_core::tree::LeafId(0),
+                aura_core::DeviceId::new(),
+                vec![0u8; 32],
+            ),
+            under: NodeIndex(0),
         };
 
         let intent = Intent::new(
             op,
-            vec![NodeIndex::new(0)],
-            Commitment::default(),
-            Priority::default(),
+            vec![NodeIndex(0)],
+            [0u8; 32],
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
 
-        assert_eq!(intent.priority, Priority::default());
-        assert!(!intent.is_stale(&Commitment::default()));
+        assert_eq!(intent.priority, Priority::default_priority());
+        assert!(!intent.is_stale(&[0u8; 32]));
     }
 
     #[test]
     fn test_intent_conflicts() {
-        let op = TreeOperation::RotatePath {
-            leaf_index: LeafIndex(0),
-            affected_path: AffectedPath::new(),
+        let op = TreeOperation::RotateEpoch {
+            affected: vec![NodeIndex(0)],
         };
 
         let intent1 = Intent::new(
             op.clone(),
-            vec![NodeIndex::new(0), NodeIndex::new(1)],
-            Commitment::new([1u8; 32]),
-            Priority::default(),
+            vec![NodeIndex(0), NodeIndex(1)],
+            [1u8; 32],
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
 
         let intent2 = Intent::new(
             op,
-            vec![NodeIndex::new(1), NodeIndex::new(2)],
-            Commitment::new([2u8; 32]), // Different snapshot
-            Priority::default(),
+            vec![NodeIndex(1), NodeIndex(2)],
+            [2u8; 32], // Different snapshot
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
@@ -346,27 +359,26 @@ mod tests {
 
     #[test]
     fn test_intent_no_conflict_same_snapshot() {
-        let op = TreeOperation::RotatePath {
-            leaf_index: LeafIndex(0),
-            affected_path: AffectedPath::new(),
+        let op = TreeOperation::RotateEpoch {
+            affected: vec![NodeIndex(0)],
         };
 
-        let snapshot = Commitment::new([1u8; 32]);
+        let snapshot = [1u8; 32];
 
         let intent1 = Intent::new(
             op.clone(),
-            vec![NodeIndex::new(0), NodeIndex::new(1)],
+            vec![NodeIndex(0), NodeIndex(1)],
             snapshot,
-            Priority::default(),
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
 
         let intent2 = Intent::new(
             op,
-            vec![NodeIndex::new(1), NodeIndex::new(2)],
+            vec![NodeIndex(1), NodeIndex(2)],
             snapshot, // Same snapshot
-            Priority::default(),
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
@@ -378,31 +390,30 @@ mod tests {
     #[test]
     fn test_intent_is_stale() {
         let intent = Intent::new(
-            TreeOperation::RotatePath {
-                leaf_index: LeafIndex(0),
-                affected_path: AffectedPath::new(),
+            TreeOperation::RotateEpoch {
+                affected: vec![NodeIndex(0)],
             },
             vec![],
-            Commitment::new([1u8; 32]),
-            Priority::default(),
+            [1u8; 32],
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
 
-        assert!(!intent.is_stale(&Commitment::new([1u8; 32])));
-        assert!(intent.is_stale(&Commitment::new([2u8; 32])));
+        assert!(!intent.is_stale(&[1u8; 32]));
+        assert!(intent.is_stale(&[2u8; 32]));
     }
 
     #[test]
     fn test_intent_age() {
         let intent = Intent::new(
-            TreeOperation::RotatePath {
-                leaf_index: LeafIndex(0),
-                affected_path: AffectedPath::new(),
+            TreeOperation::RemoveLeaf {
+                leaf: aura_core::tree::LeafId(0),
+                reason: 0,
             },
             vec![],
-            Commitment::default(),
-            Priority::default(),
+            [0u8; 32],
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
@@ -413,17 +424,19 @@ mod tests {
 
     #[test]
     fn test_intent_batch_add() {
-        let snapshot = Commitment::new([1u8; 32]);
+        use aura_core::tree::Policy;
+
+        let snapshot = [1u8; 32];
         let mut batch = IntentBatch::new(snapshot);
 
         let intent1 = Intent::new(
-            TreeOperation::RotatePath {
-                leaf_index: LeafIndex(0),
-                affected_path: AffectedPath::new(),
+            TreeOperation::ChangePolicy {
+                node: NodeIndex(0),
+                new_policy: Policy::All,
             },
-            vec![NodeIndex::new(0)],
+            vec![NodeIndex(0)],
             snapshot,
-            Priority::default(),
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
@@ -435,18 +448,17 @@ mod tests {
 
     #[test]
     fn test_intent_batch_rejects_snapshot_mismatch() {
-        let snapshot1 = Commitment::new([1u8; 32]);
-        let snapshot2 = Commitment::new([2u8; 32]);
+        let snapshot1 = [1u8; 32];
+        let snapshot2 = [2u8; 32];
         let mut batch = IntentBatch::new(snapshot1);
 
         let intent = Intent::new(
-            TreeOperation::RotatePath {
-                leaf_index: LeafIndex(0),
-                affected_path: AffectedPath::new(),
+            TreeOperation::RotateEpoch {
+                affected: vec![NodeIndex(0)],
             },
-            vec![NodeIndex::new(0)],
+            vec![NodeIndex(0)],
             snapshot2,
-            Priority::default(),
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
@@ -457,17 +469,16 @@ mod tests {
 
     #[test]
     fn test_intent_batch_intent_ids() {
-        let snapshot = Commitment::new([1u8; 32]);
+        let snapshot = [1u8; 32];
         let mut batch = IntentBatch::new(snapshot);
 
         let intent1 = Intent::new(
-            TreeOperation::RotatePath {
-                leaf_index: LeafIndex(0),
-                affected_path: AffectedPath::new(),
+            TreeOperation::RotateEpoch {
+                affected: vec![NodeIndex(0)],
             },
-            vec![NodeIndex::new(0)],
+            vec![NodeIndex(0)],
             snapshot,
-            Priority::default(),
+            Priority::default_priority(),
             DeviceId::new(),
             1000,
         );

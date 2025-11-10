@@ -7,10 +7,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+use uuid::Uuid;
 
 use super::{AuraHandlerError, ExecutionMode};
-use crate::effects::choreographic::ChoreographicRole;
-use aura_types::{DeviceId, SessionId};
+use crate::{effects::choreographic::ChoreographicRole, guards::flow::FlowHint};
+use aura_core::{AccountId, DeviceId, SessionId};
 
 /// Context for choreographic operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -429,6 +430,17 @@ pub struct AuraContext {
     pub session_id: Option<SessionId>,
     /// When this context was created (timestamp in milliseconds)
     pub created_at: u64,
+    /// Active account identifier (if known)
+    pub account_id: Option<AccountId>,
+    /// Arbitrary metadata for higher-level components
+    pub metadata: HashMap<String, String>,
+    /// Unique operation identifier for tracing
+    pub operation_id: Uuid,
+    /// Epoch timestamp bound to the context
+    pub epoch: u64,
+    /// Pending flow hint (not serialized)
+    #[serde(skip)]
+    pub flow_hint: Option<FlowHint>,
 
     // Layer-specific contexts
     /// Choreographic operations context
@@ -456,6 +468,11 @@ impl AuraContext {
             execution_mode: ExecutionMode::Testing,
             session_id: None,
             created_at,
+            account_id: None,
+            metadata: HashMap::new(),
+            operation_id: Uuid::new_v4(),
+            epoch: created_at,
+            flow_hint: None,
             choreographic: None,
             simulation: None,
             agent: Some(AgentContext::new(device_id)),
@@ -475,6 +492,11 @@ impl AuraContext {
             execution_mode: ExecutionMode::Production,
             session_id: None,
             created_at,
+            account_id: None,
+            metadata: HashMap::new(),
+            operation_id: Uuid::new_v4(),
+            epoch: created_at,
+            flow_hint: None,
             choreographic: None,
             simulation: None,
             agent: Some(AgentContext::new(device_id)),
@@ -494,6 +516,11 @@ impl AuraContext {
             execution_mode: ExecutionMode::Simulation { seed },
             session_id: None,
             created_at,
+            account_id: None,
+            metadata: HashMap::new(),
+            operation_id: Uuid::new_v4(),
+            epoch: created_at,
+            flow_hint: None,
             choreographic: None,
             simulation: Some(SimulationContext::new(seed)),
             agent: Some(AgentContext::new(device_id)),
@@ -510,6 +537,19 @@ impl AuraContext {
     /// Set session ID
     pub fn with_session(mut self, session_id: SessionId) -> Self {
         self.session_id = Some(session_id);
+        self.flow_hint = None;
+        self
+    }
+
+    /// Attach account identifier to the context.
+    pub fn with_account(mut self, account_id: AccountId) -> Self {
+        self.account_id = Some(account_id);
+        self
+    }
+
+    /// Add metadata entry.
+    pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
         self
     }
 
@@ -537,6 +577,25 @@ impl AuraContext {
         }
     }
 
+    /// Create a derived context for a new operation.
+    pub fn child_operation(&self) -> Self {
+        let mut child = self.clone();
+        child.operation_id = Uuid::new_v4();
+        child.flow_hint = None;
+        child
+    }
+
+    /// Set a pending flow hint for FlowGuard integration.
+    pub fn set_flow_hint(&mut self, hint: FlowHint) -> &mut Self {
+        self.flow_hint = Some(hint);
+        self
+    }
+
+    /// Take the pending flow hint if present.
+    pub fn take_flow_hint(&mut self) -> Option<FlowHint> {
+        self.flow_hint.take()
+    }
+
     /// Check if this is a deterministic execution mode
     pub fn is_deterministic(&self) -> bool {
         self.execution_mode.is_deterministic()
@@ -562,7 +621,7 @@ impl AuraContext {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use aura_types::DeviceId;
+    use aura_core::DeviceId;
     use uuid::Uuid;
 
     #[test]

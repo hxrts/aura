@@ -5,9 +5,9 @@
 mod common;
 
 // Note: Effects are now accessed through the unified handler interface
+use aura_core::identifiers::DeviceId;
 use aura_protocol::handlers::erased::AuraHandlerFactory;
 use aura_protocol::handlers::{AuraContext, EffectType, ExecutionMode, HandlerUtils};
-use aura_types::identifiers::DeviceId;
 use uuid::Uuid;
 
 /// Test unified handler interface for crypto effects

@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # Workspace crates
-aura-types = { path = "../aura-types" }
+aura-core = { path = "../aura-core" }
 
 # Cryptography
 aes-gcm = { workspace = true }
@@ -34,6 +34,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 bincode = { workspace = true }
+serde_bytes = "0.11"
+getrandom = "0.2"
 
 # Utilities
 thiserror = { workspace = true }
@@ -43,7 +45,6 @@ tokio = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
-aura-test-utils = { path = "../aura-test-utils" }
 tokio-test = "0.4"
 proptest = { workspace = true }
 serde_json = { workspace = true }

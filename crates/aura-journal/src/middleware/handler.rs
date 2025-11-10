@@ -1,9 +1,9 @@
 //! Journal operation handlers
 
 use super::{JournalContext, JournalHandler};
-use crate::error::{Error, Result};
+use crate::error::{AuraError, Result};
 use crate::operations::JournalOperation;
-use crate::state::AccountState;
+use crate::semilattice::account_state::AccountState;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -29,66 +29,62 @@ impl JournalHandler for StateHandler {
         match operation {
             JournalOperation::AddDevice { device } => {
                 let mut state = self.state.write().map_err(|_| {
-                    Error::storage_failed("Failed to acquire write lock on account state")
+                    AuraError::internal("Failed to acquire write lock on account state")
                 })?;
 
-                let changes = state.add_device(device)?;
+                state.add_device(device);
 
                 Ok(serde_json::json!({
                     "operation": "add_device",
-                    "success": true,
-                    "changes_count": changes.len()
+                    "success": true
                 }))
             }
 
             JournalOperation::RemoveDevice { device_id } => {
                 let mut state = self.state.write().map_err(|_| {
-                    Error::storage_failed("Failed to acquire write lock on account state")
+                    AuraError::internal("Failed to acquire write lock on account state")
                 })?;
 
-                let changes = state.remove_device(device_id)?;
+                state.remove_device(device_id);
 
                 Ok(serde_json::json!({
                     "operation": "remove_device",
                     "device_id": device_id.to_string(),
-                    "success": true,
-                    "changes_count": changes.len()
+                    "success": true
                 }))
             }
 
             JournalOperation::AddGuardian { guardian } => {
                 let mut state = self.state.write().map_err(|_| {
-                    Error::storage_failed("Failed to acquire write lock on account state")
+                    AuraError::internal("Failed to acquire write lock on account state")
                 })?;
 
-                let changes = state.add_guardian(guardian)?;
+                state.add_guardian(guardian);
 
                 Ok(serde_json::json!({
                     "operation": "add_guardian",
-                    "success": true,
-                    "changes_count": changes.len()
+                    "success": true
                 }))
             }
 
             JournalOperation::IncrementEpoch => {
                 let mut state = self.state.write().map_err(|_| {
-                    Error::storage_failed("Failed to acquire write lock on account state")
+                    AuraError::internal("Failed to acquire write lock on account state")
                 })?;
 
-                let changes = state.increment_epoch()?;
+                state.increment_epoch();
                 let new_epoch = state.get_epoch();
 
                 Ok(serde_json::json!({
                     "operation": "increment_epoch",
                     "new_epoch": new_epoch,
-                    "success": true,
-                    "changes_count": changes.len()
+                    "success": true
                 }))
             }
 
             JournalOperation::GetDevices => {
                 let state = self.state.read().map_err(|_| {
-                    Error::storage_failed("Failed to acquire read lock on account state")
+                    AuraError::internal("Failed to acquire read lock on account state")
                 })?;
 
                 let devices = state.get_devices();
@@ -102,7 +98,7 @@ impl JournalHandler for StateHandler {
 
             JournalOperation::GetEpoch => {
                 let state = self.state.read().map_err(|_| {
-                    Error::storage_failed("Failed to acquire read lock on account state")
+                    AuraError::internal("Failed to acquire read lock on account state")
                 })?;
 
                 let epoch = state.get_epoch();

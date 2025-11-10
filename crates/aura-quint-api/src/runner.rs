@@ -57,7 +57,7 @@ impl QuintRunner {
         Ok(Self { evaluator, config })
     }
 
-    /// Verify a property specification (simplified implementation)
+    /// Verify a property specification (TODO fix - Simplified implementation)
     pub async fn verify_property(&self, spec: &PropertySpec) -> QuintResult<VerificationResult> {
         #[allow(clippy::disallowed_methods)]
         let start_time = Instant::now();
@@ -66,7 +66,7 @@ impl QuintRunner {
             tracing::debug!("Starting verification for spec file: {}", spec.spec_file);
         }
 
-        // Placeholder verification - in a real implementation this would:
+        // Placeholder verification - TODO fix - In a real implementation this would:
         // 1. Parse the .qnt file using TypeScript parser via subprocess
         // 2. Generate JSON IR
         // 3. Feed JSON IR to Rust evaluator via stdin
@@ -102,9 +102,9 @@ impl QuintRunner {
         })
     }
 
-    /// Parse a Quint specification file (simplified - returns success/failure only)
+    /// Parse a Quint specification file (TODO fix - Simplified - returns success/failure only)
     pub async fn parse_spec(&self, file_path: &str) -> QuintResult<Value> {
-        // For now, just return a placeholder since parsing logic is complex
+        // TODO fix - For now, just return a placeholder since parsing logic is complex
         Ok(serde_json::json!({"status": "parsed", "file": file_path}))
     }
 

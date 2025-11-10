@@ -7,7 +7,7 @@
 
 mod common;
 
-use aura_types::DeviceId;
+use aura_core::DeviceId;
 use common::{helpers::*, test_utils::*};
 use uuid::Uuid;
 

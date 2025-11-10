@@ -3,7 +3,7 @@
 //! Provides TCP-based network transport for production use.
 //! Features message framing, peer management, and connection pooling.
 
-use aura_types::{AuraError, DeviceId};
+use aura_core::{AuraError, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
