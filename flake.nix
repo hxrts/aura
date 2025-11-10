@@ -9,7 +9,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crate2nix = {
-      url = "path:./ext/crate2nix";
+      url = "github:timewave-computer/crate2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
