@@ -17,7 +17,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 # Session types integration - temporarily removed during refactor
 
 # Native Quint evaluator from official repository
-quint_evaluator = { git = "https://github.com/informalsystems/quint" }
+quint_evaluator = { git = "https://github.com/informalsystems/quint", tag = "v0.29.0" }
 
 # Logging and tracing
 tracing = "0.1"

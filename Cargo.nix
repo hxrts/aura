@@ -10431,7 +10431,13 @@ equation coefficients
         version = "0.2.0";
         edition = "2021";
         crateBin = [];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ext/quint/evaluator; };
+        workspace_member = null;
+        src = builtins.fetchGit {
+          url = "https://github.com/informalsystems/quint";
+          rev = "644e6438a4b7f6f8fa8ee3084bde43d36e7ba265";
+          ref = "refs/tags/v0.29.0";
+          submodules = true;
+        };
         dependencies = [
           {
             name = "argh";

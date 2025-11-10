@@ -489,6 +489,51 @@ aura *ARGS='--help':
     @AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command cargo build --bin aura
     @AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command cargo run --bin aura -- {{ARGS}}
 
+# Generate Cargo.nix using crate2nix (needed for hermetic Nix builds)
+generate-cargo-nix:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Regenerating Cargo.nix with crate2nix..."
+    nix develop --command crate2nix generate
+    echo "Cargo.nix regenerated successfully!"
+    echo ""
+    echo "Run 'nix build .#aura-cli' to test hermetic build"
+
+# Build using hermetic Nix build (requires Cargo.nix to exist)
+build-nix:
+    nix build .#aura-cli
+
+# Build specific package with hermetic Nix
+build-nix-package package:
+    nix build .#{{package}}
+
+# Run hermetic Nix checks
+check-nix:
+    nix flake check
+
+# Test hermetic build of all available packages
+test-nix-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Testing all hermetic Nix builds..."
+    echo "=================================="
+    echo ""
+    
+    echo "1. Building aura-cli..."
+    nix build .#aura-cli
+    echo "[OK] aura-cli built successfully"
+    
+    echo "2. Building aura-agent..."
+    nix build .#aura-agent
+    echo "[OK] aura-agent built successfully"
+    
+    echo "3. Building aura-simulator..."
+    nix build .#aura-simulator
+    echo "[OK] aura-simulator built successfully"
+    
+    echo ""
+    echo "All hermetic builds completed successfully!"
+
 # Generate documentation
 docs:
     cargo doc --workspace --no-deps --open

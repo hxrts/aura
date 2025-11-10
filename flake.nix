@@ -9,7 +9,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crate2nix = {
-      url = "github:timewave-computer/crate2nix";
+      url = "path:./ext/crate2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -27,16 +27,12 @@
           targets = [ "wasm32-unknown-unknown" ];
         };
 
-        # Import generated Cargo.nix
+        # Import generated Cargo.nix with crate2nix's built-in overrides
         cargoNix = import ./Cargo.nix {
           inherit pkgs;
           buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate;
-          defaultCrateOverrides = pkgs.defaultCrateOverrides // {
-            # System dependencies overrides
-            openssl-sys = attrs: {
-              buildInputs = [ pkgs.openssl pkgs.pkg-config ];
-            };
-          };
+          # Use crate2nix's default overrides which now include the CC crate fix
+          defaultCrateOverrides = pkgs.defaultCrateOverrides;
         };
       in
       {
@@ -137,6 +133,7 @@
 
             export RUST_BACKTRACE=1
             export RUST_LOG=info
+            export MACOSX_DEPLOYMENT_TARGET=11.0
           '';
         };
       }

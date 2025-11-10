@@ -109,10 +109,6 @@ biscuit-auth = "6.0"    # For OCAP capability tokens
 # WASM Core
 app-wasm = { path = "crates/app-wasm" }
 
-
-[patch."https://github.com/informalsystems/quint"]
-quint_evaluator = { path = "ext/quint/evaluator" }
-
 [profile.release]
 opt-level = 3
 lto = true
