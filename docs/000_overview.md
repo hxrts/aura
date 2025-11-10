@@ -249,7 +249,7 @@ crates/
 ├── aura-protocol        ✅ Effect system and coordination layer
 ├── aura-quint-api       ⚠️  Quint formal verification integration
 ├── aura-recovery        ⚠️  Recovery ceremonies
-├── aura-rendezvous      ❌ Peer discovery (placeholder)
+├── aura-rendezvous      ✅ Social Bulletin Board peer discovery
 ├── aura-simulator       ✅ Deterministic simulation engine
 ├── aura-storage         ⚠️  High-level storage orchestration
 ├── aura-store           ✅ Low-level encrypted chunk storage
@@ -344,14 +344,18 @@ All application protocols are choreography-based reference implementations demon
     - ⚠️ Bidirectional relationship key establishment ceremony pending
     - **Status**: Invitation lifecycle + rendezvous wiring implemented; key exchange + ledger integration remain
 
-10. **Peer Discovery (Rendezvous / SBB)** ⚠️ **IN PROGRESS**
+10. **Peer Discovery (Rendezvous / SBB)** ✅ **COMPLETE**
     - ✅ Rendezvous 1.0 spec (FlowBudget + SecureChannel lifecycle) - `docs/104_rendezvous.md`
     - ✅ Core crate structure with module organization - `crates/aura-rendezvous/src/` with sbb.rs, discovery.rs, messaging.rs, relay.rs
-    - ✅ Basic SBB, discovery, messaging, and relay module infrastructure - type definitions and trait signatures
-    - ❌ SBB flooding protocol implementation pending
-    - ❌ Relationship key derivation + envelope encryption pending
-    - ❌ Web-of-trust based relay enforcement pending
-    - **Status**: Crate structure and module organization in place; protocol implementations still needed
+    - ✅ SBB flooding protocol with TTL tracking and duplicate detection - `crates/aura-rendezvous/src/sbb.rs`
+    - ✅ Content-addressed envelope system with Blake3 hashing - `crates/aura-rendezvous/src/sbb.rs`
+    - ✅ Relationship key derivation extending DKD system for bidirectional Alice↔Bob keys - `crates/aura-rendezvous/src/relationship_keys.rs`
+    - ✅ HPKE-style envelope encryption with traffic analysis resistant padding - `crates/aura-rendezvous/src/envelope_encryption.rs`
+    - ✅ Capability-aware flooding with Web-of-Trust integration and flow budget enforcement - `crates/aura-rendezvous/src/capability_aware_sbb.rs`
+    - ✅ Transport layer integration with NetworkTransport bridge - `crates/aura-rendezvous/src/messaging.rs`
+    - ✅ Complete integrated SBB system with builder pattern API - `crates/aura-rendezvous/src/integrated_sbb.rs`
+    - ✅ Comprehensive end-to-end integration tests for Alice→Bob connection scenarios - `crates/aura-rendezvous/src/integration_tests.rs`
+    - **Status**: Complete SBB system implementation with privacy-preserving peer discovery, relationship-based encryption, and capability enforcement
 
 11. **Transport Implementation & SecureChannel** ✅ **COMPLETE**
     - ✅ In-memory transport for testing - `aura-transport/src/memory.rs`
@@ -397,16 +401,16 @@ All application protocols are choreography-based reference implementations demon
 - Privacy contracts: ⚠️ ~50% complete (FlowBudget + FlowGuard enforcement wired; observer simulation + capability soundness tests not started)
 
 **Application Layer:**
-- Threshold identity core: ✅ 100% complete (FlowBudget allocator + guardian trust transitions spec’d, recovery flow still partial)
+- Threshold identity core: ✅ 100% complete (FlowBudget allocator + guardian trust transitions spec'd, recovery flow still partial)
 - Ratchet tree & journal: ✅ 100% complete
 - Guardian recovery: ⚠️ 40% complete (infrastructure and choreography framework in place; ceremony logic and cooldowns pending)
 - Invitation system: ⚠️ 35% complete (choreography framework and types in place; content-addressing, key exchange, and full acceptance flow pending)
-- Peer discovery (SBB): ⚠️ 20% complete (crate structure and module infrastructure in place; flooding, relay, and key derivation implementations pending)
+- Peer discovery (SBB): ✅ 100% complete (complete SBB flooding, relationship encryption, capability-aware routing, and end-to-end testing)
 - Transport: ✅ 100% complete (QUIC + in-memory + WebSocket + STUN + hole-punching + relay complete)
 - Maintenance (snapshots / GC / OTA): ⚠️ 60% complete (snapshot workflow + admin override stub done; cache invalidation + OTA pending)
 - Simulator: ✅ 100% complete
 
-**Overall 1.0 Progress: ~60% complete**
+**Overall 1.0 Progress: ~70% complete**
 
 ### Critical Path to 1.0
 
@@ -435,11 +439,12 @@ All application protocols are choreography-based reference implementations demon
    - Bidirectional key establishment ceremony
    - Acceptance protocol with mutual auth
 
-5. **Implement Peer Discovery (SBB)** (~3 weeks)
-   - SBB flooding protocol choreography
-   - Relationship key derivation
-   - Envelope encryption/padding
-   - Web-of-trust relay logic
+5. **Implement Peer Discovery (SBB)** ✅ **COMPLETE**
+   - ✅ SBB flooding protocol with TTL tracking and duplicate detection
+   - ✅ Bidirectional relationship key derivation extending DKD system
+   - ✅ HPKE-style envelope encryption with traffic analysis resistant padding
+   - ✅ Capability-aware flooding with Web-of-Trust integration
+   - ✅ Complete integrated system with comprehensive end-to-end testing
 
 6. **Complete Transport Layer** ✅ **COMPLETE**
    - ✅ WebSocket implementation for browser compatibility (required for web platform)
@@ -453,7 +458,7 @@ All application protocols are choreography-based reference implementations demon
    - Replace manual async implementation once tests pass
    - Document projection tooling + graduation criteria
 
-**Total estimated time to 1.0: ~11 weeks (2.5 months)**
+**Total estimated time to 1.0: ~8 weeks (2 months)**
 
 ### What Makes 1.0 "Complete"
 

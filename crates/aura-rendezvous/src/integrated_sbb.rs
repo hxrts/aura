@@ -13,7 +13,7 @@ use crate::{
     envelope_encryption::{EnvelopeEncryption, EncryptedEnvelope, PaddingStrategy},
     messaging::{SbbTransportBridge, TransportOfferPayload, SbbMessageType},
     relationship_keys::{RelationshipKeyManager, derive_test_root_key},
-    sbb::{RendezvousEnvelope, SbbEnvelope, FloodResult},
+    sbb::{RendezvousEnvelope, SbbEnvelope, FloodResult, SbbFlooding},
 };
 use aura_core::{AuraResult, AuraError, DeviceId, RelationshipId};
 use aura_transport::NetworkTransport;

@@ -58,7 +58,7 @@ pub mod tree_authz;
 pub mod tree_operations;
 pub mod tree_policy;
 
-pub use capability::{Capability, CapabilitySet};
+pub use capability::{Capability, CapabilitySet, TrustLevel, RelayPermission};
 pub use capability_evaluation::{
     evaluate_tree_operation_capabilities, CapabilityEvaluationContext, CapabilityEvaluationResult,
     EntityId, TreeCapabilityRequest,

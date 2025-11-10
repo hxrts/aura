@@ -7,6 +7,48 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
 
+/// Trust level for relationships and capabilities
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum TrustLevel {
+    /// No trust (bottom element)
+    None = 0,
+    /// Low trust level
+    Low = 1,
+    /// Medium trust level  
+    Medium = 2,
+    /// High trust level (top element)
+    High = 3,
+}
+
+impl TrustLevel {
+    /// Convert from numeric level
+    pub fn from_level(level: u8) -> Self {
+        match level {
+            0 => TrustLevel::None,
+            1 => TrustLevel::Low,
+            2 => TrustLevel::Medium,
+            3 => TrustLevel::High,
+            _ => TrustLevel::High, // Cap at highest level
+        }
+    }
+
+    /// Convert to numeric level
+    pub fn to_level(&self) -> u8 {
+        *self as u8
+    }
+}
+
+/// Relay permission capabilities
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RelayPermission {
+    /// Can relay messages up to specified size
+    Relay { max_bytes: u64 },
+    /// Can act as backup relay
+    BackupRelay,
+    /// Can coordinate relay selection
+    RelayCoordinator,
+}
+
 /// A capability that can be attenuated via meet operations
 ///
 /// Capabilities represent permissions that can only be restricted (never expanded)
@@ -333,6 +375,11 @@ impl CapabilitySet {
     /// Get the capabilities in this set
     pub fn capabilities(&self) -> impl Iterator<Item = &Capability> {
         self.capabilities.iter()
+    }
+
+    /// Insert a capability into this set
+    pub fn insert(&mut self, capability: Capability) {
+        self.capabilities.insert(capability);
     }
 }
 

@@ -1,0 +1,16 @@
+# Exclude auto-generated files from language detection
+Cargo.nix linguist-detectable=false
+
+# Language overrides
+*.nix linguist-language=Nix
+*.qnt linguist-language=Quint
+
+# Test vectors and fixtures - exclude from language stats
+**/test_vectors/*.json linguist-detectable=false
+**/fixtures/*.json linguist-detectable=false
+
+# Documentation
+docs/ linguist-documentation
+
+# Generated/temporary files
+**/*.proptest-regressions linguist-generated

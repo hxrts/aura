@@ -124,19 +124,19 @@ impl From<RendezvousError> for aura_core::AuraError {
                 aura_core::AuraError::permission_denied(err.to_string())
             }
             RendezvousError::RelayUnavailable { .. } => {
-                aura_core::AuraError::service_unavailable(err.to_string())
+                aura_core::AuraError::network(err.to_string())
             }
             RendezvousError::InvalidBrandProof { .. }
             | RendezvousError::InvalidMessageEnvelope { .. } => {
                 aura_core::AuraError::invalid(err.to_string())
             }
             RendezvousError::InsufficientPrivacy { .. } => {
-                aura_core::AuraError::constraint_violation(err.to_string())
+                aura_core::AuraError::permission_denied(err.to_string())
             }
             RendezvousError::DeliveryFailed { .. }
             | RendezvousError::DiscoveryQueryFailed { .. }
             | RendezvousError::AnonymizationFailed { .. } => {
-                aura_core::AuraError::operation_failed(err.to_string())
+                aura_core::AuraError::internal(err.to_string())
             }
         }
     }

@@ -144,7 +144,7 @@ impl SbbTransportBridge {
                 println!("Rendezvous offer was dropped (no peers or TTL expired)");
             }
             crate::sbb::FloodResult::Failed { reason } => {
-                return Err(AuraError::transport(format!("Flooding failed: {}", reason)));
+                return Err(AuraError::network(format!("Flooding failed: {}", reason)));
             }
         }
 
@@ -226,7 +226,7 @@ impl TransportSender for MockTransportSender {
             println!("Mock transport: sent message to peer {:?}: {:?}", peer, message);
             Ok(())
         } else {
-            Err(AuraError::transport("Peer not reachable"))
+            Err(AuraError::network("Peer not reachable"))
         }
     }
 

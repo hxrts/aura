@@ -467,20 +467,26 @@ impl RelayCoordinator {
         node_id: DeviceId,
         sample: PerformanceSample,
     ) -> AuraResult<()> {
+        {
+            let metrics = self
+                .relay_metrics
+                .get_mut(&node_id)
+                .ok_or_else(|| aura_core::AuraError::not_found("Relay node not found"))?;
+
+            // Add performance sample
+            metrics.performance_samples.push_back(sample);
+
+            // Keep only recent samples (last 1000)
+            while metrics.performance_samples.len() > 1000 {
+                metrics.performance_samples.pop_front();
+            }
+        }
+
+        // Update aggregate statistics (get mutable reference)
         let metrics = self
             .relay_metrics
             .get_mut(&node_id)
             .ok_or_else(|| aura_core::AuraError::not_found("Relay node not found"))?;
-
-        // Add performance sample
-        metrics.performance_samples.push_back(sample);
-
-        // Keep only recent samples (last 1000)
-        while metrics.performance_samples.len() > 1000 {
-            metrics.performance_samples.pop_front();
-        }
-
-        // Update aggregate statistics
         self.update_aggregate_stats(metrics)?;
 
         Ok(())
@@ -503,6 +509,7 @@ impl RelayCoordinator {
             last_updated: self.get_current_timestamp(),
         };
 
+        let relationship_id = routing_table.relationship_id;
         self.routing_tables.insert(relationship_id, routing_table);
         Ok(())
     }
@@ -528,7 +535,7 @@ impl RelayCoordinator {
     ) -> Vec<&RoutingPolicy> {
         self.routing_policies
             .iter()
-            .filter(|policy| self.policy_applies(policy, relationship_id, message_requirements))
+            .filter(|policy| self.policy_applies(policy, relationship_id.clone(), message_requirements))
             .collect()
     }
 
@@ -715,7 +722,7 @@ impl RelayCoordinator {
             .collect();
 
         if qualifying_nodes.len() < 3 {
-            return Err(aura_core::AuraError::insufficient_resources(
+            return Err(aura_core::AuraError::internal(
                 "Not enough qualifying relay nodes",
             ));
         }

@@ -173,7 +173,11 @@ impl SbbRelationship {
             max_streams: 10,
         };
 
-        let relay_capabilities = CapabilitySet::from_single(relay_capability);
+        let relay_capabilities = {
+            let mut caps = CapabilitySet::empty();
+            caps.insert(relay_capability);
+            caps
+        };
         let flow_budget = SbbFlowBudget::new(flow_limit, period);
 
         Self {

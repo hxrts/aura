@@ -61,8 +61,8 @@ impl RelationshipContext {
     fn build_relationship_id(&self) -> Vec<u8> {
         let mut hasher = Hasher::new();
         hasher.update(b"aura-sbb-relationship-v1");
-        hasher.update(&self.device_a.0.as_bytes());
-        hasher.update(&self.device_b.0.as_bytes());
+        hasher.update(self.device_a.0.as_bytes());
+        hasher.update(self.device_b.0.as_bytes());
         hasher.update(self.app_context.as_bytes());
         hasher.update(&self.epoch.to_le_bytes());
         
@@ -112,7 +112,7 @@ impl RelationshipKeyManager {
         let spec = KeyDerivationSpec {
             identity_context,
             permission_context: None,
-            version: 1,
+            key_version: 1,
         };
 
         let key = derive_encryption_key(&self.root_key, &spec)
@@ -150,7 +150,7 @@ impl RelationshipKeyManager {
         let spec = KeyDerivationSpec {
             identity_context,
             permission_context: None,
-            version: 1,
+            key_version: 1,
         };
 
         let key = derive_encryption_key(&self.root_key, &spec)
@@ -187,7 +187,7 @@ impl RelationshipKeyManager {
 pub fn derive_test_root_key(device_id: DeviceId) -> [u8; 32] {
     let mut hasher = Hasher::new();
     hasher.update(b"aura-test-root-key-v1");
-    hasher.update(&device_id.0.as_bytes());
+    hasher.update(device_id.0.as_bytes());
     
     let hash = hasher.finalize();
     let mut key = [0u8; 32];

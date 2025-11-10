@@ -66,4 +66,9 @@ impl UnlinkableCredential {
     pub fn empty() -> Self {
         Self { bytes: Vec::new() }
     }
+
+    /// Get credential as bytes.
+    pub fn to_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }

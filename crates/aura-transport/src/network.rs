@@ -81,6 +81,7 @@ pub struct PeerConnection {
 }
 
 /// Network transport using TCP with message framing
+#[derive(Debug)]
 pub struct NetworkTransport {
     device_id: DeviceId,
     config: NetworkConfig,

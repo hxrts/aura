@@ -196,10 +196,10 @@ impl RelaySelector {
     }
 
     /// Select best relay from a group of same type
-    fn select_best_from_group(
+    fn select_best_from_group<'a>(
         &self,
-        candidates: &[&RelayCandidate],
-    ) -> Result<&RelayCandidate, AuraError> {
+        candidates: &[&'a RelayCandidate],
+    ) -> Result<&'a RelayCandidate, AuraError> {
         if candidates.is_empty() {
             return Err(AuraError::not_found("Empty candidate group"));
         }
