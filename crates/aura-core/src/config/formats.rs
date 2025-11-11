@@ -130,33 +130,6 @@ impl ConfigFormat for JsonFormat {
     }
 }
 
-/// YAML configuration format (placeholder implementation)
-pub struct YamlFormat;
-
-impl ConfigFormat for YamlFormat {
-    fn parse<T>(&self, _content: &str) -> Result<T, AuraError>
-    where
-        T: DeserializeOwned,
-    {
-        // YAML support would require serde_yaml dependency
-        Err(AuraError::invalid("YAML format not yet implemented"))
-    }
-    
-    fn serialize<T>(&self, _config: &T) -> Result<String, AuraError>
-    where
-        T: Serialize,
-    {
-        Err(AuraError::invalid("YAML format not yet implemented"))
-    }
-    
-    fn file_extensions(&self) -> &[&str] {
-        &["yaml", "yml"]
-    }
-    
-    fn name(&self) -> &str {
-        "YAML"
-    }
-}
 
 /// Format detector that determines format from file extension or content
 pub struct FormatDetector;

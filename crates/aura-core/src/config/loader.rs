@@ -106,10 +106,6 @@ where
                         path.display(), e
                     )))?
             }
-            Some("yaml") | Some("yml") => {
-                // Placeholder for YAML support
-                return Err(AuraError::invalid("YAML support not yet implemented"));
-            }
             _ => {
                 return Err(AuraError::invalid(format!(
                     "Unsupported config file format: {}", 

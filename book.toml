@@ -1,0 +1,11 @@
+[book]
+title = "Aura"
+authors = ["Sam Hart"]
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "docs/book"
+
+[output.html]
+preferred-dark-theme = "rust"

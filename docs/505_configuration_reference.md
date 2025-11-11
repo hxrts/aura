@@ -4,7 +4,7 @@ This document describes the Aura configuration system for managing runtime setti
 
 ## Architecture Overview
 
-The configuration system uses trait-based abstractions to provide consistent configuration handling across all Aura components. Core traits define standard operations including loading from files, merging configurations, and validating settings. Format implementations support JSON, TOML, and YAML with extensibility for additional formats. Loader implementations handle file discovery, environment variable parsing, and command-line argument processing.
+The configuration system uses trait-based abstractions to provide consistent configuration handling across all Aura components. Core traits define standard operations including loading from files, merging configurations, and validating settings. Format implementations support JSON and TOML with extensibility for additional formats. Loader implementations handle file discovery, environment variable parsing, and command-line argument processing.
 
 The hierarchical merging strategy combines configuration from multiple sources with well-defined precedence. Default values provide baseline settings suitable for most deployments. File-based configuration overrides defaults with deployment-specific settings. Environment variables override file configuration for runtime customization. Command-line arguments override environment variables for ad-hoc testing and debugging. This hierarchy allows progressive refinement from general defaults to specific runtime settings.
 
@@ -14,7 +14,7 @@ Validation occurs at multiple stages to catch configuration errors early. Type-l
 
 The AuraConfig trait defines the interface that all configuration types implement. This trait requires Clone, Default, and Send+Sync to enable configuration sharing across threads and components. The trait provides methods for loading from files, merging with other configurations, validating settings, and parsing command-line arguments.
 
-The load_from_file method reads configuration from a file path. The implementation detects file format from the extension and uses the appropriate format parser. Supported formats include .json, .toml, and .yaml files. The method returns a Result indicating success or failure with detailed error information.
+The load_from_file method reads configuration from a file path. The implementation detects file format from the extension and uses the appropriate format parser. Supported formats include .json and .toml files. The method returns a Result indicating success or failure with detailed error information.
 
 The merge_with method combines two configurations following the merging strategy appropriate for each setting type. Numeric settings typically use the value from the other configuration when present. Collection settings may append or replace depending on semantics. The method modifies self in place and returns a Result indicating success or failure.
 
@@ -32,7 +32,6 @@ The JSON format handler parses configuration from JSON files using serde_json. J
 
 The TOML format handler parses configuration from TOML files using the toml crate. TOML provides a minimal syntax focused on readability for configuration files. The format works well for flat configurations without deep nesting. TOML files use .toml extension by convention.
 
-The YAML format handler parses configuration from YAML files using serde_yaml. YAML provides extensive features including anchors, aliases, and multi-document files. The format works well for configurations that benefit from reference reuse. YAML files use .yaml or .yml extension by convention.
 
 Format detection uses file extensions to select the appropriate parser. The loader examines the file path extension and dispatches to the matching format handler. If the extension does not match a known format, the loader returns an error indicating unsupported format. Applications can register custom format handlers for additional file types.
 
@@ -84,7 +83,7 @@ Deployment configuration organizes settings by environment. Development, staging
 
 ## Extension Points
 
-Custom format handlers extend format support beyond built-in JSON, TOML, and YAML. Implement the ConfigFormat trait specifying how to parse configuration from a byte stream. Register the custom format with the loader associating file extensions with the handler. This allows applications to use specialized configuration formats suited to their needs.
+Custom format handlers extend format support beyond built-in JSON and TOML. Implement the ConfigFormat trait specifying how to parse configuration from a byte stream. Register the custom format with the loader associating file extensions with the handler. This allows applications to use specialized configuration formats suited to their needs.
 
 Custom validators extend validation beyond built-in rules. Implement the ValidationRule trait specifying how to check a specific constraint. Register custom validators with the configuration type. Multiple validators can apply to the same configuration with all validators executing during validation.
 

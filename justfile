@@ -4,6 +4,54 @@
 default:
     @just --list
 
+# Generate docs/SUMMARY.md from Markdown files in docs/ and subfolders
+summary:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    docs="docs"
+    build_dir="$docs/book"
+    out="$docs/SUMMARY.md"
+
+    echo "# Summary" > "$out"
+    echo "" >> "$out"
+
+    # Find all .md files under docs/, excluding SUMMARY.md itself and the build output
+    while IFS= read -r f; do
+        rel="${f#$docs/}"
+
+        # Skip SUMMARY.md
+        [ "$rel" = "SUMMARY.md" ] && continue
+
+        # Skip files under the build output directory
+        case "$f" in "$build_dir"/*) continue ;; esac
+
+        # Derive the title from the first H1; fallback to filename
+        title="$(grep -m1 '^# ' "$f" | sed 's/^# *//')"
+        if [ -z "$title" ]; then
+            base="$(basename "${f%.*}")"
+            title="$(printf '%s\n' "$base" \
+                | tr '._-' '   ' \
+                | awk '{for(i=1;i<=NF;i++){ $i=toupper(substr($i,1,1)) substr($i,2) }}1')"
+        fi
+
+        # Indent two spaces per directory depth
+        depth="$(awk -F'/' '{print NF-1}' <<<"$rel")"
+        indent="$(printf '%*s' $((depth*2)) '')"
+
+        echo "${indent}- [$title](${rel})" >> "$out"
+    done < <(find "$docs" -type f -name '*.md' -not -name 'SUMMARY.md' -not -path "$build_dir/*" | LC_ALL=C sort)
+
+    echo "Wrote $out"
+
+# Build the book after regenerating the summary
+book: summary
+    mdbook build
+
+# Serve locally with live reload
+serve-book: summary
+    mdbook serve --open
+
 # Build all crates
 build:
     cargo build --workspace --verbose
@@ -518,19 +566,19 @@ test-nix-all:
     echo "Testing all hermetic Nix builds..."
     echo "=================================="
     echo ""
-    
+
     echo "1. Building aura-cli..."
     nix build .#aura-cli
     echo "[OK] aura-cli built successfully"
-    
+
     echo "2. Building aura-agent..."
     nix build .#aura-agent
     echo "[OK] aura-agent built successfully"
-    
+
     echo "3. Building aura-simulator..."
     nix build .#aura-simulator
     echo "[OK] aura-simulator built successfully"
-    
+
     echo ""
     echo "All hermetic builds completed successfully!"
 
@@ -698,7 +746,7 @@ test-quint-pipeline:
     if [ -f "/tmp/quint_pipeline_test.json" ]; then
         echo "   [OK] JSON file created successfully"
         echo "   Size: $(stat -f%z /tmp/quint_pipeline_test.json 2>/dev/null || stat -c%s /tmp/quint_pipeline_test.json) bytes"
-        
+
         # Extract key information from the JSON
         echo "   Module name: $(jq -r '.modules[0].name' /tmp/quint_pipeline_test.json)"
         echo "   Declarations: $(jq '.modules[0].declarations | length' /tmp/quint_pipeline_test.json)"
@@ -731,7 +779,7 @@ test-quint-pipeline:
 
     echo "5. Pipeline verification complete!"
     echo "   ✅ Quint to JSON conversion: Working"
-    echo "   ✅ JSON structure validation: Working"  
+    echo "   ✅ JSON structure validation: Working"
     echo "   ✅ Simulator integration points: Ready"
     echo ""
     echo "Available commands for the pipeline:"

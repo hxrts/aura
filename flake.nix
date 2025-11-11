@@ -65,11 +65,11 @@
           # Main CLI application
           default = cargoNix.workspaceMembers.aura-cli.build;
           aura-cli = cargoNix.workspaceMembers.aura-cli.build;
-          
+
           # Core applications
           aura-agent = cargoNix.workspaceMembers.aura-agent.build;
           aura-simulator = cargoNix.workspaceMembers.aura-simulator.build;
-          
+
           # Development tools
           regenerate-cargo-nix = pkgs.writeScriptBin "regenerate-cargo-nix" ''
             #!${pkgs.bash}/bin/bash
@@ -112,9 +112,19 @@
             # Task runner
             just
 
+            # Documentation
+            mdbook
+
             # Development tools
             git
             jq
+
+            # POSIX tools (for Justfile scripts)
+            coreutils
+            findutils
+            gawk
+            gnused
+            pkgs.grep
 
             # Formal verification and protocol modeling
             quint

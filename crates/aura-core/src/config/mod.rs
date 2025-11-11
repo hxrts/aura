@@ -7,7 +7,7 @@
 //! ## Design Principles
 //!
 //! 1. **Unified Interface**: Same configuration traits used by all components
-//! 2. **Multiple Formats**: Support for TOML, JSON, YAML, and environment variables
+//! 2. **Multiple Formats**: Support for TOML, JSON, and environment variables
 //! 3. **Validation**: Built-in validation with descriptive error messages
 //! 4. **Merging**: Hierarchical configuration merging (defaults < file < env < CLI)
 //! 5. **Type Safety**: Compile-time configuration validation
@@ -43,7 +43,7 @@ pub mod traits;
 pub mod validation;
 
 // Re-export core config types from traits module
-pub use formats::{ConfigFormat, JsonFormat, TomlFormat, YamlFormat};
+pub use formats::{ConfigFormat, JsonFormat, TomlFormat};
 pub use loader::{ConfigLoader, ConfigPriority, ConfigSource};
 pub use traits::{AuraConfig, ConfigDefaults, ConfigMerge, ConfigValidation};
 pub use validation::{ConfigValidator, ValidationResult, ValidationRule};

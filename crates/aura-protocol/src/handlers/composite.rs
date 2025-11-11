@@ -6,7 +6,7 @@ use super::{
     console::{SilentConsoleHandler, StdoutConsoleHandler},
     context::AuraContext,
     crypto::{MockCryptoHandler, RealCryptoHandler},
-    // time::{RealTimeHandler, SimulatedTimeHandler}, // Temporarily commented out
+    time::RealTimeHandler,
     erased::AuraHandler,
     network::{MemoryNetworkHandler, RealNetworkHandler, SimulatedNetworkHandler},
     storage::{FilesystemStorageHandler, MemoryStorageHandler},
@@ -119,7 +119,7 @@ pub struct CompositeHandler {
     network: Box<dyn NetworkEffects>,
     storage: Box<dyn StorageEffects>,
     crypto: Box<dyn CryptoEffects>,
-    time: DummyTimeHandler,
+    time: Box<dyn TimeEffects>,
     console: Box<dyn ConsoleEffects>,
     journal: Box<dyn JournalEffects>,
     tree: Box<dyn TreeEffects>,
@@ -150,7 +150,7 @@ impl CompositeHandler {
             network: Box::new(MemoryNetworkHandler::new(device_id)),
             storage: Box::new(MemoryStorageHandler::new()),
             crypto: Box::new(MockCryptoHandler::new(42)),
-            time: DummyTimeHandler::new(),
+            time: Box::new(DummyTimeHandler::new()),
             console: Box::new(SilentConsoleHandler::new()),
             journal: Box::new(journal),
             tree: Box::new(super::tree::MemoryTreeHandler::new(tree_journal)),
@@ -170,7 +170,7 @@ impl CompositeHandler {
             )),
             storage: Box::new(FilesystemStorageHandler::new("/tmp/aura".into()).unwrap()),
             crypto: Box::new(RealCryptoHandler::new()),
-            time: DummyTimeHandler::new(),
+            time: Box::new(RealTimeHandler::new()),
             console: Box::new(StdoutConsoleHandler::new()),
             journal: Box::new(journal),
             tree: Box::new(super::tree::MemoryTreeHandler::new(tree_journal)),
@@ -187,7 +187,7 @@ impl CompositeHandler {
             network: Box::new(SimulatedNetworkHandler::new(device_id)),
             storage: Box::new(MemoryStorageHandler::new()),
             crypto: Box::new(MockCryptoHandler::new(device_id.as_u128() as u64)),
-            time: DummyTimeHandler::new(),
+            time: Box::new(DummyTimeHandler::new()),
             console: Box::new(SilentConsoleHandler::new()),
             journal: Box::new(journal),
             tree: Box::new(super::tree::MemoryTreeHandler::new(tree_journal)),
@@ -579,7 +579,7 @@ pub struct CompositeHandlerBuilder {
     network: Option<Box<dyn NetworkEffects>>,
     storage: Option<Box<dyn StorageEffects>>,
     crypto: Option<Box<dyn CryptoEffects>>,
-    time: Option<DummyTimeHandler>,
+    time: Option<Box<dyn TimeEffects>>,
     console: Option<Box<dyn ConsoleEffects>>,
     journal: Option<Box<dyn JournalEffects>>,
     tree: Option<Box<dyn TreeEffects>>,
@@ -625,7 +625,7 @@ impl CompositeHandlerBuilder {
     }
 
     /// Set the time effects handler
-    pub fn with_time(mut self, time: DummyTimeHandler) -> Self {
+    pub fn with_time(mut self, time: Box<dyn TimeEffects>) -> Self {
         self.time = Some(time);
         self
     }
@@ -668,7 +668,7 @@ impl CompositeHandlerBuilder {
                     Box::new(RealCryptoHandler::new())
                 }
             }),
-            time: self.time.unwrap_or_else(|| DummyTimeHandler::new()),
+            time: self.time.unwrap_or_else(|| Box::new(DummyTimeHandler::new())),
             console: self.console.unwrap_or_else(|| {
                 if is_simulation {
                     Box::new(SilentConsoleHandler::new())

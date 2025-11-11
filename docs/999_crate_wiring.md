@@ -230,7 +230,7 @@ graph TD
 - **Semilattice**: `JoinSemiLattice`, `MeetSemiLattice` traits and implementations
 - **Configuration System** (`config` module):
   - **Traits**: `AuraConfig`, `ConfigDefaults`, `ConfigMerge`, `ConfigValidation` for unified configuration handling across components
-  - **Formats**: `ConfigFormat`, `JsonFormat`, `TomlFormat`, `YamlFormat` for multiple configuration file formats
+  - **Formats**: `ConfigFormat`, `JsonFormat`, `TomlFormat` for multiple configuration file formats
   - **Loader**: `ConfigLoader`, `ConfigSource`, `ConfigPriority` for hierarchical configuration loading (defaults < file < env < CLI)
   - **Validation**: `ConfigValidator`, `ValidationRule`, `ValidationResult` for compile-time and runtime configuration validation
   - **Builder**: `ConfigBuilder` for fluent configuration creation with merging and validation support
