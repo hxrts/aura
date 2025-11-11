@@ -182,6 +182,39 @@ pub struct LogParams {
     pub message: String,
 }
 
+/// Console event types for structured logging
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConsoleEvent {
+    /// Protocol started event
+    ProtocolStarted {
+        /// Unique identifier for the protocol instance
+        protocol_id: String,
+        /// Type of protocol (e.g., "DKD", "FROST")
+        protocol_type: String,
+    },
+    /// Protocol completed successfully
+    ProtocolCompleted {
+        /// Unique identifier for the protocol instance
+        protocol_id: String,
+        /// Duration of execution in milliseconds
+        duration_ms: u64,
+    },
+    /// Protocol failed with error
+    ProtocolFailed {
+        /// Unique identifier for the protocol instance
+        protocol_id: String,
+        /// Error description
+        error: String,
+    },
+    /// Custom event with arbitrary data
+    Custom {
+        /// Type/category of the custom event
+        event_type: String,
+        /// Event data as JSON value
+        data: serde_json::Value,
+    },
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // RandomEffects Parameters
 // ═══════════════════════════════════════════════════════════════════════════

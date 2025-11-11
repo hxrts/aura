@@ -211,7 +211,13 @@ impl JournalCouplingParser {
             ));
         }
 
-        let inner = &expr[2..expr.len() - 1].trim();
+        // Use character-aware slicing to handle Unicode properly
+        let chars: Vec<char> = expr.chars().collect();
+        if chars.len() < 4 {
+            return Err(AuraError::invalid("Journal annotation too short"));
+        }
+        let inner: String = chars[2..chars.len() - 1].iter().collect();
+        let inner = inner.trim();
 
         if inner.starts_with("facts:") {
             let desc = inner
@@ -225,7 +231,7 @@ impl JournalCouplingParser {
                 .expect("already checked with starts_with")
                 .trim();
             Ok(JournalAnnotation::refine_caps(desc))
-        } else if *inner == "merge" {
+        } else if inner == "merge" {
             Ok(JournalAnnotation::merge("General merge"))
         } else if inner.starts_with("Δ") {
             let desc = inner

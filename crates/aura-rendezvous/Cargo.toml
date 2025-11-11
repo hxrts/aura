@@ -31,6 +31,7 @@ async-trait = { workspace = true }
 bincode = { workspace = true }
 tracing = { workspace = true }
 rand_core = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

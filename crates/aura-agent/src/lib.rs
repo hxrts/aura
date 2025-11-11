@@ -48,16 +48,16 @@ pub mod storage_keys;
 pub mod maintenance;
 pub mod ota_orchestrator;
 
-// Unified agent effect system
-pub mod system;
+// Unified agent effect system (DISABLED - superseded by AuraEffectSystem in aura-protocol)
+// pub mod system;
 
 // Agent operations with authorization
 pub mod operations;
 
 // Re-export public API
 pub use agent::AuraAgent;
-pub use config::{AgentConfig, AgentConfigBuilder};
-pub use errors::{AgentError, Result as AgentResult};
+pub use config::AgentConfig;
+pub use errors::Result as AgentResult;
 
 // Re-export effect traits for documentation
 pub use effects::*;

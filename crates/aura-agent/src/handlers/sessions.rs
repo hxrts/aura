@@ -157,14 +157,13 @@ impl SessionOperations {
     ) -> Result<SessionHandle> {
         let effects = self.effects.read().await;
 
-        effects.log_info(
-            &format!(
+        let _ = effects
+            .log_info(&format!(
                 "Creating {:?} session with {} participants",
                 session_type,
                 participants.len()
-            ),
-            &[],
-        );
+            ))
+            .await;
 
         // Get current timestamp
         let timestamp = LedgerEffects::current_timestamp(&*effects)
@@ -213,7 +212,9 @@ impl SessionOperations {
             .map_err(|e| AuraError::internal(format!("Failed to create session: {}", e)))?;
 
         let created_id = created_session_id.to_string();
-        effects.log_info(&format!("Created session: {}", created_id), &[]);
+        let _ = effects
+            .log_info(&format!("Created session: {}", created_id))
+            .await;
 
         Ok(SessionHandle {
             session_id: created_id,
@@ -279,10 +280,13 @@ impl SessionOperations {
         // For now, just log that we would update metadata
         // The SessionManagementEffects trait doesn't provide update_metadata method
         // This would need to be implemented via send_session_message or similar
-        effects.log_debug(
-            &format!("Metadata update requested for session: {}", session_id),
-            &[],
-        );
+        effects
+            .log_debug(&format!(
+                "Metadata update requested for session: {}",
+                session_id
+            ))
+            .await
+            .ok();
 
         Ok(())
     }
@@ -293,13 +297,13 @@ impl SessionOperations {
 
         // For now, just log that we would add a participant
         // This would need to be implemented via session messages or protocol-level coordination
-        effects.log_info(
-            &format!(
+        effects
+            .log_info(&format!(
                 "Participant addition requested: {} to session: {}",
                 device_id, session_id
-            ),
-            &[],
-        );
+            ))
+            .await
+            .ok();
 
         Ok(())
     }
@@ -309,13 +313,13 @@ impl SessionOperations {
         let effects = self.effects.read().await;
 
         // For now, just log that we would remove a participant
-        effects.log_info(
-            &format!(
+        effects
+            .log_info(&format!(
                 "Participant removal requested: {} from session: {}",
                 device_id, session_id
-            ),
-            &[],
-        );
+            ))
+            .await
+            .ok();
 
         Ok(())
     }
@@ -339,7 +343,9 @@ impl SessionOperations {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to end session: {}", e)))?;
 
-        effects.log_info(&format!("Ended session: {}", session_id), &[]);
+        let _ = effects
+            .log_info(&format!("Ended session: {}", session_id))
+            .await;
 
         // Return a basic session handle for the ended session
         Ok(SessionHandle {
@@ -371,7 +377,9 @@ impl SessionOperations {
             .map(|info| info.session_id.to_string())
             .collect();
 
-        effects.log_debug(&format!("Found {} active sessions", session_ids.len()), &[]);
+        let _ = effects
+            .log_debug(&format!("Found {} active sessions", session_ids.len()))
+            .await;
 
         Ok(session_ids)
     }
@@ -452,14 +460,13 @@ impl SessionOperations {
             }
         }
 
-        effects.log_info(
-            &format!(
+        let _ = effects
+            .log_info(&format!(
                 "Cleaned up {} expired sessions (older than {}s)",
                 cleaned_sessions.len(),
                 max_age_seconds
-            ),
-            &[],
-        );
+            ))
+            .await;
 
         Ok(cleaned_sessions)
     }
@@ -494,15 +501,14 @@ impl SessionOperations {
         self.update_session_metadata(&handle.session_id, handle.metadata.clone())
             .await?;
 
-        effects.log_info(
-            &format!(
+        let _ = effects
+            .log_info(&format!(
                 "Created threshold session {}/{} for {}",
                 threshold,
                 handle.participants.len(),
                 handle.session_id
-            ),
-            &[],
-        );
+            ))
+            .await;
 
         Ok(handle)
     }
@@ -548,15 +554,14 @@ impl SessionOperations {
         self.update_session_metadata(&handle.session_id, handle.metadata.clone())
             .await?;
 
-        effects.log_info(
-            &format!(
+        let _ = effects
+            .log_info(&format!(
                 "Created recovery session {}/{} guardians for {}",
                 recovery_threshold,
                 guardian_devices.len(),
                 handle.session_id
-            ),
-            &[],
-        );
+            ))
+            .await;
 
         Ok(handle)
     }
@@ -590,10 +595,13 @@ impl SessionOperations {
         self.update_session_metadata(&handle.session_id, handle.metadata.clone())
             .await?;
 
-        effects.log_info(
-            &format!("Created key rotation session: {}", handle.session_id),
-            &[],
-        );
+        effects
+            .log_info(&format!(
+                "Created key rotation session: {}",
+                handle.session_id
+            ))
+            .await
+            .ok();
 
         Ok(handle)
     }

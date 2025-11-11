@@ -2,13 +2,18 @@
 
 use crate::{
     device_invitation::{shared_invitation_ledger, InvitationEnvelope},
-    transport::deliver_via_rendezvous,
     relationship_formation::RelationshipFormationRequest,
+    transport::deliver_via_rendezvous,
     InvitationError, InvitationResult,
 };
-use aura_core::{relationships::ContextId, DeviceId, AccountId, Cap, RelationshipId, RelationshipType, TrustLevel};
+use aura_core::effects::{JournalEffects, NetworkEffects, TimeEffects};
+use aura_core::{
+    relationships::ContextId, AccountId, Cap, DeviceId, RelationshipId, RelationshipType,
+    TrustLevel,
+};
 use aura_journal::semilattice::InvitationLedger;
-use aura_protocol::effects::{AuraEffectSystem, NetworkEffects, TimeEffects, LedgerEffects};
+use aura_protocol::effects::system::AuraEffectSystem;
+use aura_protocol::effects::LedgerEffects;
 use aura_wot::CapabilitySet;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -94,10 +99,7 @@ impl InvitationAcceptanceCoordinator {
     }
 
     /// Create with custom configuration.
-    pub fn with_config(
-        effect_system: AuraEffectSystem,
-        config: AcceptanceProtocolConfig,
-    ) -> Self {
+    pub fn with_config(effect_system: AuraEffectSystem, config: AcceptanceProtocolConfig) -> Self {
         Self {
             effects: effect_system,
             ledger: shared_invitation_ledger(),
@@ -110,8 +112,8 @@ impl InvitationAcceptanceCoordinator {
         &self,
         envelope: InvitationEnvelope,
     ) -> InvitationResult<InvitationAcceptance> {
-        let now = self.effects.current_timestamp().await;
-        
+        let now = <AuraEffectSystem as TimeEffects>::current_timestamp(&self.effects).await;
+
         // Validate invitation
         if now > envelope.expires_at {
             let mut ledger = self.ledger.lock().await;
@@ -150,7 +152,10 @@ impl InvitationAcceptanceCoordinator {
         };
 
         // Execute acceptance protocol
-        if let Err(e) = self.execute_acceptance_protocol(&envelope, &mut acceptance).await {
+        if let Err(e) = self
+            .execute_acceptance_protocol(&envelope, &mut acceptance)
+            .await
+        {
             acceptance.error_message = Some(e.to_string());
             return Ok(acceptance);
         }
@@ -190,18 +195,24 @@ impl InvitationAcceptanceCoordinator {
         &self,
         envelope: &InvitationEnvelope,
     ) -> InvitationResult<RelationshipId> {
-        let relationship_id = RelationshipId::new();
-        
+        let relationship_id = RelationshipId::from_entities(
+            envelope.invitee.0.as_bytes(),
+            envelope.inviter.0.as_bytes(),
+        );
+
         // Create relationship formation request using legacy type
         let formation_request = RelationshipFormationRequest {
             party_a: envelope.invitee, // Invitee initiates relationship
             party_b: envelope.inviter,
             account_id: envelope.account_id,
-            relationship_type: RelationshipType::DeviceCoOwnership,
+            relationship_type: crate::relationship_formation::RelationshipType::TrustDelegation,
             initial_trust_level: self.config.default_trust_level,
             metadata: vec![
                 ("role".to_string(), envelope.device_role.clone()),
-                ("context".to_string(), "device_invitation_acceptance".to_string()),
+                (
+                    "context".to_string(),
+                    "device_invitation_acceptance".to_string(),
+                ),
             ],
         };
 
@@ -213,13 +224,13 @@ impl InvitationAcceptanceCoordinator {
             "from": envelope.invitee,
             "to": envelope.inviter,
             "trust_level": self.config.default_trust_level,
-            "timestamp": self.effects.current_timestamp().await,
+            "timestamp": <AuraEffectSystem as TimeEffects>::current_timestamp(&self.effects).await,
             "context": "invitation_acceptance"
         });
 
         let event_bytes = serde_json::to_vec(&relationship_event)
             .map_err(|e| InvitationError::serialization(e.to_string()))?;
-        
+
         LedgerEffects::append_event(&self.effects, event_bytes)
             .await
             .map_err(|e| InvitationError::internal(e.to_string()))?;
@@ -236,13 +247,13 @@ impl InvitationAcceptanceCoordinator {
             "role": envelope.device_role,
             "capabilities": envelope.granted_capabilities,
             "added_by": envelope.inviter,
-            "timestamp": self.effects.current_timestamp().await,
+            "timestamp": <AuraEffectSystem as TimeEffects>::current_timestamp(&self.effects).await,
             "invitation_id": envelope.invitation_id
         });
 
         let event_bytes = serde_json::to_vec(&device_addition_event)
             .map_err(|e| InvitationError::serialization(e.to_string()))?;
-        
+
         LedgerEffects::append_event(&self.effects, event_bytes)
             .await
             .map_err(|e| InvitationError::internal(e.to_string()))?;
@@ -259,14 +270,11 @@ impl InvitationAcceptanceCoordinator {
         // from the transport layer indicating successful delivery and processing
         // For now, we simulate this with a small delay
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        
+
         // Log confirmation for observability
-        self.effects.log_info(
-            &format!(
-                "Transport confirmation received for invitation {}",
-                envelope.invitation_id
-            ),
-            &[]
+        tracing::info!(
+            "Transport confirmation received for invitation {}",
+            envelope.invitation_id
         );
 
         Ok(())
@@ -280,7 +288,7 @@ impl InvitationAcceptanceCoordinator {
             .set_flow_hint_components(context, envelope.inviter, 1)
             .await;
 
-        let now = self.effects.current_timestamp().await;
+        let now = <AuraEffectSystem as TimeEffects>::current_timestamp(&self.effects).await;
         let ack = serde_json::json!({
             "type": "invitation_accepted",
             "invitation_id": envelope.invitation_id,
@@ -302,10 +310,13 @@ impl InvitationAcceptanceCoordinator {
             envelope.invitee,
             envelope.inviter,
             ttl_window,
-        ).await {
-            self.effects.log_warn(
-                &format!("Rendezvous delivery failed for invitation {}: {}", envelope.invitation_id, e),
-                &[]
+        )
+        .await
+        {
+            tracing::warn!(
+                "Rendezvous delivery failed for invitation {}: {}",
+                envelope.invitation_id,
+                e
             );
         }
 

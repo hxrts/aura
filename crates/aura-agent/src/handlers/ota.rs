@@ -174,7 +174,7 @@ impl OtaOperations {
                 state.adoptions += 1;
                 Ok(())
             } else {
-                Err(aura_core::AuraError::invalid_operation(format!(
+                Err(aura_core::AuraError::internal(&format!(
                     "Cannot opt in to upgrade in status: {:?}",
                     state.status
                 ))
@@ -229,31 +229,26 @@ impl OtaOperations {
         adapter: &AuraHandlerAdapter,
         event: aura_core::maintenance::MaintenanceEvent,
     ) -> AgentResult<()> {
+        use aura_core::effects::JournalEffects;
+
         // Serialize event to journal fact
         let event_json = serde_json::to_string(&event)
-            .map_err(|e| aura_core::AuraError::serialization_failed(e.to_string()))?;
+            .map_err(|e| aura_core::AuraError::internal(&format!("Serialization failed: {}", e)))?;
 
         // Create journal delta with maintenance event fact
         let mut delta_journal = aura_core::Journal::default();
         delta_journal.facts.insert(
             format!("maintenance_event_{}", uuid::Uuid::new_v4()),
-            event_json,
+            aura_core::FactValue::String(event_json),
         );
 
-        // Merge into current journal via effects
-        let current = adapter.effects().journal().get_journal().await?;
-        let updated = adapter
-            .effects()
-            .journal()
-            .merge_facts(&current, &delta_journal)
-            .await?;
+        // Merge into current journal via JournalEffects trait methods
+        let effects = adapter.effects();
+        let current = effects.get_journal().await?;
+        let updated = effects.merge_facts(&current, &delta_journal).await?;
 
         // Persist updated journal
-        adapter
-            .effects()
-            .journal()
-            .persist_journal(&updated)
-            .await?;
+        effects.persist_journal(&updated).await?;
 
         Ok(())
     }

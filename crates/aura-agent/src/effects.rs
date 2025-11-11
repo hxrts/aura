@@ -1,24 +1,35 @@
 //! Agent-Specific Effect Trait Re-exports
 //!
-//! This module re-exports agent-specific effect traits from aura-protocol.
-//! Agent effect definitions have been moved to aura-protocol as per the
-//! unified architecture.
+//! This module provides a convenient public API for effect traits and types used by agents.
+//!
+//! ## Dependency Architecture
+//!
+//! - **Effect Trait Definitions**: Come from `aura-core` (interface layer)
+//! - **Agent-Specific Effects**: Defined in `aura-protocol` (orchestration layer)
+//! - **Effect System Coordinator**: `AuraEffectSystem` from `aura-protocol` (coordinates handlers)
+//!
+//! This follows the layering: Interface → Orchestration → Runtime Composition
 
-// Re-export all agent-specific effect traits from aura-protocol
+// Re-export core effect trait definitions from aura-core (interface layer)
+pub use aura_core::effects::{
+    ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, RandomEffects, StorageEffects,
+    TimeEffects,
+};
+
+// Re-export agent-specific effects from aura-protocol (orchestration layer)
 pub use aura_protocol::effects::{
     AgentEffects, AgentHealthStatus, AuthMethod, AuthenticationEffects, AuthenticationResult,
-    BiometricType, ConfigValidationError, ConfigurationEffects, CredentialBackup, DeviceConfig,
-    DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
-    SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
+    BiometricType, ChoreographicEffects, ConfigValidationError, ConfigurationEffects,
+    CredentialBackup, DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, LedgerEffects,
+    SessionHandle, SessionInfo, SessionManagementEffects, SessionMessage, SessionRole,
+    SessionStatus, SessionType,
 };
 
-// Re-export core effect traits from aura-protocol for convenience
-pub use aura_protocol::effects::{
-    ChoreographicEffects, ConsoleEffects, CryptoEffects, JournalEffects, LedgerEffects,
-    NetworkEffects, RandomEffects, StorageEffects, TimeEffects,
-};
-
-// Re-export unified effect system from the effects module
+// Re-export effect system coordinator from aura-protocol (multi-handler composition)
+// NOTE: AuraEffectSystem is correctly in aura-protocol because it:
+//   - Coordinates multiple effect handlers (composition)
+//   - Maintains stateful execution context
+//   - Provides unified handler orchestration
 pub use aura_protocol::effects::AuraEffectSystem;
 
 // Agent-specific session types

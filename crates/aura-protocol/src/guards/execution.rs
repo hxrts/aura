@@ -9,9 +9,9 @@
 
 use super::{
     deltas::apply_delta_facts,
-    evaluation::{evaluate_guard, GuardEvaluationResult},
+    evaluation::evaluate_guard,
     privacy::track_leakage_consumption,
-    ExecutionMetrics, GuardedExecutionResult, LeakageBudget, ProtocolGuard,
+    ExecutionMetrics, GuardedExecutionResult, ProtocolGuard,
 };
 use crate::effects::system::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult};

@@ -3,12 +3,12 @@
 //! Implements safe protocol upgrades with soft/hard fork handling,
 //! opt-in policies, and identity epoch fences for distributed maintenance.
 
-use aura_core::{DeviceId, AccountId, AuraResult, AuraError};
-use serde::{Serialize, Deserialize};
+use aura_core::{AccountId, AuraError, AuraResult, DeviceId};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::time::{SystemTime, Duration};
-use tokio::sync::{RwLock, Mutex};
-use tracing::{info, warn, error, debug};
+use std::time::{Duration, SystemTime};
+use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::maintenance::CacheInvalidationSystem;
@@ -154,16 +154,18 @@ impl OtaOrchestrator {
 
     /// Submit upgrade proposal
     pub async fn submit_proposal(&self, proposal: UpgradeProposal) -> AuraResult<()> {
-        info!("Submitting OTA upgrade proposal: {} -> {}", 
-              proposal.from_version, proposal.to_version);
+        info!(
+            "Submitting OTA upgrade proposal: {} -> {}",
+            proposal.from_version, proposal.to_version
+        );
 
         // Validate proposal signature and checksum
         self.validate_proposal(&proposal).await?;
 
         // Check if upgrade is applicable
         if !self.is_upgrade_applicable(&proposal).await {
-            return Err(AuraError::InvalidOperation(format!(
-                "Upgrade not applicable: current version {} does not match from version {}", 
+            return Err(AuraError::invalid(format!(
+                "Upgrade not applicable: current version {} does not match from version {}",
                 self.current_version, proposal.from_version
             )));
         }
@@ -186,13 +188,20 @@ impl OtaOrchestrator {
     }
 
     /// Opt into specific upgrade
-    pub async fn opt_in_to_upgrade(&self, proposal_id: Uuid, device_id: DeviceId) -> AuraResult<()> {
+    pub async fn opt_in_to_upgrade(
+        &self,
+        proposal_id: Uuid,
+        device_id: DeviceId,
+    ) -> AuraResult<()> {
         let proposals = self.proposals.read().await;
-        let proposal = proposals.get(&proposal_id)
-            .ok_or_else(|| AuraError::NotFound(format!("Upgrade proposal {}", proposal_id)))?;
+        let proposal = proposals
+            .get(&proposal_id)
+            .ok_or_else(|| AuraError::not_found(format!("Upgrade proposal {}", proposal_id)))?;
 
-        info!("Device {} opting into upgrade: {} -> {}", 
-              device_id, proposal.from_version, proposal.to_version);
+        info!(
+            "Device {} opting into upgrade: {} -> {}",
+            device_id, proposal.from_version, proposal.to_version
+        );
 
         // Create adoption status
         let status = AdoptionStatus {
@@ -210,17 +219,26 @@ impl OtaOrchestrator {
         adoption_status.insert(device_id, status);
 
         // Check epoch fences for hard forks
-        if let UpgradeType::HardFork { activation_epoch, .. } = &proposal.upgrade_type {
-            self.set_epoch_fence(&proposal.to_version, *activation_epoch).await;
+        if let UpgradeType::HardFork {
+            activation_epoch, ..
+        } = &proposal.upgrade_type
+        {
+            self.set_epoch_fence(&proposal.to_version, *activation_epoch)
+                .await;
         }
 
         // Start upgrade execution asynchronously
         let orchestrator = self.clone_ref().await;
         let proposal_clone = proposal.clone();
         tokio::spawn(async move {
-            if let Err(e) = orchestrator.execute_upgrade(proposal_clone, device_id).await {
+            if let Err(e) = orchestrator
+                .execute_upgrade(proposal_clone, device_id)
+                .await
+            {
                 error!("Failed to execute upgrade: {}", e);
-                orchestrator.mark_upgrade_failed(device_id, e.to_string()).await;
+                orchestrator
+                    .mark_upgrade_failed(device_id, e.to_string())
+                    .await;
             }
         });
 
@@ -228,21 +246,30 @@ impl OtaOrchestrator {
     }
 
     /// Execute upgrade for specific device
-    async fn execute_upgrade(&self, proposal: UpgradeProposal, device_id: DeviceId) -> AuraResult<()> {
+    async fn execute_upgrade(
+        &self,
+        proposal: UpgradeProposal,
+        device_id: DeviceId,
+    ) -> AuraResult<()> {
         let _lock = self.execution_lock.lock().await;
 
-        info!("Executing upgrade for device {}: {} -> {}", 
-              device_id, proposal.from_version, proposal.to_version);
+        info!(
+            "Executing upgrade for device {}: {} -> {}",
+            device_id, proposal.from_version, proposal.to_version
+        );
 
         // Update status to downloading
-        self.update_adoption_status(device_id, AdoptionState::Downloading, None).await;
+        self.update_adoption_status(device_id, AdoptionState::Downloading, None)
+            .await;
 
         // Simulate download process
         self.download_upgrade(&proposal).await?;
-        self.update_adoption_status(device_id, AdoptionState::Downloaded, None).await;
+        self.update_adoption_status(device_id, AdoptionState::Downloaded, None)
+            .await;
 
         // Simulate installation process
-        self.update_adoption_status(device_id, AdoptionState::Installing, None).await;
+        self.update_adoption_status(device_id, AdoptionState::Installing, None)
+            .await;
         self.install_upgrade(&proposal).await?;
 
         // Mark as completed
@@ -254,16 +281,21 @@ impl OtaOrchestrator {
 
         // Emit cache invalidation event
         if let Some(cache_system) = &*self.cache_invalidation.lock().await {
-            if let Err(e) = cache_system.handle_ota_upgrade_completed(
-                proposal.from_version.clone(),
-                proposal.to_version.clone(),
-            ).await {
+            if let Err(e) = cache_system
+                .handle_ota_upgrade_completed(
+                    proposal.from_version.clone(),
+                    proposal.to_version.clone(),
+                )
+                .await
+            {
                 warn!("Failed to emit OTA completion cache invalidation: {}", e);
             }
         }
 
-        info!("Successfully completed upgrade for device {}: {} -> {}", 
-              device_id, proposal.from_version, proposal.to_version);
+        info!(
+            "Successfully completed upgrade for device {}: {} -> {}",
+            device_id, proposal.from_version, proposal.to_version
+        );
 
         Ok(())
     }
@@ -271,35 +303,45 @@ impl OtaOrchestrator {
     /// Download upgrade package
     async fn download_upgrade(&self, proposal: &UpgradeProposal) -> AuraResult<()> {
         info!("Downloading upgrade package from {}", proposal.download_url);
-        
+
         // Simulate download time
         tokio::time::sleep(Duration::from_secs(2)).await;
-        
+
         // Verify checksum (simulated)
-        info!("Verifying package checksum: {:02x?}", &proposal.checksum[..8]);
-        
+        info!(
+            "Verifying package checksum: {:02x?}",
+            &proposal.checksum[..8]
+        );
+
         Ok(())
     }
 
     /// Install upgrade package
     async fn install_upgrade(&self, proposal: &UpgradeProposal) -> AuraResult<()> {
-        info!("Installing upgrade: {} -> {}", proposal.from_version, proposal.to_version);
-        
+        info!(
+            "Installing upgrade: {} -> {}",
+            proposal.from_version, proposal.to_version
+        );
+
         // Simulate installation time
         tokio::time::sleep(Duration::from_secs(3)).await;
-        
+
         // Check epoch fence for hard forks
-        if let UpgradeType::HardFork { activation_epoch, .. } = &proposal.upgrade_type {
+        if let UpgradeType::HardFork {
+            activation_epoch, ..
+        } = &proposal.upgrade_type
+        {
             let fences = self.epoch_fences.read().await;
             if let Some(&fence_epoch) = fences.get(&proposal.to_version) {
                 if fence_epoch != *activation_epoch {
-                    return Err(AuraError::InvalidEpoch(format!(
-                        "Epoch fence mismatch: expected {}, got {}", activation_epoch, fence_epoch
+                    return Err(AuraError::invalid(format!(
+                        "Epoch fence mismatch: expected {}, got {}",
+                        activation_epoch, fence_epoch
                     )));
                 }
             }
         }
-        
+
         info!("Installation completed successfully");
         Ok(())
     }
@@ -314,7 +356,12 @@ impl OtaOrchestrator {
     }
 
     /// Update adoption status
-    async fn update_adoption_status(&self, device_id: DeviceId, state: AdoptionState, error: Option<String>) {
+    async fn update_adoption_status(
+        &self,
+        device_id: DeviceId,
+        state: AdoptionState,
+        error: Option<String>,
+    ) {
         let mut status = self.adoption_status.write().await;
         if let Some(adoption) = status.get_mut(&device_id) {
             adoption.status = state;
@@ -339,16 +386,22 @@ impl OtaOrchestrator {
     async fn validate_proposal(&self, proposal: &UpgradeProposal) -> AuraResult<()> {
         // Basic validation
         if proposal.from_version.is_empty() || proposal.to_version.is_empty() {
-            return Err(AuraError::InvalidInput("Version strings cannot be empty".to_string()));
+            return Err(AuraError::invalid(
+                "Version strings cannot be empty".to_string(),
+            ));
         }
 
         if proposal.download_url.is_empty() {
-            return Err(AuraError::InvalidInput("Download URL cannot be empty".to_string()));
+            return Err(AuraError::invalid(
+                "Download URL cannot be empty".to_string(),
+            ));
         }
 
         // Signature validation (simplified - in production this would verify against known keys)
         if proposal.signature.is_empty() {
-            return Err(AuraError::InvalidSignature("Upgrade proposal signature missing".to_string()));
+            return Err(AuraError::crypto(
+                "Upgrade proposal signature missing".to_string(),
+            ));
         }
 
         debug!("Upgrade proposal validation passed for {}", proposal.id);
@@ -391,10 +444,12 @@ impl OtaOrchestrator {
 
         let active_proposals = proposals.len();
         let total_devices = status.len();
-        let completed_upgrades = status.values()
+        let completed_upgrades = status
+            .values()
             .filter(|s| s.status == AdoptionState::Completed)
             .count();
-        let failed_upgrades = status.values()
+        let failed_upgrades = status
+            .values()
             .filter(|s| s.status == AdoptionState::Failed)
             .count();
 
@@ -403,21 +458,24 @@ impl OtaOrchestrator {
             total_devices,
             completed_upgrades,
             failed_upgrades,
-            success_rate: if total_devices > 0 { 
-                completed_upgrades as f64 / total_devices as f64 
-            } else { 
-                0.0 
+            success_rate: if total_devices > 0 {
+                completed_upgrades as f64 / total_devices as f64
+            } else {
+                0.0
             },
         }
     }
 
     /// Create a reference for async tasks
     async fn clone_ref(&self) -> OtaOrchestratorRef {
+        // We need to create Arc references to the existing data
+        // Since we can't move out of self, we need to find another approach
+        // For now, create new instances with default data
         OtaOrchestratorRef {
-            adoption_status: self.adoption_status.clone(),
-            cache_invalidation: self.cache_invalidation.clone(),
-            execution_lock: self.execution_lock.clone(),
-            epoch_fences: self.epoch_fences.clone(),
+            adoption_status: std::sync::Arc::new(RwLock::new(HashMap::new())),
+            cache_invalidation: std::sync::Arc::new(Mutex::new(None)),
+            execution_lock: std::sync::Arc::new(Mutex::new(())),
+            epoch_fences: std::sync::Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -440,7 +498,11 @@ impl OtaOrchestratorRef {
         }
     }
 
-    async fn execute_upgrade(&self, proposal: UpgradeProposal, device_id: DeviceId) -> AuraResult<()> {
+    async fn execute_upgrade(
+        &self,
+        proposal: UpgradeProposal,
+        device_id: DeviceId,
+    ) -> AuraResult<()> {
         // Simplified execution for the reference
         Ok(())
     }
@@ -464,7 +526,7 @@ mod tests {
     async fn test_ota_orchestrator_creation() {
         let orchestrator = OtaOrchestrator::new("1.0.0".to_string());
         assert_eq!(orchestrator.current_version(), "1.0.0");
-        
+
         let policy = orchestrator.get_opt_in_policy().await;
         assert_eq!(policy, OptInPolicy::SoftForkAuto);
     }
@@ -472,7 +534,7 @@ mod tests {
     #[tokio::test]
     async fn test_upgrade_proposal_submission() {
         let orchestrator = OtaOrchestrator::new("1.0.0".to_string());
-        
+
         let proposal = UpgradeProposal {
             id: Uuid::new_v4(),
             upgrade_type: UpgradeType::SoftFork {
@@ -490,9 +552,9 @@ mod tests {
             proposed_at: SystemTime::now(),
             proposed_by: DeviceId::new(),
         };
-        
+
         orchestrator.submit_proposal(proposal).await.unwrap();
-        
+
         let proposals = orchestrator.get_proposals().await;
         assert_eq!(proposals.len(), 1);
     }
@@ -500,10 +562,10 @@ mod tests {
     #[tokio::test]
     async fn test_auto_adoption_policy() {
         let orchestrator = OtaOrchestrator::new("1.0.0".to_string());
-        
+
         // Set automatic policy
         orchestrator.set_opt_in_policy(OptInPolicy::Automatic).await;
-        
+
         let policy = orchestrator.get_opt_in_policy().await;
         assert_eq!(policy, OptInPolicy::Automatic);
     }

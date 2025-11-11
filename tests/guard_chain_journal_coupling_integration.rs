@@ -13,7 +13,7 @@ use aura_protocol::{
         execute_anti_entropy_with_guard_chain, AntiEntropyConfig, CrdtType,
     },
     effects::{
-        semilattice::{CrdtCoordinator, CrdtCoordinatorFactory},
+        semilattice::CrdtCoordinator,
         system::AuraEffectSystem,
     },
     guards::{JournalCoupler, JournalCouplerBuilder, ProtocolGuard},
@@ -76,9 +76,9 @@ async fn test_complete_guard_chain_execution() {
     let effect_system_a = AuraEffectSystem::new(device_a, ExecutionMode::Testing);
     let effect_system_b = AuraEffectSystem::new(device_b, ExecutionMode::Testing);
 
-    // Create CRDT coordinators
-    let coordinator_a = CrdtCoordinatorFactory::cv_only(device_a, TestCounter::new(device_a));
-    let coordinator_b = CrdtCoordinatorFactory::cv_only(device_b, TestCounter::new(device_b));
+    // Create CRDT coordinators using builder pattern
+    let coordinator_a = CrdtCoordinator::with_cv_state(device_a, TestCounter::new(device_a));
+    let coordinator_b = CrdtCoordinator::with_cv_state(device_b, TestCounter::new(device_b));
 
     // Configure anti-entropy
     let config = AntiEntropyConfig {
@@ -183,7 +183,7 @@ async fn test_journal_coupling_with_different_annotation_types() {
             JournalAnnotation::add_facts("Add facts test"),
         ),
         (
-            "caps_operation", 
+            "caps_operation",
             JournalAnnotation::refine_caps("Refine capabilities test"),
         ),
         (
@@ -206,7 +206,7 @@ async fn test_journal_coupling_with_different_annotation_types() {
 
         assert_eq!(result.result, format!("completed_{}", op_id));
         assert!(result.coupling_metrics.coupling_successful);
-        
+
         // Should have applied journal operations
         assert!(!result.journal_ops_applied.is_empty());
     }
@@ -215,7 +215,7 @@ async fn test_journal_coupling_with_different_annotation_types() {
 #[tokio::test]
 async fn test_optimistic_vs_pessimistic_journal_coupling() {
     let device_id = DeviceId::new();
-    
+
     // Test pessimistic coupling (default)
     let mut effect_system_pessimistic = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
     let pessimistic_coupler = JournalCouplerBuilder::new()
@@ -252,7 +252,7 @@ async fn test_optimistic_vs_pessimistic_journal_coupling() {
         .unwrap();
 
     assert_eq!(optimistic_result.result, "optimistic_done");
-    
+
     // Both should succeed, but with potentially different performance characteristics
     assert!(pessimistic_result.coupling_metrics.coupling_successful);
     assert!(optimistic_result.coupling_metrics.coupling_successful);
@@ -293,8 +293,8 @@ async fn test_guard_chain_capability_enforcement() {
             Capability::Execute {
                 operation: "restricted_operation".to_string(),
             },
-            Capability::Send {
-                message_type: "restricted_message".to_string(),
+            Capability::Write {
+                resource_pattern: "restricted_message".to_string(),
             },
         ]);
 
@@ -336,7 +336,7 @@ async fn test_leakage_budget_tracking() {
     let guard = ProtocolGuard::new("leakage_test")
         .leakage_budget(aura_protocol::guards::LeakageBudget::new(
             3, // External adversary
-            2, // Neighbor adversary  
+            2, // Neighbor adversary
             1, // In-group adversary
         ));
 
@@ -356,7 +356,7 @@ async fn test_leakage_budget_tracking() {
 
     assert_eq!(result.result, "leakage_tracked_operation");
     assert!(result.coupling_metrics.coupling_successful);
-    
+
     // Verify that leakage budget tracking is integrated
     // (specific budget values depend on the effect system implementation)
 }
@@ -375,7 +375,7 @@ async fn test_guard_chain_with_multiple_delta_facts() {
                 "operation": "multi_delta_operation"
             }),
             serde_json::json!({
-                "type": "capability_grant", 
+                "type": "capability_grant",
                 "capability": "multi_delta_capability",
                 "target_device": device_id.to_string(),
                 "granted_for": "multi_delta_test"

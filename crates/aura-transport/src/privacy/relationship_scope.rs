@@ -3,10 +3,10 @@
 //! Implements DKD-derived relationship contexts that determine what
 //! capability information can be revealed to different peers.
 
-use aura_core::identifiers::{AccountId, DeviceId};
-use blake3::{Hash, Hasher};
+use aura_core::identifiers::DeviceId;
+use blake3::Hasher;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::peers::PeerCapabilities;
 

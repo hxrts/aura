@@ -37,15 +37,6 @@
 //! participating in signing. Parent binding prevents replay attacks by tying each
 //! signature to its tree context.
 //!
-//! ### Byzantine Consensus
-//!
-//! The consensus module implements Byzantine fault-tolerant consensus for proposal
-//! agreement. The protocol uses a leader-voter pattern where the leader broadcasts
-//! a proposal to all voters, each voter sends an approve or reject vote back to the
-//! leader, and the leader broadcasts the final decision based on whether the threshold
-//! of approvals was reached. This provides safety under Byzantine failures as long as
-//! fewer than one third of participants are malicious.
-//!
 //! ### Tree Operations
 //!
 //! The tree_coordination module implements choreographies for coordinating tree
@@ -98,8 +89,7 @@
 //! behavior controlled by handler configuration.
 
 pub mod anti_entropy;
-pub mod consensus;
-pub mod frost;
+// pub mod frost; // REMOVED: Superseded by aura-frost crate
 pub mod ota;
 pub mod snapshot;
 pub mod threshold_ceremony;
@@ -110,10 +100,9 @@ pub mod tree_coordination;
 // so we only re-export the main types that are meant to be public
 
 pub use anti_entropy::{AntiEntropyConfig, AntiEntropyError};
-pub use consensus::{ConsensusConfig, ConsensusProposal, ConsensusError};
-// Note: FROST, snapshot, threshold_ceremony, and tree_coordination choreographies are temporarily disabled
+// Note: snapshot, threshold_ceremony, and tree_coordination choreographies are temporarily disabled
 // due to macro conflicts. Only re-export types that don't depend on choreography! generated types.
-pub use frost::FrostError; 
+// FROST removed: Use aura_frost crate instead
 // ota::* exports omitted pending implementation
 pub use snapshot::{SnapshotConfig, SnapshotProposal};
 // pub use threshold_ceremony::{ThresholdCeremonyConfig, CeremonyError}; // Disabled - choreography types unavailable

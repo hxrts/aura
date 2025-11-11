@@ -6,12 +6,12 @@
 //! - Key resharing and rotation
 
 pub mod dkd;
-pub mod frost;
+// pub mod frost; // REMOVED: Use aura-frost crate for FROST messages
 pub mod resharing;
 
 // Re-export crypto message types
 pub use dkd::*;
-pub use frost::*;
+// pub use frost::*; // REMOVED: Use aura-frost crate
 pub use resharing::*;
 
 use aura_core::{DeviceId, SessionId};
@@ -37,8 +37,8 @@ pub struct CryptoMessage {
 pub enum CryptoPayload {
     /// DKD protocol messages
     Dkd(DkdMessage),
-    /// FROST protocol messages
-    Frost(FrostMessage),
+    /// FROST protocol messages - Use aura-frost crate for FROST operations
+    // Frost(FrostMessage), // REMOVED: Use aura-frost crate
     /// Resharing protocol messages
     Resharing(ResharingMessage),
 }
@@ -65,7 +65,7 @@ impl CryptoMessage {
     pub fn protocol_type(&self) -> &'static str {
         match &self.payload {
             CryptoPayload::Dkd(_) => "dkd",
-            CryptoPayload::Frost(_) => "frost",
+            // CryptoPayload::Frost(_) => "frost", // REMOVED: Use aura-frost crate
             CryptoPayload::Resharing(_) => "resharing",
         }
     }

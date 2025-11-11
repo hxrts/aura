@@ -37,14 +37,13 @@
 //! - Atomic application across replicas
 //! - Protocol version gating for safe upgrades
 
-use crate::effects::ChoreographyError;
 use crate::choreography::AuraHandlerAdapter;
-use crate::effects::{ConsoleEffects, CryptoEffects, JournalEffects, TreeEffects};
+use crate::effects::ChoreographyError;
+use crate::effects::{ConsoleEffects, TreeEffects};
 use crate::handlers::AuraHandlerError;
-use aura_core::tree::{Cut, Partial, ProposalId, Snapshot};
+use aura_core::tree::{Cut, ProposalId, Snapshot};
 use aura_core::{DeviceId, SessionId};
 use aura_journal::ratchet_tree::TreeState;
-use rumpsteak_aura_choreography::choreography;
 use std::collections::BTreeMap;
 
 // ============================================================================
@@ -115,9 +114,25 @@ pub enum SnapshotError {
     EffectSystem(String),
 }
 
+impl From<aura_core::AuraError> for SnapshotError {
+    fn from(e: aura_core::AuraError) -> Self {
+        SnapshotError::EffectSystem(e.to_string())
+    }
+}
+
 impl From<SnapshotError> for ChoreographyError {
     fn from(e: SnapshotError) -> Self {
-        ChoreographyError::ProtocolError(e.to_string())
+        ChoreographyError::ProtocolViolation {
+            message: e.to_string(),
+        }
+    }
+}
+
+impl From<aura_core::AuraError> for ChoreographyError {
+    fn from(e: aura_core::AuraError) -> Self {
+        ChoreographyError::ProtocolViolation {
+            message: e.to_string(),
+        }
     }
 }
 
@@ -259,16 +274,17 @@ async fn proposer_session(
     let proposal_id = ProposalId::new_random();
 
     // Log proposal initiation
-    adapter.effects().log_info(
-        &format!(
+    adapter
+        .effects()
+        .log_info(&format!(
             "Starting snapshot proposal {:?} at epoch {} with {}-of-{} threshold",
             proposal_id,
             config.cut.epoch,
             config.threshold,
             quorum.len()
-        ),
-        &[],
-    );
+        ))
+        .await
+        .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
     // Phase 1: Create and broadcast proposal
     let effects_cut = crate::effects::tree::Cut {
@@ -300,10 +316,11 @@ async fn proposer_session(
             .map_err(|e| SnapshotError::Communication(format!("Failed to send proposal: {}", e)))?;
     }
 
-    adapter.effects().log_debug(
-        &format!("Sent proposal to {} quorum members", quorum.len()),
-        &[],
-    );
+    adapter
+        .effects()
+        .log_debug(&format!("Sent proposal to {} quorum members", quorum.len()))
+        .await
+        .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
     // Phase 2: Collect approvals from quorum members
     let mut approvals: Vec<SnapshotApproval> = Vec::new();
@@ -326,13 +343,13 @@ async fn proposer_session(
 
     let approval_count = approvals.iter().filter(|a| a.approved).count() as u16;
 
-    adapter.effects().log_info(
-        &format!(
+    adapter
+        .effects()
+        .log_info(&format!(
             "Collected {} approvals (threshold: {}), {} support GC",
             approval_count, config.threshold, gc_capable_count
-        ),
-        &[],
-    );
+        ))
+        .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
     // Phase 3: Finalize or abort based on threshold
     if approval_count >= config.threshold {
@@ -340,29 +357,30 @@ async fn proposer_session(
         let safe_for_gc = gc_capable_count >= config.threshold;
 
         if !safe_for_gc {
-            adapter.effects().log_warn(
-                &format!(
+            adapter
+                .effects()
+                .log_warn(&format!(
                     "Snapshot approved but GC disabled: only {}/{} peers support safe GC",
                     gc_capable_count, config.threshold
-                ),
-                &[],
-            );
+                ))
+                .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
         }
 
-        adapter.effects().log_info(
-            &format!(
+        adapter
+            .effects()
+            .log_info(&format!(
                 "Threshold met, finalizing snapshot (GC enabled: {})",
                 safe_for_gc
-            ),
-            &[],
-        );
+            ))
+            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         // Aggregate partial signatures
         // TODO fix - For now, concatenate them - in production, use proper FROST aggregation
         let aggregate_signature = partial_signatures.concat();
 
         // Finalize snapshot via effects
-        let effects_proposal_id = crate::effects::tree::ProposalId(aura_core::Hash32(proposal_id.0));
+        let effects_proposal_id =
+            crate::effects::tree::ProposalId(aura_core::Hash32(proposal_id.0));
         let effects_snapshot = adapter
             .effects()
             .finalize_snapshot(effects_proposal_id)
@@ -406,7 +424,8 @@ async fn proposer_session(
 
         adapter
             .effects()
-            .log_info("Snapshot committed successfully", &[]);
+            .log_info("Snapshot committed successfully")
+            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         Ok(SnapshotResult {
             snapshot: Some(snapshot),
@@ -433,7 +452,8 @@ async fn proposer_session(
 
         adapter
             .effects()
-            .log_warn(&format!("Snapshot aborted: {}", abort.reason), &[]);
+            .log_warn(&format!("Snapshot aborted: {}", abort.reason))
+            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         Ok(SnapshotResult {
             snapshot: None,
@@ -455,13 +475,13 @@ async fn quorum_member_session(
         .await
         .map_err(|e| SnapshotError::Communication(format!("Failed to receive proposal: {}", e)))?;
 
-    adapter.effects().log_info(
-        &format!(
+    adapter
+        .effects()
+        .log_info(&format!(
             "Received snapshot proposal {:?} at epoch {}",
             proposal.proposal_id, proposal.cut.epoch
-        ),
-        &[],
-    );
+        ))
+        .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
     // Evaluate proposal locally with upgrade safety checks
     // Check if cut is valid and acceptable:
@@ -504,7 +524,8 @@ async fn quorum_member_session(
 
     // Phase 2: Generate approval (partial signature)
     let partial_signature = if approved {
-        let effects_proposal_id = crate::effects::tree::ProposalId(aura_core::Hash32(proposal.proposal_id.0));
+        let effects_proposal_id =
+            crate::effects::tree::ProposalId(aura_core::Hash32(proposal.proposal_id.0));
         let partial = adapter
             .effects()
             .approve_snapshot(effects_proposal_id)
@@ -540,12 +561,16 @@ async fn quorum_member_session(
     if approved {
         adapter
             .effects()
-            .log_info("Snapshot proposal approved", &[]);
+            .log_info("Snapshot proposal approved")
+            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
     } else {
-        adapter.effects().log_warn(
-            &format!("Snapshot proposal rejected: {}", reason.unwrap_or_default()),
-            &[],
-        );
+        adapter
+            .effects()
+            .log_warn(&format!(
+                "Snapshot proposal rejected: {}",
+                reason.unwrap_or_default()
+            ))
+            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
     }
 
     // Phase 3: Receive commit or abort
@@ -553,7 +578,8 @@ async fn quorum_member_session(
     let result = if let Ok(commit) = adapter.recv_from::<SnapshotCommit>(proposer_id).await {
         adapter
             .effects()
-            .log_info("Received snapshot commit, applying", &[]);
+            .log_info("Received snapshot commit, applying")
+            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         // Convert to effects snapshot
         let effects_snapshot = crate::effects::tree::Snapshot {
@@ -571,7 +597,8 @@ async fn quorum_member_session(
             Ok(()) => {
                 adapter
                     .effects()
-                    .log_info("Snapshot applied successfully", &[]);
+                    .log_info("Snapshot applied successfully")
+                    .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
                 SnapshotResult {
                     snapshot: Some(commit.snapshot),
@@ -583,7 +610,8 @@ async fn quorum_member_session(
             Err(e) => {
                 adapter
                     .effects()
-                    .log_error(&format!("Failed to apply snapshot: {}", e), &[]);
+                    .log_error(&format!("Failed to apply snapshot: {}", e))
+                    .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
                 SnapshotResult {
                     snapshot: Some(commit.snapshot),
@@ -596,7 +624,8 @@ async fn quorum_member_session(
     } else if let Ok(abort) = adapter.recv_from::<SnapshotAbort>(proposer_id).await {
         adapter
             .effects()
-            .log_warn(&format!("Snapshot aborted: {}", abort.reason), &[]);
+            .log_warn(&format!("Snapshot aborted: {}", abort.reason))
+            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         SnapshotResult {
             snapshot: None,
@@ -639,7 +668,8 @@ pub async fn execute_as_proposer(
     }
 
     // Create handler and adapter
-    let mut adapter = AuraHandlerAdapter::new(config.proposer.into(), effect_system.execution_mode());
+    let mut adapter =
+        AuraHandlerAdapter::new(config.proposer.into(), effect_system.execution_mode());
 
     // Execute proposer session
     proposer_session(&mut adapter, &config.quorum, &config)
@@ -674,8 +704,8 @@ pub async fn apply_snapshot_commit(
     ConsoleEffects::log_info(
         effect_system,
         &format!("Applying snapshot commit at epoch {}", snapshot.epoch),
-        &[],
-    );
+    )
+    .await?;
 
     let effects_snapshot = crate::effects::tree::Snapshot {
         cut: crate::effects::tree::Cut {
@@ -689,7 +719,7 @@ pub async fn apply_snapshot_commit(
 
     match effect_system.apply_snapshot(&effects_snapshot).await {
         Ok(()) => {
-            ConsoleEffects::log_info(effect_system, "Snapshot applied successfully", &[]);
+            ConsoleEffects::log_info(effect_system, "Snapshot applied successfully").await?;
 
             Ok(SnapshotResult {
                 snapshot: Some(snapshot),
@@ -699,11 +729,8 @@ pub async fn apply_snapshot_commit(
             })
         }
         Err(e) => {
-            ConsoleEffects::log_error(
-                effect_system,
-                &format!("Failed to apply snapshot: {}", e),
-                &[],
-            );
+            ConsoleEffects::log_error(effect_system, &format!("Failed to apply snapshot: {}", e))
+                .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
             Ok(SnapshotResult {
                 snapshot: Some(snapshot),

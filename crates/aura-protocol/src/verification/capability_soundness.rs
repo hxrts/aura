@@ -10,17 +10,13 @@
 //! - **Context Isolation**: Capability contexts remain properly isolated
 //! - **Authorization Soundness**: All operations are properly authorized
 
-use crate::{
-    guards::capability::{CapabilityGuard, GuardedContext, GuardedEffect},
-};
 use aura_core::{
-    DeviceId, SessionId,
-    Cap, Fact, Journal,
-    MessageContext, AuraError, AuraResult,
+    DeviceId,
+    Cap, Fact, AuraResult,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -229,7 +225,7 @@ impl CapabilitySoundnessVerifier {
         let start_time = SystemTime::now();
         
         // Initialize verification state
-        let mut verification_state = VerificationState {
+        let verification_state = VerificationState {
             explored_states: HashMap::new(),
             executed_operations: Vec::new(),
             start_time,

@@ -25,12 +25,10 @@
 //! - Only signature count revealed (threshold satisfied)
 //! - Parent binding prevents replay attacks
 
-use crate::effects::ChoreographyError;
-use crate::effects::{ConsoleEffects, CryptoEffects, NetworkEffects, TimeEffects};
+use crate::effects::CryptoEffects;
 use aura_core::effects::RandomEffects;
 use aura_core::tree::Epoch;
 use aura_core::{AttestedOp, DeviceId, Hash32, SessionId, TreeOp};
-use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -74,8 +72,8 @@ impl ParentBinding {
         let mut msg = Vec::new();
         msg.extend_from_slice(b"TREE_OP_SIG");
         msg.extend_from_slice(&self.parent_epoch.to_le_bytes());
-        msg.extend_from_slice(&self.parent_commitment);
-        msg.extend_from_slice(&self.policy_hash);
+        msg.extend_from_slice(self.parent_commitment.as_ref());
+        msg.extend_from_slice(self.policy_hash.as_ref());
         msg.extend_from_slice(op_bytes);
         msg
     }

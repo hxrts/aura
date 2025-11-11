@@ -4,12 +4,11 @@
 //! manifests, integrating blinded manifests with scoped views.
 
 use super::{
-    blinded_manifest::{BlindedManifest, CapabilityBucket, EstimatedFeatureCount},
+    blinded_manifest::{BlindedManifest, CapabilityBucket},
     relationship_scope::{CapabilityViewManager, RelationshipScope, ScopedCapabilityView},
 };
 use crate::peers::PeerCapabilities;
 use aura_core::identifiers::{AccountId, DeviceId};
-use blake3::Hash;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
@@ -100,7 +99,7 @@ impl ManifestManager {
     ) -> Result<DeviceManifest, ManifestError> {
         // Determine relationship scope with the requesting peer
         let scope = {
-            let mut view_manager = self
+            let _view_manager = self
                 .view_manager
                 .write()
                 .map_err(|_| ManifestError::LockError)?;

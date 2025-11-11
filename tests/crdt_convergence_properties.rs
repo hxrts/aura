@@ -3,14 +3,14 @@
 //! This test suite verifies that all CRDT implementations in Aura satisfy
 //! the fundamental convergence properties required for distributed consistency:
 //!
-//! 1. **Strong Eventual Consistency (SEC)**: All replicas that have received 
+//! 1. **Strong Eventual Consistency (SEC)**: All replicas that have received
 //!    the same set of operations converge to the same state
-//! 2. **Commutativity**: The order of operation application doesn't affect 
+//! 2. **Commutativity**: The order of operation application doesn't affect
 //!    the final state for commutative CRDTs
 //! 3. **Associativity**: Grouping of operations doesn't affect the final state
-//! 4. **Idempotence**: Applying the same operation multiple times has the 
+//! 4. **Idempotence**: Applying the same operation multiple times has the
 //!    same effect as applying it once
-//! 5. **Monotonicity**: States only grow (for join semilattices) or shrink 
+//! 5. **Monotonicity**: States only grow (for join semilattices) or shrink
 //!    (for meet semilattices) but never oscillate
 //!
 //! These properties are essential for ensuring that Aura's distributed
@@ -25,7 +25,7 @@ use aura_core::{
 };
 use aura_protocol::{
     effects::semilattice::{
-        CmHandler, CvHandler, DeltaHandler, MvHandler, CrdtCoordinatorFactory,
+        CmHandler, CvHandler, DeltaHandler, MvHandler,
     },
     handlers::ExecutionMode,
 };
@@ -394,21 +394,20 @@ async fn test_crdt_coordinator_convergence() {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
 
-    let coordinator_a = CrdtCoordinatorFactory::all_types(
-        device_a,
-        TestCounter::new(device_a),
-        TestCommutativeCounter::new(),
-        TestDeltaCounter::new(device_a),
-        TestConstraint::new(100, 10),
-    );
+    // Use builder pattern to create coordinators with all CRDT types
+    use aura_protocol::effects::semilattice::CrdtCoordinator;
 
-    let coordinator_b = CrdtCoordinatorFactory::all_types(
-        device_b,
-        TestCounter::new(device_b),
-        TestCommutativeCounter::new(),
-        TestDeltaCounter::new(device_b),
-        TestConstraint::new(100, 10),
-    );
+    let coordinator_a = CrdtCoordinator::new(device_a)
+        .with_cv_handler(CvHandler::with_state(TestCounter::new(device_a)))
+        .with_cm_handler(CmHandler::new(TestCommutativeCounter::new()))
+        .with_delta_handler(DeltaHandler::with_state(TestDeltaCounter::new(device_a)))
+        .with_mv_handler(MvHandler::with_state(TestConstraint::new(100, 10)));
+
+    let coordinator_b = CrdtCoordinator::new(device_b)
+        .with_cv_handler(CvHandler::with_state(TestCounter::new(device_b)))
+        .with_cm_handler(CmHandler::new(TestCommutativeCounter::new()))
+        .with_delta_handler(DeltaHandler::with_state(TestDeltaCounter::new(device_b)))
+        .with_mv_handler(MvHandler::with_state(TestConstraint::new(100, 10)));
 
     // Both coordinators should properly manage all CRDT types
     assert!(coordinator_a.has_cv_handler());
@@ -482,7 +481,7 @@ async fn test_monotonicity_property() {
 async fn test_concurrent_operations_convergence() {
     // Test convergence under concurrent operations from multiple devices
     let devices: Vec<DeviceId> = (0..5).map(|_| DeviceId::new()).collect();
-    
+
     let mut handlers: Vec<CmHandler<TestCommutativeCounter, TestIncrement, String>> = devices
         .iter()
         .map(|&device_id| CmHandler::new(device_id, TestCommutativeCounter::new()))
@@ -504,7 +503,7 @@ async fn test_concurrent_operations_convergence() {
 
     // All handlers should converge to the same state
     let expected_total: u64 = operations.iter().map(|op| op.increment_value as u64).sum();
-    
+
     for handler in &handlers {
         let state = handler.current_state();
         assert_eq!(state.total, expected_total);
@@ -539,7 +538,7 @@ fn test_counter_join_properties_deterministic() {
 fn test_commutativity_property_deterministic() {
     // Test commutativity with specific values
     let test_cases = vec![(10u64, 20u64), (100, 50), (0, 1), (42, 42)];
-    
+
     for (a, b) in test_cases {
         let device = DeviceId::new();
         let counter_a = TestCounter { value: a, device };

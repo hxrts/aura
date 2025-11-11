@@ -5,9 +5,10 @@
 
 use crate::{AuraError, AuraResult};
 use aura_core::{AccountId, DeviceId};
+use aura_crypto::Ed25519Signature;
 use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation};
 use aura_verify::session::{SessionScope, SessionTicket};
-use aura_verify::{Ed25519Signature, IdentityProof, VerifiedIdentity};
+use aura_verify::{IdentityProof, VerifiedIdentity};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
@@ -411,9 +412,11 @@ mod tests {
             duration_seconds: 3600,
         };
 
-        // Note: This will return an error since choreography is not fully implemented
+        // Note: This will return Ok with success=false since choreography is not fully implemented
         let result = coordinator.establish_session(request).await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(!response.success);
         assert!(coordinator.has_active_choreography());
     }
 }

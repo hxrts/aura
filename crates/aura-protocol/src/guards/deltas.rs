@@ -4,7 +4,7 @@
 //! aura-journal's CRDT system. It ensures that protocol execution results in
 //! monotonic fact accumulation following join-semilattice laws.
 
-use crate::effects::{system::AuraEffectSystem, JournalEffects};
+use crate::effects::system::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult};
 use serde_json::Value as JsonValue;
 use std::time::Instant;
@@ -193,14 +193,12 @@ async fn rollback_applied_facts(
             fact = %fact,
             "Fact applied but sequence failed - applying compensation"
         );
-        
+
         // Generate compensation fact based on fact type
         if let Some(compensation_fact) = generate_compensation_fact(fact)? {
-            // TODO: Implement append_fact in AuraEffectSystem
             // Apply compensation fact to journal
             tracing::info!("Applying compensation fact: {}", compensation_fact);
-            let compensation_error: Result<(), aura_core::AuraError> = Ok(()); // Stub
-            if let Err(compensation_error) = compensation_error {
+            if let Err(compensation_error) = effect_system.append_fact(compensation_fact.clone()).await {
                 error!(
                     compensation_fact = %compensation_fact,
                     error = %compensation_error,
@@ -341,78 +339,131 @@ fn generate_compensation_fact(fact: &JsonValue) -> AuraResult<Option<JsonValue>>
         .get("type")
         .and_then(|t| t.as_str())
         .unwrap_or("unknown");
-    
+
     match fact_type {
         "device_registration" => {
             // For device registration failures, mark device as inactive
             if let Some(device_id) = fact.get("device_id").and_then(|id| id.as_str()) {
-                Ok(Some(JsonValue::Object([
-                    ("type".to_string(), JsonValue::String("device_deactivation".to_string())),
-                    ("device_id".to_string(), JsonValue::String(device_id.to_string())),
-                    ("reason".to_string(), JsonValue::String("registration_compensation".to_string())),
-                    ("timestamp".to_string(), JsonValue::Number(serde_json::Number::from(
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs()
-                    ))),
-                ].into())))
+                let map = serde_json::Map::from_iter([
+                    (
+                        "type".to_string(),
+                        JsonValue::String("device_deactivation".to_string()),
+                    ),
+                    (
+                        "device_id".to_string(),
+                        JsonValue::String(device_id.to_string()),
+                    ),
+                    (
+                        "reason".to_string(),
+                        JsonValue::String("registration_compensation".to_string()),
+                    ),
+                    (
+                        "timestamp".to_string(),
+                        JsonValue::Number(serde_json::Number::from(
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                        )),
+                    ),
+                ]);
+                Ok(Some(JsonValue::Object(map)))
             } else {
                 Ok(None)
             }
-        },
-        
+        }
+
         "capability_grant" => {
             // For capability grant failures, revoke the granted capability
             if let (Some(capability), Some(target_device)) = (
                 fact.get("capability").and_then(|c| c.as_str()),
-                fact.get("target_device").and_then(|d| d.as_str())
+                fact.get("target_device").and_then(|d| d.as_str()),
             ) {
-                Ok(Some(JsonValue::Object([
-                    ("type".to_string(), JsonValue::String("capability_revocation".to_string())),
-                    ("capability".to_string(), JsonValue::String(capability.to_string())),
-                    ("target_device".to_string(), JsonValue::String(target_device.to_string())),
-                    ("reason".to_string(), JsonValue::String("grant_compensation".to_string())),
-                ].into())))
+                let map = serde_json::Map::from_iter([
+                    (
+                        "type".to_string(),
+                        JsonValue::String("capability_revocation".to_string()),
+                    ),
+                    (
+                        "capability".to_string(),
+                        JsonValue::String(capability.to_string()),
+                    ),
+                    (
+                        "target_device".to_string(),
+                        JsonValue::String(target_device.to_string()),
+                    ),
+                    (
+                        "reason".to_string(),
+                        JsonValue::String("grant_compensation".to_string()),
+                    ),
+                ]);
+                Ok(Some(JsonValue::Object(map)))
             } else {
                 Ok(None)
             }
-        },
-        
+        }
+
         "session_attestation" => {
             // For session attestation failures, invalidate the session
             if let Some(session_id) = fact.get("session_id").and_then(|id| id.as_str()) {
-                Ok(Some(JsonValue::Object([
-                    ("type".to_string(), JsonValue::String("session_invalidation".to_string())),
-                    ("session_id".to_string(), JsonValue::String(session_id.to_string())),
-                    ("reason".to_string(), JsonValue::String("attestation_compensation".to_string())),
-                ].into())))
+                let map = serde_json::Map::from_iter([
+                    (
+                        "type".to_string(),
+                        JsonValue::String("session_invalidation".to_string()),
+                    ),
+                    (
+                        "session_id".to_string(),
+                        JsonValue::String(session_id.to_string()),
+                    ),
+                    (
+                        "reason".to_string(),
+                        JsonValue::String("attestation_compensation".to_string()),
+                    ),
+                ]);
+                Ok(Some(JsonValue::Object(map)))
             } else {
                 Ok(None)
             }
-        },
-        
+        }
+
         "intent_finalization" => {
             // For intent finalization failures, mark intent as failed
             if let Some(intent_id) = fact.get("intent_id").and_then(|id| id.as_str()) {
-                Ok(Some(JsonValue::Object([
-                    ("type".to_string(), JsonValue::String("intent_failure".to_string())),
-                    ("intent_id".to_string(), JsonValue::String(intent_id.to_string())),
-                    ("reason".to_string(), JsonValue::String("finalization_compensation".to_string())),
-                ].into())))
+                let map = serde_json::Map::from_iter([
+                    (
+                        "type".to_string(),
+                        JsonValue::String("intent_failure".to_string()),
+                    ),
+                    (
+                        "intent_id".to_string(),
+                        JsonValue::String(intent_id.to_string()),
+                    ),
+                    (
+                        "reason".to_string(),
+                        JsonValue::String("finalization_compensation".to_string()),
+                    ),
+                ]);
+                Ok(Some(JsonValue::Object(map)))
             } else {
                 Ok(None)
             }
-        },
-        
+        }
+
         _ => {
             // For unknown fact types, create a generic compensation record
             warn!(fact_type = fact_type, "Unknown fact type for compensation");
-            Ok(Some(JsonValue::Object([
-                ("type".to_string(), JsonValue::String("operation_compensation".to_string())),
+            let map = serde_json::Map::from_iter([
+                (
+                    "type".to_string(),
+                    JsonValue::String("operation_compensation".to_string()),
+                ),
                 ("original_fact".to_string(), fact.clone()),
-                ("reason".to_string(), JsonValue::String("unknown_type_compensation".to_string())),
-            ].into())))
+                (
+                    "reason".to_string(),
+                    JsonValue::String("unknown_type_compensation".to_string()),
+                ),
+            ]);
+            Ok(Some(JsonValue::Object(map)))
         }
     }
 }
@@ -428,65 +479,95 @@ impl JournalOperationExt for AuraEffectSystem {
 
         // Apply operation via CRDT journal effects
         match operation {
-            JournalOperation::RegisterDevice { device_id, metadata } => {
+            JournalOperation::RegisterDevice {
+                device_id,
+                metadata,
+            } => {
                 // Create device registration fact for journal merge
                 let mut device_fact_map = serde_json::Map::new();
-                device_fact_map.insert("type".to_string(), JsonValue::String("device_registration".to_string()));
+                device_fact_map.insert(
+                    "type".to_string(),
+                    JsonValue::String("device_registration".to_string()),
+                );
                 device_fact_map.insert("device_id".to_string(), JsonValue::String(device_id));
                 device_fact_map.insert("metadata".to_string(), metadata);
-                device_fact_map.insert("timestamp".to_string(), JsonValue::Number(serde_json::Number::from(
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs()
-                )));
+                device_fact_map.insert(
+                    "timestamp".to_string(),
+                    JsonValue::Number(serde_json::Number::from(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                    )),
+                );
                 let device_fact = JsonValue::Object(device_fact_map);
-                
-                // TODO: Implement append_fact in AuraEffectSystem
+
                 tracing::info!("Applying device registration fact: {}", device_fact);
-                // self.append_fact(device_fact).await?;
-            },
-            
-            JournalOperation::GrantCapability { capability, target_device, expiry } => {
+                self.append_fact(device_fact).await?;
+            }
+
+            JournalOperation::GrantCapability {
+                capability,
+                target_device,
+                expiry,
+            } => {
                 // Create capability grant fact
                 let mut cap_fact = serde_json::Map::new();
-                cap_fact.insert("type".to_string(), JsonValue::String("capability_grant".to_string()));
+                cap_fact.insert(
+                    "type".to_string(),
+                    JsonValue::String("capability_grant".to_string()),
+                );
                 cap_fact.insert("capability".to_string(), JsonValue::String(capability));
-                cap_fact.insert("target_device".to_string(), JsonValue::String(target_device));
+                cap_fact.insert(
+                    "target_device".to_string(),
+                    JsonValue::String(target_device),
+                );
                 if let Some(expiry_time) = expiry {
-                    cap_fact.insert("expiry".to_string(), JsonValue::Number(serde_json::Number::from(expiry_time)));
+                    cap_fact.insert(
+                        "expiry".to_string(),
+                        JsonValue::Number(serde_json::Number::from(expiry_time)),
+                    );
                 }
-                
-                // TODO: Implement append_fact in AuraEffectSystem  
-                tracing::info!("Applying capability grant fact: {}", JsonValue::Object(cap_fact.clone()));
-                // self.append_fact(JsonValue::Object(cap_fact)).await?;
-            },
-            
-            JournalOperation::AttestSession { session_id, attestation } => {
+
+                tracing::info!(
+                    "Applying capability grant fact: {}",
+                    JsonValue::Object(cap_fact.clone())
+                );
+                self.append_fact(JsonValue::Object(cap_fact)).await?;
+            }
+
+            JournalOperation::AttestSession {
+                session_id,
+                attestation,
+            } => {
                 // Create session attestation fact
                 let mut session_fact_map = serde_json::Map::new();
-                session_fact_map.insert("type".to_string(), JsonValue::String("session_attestation".to_string()));
+                session_fact_map.insert(
+                    "type".to_string(),
+                    JsonValue::String("session_attestation".to_string()),
+                );
                 session_fact_map.insert("session_id".to_string(), JsonValue::String(session_id));
                 session_fact_map.insert("attestation".to_string(), attestation);
                 let session_fact = JsonValue::Object(session_fact_map);
-                
-                // TODO: Implement append_fact in AuraEffectSystem
+
                 tracing::info!("Applying session attestation fact: {}", session_fact);
-                // self.append_fact(session_fact).await?;
-            },
-            
+                self.append_fact(session_fact).await?;
+            }
+
             JournalOperation::FinalizeIntent { intent_id, result } => {
                 // Create intent finalization fact
                 let mut intent_fact_map = serde_json::Map::new();
-                intent_fact_map.insert("type".to_string(), JsonValue::String("intent_finalization".to_string()));
+                intent_fact_map.insert(
+                    "type".to_string(),
+                    JsonValue::String("intent_finalization".to_string()),
+                );
                 intent_fact_map.insert("intent_id".to_string(), JsonValue::String(intent_id));
                 intent_fact_map.insert("result".to_string(), result);
                 let intent_fact = JsonValue::Object(intent_fact_map);
-                
-                // TODO: Implement append_fact in AuraEffectSystem
+
                 tracing::info!("Applying intent finalization fact: {}", intent_fact);
-                // self.append_fact(intent_fact).await?;
-            },
+                self.append_fact(intent_fact).await?;
+            }
         }
 
         Ok(())

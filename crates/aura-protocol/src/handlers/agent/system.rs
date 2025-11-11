@@ -102,7 +102,7 @@ impl AgentEffects for AgentEffectSystemHandler {
         // TODO fix - In a real implementation, this would sync with the distributed journal
         // TODO fix - For now, we'll just log the operation
         let effects = self.core_effects.read().await;
-        effects.log_info("Syncing distributed state", &[]);
+        effects.log_info("Syncing distributed state").await?;
         Ok(())
     }
 
@@ -262,7 +262,7 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
         }
 
         // TODO fix - In a real implementation, would decrypt and restore credentials
-        effects.log_info("Credentials restored from backup", &[]);
+        effects.log_info("Credentials restored from backup").await?;
         Ok(())
     }
 
@@ -274,7 +274,7 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
         }
 
         let effects = self.core_effects.read().await;
-        effects.log_info("Secure wipe completed", &[]);
+        effects.log_info("Secure wipe completed").await?;
         Ok(())
     }
 }
@@ -459,6 +459,37 @@ impl ConfigurationEffects for AgentEffectSystemHandler {
         }
 
         Ok(errors)
+    }
+    
+    async fn get_config_json(&self, key: &str) -> Result<Option<serde_json::Value>> {
+        let effects = self.core_effects.read().await;
+        
+        if let Ok(Some(config_bytes)) = effects.retrieve(key).await {
+            if let Ok(config_str) = String::from_utf8(config_bytes) {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&config_str) {
+                    return Ok(Some(value));
+                }
+            }
+        }
+        
+        Ok(None)
+    }
+    
+    async fn set_config_json(&self, key: &str, value: &serde_json::Value) -> Result<()> {
+        let config_json = serde_json::to_string(value)
+            .map_err(|e| aura_core::AuraError::invalid(format!("Invalid JSON: {}", e)))?;
+        
+        let effects = self.core_effects.read().await;
+        effects
+            .store(key, config_json.into_bytes())
+            .await
+            .map_err(|e| aura_core::AuraError::internal(format!("Failed to store config: {}", e)))
+    }
+    
+    async fn get_all_config(&self) -> Result<std::collections::HashMap<String, serde_json::Value>> {
+        // TODO: Implement retrieving all configuration keys
+        // For now, return an empty map since we don't have a list_keys operation
+        Ok(std::collections::HashMap::new())
     }
 }
 

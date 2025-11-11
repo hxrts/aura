@@ -113,16 +113,14 @@ where
         self.sources.push(ConfigSource::CommandLine);
         Ok(self)
     }
-    
+
     /// Parse CLI arguments into configuration
     fn parse_cli_args(&self, args: Vec<String>) -> Result<T, AuraError> {
         let mut parsed_config = T::defaults();
         let mut arg_iter = args.iter().skip(1); // Skip program name
-        
+
         while let Some(arg) = arg_iter.next() {
-            if arg.starts_with("--") {
-                let key = &arg[2..]; // Remove "--" prefix
-                
+            if let Some(key) = arg.strip_prefix("--") {
                 // Handle --key=value format
                 if let Some((config_key, value)) = key.split_once('=') {
                     parsed_config.set_from_string(config_key, value)?;
@@ -131,7 +129,10 @@ where
                     if let Some(value) = arg_iter.next() {
                         parsed_config.set_from_string(key, value)?;
                     } else {
-                        return Err(AuraError::invalid(format!("Missing value for argument: --{}", key)));
+                        return Err(AuraError::invalid(format!(
+                            "Missing value for argument: --{}",
+                            key
+                        )));
                     }
                 }
             } else if arg.starts_with('-') && arg.len() == 2 {
@@ -150,21 +151,26 @@ where
                 parsed_config.handle_positional_arg(arg)?;
             }
         }
-        
+
         Ok(parsed_config)
     }
-    
+
     /// Map short flags to configuration keys
     fn short_flag_to_config_key(&self, short_flag: &str) -> Result<String, AuraError> {
         // Common short flag mappings
         let mapping = match short_flag {
             "v" => "verbose",
-            "q" => "quiet", 
+            "q" => "quiet",
             "p" => "port",
             "h" => "host",
             "c" => "config",
             "d" => "debug",
-            _ => return Err(AuraError::invalid(format!("Unknown short flag: -{}", short_flag))),
+            _ => {
+                return Err(AuraError::invalid(format!(
+                    "Unknown short flag: -{}",
+                    short_flag
+                )))
+            }
         };
         Ok(mapping.to_string())
     }
@@ -179,8 +185,8 @@ where
     fn is_defaults(&self) -> bool {
         // Compare current config with defaults
         // This is simplified - a full implementation would use deep comparison
-        self.sources.is_empty() || 
-        std::ptr::eq(&self.config as *const T, &T::defaults() as *const T)
+        self.sources.is_empty()
+            || std::ptr::eq(&self.config as *const T, &T::defaults() as *const T)
     }
 }
 
@@ -196,7 +202,7 @@ pub struct ConfigWatcher<T> {
     file_path: Option<std::path::PathBuf>,
 }
 
-impl<T: AuraConfig> ConfigWatcher<T> 
+impl<T: AuraConfig> ConfigWatcher<T>
 where
     AuraError: From<<T as AuraConfig>::Error>,
 {
@@ -211,64 +217,74 @@ where
     /// Start watching a configuration file for changes
     pub fn watch_file(&mut self, path: &Path) -> Result<(), AuraError> {
         if !path.exists() {
-            return Err(AuraError::not_found(format!("Configuration file not found: {}", path.display())));
+            return Err(AuraError::not_found(format!(
+                "Configuration file not found: {}",
+                path.display()
+            )));
         }
-        
+
         self.file_path = Some(path.to_path_buf());
-        
+
         // Start file watcher thread
         self.start_file_watcher(path)?;
-        
+
         Ok(())
     }
-    
+
     /// Start background file watcher using polling
     fn start_file_watcher(&self, path: &Path) -> Result<(), AuraError> {
         use std::fs;
         use std::thread;
         use std::time::{Duration, SystemTime};
-        
+
         let path_clone = path.to_path_buf();
-        
+
         // Get initial modification time
         let initial_modified = fs::metadata(&path_clone)
             .and_then(|metadata| metadata.modified())
             .map_err(|e| AuraError::internal(format!("Failed to get file metadata: {}", e)))?;
-        
+
         // Store initial timestamp for comparison
-        static FILE_WATCHER_STATE: Mutex<Option<(std::path::PathBuf, SystemTime)>> = Mutex::new(None);
-        
-        *FILE_WATCHER_STATE.lock().unwrap() = Some((path_clone.clone(), initial_modified));
-        
+        static FILE_WATCHER_STATE: Mutex<Option<(std::path::PathBuf, SystemTime)>> =
+            Mutex::new(None);
+
+        *FILE_WATCHER_STATE
+            .lock()
+            .expect("FILE_WATCHER_STATE mutex poisoned") =
+            Some((path_clone.clone(), initial_modified));
+
         // Spawn watcher thread
         thread::spawn(move || {
             loop {
                 thread::sleep(Duration::from_secs(1)); // Poll every second
-                
+
                 if let Ok(metadata) = fs::metadata(&path_clone) {
                     if let Ok(modified) = metadata.modified() {
-                        let mut state = FILE_WATCHER_STATE.lock().unwrap();
+                        let mut state = FILE_WATCHER_STATE.lock().expect("mutex poisoned");
                         if let Some((_, last_modified)) = state.as_ref() {
                             if modified > *last_modified {
                                 // File was modified - update timestamp
                                 *state = Some((path_clone.clone(), modified));
-                                
+
                                 // Note: In a real implementation, this would trigger a callback
                                 // or send a notification to the main thread
-                                tracing::info!("Configuration file modified: {}", path_clone.display());
+                                tracing::info!(
+                                    "Configuration file modified: {}",
+                                    path_clone.display()
+                                );
                             }
                         }
                     }
                 }
             }
         });
-        
+
         Ok(())
     }
 
     /// Check for configuration changes and reload if necessary
-    pub fn check_for_changes(&mut self) -> Result<bool, AuraError> 
-    where 
+    pub fn check_for_changes(&mut self) -> Result<bool, AuraError>
+    where
         <T as AuraConfig>::Error: std::fmt::Display,
     {
         if let Some(path) = &self.file_path {
@@ -279,23 +295,20 @@ where
                     Ok(new_config) => {
                         // Validate new configuration before applying
                         new_config.validate()?;
-                        
+
                         let old_config = std::mem::replace(&mut self.current_config, new_config);
-                        
-                        tracing::info!(
-                            "Configuration reloaded from: {}", 
-                            path.display()
-                        );
-                        
+
+                        tracing::info!("Configuration reloaded from: {}", path.display());
+
                         // Notify about hot reload
                         self.notify_hot_reload(&old_config, &self.current_config);
-                        
+
                         Ok(true)
                     }
                     Err(e) => {
                         tracing::warn!(
-                            "Failed to reload configuration from {}: {}", 
-                            path.display(), 
+                            "Failed to reload configuration from {}: {}",
+                            path.display(),
                             e
                         );
                         Ok(false)
@@ -308,23 +321,25 @@ where
             Ok(false)
         }
     }
-    
+
     /// Check if the watched file was modified
     fn was_file_modified(&self, path: &Path) -> Result<bool, AuraError> {
         use std::fs;
         use std::time::SystemTime;
-        
-        static FILE_TIMESTAMPS: std::sync::LazyLock<Mutex<std::collections::HashMap<std::path::PathBuf, SystemTime>>> = 
-            std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
-        
+
+        static FILE_TIMESTAMPS: std::sync::LazyLock<
+            Mutex<std::collections::HashMap<std::path::PathBuf, SystemTime>>,
+        > = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
         let metadata = fs::metadata(path)
             .map_err(|e| AuraError::not_found(format!("Configuration file not found: {}", e)))?;
-            
-        let current_modified = metadata.modified()
+
+        let current_modified = metadata
+            .modified()
             .map_err(|e| AuraError::internal(format!("Failed to get modification time: {}", e)))?;
-        
-        let mut timestamps = FILE_TIMESTAMPS.lock().unwrap();
-        
+
+        let mut timestamps = FILE_TIMESTAMPS.lock().expect("mutex poisoned");
+
         match timestamps.get(path) {
             Some(last_modified) => {
                 let was_modified = current_modified > *last_modified;
@@ -340,7 +355,7 @@ where
             }
         }
     }
-    
+
     /// Notify about hot reload (hook for custom handling)
     fn notify_hot_reload(&self, _old_config: &T, _new_config: &T) {
         // In a real implementation, this could trigger callbacks,
@@ -366,10 +381,10 @@ static CONFIG_REGISTRY_INIT: Once = Once::new();
 #[allow(clippy::unwrap_used)] // Mutex lock failure is unrecoverable in this context
 pub fn register_config<T: AuraConfig + Send + Sync + 'static>(component_name: &str, config: T) {
     CONFIG_REGISTRY_INIT.call_once(|| {
-        *CONFIG_REGISTRY.lock().unwrap() = Some(std::collections::HashMap::new());
+        *CONFIG_REGISTRY.lock().expect("mutex poisoned") = Some(std::collections::HashMap::new());
     });
 
-    let mut registry = CONFIG_REGISTRY.lock().unwrap();
+    let mut registry = CONFIG_REGISTRY.lock().expect("mutex poisoned");
     if let Some(ref mut map) = *registry {
         map.insert(component_name.to_string(), Box::new(config));
     }
@@ -379,7 +394,7 @@ pub fn register_config<T: AuraConfig + Send + Sync + 'static>(component_name: &s
 /// Note: Returns owned config to avoid lifetime issues with locked mutex
 #[allow(clippy::unwrap_used)] // Mutex lock failure is unrecoverable in this context
 pub fn get_config<T: AuraConfig + Clone + 'static>(component_name: &str) -> Option<T> {
-    let registry = CONFIG_REGISTRY.lock().unwrap();
+    let registry = CONFIG_REGISTRY.lock().expect("mutex poisoned");
     registry
         .as_ref()?
         .get(component_name)

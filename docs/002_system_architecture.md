@@ -104,17 +104,65 @@ pub struct RetryMiddleware<H> { inner: H, max_attempts: u32 }
 ```
 Middleware implements effect traits by delegating to inner handlers with additional behavior like retry logic or metrics.
 
-### 1.3 Core Effect Types
+### 1.3 Layered Effect Architecture
 
-The effect system organizes capabilities into categories:
+The effect system is organized into 8 clean architectural layers with zero circular dependencies:
 
-Core Effects provide fundamental operations. These include network communication, cryptographic primitives, persistent storage, time management, and console output.
+**1. Interface Layer (`aura-core`)**:
+- Effect trait definitions only: `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `JournalEffects`, `ConsoleEffects`, `RandomEffects`
+- Domain types: `DeviceId`, `AccountId`, `FlowBudget`, etc.
+- Single source of truth for all effect interfaces
+- Dependencies: Only `serde`, `uuid`, `thiserror`, `chrono` - no other Aura crates
 
-Agent Effects handle device-specific concerns. These include secure storage, biometric authentication, and session management.
+**2. Specification Layer (Domain Crates + `aura-mpst`)**:
+- Domain-specific types and semantics (`aura-crypto`, `aura-journal`, `aura-wot`, `aura-store`)
+- MPST choreography specifications and session type extensions (`aura-mpst`)
+- Domain logic and CRDT implementations (no effect handlers)
 
-Simulation Effects enable controlled testing. These include fault injection, time manipulation, and property verification.
+**3. Implementation Layer (`aura-effects`)** - The Standard Library:
+- Context-free, stateless effect handlers that work in ANY execution context
+- Mock handlers: `MockCryptoHandler`, `MockNetworkHandler`, `MemoryStorageHandler`
+- Real handlers: `RealCryptoHandler`, `TcpNetworkHandler`, `FilesystemStorageHandler`
+- Testing and production variants for each effect type
+- Dependencies: `aura-core` + external libraries (tokio, blake3, etc.)
+- What belongs here: Stateless, single-party, context-free operations
+- What does NOT belong: Coordination, multi-handler composition, choreographic bridging
 
-Privacy Effects enforce leakage budgets and flow control. These maintain confidentiality guarantees across protocol executions.
+**4. Orchestration Layer (`aura-protocol`)**:
+- Multi-party coordination primitives: `AuraHandlerAdapter`, `CompositeHandler`, `CrdtCoordinator`
+- Stateful coordination: guard chains, middleware stacks, choreographic bridges
+- Protocol-specific effect traits: `TreeEffects`, `LedgerEffects`, `ChoreographicEffects`, `SystemEffects`
+- Reusable distributed protocols: anti-entropy, snapshot, threshold ceremony
+- Enhanced handlers with coordination features: `EnhancedTimeHandler`, `GuardedJournalHandler`
+
+**5. Feature/Protocol Layer (`aura-frost`, `aura-invitation`, `aura-recovery`)**:
+- Complete end-to-end protocol implementations
+- Feature-specific choreographies and business logic
+- Not basic handlers, not complete applications - reusable protocol building blocks
+
+**6. Runtime Composition Layer (`aura-agent`, `aura-simulator`)**:
+- Assembles effect handlers and protocols into working agent runtimes
+- **Important**: These are LIBRARIES, not binaries - they provide runtime APIs
+- `aura-agent`: Production runtime composition
+- `aura-simulator`: Deterministic testing runtime with controlled effects
+
+**7. User Interface Layer (`aura-cli`, `app-console`, `app-wasm`)**:
+- Binaries with `main()` entry points - what users actually run
+- Drive the agent runtime from UI layer
+- `aura-cli`: Terminal interface
+- `app-console`: Web UI (planned)
+- `app-wasm`: WebAssembly bindings for browser (planned)
+
+**8. Testing/Tools Layer (`aura-testkit`, `aura-quint-api`)**:
+- Cross-cutting test utilities and shared fixtures
+- Formal verification integration
+
+**Architectural Benefits**:
+- Zero circular dependencies - clean unidirectional flow
+- Standard library (`aura-effects`) for effect implementations
+- Clear distinction: basic implementations vs coordination vs applications
+- Easy testing with comprehensive mock handlers
+- Obvious where new code belongs using the decision matrix (see Work Plan 013)
 
 ### 1.4 Session Type Algebra Integration
 
@@ -214,7 +262,7 @@ graph TD
     B -->|YES| D{"FlowGuard:<br/>headroom(ctx, cost)?"}
     D -->|NO| E["return authorized: false<br/>Observable: Local block<br/>no packet, no charge"]
     D -->|YES| F["charge budget, issue receipt<br/>return authorized: true<br/>Observable: Charge recorded<br/>packet may proceed"]
-    
+
     C -.-> G["CapGuard FAILED"]
     E -.-> H["FlowGuard FAILED"]
     F -.-> I["Guard Chain PASSED"]
@@ -398,7 +446,7 @@ The CRDT architecture spans four layers:
 
 **Foundation Layer** (`aura-core/src/semilattice/`) provides core traits (`JoinSemilattice`, `MeetSemiLattice`, `CvState`, `MvState`) and message types (`StateMsg<S>`, `MeetStateMsg<S>`, `OpWithCtx<Op,Ctx>`). Property-based tests validate algebraic laws.
 
-**Effect Interpreter Layer** (`aura-protocol/src/effects/semilattice/`) implements handlers for each CRDT type: `CvHandler<S: CvState>` for join-based state CRDTs, `MvHandler<S: MvState>` for meet-based constraint CRDTs, `DeltaHandler<S,D>` for delta-based updates, and `CmHandler<S,Op>` for operation-based approaches. Delivery effects (`CausalBroadcast`, `AtLeastOnce`) manage message ordering and reliability.
+**Effect Interpreter Layer** (`aura-protocol/src/effects/semilattice/`) implements coordination handlers for CRDT types: `CrdtCoordinator` orchestrates multiple CRDT handler types. The basic CRDT handlers themselves are provided by `aura-effects`. Delivery effects (`CausalBroadcast`, `AtLeastOnce`) manage message ordering and reliability in the orchestration layer.
 
 **Choreographic Protocol Layer** (`aura-protocol/src/choreography/`) defines anti-entropy, snapshot, threshold, and tree coordination protocols. The runtime module provides `AuraHandlerAdapter` for testing, production, and simulation scaffolding.
 
@@ -454,7 +502,22 @@ The OperationId type provides stable identifiers for tracking dependencies. Each
 
 The CRDT coordinator in aura-protocol/src/effects/semilattice/crdt_coordinator.rs provides unified choreographic access to all four CRDT handler types. This coordinator enables distributed protocols to synchronize state across CvRDT (state-based), CmRDT (operation-based), Delta-CRDT (delta-based), and MvRDT (meet-based) semantics through a single interface.
 
-The coordinator maintains optional handlers for each CRDT type using a builder pattern. Applications register only the handler types they need through with_cv_handler, with_cm_handler, with_delta_handler, and with_mv_handler methods. This selective registration avoids instantiating unused handler types while providing type-safe access to registered handlers. The coordinator tracks a device identifier and vector clock for causal ordering across all handler types.
+The coordinator uses an ergonomic builder pattern for setup. Applications can use convenience methods for common cases or chain multiple handlers for complex scenarios:
+
+```rust
+// Simple case: Convergent CRDT with initial state
+let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_state);
+
+// Delta CRDT with compaction threshold
+let coordinator = CrdtCoordinator::with_delta_threshold(device_id, 100);
+
+// Multiple handlers chained together
+let coordinator = CrdtCoordinator::new(device_id)
+    .with_cv_handler(CvHandler::new())
+    .with_delta_handler(DeltaHandler::with_threshold(50));
+```
+
+This selective registration avoids instantiating unused handler types while providing type-safe access to registered handlers. The coordinator tracks a device identifier and vector clock for causal ordering across all handler types.
 
 Handler selection routes synchronization requests to the appropriate CRDT handler based on type tags. When a sync request arrives, the coordinator examines the CrdtType enum to determine whether the request targets convergent, commutative, delta, or meet handlers. The coordinator then delegates to the appropriate handler's merge or apply methods while maintaining causal consistency through vector clock updates. This routing logic centralizes CRDT type dispatch while preserving the distinct semantics of each handler type.
 
@@ -592,7 +655,7 @@ graph TD
     C --> D["<b>Infrastructure</b><br/>Exists"]
     C -->|implementation| E["<b>Protocols</b><br/>async fn execute_dkd_alice<br/>Manual async protocol impls"]
     E --> F["<b>Working Code</b><br/>Current"]
-    
+
     style A fill:#e1f5ff
     style C fill:#fff3e0
     style E fill:#f3e5f5
@@ -675,7 +738,7 @@ graph LR
     C --> D["Authorization"]
     D --> E["Capability<br/>Evaluation"]
     E --> F["Permission Grant<br/>(Allow/Deny Operation)"]
-    
+
     style A fill:#ffebee
     style C fill:#e8f5e9
     style E fill:#fff3e0
@@ -706,7 +769,7 @@ pub trait AuthenticationEffects: Send + Sync {
 }
 ```
 
-**Protocol-Level Effects** ([`crates/aura-protocol/src/effects/agent.rs`](../crates/aura-protocol/src/effects/agent.rs)):
+**Protocol-Level Effects** (coordination layer in `aura-protocol`):
 ```rust
 #[async_trait]
 pub trait AgentEffects: Send + Sync {
@@ -790,27 +853,29 @@ The workspace uses layered dependencies from foundation types through domain log
 
 ### 7.2 Architectural Layers
 
-**Foundation Types** provide core identifiers, time types, and error handling without domain-specific logic.
+**Interface Layer (`aura-core`)** provides core identifiers, effect trait definitions, and error handling - zero implementations.
 
-**Core Effect System** defines effect traits, system-level handlers, middleware, and infrastructure for the unified effect system.
+**Implementation Layer (`aura-effects`)** provides standard effect handler implementations that work in any execution context - stateless, single-party operations.
 
-**Protocol Coordination** implements session type adapters and choreographic protocol definitions consuming effects via dependency injection.
+**Specification Layer (Domain Crates)** contains domain-specific types and algorithms while implementing `aura-core` traits for their types.
 
-**Domain Business Logic** contains domain-specific types and algorithms while consuming effects through dependency injection.
+**Orchestration Layer (`aura-protocol`)** implements multi-party coordination primitives, guard chains, and stateful choreographic bridges.
 
-**Runtime Composition** provides agent-specific effect traits, handlers, and runtime composition combining core effects into executable workflows.
+**Runtime Composition Layer (`aura-agent`, `aura-simulator`)** assembles handlers and protocols into complete working systems - libraries that applications use.
 
-**Higher-Order Runtime** implements simulation-specific effects and controlled behaviors for testing with deterministic infrastructure.
+**User Interface Layer (`aura-cli`)** provides applications with main entry points that drive the runtime composition layer.
 
 ### 7.3 Crate Boundary Rules
 
-**Foundation Types** contain core identifiers, time types, and error handling while excluding effect traits and domain logic.
+**Interface Layer (`aura-core`)** contains only trait definitions and foundational types - zero implementations.
 
-**Effect System** provides core effect traits, handlers, middleware, and infrastructure while excluding domain-specific operations.
+**Implementation Layer (`aura-effects`)** contains only context-free, stateless effect implementations - zero coordination logic.
 
-**Runtime Composition** implements agent-specific effects and runtime composition while avoiding core effect definitions.
+**Orchestration Layer (`aura-protocol`)** contains only multi-party coordination and stateful composition - zero basic effect implementations.
 
-**Domain Logic** contains domain-specific types and algorithms consuming effects through dependency injection while avoiding effect definitions.
+**Runtime Composition** assembles components into working systems - libraries with APIs, not main entry points.
+
+**User Interface** provides main entry points and drives runtime libraries - applications that users actually run.
 
 ### 7.4 Anti-Patterns to Avoid
 
@@ -822,11 +887,15 @@ The workspace uses layered dependencies from foundation types through domain log
 
 ### 7.5 Crate Roles in Effect System Architecture
 
-**Core Infrastructure** defines system capabilities and implements universal middleware for foundational operations.
+**Interface Definition (`aura-core`)** defines what operations exist through trait definitions - the vocabulary of capabilities.
 
-**Runtime Composition** provides device-level capabilities and implements workflows by composing core effects into executable runtimes.
+**Standard Implementation (`aura-effects`)** provides how to do individual operations through context-free handlers - the standard library of implementations.
 
-**Simulation Orchestration** defines simulation capabilities and implements controlled behaviors for testing with deterministic infrastructure.
+**Orchestration (`aura-protocol`)** provides how to coordinate operations across parties or handlers through stateful composition - the coordination primitives.
+
+**Runtime Composition (`aura-agent`)** provides how to assemble components into working systems - the runtime libraries that applications use.
+
+**Applications (`aura-cli`)** provide what users actually run - the main entry points that instantiate and drive runtime systems.
 
 ---
 
@@ -842,7 +911,22 @@ Production handlers implement real system operations and may bypass linting rest
 
 ### 8.3 Usage Patterns
 
-CRDT integration combines foundation types with effect handlers to provide composable semilattices with type safety and automatic conflict resolution.
+**Correct Import Patterns**:
+```rust
+// Import effect traits from aura-core
+use aura_core::effects::CryptoEffects;
+
+// Import implementations from aura-effects
+use aura_effects::crypto::RealCryptoHandler;
+
+// Import coordination primitives from aura-protocol
+use aura_protocol::handlers::CompositeHandler;
+
+// Runtime composition from aura-agent
+use aura_agent::AuraAgent;
+```
+
+**CRDT Integration** combines foundation types with effect handlers to provide composable semilattices with type safety and automatic conflict resolution.
 
 ## See Also
 

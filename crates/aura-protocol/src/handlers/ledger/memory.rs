@@ -2,8 +2,7 @@
 
 use crate::effects::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEventStream};
 use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use rand::RngCore;
 
 /// Memory-based ledger handler for testing
 pub struct MemoryLedgerHandler {
@@ -65,5 +64,62 @@ impl LedgerEffects for MemoryLedgerHandler {
 
     async fn subscribe_to_events(&self) -> Result<LedgerEventStream, LedgerError> {
         Err(LedgerError::NotAvailable)
+    }
+
+    async fn would_create_cycle(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+        _new_edge: (Vec<u8>, Vec<u8>),
+    ) -> Result<bool, LedgerError> {
+        Ok(false) // Memory implementation assumes no cycles
+    }
+
+    async fn find_connected_components(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Vec<Vec<Vec<u8>>>, LedgerError> {
+        Ok(vec![]) // Memory implementation returns empty components
+    }
+
+    async fn topological_sort(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Vec<Vec<u8>>, LedgerError> {
+        Ok(vec![]) // Memory implementation returns empty sort
+    }
+
+    async fn shortest_path(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+        _start: Vec<u8>,
+        _end: Vec<u8>,
+    ) -> Result<Option<Vec<Vec<u8>>>, LedgerError> {
+        Ok(None) // Memory implementation returns no path
+    }
+
+    async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, LedgerError> {
+        let mut secret = vec![0u8; length];
+        rand::thread_rng().fill_bytes(&mut secret);
+        Ok(secret)
+    }
+
+    async fn hash_blake3(&self, data: &[u8]) -> Result<[u8; 32], LedgerError> {
+        Ok(blake3::hash(data).into())
+    }
+
+    async fn current_timestamp(&self) -> Result<u64, LedgerError> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| LedgerError::Corrupted { reason: "Failed to get current time".to_string() })?;
+        Ok(duration.as_secs())
+    }
+
+    async fn ledger_device_id(&self) -> Result<aura_core::DeviceId, LedgerError> {
+        Ok(aura_core::DeviceId::new()) // Memory implementation returns a new device ID
+    }
+
+    async fn new_uuid(&self) -> Result<uuid::Uuid, LedgerError> {
+        Ok(uuid::Uuid::new_v4())
     }
 }

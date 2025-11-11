@@ -498,18 +498,21 @@ mod tests {
         LeafNode::new_device(LeafId(id), aura_core::DeviceId::new(), vec![id as u8; 32])
     }
 
-    fn create_test_operation(leaf_id: u32, parent_epoch: u64) -> AttestedOp {
-        AttestedOp {
-            op: TreeOp {
-                parent_epoch,
-                parent_commitment: [0u8; 32],
-                op: TreeOpKind::AddLeaf {
-                    leaf: create_test_leaf(leaf_id),
-                    under: NodeIndex(0),
-                },
-                version: 1,
+    async fn create_test_operation(leaf_id: u32, parent_epoch: u64) -> AttestedOp {
+        let tree_op = TreeOp {
+            parent_epoch,
+            parent_commitment: [0u8; 32],
+            op: TreeOpKind::AddLeaf {
+                leaf: create_test_leaf(leaf_id),
+                under: NodeIndex(0),
             },
-            agg_sig: vec![],
+            version: 1,
+        };
+        
+        // Create test attested op with dummy signature
+        AttestedOp {
+            op: tree_op,
+            agg_sig: vec![1u8; 64], // Test signature
             signer_count: 1,
         }
     }
@@ -521,10 +524,10 @@ mod tests {
         assert_eq!(processor.operation_history().len(), 0);
     }
 
-    #[test]
-    fn test_process_single_operation() {
+    #[tokio::test]
+    async fn test_process_single_operation() {
         let mut processor = TreeOperationProcessor::new();
-        let op = create_test_operation(1, 0);
+        let op = create_test_operation(1, 0).await;
 
         let result = processor.process_operation(&op);
         assert!(result.is_ok());
@@ -535,10 +538,10 @@ mod tests {
         assert_eq!(processor.current_state().num_leaves(), 1);
     }
 
-    #[test]
-    fn test_duplicate_operation_rejection() {
+    #[tokio::test]
+    async fn test_duplicate_operation_rejection() {
         let mut processor = TreeOperationProcessor::new();
-        let op = create_test_operation(1, 0);
+        let op = create_test_operation(1, 0).await;
 
         // Process first time - should succeed
         let result1 = processor.process_operation(&op);
@@ -553,14 +556,14 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_batch_processing() {
+    #[tokio::test]
+    async fn test_batch_processing() {
         let mut batch_processor = BatchProcessor::new(2, true);
 
         let ops = vec![
-            create_test_operation(1, 0),
-            create_test_operation(2, 0),
-            create_test_operation(3, 0),
+            create_test_operation(1, 0).await,
+            create_test_operation(2, 0).await,
+            create_test_operation(3, 0).await,
         ];
 
         let results = batch_processor.process_batched(&ops);
@@ -571,14 +574,14 @@ mod tests {
         assert!(processed.iter().all(|p| p.success));
     }
 
-    #[test]
-    fn test_sync_from_oplog() {
+    #[tokio::test]
+    async fn test_sync_from_oplog() {
         let mut processor = TreeOperationProcessor::new();
 
         let ops = vec![
-            create_test_operation(1, 0),
-            create_test_operation(2, 0),
-            create_test_operation(3, 0),
+            create_test_operation(1, 0).await,
+            create_test_operation(2, 0).await,
+            create_test_operation(3, 0).await,
         ];
 
         let result = processor.sync_from_oplog(&ops);
@@ -586,10 +589,10 @@ mod tests {
         assert_eq!(processor.current_state().num_leaves(), 1);
     }
 
-    #[test]
-    fn test_query_interface() {
+    #[tokio::test]
+    async fn test_query_interface() {
         let mut processor = TreeOperationProcessor::new();
-        let op = create_test_operation(1, 0);
+        let op = create_test_operation(1, 0).await;
 
         processor.process_operation(&op).unwrap();
 
@@ -601,12 +604,12 @@ mod tests {
         assert_eq!(device_leaves.len(), 1);
     }
 
-    #[test]
-    fn test_processing_stats() {
+    #[tokio::test]
+    async fn test_processing_stats() {
         let mut processor = TreeOperationProcessor::new();
 
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(2, 0);
+        let op1 = create_test_operation(1, 0).await;
+        let op2 = create_test_operation(2, 0).await;
 
         processor.process_operation(&op1).unwrap();
         processor.process_operation(&op2).unwrap();

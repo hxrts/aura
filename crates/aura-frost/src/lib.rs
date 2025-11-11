@@ -45,10 +45,10 @@ pub use aura_crypto::frost::{
     ThresholdSignature, TreeSigningContext,
 };
 
-// Re-export protocol types  
-pub use aura_protocol::effects::{NetworkEffects, CryptoEffects, TimeEffects, ConsoleEffects};
+// Re-export core effect types  
+pub use aura_core::effects::{NetworkEffects, CryptoEffects, TimeEffects, ConsoleEffects};
 
-// Re-export FROST coordinators
+// Re-export FROST coordinators and choreographies
 pub use distributed_keygen::DkgCoordinator;
 pub use key_resharing::KeyResharingCoordinator;
 pub use signature_aggregation::SignatureAggregationCoordinator;

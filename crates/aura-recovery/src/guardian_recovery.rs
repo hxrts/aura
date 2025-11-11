@@ -7,7 +7,7 @@ use crate::{
 };
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
-use aura_protocol::effects::AuraEffectSystem;
+use aura_protocol::effects::{AuraEffectSystem, TimeEffects, ConsoleEffects};
 use aura_verify::session::SessionTicket;
 use aura_wot::{CapabilitySet, TreePolicy};
 use serde::{Deserialize, Serialize};
@@ -52,7 +52,7 @@ pub struct GuardianRecoveryRequest {
 }
 
 /// Recovery priority levels influence timeout/cooldown handling.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RecoveryPriority {
     /// Normal recovery (standard cooldown)
     Normal,
@@ -213,7 +213,8 @@ impl RecoveryPolicyEnforcer {
         let mut validation = PolicyValidationResult::new();
 
         // Check threshold requirements
-        if let Some(&required_threshold) = self.config.threshold_requirements.get(&request.priority) {
+        if let Some(&required_threshold) = self.config.threshold_requirements.get(&request.priority)
+        {
             if request.required_threshold < required_threshold {
                 validation.add_violation(PolicyViolation::InsufficientThreshold {
                     required: required_threshold,
@@ -224,13 +225,15 @@ impl RecoveryPolicyEnforcer {
         }
 
         // Check recovery attempt limits
-        let current_epoch = self.effect_system.current_timestamp().await / 3600; // Hour-based epochs
-        let attempt_count = self.get_recovery_attempts(
-            &request.requesting_device, 
-            &request.account_id, 
-            current_epoch
-        ).await?;
-        
+        let current_epoch = self.effect_system.current_timestamp_millis().await / (3600 * 1000); // Hour-based epochs
+        let attempt_count = self
+            .get_recovery_attempts(
+                &request.requesting_device,
+                &request.account_id,
+                current_epoch,
+            )
+            .await?;
+
         if attempt_count >= self.config.max_recovery_attempts {
             validation.add_violation(PolicyViolation::TooManyAttempts {
                 limit: self.config.max_recovery_attempts,
@@ -240,12 +243,16 @@ impl RecoveryPolicyEnforcer {
         }
 
         // Check guardian trust policy compliance
-        let trust_violations = self.validate_guardian_trust(&request.available_guardians).await?;
+        let trust_violations = self
+            .validate_guardian_trust(&request.available_guardians)
+            .await?;
         validation.extend_violations(trust_violations);
 
         // Check capabilities for initiation
-        let device_capabilities = self.get_device_capabilities(&request.requesting_device).await?;
-        if !device_capabilities.contains_all(&self.config.initiation_capabilities) {
+        let device_capabilities = self
+            .get_device_capabilities(&request.requesting_device)
+            .await?;
+        if !self.config.initiation_capabilities.is_subset_of(&device_capabilities) {
             validation.add_violation(PolicyViolation::MissingCapabilities {
                 required: self.config.initiation_capabilities.clone(),
                 available: device_capabilities,
@@ -266,17 +273,17 @@ impl RecoveryPolicyEnforcer {
 
         // Check guardian capabilities
         let guardian_capabilities = self.get_device_capabilities(guardian_id).await?;
-        if !guardian_capabilities.contains_all(&self.config.approval_capabilities) {
+        if !self.config.approval_capabilities.is_subset_of(&guardian_capabilities) {
             validation.add_violation(PolicyViolation::MissingCapabilities {
                 required: self.config.approval_capabilities.clone(),
-                available: guardian_capabilities,
+                available: guardian_capabilities.clone(),
                 operation: "guardian_approval".to_string(),
             });
         }
 
         // Check emergency override if applicable
         if matches!(request.priority, RecoveryPriority::Emergency) {
-            if !guardian_capabilities.contains_all(&self.config.emergency_override_capabilities) {
+            if !self.config.emergency_override_capabilities.is_subset_of(&guardian_capabilities) {
                 validation.add_violation(PolicyViolation::EmergencyOverrideRequired {
                     guardian: *guardian_id,
                     required_capabilities: self.config.emergency_override_capabilities.clone(),
@@ -285,7 +292,9 @@ impl RecoveryPolicyEnforcer {
         }
 
         // Check cooldown multipliers
-        let cooldown_multiplier = self.config.cooldown_multipliers
+        let cooldown_multiplier = self
+            .config
+            .cooldown_multipliers
             .get(&request.priority)
             .copied()
             .unwrap_or(1.0);
@@ -307,7 +316,9 @@ impl RecoveryPolicyEnforcer {
         base_cooldown: u64,
         priority: &RecoveryPriority,
     ) -> u64 {
-        let multiplier = self.config.cooldown_multipliers
+        let multiplier = self
+            .config
+            .cooldown_multipliers
             .get(priority)
             .copied()
             .unwrap_or(1.0);
@@ -341,7 +352,7 @@ impl RecoveryPolicyEnforcer {
         guardian_set: &GuardianSet,
     ) -> RecoveryResult<Vec<PolicyViolation>> {
         let mut violations = Vec::new();
-        
+
         // Check minimum trust level for each guardian
         for guardian in guardian_set.iter() {
             let trust_score = self.get_guardian_trust_score(&guardian.device_id).await?;
@@ -450,8 +461,8 @@ impl GuardianRecoveryCoordinator {
     pub fn new(effect_system: AuraEffectSystem) -> Self {
         let policy_config = RecoveryPolicyConfig::default();
         let policy_enforcer = RecoveryPolicyEnforcer::new(policy_config, effect_system.clone());
-        
-        Self { 
+
+        Self {
             effect_system,
             policy_enforcer,
         }
@@ -463,7 +474,7 @@ impl GuardianRecoveryCoordinator {
         policy_config: RecoveryPolicyConfig,
     ) -> Self {
         let policy_enforcer = RecoveryPolicyEnforcer::new(policy_config, effect_system.clone());
-        
+
         Self {
             effect_system,
             policy_enforcer,
@@ -482,20 +493,20 @@ impl GuardianRecoveryCoordinator {
         }
 
         // Enforce recovery policy before proceeding
-        let validation = self.policy_enforcer.validate_recovery_request(&request).await?;
+        let validation = self
+            .policy_enforcer
+            .validate_recovery_request(&request)
+            .await?;
         if !validation.is_valid {
-            self.effect_system.log_error(
-                &format!("Recovery policy validation failed: {} violations", validation.violations.len()),
-                &[],
+            tracing::error!(
+                "Recovery policy validation failed: {} violations",
+                validation.violations.len()
             );
-            
+
             for violation in &validation.violations {
-                self.effect_system.log_error(
-                    &format!("Policy violation: {:?}", violation),
-                    &[],
-                );
+                tracing::error!("Policy violation: {:?}", violation);
             }
-            
+
             return Err(RecoveryError::permission_denied(format!(
                 "Recovery request rejected due to policy violations: {}",
                 validation.violations.len()
@@ -504,10 +515,7 @@ impl GuardianRecoveryCoordinator {
 
         // Log policy warnings
         for warning in &validation.warnings {
-            self.effect_system.log_warn(
-                &format!("Policy warning: {:?}", warning),
-                &[],
-            );
+            tracing::warn!("Policy warning: {:?}", warning);
         }
 
         let mut choreography = RecoveryChoreography::new(
@@ -519,7 +527,8 @@ impl GuardianRecoveryCoordinator {
 
         // Execute recovery with policy-aware cooldown calculation
         let mut policy_aware_request = request.clone();
-        self.apply_policy_adjustments(&mut policy_aware_request).await?;
+        self.apply_policy_adjustments(&mut policy_aware_request)
+            .await?;
 
         choreography
             .execute_recovery(policy_aware_request.clone())
@@ -528,12 +537,16 @@ impl GuardianRecoveryCoordinator {
     }
 
     /// Apply policy-based adjustments to recovery request
-    async fn apply_policy_adjustments(&self, request: &mut GuardianRecoveryRequest) -> RecoveryResult<()> {
+    async fn apply_policy_adjustments(
+        &self,
+        request: &mut GuardianRecoveryRequest,
+    ) -> RecoveryResult<()> {
         // Adjust dispute window based on priority
         match request.priority {
             RecoveryPriority::Emergency => {
                 // Emergency recoveries get shorter dispute window
-                request.dispute_window_secs = request.dispute_window_secs.min(24 * 60 * 60); // Max 24 hours
+                request.dispute_window_secs = request.dispute_window_secs.min(24 * 60 * 60);
+                // Max 24 hours
             }
             RecoveryPriority::Urgent => {
                 // Urgent recoveries get standard window
@@ -541,17 +554,17 @@ impl GuardianRecoveryCoordinator {
             }
             RecoveryPriority::Normal => {
                 // Normal recoveries get extended window for additional review
-                request.dispute_window_secs = request.dispute_window_secs.max(48 * 60 * 60); // Min 48 hours
+                request.dispute_window_secs = request.dispute_window_secs.max(48 * 60 * 60);
+                // Min 48 hours
             }
         }
 
-        self.effect_system.log_info(
+        let _ = self.effect_system.log_info(
             &format!(
                 "Applied policy adjustments: dispute_window={}s for {:?} priority",
                 request.dispute_window_secs, request.priority
             ),
-            &[],
-        );
+        ).await;
 
         Ok(())
     }
@@ -562,7 +575,9 @@ impl GuardianRecoveryCoordinator {
         guardian_id: &DeviceId,
         request: &GuardianRecoveryRequest,
     ) -> RecoveryResult<PolicyValidationResult> {
-        self.policy_enforcer.validate_guardian_approval(guardian_id, request).await
+        self.policy_enforcer
+            .validate_guardian_approval(guardian_id, request)
+            .await
     }
 
     /// Get policy configuration

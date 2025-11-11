@@ -1,5 +1,7 @@
 # Protocol Development Guide
 
+> **Important Note**: This guide shows the **intended** choreographic programming approach for Aura. Currently, most protocols are implemented manually using the effect system while choreographic DSL integration is in development. For the actual rumpsteak-aura DSL syntax, see [Choreography Programming Guide](805_choreography_programming_guide.md).
+
 Aura's choreographic programming enables writing distributed protocols from a global perspective. The choreography compiler generates local implementations for each participant with session type safety guarantees.
 
 This guide covers choreographic programming patterns, protocol composition techniques, error handling strategies, and testing approaches for distributed systems. You will learn to build reliable coordination protocols.
@@ -13,26 +15,25 @@ See [Getting Started Guide](800_getting_started_guide.md) for basic concepts. Fo
 **Global Perspective** describes protocols from the viewpoint of an omniscient observer. For complete choreography system documentation including DSL syntax, projection rules, and execution patterns, see [Choreography System Reference](302_choreography_system.md).
 
 ```rust
-use rumpsteak_choreography::choreography;
+// Note: This shows the ideal choreographic syntax for documentation purposes.
+// Current implementation requires manual protocol implementations using the effect system.
+// See docs/805_choreography_programming_guide.md for actual rumpsteak-aura DSL syntax.
 
-choreography! {
-    protocol TwoPhaseCommit {
-        roles: Coordinator, Participant;
-        
-        // Phase 1: Prepare
-        Coordinator -> Participant: PrepareRequest(transaction_id: u64);
-        Participant -> Coordinator: PrepareResponse(vote: Vote);
-        
-        // Phase 2: Commit or Abort
-        match vote {
-            Vote::Commit => {
-                Coordinator -> Participant: CommitRequest(transaction_id: u64);
-                Participant -> Coordinator: CommitAck;
-            }
-            Vote::Abort => {
-                Coordinator -> Participant: AbortRequest(transaction_id: u64);
-                Participant -> Coordinator: AbortAck;
-            }
+// Actual rumpsteak-aura syntax (when using DSL):
+choreography TwoPhaseCommit {
+    roles: Coordinator, Participant
+
+    Coordinator -> Participant: PrepareRequest
+    Participant -> Coordinator: PrepareResponse
+
+    choice Participant {
+        commit: {
+            Coordinator -> Participant: CommitRequest
+            Participant -> Coordinator: CommitAck
+        }
+        abort: {
+            Coordinator -> Participant: AbortRequest
+            Participant -> Coordinator: AbortAck
         }
     }
 }
@@ -53,23 +54,23 @@ pub async fn coordinator_role(
     // Send prepare request
     let prepare_msg = PrepareRequest { transaction_id };
     effects.send_message(participant_id, prepare_msg).await?;
-    
+
     // Receive prepare response
     let response: PrepareResponse = effects.receive_message().await?;
-    
+
     // Act on vote
     match response.vote {
         Vote::Commit => {
             let commit_msg = CommitRequest { transaction_id };
             effects.send_message(participant_id, commit_msg).await?;
-            
+
             let _ack: CommitAck = effects.receive_message().await?;
             Ok(CommitResult::Committed)
         }
         Vote::Abort => {
             let abort_msg = AbortRequest { transaction_id };
             effects.send_message(participant_id, abort_msg).await?;
-            
+
             let _ack: AbortAck = effects.receive_message().await?;
             Ok(CommitResult::Aborted)
         }
@@ -88,7 +89,7 @@ type CoordinatorSession = Send<PrepareRequest, Receive<PrepareResponse, Choice<
     Send<AbortRequest, Receive<AbortAck, End>>
 >>>;
 
-// Session type for participant role  
+// Session type for participant role
 type ParticipantSession = Receive<PrepareRequest, Send<PrepareResponse, Offer<
     Receive<CommitRequest, Send<CommitAck, End>>,
     Receive<AbortRequest, Send<AbortAck, End>>
@@ -97,24 +98,70 @@ type ParticipantSession = Receive<PrepareRequest, Send<PrepareResponse, Offer<
 
 Session types encode the communication protocol in the type system. Incorrect message ordering or missing messages result in compile-time errors.
 
+**CRDT Integration with Builder Pattern** enables choreographies to synchronize distributed state using ergonomic setup methods:
+
+```rust
+use aura_protocol::effects::semilattice::CrdtCoordinator;
+use aura_protocol::choreography::protocols::anti_entropy::execute_anti_entropy;
+
+// Create coordinator using builder pattern
+let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_state);
+
+// Execute choreography with CRDT synchronization
+let (result, updated_coordinator) = execute_anti_entropy(
+    device_id,
+    config,
+    is_requester,
+    &effect_system,
+    coordinator,
+).await?;
+
+// Extract synchronized state
+let synced_state = updated_coordinator.cv_handler().get_state();
+```
+
+The builder pattern provides three ergonomic approaches for CRDT handler setup:
+
+```rust
+// Approach 1: Convenience methods for common cases
+let cv_coordinator = CrdtCoordinator::with_cv(device_id);
+let delta_coordinator = CrdtCoordinator::with_delta_threshold(device_id, 100);
+let mv_coordinator = CrdtCoordinator::with_mv_state(device_id, constraints);
+
+// Approach 2: Explicit state initialization
+let coordinator = CrdtCoordinator::with_cv_state(device_id, initial_journal);
+
+// Approach 3: Multiple handlers chained together
+let coordinator = CrdtCoordinator::new(device_id)
+    .with_cv_handler(CvHandler::new())
+    .with_delta_handler(DeltaHandler::with_threshold(50))
+    .with_mv_handler(MvHandler::with_state(caps));
+```
+
+For complete CRDT programming patterns and semilattice implementation details, see [CRDT Programming Guide](802_crdt_programming_guide.md).
+
 ## Protocol Composition
 
 **Sequential Composition** chains protocols to create complex multi-phase interactions. Sequential composition enables building sophisticated workflows from simpler protocol components.
 
 ```rust
-choreography! {
-    protocol SecureDataTransfer {
-        roles: Alice, Bob;
-        
-        // Phase 1: Authentication
-        compose Authentication(Alice, Bob);
-        
-        // Phase 2: Key exchange  
-        compose KeyExchange(Alice, Bob);
-        
-        // Phase 3: Data transfer
-        compose DataTransfer(Alice, Bob);
-    }
+// Note: Protocol composition is achieved through manual implementation coordination
+// in the current Aura system, not through DSL syntax.
+
+choreography SecureDataTransfer {
+    roles: Alice, Bob
+
+    // Phase 1: Authentication messages
+    Alice -> Bob: AuthRequest
+    Bob -> Alice: AuthResponse
+
+    // Phase 2: Key exchange messages
+    Alice -> Bob: KeyRequest
+    Bob -> Alice: KeyResponse
+
+    // Phase 3: Data transfer messages
+    Alice -> Bob: DataMessage
+    Bob -> Alice: DataAck
 }
 ```
 
@@ -123,26 +170,26 @@ Sequential composition executes protocols in order with shared context. Later pr
 **Parallel Composition** executes multiple protocols concurrently with synchronization points. Parallel composition enables efficient resource utilization and reduces latency.
 
 ```rust
-choreography! {
-    protocol DistributedConsensus {
-        roles: Node1, Node2, Node3;
-        
-        // Parallel proposal phase
-        parallel {
-            Node1 -> Node2: Proposal(value1);
-            Node1 -> Node3: Proposal(value1);
-            Node2 -> Node1: Proposal(value2);
-            Node2 -> Node3: Proposal(value2);
-            Node3 -> Node1: Proposal(value3);
-            Node3 -> Node2: Proposal(value3);
+// Note: Parallel execution is handled in the implementation, not the DSL.
+// The DSL describes message ordering; parallelism is an implementation detail.
+
+choreography DistributedConsensus {
+    roles: Node1, Node2, Node3
+
+    // Proposal phase (implementation can parallelize these)
+    Node1 -> Node2: Proposal
+    Node1 -> Node3: Proposal
+    Node2 -> Node1: Proposal
+    Node2 -> Node3: Proposal
+    Node3 -> Node1: Proposal
+    Node3 -> Node2: Proposal
+
+    // Decision phase
+    choice Node1 {
+        decide: {
+            Node1 -> Node2: Decision
+            Node1 -> Node3: Decision
         }
-        
-        // Synchronization barrier
-        barrier;
-        
-        // Consensus decision
-        Node1 -> Node2: Decision(chosen_value);
-        Node1 -> Node3: Decision(chosen_value);
     }
 }
 ```
@@ -155,10 +202,10 @@ Parallel composition allows concurrent message exchange followed by synchronizat
 choreography! {
     protocol AdaptiveSync {
         roles: Client, Server;
-        
+
         Client -> Server: CapabilityQuery;
         Server -> Client: CapabilityResponse(capabilities);
-        
+
         match capabilities.sync_type {
             SyncType::FullSync => compose FullSynchronization(Client, Server),
             SyncType::DeltaSync => compose DeltaSynchronization(Client, Server),
@@ -178,9 +225,9 @@ Conditional composition selects appropriate sub-protocols based on participant c
 choreography! {
     protocol RobustRequest {
         roles: Client, Server;
-        
+
         Client -> Server: Request(data);
-        
+
         timeout(30_seconds) {
             Server -> Client: Response(result);
         } or {
@@ -212,7 +259,7 @@ pub async fn robust_coordinator(
             Err(e) => return Err(e),
         }
     }
-    
+
     Err(ProtocolError::MaxRetriesExceeded)
 }
 ```
@@ -225,15 +272,15 @@ Retry logic implements exponential backoff to avoid overwhelming failed particip
 choreography! {
     protocol CompensatingTransaction {
         roles: Coordinator, ServiceA, ServiceB;
-        
+
         // Forward operations
         try {
             Coordinator -> ServiceA: ReserveResource(resource_id);
             ServiceA -> Coordinator: ReservationConfirmed;
-            
+
             Coordinator -> ServiceB: AllocateResource(resource_id);
             ServiceB -> Coordinator: AllocationConfirmed;
-            
+
             Coordinator -> ServiceA: CommitReservation(resource_id);
             Coordinator -> ServiceB: CommitAllocation(resource_id);
         } compensate {
@@ -264,7 +311,7 @@ pub async fn recover_participant_state(
     effects: &AuraEffectSystem,
 ) -> Result<Option<ProtocolCheckpoint>, RecoveryError> {
     let checkpoint_key = format!("protocol:{}:{}", protocol_id, device_id);
-    
+
     match effects.storage_load(&checkpoint_key).await {
         Ok(data) => {
             let checkpoint: ProtocolCheckpoint = bincode::deserialize(&data)?;
@@ -287,20 +334,20 @@ Recovery mechanisms restore participant state from persistent checkpoints. Parti
 async fn test_two_phase_commit_success() {
     let coordinator_id = DeviceId::new();
     let participant_id = DeviceId::new();
-    
+
     // For AuraEffectSystem testing patterns, see System Architecture guide
     let network = MockNetwork::deterministic();
     let coordinator_effects = AuraEffectSystem::with_network(network.clone());
     let participant_effects = AuraEffectSystem::with_network(network.clone());
-    
+
     let transaction_id = 12345;
-    
+
     // Run coordinator and participant concurrently
     let (coordinator_result, participant_result) = tokio::join!(
         coordinator_role(transaction_id, participant_id, &coordinator_effects),
         participant_role(transaction_id, Vote::Commit, &participant_effects)
     );
-    
+
     assert!(matches!(coordinator_result.unwrap(), CommitResult::Committed));
     assert!(participant_result.is_ok());
 }
@@ -315,22 +362,24 @@ use proptest::prelude::*;
 
 proptest! {
     #[test]
-    fn test_consensus_safety_property(
-        node_values in prop::collection::vec(any::<u64>(), 3..10),
-        network_partition in prop::collection::vec(any::<bool>(), 10..50)
+    fn test_threshold_signing_safety(
+        signers in prop::collection::vec(any::<DeviceId>(), 3..10),
+        threshold in 2usize..7,
+        message in prop::collection::vec(any::<u8>(), 32..128)
     ) {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        
+
         rt.block_on(async {
-            let result = run_consensus_protocol(node_values, network_partition).await;
-            
-            // Safety: All nodes that decide must decide the same value
-            if let Some(consensus_value) = result.consensus_value {
-                for node_decision in result.node_decisions {
-                    if let Some(decided_value) = node_decision {
-                        prop_assert_eq!(decided_value, consensus_value);
-                    }
-                }
+            let result = run_threshold_signing_protocol(signers, threshold, message).await;
+
+            // Safety: Valid threshold signatures must verify
+            if let Some(signature) = result.threshold_signature {
+                prop_assert!(verify_threshold_signature(&message, &signature, threshold));
+            }
+
+            // Safety: Cannot generate signature with fewer than threshold signers
+            if result.participating_signers.len() < threshold {
+                prop_assert!(result.threshold_signature.is_none());
             }
         });
     }
@@ -359,17 +408,17 @@ impl NetworkEffects for ChaosNetwork {
         // Inject random delays
         let delay = self.random_delay();
         tokio::time::sleep(delay).await;
-        
+
         // Inject random failures
         if self.should_fail() {
             return Err(NetworkError::MessageLost);
         }
-        
+
         // Inject network partitions
         if self.is_partitioned(recipient) {
             return Err(NetworkError::NetworkPartition);
         }
-        
+
         self.inner.send_message(recipient, message).await
     }
 }
@@ -385,7 +434,7 @@ pub fn validate_protocol_trace(
     spec: &ProtocolSpecification,
 ) -> Result<(), ValidationError> {
     let mut state_machine = spec.initial_state();
-    
+
     for event in &trace.events {
         match state_machine.process_event(event) {
             Ok(new_state) => state_machine = new_state,
@@ -396,11 +445,11 @@ pub fn validate_protocol_trace(
             }),
         }
     }
-    
+
     if !state_machine.is_terminal() {
         return Err(ValidationError::IncompleteExecution);
     }
-    
+
     Ok(())
 }
 ```
@@ -415,12 +464,12 @@ Model-based testing compares execution traces against formal protocol specificat
 choreography! {
     protocol DistributedAuction {
         roles: Auctioneer, Bidder1, Bidder2, Bidder3;
-        
+
         // Auction announcement
         Auctioneer -> Bidder1: AuctionAnnouncement(item);
         Auctioneer -> Bidder2: AuctionAnnouncement(item);
         Auctioneer -> Bidder3: AuctionAnnouncement(item);
-        
+
         // Bidding rounds
         for round in 1..max_rounds {
             parallel {
@@ -428,14 +477,14 @@ choreography! {
                 Bidder2 -> Auctioneer: Bid(amount2);
                 Bidder3 -> Auctioneer: Bid(amount3);
             }
-            
+
             let highest_bid = max(amount1, amount2, amount3);
-            
+
             Auctioneer -> Bidder1: RoundResult(highest_bid);
             Auctioneer -> Bidder2: RoundResult(highest_bid);
             Auctioneer -> Bidder3: RoundResult(highest_bid);
         }
-        
+
         // Winner announcement
         Auctioneer -> Bidder1: AuctionResult(winner);
         Auctioneer -> Bidder2: AuctionResult(winner);
@@ -452,19 +501,19 @@ Multi-party choreographies coordinate complex interactions with synchronization 
 choreography! {
     protocol DataStreaming {
         roles: Producer, Consumer;
-        
+
         Producer -> Consumer: StreamInit(stream_id);
         Consumer -> Producer: StreamAck;
-        
+
         loop {
             Producer -> Consumer: DataChunk(chunk);
             Consumer -> Producer: ChunkAck(chunk_id);
-            
+
             if chunk.is_last {
                 break;
             }
         }
-        
+
         Producer -> Consumer: StreamEnd;
         Consumer -> Producer: StreamComplete;
     }
@@ -479,13 +528,13 @@ Streaming protocols provide flow control and acknowledgment mechanisms for effic
 choreography! {
     protocol HierarchicalConsensus {
         roles: Leader, Replica1, Replica2, SubLeader, SubReplica1, SubReplica2;
-        
+
         // Top-level consensus
         compose Consensus(Leader, Replica1, Replica2);
-        
-        // Sub-group consensus  
+
+        // Sub-group consensus
         compose Consensus(SubLeader, SubReplica1, SubReplica2);
-        
+
         // Cross-level coordination
         Leader -> SubLeader: CoordinationMessage(decision);
         SubLeader -> Leader: CoordinationAck;

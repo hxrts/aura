@@ -439,12 +439,8 @@ mod tests {
 // Additional handler modules (others already declared above)
 pub mod agent;
 pub mod choreographic;
-pub mod console;
-pub mod crypto;
 pub mod journal;
 pub mod ledger;
-pub mod network;
-pub mod storage;
 pub mod sync;
 pub mod system;
 pub mod time;

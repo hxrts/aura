@@ -4,25 +4,21 @@
 //! that can be used by applications, replacing the old hand-coded handlers
 //! with choreography-based implementations.
 
+use crate::tree_ops::TreeOperationCoordinator;
 use crate::verification::{DeviceInfo, DeviceStatus, IdentityResult, IdentityVerifier};
 use async_trait::async_trait;
 use aura_core::{
-    tree::{AttestedOp, LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind},
-    AccountId, AuraError, AuraResult, DeviceId, Policy,
+    tree::{AttestedOp, Epoch, LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind},
+    AccountId, AuraError, Cap, DeviceId, Policy,
 };
 use aura_mpst::AuraRuntime;
 use std::collections::HashMap;
 
 /// Application-level tree handler that uses choreographies
-#[derive(Debug)]
 pub struct ChoreographicTreeHandler {
-    /// Tree operation coordinator
-    // coordinator: TreeOperationCoordinator,  // TODO: Implement this type
-    /// Identity verifier
+    coordinator: TreeOperationCoordinator,
     verifier: IdentityVerifier,
-    /// Local device ID
     device_id: DeviceId,
-    /// Handler configuration
     config: TreeHandlerConfig,
 }
 
@@ -62,9 +58,9 @@ pub struct TreeOperationContext {
 
 impl ChoreographicTreeHandler {
     /// Create a new choreographic tree handler
-    pub fn new(_runtime: AuraRuntime, device_id: DeviceId, config: TreeHandlerConfig) -> Self {
+    pub fn new(runtime: AuraRuntime, device_id: DeviceId, config: TreeHandlerConfig) -> Self {
         Self {
-            // coordinator: TreeOperationCoordinator::new(_runtime),  // TODO: Implement this
+            coordinator: TreeOperationCoordinator::new(runtime, device_id),
             verifier: IdentityVerifier::new(),
             device_id,
             config,
@@ -82,7 +78,6 @@ impl ChoreographicTreeHandler {
         operation: TreeOp,
         context: TreeOperationContext,
     ) -> IdentityResult<AttestedOp> {
-        // Verify the operation
         if self.config.strict_verification {
             let verification = self
                 .verifier
@@ -92,31 +87,26 @@ impl ChoreographicTreeHandler {
             }
         }
 
-        // Check participant count
         if context.participants.len() > self.config.max_participants {
             return Err(AuraError::invalid(
                 "Too many participants for tree operation",
             ));
         }
 
-        // Create tree operation request (TODO: Define TreeOpRequest type)
-        let request = format!(
-            "TreeOpRequest {{ operation: {:?}, participants: {:?}, threshold: {} }}",
-            operation, context.participants, self.config.default_threshold
-        );
+        let policy = Policy::Threshold {
+            m: self.config.default_threshold as u16,
+            n: context.participants.len() as u16,
+        };
+        let capabilities: HashMap<DeviceId, Cap> = context
+            .participants
+            .iter()
+            .map(|id| (*id, Cap::new()))
+            .collect();
 
-        // Execute via choreography (TODO: Implement TreeOperationCoordinator)
-        tracing::info!(
-            "Would execute tree operation via choreography: {:?}",
-            request
-        );
-
-        // TODO fix - For now, return a placeholder attested operation
-        Ok(AttestedOp {
-            op: operation,
-            agg_sig: vec![0u8; 64],
-            signer_count: self.config.default_threshold as u16,
-        })
+        self.coordinator
+            .execute(operation, 0, policy, context.participants, capabilities)
+            .await
+            .map_err(Into::into)
     }
 
     /// Add a leaf node to the tree

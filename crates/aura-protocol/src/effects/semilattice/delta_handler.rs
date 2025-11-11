@@ -87,7 +87,7 @@ where
             // Apply the combined delta to state
             // Note: This requires implementing delta application logic
             // TODO fix - For now, we assume deltas can be converted to state updates
-            self.apply_delta_to_state(delta);
+            self.apply_delta_to_state_generic(delta);
         }
     }
 
@@ -96,7 +96,7 @@ where
     /// This is a generic fallback implementation. For specific CRDT types,
     /// you should use the specialized DeltaHandler implementations below
     /// that work with the DeltaState trait.
-    fn apply_delta_to_state(&mut self, _delta: D) {
+    fn apply_delta_to_state_generic(&mut self, _delta: D) {
         // Generic implementation: We cannot apply deltas without knowing the specific
         // relationship between Delta type and State type. Use the DeltaState implementations below.
         tracing::debug!("Applied delta to state (generic fallback - consider using DeltaState implementation)");
@@ -271,7 +271,7 @@ mod tests {
     use aura_core::semilattice::{Bottom, JoinSemilattice};
 
     // Test state type
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct TestCounter(u64);
 
     impl JoinSemilattice for TestCounter {

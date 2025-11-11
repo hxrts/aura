@@ -33,7 +33,6 @@ async fn replace_admin(
             "Replacing admin for account {} with {} (activation epoch {})",
             account_id, new_admin_id, activation_epoch
         ),
-        &[],
     );
 
     let agent = AuraAgent::new(effects, device_id);

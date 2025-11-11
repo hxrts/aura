@@ -1,7 +1,9 @@
 //! Concrete guardian recovery choreography implementation used by the agent/CLI.
 
 use crate::{
-    guardian_recovery::{GuardianRecoveryRequest, RecoveryPriority, RecoveryPolicyEnforcer, RecoveryPolicyConfig},
+    guardian_recovery::{
+        GuardianRecoveryRequest, RecoveryPolicyConfig, RecoveryPolicyEnforcer, RecoveryPriority,
+    },
     types::{GuardianProfile, GuardianSet, RecoveryEvidence, RecoveryShare},
     RecoveryResult,
 };
@@ -215,12 +217,10 @@ impl RecoveryChoreography {
             cooldowns.insert(guardian.guardian_id, now + cooldown_period);
         }
 
-        self.effects.log_info(
-            &format!(
-                "Guardian {} approved recovery for account {}.",
-                guardian.guardian_id, request.account_id
-            ),
-            &[],
+        tracing::info!(
+            "Guardian {} approved recovery for account {}.",
+            guardian.guardian_id,
+            request.account_id
         );
 
         Ok(share)
@@ -245,14 +245,11 @@ impl RecoveryChoreography {
         let mut metrics = RecoverySessionMetrics::default();
         metrics.started_at = self.effects.current_timestamp().await;
 
-        self.effects.log_info(
-            &format!(
-                "Starting guardian recovery for account {} with {} guardians (need {}).",
-                request.account_id,
-                self.guardian_set.len(),
-                required
-            ),
-            &[],
+        tracing::info!(
+            "Starting guardian recovery for account {} with {} guardians (need {}).",
+            request.account_id,
+            self.guardian_set.len(),
+            required
         );
 
         let recovery_ctx = self.recovery_context(&request);
@@ -277,12 +274,10 @@ impl RecoveryChoreography {
                     if matches!(err, AuraError::PermissionDenied { .. }) {
                         cooldown_failures += 1;
                     }
-                    self.effects.log_warn(
-                        &format!(
-                            "Guardian {} rejected recovery request: {}",
-                            guardian.guardian_id, err
-                        ),
-                        &[],
+                    tracing::warn!(
+                        "Guardian {} rejected recovery request: {}",
+                        guardian.guardian_id,
+                        err
                     );
                 }
             }
@@ -302,7 +297,9 @@ impl RecoveryChoreography {
         let signature = aggregate_threshold_signature(&shares);
         let cooldown_expires_at = shares
             .iter()
-            .map(|share| share.issued_at + self.calculate_guardian_cooldown(&share.guardian, &request))
+            .map(|share| {
+                share.issued_at + self.calculate_guardian_cooldown(&share.guardian, &request)
+            })
             .max()
             .unwrap_or(metrics.started_at);
         let dispute_window_secs = request.dispute_window_secs;
@@ -332,13 +329,10 @@ impl RecoveryChoreography {
             metrics,
         };
 
-        self.effects.log_info(
-            &format!(
-                "Guardian recovery completed for account {} ({} approvals).",
-                request.account_id,
-                session_result.guardian_shares.len()
-            ),
-            &[],
+        tracing::info!(
+            "Guardian recovery completed for account {} ({} approvals).",
+            request.account_id,
+            session_result.guardian_shares.len()
         );
 
         Ok(session_result)
@@ -403,12 +397,10 @@ impl RecoveryChoreography {
         if let Err(err) =
             NetworkEffects::send_to_peer(&self.effects, guardian.device_id.0, payload).await
         {
-            self.effects.log_warn(
-                &format!(
-                    "Failed to send recovery request to guardian {}: {}",
-                    guardian.guardian_id, err
-                ),
-                &[],
+            tracing::warn!(
+                "Failed to send recovery request to guardian {}: {}",
+                guardian.guardian_id,
+                err
             );
         }
 
@@ -439,12 +431,10 @@ impl RecoveryChoreography {
         if let Err(err) =
             NetworkEffects::send_to_peer(&self.effects, request.requesting_device.0, payload).await
         {
-            self.effects.log_warn(
-                &format!(
-                    "Failed to deliver guardian share to {}: {}",
-                    request.requesting_device, err
-                ),
-                &[],
+            tracing::warn!(
+                "Failed to deliver guardian share to {}: {}",
+                request.requesting_device,
+                err
             );
         }
 
@@ -460,7 +450,11 @@ impl RecoveryChoreography {
     }
 
     /// Calculate policy-aware cooldown period for guardian
-    fn calculate_guardian_cooldown(&self, guardian: &GuardianProfile, request: &GuardianRecoveryRequest) -> u64 {
+    fn calculate_guardian_cooldown(
+        &self,
+        guardian: &GuardianProfile,
+        request: &GuardianRecoveryRequest,
+    ) -> u64 {
         let base_cooldown = if guardian.cooldown_secs == 0 {
             DEFAULT_COOLDOWN_SECS
         } else {
@@ -520,8 +514,6 @@ fn aggregate_threshold_signature(shares: &[RecoveryShare]) -> ThresholdSignature
 async fn current_cooldown_until(guardian_id: GuardianId) -> u64 {
     let ledger = GUARDIAN_COOLDOWNS.lock().await;
     ledger.get(&guardian_id).copied().unwrap_or(0)
-}
-
 }
 
 fn guardian_cooldown(guardian: &GuardianProfile) -> u64 {

@@ -2,7 +2,9 @@
 //!
 //! Effect-based implementations of CLI commands following the unified effect system.
 
-use crate::{AdminAction, InvitationAction, OtaAction, RecoveryAction, ScenarioAction, SnapshotAction};
+use crate::{
+    AdminAction, InvitationAction, OtaAction, RecoveryAction, ScenarioAction, SnapshotAction,
+};
 use anyhow::Result;
 use aura_protocol::{AuraEffectSystem, ConsoleEffects};
 use std::path::PathBuf;
@@ -97,11 +99,11 @@ impl CliHandler {
 
     /// Log error message through effects
     pub async fn log_error(&self, message: &str) {
-        self.effect_system.log_error(message, &[]);
+        self.effect_system.log_error(message);
     }
 
     /// Log info message through effects
     pub async fn log_info(&self, message: &str) {
-        self.effect_system.log_info(message, &[]);
+        self.effect_system.log_info(message);
     }
 }

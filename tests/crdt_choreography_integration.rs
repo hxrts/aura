@@ -13,7 +13,7 @@ use aura_protocol::{
         execute_anti_entropy, AntiEntropyConfig, CrdtType,
     },
     effects::{
-        semilattice::{CrdtCoordinator, CrdtCoordinatorFactory},
+        semilattice::CrdtCoordinator,
         system::AuraEffectSystem,
     },
     handlers::ExecutionMode,
@@ -232,9 +232,9 @@ async fn test_cv_crdt_choreography_integration() {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
 
-    // Create coordinators for both devices
-    let mut coordinator_a = CrdtCoordinatorFactory::cv_only(device_a, TestCounter::new());
-    let mut coordinator_b = CrdtCoordinatorFactory::cv_only(device_b, TestCounter::new());
+    // Create coordinators for both devices using builder pattern
+    let mut coordinator_a = CrdtCoordinator::with_cv_state(device_a, TestCounter::new());
+    let mut coordinator_b = CrdtCoordinator::with_cv_state(device_b, TestCounter::new());
 
     // Simulate state changes
     let mut state_a = TestCounter::new();
@@ -282,9 +282,9 @@ async fn test_cm_crdt_choreography_integration() {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
 
-    // Create coordinators for operation-based CRDTs
-    let coordinator_a = CrdtCoordinatorFactory::cm_only(device_a, CmTestCounter::new());
-    let coordinator_b = CrdtCoordinatorFactory::cm_only(device_b, CmTestCounter::new());
+    // Create coordinators for operation-based CRDTs using builder pattern
+    let coordinator_a = CrdtCoordinator::with_cm(device_a, CmTestCounter::new());
+    let coordinator_b = CrdtCoordinator::with_cm(device_b, CmTestCounter::new());
 
     // Create effect systems
     let effect_system = AuraEffectSystem::new(device_a, ExecutionMode::Testing);
@@ -444,35 +444,45 @@ async fn test_multi_crdt_choreography_integration() {
     assert!(result.is_ok(), "Multi-CRDT synchronization should succeed");
     let (sync_result, final_coordinator) = result.unwrap();
     assert!(sync_result.success, "Sync should report success");
-    
+
     // Should sync both CV and CM CRDTs
     assert!(sync_result.ops_sent >= 2, "Should sync at least 2 CRDT types");
     assert_eq!(final_coordinator.device_id(), device_a);
 }
 
-#[tokio::test] 
-async fn test_crdt_coordinator_factory_patterns() {
+#[tokio::test]
+async fn test_crdt_coordinator_builder_patterns() {
     let device_id = DeviceId::new();
 
-    // Test CV-only factory
-    let cv_coordinator = CrdtCoordinatorFactory::cv_only(device_id, TestCounter::new());
+    // Test CV-only builder
+    let cv_coordinator = CrdtCoordinator::with_cv_state(device_id, TestCounter::new());
     assert!(cv_coordinator.has_handler(CrdtType::Convergent));
     assert!(!cv_coordinator.has_handler(CrdtType::Commutative));
 
-    // Test CM-only factory
-    let cm_coordinator = CrdtCoordinatorFactory::cm_only(device_id, CmTestCounter::new());
+    // Test CM-only builder
+    let cm_coordinator = CrdtCoordinator::with_cm(device_id, CmTestCounter::new());
     assert!(cm_coordinator.has_handler(CrdtType::Commutative));
     assert!(!cm_coordinator.has_handler(CrdtType::Convergent));
 
-    // Test full support factory
-    let full_coordinator: CrdtCoordinator<TestCounter, CmTestCounter, DeltaTestCounter, PermissionSet, IncrementOp, u64> = 
-        CrdtCoordinatorFactory::full_support(device_id);
-    
-    // Full support coordinator starts with no handlers registered until explicitly added
-    assert!(!full_coordinator.has_handler(CrdtType::Convergent));
-    assert!(!full_coordinator.has_handler(CrdtType::Commutative));
-    assert!(!full_coordinator.has_handler(CrdtType::Delta));
-    assert!(!full_coordinator.has_handler(CrdtType::Meet));
+    // Test Delta-only builder
+    let delta_coordinator = CrdtCoordinator::with_delta(device_id);
+    assert!(delta_coordinator.has_handler(CrdtType::Delta));
+    assert!(!delta_coordinator.has_handler(CrdtType::Convergent));
+
+    // Test MV-only builder
+    let mv_coordinator = CrdtCoordinator::with_mv_state(device_id, PermissionSet::new());
+    assert!(mv_coordinator.has_handler(CrdtType::Meet));
+    assert!(!mv_coordinator.has_handler(CrdtType::Convergent));
+
+    // Test chained builder for multiple handlers
+    let multi_coordinator = CrdtCoordinator::new(device_id)
+        .with_cv_handler(aura_protocol::effects::semilattice::CvHandler::with_state(TestCounter::new()))
+        .with_cm_handler(aura_protocol::effects::semilattice::CmHandler::new(CmTestCounter::new()));
+
+    assert!(multi_coordinator.has_handler(CrdtType::Convergent));
+    assert!(multi_coordinator.has_handler(CrdtType::Commutative));
+    assert!(!multi_coordinator.has_handler(CrdtType::Delta));
+    assert!(!multi_coordinator.has_handler(CrdtType::Meet));
 }
 
 #[tokio::test]
@@ -480,8 +490,8 @@ async fn test_sync_request_creation_and_handling() {
     let device_id = DeviceId::new();
     let session_id = SessionId::new();
 
-    // Create coordinator
-    let mut coordinator = CrdtCoordinatorFactory::cv_only(device_id, TestCounter::new());
+    // Create coordinator using builder pattern
+    let mut coordinator = CrdtCoordinator::with_cv_state(device_id, TestCounter::new());
 
     // Test sync request creation
     let request = coordinator.create_sync_request(session_id, CrdtType::Convergent).unwrap();

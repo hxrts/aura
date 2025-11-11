@@ -406,9 +406,11 @@ mod tests {
             challenge_nonce: vec![1, 2, 3, 4],
         };
 
-        // Note: This will return an error since choreography is not fully implemented
+        // Note: This will return Ok with success=false since choreography is not fully implemented
         let result = coordinator.authenticate_device(request).await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(!response.success);
         assert!(coordinator.has_active_choreography());
     }
 }

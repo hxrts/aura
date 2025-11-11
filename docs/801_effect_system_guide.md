@@ -10,15 +10,46 @@ See [Getting Started Guide](800_getting_started_guide.md) for basic concepts. Se
 
 ## Effect System Architecture
 
-**Effect Traits** define capabilities without specifying implementation details. Applications depend on effect traits rather than concrete implementations. This enables dependency injection and environment-specific behavior.
+Aura's effect system is organized in clean architectural layers:
+
+### Interface Layer (`aura-core`)
+
+**Effect Traits** define capabilities without implementation details. Always import effect traits from `aura-core`:
 
 ```rust
+// Import traits from aura-core
+use aura_core::effects::{StorageEffects, CryptoEffects, NetworkEffects};
+
 #[async_trait]
 pub trait StorageEffects: Send + Sync {
     async fn store(&self, key: &str, data: &[u8]) -> Result<(), StorageError>;
     async fn load(&self, key: &str) -> Result<Vec<u8>, StorageError>;
     async fn delete(&self, key: &str) -> Result<(), StorageError>;
 }
+```
+
+### Implementation Layer (`aura-effects`)
+
+**Standard Handlers** provide context-free implementations. Import implementations from `aura-effects`:
+
+```rust
+// Import handlers from aura-effects
+use aura_effects::storage::{FilesystemStorageHandler, MemoryStorageHandler};
+use aura_effects::crypto::{RealCryptoHandler, MockCryptoHandler};
+
+// Standard implementations work in any execution context
+let storage = FilesystemStorageHandler::new("/data".into())?;
+let crypto = RealCryptoHandler::new();
+```
+
+### Orchestration Layer (`aura-protocol`) 
+
+**Coordination Primitives** handle multi-party or stateful composition. Import coordination from `aura-protocol`:
+
+```rust
+// Import coordination from aura-protocol
+use aura_protocol::handlers::{CompositeHandler, AuraHandlerAdapter};
+use aura_protocol::effects::semilattice::CrdtCoordinator;
 ```
 
 Effect traits use async methods to handle I/O operations. All effects implement `Send` and `Sync` for safe usage across async task boundaries.
@@ -63,39 +94,46 @@ Different execution modes provide different handler implementations. Testing mod
 
 ## Handler Patterns
 
-**Production Handlers** implement effects using real infrastructure and external services. These handlers provide actual functionality for deployed applications.
+### Standard Handlers (`aura-effects`)
+
+**Production Handlers** from `aura-effects` implement effects using real infrastructure:
 
 ```rust
-pub struct FileSystemStorageHandler {
-    base_path: PathBuf,
-}
+// Use standard handlers from aura-effects
+use aura_effects::storage::FilesystemStorageHandler;
+use aura_core::effects::StorageEffects;
 
-#[async_trait]
-impl StorageEffects for FileSystemStorageHandler {
-    async fn store(&self, key: &str, data: &[u8]) -> Result<(), StorageError> {
-        let file_path = self.base_path.join(key);
-        tokio::fs::write(file_path, data)
-            .await
-            .map_err(StorageError::Io)
-    }
+// Standard implementation that works in any context
+let storage = FilesystemStorageHandler::new("/data".into())?;
 
-    async fn load(&self, key: &str) -> Result<Vec<u8>, StorageError> {
-        let file_path = self.base_path.join(key);
-        tokio::fs::read(file_path)
-            .await
-            .map_err(StorageError::Io)
-    }
-
-    async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        let file_path = self.base_path.join(key);
-        tokio::fs::remove_file(file_path)
-            .await
-            .map_err(StorageError::Io)
-    }
-}
+// All aura-effects handlers are context-free and stateless
+let result = storage.store("key", b"data").await?;
 ```
 
-Production handlers integrate with external systems like file systems, databases, and network services. Error handling converts external errors to effect-specific error types.
+**Testing Handlers** from `aura-effects` provide predictable behavior:
+
+```rust
+use aura_effects::storage::MemoryStorageHandler;
+use aura_effects::crypto::MockCryptoHandler;
+
+// Deterministic handlers for testing
+let storage = MemoryStorageHandler::new();
+let crypto = MockCryptoHandler::new();
+```
+
+### Coordination Handlers (`aura-protocol`)
+
+**Multi-party Coordination** requires `aura-protocol` for stateful orchestration:
+
+```rust
+use aura_protocol::effects::semilattice::CrdtCoordinator;
+use aura_protocol::handlers::CompositeHandler;
+
+// Coordinates multiple CRDT handlers
+let coordinator = CrdtCoordinator::new(device_id)
+    .with_cv_handler(cv_state)
+    .with_delta_handler(delta_threshold);
+```
 
 **Testing Handlers** provide predictable behavior for unit tests. Mock handlers eliminate external dependencies and enable fast test execution.
 

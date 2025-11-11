@@ -184,6 +184,7 @@ effect TransportEffects {
   recv    : () -> Msg<Ctx, Any, V>
   connect : PeerId -> Channel
 }
+```
 
 ### 2.4 Guards and Observability Invariants
 
@@ -198,6 +199,7 @@ Named invariants used across documents:
 - No‑Observable‑Without‑Charge: there is no `send(ctx, peer, …)` event without a preceding successful `charge(ctx, peer, cost, epoch)`.
 - Deterministic‑Replenishment: `limit(ctx)` updates via meet on deterministic journal facts; `spent` is join‑monotone; epochs gate resets.
 
+```rust
 // Time & randomness for simulation/proofs
 effect TimeEffects   { now : () -> Instant; sleep : Duration -> () }
 effect RandEffects   { sample : Dist -> Val }

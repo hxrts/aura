@@ -5,7 +5,7 @@ use aura_invitation::relationship_formation::{
     execute_relationship_formation, RelationshipFormationConfig, RelationshipFormationError,
     RelationshipKeys,
 };
-use aura_protocol::effects::system::AuraEffectSystem;
+// Note: For testing, use mock handlers from aura-effects
 
 /// Test successful relationship formation ceremony
 #[tokio::test]

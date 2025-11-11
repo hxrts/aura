@@ -1,19 +1,24 @@
 # Top-level workspace for Aura
 [workspace]
 resolver = "2"
-exclude = ["ext/*"]  # ext/* are temporary external repos
+exclude = [
+    "ext/*",  # ext/* are temporary external repos
+    "crates/aura-testkit",  # TODO: Update to new effect system
+    "crates/aura-simulator",  # TODO: Update to new effect system
+]
 
 members = [
     "crates/aura-agent",
     "crates/aura-verify",
     "crates/aura-protocol",
+    "crates/aura-effects",
     "crates/aura-crypto",
     "crates/aura-journal",
     "crates/aura-store",
     "crates/aura-transport",
-    "crates/aura-testkit",
+    # "crates/aura-testkit",  # Excluded - needs update to new effect system
     "crates/aura-cli",
-    "crates/aura-simulator",
+    # "crates/aura-simulator",  # Excluded - needs update to new effect system
     "crates/aura-wot",
     "crates/aura-mpst",
     "crates/aura-quint-api",
@@ -98,6 +103,7 @@ proptest = "1.5"
 dirs = "5.0"
 glob = "0.3"
 fastrand = "2.1"
+parking_lot = "0.12"
 subtle = "2.6"
 getrandom = "0.2"
 

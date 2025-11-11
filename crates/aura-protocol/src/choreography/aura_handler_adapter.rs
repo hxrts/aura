@@ -4,14 +4,13 @@
 //! and Aura's effect system, enabling implementation-agnostic choreographic execution.
 
 use crate::{
-    effects::ChoreographicRole,
     effects::system::AuraEffectSystem,
     guards::{FlowHint, LeakageBudget, ProtocolGuard},
     handlers::{AuraHandlerError, ExecutionMode},
 };
-use aura_core::{relationships::ContextId, AuraError, DeviceId, Receipt};
+use aura_core::{relationships::ContextId, DeviceId, Receipt};
 use aura_wot::Capability;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use std::{any::type_name, collections::HashMap};
 
@@ -132,7 +131,7 @@ impl AuraHandlerAdapter {
             .cloned()
             .unwrap_or_else(|| self.default_guard.clone());
 
-        let mut guard = ProtocolGuard::new(format!(
+        let guard = ProtocolGuard::new(format!(
             "choreography_send::{}",
             type_name::<T>()
         ))

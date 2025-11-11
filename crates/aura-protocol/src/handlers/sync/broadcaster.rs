@@ -255,7 +255,7 @@ mod tests {
     use super::*;
     use aura_core::tree::{Epoch, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
 
-    fn create_test_op(commitment: TreeHash32) -> AttestedOp {
+    fn create_test_op(commitment: Hash32) -> AttestedOp {
         AttestedOp {
             op: TreeOp {
                 parent_commitment: commitment,

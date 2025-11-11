@@ -92,10 +92,10 @@ pub struct Nonce {
 
 impl Nonce {
     /// Create from FROST signing nonces
-    /// 
+    ///
     /// Note: FROST nonces cannot be serialized as they contain secret data.
     /// This stores only an identifier for tracking purposes.
-    pub fn from_frost(nonces: frost::round1::SigningNonces) -> Self {
+    pub fn from_frost(_nonces: frost::round1::SigningNonces) -> Self {
         let mut id = [0u8; 32];
         #[allow(clippy::expect_used)]
         getrandom::getrandom(&mut id).expect("Failed to generate nonce ID");
@@ -105,13 +105,13 @@ impl Nonce {
         // of the nonce commitment as a placeholder.
         let mut hasher = blake3::Hasher::new();
         hasher.update(&id);
-        let value = hasher.finalize().as_bytes()[..64].to_vec();
+        let value = hasher.finalize().as_bytes().to_vec();
 
         Self { id, value }
     }
 
     /// Convert to FROST signing nonces
-    /// 
+    ///
     /// This is a security limitation - FROST nonces should not be reconstructed
     /// from serialized data. In production, nonces should be:
     /// 1. Generated fresh for each signing operation
@@ -170,7 +170,7 @@ impl NonceCommitment {
         if bytes.len() < 32 {
             return Err("Commitment too short".to_string());
         }
-        
+
         Ok(Self {
             signer: 1, // Default signer for mock
             commitment: bytes,
@@ -241,7 +241,7 @@ impl PartialSignature {
         if bytes.len() < 32 {
             return Err("Partial signature too short".to_string());
         }
-        
+
         Ok(Self {
             signer: 1, // Default signer for mock
             signature: bytes,
@@ -344,7 +344,10 @@ pub fn binding_message(ctx: &TreeSigningContext, op_bytes: &[u8]) -> Vec<u8> {
 ///
 /// This function requires a signing share to properly generate FROST nonces.
 /// In a real implementation, this would use the device's signing share from DKG.
-pub fn generate_nonce_with_share(signer_id: u16, signing_share: &frost::keys::SigningShare) -> (Nonce, NonceCommitment) {
+pub fn generate_nonce_with_share(
+    signer_id: u16,
+    signing_share: &frost::keys::SigningShare,
+) -> (Nonce, NonceCommitment) {
     let identifier = frost::Identifier::try_from(signer_id).expect("Valid signer ID");
 
     // Generate proper FROST nonces and commitments using the signing share
@@ -367,12 +370,12 @@ pub fn generate_nonce_with_share(signer_id: u16, signing_share: &frost::keys::Si
 }
 
 /// Generate placeholder nonce for development/testing (deprecated)
-/// 
+///
 /// This version is kept for backwards compatibility but should not be used
 /// in production as it cannot generate proper FROST nonces without a signing share.
 #[deprecated(note = "Use generate_nonce_with_share for proper FROST nonces")]
 pub fn generate_nonce(signer_id: u16) -> (Nonce, NonceCommitment) {
-    let identifier = frost::Identifier::try_from(signer_id).expect("Valid signer ID");
+    let _identifier = frost::Identifier::try_from(signer_id).expect("Valid signer ID");
 
     // Create nonce ID for tracking
     #[allow(clippy::disallowed_methods)]
@@ -389,7 +392,7 @@ pub fn generate_nonce(signer_id: u16) -> (Nonce, NonceCommitment) {
     // Generate placeholder commitment using hash
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(&nonce_id);
+    hasher.update(nonce_id);
     let commitment_bytes = hasher.finalize();
 
     let commitment = NonceCommitment {
@@ -462,10 +465,10 @@ pub fn verify_nonce_opening(commitment: &NonceCommitment, opening: &NonceOpen) -
 /// This function generates fresh nonces for security rather than reusing
 /// serialized nonces. This is the correct approach for FROST signatures.
 pub fn frost_sign_partial(
-    share: &Share,
-    msg: &[u8],
+    _share: &Share,
+    _msg: &[u8],
     _nonce: &Nonce, // Ignored for security - we generate fresh nonces
-    commitments: &BTreeMap<u16, NonceCommitment>,
+    _commitments: &BTreeMap<u16, NonceCommitment>,
 ) -> Result<PartialSignature, String> {
     // For security reasons, this function requires a proper KeyPackage from DKG
     // rather than just a SigningShare. This prevents misuse of shares.
@@ -486,7 +489,8 @@ pub fn frost_sign_partial_with_keypackage(
     // Generate fresh nonces for this signing operation (secure approach)
     #[allow(clippy::disallowed_methods)]
     let mut rng = rand::thread_rng();
-    let (frost_nonce, _our_commitment) = frost::round1::commit(key_package.signing_share(), &mut rng);
+    let (frost_nonce, _our_commitment) =
+        frost::round1::commit(key_package.signing_share(), &mut rng);
 
     // Convert commitments to FROST format
     let mut frost_commitments = BTreeMap::new();
@@ -505,7 +509,7 @@ pub fn frost_sign_partial_with_keypackage(
         .map_err(|e| format!("FROST signing failed: {}", e))?;
 
     // Convert to our format
-    let signer_id = u16::from_be_bytes([0, identifier.serialize()[0]]);
+    let _signer_id = u16::from_be_bytes([0, identifier.serialize()[0]]);
     Ok(PartialSignature::from_frost(*identifier, signature_share))
 }
 
@@ -647,6 +651,7 @@ pub struct PublicKeyPackage {
     pub signer_public_keys: std::collections::BTreeMap<u16, Vec<u8>>,
     /// Threshold parameters
     pub threshold: u16,
+    /// Maximum number of signers
     pub max_signers: u16,
 }
 
@@ -774,7 +779,7 @@ mod tests {
     #[ignore = "Uses deprecated API not part of real FROST protocol"]
     #[allow(deprecated)]
     fn test_nonce_commitment_invalid() {
-        let (nonce1, commitment1) = generate_nonce(1);
+        let (_nonce1, commitment1) = generate_nonce(1);
         let (nonce2, _) = generate_nonce(1);
         let opening2 = open_nonce(&nonce2, 1);
 
@@ -840,15 +845,13 @@ mod tests {
 
     #[test]
     fn test_frost_roundtrip_serialization() {
-        use frost::keys::KeyPackage;
-
         // Generate a test key package (2-of-3 threshold)
         let max_signers = 3;
         let min_signers = 2;
         #[allow(clippy::disallowed_methods)]
         let mut rng = rand::thread_rng();
 
-        let (shares, pubkey_package) = frost::keys::generate_with_dealer(
+        let (shares, _pubkey_package) = frost::keys::generate_with_dealer(
             max_signers,
             min_signers,
             frost::keys::IdentifierList::Default,
@@ -862,7 +865,7 @@ mod tests {
             .unwrap();
         let share = Share::from_frost(
             frost::Identifier::try_from(1).unwrap(),
-            frost_share.signing_share().clone(),
+            *frost_share.signing_share(),
         );
 
         let roundtrip_share = share.to_frost().unwrap();
@@ -885,8 +888,6 @@ mod tests {
     fn test_frost_integration_basic() {
         // This test verifies FROST integration works but doesn't test
         // the full signing flow (which requires proper setup)
-        use frost::keys::KeyPackage;
-
         let max_signers = 3;
         let min_signers = 2;
         #[allow(clippy::disallowed_methods)]

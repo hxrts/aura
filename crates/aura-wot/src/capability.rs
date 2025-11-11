@@ -503,6 +503,26 @@ impl CapabilitySet {
     pub fn insert(&mut self, capability: Capability) {
         self.capabilities.insert(capability);
     }
+
+    /// Create capability set for guardian recovery initiation
+    pub fn guardian_recovery_initiation() -> Self {
+        Self::from_permissions(&["guardian:recovery:initiate", "trust:verify"])
+    }
+
+    /// Create capability set for guardian approval
+    pub fn guardian_approval() -> Self {
+        Self::from_permissions(&["guardian:approve", "recovery:sign"])
+    }
+
+    /// Create capability set for emergency override
+    pub fn emergency_override() -> Self {
+        Self::from_permissions(&["emergency:override", "guardian:emergency"])
+    }
+
+    /// Create default device capabilities
+    pub fn default_device_capabilities() -> Self {
+        Self::from_permissions(&["device:basic", "communication:send", "communication:receive"])
+    }
 }
 
 impl fmt::Display for CapabilitySet {

@@ -3,29 +3,103 @@
 //! Combines multiple effect handlers into a single unified handler that implements all effect traits.
 
 use super::{
-    console::{SilentConsoleHandler, StdoutConsoleHandler},
     context::AuraContext,
-    crypto::{MockCryptoHandler, RealCryptoHandler},
-    time::RealTimeHandler,
     erased::AuraHandler,
-    network::{MemoryNetworkHandler, RealNetworkHandler, SimulatedNetworkHandler},
-    storage::{FilesystemStorageHandler, MemoryStorageHandler},
+    tree::DummyTreeHandler,
     {AuraHandlerError, EffectType, ExecutionMode},
 };
+// Use standard effect handlers from aura-effects
+use aura_effects::{
+    crypto::{MockCryptoHandler, RealCryptoHandler},
+    network::{
+        MemoryNetworkHandler, MockNetworkHandler as SimulatedNetworkHandler,
+        TcpNetworkHandler as RealNetworkHandler,
+    },
+    storage::{FilesystemStorageHandler, MemoryStorageHandler},
+    time::{RealTimeHandler, SimulatedTimeHandler},
+};
 // Import from aura-core for core effect traits
-use aura_core::effects::{JournalEffects as CoreJournalEffects, ConsoleEffects as CoreConsoleEffects, CryptoEffects as CoreCryptoEffects, NetworkEffects as CoreNetworkEffects, StorageEffects as CoreStorageEffects, TimeEffects as CoreTimeEffects, RandomEffects as CoreRandomEffects};
+use aura_core::effects::{
+    ConsoleEffects as CoreConsoleEffects, CryptoEffects as CoreCryptoEffects,
+    JournalEffects as CoreJournalEffects, NetworkEffects as CoreNetworkEffects,
+    RandomEffects as CoreRandomEffects, StorageEffects as CoreStorageEffects,
+    TimeEffects as CoreTimeEffects,
+};
 // Import from local crate for extended effect traits
-use crate::effects::{AgentEffects, ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, ChoreographyMetrics, LedgerEffects, LedgerError, LedgerEventStream, DeviceMetadata, TreeEffects, SystemEffects, SystemError, TreeCoordinationEffects, SyncEffects, JournalEffects, JournalEffects as ProtocolJournalEffects, TimeEffects, TimeError, TimeoutHandle, WakeCondition, NetworkEffects, NetworkError, PeerEventStream, StorageEffects, StorageError, StorageStats, CryptoEffects, CryptoError, ConsoleEffects, ConsoleEvent, RandomEffects, AuraError, AuraResult};
+use crate::effects::{
+    AuraError, ChoreographicEffects, ChoreographicRole,
+    ChoreographyError, ChoreographyEvent, ChoreographyMetrics, ConsoleEffects, ConsoleEvent,
+    CryptoEffects, CryptoError, DeviceMetadata, LedgerEffects, LedgerError, LedgerEventStream,
+    NetworkEffects, NetworkError, PeerEventStream, RandomEffects, StorageEffects, StorageError,
+    StorageStats, SystemEffects, SystemError, TimeEffects, TimeError, TimeoutHandle, TreeEffects, WakeCondition,
+};
 use async_trait::async_trait;
 use aura_core::{identifiers::DeviceId, relationships::ContextId, FlowBudget, LocalSessionType};
-use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use serde_json;
-use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-/// Dummy time handler for stub implementation
+/// Simple console handler that outputs nothing (for testing/simulation)
+pub struct SilentConsoleHandler;
+
+impl SilentConsoleHandler {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl aura_core::effects::ConsoleEffects for SilentConsoleHandler {
+    async fn log_info(&self, _message: &str) -> Result<(), AuraError> {
+        Ok(())
+    }
+
+    async fn log_warn(&self, _message: &str) -> Result<(), AuraError> {
+        Ok(())
+    }
+
+    async fn log_error(&self, _message: &str) -> Result<(), AuraError> {
+        Ok(())
+    }
+
+    async fn log_debug(&self, _message: &str) -> Result<(), AuraError> {
+        Ok(())
+    }
+}
+
+/// Simple console handler that outputs to stdout (for production)
+pub struct StdoutConsoleHandler;
+
+impl StdoutConsoleHandler {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl aura_core::effects::ConsoleEffects for StdoutConsoleHandler {
+    async fn log_info(&self, message: &str) -> Result<(), AuraError> {
+        println!("[INFO] {}", message);
+        Ok(())
+    }
+
+    async fn log_warn(&self, message: &str) -> Result<(), AuraError> {
+        println!("[WARN] {}", message);
+        Ok(())
+    }
+
+    async fn log_error(&self, message: &str) -> Result<(), AuraError> {
+        eprintln!("[ERROR] {}", message);
+        Ok(())
+    }
+
+    async fn log_debug(&self, message: &str) -> Result<(), AuraError> {
+        println!("[DEBUG] {}", message);
+        Ok(())
+    }
+}
+
 /// Dummy time handler for testing and simulation
 pub struct DummyTimeHandler;
 
@@ -121,7 +195,7 @@ pub struct CompositeHandler {
     crypto: Box<dyn CryptoEffects>,
     time: Box<dyn TimeEffects>,
     console: Box<dyn ConsoleEffects>,
-    journal: Box<dyn JournalEffects>,
+    journal: Box<dyn CoreJournalEffects>,
     tree: Box<dyn TreeEffects>,
     // Note: LedgerEffects and ChoreographicEffects will be added when their handlers are implemented
 }
@@ -132,10 +206,9 @@ impl CompositeHandler {
         match mode {
             ExecutionMode::Testing => Self::for_testing(device_id),
             ExecutionMode::Production => Self::for_production(device_id),
-            ExecutionMode::Simulation { seed: _seed } => {
-                // TODO fix - For now, simulation mode uses the same as testing
-                // TODO: Create simulation-specific handlers with the seed
-                Self::for_testing(device_id)
+            ExecutionMode::Simulation { seed } => {
+                // Create simulation-specific handlers with deterministic behavior
+                Self::for_simulation_with_seed(device_id, seed)
             }
         }
     }
@@ -143,7 +216,7 @@ impl CompositeHandler {
     /// Create a composite handler for testing with all mock/memory implementations
     pub fn for_testing(device_id: Uuid) -> Self {
         let journal = super::journal::MemoryJournalHandler::new();
-        let tree_journal: Arc<dyn JournalEffects> = std::sync::Arc::new(journal.clone());
+        let tree_journal: Arc<dyn CoreJournalEffects> = std::sync::Arc::new(journal.clone());
         Self {
             device_id,
             is_simulation: true,
@@ -153,44 +226,48 @@ impl CompositeHandler {
             time: Box::new(DummyTimeHandler::new()),
             console: Box::new(SilentConsoleHandler::new()),
             journal: Box::new(journal),
-            tree: Box::new(super::tree::MemoryTreeHandler::new(tree_journal)),
+            // TODO fix - Tree handler needs choreographic setup with runtime
+            // For now, use a simple no-op handler
+            tree: Box::new(DummyTreeHandler::new()),
         }
     }
 
     /// Create a composite handler for production with real implementations
     pub fn for_production(device_id: Uuid) -> Self {
         let journal = super::journal::MemoryJournalHandler::new();
-        let tree_journal: Arc<dyn JournalEffects> = std::sync::Arc::new(journal.clone());
+        let tree_journal: Arc<dyn CoreJournalEffects> = std::sync::Arc::new(journal.clone());
         Self {
             device_id,
             is_simulation: false,
-            network: Box::new(RealNetworkHandler::new(
-                device_id,
-                "tcp://0.0.0.0:0".to_string(),
-            )),
+            network: Box::new(RealNetworkHandler::new()),
             storage: Box::new(FilesystemStorageHandler::new("/tmp/aura".into()).unwrap()),
             crypto: Box::new(RealCryptoHandler::new()),
             time: Box::new(RealTimeHandler::new()),
             console: Box::new(StdoutConsoleHandler::new()),
             journal: Box::new(journal),
-            tree: Box::new(super::tree::MemoryTreeHandler::new(tree_journal)),
+            tree: Box::new(DummyTreeHandler::new()),
         }
     }
 
     /// Create a composite handler for simulation/deterministic testing
     pub fn for_simulation(device_id: Uuid) -> Self {
+        Self::for_simulation_with_seed(device_id, 0)
+    }
+
+    /// Create a composite handler for simulation with a specific seed for deterministic behavior
+    pub fn for_simulation_with_seed(device_id: Uuid, seed: u64) -> Self {
         let journal = super::journal::MemoryJournalHandler::new();
-        let tree_journal: Arc<dyn JournalEffects> = std::sync::Arc::new(journal.clone());
+        let tree_journal: Arc<dyn CoreJournalEffects> = std::sync::Arc::new(journal.clone());
         Self {
             device_id,
             is_simulation: true,
-            network: Box::new(SimulatedNetworkHandler::new(device_id)),
+            network: Box::new(SimulatedNetworkHandler::new()),
             storage: Box::new(MemoryStorageHandler::new()),
-            crypto: Box::new(MockCryptoHandler::new(device_id.as_u128() as u64)),
-            time: Box::new(DummyTimeHandler::new()),
+            crypto: Box::new(MockCryptoHandler::new(seed)), // Use seed for deterministic crypto
+            time: Box::new(SimulatedTimeHandler::new(seed)), // Use proper simulated time handler
             console: Box::new(SilentConsoleHandler::new()),
             journal: Box::new(journal),
-            tree: Box::new(super::tree::MemoryTreeHandler::new(tree_journal)),
+            tree: Box::new(DummyTreeHandler::new()),
         }
     }
 
@@ -540,32 +617,22 @@ impl TimeEffects for CompositeHandler {
     // Use tokio::time::timeout directly where needed
 }
 
+#[async_trait]
 impl ConsoleEffects for CompositeHandler {
-    fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
-        self.console.log_trace(message, fields);
+    async fn log_debug(&self, message: &str) -> Result<(), AuraError> {
+        self.console.log_debug(message).await
     }
 
-    fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
-        self.console.log_debug(message, fields);
+    async fn log_info(&self, message: &str) -> Result<(), AuraError> {
+        self.console.log_info(message).await
     }
 
-    fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
-        self.console.log_info(message, fields);
+    async fn log_warn(&self, message: &str) -> Result<(), AuraError> {
+        self.console.log_warn(message).await
     }
 
-    fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
-        self.console.log_warn(message, fields);
-    }
-
-    fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
-        self.console.log_error(message, fields);
-    }
-
-    fn emit_event(
-        &self,
-        event: ConsoleEvent,
-    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        self.console.emit_event(event)
+    async fn log_error(&self, message: &str) -> Result<(), AuraError> {
+        self.console.log_error(message).await
     }
 }
 
@@ -581,7 +648,7 @@ pub struct CompositeHandlerBuilder {
     crypto: Option<Box<dyn CryptoEffects>>,
     time: Option<Box<dyn TimeEffects>>,
     console: Option<Box<dyn ConsoleEffects>>,
-    journal: Option<Box<dyn JournalEffects>>,
+    journal: Option<Box<dyn CoreJournalEffects>>,
     tree: Option<Box<dyn TreeEffects>>,
 }
 
@@ -648,10 +715,7 @@ impl CompositeHandlerBuilder {
                 if is_simulation {
                     Box::new(MemoryNetworkHandler::new(device_id))
                 } else {
-                    Box::new(RealNetworkHandler::new(
-                        device_id,
-                        "tcp://0.0.0.0:0".to_string(),
-                    ))
+                    Box::new(RealNetworkHandler::new())
                 }
             }),
             storage: self.storage.unwrap_or_else(|| {
@@ -668,7 +732,9 @@ impl CompositeHandlerBuilder {
                     Box::new(RealCryptoHandler::new())
                 }
             }),
-            time: self.time.unwrap_or_else(|| Box::new(DummyTimeHandler::new())),
+            time: self
+                .time
+                .unwrap_or_else(|| Box::new(DummyTimeHandler::new())),
             console: self.console.unwrap_or_else(|| {
                 if is_simulation {
                     Box::new(SilentConsoleHandler::new())
@@ -679,10 +745,9 @@ impl CompositeHandlerBuilder {
             journal: self
                 .journal
                 .unwrap_or_else(|| Box::new(super::journal::MemoryJournalHandler::new())),
-            tree: self.tree.unwrap_or_else(|| {
-                let journal_arc = std::sync::Arc::new(super::journal::MemoryJournalHandler::new());
-                Box::new(super::tree::MemoryTreeHandler::new(journal_arc))
-            }),
+            tree: self
+                .tree
+                .unwrap_or_else(|| Box::new(DummyTreeHandler::new())),
         }
     }
 }
@@ -855,7 +920,7 @@ impl ChoreographicEffects for CompositeHandler {
             event_type: "choreography".to_string(),
             data: serde_json::to_value(event).unwrap_or_default(),
         };
-        self.console.emit_event(console_event).await;
+        // Note: emit_event removed from ConsoleEffects trait
         Ok(())
     }
 
@@ -875,199 +940,9 @@ impl ChoreographicEffects for CompositeHandler {
     }
 }
 
-// Implement JournalEffects by delegating to the journal handler
-#[async_trait]
-impl ProtocolJournalEffects for CompositeHandler {
-    async fn append_attested_tree_op(
-        &self,
-        op: aura_core::AttestedOp,
-    ) -> Result<aura_core::Hash32, aura_core::AuraError> {
-        self.journal.append_attested_tree_op(op).await
-    }
-
-    async fn get_tree_state(
-        &self,
-    ) -> Result<aura_journal::ratchet_tree::TreeState, aura_core::AuraError> {
-        self.journal.get_tree_state().await
-    }
-
-    async fn get_op_log(&self) -> Result<aura_journal::semilattice::OpLog, aura_core::AuraError> {
-        self.journal.get_op_log().await
-    }
-
-    async fn merge_op_log(
-        &self,
-        remote: aura_journal::semilattice::OpLog,
-    ) -> Result<(), aura_core::AuraError> {
-        self.journal.merge_op_log(remote).await
-    }
-
-    async fn get_attested_op(
-        &self,
-        cid: &aura_core::Hash32,
-    ) -> Result<Option<aura_core::AttestedOp>, aura_core::AuraError> {
-        self.journal.get_attested_op(cid).await
-    }
-
-    async fn list_attested_ops(&self) -> Result<Vec<aura_core::AttestedOp>, aura_core::AuraError> {
-        self.journal.list_attested_ops().await
-    }
-
-    // Delegate other JournalEffects methods to the journal handler
-    async fn get_journal_state(
-        &self,
-    ) -> Result<crate::effects::journal::JournalMap, aura_core::AuraError> {
-        self.journal.get_journal_state().await
-    }
-
-    async fn get_current_tree(
-        &self,
-    ) -> Result<crate::effects::journal::RatchetTree, aura_core::AuraError> {
-        self.journal.get_current_tree().await
-    }
-
-    async fn get_tree_at_epoch(
-        &self,
-        epoch: crate::effects::journal::Epoch,
-    ) -> Result<crate::effects::journal::RatchetTree, aura_core::AuraError> {
-        self.journal.get_tree_at_epoch(epoch).await
-    }
-
-    async fn get_current_commitment(
-        &self,
-    ) -> Result<crate::effects::journal::Commitment, aura_core::AuraError> {
-        self.journal.get_current_commitment().await
-    }
-
-    async fn get_latest_epoch(
-        &self,
-    ) -> Result<Option<crate::effects::journal::Epoch>, aura_core::AuraError> {
-        self.journal.get_latest_epoch().await
-    }
-
-    async fn append_tree_op(
-        &self,
-        op: crate::effects::journal::TreeOpRecord,
-    ) -> Result<(), aura_core::AuraError> {
-        self.journal.append_tree_op(op).await
-    }
-
-    async fn get_tree_op(
-        &self,
-        epoch: crate::effects::journal::Epoch,
-    ) -> Result<Option<crate::effects::journal::TreeOpRecord>, aura_core::AuraError> {
-        self.journal.get_tree_op(epoch).await
-    }
-
-    async fn list_tree_ops(
-        &self,
-    ) -> Result<Vec<crate::effects::journal::TreeOpRecord>, aura_core::AuraError> {
-        self.journal.list_tree_ops().await
-    }
-
-    async fn submit_intent(
-        &self,
-        intent: crate::effects::journal::Intent,
-    ) -> Result<crate::effects::journal::IntentId, aura_core::AuraError> {
-        self.journal.submit_intent(intent).await
-    }
-
-    async fn get_intent(
-        &self,
-        intent_id: crate::effects::journal::IntentId,
-    ) -> Result<Option<crate::effects::journal::Intent>, aura_core::AuraError> {
-        self.journal.get_intent(intent_id).await
-    }
-
-    async fn get_intent_status(
-        &self,
-        intent_id: crate::effects::journal::IntentId,
-    ) -> Result<crate::effects::journal::IntentStatus, aura_core::AuraError> {
-        self.journal.get_intent_status(intent_id).await
-    }
-
-    async fn list_pending_intents(
-        &self,
-    ) -> Result<Vec<crate::effects::journal::Intent>, aura_core::AuraError> {
-        self.journal.list_pending_intents().await
-    }
-
-    async fn tombstone_intent(
-        &self,
-        intent_id: crate::effects::journal::IntentId,
-    ) -> Result<(), aura_core::AuraError> {
-        self.journal.tombstone_intent(intent_id).await
-    }
-
-    async fn prune_stale_intents(
-        &self,
-        current_commitment: crate::effects::journal::Commitment,
-    ) -> Result<usize, aura_core::AuraError> {
-        self.journal.prune_stale_intents(current_commitment).await
-    }
-
-    async fn validate_capability(
-        &self,
-        capability: &crate::effects::journal::CapabilityRef,
-    ) -> Result<bool, aura_core::AuraError> {
-        self.journal.validate_capability(capability).await
-    }
-
-    async fn is_capability_revoked(
-        &self,
-        capability_id: &crate::effects::journal::CapabilityId,
-    ) -> Result<bool, aura_core::AuraError> {
-        self.journal.is_capability_revoked(capability_id).await
-    }
-
-    async fn list_capabilities_in_op(
-        &self,
-        epoch: crate::effects::journal::Epoch,
-    ) -> Result<Vec<crate::effects::journal::CapabilityRef>, aura_core::AuraError> {
-        self.journal.list_capabilities_in_op(epoch).await
-    }
-
-    async fn merge_journal_state(
-        &self,
-        other: crate::effects::journal::JournalMap,
-    ) -> Result<(), aura_core::AuraError> {
-        self.journal.merge_journal_state(other).await
-    }
-
-    async fn get_journal_stats(
-        &self,
-    ) -> Result<crate::effects::journal::JournalStats, aura_core::AuraError> {
-        self.journal.get_journal_stats().await
-    }
-
-    async fn is_device_member(
-        &self,
-        device_id: aura_core::identifiers::DeviceId,
-    ) -> Result<bool, aura_core::AuraError> {
-        self.journal.is_device_member(device_id).await
-    }
-
-    async fn get_device_leaf_index(
-        &self,
-        device_id: aura_core::identifiers::DeviceId,
-    ) -> Result<Option<crate::effects::journal::LeafIndex>, aura_core::AuraError> {
-        self.journal.get_device_leaf_index(device_id).await
-    }
-
-    async fn list_devices(
-        &self,
-    ) -> Result<Vec<aura_core::identifiers::DeviceId>, aura_core::AuraError> {
-        self.journal.list_devices().await
-    }
-
-    async fn list_guardians(
-        &self,
-    ) -> Result<Vec<aura_core::identifiers::GuardianId>, aura_core::AuraError> {
-        self.journal.list_guardians().await
-    }
-
-    // Flow budget methods removed - they belong to aura-core's JournalEffects trait
-}
+// REMOVED: ProtocolJournalEffects implementation - violates crate boundaries
+// All the deprecated methods from local JournalEffects trait have been removed
+// Core JournalEffects is implemented below
 
 // Implement aura-core's JournalEffects for flow budget operations
 #[async_trait]
@@ -1078,7 +953,10 @@ impl CoreJournalEffects for CompositeHandler {
         delta: &aura_core::Journal,
     ) -> Result<aura_core::Journal, aura_core::AuraError> {
         // Delegate to journal handler for CRDT operations
-        self.journal.merge_facts(target, delta).await.map_err(|e| aura_core::AuraError::internal(&format!("merge_facts failed: {}", e)))
+        self.journal
+            .merge_facts(target, delta)
+            .await
+            .map_err(|e| aura_core::AuraError::internal(&format!("merge_facts failed: {}", e)))
     }
 
     async fn refine_caps(
@@ -1086,15 +964,27 @@ impl CoreJournalEffects for CompositeHandler {
         target: &aura_core::Journal,
         refinement: &aura_core::Journal,
     ) -> Result<aura_core::Journal, aura_core::AuraError> {
-        self.journal.refine_caps(target, refinement).await.map_err(|e| aura_core::AuraError::internal(&format!("refine_caps failed: {}", e)))
+        self.journal
+            .refine_caps(target, refinement)
+            .await
+            .map_err(|e| aura_core::AuraError::internal(&format!("refine_caps failed: {}", e)))
     }
 
     async fn get_journal(&self) -> Result<aura_core::Journal, aura_core::AuraError> {
-        self.journal.get_journal().await.map_err(|e| aura_core::AuraError::internal(&format!("get_journal failed: {}", e)))
+        self.journal
+            .get_journal()
+            .await
+            .map_err(|e| aura_core::AuraError::internal(&format!("get_journal failed: {}", e)))
     }
 
-    async fn persist_journal(&self, journal: &aura_core::Journal) -> Result<(), aura_core::AuraError> {
-        self.journal.persist_journal(journal).await.map_err(|e| aura_core::AuraError::internal(&format!("persist_journal failed: {}", e)))
+    async fn persist_journal(
+        &self,
+        journal: &aura_core::Journal,
+    ) -> Result<(), aura_core::AuraError> {
+        self.journal
+            .persist_journal(journal)
+            .await
+            .map_err(|e| aura_core::AuraError::internal(&format!("persist_journal failed: {}", e)))
     }
 
     async fn get_flow_budget(
@@ -1102,7 +992,10 @@ impl CoreJournalEffects for CompositeHandler {
         context: &ContextId,
         peer: &DeviceId,
     ) -> Result<FlowBudget, aura_core::AuraError> {
-        self.journal.get_flow_budget(context, peer).await.map_err(|e| aura_core::AuraError::internal(&format!("get_flow_budget failed: {}", e)))
+        self.journal
+            .get_flow_budget(context, peer)
+            .await
+            .map_err(|e| aura_core::AuraError::internal(&format!("get_flow_budget failed: {}", e)))
     }
 
     async fn update_flow_budget(
@@ -1111,7 +1004,12 @@ impl CoreJournalEffects for CompositeHandler {
         peer: &DeviceId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, aura_core::AuraError> {
-        self.journal.update_flow_budget(context, peer, budget).await.map_err(|e| aura_core::AuraError::internal(&format!("update_flow_budget failed: {}", e)))
+        self.journal
+            .update_flow_budget(context, peer, budget)
+            .await
+            .map_err(|e| {
+                aura_core::AuraError::internal(&format!("update_flow_budget failed: {}", e))
+            })
     }
 
     async fn charge_flow_budget(
@@ -1120,7 +1018,12 @@ impl CoreJournalEffects for CompositeHandler {
         peer: &DeviceId,
         cost: u32,
     ) -> Result<FlowBudget, aura_core::AuraError> {
-        self.journal.charge_flow_budget(context, peer, cost).await.map_err(|e| aura_core::AuraError::internal(&format!("charge_flow_budget failed: {}", e)))
+        self.journal
+            .charge_flow_budget(context, peer, cost)
+            .await
+            .map_err(|e| {
+                aura_core::AuraError::internal(&format!("charge_flow_budget failed: {}", e))
+            })
     }
 }
 
@@ -1222,12 +1125,24 @@ impl SystemEffects for CompositeHandler {
     async fn log(&self, level: &str, component: &str, message: &str) -> Result<(), SystemError> {
         let log_message = format!("[{}] {}: {}", component, level, message);
         match level {
-            "ERROR" => self.console.log_error(&log_message, &[]),
-            "WARN" => self.console.log_warn(&log_message, &[]),
-            "INFO" => self.console.log_info(&log_message, &[]),
-            "DEBUG" => self.console.log_debug(&log_message, &[]),
-            "TRACE" => self.console.log_trace(&log_message, &[]),
-            _ => self.console.log_info(&log_message, &[]),
+            "ERROR" => {
+                self.console.log_error(&log_message).await?;
+            }
+            "WARN" => {
+                self.console.log_warn(&log_message).await?;
+            }
+            "INFO" => {
+                self.console.log_info(&log_message).await?;
+            }
+            "DEBUG" => {
+                self.console.log_debug(&log_message).await?;
+            }
+            "TRACE" => {
+                let _ = self.console.log_debug(&log_message).await;
+            }
+            _ => {
+                self.console.log_info(&log_message).await?;
+            }
         }
         Ok(())
     }
@@ -1243,27 +1158,59 @@ impl SystemEffects for CompositeHandler {
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
-        
-        let log_message = format!("[{}] {}: {}", component, level, message);
+
+        // Format context fields into the message since ConsoleEffects doesn't support fields
+        let context_str = if !context.is_empty() {
+            format!(
+                " [{}]",
+                context
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            String::new()
+        };
+
+        let log_message = format!("[{}] {}: {}{}", component, level, message, context_str);
         match level {
-            "ERROR" => self.console.log_error(&log_message, &fields),
-            "WARN" => self.console.log_warn(&log_message, &fields),
-            "INFO" => self.console.log_info(&log_message, &fields),
-            "DEBUG" => self.console.log_debug(&log_message, &fields),
-            "TRACE" => self.console.log_trace(&log_message, &fields),
-            _ => self.console.log_info(&log_message, &fields),
+            "ERROR" => {
+                self.console.log_error(&log_message).await?;
+            }
+            "WARN" => {
+                self.console.log_warn(&log_message).await?;
+            }
+            "INFO" => {
+                self.console.log_info(&log_message).await?;
+            }
+            "DEBUG" => {
+                self.console.log_debug(&log_message).await?;
+            }
+            "TRACE" => {
+                let _ = self.console.log_debug(&log_message).await;
+            }
+            _ => {
+                self.console.log_info(&log_message).await?;
+            }
         }
         Ok(())
     }
 
-    async fn get_system_info(&self) -> Result<std::collections::HashMap<String, String>, SystemError> {
+    async fn get_system_info(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, SystemError> {
         let mut info = std::collections::HashMap::new();
         info.insert("device_id".to_string(), self.device_id.to_string());
         info.insert("is_simulation".to_string(), self.is_simulation.to_string());
-        info.insert("crypto_capabilities".to_string(), 
-                   self.crypto.crypto_capabilities().join(","));
-        info.insert("execution_mode".to_string(), 
-                   format!("{:?}", self.execution_mode()));
+        info.insert(
+            "crypto_capabilities".to_string(),
+            self.crypto.crypto_capabilities().join(","),
+        );
+        info.insert(
+            "execution_mode".to_string(),
+            format!("{:?}", self.execution_mode()),
+        );
         Ok(info)
     }
 
@@ -1292,21 +1239,21 @@ impl SystemEffects for CompositeHandler {
 
     async fn get_metrics(&self) -> Result<std::collections::HashMap<String, f64>, SystemError> {
         let mut metrics = std::collections::HashMap::new();
-        
+
         // Get storage stats if available
         if let Ok(stats) = self.storage.stats().await {
-            metrics.insert("storage_items".to_string(), stats.total_items as f64);
-            metrics.insert("storage_size_bytes".to_string(), stats.total_size_bytes as f64);
+            metrics.insert("storage_items".to_string(), stats.key_count as f64);
+            metrics.insert("storage_size_bytes".to_string(), stats.total_size as f64);
         }
-        
+
         // Get current epoch from time
         let current_epoch = self.time.current_epoch().await;
         metrics.insert("current_epoch".to_string(), current_epoch as f64);
-        
+
         // Get number of connected peers
         let connected_peers = self.network.connected_peers().await.len();
         metrics.insert("connected_peers".to_string(), connected_peers as f64);
-        
+
         Ok(metrics)
     }
 
@@ -1550,20 +1497,29 @@ impl CompositeHandler {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "log_info" => {
-                let (message, fields): (String, Vec<(String, String)>) =
-                    serde_json::from_slice(parameters).map_err(|e| {
-                        AuraHandlerError::ContextError {
-                            message: format!(
-                                "Failed to deserialize {} parameters: {}",
-                                operation, e
-                            ),
-                        }
-                    })?;
-                let field_refs: Vec<(&str, &str)> = fields
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), v.as_str()))
-                    .collect();
-                self.console.log_info(&message, &field_refs);
+                #[derive(serde::Deserialize)]
+                #[serde(untagged)]
+                enum LogInfoParams {
+                    MessageOnly(String),
+                    MessageWithFields { message: String },
+                }
+
+                let params: LogInfoParams = serde_json::from_slice(parameters).map_err(|e| {
+                    AuraHandlerError::ContextError {
+                        message: format!("Failed to deserialize {} parameters: {}", operation, e),
+                    }
+                })?;
+
+                let message = match params {
+                    LogInfoParams::MessageOnly(msg) => msg,
+                    LogInfoParams::MessageWithFields { message } => message,
+                };
+
+                self.console.log_info(&message).await.map_err(|e| {
+                    AuraHandlerError::ContextError {
+                        message: format!("Console effect {} failed: {}", operation, e),
+                    }
+                })?;
                 Ok(serde_json::to_vec(&()).unwrap_or_default())
             }
             _ => Err(AuraHandlerError::UnknownOperation {
@@ -1685,30 +1641,16 @@ impl CompositeHandler {
         parameters: &[u8],
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
-            "get_journal_state" => {
-                let result = self.journal.get_journal_state().await.map_err(|e| {
+            "get_journal_state" | "get_journal" => {
+                let result = self.journal.get_journal().await.map_err(|e| {
                     AuraHandlerError::ContextError {
                         message: format!("Journal effect {} failed: {}", operation, e),
                     }
                 })?;
                 Ok(serde_json::to_vec(&result).unwrap_or_default())
             }
-            "get_current_tree" => {
-                let result = self.journal.get_current_tree().await.map_err(|e| {
-                    AuraHandlerError::ContextError {
-                        message: format!("Journal effect {} failed: {}", operation, e),
-                    }
-                })?;
-                Ok(serde_json::to_vec(&result).unwrap_or_default())
-            }
-            "get_latest_epoch" => {
-                let result = self.journal.get_latest_epoch().await.map_err(|e| {
-                    AuraHandlerError::ContextError {
-                        message: format!("Journal effect {} failed: {}", operation, e),
-                    }
-                })?;
-                Ok(serde_json::to_vec(&result).unwrap_or_default())
-            }
+            // Legacy operations removed - use TreeEffects for tree operations
+            // "get_current_tree" and "get_latest_epoch" are tree-specific, not journal operations
             _ => Err(AuraHandlerError::UnknownOperation {
                 effect_type: EffectType::Journal,
                 operation: operation.to_string(),

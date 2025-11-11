@@ -63,7 +63,7 @@ impl RecoveryLedger {
     ) -> AuraResult<()> {
         let key = evidence_key(account_id, evidence.issued_at);
         let bytes = to_vec(evidence)
-            .map_err(|e| AuraError::serialization_failed(format!("encode evidence: {}", e)))?;
+            .map_err(|e| AuraError::serialization(format!("encode evidence: {}", e)))?;
 
         StorageEffects::store(&self.effects, &key, bytes)
             .await
@@ -81,7 +81,7 @@ impl RecoveryLedger {
         match StorageEffects::retrieve(&self.effects, &key).await {
             Ok(Some(bytes)) => {
                 let evidence = from_slice(&bytes).map_err(|e| {
-                    AuraError::deserialization_failed(format!("decode evidence: {}", e))
+                    AuraError::serialization(format!("decode evidence: {}", e))
                 })?;
                 Ok(Some(evidence))
             }
@@ -115,7 +115,7 @@ impl RecoveryLedger {
     pub async fn store_session_state(&self, session: &RecoverySessionState) -> AuraResult<()> {
         let key = session_state_key(&session.account_id, &session.requesting_device);
         let bytes = to_vec(session)
-            .map_err(|e| AuraError::serialization_failed(format!("encode session: {}", e)))?;
+            .map_err(|e| AuraError::serialization(format!("encode session: {}", e)))?;
 
         StorageEffects::store(&self.effects, &key, bytes)
             .await
@@ -133,7 +133,7 @@ impl RecoveryLedger {
         match StorageEffects::retrieve(&self.effects, &key).await {
             Ok(Some(bytes)) => {
                 let session = from_slice(&bytes).map_err(|e| {
-                    AuraError::deserialization_failed(format!("decode session: {}", e))
+                    AuraError::serialization(format!("decode session: {}", e))
                 })?;
                 Ok(Some(session))
             }

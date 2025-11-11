@@ -28,15 +28,15 @@ where
         + Sync,
 {
     async fn log_info(&self, message: &str) {
-        self.inner.log_info(&format!("INFO: {}", message), &[]);
+        self.inner.log_info(&format!("INFO: {}", message));
     }
 
     async fn log_warning(&self, message: &str) {
-        self.inner.log_warn(&format!("WARN: {}", message), &[]);
+        self.inner.log_warn(&format!("WARN: {}", message));
     }
 
     async fn log_error(&self, message: &str) {
-        self.inner.log_error(&format!("ERROR: {}", message), &[]);
+        self.inner.log_error(&format!("ERROR: {}", message));
     }
 
     async fn create_dir_all(&self, path: &PathBuf) -> Result<()> {

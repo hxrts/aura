@@ -22,21 +22,21 @@ where
     E: aura_protocol::ConsoleEffects + Send + Sync,
 {
     async fn display(&self, content: &str) {
-        self.inner.log_info(content, &[]);
+        self.inner.log_info(content);
     }
 
     async fn display_error(&self, error: &str) {
-        self.inner.log_error(&format!("ERROR: {}", error), &[]);
+        self.inner.log_error(&format!("ERROR: {}", error));
     }
 
     async fn display_success(&self, message: &str) {
-        self.inner.log_info(&format!("SUCCESS: {}", message), &[]);
+        self.inner.log_info(&format!("SUCCESS: {}", message));
     }
 
     async fn display_progress(&self, message: &str, progress: f64) {
         let percentage = (progress * 100.0).min(100.0).max(0.0);
         self.inner
-            .log_info(&format!("{}: {:.1}%", message, percentage), &[]);
+            .log_info(&format!("{}: {:.1}%", message, percentage));
     }
 
     async fn format_json(&self, data: &Value) -> Result<String> {

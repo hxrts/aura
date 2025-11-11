@@ -57,8 +57,10 @@ petgraph = { workspace = true }
 biscuit-auth = { workspace = true }
 
 [dev-dependencies]
+# Test utilities
 # aura-testkit = { path = "../aura-testkit" }  # Temporarily disabled due to aura-protocol compilation issues
 # aura-protocol = { path = "../aura-protocol" }  # Temporarily disabled due to circular dependency
+async-trait = { workspace = true }
 tokio-test = { workspace = true }
 rand_chacha = { workspace = true }
 proptest = { workspace = true }

@@ -10,7 +10,7 @@ use aura_invitation::{
     relationship_formation::{RelationshipFormationCoordinator, RelationshipFormationRequest, RelationshipType},
 };
 use aura_journal::semilattice::InvitationLedger;
-use aura_protocol::effects::AuraEffectSystem;
+// Note: For testing, use mock handlers from aura-effects
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

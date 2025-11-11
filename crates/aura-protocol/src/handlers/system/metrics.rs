@@ -2,7 +2,6 @@
 
 use crate::effects::{SystemEffects, SystemError};
 use async_trait::async_trait;
-use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

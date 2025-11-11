@@ -6,7 +6,7 @@
 use crate::tree_ops::choreography::TreeOpMessage;
 use aura_core::{
     tree::{AttestedOp, TreeOp},
-    AuraResult, Cap, DeviceId, Epoch, Policy,
+    AuraError, AuraResult, Cap, DeviceId, Epoch, Policy,
 };
 use aura_crypto::Ed25519Signature;
 use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation};
@@ -55,6 +55,16 @@ impl TreeOpChoreography {
             capabilities,
             runtime,
         }
+    }
+
+    /// Execute tree operation with participants
+    pub async fn execute(
+        mut self,
+        operation: TreeOp,
+        _participants: Vec<DeviceId>,
+    ) -> AuraResult<AttestedOp> {
+        let result = self.execute_tree_operation(operation).await?;
+        result.ok_or_else(|| AuraError::invalid("Tree operation failed"))
     }
 
     /// Execute the G_tree_op choreography following the formal model

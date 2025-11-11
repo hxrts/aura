@@ -516,7 +516,7 @@ use aura_protocol::authorization_bridge::{
     AuthorizedEvent,
 };
 use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};
-use aura_wot::{CapabilitySet, NodeIndex, TreeAuthzContext, TreeOp, TreeOpKind};
+use aura_wot::{CapabilitySet, TreeAuthzContext, TreeOp, TreeOpKind};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 

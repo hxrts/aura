@@ -2,13 +2,13 @@
 
 use crate::effects::{SystemEffects, SystemError};
 use async_trait::async_trait;
-use aura_core::{AuraError, DeviceId, SessionId};
-use serde_json::{json, Value};
+use aura_core::{DeviceId, SessionId};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, error, info, warn, Level};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Log entry with structured metadata

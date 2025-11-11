@@ -9,10 +9,13 @@ repository.workspace = true
 
 [dependencies]
 aura-core = { path = "../aura-core" }
-aura-protocol = { path = "../aura-protocol" }
+aura-effects = { path = "../aura-effects" }
 aura-crypto = { path = "../aura-crypto" }
-# rumpsteak-aura removed - using effect system pattern instead
+aura-mpst = { path = "../aura-mpst" }
+rumpsteak-aura = { workspace = true }
+rumpsteak-aura-choreography = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
@@ -21,6 +24,7 @@ futures = { workspace = true }
 tokio = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
+frost-ed25519 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

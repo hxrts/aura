@@ -59,36 +59,71 @@ These commands validate that the development environment is configured correctly
 
 The `just` command runner provides consistent build tasks across different operating systems. All project documentation assumes you are running within the Nix development shell.
 
+## Application Dependencies
+
+When building applications on Aura, choose dependencies based on your architecture layer:
+
+**For Basic Applications** (runtime composition):
+```toml
+[dependencies]
+aura-core = { path = "../aura-core" }      # Effect traits and types
+aura-agent = { path = "../aura-agent" }    # Complete runtime
+```
+
+**For Effect System Libraries** (handler implementations):
+```toml  
+[dependencies]
+aura-core = { path = "../aura-core" }      # Effect traits
+aura-effects = { path = "../aura-effects" } # Standard implementations
+```
+
+**For Protocol Coordination** (distributed protocols):
+```toml
+[dependencies]
+aura-core = { path = "../aura-core" }      # Effect traits
+aura-effects = { path = "../aura-effects" } # Handler implementations  
+aura-protocol = { path = "../aura-protocol" } # Coordination primitives
+aura-mpst = { path = "../aura-mpst" }      # Choreographic DSL
+```
+
+**Never depend on:**
+- `aura-protocol` just to get basic effect handlers (use `aura-effects`)
+- Multiple crates for the same functionality (causes conflicts)
+
 ## First Application
 
 **Create Application Structure:**
 ```rust
+// Import foundational types from aura-core
 use aura_core::{AccountId, DeviceId};
-use aura_journal::{JournalEffects, Entry};
-use aura_protocol::effects::AuraEffectSystem;
+use aura_core::effects::JournalEffects;
+
+// Import runtime composition from aura-agent  
+use aura_agent::AuraAgent;
 
 pub struct CounterApp {
     device_id: DeviceId,
     account_id: AccountId,
-    effects: AuraEffectSystem,
+    agent: AuraAgent,
 }
 
 impl CounterApp {
-    pub fn new(device_id: DeviceId, account_id: AccountId, effects: AuraEffectSystem) -> Self {
-        Self { device_id, account_id, effects }
+    pub fn new(device_id: DeviceId, account_id: AccountId, agent: AuraAgent) -> Self {
+        Self { device_id, account_id, agent }
     }
 }
 ```
 
-The application structure separates business logic from effect handlers. For complete `AuraEffectSystem` documentation, see [Effect System API](500_effect_system_api.md).
+The application structure separates business logic from runtime composition. `AuraAgent` provides a complete runtime that assembles handlers and protocols. For complete effect system documentation, see [Effect System API](500_effect_system_api.md).
 
 **Implement Core Logic:**
 ```rust
 impl CounterApp {
     pub async fn increment(&self, amount: i64) -> Result<(), AppError> {
+        // Use the agent's journal effects
         let entry = Entry::counter_increment(self.device_id, amount);
 
-        self.effects
+        self.agent
             .journal_write_entry(entry)
             .await
             .map_err(AppError::Journal)?;
@@ -98,7 +133,7 @@ impl CounterApp {
 
     pub async fn get_current_value(&self) -> Result<i64, AppError> {
         let query = Query::all_counter_entries(self.account_id);
-        let entries = self.effects
+        let entries = self.agent
             .journal_read_entries(query)
             .await
             .map_err(AppError::Journal)?;
@@ -113,19 +148,21 @@ impl CounterApp {
 }
 ```
 
-Application methods use effect traits to interact with the journal. The CRDT properties ensure counter values converge correctly across devices without explicit synchronization.
+Application methods use the agent's composed effect system to interact with the journal. The `AuraAgent` provides a complete runtime while hiding handler composition complexity. CRDT properties ensure counter values converge correctly across devices.
 
 ## Testing Patterns
 
-**Unit Tests with Mock Effects:**
+**Unit Tests with Testing Runtime:**
 ```rust
 #[tokio::test]
 async fn test_counter_increment() {
     let device_id = DeviceId::new();
     let account_id = AccountId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    
+    // Use testing agent with deterministic handlers from aura-effects
+    let agent = AuraAgent::for_testing(device_id)?;
 
-    let app = CounterApp::new(device_id, account_id, effects);
+    let app = CounterApp::new(device_id, account_id, agent);
 
     app.increment(5).await.unwrap();
     let value = app.get_current_value().await.unwrap();

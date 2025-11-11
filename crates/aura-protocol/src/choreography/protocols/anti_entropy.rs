@@ -12,27 +12,41 @@
 //!
 //! ## CRDT Integration
 //!
-//! This protocol integrates with all four CRDT handlers:
+//! This protocol integrates with all four CRDT handlers using the builder pattern:
+//!
+//! ```ignore
+//! use crate::effects::semilattice::CrdtCoordinator;
+//!
+//! // Create coordinator with convergent CRDT handler
+//! let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_state);
+//!
+//! // Execute anti-entropy protocol
+//! let (result, updated_coordinator) = execute_anti_entropy(
+//!     device_id,
+//!     config,
+//!     is_requester,
+//!     &effect_system,
+//!     coordinator,
+//! ).await?;
+//! ```
+//!
+//! Supported CRDT types:
 //! - CvHandler: Full state synchronization for convergent CRDTs
 //! - CmHandler: Operation-based synchronization with causal ordering
 //! - DeltaHandler: Delta-based synchronization for bandwidth optimization
 //! - MvHandler: Meet-semilattice synchronization for constraint-based CRDTs
 
-use crate::effects::ChoreographyError;
 use crate::effects::{
-    ConsoleEffects, CryptoEffects, RandomEffects,
-    semilattice::{CmHandler, CvHandler, DeltaHandler, MvHandler},
+    CryptoEffects, RandomEffects,
 };
 use crate::guards::{JournalCoupler, JournalCouplerBuilder, ProtocolGuard};
 use aura_core::{
-    semilattice::{CausalOp, CvState, DeltaState, MvState, OpWithCtx},
-    DeviceId, SessionId, CausalContext, VectorClock, Journal,
+    CausalContext, DeviceId, SessionId,
 };
-use aura_mpst::journal_coupling::{JournalAnnotation, JournalOpType};
+use aura_mpst::journal_coupling::JournalAnnotation;
 use aura_wot::Capability;
 use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Anti-entropy choreography configuration
 #[derive(Debug, Clone)]
@@ -173,15 +187,43 @@ pub async fn execute_anti_entropy<CvS, CmS, DeltaS, MvS, Op, Id>(
     config: AntiEntropyConfig,
     is_requester: bool,
     effect_system: &crate::effects::system::AuraEffectSystem,
-    mut crdt_coordinator: crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>,
-) -> Result<(AntiEntropyResult, crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>), AntiEntropyError>
+    mut crdt_coordinator: crate::effects::semilattice::CrdtCoordinator<
+        CvS,
+        CmS,
+        DeltaS,
+        MvS,
+        Op,
+        Id,
+    >,
+) -> Result<
+    (
+        AntiEntropyResult,
+        crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>,
+    ),
+    AntiEntropyError,
+>
 where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
-    CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
+    CmS: aura_core::semilattice::CmApply<Op>
+        + aura_core::semilattice::Dedup<Id>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    DeltaS: aura_core::semilattice::CvState
+        + aura_core::semilattice::DeltaState
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
     DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
-    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
+    MvS: aura_core::semilattice::MvState
+        + aura_core::semilattice::Top
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
     // Validate configuration
@@ -193,10 +235,8 @@ where
     }
 
     // Create handler adapter
-    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
-        device_id,
-        effect_system.execution_mode(),
-    );
+    let mut adapter =
+        crate::choreography::AuraHandlerAdapter::new(device_id, effect_system.execution_mode());
 
     // Execute appropriate role
     let result = if is_requester {
@@ -207,7 +247,8 @@ where
             .copied()
             .ok_or_else(|| AntiEntropyError::InvalidConfig("No responder found".to_string()))?;
 
-        requester_session_with_crdt(&mut adapter, responder_id, &config, &mut crdt_coordinator).await
+        requester_session_with_crdt(&mut adapter, responder_id, &config, &mut crdt_coordinator)
+            .await
     } else {
         let requester_id = config
             .participants
@@ -216,7 +257,8 @@ where
             .copied()
             .ok_or_else(|| AntiEntropyError::InvalidConfig("No requester found".to_string()))?;
 
-        responder_session_with_crdt(&mut adapter, requester_id, &config, &mut crdt_coordinator).await
+        responder_session_with_crdt(&mut adapter, requester_id, &config, &mut crdt_coordinator)
+            .await
     }?;
 
     Ok((result, crdt_coordinator))
@@ -231,15 +273,43 @@ pub async fn execute_anti_entropy_with_guard_chain<CvS, CmS, DeltaS, MvS, Op, Id
     config: AntiEntropyConfig,
     is_requester: bool,
     effect_system: &crate::effects::system::AuraEffectSystem,
-    mut crdt_coordinator: crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>,
-) -> Result<(AntiEntropyResult, crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>), AntiEntropyError>
+    mut crdt_coordinator: crate::effects::semilattice::CrdtCoordinator<
+        CvS,
+        CmS,
+        DeltaS,
+        MvS,
+        Op,
+        Id,
+    >,
+) -> Result<
+    (
+        AntiEntropyResult,
+        crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>,
+    ),
+    AntiEntropyError,
+>
 where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
-    CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
+    CmS: aura_core::semilattice::CmApply<Op>
+        + aura_core::semilattice::Dedup<Id>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    DeltaS: aura_core::semilattice::CvState
+        + aura_core::semilattice::DeltaState
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
     DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
-    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
+    MvS: aura_core::semilattice::MvState
+        + aura_core::semilattice::Top
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
     // Validate configuration
@@ -251,10 +321,8 @@ where
     }
 
     // Create handler adapter
-    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
-        device_id,
-        effect_system.execution_mode(),
-    );
+    let mut adapter =
+        crate::choreography::AuraHandlerAdapter::new(device_id, effect_system.execution_mode());
 
     // Create complete guard chain for anti-entropy operations
     let guard_chain = create_anti_entropy_guard_chain(&config);
@@ -307,11 +375,10 @@ fn create_anti_entropy_guard_chain(config: &AntiEntropyConfig) -> ProtocolGuard 
             Capability::Execute {
                 operation: "sync_state".to_string(),
             },
-            Capability::Send {
-                message_type: "sync_request".to_string(),
-            },
-            Capability::Receive {
-                message_type: "sync_response".to_string(),
+            Capability::Relay {
+                max_bytes_per_period: 1024 * 1024, // 1MB for sync operations
+                period_seconds: 3600,
+                max_streams: 10,
             },
         ])
         .delta_facts(vec![
@@ -335,7 +402,7 @@ fn create_anti_entropy_guard_chain(config: &AntiEntropyConfig) -> ProtocolGuard 
         ])
         .leakage_budget(crate::guards::LeakageBudget::new(
             2, // External adversary: minimal leakage (sync timing)
-            1, // Neighbor adversary: participant information  
+            1, // Neighbor adversary: participant information
             0, // In-group adversary: no additional leakage
         ))
 }
@@ -365,17 +432,39 @@ async fn execute_requester_with_guards<CvS, CmS, DeltaS, MvS, Op, Id>(
     adapter: &mut crate::choreography::AuraHandlerAdapter,
     responder_id: DeviceId,
     config: &AntiEntropyConfig,
-    crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>,
+    crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<
+        CvS,
+        CmS,
+        DeltaS,
+        MvS,
+        Op,
+        Id,
+    >,
     guard_chain: &ProtocolGuard,
     journal_coupler: &JournalCoupler,
 ) -> Result<AntiEntropyResult, AntiEntropyError>
 where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
-    CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
+    CmS: aura_core::semilattice::CmApply<Op>
+        + aura_core::semilattice::Dedup<Id>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    DeltaS: aura_core::semilattice::CvState
+        + aura_core::semilattice::DeltaState
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
     DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
-    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
+    MvS: aura_core::semilattice::MvState
+        + aura_core::semilattice::Top
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
     // Execute the requester logic with full guard chain protection
@@ -386,13 +475,17 @@ where
             |effects| async move {
                 // TODO: Implement core anti-entropy protocol logic
                 // requester_session_with_crdt(adapter, responder_id, config, crdt_coordinator).await
-                Err(aura_core::AuraError::internal("Anti-entropy protocol not yet implemented"))
+                Err(aura_core::AuraError::internal(
+                    "Anti-entropy protocol not yet implemented",
+                ))
             },
         )
         .await
-        .map_err(|e| AntiEntropyError::Handler(crate::handlers::AuraHandlerError::ContextError {
-            message: format!("Guard chain execution failed: {}", e),
-        }))?;
+        .map_err(|e| {
+            AntiEntropyError::Handler(crate::handlers::AuraHandlerError::ContextError {
+                message: format!("Guard chain execution failed: {}", e),
+            })
+        })?;
 
     Ok(coupling_result.result)
 }
@@ -402,17 +495,39 @@ async fn execute_responder_with_guards<CvS, CmS, DeltaS, MvS, Op, Id>(
     adapter: &mut crate::choreography::AuraHandlerAdapter,
     requester_id: DeviceId,
     config: &AntiEntropyConfig,
-    crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>,
+    crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<
+        CvS,
+        CmS,
+        DeltaS,
+        MvS,
+        Op,
+        Id,
+    >,
     guard_chain: &ProtocolGuard,
     journal_coupler: &JournalCoupler,
 ) -> Result<AntiEntropyResult, AntiEntropyError>
 where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
-    CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
+    CmS: aura_core::semilattice::CmApply<Op>
+        + aura_core::semilattice::Dedup<Id>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    DeltaS: aura_core::semilattice::CvState
+        + aura_core::semilattice::DeltaState
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
     DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
-    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
+    MvS: aura_core::semilattice::MvState
+        + aura_core::semilattice::Top
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
     // Execute the responder logic with full guard chain protection
@@ -421,15 +536,19 @@ where
             adapter.effects_mut(),
             journal_coupler,
             |effects| async move {
-                // TODO: Implement core anti-entropy protocol logic  
+                // TODO: Implement core anti-entropy protocol logic
                 // responder_session_with_crdt(adapter, requester_id, config, crdt_coordinator).await
-                Err(aura_core::AuraError::internal("Anti-entropy responder protocol not yet implemented"))
+                Err(aura_core::AuraError::internal(
+                    "Anti-entropy responder protocol not yet implemented",
+                ))
             },
         )
         .await
-        .map_err(|e| AntiEntropyError::Handler(crate::handlers::AuraHandlerError::ContextError {
-            message: format!("Guard chain execution failed: {}", e),
-        }))?;
+        .map_err(|e| {
+            AntiEntropyError::Handler(crate::handlers::AuraHandlerError::ContextError {
+                message: format!("Guard chain execution failed: {}", e),
+            })
+        })?;
 
     Ok(coupling_result.result)
 }
@@ -439,15 +558,37 @@ async fn requester_session_with_crdt<CvS, CmS, DeltaS, MvS, Op, Id>(
     adapter: &mut crate::choreography::AuraHandlerAdapter,
     responder_id: DeviceId,
     config: &AntiEntropyConfig,
-    crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>,
+    crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<
+        CvS,
+        CmS,
+        DeltaS,
+        MvS,
+        Op,
+        Id,
+    >,
 ) -> Result<AntiEntropyResult, AntiEntropyError>
 where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
-    CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
+    CmS: aura_core::semilattice::CmApply<Op>
+        + aura_core::semilattice::Dedup<Id>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    DeltaS: aura_core::semilattice::CvState
+        + aura_core::semilattice::DeltaState
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
     DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
-    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
+    MvS: aura_core::semilattice::MvState
+        + aura_core::semilattice::Top
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
     let session_id = SessionId::new();
@@ -505,13 +646,15 @@ where
 
     // Phase 5: CRDT synchronization - request for each supported CRDT type
     let mut total_sync_ops = 0;
-    
+
     // Sync convergent CRDTs
     if crdt_coordinator.has_handler(CrdtType::Convergent) {
         let cv_request = crdt_coordinator
             .create_sync_request(session_id.clone(), CrdtType::Convergent)
-            .map_err(|e| AntiEntropyError::SyncFailed(format!("Failed to create CV sync request: {}", e)))?;
-        
+            .map_err(|e| {
+                AntiEntropyError::SyncFailed(format!("Failed to create CV sync request: {}", e))
+            })?;
+
         adapter.send(responder_id, cv_request).await.map_err(|e| {
             AntiEntropyError::Communication(format!("Failed to send CV sync request: {}", e))
         })?;
@@ -520,9 +663,12 @@ where
             AntiEntropyError::Communication(format!("Failed to receive CV sync response: {}", e))
         })?;
 
-        crdt_coordinator.handle_sync_response(cv_response).await.map_err(|e| {
-            AntiEntropyError::SyncFailed(format!("Failed to handle CV sync response: {}", e))
-        })?;
+        crdt_coordinator
+            .handle_sync_response(cv_response)
+            .await
+            .map_err(|e| {
+                AntiEntropyError::SyncFailed(format!("Failed to handle CV sync response: {}", e))
+            })?;
         total_sync_ops += 1;
     }
 
@@ -530,8 +676,10 @@ where
     if crdt_coordinator.has_handler(CrdtType::Commutative) {
         let cm_request = crdt_coordinator
             .create_sync_request(session_id.clone(), CrdtType::Commutative)
-            .map_err(|e| AntiEntropyError::SyncFailed(format!("Failed to create CM sync request: {}", e)))?;
-        
+            .map_err(|e| {
+                AntiEntropyError::SyncFailed(format!("Failed to create CM sync request: {}", e))
+            })?;
+
         adapter.send(responder_id, cm_request).await.map_err(|e| {
             AntiEntropyError::Communication(format!("Failed to send CM sync request: {}", e))
         })?;
@@ -540,9 +688,12 @@ where
             AntiEntropyError::Communication(format!("Failed to receive CM sync response: {}", e))
         })?;
 
-        crdt_coordinator.handle_sync_response(cm_response).await.map_err(|e| {
-            AntiEntropyError::SyncFailed(format!("Failed to handle CM sync response: {}", e))
-        })?;
+        crdt_coordinator
+            .handle_sync_response(cm_response)
+            .await
+            .map_err(|e| {
+                AntiEntropyError::SyncFailed(format!("Failed to handle CM sync response: {}", e))
+            })?;
         total_sync_ops += 1;
     }
 
@@ -550,19 +701,31 @@ where
     if crdt_coordinator.has_handler(CrdtType::Delta) {
         let delta_request = crdt_coordinator
             .create_sync_request(session_id.clone(), CrdtType::Delta)
-            .map_err(|e| AntiEntropyError::SyncFailed(format!("Failed to create Delta sync request: {}", e)))?;
-        
-        adapter.send(responder_id, delta_request).await.map_err(|e| {
-            AntiEntropyError::Communication(format!("Failed to send Delta sync request: {}", e))
-        })?;
+            .map_err(|e| {
+                AntiEntropyError::SyncFailed(format!("Failed to create Delta sync request: {}", e))
+            })?;
 
-        let delta_response: CrdtSyncResponse = adapter.recv_from(responder_id).await.map_err(|e| {
-            AntiEntropyError::Communication(format!("Failed to receive Delta sync response: {}", e))
-        })?;
+        adapter
+            .send(responder_id, delta_request)
+            .await
+            .map_err(|e| {
+                AntiEntropyError::Communication(format!("Failed to send Delta sync request: {}", e))
+            })?;
 
-        crdt_coordinator.handle_sync_response(delta_response).await.map_err(|e| {
-            AntiEntropyError::SyncFailed(format!("Failed to handle Delta sync response: {}", e))
-        })?;
+        let delta_response: CrdtSyncResponse =
+            adapter.recv_from(responder_id).await.map_err(|e| {
+                AntiEntropyError::Communication(format!(
+                    "Failed to receive Delta sync response: {}",
+                    e
+                ))
+            })?;
+
+        crdt_coordinator
+            .handle_sync_response(delta_response)
+            .await
+            .map_err(|e| {
+                AntiEntropyError::SyncFailed(format!("Failed to handle Delta sync response: {}", e))
+            })?;
         total_sync_ops += 1;
     }
 
@@ -570,8 +733,10 @@ where
     if crdt_coordinator.has_handler(CrdtType::Meet) {
         let mv_request = crdt_coordinator
             .create_sync_request(session_id, CrdtType::Meet)
-            .map_err(|e| AntiEntropyError::SyncFailed(format!("Failed to create MV sync request: {}", e)))?;
-        
+            .map_err(|e| {
+                AntiEntropyError::SyncFailed(format!("Failed to create MV sync request: {}", e))
+            })?;
+
         adapter.send(responder_id, mv_request).await.map_err(|e| {
             AntiEntropyError::Communication(format!("Failed to send MV sync request: {}", e))
         })?;
@@ -580,9 +745,12 @@ where
             AntiEntropyError::Communication(format!("Failed to receive MV sync response: {}", e))
         })?;
 
-        crdt_coordinator.handle_sync_response(mv_response).await.map_err(|e| {
-            AntiEntropyError::SyncFailed(format!("Failed to handle MV sync response: {}", e))
-        })?;
+        crdt_coordinator
+            .handle_sync_response(mv_response)
+            .await
+            .map_err(|e| {
+                AntiEntropyError::SyncFailed(format!("Failed to handle MV sync response: {}", e))
+            })?;
         total_sync_ops += 1;
     }
 
@@ -598,15 +766,37 @@ async fn responder_session_with_crdt<CvS, CmS, DeltaS, MvS, Op, Id>(
     adapter: &mut crate::choreography::AuraHandlerAdapter,
     requester_id: DeviceId,
     _config: &AntiEntropyConfig,
-    crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>,
+    crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<
+        CvS,
+        CmS,
+        DeltaS,
+        MvS,
+        Op,
+        Id,
+    >,
 ) -> Result<AntiEntropyResult, AntiEntropyError>
 where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
-    CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
+    CmS: aura_core::semilattice::CmApply<Op>
+        + aura_core::semilattice::Dedup<Id>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    DeltaS: aura_core::semilattice::CvState
+        + aura_core::semilattice::DeltaState
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
     DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
-    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
+    MvS: aura_core::semilattice::MvState
+        + aura_core::semilattice::Top
+        + Serialize
+        + serde::de::DeserializeOwned
+        + 'static,
+    Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext>
+        + Serialize
+        + serde::de::DeserializeOwned
+        + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
     // Phase 1: Receive digest request
@@ -665,19 +855,29 @@ where
 
     // The responder now waits for and handles CRDT sync requests
     // We handle requests for each CRDT type that we support
-    for _ in 0..4 {  // Maximum 4 CRDT types
+    for _ in 0..4 {
+        // Maximum 4 CRDT types
         match adapter.recv_from::<CrdtSyncRequest>(requester_id).await {
             Ok(sync_request) => {
                 let sync_response = crdt_coordinator
                     .handle_sync_request(sync_request)
                     .await
                     .map_err(|e| {
-                        AntiEntropyError::SyncFailed(format!("Failed to handle CRDT sync request: {}", e))
+                        AntiEntropyError::SyncFailed(format!(
+                            "Failed to handle CRDT sync request: {}",
+                            e
+                        ))
                     })?;
 
-                adapter.send(requester_id, sync_response).await.map_err(|e| {
-                    AntiEntropyError::Communication(format!("Failed to send CRDT sync response: {}", e))
-                })?;
+                adapter
+                    .send(requester_id, sync_response)
+                    .await
+                    .map_err(|e| {
+                        AntiEntropyError::Communication(format!(
+                            "Failed to send CRDT sync response: {}",
+                            e
+                        ))
+                    })?;
 
                 total_sync_responses += 1;
             }

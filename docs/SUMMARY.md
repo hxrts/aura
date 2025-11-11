@@ -29,5 +29,6 @@
 - [CRDT Programming Guide](802_crdt_programming_guide.md)
 - [Protocol Development Guide](803_protocol_development_guide.md)
 - [Deployment Guide](804_deployment_guide.md)
+- [Choreography Programming Guide](805_choreography_programming_guide.md)
 - [099 · Architectural Glossary](998_glossary.md)
 - [Aura Crate Dependency Graph and API Reference](999_crate_wiring.md)

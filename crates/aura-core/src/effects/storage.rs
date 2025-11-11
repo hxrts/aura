@@ -53,6 +53,31 @@ pub enum StorageError {
     /// Permission denied for storage operation
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
+    /// Encryption failed
+    #[error("Encryption failed: {reason}")]
+    EncryptionFailed { reason: String },
+    /// Decryption failed
+    #[error("Decryption failed: {reason}")]
+    DecryptionFailed { reason: String },
+    /// Integrity check failed
+    #[error("Integrity check failed for key {key}: expected {expected}, got {actual}")]
+    IntegrityCheckFailed {
+        key: String,
+        expected: String,
+        actual: String,
+    },
+    /// Invalid key format
+    #[error("Invalid key: {reason}")]
+    InvalidKey { reason: String },
+    /// Storage space exhausted
+    #[error("Storage space exhausted: {available} available, {required} required")]
+    SpaceExhausted { available: u64, required: u64 },
+    /// Configuration error
+    #[error("Configuration error: {reason}")]
+    ConfigurationError { reason: String },
+    /// Data corruption detected
+    #[error("Data corruption detected: {details}")]
+    CorruptionDetected { details: String },
 }
 
 /// Storage statistics

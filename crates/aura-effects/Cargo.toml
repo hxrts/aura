@@ -1,0 +1,66 @@
+# Aura Effects - Standard Effect Handler Implementations
+[package]
+name = "aura-effects"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Standard library of context-free effect handler implementations"
+keywords = ["effects", "handlers", "algebraic-effects", "runtime"]
+categories = ["development-tools"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Core traits (interface layer)
+aura-core = { path = "../aura-core" }
+
+# Domain crates (for specialized types)
+aura-crypto = { path = "../aura-crypto" }
+aura-journal = { path = "../aura-journal" }
+aura-transport = { path = "../aura-transport" }
+# NOTE: aura-store creates circular dependency (aura-store → aura-protocol → aura-effects)
+# Encrypted storage handler belongs in a higher layer
+# aura-store = { path = "../aura-store" }
+
+# Async runtime
+tokio = { workspace = true }
+tokio-stream = "0.1"
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+
+# Cryptography
+ed25519-dalek = { workspace = true }
+frost-ed25519 = { workspace = true }
+blake3 = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+hmac = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }
+aes-gcm = { workspace = true }
+getrandom = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+once_cell = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[features]
+default = []

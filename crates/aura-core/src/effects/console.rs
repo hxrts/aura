@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 /// Pure trait for console/logging operations
 #[async_trait]
-pub trait ConsoleEffects {
+pub trait ConsoleEffects: Send + Sync {
     /// Log an info message
     async fn log_info(&self, message: &str) -> Result<(), AuraError>;
 

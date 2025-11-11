@@ -173,7 +173,7 @@ impl CausalContext {
 }
 
 /// Operation identifier for dependency tracking
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct OperationId {
     /// The actor that created the operation
     pub actor: ActorId,

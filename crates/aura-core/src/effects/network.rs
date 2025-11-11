@@ -54,6 +54,54 @@ pub enum NetworkError {
     /// Operation is not implemented
     #[error("Not implemented")]
     NotImplemented,
+    /// Operation timed out
+    #[error("Operation '{operation}' timed out after {timeout_ms}ms")]
+    OperationTimeout {
+        /// The operation that timed out
+        operation: String,
+        /// Timeout duration in milliseconds
+        timeout_ms: u64,
+    },
+    /// Request retry limit exceeded
+    #[error("Retry limit exceeded after {attempts} attempts. Last error: {last_error}")]
+    RetryLimitExceeded {
+        /// Number of retry attempts made
+        attempts: usize,
+        /// Error message from the last attempt
+        last_error: String,
+    },
+    /// Circuit breaker is open
+    #[error("Circuit breaker is open: {reason}")]
+    CircuitBreakerOpen {
+        /// Reason the circuit breaker was opened
+        reason: String,
+    },
+    /// Peer unreachable
+    #[error("Peer unreachable: {peer_id}")]
+    PeerUnreachable {
+        /// Identifier of the unreachable peer
+        peer_id: String,
+    },
+    /// Network partition detected
+    #[error("Network partition detected: {details}")]
+    NetworkPartition {
+        /// Details about the detected partition
+        details: String,
+    },
+    /// Message validation failed
+    #[error("Message validation failed: {reason}")]
+    ValidationFailed {
+        /// Reason validation failed
+        reason: String,
+    },
+    /// Rate limit exceeded
+    #[error("Rate limit exceeded: {limit} requests per {window_ms}ms window")]
+    RateLimitExceeded {
+        /// Request limit
+        limit: usize,
+        /// Time window in milliseconds
+        window_ms: u64,
+    },
 }
 
 /// Stream type for peer connection events
@@ -64,7 +112,7 @@ pub type PeerEventStream = std::pin::Pin<Box<dyn futures::Stream<Item = PeerEven
 pub enum PeerEvent {
     /// Peer connected
     Connected(Uuid),
-    /// Peer disconnected  
+    /// Peer disconnected
     Disconnected(Uuid),
     /// Connection failed
     ConnectionFailed(Uuid, String),

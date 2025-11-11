@@ -99,7 +99,7 @@ pub use effects::{
     AntiEntropyConfig, AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats,
     AuraEffects, BloomDigest, ChoreographicEffects, ChoreographicRole, ChoreographyEvent,
     ChoreographyMetrics, ConsoleEffects, ConsoleEvent, CryptoEffects, DeviceMetadata,
-    JournalEffects, LedgerEffects, LedgerError, LedgerEvent, LedgerEventStream, LogLevel,
+    JournalEffects, LedgerEffects, LedgerError, LedgerEvent, LedgerEventStream,
     NetworkAddress, NetworkEffects, NetworkError, RandomEffects, StorageEffects, StorageError,
     StorageLocation, SyncEffects, SyncError, TimeEffects, WakeCondition,
 };

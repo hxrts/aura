@@ -84,6 +84,30 @@ Property-based tests verify these laws automatically during development. Any vio
 
 Capability delegation enables temporary authority transfer with proper attenuation. Each delegation step can only grant capabilities that the delegator currently possesses. Delegation depth limits prevent unbounded chain length.
 
+The following diagram illustrates how capabilities shrink with each delegation step using the `meet` operation.
+
+```mermaid
+graph TD
+    subgraph "Initial State"
+        Alice_Caps["Alice<br/>Capabilities: {Read, Write, Share}"]
+    end
+
+    subgraph "Step 1: Alice delegates to Bob"
+        Alice_Delegates["Alice grants {Read, Write} to Bob"]
+        Bob_Receives["Bob's effective capabilities become<br/>meet(Alice's Caps, Grant) = {Read, Write}"]
+    end
+
+    subgraph "Step 2: Bob delegates to Charlie"
+        Bob_Delegates["Bob grants {Read} to Charlie"]
+        Charlie_Receives["Charlie's effective capabilities become<br/>meet(Bob's Caps, Grant) = {Read}"]
+    end
+
+    Alice_Caps -- grants --> Alice_Delegates;
+    Alice_Delegates --> Bob_Receives;
+    Bob_Receives -- grants --> Bob_Delegates;
+    Bob_Delegates --> Charlie_Receives;
+```
+
 ```rust
 pub struct DelegationLink {
     pub delegator: DeviceId,
@@ -125,6 +149,28 @@ Guardian threshold policies specify required approvals for different operation t
 ### Journal Integration
 
 Trust relationships persist in the journal as CRDT facts using join-semilattice semantics. Relationship facts accumulate trust evidence over time. Trust downgrades require explicit negative facts rather than removal.
+
+The diagram below shows how a trust relationship is created, stored in the journal, synchronized across the network as a CRDT, and then used for authorization.
+
+```mermaid
+sequenceDiagram
+    participant User as "User Action"
+    participant App as "Application Logic"
+    participant Journal as "Journal (CRDT)"
+    participant Network as "Network Sync"
+    participant AuthZ as "Authorization Logic"
+
+    User->>App: 1. Initiates action to trust another user
+    App->>Journal: 2. Creates and writes a `TrustRelationshipFact`
+    Journal->>Network: 3. Journal syncs facts via CRDT anti-entropy
+    Network->>Journal: 4. Remote facts are merged into local journal
+
+    User->>App: 5. Initiates action requiring authorization
+    App->>AuthZ: 6. Requests authorization check
+    AuthZ->>Journal: 7. Queries journal for relevant trust facts
+    Journal-->>AuthZ: 8. Returns stored trust facts
+    AuthZ-->>App: 9. Returns "Allowed" or "Denied"
+```
 
 ```rust
 pub struct TrustRelationshipFact {

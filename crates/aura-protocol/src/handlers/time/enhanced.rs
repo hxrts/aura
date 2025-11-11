@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Notify, RwLock};
-use tokio::time::{sleep, sleep_until, Instant};
+use tokio::time::{sleep, Instant};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -88,7 +88,7 @@ impl EnhancedTimeHandler {
         let stats = self.stats.clone();
 
         tokio::spawn(async move {
-            let mut receiver_opt = timeout_rx.write().await.take();
+            let receiver_opt = timeout_rx.write().await.take();
 
             if let Some(mut receiver) = receiver_opt {
                 while let Some(timeout_id) = receiver.recv().await {

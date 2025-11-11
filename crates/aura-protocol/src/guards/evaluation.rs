@@ -3,7 +3,7 @@
 //! This module implements the `need(σ) ≤ C` checking required by the formal model.
 //! It bridges the protocol layer with the capability calculus implemented in aura-wot.
 
-use super::{ExecutionMetrics, ProtocolGuard};
+use super::ProtocolGuard;
 use crate::effects::system::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_wot::{Capability, CapabilityEvaluator, EffectSystemInterface, EffectiveCapabilitySet};

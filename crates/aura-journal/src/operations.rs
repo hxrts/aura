@@ -359,8 +359,7 @@ pub enum JournalOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{DeviceIdExt, GuardianIdExt};
-    use aura_crypto::Effects;
+    use uuid::Uuid;
 
     #[test]
     fn test_operation_id_deterministic() {
@@ -372,18 +371,16 @@ mod tests {
 
     #[test]
     fn test_operation_conflicts() {
-        let effects = Effects::test();
-        let device_id = DeviceId::new_with_effects(&effects);
+        // Use fixed test data instead of effects-based generation
+        let device_id = DeviceId(Uuid::new_v4());
 
         let add_op = Operation::AddDevice {
             device: DeviceMetadata {
                 device_id,
                 device_name: "Test".to_string(),
                 device_type: crate::types::DeviceType::Native,
-                public_key: aura_crypto::Ed25519SigningKey::from_bytes(
-                    &effects.random_bytes::<32>(),
-                )
-                .verifying_key(),
+                public_key: aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32])
+                    .verifying_key(),
                 added_at: 1000,
                 last_seen: 1000,
                 dkd_commitment_proofs: std::collections::BTreeMap::new(),

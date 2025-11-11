@@ -6,8 +6,7 @@
 use crate::access_control::{
     StorageAccessControl, StorageAccessRequest, StorageOperation, StorageResource,
 };
-use aura_core::{AccountId, AuraResult, ContentId, DeviceId};
-use aura_mpst::CapabilityGuard;
+use aura_core::{AccountId, AuraResult, ContentId, DeviceId, Hash32};
 use aura_protocol::effects::{AuraEffectSystem, NetworkEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -596,14 +595,14 @@ mod tests {
 
         let results = vec![
             SearchResult {
-                content_id: ContentId::new([0u8; 32]),
+                content_id: ContentId::new(Hash32([0u8; 32])),
                 owner: None,
                 score: 0.9,
                 snippet: None,
                 required_capabilities: vec![],
             },
             SearchResult {
-                content_id: ContentId::new([0u8; 32]),
+                content_id: ContentId::new(Hash32([0u8; 32])),
                 owner: None,
                 score: 0.7,
                 snippet: None,

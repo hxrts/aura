@@ -15,14 +15,16 @@ default = []
 
 [dependencies]
 # Workspace crates
+aura-core = { path = "../aura-core" }
+aura-effects = { path = "../aura-effects" }
 aura-crypto = { path = "../aura-crypto" }
 aura-journal = { path = "../aura-journal" }
-aura-core = { path = "../aura-core" }
 aura-verify = { path = "../aura-verify" }
 aura-wot = { path = "../aura-wot" }
 aura-identity = { path = "../aura-identity" }
 aura-transport = { path = "../aura-transport" }
 aura-mpst = { path = "../aura-mpst" }
+# aura-frost = { path = "../aura-frost" }  # Temporarily excluded - has FROST API issues
 
 # Curve operations
 curve25519-dalek = { workspace = true }
@@ -36,6 +38,8 @@ sha2 = { workspace = true }
 blake3 = { workspace = true }
 hmac = { workspace = true }
 hkdf = { workspace = true }
+aes-gcm = { workspace = true }
+getrandom = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

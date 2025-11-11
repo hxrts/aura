@@ -14,7 +14,7 @@ aura-verify = { path = "../aura-verify" }
 aura-authenticate = { path = "../aura-authenticate" }
 aura-wot = { path = "../aura-wot" }
 aura-crypto = { path = "../aura-crypto" }
-aura-frost = { path = "../aura-frost" }
+# aura-frost = { path = "../aura-frost" }  # Temporarily excluded - has FROST API issues
 aura-protocol = { path = "../aura-protocol" }
 rumpsteak-aura = { workspace = true }
 serde = { workspace = true }
@@ -31,7 +31,7 @@ blake3 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
-aura-testkit = { path = "../aura-testkit" }
+# aura-testkit = { path = "../aura-testkit" }  # Temporarily disabled due to workspace exclusion
 
 [lints]
 workspace = true

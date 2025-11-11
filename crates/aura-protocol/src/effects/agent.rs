@@ -5,8 +5,7 @@
 
 use async_trait::async_trait;
 use aura_core::{
-    identifiers::{AccountId, DeviceId, SessionId},
-    AuraError, AuraResult as Result,
+    identifiers::{AccountId, DeviceId, SessionId}, AuraResult as Result,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -286,6 +285,15 @@ pub trait ConfigurationEffects: Send + Sync {
 
     /// Validate configuration settings
     async fn validate_config(&self, config: &DeviceConfig) -> Result<Vec<ConfigValidationError>>;
+    
+    /// Get configuration value as JSON
+    async fn get_config_json(&self, key: &str) -> Result<Option<serde_json::Value>>;
+    
+    /// Set configuration value as JSON
+    async fn set_config_json(&self, key: &str, value: &serde_json::Value) -> Result<()>;
+    
+    /// Get all configuration as key-value pairs
+    async fn get_all_config(&self) -> Result<std::collections::HashMap<String, serde_json::Value>>;
 }
 
 /// Device configuration structure
@@ -325,3 +333,32 @@ pub struct ConfigValidationError {
     pub error: String,
     pub suggested_value: Option<serde_json::Value>,
 }
+
+/// Configuration operation error
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConfigError {
+    /// Configuration key not found
+    NotFound(String),
+    /// Invalid JSON value
+    InvalidJson(String),
+    /// Serialization/deserialization error
+    SerializationError(String),
+    /// Storage error
+    StorageError(String),
+    /// Permission denied
+    PermissionDenied(String),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::NotFound(key) => write!(f, "Configuration key not found: {}", key),
+            ConfigError::InvalidJson(msg) => write!(f, "Invalid JSON value: {}", msg),
+            ConfigError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+            ConfigError::StorageError(msg) => write!(f, "Storage error: {}", msg),
+            ConfigError::PermissionDenied(msg) => write!(f, "Permission denied: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}

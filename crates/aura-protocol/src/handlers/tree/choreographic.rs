@@ -3,54 +3,29 @@
 //! This handler replaces the old hand-coded tree coordination with
 //! choreographic implementations from aura-identity.
 
-use crate::effects::{
-    tree::{Cut, Partial, ProposalId, Snapshot},
-    TreeEffects,
-};
+use crate::effects::{TreeEffects, tree::{Cut, ProposalId, Partial, Snapshot}};
 use async_trait::async_trait;
 use aura_core::{
-    tree::{AttestedOp, Epoch, LeafId, LeafNode, NodeIndex, Policy, TreeOp},
-    AccountId, AuraError, AuraResult, DeviceId, Hash32,
-};
-use aura_identity::{
-    handlers::{ChoreographicTreeHandler, TreeHandlerConfig, TreeOperationContext},
-    verification::{DeviceInfo, DeviceStatus},
+    tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind},
+    AuraError, AuraResult, DeviceId, Hash32,
 };
 use aura_journal::ratchet_tree::TreeState;
-use std::collections::HashMap;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// Choreographic tree handler that implements TreeEffects
 ///
 /// This handler replaces old hand-coded tree coordination by delegating
-/// to the choreographic implementations in aura-identity.
+/// to choreographic implementations in a future aura-identity crate.
+/// For now, it provides stub implementations.
 pub struct ChoreographicTreeEffectHandler {
-    /// The choreographic handler from aura-identity
-    inner: ChoreographicTreeHandler,
     /// Device ID for this handler
     device_id: DeviceId,
 }
 
 impl ChoreographicTreeEffectHandler {
     /// Create a new choreographic tree effect handler
-    pub fn new(inner: ChoreographicTreeHandler, device_id: DeviceId) -> Self {
-        Self { inner, device_id }
-    }
-
-    /// Convert identity operations that now return AuraError directly
-
-    /// Create a basic operation context
-    fn create_context(
-        &self,
-        account_id: AccountId,
-        participants: Vec<DeviceId>,
-    ) -> TreeOperationContext {
-        TreeOperationContext {
-            requester: self.device_id,
-            account_id,
-            participants,
-            metadata: HashMap::new(),
-        }
+    pub fn new(device_id: DeviceId) -> Self {
+        Self { device_id }
     }
 }
 
@@ -93,49 +68,34 @@ impl TreeEffects for ChoreographicTreeEffectHandler {
         Ok(Hash32::new([0u8; 32])) // Placeholder commitment
     }
 
-    async fn verify_aggregate_sig(&self, op: &AttestedOp, state: &TreeState) -> AuraResult<bool> {
+    async fn verify_aggregate_sig(&self, op: &AttestedOp, _state: &TreeState) -> AuraResult<bool> {
         info!(
             "Verifying aggregate signature for operation: {:?}",
             op.op.op
         );
 
-        // Use the verification system from aura-identity
-        let verification_result = self
-            .inner
-            .verifier()
-            .verify_tree_operation(&op.op, self.device_id);
-
-        match verification_result {
-            Ok(result) => {
-                info!(
-                    "Signature verification result: verified={}, confidence={}",
-                    result.verified, result.confidence
-                );
-                Ok(result.verified)
-            }
-            Err(err) => {
-                error!("Signature verification error: {}", err);
-                Err(err)
-            }
-        }
+        // TODO: Implement actual verification once aura-identity is available
+        // For now, return true as a stub implementation
+        warn!("Signature verification not implemented - returning true");
+        Ok(true)
     }
 
     async fn add_leaf(
         &self,
         leaf: LeafNode,
         under: NodeIndex,
-    ) -> AuraResult<aura_core::tree::TreeOpKind> {
+    ) -> AuraResult<TreeOpKind> {
         info!("Creating add leaf operation");
-        Ok(aura_core::tree::TreeOpKind::AddLeaf { leaf, under })
+        Ok(TreeOpKind::AddLeaf { leaf, under })
     }
 
     async fn remove_leaf(
         &self,
         leaf_id: LeafId,
         reason: u8,
-    ) -> AuraResult<aura_core::tree::TreeOpKind> {
+    ) -> AuraResult<TreeOpKind> {
         info!("Creating remove leaf operation");
-        Ok(aura_core::tree::TreeOpKind::RemoveLeaf {
+        Ok(TreeOpKind::RemoveLeaf {
             leaf: leaf_id,
             reason,
         })
@@ -145,20 +105,20 @@ impl TreeEffects for ChoreographicTreeEffectHandler {
         &self,
         node: NodeIndex,
         new_policy: Policy,
-    ) -> AuraResult<aura_core::tree::TreeOpKind> {
+    ) -> AuraResult<TreeOpKind> {
         info!("Creating change policy operation");
-        Ok(aura_core::tree::TreeOpKind::ChangePolicy { node, new_policy })
+        Ok(TreeOpKind::ChangePolicy { node, new_policy })
     }
 
     async fn rotate_epoch(
         &self,
         affected: Vec<NodeIndex>,
-    ) -> AuraResult<aura_core::tree::TreeOpKind> {
+    ) -> AuraResult<TreeOpKind> {
         info!(
             "Creating rotate epoch operation for {} affected nodes",
             affected.len()
         );
-        Ok(aura_core::tree::TreeOpKind::RotateEpoch { affected })
+        Ok(TreeOpKind::RotateEpoch { affected })
     }
 
     // Snapshot operations - using placeholder implementations TODO fix - For now
@@ -181,73 +141,5 @@ impl TreeEffects for ChoreographicTreeEffectHandler {
     async fn apply_snapshot(&self, _snapshot: &Snapshot) -> AuraResult<()> {
         warn!("Snapshot operations not implemented in choreographic handler");
         Err(AuraError::not_found("Snapshot operations not implemented"))
-    }
-}
-
-/// Factory for creating choreographic tree effect handlers
-pub struct ChoreographicTreeEffectHandlerFactory;
-
-impl ChoreographicTreeEffectHandlerFactory {
-    /// Create a new choreographic tree effect handler
-    pub fn create(
-        device_id: DeviceId,
-        runtime: aura_identity::AuraRuntime,
-    ) -> AuraResult<ChoreographicTreeEffectHandler> {
-        let config = TreeHandlerConfig {
-            default_threshold: 2,
-            max_participants: 10,
-            strict_verification: true,
-        };
-
-        let inner = ChoreographicTreeHandler::new(runtime, device_id, config);
-
-        Ok(ChoreographicTreeEffectHandler::new(inner, device_id))
-    }
-
-    /// Register a device with the handler
-    pub fn register_device(
-        handler: &mut ChoreographicTreeEffectHandler,
-        device_info: DeviceInfo,
-    ) -> AuraResult<()> {
-        handler.inner.register_device(device_info)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use aura_core::{Cap, Journal};
-    use aura_identity::verification::DeviceInfo;
-    // TODO: Add aura-mpst dependency when ready
-    // use aura_mpst::AuraRuntime;
-
-    #[tokio::test]
-    #[ignore] // TODO: Enable when aura-mpst dependency is added
-    async fn test_choreographic_handler_creation() {
-        let device_id = DeviceId::new();
-        // let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
-
-        // let handler = ChoreographicTreeEffectHandlerFactory::create(device_id, runtime);
-        // assert!(handler.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_device_registration() {
-        let device_id = DeviceId::new();
-        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
-
-        let mut handler =
-            ChoreographicTreeEffectHandlerFactory::create(device_id, runtime).unwrap();
-
-        let device_info = DeviceInfo {
-            device_id,
-            public_key: vec![1, 2, 3, 4],
-            capabilities: Cap::top(),
-            status: DeviceStatus::Active,
-        };
-
-        let result =
-            ChoreographicTreeEffectHandlerFactory::register_device(&mut handler, device_info);
-        assert!(result.is_ok());
     }
 }

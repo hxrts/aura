@@ -3,7 +3,7 @@ use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
     invitation_acceptance::InvitationAcceptanceCoordinator,
 };
-use aura_protocol::effects::AuraEffectSystem;
+// Note: For testing, use mock handlers from aura-effects
 
 fn sample_request(invitee: DeviceId) -> DeviceInvitationRequest {
     DeviceInvitationRequest {

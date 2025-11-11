@@ -76,6 +76,60 @@ impl HybridCounter {
 
 Hybrid approaches optimize bandwidth usage by selecting appropriate synchronization methods. Small change sets use operation synchronization while large change sets use state synchronization.
 
+## Using CRDT Handlers with Builder Pattern
+
+Aura provides builder methods for easily setting up CRDT handlers in choreographies. The `CrdtCoordinator` uses a clean builder pattern that avoids boilerplate while maintaining type safety.
+
+**Simple Setup** uses convenience methods for common cases:
+
+```rust
+use aura_protocol::effects::semilattice::CrdtCoordinator;
+
+// Convergent CRDT with initial state
+let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_map);
+
+// Delta CRDT with compaction threshold
+let coordinator = CrdtCoordinator::with_delta_threshold(device_id, 100);
+
+// Meet-semilattice CRDT for constraints
+let coordinator = CrdtCoordinator::with_mv_state(device_id, capability_set);
+```
+
+The builder pattern eliminates manual handler registration while providing clear intent. Each convenience method creates the appropriate handler type with sensible defaults.
+
+**Chained Setup** combines multiple handlers for complex scenarios:
+
+```rust
+// Multiple CRDT types in one coordinator
+let coordinator = CrdtCoordinator::new(device_id)
+    .with_cv_handler(CvHandler::new())
+    .with_delta_handler(DeltaHandler::with_threshold(50))
+    .with_mv_handler(MvHandler::with_state(constraints));
+```
+
+Chaining allows selective registration of only the handler types needed by the application. This avoids instantiating unused handlers and reduces memory overhead.
+
+**Integration with Protocols** passes coordinators directly to choreographic implementations:
+
+```rust
+use aura_protocol::choreography::protocols::anti_entropy::execute_anti_entropy;
+
+let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_state);
+
+let (result, updated_coordinator) = execute_anti_entropy(
+    device_id,
+    config,
+    is_requester,
+    &effect_system,
+    coordinator,
+).await?;
+
+// Coordinator contains synchronized state after protocol execution
+let synchronized_state = updated_coordinator.cv_handler().get_state();
+```
+
+Protocols consume and return coordinators, enabling immutable data flow patterns. The returned coordinator contains synchronized state after protocol execution completes.
+
 ## Semilattice Implementation
 
 **Join Operations** define how concurrent states merge to produce consistent results. Join operations must be associative, commutative, and idempotent to ensure convergence properties.

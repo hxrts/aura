@@ -105,11 +105,7 @@ impl From<EventId> for Uuid {
     }
 }
 
-/// Extension trait for EventId with Effects support
-pub trait EventIdExt {
-    /// Create a new event ID using Effects for deterministic randomness
-    fn new_with_effects(effects: &impl EffectsLike) -> Self;
-}
+// EventIdExt moved to aura-effects to maintain clean interface layer
 
 /// Event nonce for ordering and uniqueness
 ///
@@ -444,81 +440,8 @@ impl FromStr for AccountId {
     }
 }
 
-// Extension traits for Effects-based ID generation (for deterministic testing)
-// These traits allow IDs to be generated using injected randomness via Effects
-
-/// Extension trait for DeviceId with Effects support
-pub trait DeviceIdExt {
-    /// Create a new device ID using Effects for deterministic randomness
-    fn new_with_effects(effects: &impl crate::EffectsLike) -> Self;
-    /// Create from a string identifier using Effects
-    fn from_string_with_effects(id_str: &str, effects: &impl crate::EffectsLike) -> Self;
-}
-
-/// Extension trait for GuardianId with Effects support
-pub trait GuardianIdExt {
-    /// Create a new guardian ID using Effects for deterministic randomness
-    fn new_with_effects(effects: &impl crate::EffectsLike) -> Self;
-    /// Create from a string identifier using Effects
-    fn from_string_with_effects(id_str: &str, effects: &impl crate::EffectsLike) -> Self;
-}
-
-/// Extension trait for AccountId with Effects support
-pub trait AccountIdExt {
-    /// Create a new account ID using Effects for deterministic randomness
-    fn new_with_effects(effects: &impl crate::EffectsLike) -> Self;
-    /// Create from a string identifier using Effects
-    fn from_string_with_effects(id_str: &str, effects: &impl crate::EffectsLike) -> Self;
-}
-
-/// Trait for Effects-like objects that support UUID generation
-/// Used to abstract over different Effects implementations for ID generation
-pub trait EffectsLike {
-    /// Generate a deterministic UUID
-    fn gen_uuid(&self) -> Uuid;
-}
-
-impl DeviceIdExt for DeviceId {
-    fn new_with_effects(effects: &impl EffectsLike) -> Self {
-        DeviceId(effects.gen_uuid())
-    }
-
-    fn from_string_with_effects(id_str: &str, _effects: &impl EffectsLike) -> Self {
-        // Create a deterministic UUID from the string
-        let namespace = Uuid::NAMESPACE_DNS;
-        DeviceId(Uuid::new_v5(&namespace, id_str.as_bytes()))
-    }
-}
-
-impl GuardianIdExt for GuardianId {
-    fn new_with_effects(effects: &impl EffectsLike) -> Self {
-        GuardianId(effects.gen_uuid())
-    }
-
-    fn from_string_with_effects(id_str: &str, _effects: &impl EffectsLike) -> Self {
-        // Create a deterministic UUID from the string
-        let namespace = Uuid::NAMESPACE_DNS;
-        GuardianId(Uuid::new_v5(&namespace, id_str.as_bytes()))
-    }
-}
-
-impl AccountIdExt for AccountId {
-    fn new_with_effects(effects: &impl EffectsLike) -> Self {
-        AccountId(effects.gen_uuid())
-    }
-
-    fn from_string_with_effects(id_str: &str, _effects: &impl EffectsLike) -> Self {
-        // Create a deterministic UUID from the string
-        let namespace = Uuid::NAMESPACE_DNS;
-        AccountId(Uuid::new_v5(&namespace, id_str.as_bytes()))
-    }
-}
-
-impl EventIdExt for EventId {
-    fn new_with_effects(effects: &impl EffectsLike) -> Self {
-        EventId(effects.gen_uuid())
-    }
-}
+// Extension traits for Effects-based ID generation moved to aura-effects
+// to maintain clean interface layer separation
 
 /// Extension trait for IndividualId with additional utility methods
 pub trait IndividualIdExt {
@@ -552,21 +475,13 @@ impl DataId {
         Self(format!("data:{}", Uuid::new_v4()))
     }
 
-    /// Create a new data ID with Effects for deterministic generation
-    pub fn new_with_effects(effects: &impl EffectsLike) -> Self {
-        Self(format!("data:{}", effects.gen_uuid()))
-    }
-
     /// Create an encrypted data ID
     #[allow(clippy::disallowed_methods)]
     pub fn new_encrypted() -> Self {
         Self(format!("encrypted:{}", Uuid::new_v4()))
     }
 
-    /// Create an encrypted data ID with Effects
-    pub fn new_encrypted_with_effects(effects: &impl EffectsLike) -> Self {
-        Self(format!("encrypted:{}", effects.gen_uuid()))
-    }
+    // Effects-based methods moved to aura-effects
 
     /// Get the inner string
     pub fn as_str(&self) -> &str {

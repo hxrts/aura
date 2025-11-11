@@ -88,10 +88,13 @@ impl ProtocolInfrastructure {
             )));
         }
 
-        // Validate requirements
+        // Validate requirements with minimal participant count
+        // Use the minimum required participants for validation during registration
+        let min_participants = definition.requirements.min_participants;
+        let dummy_participants = (0..min_participants).map(|_| DeviceId::new()).collect();
         definition.requirements.validate(
             &AuraRuntime::new(DeviceId::new(), Cap::top(), Journal::new()),
-            &ExecutionContext::new(&definition.name, vec![DeviceId::new()]),
+            &ExecutionContext::new(&definition.name, dummy_participants),
         )?;
 
         self.protocols.insert(definition.name.clone(), definition);

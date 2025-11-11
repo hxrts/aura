@@ -2,13 +2,14 @@
 //!
 //! Provides TCP-based network transport for production use.
 //! Features message framing, peer management, and connection pooling.
-//! 
+//!
 //! **REFACTORED**: Now uses SecureChannelRegistry instead of duplicate connection caches
 //! to enforce one active channel per (ContextId, peer_device) as specified in work/007.md
 
-use crate::secure_channel::{SecureChannelRegistry, ChannelKey};
-use aura_core::{AuraError, DeviceId, Receipt, relationships::ContextId, 
-                flow::FlowBudget, session_epochs::Epoch};
+use crate::secure_channel::SecureChannelRegistry;
+use aura_core::{
+    flow::FlowBudget, relationships::ContextId, session_epochs::Epoch, AuraError, DeviceId, Receipt,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -16,7 +17,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 
 /// Get current time as seconds since UNIX epoch
 fn current_timestamp() -> u64 {
@@ -88,7 +89,7 @@ pub struct PeerConnection {
 }
 
 /// Network transport using TCP with message framing and anti-replay protection
-/// 
+///
 /// **REFACTORED**: Connection management now delegated to SecureChannelRegistry
 /// to eliminate duplicate channel caches and enforce unified channel semantics.
 #[derive(Debug)]
@@ -123,9 +124,9 @@ impl NetworkTransport {
 
     /// Create a new network transport with custom channel registry
     pub fn new_with_registry(
-        device_id: DeviceId, 
+        device_id: DeviceId,
         config: NetworkConfig,
-        channel_registry: Arc<SecureChannelRegistry>
+        channel_registry: Arc<SecureChannelRegistry>,
     ) -> Self {
         let (incoming_sender, incoming_receiver) = mpsc::unbounded_channel();
 
@@ -215,9 +216,9 @@ impl NetworkTransport {
     /// Add a peer connection for a specific context
     /// **REFACTORED**: Now uses SecureChannelRegistry instead of local peer cache
     pub async fn add_peer_for_context(
-        &self, 
+        &self,
         context: ContextId,
-        device_id: DeviceId, 
+        device_id: DeviceId,
         addr: SocketAddr,
         epoch: Epoch,
         flow_budget: FlowBudget,
@@ -244,14 +245,20 @@ impl NetworkTransport {
             peer_id = %device_id.0,
             "Using deprecated add_peer method - context information missing"
         );
-        
+
         // Use a default context for legacy compatibility
         let default_context = ContextId::new("legacy_transport");
         let default_epoch = Epoch::initial();
         let default_budget = FlowBudget::new(1000, default_epoch);
-        
-        self.add_peer_for_context(default_context, device_id, addr, default_epoch, default_budget)
-            .await
+
+        self.add_peer_for_context(
+            default_context,
+            device_id,
+            addr,
+            default_epoch,
+            default_budget,
+        )
+        .await
     }
 
     /// Connect to a peer (deprecated - use channel-based connections instead)
@@ -264,8 +271,12 @@ impl NetworkTransport {
         // For backward compatibility, check if we have any channel for this device
         // This is a simplified implementation - in practice, you'd need context information
         let default_context = ContextId::new("legacy_transport");
-        
-        if self.channel_registry.has_channel(default_context, device_id).await {
+
+        if self
+            .channel_registry
+            .has_channel(default_context, device_id)
+            .await
+        {
             tracing::info!(
                 peer_id = %device_id.0,
                 "Found existing channel for peer"
@@ -277,9 +288,9 @@ impl NetworkTransport {
             peer_id = %device_id.0,
             "No existing channel found for peer - consider using add_peer_for_context instead"
         );
-        
+
         Err(AuraError::coordination_failed(format!(
-            "No channel found for peer {} - use add_peer_for_context instead", 
+            "No channel found for peer {} - use add_peer_for_context instead",
             device_id.0
         )))
     }
@@ -317,7 +328,7 @@ impl NetworkTransport {
             *counter
         };
 
-        let message = NetworkMessage {
+        let _message = NetworkMessage {
             from: self.device_id,
             to,
             message_type,
@@ -330,16 +341,16 @@ impl NetworkTransport {
         // Send via channel registry instead of direct connection
         // For now, use a simplified approach - in a full implementation,
         // you'd need to specify which context to send through
-        let default_context = ContextId::new("legacy_transport");
-        
+        let _default_context = ContextId::new("legacy_transport");
+
         tracing::warn!(
             to = %to.0,
             "Sending message via legacy method - context information missing"
         );
-        
+
         // This is simplified - real implementation would route through appropriate channel
         Err(AuraError::coordination_failed(
-            "Legacy send method deprecated - use channel-based messaging instead".to_string()
+            "Legacy send method deprecated - use channel-based messaging instead".to_string(),
         ))
     }
 
@@ -398,10 +409,12 @@ impl NetworkTransport {
             nonce_set.insert(receipt.nonce);
 
             // Cryptographic verification of receipt signature
-            self.verify_receipt_signature(&receipt, &message.from).await?;
+            self.verify_receipt_signature(&receipt, &message.from)
+                .await?;
 
             // Verify receipt chain hash
-            self.verify_receipt_chain_hash(&receipt, &message.from).await?;
+            self.verify_receipt_chain_hash(&receipt, &message.from)
+                .await?;
 
             tracing::debug!(
                 from = %message.from.0,
@@ -448,7 +461,9 @@ impl NetworkTransport {
     pub async fn is_peer_connected(&self, device_id: DeviceId) -> bool {
         // Simplified implementation - check default context only
         let default_context = ContextId::new("legacy_transport");
-        self.channel_registry.has_channel(default_context, device_id).await
+        self.channel_registry
+            .has_channel(default_context, device_id)
+            .await
     }
 
     /// Handle incoming connection
@@ -551,30 +566,46 @@ impl NetworkTransport {
     }
 
     /// Verify cryptographic signature on receipt
-    async fn verify_receipt_signature(&self, receipt: &Receipt, sender: &DeviceId) -> Result<(), AuraError> {
+    async fn verify_receipt_signature(
+        &self,
+        receipt: &Receipt,
+        sender: &DeviceId,
+    ) -> Result<(), AuraError> {
         // Extract sender's public key
         let public_key = self.get_device_public_key(sender).await?;
-        
+
         // Compute receipt commitment for signature verification
         let receipt_commitment = self.compute_receipt_commitment(receipt)?;
-        
+
         // Verify signature using Ed25519
         if receipt.sig.len() != 64 {
-            return Err(AuraError::coordination_failed("Invalid signature length".to_string()));
+            return Err(AuraError::coordination_failed(
+                "Invalid signature length".to_string(),
+            ));
         }
-        
-        let sig_array: [u8; 64] = receipt.sig.clone().try_into()
-            .map_err(|_| AuraError::coordination_failed("Failed to convert signature to array".to_string()))?;
-            
+
+        let sig_array: [u8; 64] = receipt.sig.clone().try_into().map_err(|_| {
+            AuraError::coordination_failed("Failed to convert signature to array".to_string())
+        })?;
+
         self.verify_ed25519_signature(&sig_array, &receipt_commitment, &public_key)
-            .map_err(|e| AuraError::coordination_failed(format!("Receipt signature verification failed: {}", e)))
+            .map_err(|e| {
+                AuraError::coordination_failed(format!(
+                    "Receipt signature verification failed: {}",
+                    e
+                ))
+            })
     }
 
     /// Verify receipt chain hash for anti-replay protection
-    async fn verify_receipt_chain_hash(&self, receipt: &Receipt, sender: &DeviceId) -> Result<(), AuraError> {
+    async fn verify_receipt_chain_hash(
+        &self,
+        receipt: &Receipt,
+        sender: &DeviceId,
+    ) -> Result<(), AuraError> {
         // Get the previous receipt hash for this sender
         let expected_prev_hash = self.get_previous_receipt_hash(sender).await?;
-        
+
         // Verify the chain linkage
         let expected_hash = aura_core::Hash32(expected_prev_hash);
         if receipt.prev != expected_hash {
@@ -583,11 +614,11 @@ impl NetworkTransport {
                 expected_hash, receipt.prev
             )));
         }
-        
+
         // Update our record of the latest receipt hash for this sender
         let receipt_hash = self.compute_receipt_hash(receipt)?;
         self.update_receipt_hash(sender, receipt_hash).await?;
-        
+
         Ok(())
     }
 
@@ -595,13 +626,13 @@ impl NetworkTransport {
     async fn get_device_public_key(&self, device_id: &DeviceId) -> Result<[u8; 32], AuraError> {
         // This is simplified - real implementation would query from identity system
         tracing::debug!("Looking up public key for device: {}", device_id);
-        
+
         // Placeholder: use device ID hash as public key
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(device_id.0.as_bytes());
         let hash = hasher.finalize();
-        
+
         let mut public_key = [0u8; 32];
         public_key.copy_from_slice(&hash[..32]);
         Ok(public_key)
@@ -609,37 +640,44 @@ impl NetworkTransport {
 
     /// Compute receipt commitment for signature verification
     fn compute_receipt_commitment(&self, receipt: &Receipt) -> Result<Vec<u8>, AuraError> {
-        use sha2::{Sha256, Digest};
-        
+        use sha2::{Digest, Sha256};
+
         let mut hasher = Sha256::new();
-        
+
         // Add receipt fields to commitment
         hasher.update(b"MESSAGE_RECEIPT");
         hasher.update(receipt.nonce.to_be_bytes());
         hasher.update(receipt.cost.to_be_bytes());
         hasher.update(receipt.epoch.value().to_be_bytes());
         hasher.update(&receipt.prev);
-        
+
         Ok(hasher.finalize().to_vec())
     }
 
     /// Verify Ed25519 signature
-    fn verify_ed25519_signature(&self, signature: &[u8; 64], message: &[u8], public_key: &[u8; 32]) -> Result<(), AuraError> {
+    fn verify_ed25519_signature(
+        &self,
+        signature: &[u8; 64],
+        message: &[u8],
+        public_key: &[u8; 32],
+    ) -> Result<(), AuraError> {
         // This is simplified - real implementation would use ed25519-dalek
         if signature.len() != 64 {
-            return Err(AuraError::coordination_failed("Invalid signature length".to_string()));
+            return Err(AuraError::coordination_failed(
+                "Invalid signature length".to_string(),
+            ));
         }
-        
+
         if message.is_empty() {
             return Err(AuraError::coordination_failed("Empty message".to_string()));
         }
-        
+
         tracing::debug!(
             "Verifying Ed25519 signature: msg_len={}, key={:?}",
             message.len(),
             &public_key[..4]
         );
-        
+
         // Placeholder verification - always succeeds for now
         // Real implementation would use ed25519_dalek::VerifyingKey
         Ok(())
@@ -649,24 +687,24 @@ impl NetworkTransport {
     async fn get_previous_receipt_hash(&self, device_id: &DeviceId) -> Result<[u8; 32], AuraError> {
         // This is simplified - real implementation would query from persistent storage
         tracing::debug!("Getting previous receipt hash for device: {}", device_id);
-        
+
         // Placeholder: return zero hash for first receipt
         Ok([0u8; 32])
     }
 
     /// Compute hash of receipt for chain linkage
     fn compute_receipt_hash(&self, receipt: &Receipt) -> Result<[u8; 32], AuraError> {
-        use sha2::{Sha256, Digest};
-        
+        use sha2::{Digest, Sha256};
+
         let mut hasher = Sha256::new();
-        
+
         // Add all receipt fields to hash
         hasher.update(receipt.nonce.to_be_bytes());
         hasher.update(receipt.cost.to_be_bytes());
         hasher.update(receipt.epoch.value().to_be_bytes());
         hasher.update(&receipt.prev);
         hasher.update(&receipt.sig);
-        
+
         let hash = hasher.finalize();
         let mut result = [0u8; 32];
         result.copy_from_slice(&hash[..32]);
@@ -674,7 +712,11 @@ impl NetworkTransport {
     }
 
     /// Update stored receipt hash for device
-    async fn update_receipt_hash(&self, device_id: &DeviceId, hash: [u8; 32]) -> Result<(), AuraError> {
+    async fn update_receipt_hash(
+        &self,
+        device_id: &DeviceId,
+        hash: [u8; 32],
+    ) -> Result<(), AuraError> {
         // This is simplified - real implementation would persist to storage
         tracing::debug!(
             "Updating receipt hash for device {}: {:?}",

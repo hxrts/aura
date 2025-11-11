@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use aura_core::{AttestedOp, AuraError, AuraResult};
-use aura_journal::Journal;
+use aura_core::Journal;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 

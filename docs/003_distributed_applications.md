@@ -380,10 +380,10 @@ async fn test_byzantine_resilience() {
             FaultType::EquivocatingBroadcast,
         ]);
         
-    let result = simulator.run_consensus_protocol().await?;
+    let result = simulator.run_anti_entropy_protocol().await?;
     
-    // Safety: Byzantine nodes cannot break agreement
-    assert!(result.all_honest_agree());
+    // Safety: Byzantine nodes cannot prevent CRDT convergence
+    assert!(result.all_replicas_converged());
     
     // Liveness: Protocol terminates despite faults
     assert!(result.terminated_within(Duration::from_secs(30)));
@@ -481,7 +481,6 @@ Link core invariants from `docs/001_theoretical_foundations.md` to tests in this
 Threshold Identity with Social Recovery
 ```rust
 use aura_agent::AuraAgent;
-use aura_protocol::effects::system::AuraEffectSystem;
 use aura_recovery::guardian_recovery::{
     GuardianRecoveryCoordinator, GuardianRecoveryRequest, RecoveryPriority, RecoveryOperationType,
 };
@@ -493,8 +492,9 @@ use aura_mpst::AuraRuntime;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_production(device_id)?;
-    let mut agent = AuraAgent::new(effects, device_id);
+    
+    // Use aura-agent for complete runtime composition
+    let mut agent = AuraAgent::for_production(device_id)?;
     agent.initialize().await?;
 
     // Kick off guardian recovery choreography from the recovery crate
@@ -529,9 +529,14 @@ use aura_core::session_epochs::{ParticipantId, SessionStatus, LocalSessionType};
 use aura_core::protocols::{ProtocolType, ThresholdConfig, ProtocolSessionStatus};
 use aura_core::identifiers::{SessionId, EventId, DeviceId};
 
-// Current effect system (aura-protocol)
-use aura_protocol::effects::system::AuraEffectSystem;
-use aura_protocol::effects::{CryptoEffects, NetworkEffects, StorageEffects};
+// Import effect traits from aura-core
+use aura_core::effects::{CryptoEffects, NetworkEffects, StorageEffects};
+// Import implementations from aura-effects
+use aura_effects::crypto::RealCryptoHandler;
+use aura_effects::network::TcpNetworkHandler;
+use aura_effects::storage::FilesystemStorageHandler;
+// Runtime composition from aura-agent
+use aura_agent::AuraAgent;
 
 // CRDT system integration
 use aura_core::semilattice::{StateMsg, CvState, MeetStateMsg, MvState};
@@ -552,7 +557,7 @@ use aura_journal::semilattice::{JournalMap, CapabilitySet, ModernAccountState};
 use aura_protocol::choreography::protocols::threshold_ceremony::{
     execute_threshold_ceremony, CeremonyConfig, CeremonyResult, CeremonyError,
 };
-use aura_protocol::effects::system::AuraEffectSystem;
+use aura_agent::AuraAgent;
 
 pub struct CeremonyRole {
     pub is_coordinator: bool,
@@ -564,7 +569,7 @@ pub async fn run_ceremony(
     device_id: DeviceId,
     role: CeremonyRole,
     config: CeremonyConfig,
-    effects: &AuraEffectSystem,
+    agent: &AuraAgent,
 ) -> Result<CeremonyResult, CeremonyError> {
     execute_threshold_ceremony(
         device_id,
@@ -572,7 +577,7 @@ pub async fn run_ceremony(
         role.is_coordinator,
         role.is_observer,
         role.signer_index,
-        effects,
+        agent,
     ).await
 }
 ```

@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use aura_core::{
     semilattice::{JoinSemilattice, MeetSemiLattice},
-    Cap, Fact, Journal, MessageContext,
+    AuthLevel, Cap, Fact, Journal, MessageContext,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -118,18 +118,6 @@ impl Default for EffectRequirement {
     }
 }
 
-/// Authentication levels for capability requirements
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum AuthLevel {
-    /// No authentication required
-    None = 0,
-    /// Basic device authentication
-    Device = 1,
-    /// Multi-factor authentication
-    MultiFactor = 2,
-    /// Threshold signature required
-    Threshold = 3,
-}
 
 /// Trait for effects that require capability checking
 #[async_trait]

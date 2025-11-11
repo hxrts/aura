@@ -3,7 +3,7 @@
 //! Provides choreographic effect handler for ratchet tree protocol integration.
 
 pub mod choreographic;
-pub mod memory;
+pub mod dummy;
 
-pub use choreographic::{ChoreographicTreeEffectHandler, ChoreographicTreeEffectHandlerFactory};
-pub use memory::MemoryTreeHandler;
+pub use choreographic::ChoreographicTreeEffectHandler;
+pub use dummy::DummyTreeHandler;

@@ -335,15 +335,12 @@ impl MaintenanceController {
         }
 
         drop(fence_guard);
-        effects.log_info(
-            &format!(
-                "Snapshot {} committed at epoch {} (digest {:02x?})",
-                proposal_id,
-                snapshot.epoch,
-                &state_digest[..4]
-            ),
-            &[],
-        );
+        effects.log_info(&format!(
+            "Snapshot {} committed at epoch {} (digest {:02x?})",
+            proposal_id,
+            snapshot.epoch,
+            &state_digest[..4]
+        ));
 
         Ok(SnapshotOutcome {
             proposal_id,
@@ -382,13 +379,10 @@ impl MaintenanceController {
             );
         }
 
-        effects.log_info(
-            &format!(
-                "Admin replacement stub recorded for account {} (new admin {}, activation epoch {})",
-                account_id, new_admin, activation_epoch
-            ),
-            &[],
-        );
+        effects.log_info(&format!(
+            "Admin replacement stub recorded for account {} (new admin {}, activation epoch {})",
+            account_id, new_admin, activation_epoch
+        ));
         Ok(())
     }
 

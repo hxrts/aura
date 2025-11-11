@@ -9,12 +9,14 @@ repository.workspace = true
 
 [dependencies]
 aura-core = { path = "../aura-core" }
+aura-effects = { path = "../aura-effects" }
+aura-protocol = { path = "../aura-protocol" }
 aura-mpst = { path = "../aura-mpst" }
 aura-wot = { path = "../aura-wot" }
 aura-authenticate = { path = "../aura-authenticate" }
-aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../aura-journal" }
 rumpsteak-aura = { workspace = true }
+rumpsteak-aura-choreography = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,10 +27,11 @@ futures = { workspace = true }
 tokio = { workspace = true }
 once_cell = { workspace = true }
 blake3 = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
-aura-testkit = { path = "../aura-testkit" }
+# aura-testkit = { path = "../aura-testkit" }  # Temporarily disabled due to workspace exclusion
 
 [lints]
 workspace = true

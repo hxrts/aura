@@ -1,8 +1,29 @@
-# Effect System API
+# Effect System API Reference
 
-Quick reference for Aura's algebraic effect system interfaces and handler patterns. Effect types define capability interfaces while handlers provide concrete implementations for different environments. The system enables testable, composable, and environment-agnostic code.
+Quick reference for Aura's algebraic effect system interfaces and implementations. Effect traits define capability interfaces while handlers provide concrete implementations for different environments.
 
-Effect traits define what capabilities a component needs without specifying how those capabilities are implemented. Handlers provide concrete implementations for real, mock, or simulation environments.
+## Architecture Overview
+
+**Effect Traits** are defined in `aura-core` - import these when you need interface definitions:
+```rust
+use aura_core::effects::{StorageEffects, CryptoEffects, NetworkEffects};
+```
+
+**Standard Implementations** are provided by `aura-effects` - import these for testing and production:
+```rust  
+use aura_effects::storage::{FilesystemStorageHandler, MemoryStorageHandler};
+use aura_effects::crypto::{RealCryptoHandler, MockCryptoHandler};
+```
+
+**Coordination Primitives** are provided by `aura-protocol` for multi-party operations:
+```rust
+use aura_protocol::handlers::{CompositeHandler, AuraHandlerAdapter};
+```
+
+**Runtime Composition** is provided by `aura-agent` for complete applications:
+```rust
+use aura_agent::AuraAgent;
+```
 
 See [Effect System Guide](801_effect_system_guide.md) for detailed patterns. See [CRDT Programming Guide](802_crdt_programming_guide.md) for effect integration.
 
@@ -12,9 +33,12 @@ See [Effect System Guide](801_effect_system_guide.md) for detailed patterns. See
 
 ### Storage Effects
 
-**Interface**: File and content storage operations with encryption and access control.
+**Interface** (defined in `aura-core`): File and content storage operations with encryption and access control.
 
 ```rust
+// Import trait from aura-core  
+use aura_core::effects::StorageEffects;
+
 #[async_trait]
 pub trait StorageEffects: Send + Sync {
     async fn store(&self, key: &str, data: &[u8]) -> Result<(), StorageError>;
@@ -25,22 +49,36 @@ pub trait StorageEffects: Send + Sync {
 }
 ```
 
+**Standard Implementations** (from `aura-effects`):
+```rust
+use aura_effects::storage::{FilesystemStorageHandler, MemoryStorageHandler};
+
+// Production: persistent filesystem storage
+let storage = FilesystemStorageHandler::new("/data".into())?;
+
+// Testing: fast in-memory storage  
+let storage = MemoryStorageHandler::new();
+```
+
 **Common Usage**:
 ```rust
 // Store encrypted content
 let content_id = ContentId::new();
-effects.store(&content_id.to_string(), &encrypted_data).await?;
+storage.store(&content_id.to_string(), &encrypted_data).await?;
 
 // Load and verify
-let data = effects.load(&content_id.to_string()).await?;
+let data = storage.load(&content_id.to_string()).await?;
 ```
 
 ### Network Effects
 
-**Interface**: Message passing and peer communication with encryption and routing.
+**Interface** (defined in `aura-core`): Message passing and peer communication with encryption and routing.
 
 ```rust
-#[async_trait]
+// Import trait from aura-core
+use aura_core::effects::NetworkEffects;
+
+#[async_trait] 
 pub trait NetworkEffects: Send + Sync {
     async fn send_message(&self, peer: PeerId, message: Vec<u8>) -> Result<(), NetworkError>;
     async fn receive_messages(&self) -> Result<Vec<(PeerId, Vec<u8>)>, NetworkError>;
@@ -50,42 +88,80 @@ pub trait NetworkEffects: Send + Sync {
 }
 ```
 
-**Common Usage**:
+**Standard Implementations** (from `aura-effects`):
 ```rust
-// Send choreography message
-let message = ChoreographyMessage::new(operation);
-let serialized = bincode::serialize(&message)?;
-effects.send_message(target_peer, serialized).await?;
+use aura_effects::network::{TcpNetworkHandler, MockNetworkHandler};
+
+// Production: real TCP networking
+let network = TcpNetworkHandler::new("0.0.0.0:8080".parse()?)?;
+
+// Testing: deterministic mock networking
+let network = MockNetworkHandler::new();
 ```
 
-### Crypto Effects
+**Common Usage**:
+```rust
+// Send choreography message  
+let message = ChoreographyMessage::new(operation);
+let serialized = bincode::serialize(&message)?;
+network.send_message(target_peer, serialized).await?;
+```
 
-**Interface**: Cryptographic operations including FROST signatures and key derivation.
+### Crypto Effects  
+
+**Interface** (defined in `aura-core`): Cryptographic operations including single-party signatures and key derivation.
 
 ```rust
+// Import trait from aura-core
+use aura_core::effects::CryptoEffects;
+
 #[async_trait]
 pub trait CryptoEffects: Send + Sync {
     async fn sign(&self, data: &[u8], key_id: KeyId) -> Result<Signature, CryptoError>;
     async fn verify(&self, data: &[u8], signature: &Signature, public_key: &PublicKey) -> Result<bool, CryptoError>;
-    async fn threshold_sign(&self, data: &[u8], signing_group: &SigningGroup) -> Result<ThresholdSignature, CryptoError>;
     async fn derive_key(&self, master_key: &[u8; 32], path: &[u32]) -> Result<[u8; 32], CryptoError>;
     async fn encrypt(&self, data: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Vec<u8>, CryptoError>;
     async fn decrypt(&self, ciphertext: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Vec<u8>, CryptoError>;
+    async fn blake3_hash(&self, data: &[u8]) -> [u8; 32];
 }
+```
+
+**Standard Implementations** (from `aura-effects`):
+```rust
+use aura_effects::crypto::{RealCryptoHandler, MockCryptoHandler};
+
+// Production: real cryptography with Ed25519
+let crypto = RealCryptoHandler::new();
+
+// Testing: deterministic mock crypto  
+let crypto = MockCryptoHandler::new();
+```
+
+**Multi-party Coordination** (FROST threshold signatures require `aura-protocol` or `aura-frost`):
+```rust
+// FROST threshold signatures need coordination - use aura-frost
+use aura_frost::execute_threshold_ceremony;
+
+// Not available as single-party effect - requires choreographic coordination
 ```
 
 **Common Usage**:
 ```rust
-// FROST threshold signature
-let signing_group = SigningGroup::new(participants, threshold);
-let signature = effects.threshold_sign(&message_hash, &signing_group).await?;
+// Single-party Ed25519 signature
+let signature = crypto.sign(&message_hash, &key_id).await?;
+
+// Key derivation (DKD)
+let derived_key = crypto.derive_key(&master_key, &[0, 1, 2]).await?;
 ```
 
 ### Journal Effects
 
-**Interface**: CRDT journal operations for distributed state management.
+**Interface** (defined in `aura-core`): CRDT journal operations for distributed state management.
 
 ```rust
+// Import trait from aura-core
+use aura_core::effects::JournalEffects;
+
 #[async_trait]
 pub trait JournalEffects: Send + Sync {
     async fn append_fact(&self, fact: Fact) -> Result<FactId, JournalError>;
@@ -97,11 +173,21 @@ pub trait JournalEffects: Send + Sync {
 }
 ```
 
+**Standard Implementations** (from `aura-effects`):
+```rust
+use aura_effects::journal::MemoryJournalHandler;
+
+// Basic in-memory journal for testing and simple use cases
+let journal = MemoryJournalHandler::new();
+```
+
+**Note**: Most journal operations require multi-party coordination. Use `aura-agent` for complete journal functionality with CRDT synchronization.
+
 **Common Usage**:
 ```rust
 // Record device operation
 let fact = Fact::device_operation(device_id, operation, timestamp);
-let fact_id = effects.append_fact(fact).await?;
+let fact_id = journal.append_fact(fact).await?;
 ```
 
 ### Time Effects

@@ -16,7 +16,6 @@ pub use aura_core::{
 };
 
 // Use ContentId from aura-core
-pub use aura_core::ContentId;
 
 // Display for AccountId is implemented in aura-crypto crate
 
@@ -111,13 +110,13 @@ impl Default for GuardianPolicy {
 // Extensions for journal-specific functionality
 /// Provides effects-based session ID generation for journal operations
 pub trait SessionIdExt {
-    fn new_with_effects(effects: &dyn aura_crypto::effects::CryptoEffects) -> Self;
+    async fn new_with_effects(effects: &dyn aura_core::effects::CryptoEffects) -> Self;
 }
 
 impl SessionIdExt for SessionId {
-    fn new_with_effects(effects: &dyn aura_crypto::effects::CryptoEffects) -> Self {
+    async fn new_with_effects(effects: &dyn aura_core::effects::CryptoEffects) -> Self {
         // Generate random bytes for UUID v4 using crypto effects
-        let random_bytes: Vec<u8> = (0..16).map(|_| effects.random_byte()).collect();
+        let random_bytes = effects.random_bytes(16).await;
 
         // Create UUID v4 from random bytes
         let mut uuid_bytes = [0u8; 16];

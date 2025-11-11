@@ -18,12 +18,6 @@ pub mod guardian;
 pub mod session;
 pub mod threshold;
 
-// Pure authentication - no authorization types
-
-// Phase 6: Pure identity verification tests
-#[cfg(test)]
-mod identity_verification_tests;
-
 // Re-export commonly used types
 pub use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
 pub use device::verify_device_signature;

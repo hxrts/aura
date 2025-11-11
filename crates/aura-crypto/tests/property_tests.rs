@@ -122,7 +122,7 @@ proptest! {
         root_key in root_key_strategy(),
         device_id in device_id_strategy()
     ) {
-        prop_assume!(device_id.len() > 0);
+        prop_assume!(!device_id.is_empty());
 
         let spec1 = KeyDerivationSpec::identity_only(
             IdentityKeyContext::DeviceEncryption {
@@ -399,10 +399,12 @@ proptest! {
         );
 
         // Time key derivation with different root keys
+        #[allow(clippy::disallowed_methods)]
         let start1 = std::time::Instant::now();
         let _key1 = derive_encryption_key(&root_key1, &spec).unwrap();
         let duration1 = start1.elapsed();
 
+        #[allow(clippy::disallowed_methods)]
         let start2 = std::time::Instant::now();
         let _key2 = derive_encryption_key(&root_key2, &spec).unwrap();
         let duration2 = start2.elapsed();
@@ -422,7 +424,7 @@ proptest! {
     ) {
         // Create very large device ID
         let large_device_id = vec![0x42u8; device_size];
-        
+
         let spec = KeyDerivationSpec::identity_only(
             IdentityKeyContext::DeviceEncryption {
                 device_id: large_device_id.clone(),
@@ -442,20 +444,20 @@ proptest! {
         if device_size > 0 {
             let mut smaller_id = large_device_id.clone();
             smaller_id.truncate(device_size / 2);
-            
+
             let smaller_spec = KeyDerivationSpec::identity_only(
                 IdentityKeyContext::DeviceEncryption {
                     device_id: smaller_id,
                 }
             );
-            
+
             let smaller_key = derive_encryption_key(&root_key, &smaller_spec).unwrap();
             prop_assert_ne!(key.as_ref(), smaller_key.as_ref(),
                 "Different length contexts should produce different keys");
         }
     }
 
-    /// Property: Cross-context contamination resistance  
+    /// Property: Cross-context contamination resistance
     /// Keys derived for different contexts should be uncorrelated
     #[test]
     fn prop_cross_context_isolation(
@@ -473,7 +475,7 @@ proptest! {
             }
         );
 
-        // Account root context  
+        // Account root context
         let account_spec = KeyDerivationSpec::identity_only(
             IdentityKeyContext::AccountRoot {
                 account_id: account_id.clone(),
@@ -515,7 +517,7 @@ proptest! {
     }
 
     /// Property: Permission key hierarchies maintain security
-    /// Child permissions cannot derive parent permissions 
+    /// Child permissions cannot derive parent permissions
     #[test]
     fn prop_permission_hierarchy_security(
         root_key in root_key_strategy(),
@@ -568,7 +570,7 @@ proptest! {
 
     /// Property: Key rotation maintains backward secrecy
     /// New versions cannot be used to derive old versions
-    #[test] 
+    #[test]
     fn prop_backward_secrecy(
         root_key in root_key_strategy(),
         device_id in device_id_strategy(),

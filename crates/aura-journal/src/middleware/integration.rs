@@ -415,19 +415,17 @@ struct MiddlewareConfigs {
 mod tests {
     use super::*;
     use crate::operations::JournalOperation;
-    use aura_core::{AccountIdExt, DeviceIdExt};
-    use aura_crypto::Effects;
+    use uuid::Uuid;
 
     #[test]
     fn test_effect_system_integration() {
-        let effects = Effects::test();
-        let account_id = aura_core::AccountId::new_with_effects(&effects);
-        let device_id = aura_core::DeviceId::new_with_effects(&effects);
+        let account_id = aura_core::AccountId(Uuid::new_v4());
+        let device_id = aura_core::DeviceId(Uuid::new_v4());
 
         // Create account state
         let state = Arc::new(RwLock::new(AccountState::new(
             account_id,
-            aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>())
+            aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32])
                 .verifying_key(),
         )));
 

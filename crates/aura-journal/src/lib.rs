@@ -11,7 +11,6 @@
 //! - **Sync**: Built-in protocol for efficient state synchronization
 
 // Core modules
-mod effects;
 mod error;
 pub mod journal_ops;
 pub mod middleware;
@@ -27,11 +26,15 @@ pub mod semilattice;
 // New ratchet tree implementation (Phase 2)
 pub mod ratchet_tree;
 
+// Test effects moved to aura-testkit to maintain clean domain layer
+
 // Re-exports
-pub use effects::*;
 pub use error::{AuraError, Result};
 pub use operations::*;
 pub use sync::*;
+
+// Core type re-exports
+pub use aura_core::Hash32;
 
 // Domain re-exports
 pub use journal::*;

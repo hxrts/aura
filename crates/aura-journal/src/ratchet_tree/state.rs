@@ -10,10 +10,7 @@
 //! - **Navigation Helpers**: Query nodes, leaves, paths, policies
 //! - **Commitment Verification**: Validate tree integrity
 
-use aura_core::{
-    tree::{BranchNode, Epoch, LeafId, LeafNode, NodeIndex, Policy, TreeHash32},
-    Hash32,
-};
+use aura_core::tree::{BranchNode, Epoch, LeafId, LeafNode, NodeIndex, Policy, TreeHash32};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;

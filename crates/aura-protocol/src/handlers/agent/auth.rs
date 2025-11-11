@@ -59,8 +59,7 @@ impl AuthenticationHandler {
                 "Initializing authentication handler for device {}",
                 self.device_id
             ),
-            &[],
-        );
+        ).await?;
         Ok(())
     }
 
@@ -71,7 +70,7 @@ impl AuthenticationHandler {
         *state = AuthState::default();
 
         let effects = self.core_effects.read().await;
-        effects.log_debug("Authentication handler shutdown complete", &[]);
+        effects.log_debug("Authentication handler shutdown complete").await?;
         Ok(())
     }
 
@@ -103,8 +102,7 @@ impl AuthenticationEffects for AuthenticationHandler {
 
         effects.log_info(
             &format!("Starting device authentication for {}", self.device_id),
-            &[],
-        );
+        ).await?;
 
         // Try to get device identity through core effects
         // TODO fix - Simplified device authentication - in real implementation would check device credentials
@@ -133,8 +131,7 @@ impl AuthenticationEffects for AuthenticationHandler {
 
                 effects.log_info(
                     &format!("Device {} authenticated successfully", self.device_id),
-                    &[],
-                );
+                ).await?;
 
                 Ok(AuthenticationResult {
                     success: true,
@@ -150,8 +147,7 @@ impl AuthenticationEffects for AuthenticationHandler {
                         "Device identity mismatch: expected {}, got {}",
                         self.device_id, other_identity
                     ),
-                    &[],
-                );
+                ).await?;
 
                 Ok(AuthenticationResult {
                     success: false,
@@ -162,7 +158,7 @@ impl AuthenticationEffects for AuthenticationHandler {
                 })
             }
             Err(e) => {
-                effects.log_error(&format!("Device identity check failed: {}", e), &[]);
+                effects.log_error(&format!("Device identity check failed: {}", e)).await?;
 
                 Ok(AuthenticationResult {
                     success: false,
@@ -205,7 +201,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         *state = AuthState::default();
 
         let effects = self.core_effects.read().await;
-        effects.log_info(&format!("Device {} locked", self.device_id), &[]);
+        effects.log_info(&format!("Device {} locked", self.device_id)).await?;
 
         Ok(())
     }
@@ -228,8 +224,7 @@ impl AuthenticationEffects for AuthenticationHandler {
 
         effects.log_debug(
             &format!("Available auth methods: {} methods", methods.len()),
-            &[],
-        );
+        ).await?;
 
         Ok(methods)
     }
@@ -237,7 +232,7 @@ impl AuthenticationEffects for AuthenticationHandler {
     async fn enroll_biometric(&self, biometric_type: BiometricType) -> Result<()> {
         let effects = self.core_effects.read().await;
 
-        effects.log_info(&format!("Enrolling biometric: {:?}", biometric_type), &[]);
+        effects.log_info(&format!("Enrolling biometric: {:?}", biometric_type)).await?;
 
         // TODO fix - In a real implementation, this would interface with platform biometric APIs
         // TODO fix - For now, we simulate the enrollment process
@@ -256,8 +251,7 @@ impl AuthenticationEffects for AuthenticationHandler {
 
         effects.log_info(
             &format!("Biometric enrollment complete: {:?}", biometric_type),
-            &[],
-        );
+        ).await?;
 
         Ok(())
     }
@@ -265,7 +259,7 @@ impl AuthenticationEffects for AuthenticationHandler {
     async fn remove_biometric(&self, biometric_type: BiometricType) -> Result<()> {
         let effects = self.core_effects.read().await;
 
-        effects.log_info(&format!("Removing biometric: {:?}", biometric_type), &[]);
+        effects.log_info(&format!("Removing biometric: {:?}", biometric_type)).await?;
 
         // Remove the stored template
         let template_key = format!("biometric_template_{:?}", biometric_type);
@@ -275,8 +269,7 @@ impl AuthenticationEffects for AuthenticationHandler {
 
         effects.log_info(
             &format!("Biometric removal complete: {:?}", biometric_type),
-            &[],
-        );
+        ).await?;
 
         Ok(())
     }
@@ -300,9 +293,9 @@ impl AuthenticationEffects for AuthenticationHandler {
         let is_valid = capability_hash != [0u8; 32];
 
         if is_valid {
-            effects.log_debug("Capability verification successful", &[]);
+            effects.log_debug("Capability verification successful").await?;
         } else {
-            effects.log_warn("Capability verification failed", &[]);
+            effects.log_warn("Capability verification failed").await?;
         }
 
         Ok(is_valid)
@@ -313,8 +306,7 @@ impl AuthenticationEffects for AuthenticationHandler {
 
         effects.log_info(
             &format!("Generating device attestation for {}", self.device_id),
-            &[],
-        );
+        ).await?;
 
         // Generate device attestation (simulated)
         // In real implementation would use platform attestation APIs
@@ -325,7 +317,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         // TODO fix - In a real implementation, this would be a proper device attestation
         // that proves the device identity and integrity
 
-        effects.log_info("Device attestation generated successfully", &[]);
+        effects.log_info("Device attestation generated successfully").await?;
 
         Ok(attestation)
     }

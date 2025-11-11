@@ -4,7 +4,6 @@
 //! all Aura protocols, ensuring mathematical guarantees for context isolation,
 //! unlinkability, and leakage bounds.
 
-use crate::{CapabilityGuard, ExecutionContext, JournalAnnotation};
 use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -48,6 +47,16 @@ impl LeakageBudget {
     }
 }
 
+/// Get current time in milliseconds since epoch.
+/// Callers should inject this value from TimeEffects for testability.
+/// This function is only for convenience when TimeEffects is not available.
+fn get_current_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 /// Privacy contract verification engine
 #[derive(Debug, Clone)]
 pub struct PrivacyVerifier {
@@ -74,10 +83,10 @@ pub struct PrivacyContext {
     leakage_budget: LeakageBudget,
     /// Operations performed in this context
     operations: Vec<PrivacyOperation>,
-    /// Context creation time
-    created_at: SystemTime,
-    /// Last activity timestamp
-    last_activity: SystemTime,
+    /// Context creation time (milliseconds since epoch)
+    created_at: u64,
+    /// Last activity timestamp (milliseconds since epoch)
+    last_activity: u64,
     /// Privacy level requirements
     privacy_requirements: PrivacyRequirements,
 }
@@ -139,8 +148,8 @@ pub struct PrivacyOperation {
     participants: Vec<DeviceId>,
     /// Leakage caused by this operation
     operation_leakage: LeakageBudget,
-    /// Timestamp
-    timestamp: SystemTime,
+    /// Timestamp (milliseconds since epoch)
+    timestamp: u64,
     /// Privacy metadata
     privacy_metadata: PrivacyMetadata,
 }
@@ -197,8 +206,8 @@ pub struct IsolationViolationAttempt {
     target_context: ContextId,
     /// Attempted operation
     attempted_operation: String,
-    /// Timestamp of attempt
-    timestamp: SystemTime,
+    /// Timestamp of attempt (milliseconds since epoch)
+    timestamp: u64,
     /// Whether attempt was blocked
     was_blocked: bool,
     /// Violation severity
@@ -276,8 +285,8 @@ pub struct ObservableEvent {
     event_type: String,
     /// Observable metadata
     observable_metadata: HashMap<String, String>,
-    /// Timestamp
-    timestamp: SystemTime,
+    /// Timestamp (milliseconds since epoch)
+    timestamp: u64,
     /// Observer that can see this event
     visible_to: Vec<ObserverCapability>,
 }
@@ -332,8 +341,8 @@ pub struct GlobalLeakageBounds {
 /// Leakage event for tracking
 #[derive(Debug, Clone)]
 pub struct LeakageEvent {
-    /// Event timestamp
-    timestamp: SystemTime,
+    /// Event timestamp (milliseconds since epoch)
+    timestamp: u64,
     /// Source context
     context_id: ContextId,
     /// Leakage amount
@@ -413,6 +422,7 @@ pub enum PrivacyTransformation {
 
 /// Types used for identification
 pub type ContextId = [u8; 32];
+/// Unique identifier for a privacy operation
 pub type OperationId = [u8; 32];
 
 /// Operation types for privacy tracking
@@ -471,8 +481,8 @@ pub struct IsolationException {
     condition: String,
     /// Allowed operations under exception
     allowed_operations: Vec<String>,
-    /// Exception expiry
-    expires_at: Option<SystemTime>,
+    /// Exception expiry (milliseconds since epoch, None if never expires)
+    expires_at: Option<u64>,
 }
 
 /// Violation severity levels
@@ -504,10 +514,10 @@ pub struct MessageMetadata {
 /// Timing information
 #[derive(Debug, Clone)]
 pub struct TimingInfo {
-    /// Send timestamp
-    send_time: SystemTime,
-    /// Receive timestamp
-    receive_time: Option<SystemTime>,
+    /// Send timestamp (milliseconds since epoch)
+    send_time: u64,
+    /// Receive timestamp (milliseconds since epoch, None if not yet received)
+    receive_time: Option<u64>,
     /// Processing delays
     processing_delays: Vec<Duration>,
     /// Network latency
@@ -539,8 +549,8 @@ pub struct FrequencyPatterns {
 /// Burst pattern
 #[derive(Debug, Clone)]
 pub struct BurstPattern {
-    /// Burst start time
-    start_time: SystemTime,
+    /// Burst start time (milliseconds since epoch)
+    start_time: u64,
     /// Burst duration
     duration: Duration,
     /// Message count in burst
@@ -651,8 +661,8 @@ impl PrivacyVerifier {
             context_type,
             leakage_budget: LeakageBudget::zero(),
             operations: Vec::new(),
-            created_at: SystemTime::now(),
-            last_activity: SystemTime::now(),
+            created_at: get_current_time_ms(),
+            last_activity: get_current_time_ms(),
             privacy_requirements,
         };
 
@@ -710,7 +720,7 @@ impl PrivacyVerifier {
         // Update context
         if let Some(context) = self.contexts.get_mut(&operation.context_id) {
             context.operations.push(operation.clone());
-            context.last_activity = SystemTime::now();
+            context.last_activity = get_current_time_ms();
             context.leakage_budget = context.leakage_budget.add(&operation.operation_leakage);
         }
 
@@ -765,13 +775,7 @@ impl PrivacyVerifier {
         hasher.update(&serde_json::to_vec(context_type).map_err(|e| {
             AuraError::serialization(format!("Context type serialization failed: {}", e))
         })?);
-        hasher.update(
-            &SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-                .to_le_bytes(),
-        );
+        hasher.update(&get_current_time_ms().to_le_bytes());
 
         let hash = hasher.finalize();
         let mut context_id = [0u8; 32];
@@ -811,7 +815,6 @@ pub enum VerificationResult {
     Conditional(Vec<String>),
 }
 
-
 /// Comprehensive privacy verification report
 #[derive(Debug, Clone)]
 pub struct PrivacyVerificationReport {
@@ -825,8 +828,8 @@ pub struct PrivacyVerificationReport {
     pub attack_simulation_results: AttackSimulationResults,
     /// Overall privacy score (0.0 to 1.0)
     pub overall_privacy_score: f64,
-    /// Report timestamp
-    pub timestamp: SystemTime,
+    /// Report timestamp (milliseconds since epoch)
+    pub timestamp: u64,
 }
 
 impl PrivacyVerificationReport {
@@ -837,7 +840,7 @@ impl PrivacyVerificationReport {
             unlinkability_results: UnlinkabilityVerificationResults::default(),
             attack_simulation_results: AttackSimulationResults::default(),
             overall_privacy_score: 0.0,
-            timestamp: SystemTime::now(),
+            timestamp: get_current_time_ms(),
         }
     }
 }
@@ -905,7 +908,7 @@ impl LeakageTracker {
 
     async fn check_operation_leakage(
         &self,
-        operation: &PrivacyOperation,
+        _operation: &PrivacyOperation,
     ) -> AuraResult<LeakageCheckResult> {
         // TODO fix - Simplified leakage check
         Ok(LeakageCheckResult {
@@ -916,12 +919,12 @@ impl LeakageTracker {
 
     async fn record_leakage(&mut self, operation: &PrivacyOperation) -> AuraResult<()> {
         let event = LeakageEvent {
-            timestamp: SystemTime::now(),
+            timestamp: get_current_time_ms(),
             context_id: operation.context_id,
             leakage_amount: operation.operation_leakage.clone(),
             description: format!(
                 "Operation {}: {:?}",
-                hex::encode(&operation.operation_id),
+                hex::encode(operation.operation_id),
                 operation.operation_type
             ),
             severity: LeakageSeverity::Info,
@@ -976,7 +979,7 @@ impl ContextIsolationMonitor {
 
     async fn check_operation(
         &self,
-        operation: &PrivacyOperation,
+        _operation: &PrivacyOperation,
     ) -> AuraResult<IsolationCheckResult> {
         Ok(IsolationCheckResult {
             allowed: true,
@@ -1006,7 +1009,7 @@ impl UnlinkabilityVerifier {
 
     async fn check_operation(
         &self,
-        operation: &PrivacyOperation,
+        _operation: &PrivacyOperation,
     ) -> AuraResult<UnlinkabilityCheckResult> {
         Ok(UnlinkabilityCheckResult {
             maintains_unlinkability: true,
@@ -1014,7 +1017,7 @@ impl UnlinkabilityVerifier {
         })
     }
 
-    async fn update_analysis(&mut self, operation: &PrivacyOperation) -> AuraResult<()> {
+    async fn update_analysis(&mut self, _operation: &PrivacyOperation) -> AuraResult<()> {
         // Update analysis with new operation
         Ok(())
     }
@@ -1184,12 +1187,7 @@ impl ObserverSimulator {
         let mut event_times: Vec<_> = self
             .observable_events
             .iter()
-            .map(|e| {
-                e.timestamp
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis()
-            })
+            .map(|e| e.timestamp as u128)
             .collect();
         event_times.sort();
 
@@ -1251,8 +1249,8 @@ impl ObserverSimulator {
 
         if !sizes.is_empty() {
             // Check for size variation indicating inadequate padding
-            let max_size = *sizes.iter().max().unwrap();
-            let min_size = *sizes.iter().min().unwrap();
+            let max_size = *sizes.iter().max().expect("sizes is not empty");
+            let min_size = *sizes.iter().min().expect("sizes is not empty");
             let size_variation = (max_size - min_size) as f64 / max_size as f64;
 
             if size_variation > 0.1 {
@@ -1299,12 +1297,7 @@ impl ObserverSimulator {
         let mut time_windows = HashMap::new();
 
         for event in &self.observable_events {
-            let window_start = event
-                .timestamp
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-                / window_size.as_secs();
+            let window_start = event.timestamp / 1000 / window_size.as_secs();
             *time_windows.entry(window_start).or_insert(0) += 1;
         }
 
@@ -1393,7 +1386,9 @@ impl ObserverSimulator {
             }
         }
 
-        let max_pattern_strength = pattern_matches.iter().fold(0.0f64, |max, &val| max.max(val));
+        let max_pattern_strength = pattern_matches
+            .iter()
+            .fold(0.0f64, |max, &val| max.max(val));
         let success_probability = if max_pattern_strength > 0.5 { 0.7 } else { 0.2 };
 
         Ok(AttackResult {
@@ -1439,7 +1434,9 @@ impl ObserverSimulator {
             ));
         }
 
-        let max_inference_confidence = inference_results.iter().fold(0.0f64, |max, &val| max.max(val));
+        let max_inference_confidence = inference_results
+            .iter()
+            .fold(0.0f64, |max, &val| max.max(val));
         let success_probability = if max_inference_confidence > 0.6 {
             0.8
         } else {
@@ -1478,15 +1475,7 @@ impl ObserverSimulator {
         let mut metadata = HashMap::new();
 
         // Extract timing information
-        metadata.insert(
-            "timestamp".to_string(),
-            operation
-                .timestamp
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-                .to_string(),
-        );
+        metadata.insert("timestamp".to_string(), operation.timestamp.to_string());
 
         // Extract participant information (hashed for privacy)
         if !operation.participants.is_empty() {
@@ -1552,29 +1541,22 @@ impl ObserverSimulator {
     /// Determine which observer capabilities can see this operation
     fn determine_visible_capabilities(
         &self,
-        operation: &PrivacyOperation,
+        _operation: &PrivacyOperation,
     ) -> Vec<ObserverCapability> {
-        let mut visible_to = Vec::new();
-
-        // All operations produce some network traffic
-        visible_to.push(ObserverCapability::NetworkTrafficObservation);
-
-        // Operations have timing information
-        visible_to.push(ObserverCapability::TimingAnalysis);
-
-        // Operations have size information
-        visible_to.push(ObserverCapability::SizeAnalysis);
-
-        // Recurring operations can be analyzed for frequency
-        visible_to.push(ObserverCapability::FrequencyAnalysis);
-
-        // All operations can contribute to temporal correlation analysis
-        visible_to.push(ObserverCapability::TemporalCorrelation);
-
-        // All operations can be subject to statistical analysis
-        visible_to.push(ObserverCapability::StatisticalAnalysis);
-
-        visible_to
+        vec![
+            // All operations produce some network traffic
+            ObserverCapability::NetworkTrafficObservation,
+            // Operations have timing information
+            ObserverCapability::TimingAnalysis,
+            // Operations have size information
+            ObserverCapability::SizeAnalysis,
+            // Recurring operations can be analyzed for frequency
+            ObserverCapability::FrequencyAnalysis,
+            // All operations can contribute to temporal correlation analysis
+            ObserverCapability::TemporalCorrelation,
+            // All operations can be subject to statistical analysis
+            ObserverCapability::StatisticalAnalysis,
+        ]
     }
 
     /// Create device fingerprint for observer analysis
@@ -1650,11 +1632,7 @@ impl ObserverSimulator {
             let mut feature_vector = Vec::new();
 
             // Timing features
-            let timestamp_ms = event
-                .timestamp
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as f64;
+            let timestamp_ms = event.timestamp as f64;
             feature_vector.push(timestamp_ms % (24.0 * 3600.0 * 1000.0)); // Time of day
 
             // Size features
@@ -1821,7 +1799,7 @@ mod tests {
     fn test_context_registration() {
         let mut verifier = PrivacyVerifier::new();
 
-        let context_type = ContextType::Relationship(RelationshipId::new());
+        let context_type = ContextType::Relationship(RelationshipId::new([0u8; 32]));
         let requirements = PrivacyRequirements {
             max_external_leakage: 0.0,
             max_neighbor_leakage: 1.0,

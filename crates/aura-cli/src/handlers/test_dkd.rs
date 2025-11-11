@@ -15,10 +15,10 @@ pub async fn handle_test_dkd(
     context: &str,
     file: &PathBuf,
 ) -> Result<()> {
-    effects.log_info("Testing DKD (Distributed Key Derivation)", &[]);
-    effects.log_info(&format!("App ID: {}", app_id), &[]);
-    effects.log_info(&format!("Context: {}", context), &[]);
-    effects.log_info(&format!("Config file: {}", file.display()), &[]);
+    let _ = effects.log_info("Testing DKD (Distributed Key Derivation)").await;
+    let _ = effects.log_info(&format!("App ID: {}", app_id)).await;
+    let _ = effects.log_info(&format!("Context: {}", context)).await;
+    let _ = effects.log_info(&format!("Config file: {}", file.display())).await;
 
     // Validate config file exists through storage effects
     let config_data = effects
@@ -29,10 +29,9 @@ pub async fn handle_test_dkd(
 
     // Load and parse config
     let config = parse_dkd_config(&config_data)?;
-    effects.log_info(
+    let _ = effects.log_info(
         &format!("Loaded config for device: {}", config.device_id),
-        &[],
-    );
+    ).await;
 
     // Perform DKD test through crypto effects
     let test_result = perform_dkd_test(effects, app_id, context, &config).await?;
@@ -40,7 +39,7 @@ pub async fn handle_test_dkd(
     // Display results
     display_dkd_results(effects, &test_result).await;
 
-    effects.log_info("DKD test completed successfully", &[]);
+    let _ = effects.log_info("DKD test completed successfully").await;
 
     Ok(())
 }
@@ -63,28 +62,28 @@ async fn perform_dkd_test(
     context: &str,
     config: &DkdConfig,
 ) -> Result<DkdTestResult> {
-    effects.log_info("Starting DKD test protocol", &[]);
+    let _ = effects.log_info("Starting DKD test protocol").await;
 
     // Step 1: Generate initial randomness through random effects
-    effects.log_info("Step 1: Generating randomness", &[]);
+    let _ = effects.log_info("Step 1: Generating randomness").await;
     let randomness = RandomEffects::random_bytes(effects, 32).await;
 
     // Step 2: Create derivation input through crypto effects
-    effects.log_info("Step 2: Creating derivation input", &[]);
+    let _ = effects.log_info("Step 2: Creating derivation input").await;
     let derivation_input =
         create_derivation_input(effects, app_id, context, &config.device_id).await?;
 
     // Step 3: Perform key derivation through crypto effects
-    effects.log_info("Step 3: Performing key derivation", &[]);
+    let _ = effects.log_info("Step 3: Performing key derivation").await;
     let derived_key = effects.hash(&derivation_input).await;
 
     // Step 4: Generate commitment through crypto effects
-    effects.log_info("Step 4: Generating commitment", &[]);
+    let _ = effects.log_info("Step 4: Generating commitment").await;
     let commitment_data = [&randomness[..], &derived_key[..]].concat();
     let commitment = effects.hash(&commitment_data).await;
 
     // Step 5: Simulate threshold operations
-    effects.log_info("Step 5: Simulating threshold operations", &[]);
+    let _ = effects.log_info("Step 5: Simulating threshold operations").await;
     let threshold_result = simulate_threshold_operations(effects, &derived_key, config).await?;
 
     let result = DkdTestResult {
@@ -124,10 +123,9 @@ async fn create_derivation_input(
     let device_id_hash = effects.hash(device_id.as_bytes()).await;
     input.extend_from_slice(&device_id_hash);
 
-    effects.log_info(
+    let _ = effects.log_info(
         &format!("Created derivation input: {} bytes", input.len()),
-        &[],
-    );
+    ).await;
 
     Ok(input)
 }
@@ -138,17 +136,16 @@ async fn simulate_threshold_operations(
     derived_key: &[u8; 32],
     config: &DkdConfig,
 ) -> Result<bool> {
-    effects.log_info(
+    let _ = effects.log_info(
         &format!(
             "Simulating {}-of-{} threshold operation",
             config.threshold, config.total_devices
         ),
-        &[],
-    );
+    ).await;
 
     // Simulate multiple device participation
     for i in 1..=config.threshold {
-        effects.log_info(&format!("Device {} participating in threshold", i), &[]);
+        let _ = effects.log_info(&format!("Device {} participating in threshold", i)).await;
 
         // Create device-specific input
         let device_input = format!("device_{}_key_share", i);
@@ -160,10 +157,10 @@ async fn simulate_threshold_operations(
         combined.extend_from_slice(&device_hash);
         let _share_result = effects.hash(&combined).await;
 
-        effects.log_info(&format!("Device {} share computed", i), &[]);
+        let _ = effects.log_info(&format!("Device {} share computed", i)).await;
     }
 
-    effects.log_info("Threshold operation simulation complete", &[]);
+    let _ = effects.log_info("Threshold operation simulation complete").await;
 
     // For testing purposes, always return success
     Ok(true)
@@ -171,20 +168,19 @@ async fn simulate_threshold_operations(
 
 /// Display DKD test results
 async fn display_dkd_results(effects: &AuraEffectSystem, result: &DkdTestResult) {
-    effects.log_info("=== DKD Test Results ===", &[]);
-    effects.log_info(&format!("Device ID: {}", result.device_id), &[]);
-    effects.log_info(&format!("App ID: {}", result.app_id), &[]);
-    effects.log_info(&format!("Context: {}", result.context), &[]);
-    effects.log_info(&format!("Participants: {}", result.participants), &[]);
-    effects.log_info(&format!("Threshold: {}", result.threshold), &[]);
-    effects.log_info(&format!("Randomness: {}", result.randomness), &[]);
-    effects.log_info(&format!("Derived Key: {}", result.derived_key), &[]);
-    effects.log_info(&format!("Commitment: {}", result.commitment), &[]);
-    effects.log_info(
+    let _ = effects.log_info("=== DKD Test Results ===").await;
+    let _ = effects.log_info(&format!("Device ID: {}", result.device_id)).await;
+    let _ = effects.log_info(&format!("App ID: {}", result.app_id)).await;
+    let _ = effects.log_info(&format!("Context: {}", result.context)).await;
+    let _ = effects.log_info(&format!("Participants: {}", result.participants)).await;
+    let _ = effects.log_info(&format!("Threshold: {}", result.threshold)).await;
+    let _ = effects.log_info(&format!("Randomness: {}", result.randomness)).await;
+    let _ = effects.log_info(&format!("Derived Key: {}", result.derived_key)).await;
+    let _ = effects.log_info(&format!("Commitment: {}", result.commitment)).await;
+    let _ = effects.log_info(
         &format!("Threshold Success: {}", result.threshold_success),
-        &[],
-    );
-    effects.log_info("=== End Results ===", &[]);
+    ).await;
+    let _ = effects.log_info("=== End Results ===").await;
 }
 
 /// DKD configuration structure

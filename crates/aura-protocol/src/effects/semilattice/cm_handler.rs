@@ -69,14 +69,14 @@ where
     fn apply_operation(&mut self, op: Op, ctx: CausalContext) {
         // Mark as seen for deduplication
         self.state.mark_seen(op.id());
-        
+
         // Create operation ID for dependency tracking
         let op_id = OperationId::new(ctx.actor, ctx.clock.get(&ctx.actor));
         self.applied_operations.insert(op_id, true);
-        
+
         // Update our vector clock
         self.current_clock.update(&ctx.clock);
-        
+
         // Apply the operation to the state
         self.state.apply(op);
     }
@@ -309,11 +309,19 @@ mod tests {
 
         // Create operations with causal dependencies
         let op1_ctx = CausalContext::new(actor);
-        let op1 = TestOp { id: 1, value: 5, causal_ctx: op1_ctx.clone() };
+        let op1 = TestOp {
+            id: 1,
+            value: 5,
+            causal_ctx: op1_ctx.clone(),
+        };
 
         // op2 depends on op1
         let op2_ctx = CausalContext::after(actor, &op1_ctx);
-        let op2 = TestOp { id: 2, value: 3, causal_ctx: op2_ctx.clone() };
+        let op2 = TestOp {
+            id: 2,
+            value: 3,
+            causal_ctx: op2_ctx.clone(),
+        };
 
         // Send op2 first (out of order)
         handler.on_recv(OpWithCtx::new(op2.clone(), op2.causal_ctx.clone()));

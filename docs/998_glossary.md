@@ -11,7 +11,7 @@
 ### Core Components
 
 **AuraEffectSystem** - The main runtime façade for all effect operations. Contains a `CompositeHandler` and manages unified context flow.
-- Implementation: [`crates/aura-protocol/src/effects/system.rs`](../crates/aura-protocol/src/effects/system.rs)
+- Implementation: `aura-agent` (runtime composition) with handlers from `aura-effects`
 - Usage: Primary entry point for applications using the effect system
 
 **CompositeHandler** - Internal delegation component within `AuraEffectSystem`. Routes effect calls to specialized handlers.
@@ -32,9 +32,13 @@
 - `TimeEffects`, `CryptoEffects`, `StorageEffects`, `NetworkEffects`, `JournalEffects`, `ConsoleEffects`, `RandomEffects`
 - Location: [`crates/aura-core/src/effects/`](../crates/aura-core/src/effects/)
 
-**Extended Effects** - Higher-level effect interfaces defined in `aura-protocol`:
-- `SystemEffects`, `LedgerEffects`, `ChoreographicEffects`, `TreeEffects`, `AgentEffects`
-- Location: [`crates/aura-protocol/src/effects/`](../crates/aura-protocol/src/effects/)
+**Standard Implementations** - Context-free effect implementations in `aura-effects`:
+- `RealCryptoHandler`, `MockCryptoHandler`, `FilesystemStorageHandler`, `MemoryStorageHandler`, etc.
+- Location: [`crates/aura-effects/src/`](../crates/aura-effects/src/)
+
+**Coordination Primitives** - Multi-party coordination in `aura-protocol`:
+- `AuraHandlerAdapter`, `CompositeHandler`, `CrdtCoordinator`, guard chains
+- Location: [`crates/aura-protocol/src/`](../crates/aura-protocol/src/)
 
 ---
 
@@ -79,7 +83,8 @@ FlowBudget { limit: u64, spent: u64, epoch: Epoch }
 - Relationship: **Uses** Ledger effects for primitive operations
 
 **Ledger** - Lower-level effect interface providing primitive operations that Journal depends on.
-- Implementation: [`crates/aura-protocol/src/effects/ledger.rs`](../crates/aura-protocol/src/effects/ledger.rs)
+- Interface: [`crates/aura-core/src/effects/ledger.rs`](../crates/aura-core/src/effects/ledger.rs)
+- Implementations: [`crates/aura-effects/src/ledger/`](../crates/aura-effects/src/ledger/)
 - Provides: Device management, crypto utilities, graph operations, event sourcing
 - Relationship: **Supports** Journal through effect interface
 
@@ -168,7 +173,7 @@ FlowBudget { limit: u64, spent: u64, epoch: Epoch }
 **Execution Modes** - Runtime configuration determining which handler implementations to use.
 - Types: `Testing`, `Production`, `Simulation`
 - Control: Handler selection, determinism, fault injection
-- Implementation: [`crates/aura-protocol/src/effects/system.rs`](../crates/aura-protocol/src/effects/system.rs)
+- Implementation: [`crates/aura-agent/src/system.rs`](../crates/aura-agent/src/system.rs)
 
 ---
 
@@ -190,12 +195,6 @@ FlowBudget { limit: u64, spent: u64, epoch: Epoch }
 
 ## Maintenance
 
-**Implementation Status Tags** - Standardized indicators for feature completion:
-- ✅ **COMPLETE**: Fully implemented and tested
-- ⚠️ **IN PROGRESS**: Partial implementation exists  
-- ❌ **NOT STARTED**: Not yet implemented
-- 🗑️ **REMOVED**: Intentionally deleted or deprecated
-
 **Canonical Sources** - Single sources of truth for major architectural concepts:
 - Effect System: This glossary + [`docs/002_system_architecture.md`](002_system_architecture.md)
 - Journal vs Ledger: [`docs/105_journal.md`](105_journal.md)
@@ -211,8 +210,3 @@ FlowBudget { limit: u64, spent: u64, epoch: Epoch }
 3. **Link References**: Link to relevant implementation files when introducing concepts
 4. **Status Accuracy**: Use implementation status tags accurately based on actual code state
 5. **Canonical Links**: Reference canonical documentation sources rather than duplicating explanations
-
----
-
-*Last Updated: 2024-11-09*  
-*Maintainer: Keep this synchronized with actual implementation*

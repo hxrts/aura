@@ -618,7 +618,8 @@ impl ConnectionManager {
         packet.push(0x80); // Long header, Initial packet
         packet.extend_from_slice(b"AURA"); // Protocol identifier
         packet.extend_from_slice(&[0x01]); // Version
-        packet.extend_from_slice(&self.device_id.as_bytes()[..8]); // Connection ID
+        let device_bytes = self.device_id.to_bytes().map_err(|e| AuraError::invalid(e))?;
+        packet.extend_from_slice(&device_bytes[..8]); // Connection ID
         Ok(packet)
     }
 

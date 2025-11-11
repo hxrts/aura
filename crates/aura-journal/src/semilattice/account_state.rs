@@ -309,14 +309,12 @@ impl Default for MaxCounter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{AccountIdExt, DeviceIdExt};
-    use aura_crypto::Effects;
+    use uuid::Uuid;
 
     #[test]
     fn test_account_state_creation() {
-        let effects = Effects::test();
-        let account_id = AccountId::new_with_effects(&effects);
-        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
+        let account_id = AccountId(Uuid::new_v4());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public_key = signing_key.verifying_key();
 
         let state = AccountState::new(account_id, group_public_key);
@@ -328,7 +326,7 @@ mod tests {
     fn test_device_management() {
         let effects = Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
-        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes_sync::<32>());
         let group_public_key = signing_key.verifying_key();
 
         let mut state = AccountState::new(account_id, group_public_key);
@@ -356,7 +354,7 @@ mod tests {
     fn test_epoch_management() {
         let effects = Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
-        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes_sync::<32>());
         let group_public_key = signing_key.verifying_key();
 
         let mut state = AccountState::new(account_id, group_public_key);
@@ -377,7 +375,7 @@ mod tests {
     fn test_join_semilattice() {
         let effects = Effects::test();
         let account_id = AccountId::new_with_effects(&effects);
-        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>());
+        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes_sync::<32>());
         let group_public_key = signing_key.verifying_key();
 
         let mut state1 = AccountState::new(account_id, group_public_key);

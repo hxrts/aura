@@ -4,7 +4,7 @@
 //! including validation, synchronization, and multi-device session management.
 
 use async_trait::async_trait;
-use aura_core::{AttestedOp, AuraError, DeviceId, Hash32, LeafNode, NodeIndex, TreeOpKind};
+use aura_core::{AttestedOp, DeviceId, Hash32, TreeOpKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;

@@ -1,7 +1,6 @@
 use crate::semilattice::OpLog;
-use aura_core::tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, Snapshot, Epoch, TreeOp, TreeOpKind, TreeHash32};
-use aura_core::Hash32;
-use std::collections::{BTreeMap, BTreeSet};
+use aura_core::tree::{AttestedOp, LeafId, NodeIndex, Snapshot, Epoch, TreeOp, TreeOpKind};
+use std::collections::BTreeSet;
 
 /// Compact an OpLog by replacing history before a snapshot with the snapshot fact
 ///
@@ -49,9 +48,11 @@ pub fn compact(oplog: &OpLog, snapshot: &Snapshot) -> Result<OpLog, CompactionEr
     // Create new OpLog with snapshot fact
     let mut compacted = OpLog::new();
 
-    // Add snapshot as a special "fact" operation
-    let snapshot_fact = create_snapshot_fact_operation(&snapshot, snapshot.epoch)?;
-    compacted.append(snapshot_fact);
+    // Only add snapshot fact if there were operations before the cut
+    if !before_cut.is_empty() {
+        let snapshot_fact = create_snapshot_fact_operation(&snapshot, snapshot.epoch)?;
+        compacted.append(snapshot_fact);
+    }
 
     // Add all operations after cut
     for op in after_cut {
@@ -63,7 +64,7 @@ pub fn compact(oplog: &OpLog, snapshot: &Snapshot) -> Result<OpLog, CompactionEr
 
 /// Create a snapshot fact operation from a snapshot
 fn create_snapshot_fact_operation(snapshot: &Snapshot, cut_epoch: Epoch) -> Result<AttestedOp, CompactionError> {
-    use blake3::Hasher;
+    
 
     // Create a special tree operation that represents the snapshot fact
     // For now, use RotateEpoch as a placeholder since SnapshotFact doesn't exist
@@ -328,7 +329,7 @@ mod tests {
                 },
                 version: 1,
             },
-            agg_sig: vec![],
+            agg_sig: vec![1u8; 64], // Dummy signature for tests
             signer_count: 1,
         }
     }

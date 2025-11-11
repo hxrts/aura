@@ -102,7 +102,7 @@ pub mod config;
 // === Public API Re-exports ===
 
 // Core algebraic types
-pub use journal::{Cap, Fact, FactValue, Journal};
+pub use journal::{AuthLevel, Cap, Fact, FactValue, Journal};
 pub use semilattice::{
     Bottom, CmState, CvState, DeltaState, JoinSemilattice, MeetSemiLattice, MvState, Top,
 };

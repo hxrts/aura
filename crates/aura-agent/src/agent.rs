@@ -8,11 +8,10 @@
 use crate::config::AgentConfig;
 use crate::effects::*;
 use crate::errors::{AuraError, Result as AgentResult};
-use crate::handlers::{
-    AgentEffectSystemHandler, OtaOperations, SessionOperations, StorageOperations,
-};
+use crate::handlers::{AgentEffectSystemHandler, OtaOperations, StorageOperations};
 use crate::maintenance::{MaintenanceController, SnapshotOutcome};
 use crate::middleware::{AgentMiddlewareStack, MiddlewareStackBuilder};
+use aura_core::effects::{ConsoleEffects, StorageEffects};
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_protocol::effects::{AuraEffectSystem, SessionType};
 use aura_sync::WriterFence;
@@ -161,10 +160,9 @@ impl AuraAgent {
 
         // Log initialization completion
         let effects = self.core_effects.read().await;
-        effects.log_info(
-            &format!("Agent initialized for device {}", self.device_id),
-            &[],
-        );
+        let _ = effects
+            .log_info(&format!("Agent initialized for device {}", self.device_id))
+            .await;
 
         Ok(())
     }
@@ -238,7 +236,21 @@ impl AuraAgent {
 
     /// Update configuration through effects
     pub async fn update_config(&self, config: AgentConfig) -> AgentResult<()> {
-        // TODO: Add validation when needed
+        // Validate device ID matches
+        if config.device_id != self.device_id {
+            return Err(AuraError::invalid("Device ID mismatch"));
+        }
+
+        // Serialize config
+        let config_bytes = serde_json::to_vec(&config)
+            .map_err(|e| AuraError::internal(format!("Failed to serialize config: {}", e)))?;
+
+        // Store through effects
+        let effects = self.core_effects.read().await;
+        let config_key = format!("agent/config/{}", self.device_id.0);
+        StorageEffects::store(&*effects, &config_key, config_bytes)
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to store config: {}", e)))?;
 
         // Update cache
         {
@@ -246,7 +258,13 @@ impl AuraAgent {
             *cache = Some(config.clone());
         }
 
-        // TODO: Store through effects system
+        ConsoleEffects::log_debug(
+            &*effects,
+            &format!("Saved config for device {}", self.device_id),
+        )
+        .await
+        .ok();
+
         Ok(())
     }
 
@@ -324,14 +342,14 @@ impl AuraAgent {
 
     // Private helper methods
 
-    async fn get_or_create_session_ops(&self) -> AgentResult<SessionOperations> {
+    async fn get_or_create_session_ops(&self) -> AgentResult<crate::handlers::SessionOperations> {
         // Get config to get account_id
         let config = self.get_config().await?;
         let account_id = config.account_id.unwrap_or_else(|| AccountId::new());
 
         // Create fresh session operations each time
         // This is simpler than trying to cache non-cloneable operations
-        Ok(SessionOperations::new(
+        Ok(crate::handlers::SessionOperations::new(
             self.core_effects.clone(),
             self.device_id,
             account_id,
@@ -339,24 +357,96 @@ impl AuraAgent {
     }
 
     async fn load_or_create_config(&self) -> AgentResult<AgentConfig> {
-        // Create default config TODO fix - For now
-        // TODO: Implement proper config loading/saving through effects
-        let default_config = AgentConfig {
-            device_id: self.device_id,
-            account_id: None,
-        };
-        Ok(default_config)
+        let effects = self.core_effects.read().await;
+        let config_key = format!("agent/config/{}", self.device_id.0);
+
+        match StorageEffects::retrieve(&*effects, &config_key).await {
+            Ok(Some(bytes)) => {
+                // Deserialize existing config
+                let config: AgentConfig = serde_json::from_slice(&bytes).map_err(|e| {
+                    AuraError::internal(format!("Failed to deserialize config: {}", e))
+                })?;
+
+                ConsoleEffects::log_debug(
+                    &*effects,
+                    &format!("Loaded config for device {}", self.device_id),
+                )
+                .await
+                .ok();
+                Ok(config)
+            }
+            Ok(None) => {
+                // No config exists, create default
+                let config = AgentConfig {
+                    device_id: self.device_id,
+                    account_id: None,
+                };
+
+                ConsoleEffects::log_debug(
+                    &*effects,
+                    &format!(
+                        "No existing config found, creating default for device {}",
+                        self.device_id
+                    ),
+                )
+                .await
+                .ok();
+
+                // Save the default config
+                drop(effects); // Release read lock before calling update_config
+                self.update_config(config.clone()).await?;
+
+                Ok(config)
+            }
+            Err(e) => Err(AuraError::internal(format!("Failed to load config: {}", e))),
+        }
     }
 
-    async fn initialize_storage(&self, config: &AgentConfig) -> AgentResult<()> {
-        // TODO: Implement proper storage initialization through effects
-        // TODO fix - For now, skip hardware security checks and storage initialization
+    async fn initialize_storage(&self, _config: &AgentConfig) -> AgentResult<()> {
+        // Verify storage is accessible by performing a test write/read/delete
+        let effects = self.core_effects.read().await;
+        let test_key = format!("agent/init_check/{}", self.device_id.0);
+        let test_data = b"initialized".to_vec();
+
+        // Test write
+        StorageEffects::store(&*effects, &test_key, test_data.clone())
+            .await
+            .map_err(|e| AuraError::internal(format!("Storage write test failed: {}", e)))?;
+
+        // Test read
+        let retrieved = StorageEffects::retrieve(&*effects, &test_key)
+            .await
+            .map_err(|e| AuraError::internal(format!("Storage read test failed: {}", e)))?;
+
+        if retrieved.as_deref() != Some(test_data.as_slice()) {
+            return Err(AuraError::internal("Storage verification failed"));
+        }
+
+        // Test delete
+        StorageEffects::remove(&*effects, &test_key)
+            .await
+            .map_err(|e| AuraError::internal(format!("Storage delete test failed: {}", e)))?;
+
+        ConsoleEffects::log_debug(
+            &*effects,
+            &format!("Storage initialized for device {}", self.device_id),
+        )
+        .await
+        .ok();
+
         Ok(())
     }
 
     async fn initialize_sessions(&self) -> AgentResult<()> {
-        // TODO: Implement proper session cleanup through effects
-        // TODO fix - For now, skip session management initialization
+        // Session management is handled through MemorySessionHandler in aura-protocol
+        // No initialization needed beyond what's already done in handler construction
+        let effects = self.core_effects.read().await;
+        ConsoleEffects::log_debug(
+            &*effects,
+            &format!("Session management ready for device {}", self.device_id),
+        )
+        .await
+        .ok();
         Ok(())
     }
 }

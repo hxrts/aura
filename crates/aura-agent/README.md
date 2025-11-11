@@ -4,7 +4,7 @@ Device-side identity management with effect-based runtime composition.
 
 ## Architecture
 
-The `aura-agent` crate follows the unified effect system architecture by **composing handlers into a runtime**. It does not define effects or implement core effect handlers - instead, it composes existing effect handlers from `aura-protocol` into agent-specific runtimes.
+The `aura-agent` crate follows the unified effect system architecture by composing handlers into a runtime. It does not define effects or implement core effect handlers - instead, it composes existing effect handlers from `aura-protocol` into agent-specific runtimes.
 
 ### Core Concept
 
@@ -12,7 +12,7 @@ The `aura-agent` crate follows the unified effect system architecture by **compo
 // The agent composes handlers to build a runtime
 let agent = AuraAgent::new()
     .with_storage_handler(secure_storage_handler)
-    .with_auth_handler(biometric_auth_handler) 
+    .with_auth_handler(biometric_auth_handler)
     .with_session_handler(threshold_session_handler)
     .with_middleware(metrics_middleware)
     .with_middleware(validation_middleware)
@@ -36,7 +36,7 @@ src/
 │   └── mod.rs       # Effect trait exports
 ├── handlers/        # Handler implementations for agent effects
 │   ├── auth.rs      # AuthenticationHandler implementation
-│   ├── journal.rs   # JournalHandler implementation  
+│   ├── journal.rs   # JournalHandler implementation
 │   ├── sessions.rs  # SessionHandler implementation
 │   └── storage.rs   # StorageHandler implementation
 └── middleware/      # Middleware that wraps handlers
@@ -60,7 +60,7 @@ use aura_agent::{AuraAgent, create_production_agent};
 // Production runtime with real effect handlers
 let agent = create_production_agent(device_id).await?;
 
-// Testing runtime with mock handlers  
+// Testing runtime with mock handlers
 let agent = AuraAgent::for_testing(device_id);
 
 // Custom runtime composition

@@ -20,8 +20,8 @@
 
 #![allow(clippy::result_large_err)]
 
-// Effects system for crypto operations
-pub mod effects;
+// Effects imported from aura-core
+// (effects.rs was deleted to eliminate duplication)
 
 // Key derivation system
 pub mod key_derivation;
@@ -51,8 +51,9 @@ pub type Result<T> = AuraResult<T>;
 // Re-export complete middleware system
 pub use middleware::*;
 
-// Re-export effects system
-pub use effects::{CryptoEffects, CryptoEffectsExt, Effects, EffectsInterface, TimeEffects};
+// Re-export effects system from aura-core
+pub use aura_core::effects::{CryptoEffects, TimeEffects};
+
 
 // Re-export key derivation functions and types
 pub use key_derivation::{
@@ -74,13 +75,11 @@ pub type MerkleProof = SimpleMerkleProof;
 
 /// Generate a UUID for compatibility
 ///
-/// This function now uses the effects system for proper abstraction.
-/// For deterministic testing, use `Effects::deterministic()` or `Effects::test()`.
-/// For production use, use `Effects::production()`.
+/// This is a basic utility function. For more sophisticated effects-based UUID generation,
+/// use the RandomEffects trait implementations from aura-effects.
+#[allow(clippy::disallowed_methods)]
 pub fn generate_uuid() -> uuid::Uuid {
-    // Use production effects by default for backwards compatibility
-    let effects = Effects::production();
-    effects.gen_uuid()
+    uuid::Uuid::new_v4()
 }
 
 /// Simple HPKE key pair implementation (placeholder)

@@ -27,14 +27,12 @@ use super::erased::{AuraHandler, HandlerUtils};
 use super::EffectType;
 use crate::effects::crypto::CryptoError;
 use crate::effects::params::{
-    Blake3HashParams, DelayParams, RandomBytesParams, RandomRangeParams, Sha256HashParams,
+    DelayParams, RandomBytesParams, RandomRangeParams,
 };
 use crate::effects::*;
 use crate::handlers::context::AuraContext;
 use async_trait::async_trait;
 use aura_core::{AuraError, DeviceId};
-use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
-use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -614,75 +612,26 @@ impl TimeEffects for TypedHandlerBridge {
 // ConsoleEffects Blanket Implementation
 // ═══════════════════════════════════════════════════════════════════════════
 
-impl ConsoleEffects for TypedHandlerBridge {
-    fn log_trace(&self, message: &str, fields: &[(&str, &str)]) {
-        // Convert to owned strings to avoid lifetime issues
-        let message_owned = message.to_string();
-        let fields_owned: Vec<(String, String)> = fields
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        // TODO fix - Simplified implementation for bridge - just print synchronously
-        println!("[TRACE] {}: {:?}", message_owned, fields_owned);
+#[async_trait]
+impl aura_core::effects::ConsoleEffects for TypedHandlerBridge {
+    async fn log_info(&self, message: &str) -> Result<(), AuraError> {
+        println!("[INFO] {}", message);
+        Ok(())
     }
 
-    fn log_debug(&self, message: &str, fields: &[(&str, &str)]) {
-        // Convert to owned strings to avoid lifetime issues
-        let message_owned = message.to_string();
-        let fields_owned: Vec<(String, String)> = fields
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        // TODO fix - Simplified implementation for bridge - just print synchronously
-        println!("[DEBUG] {}: {:?}", message_owned, fields_owned);
+    async fn log_warn(&self, message: &str) -> Result<(), AuraError> {
+        println!("[WARN] {}", message);
+        Ok(())
     }
 
-    fn log_info(&self, message: &str, fields: &[(&str, &str)]) {
-        // Convert to owned strings to avoid lifetime issues
-        let message_owned = message.to_string();
-        let fields_owned: Vec<(String, String)> = fields
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        // TODO fix - Simplified implementation for bridge - just print synchronously
-        println!("[INFO] {}: {:?}", message_owned, fields_owned);
+    async fn log_error(&self, message: &str) -> Result<(), AuraError> {
+        eprintln!("[ERROR] {}", message);
+        Ok(())
     }
 
-    fn log_warn(&self, message: &str, fields: &[(&str, &str)]) {
-        // Convert to owned strings to avoid lifetime issues
-        let message_owned = message.to_string();
-        let fields_owned: Vec<(String, String)> = fields
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        // TODO fix - Simplified implementation for bridge - just print synchronously
-        println!("[WARN] {}: {:?}", message_owned, fields_owned);
-    }
-
-    fn log_error(&self, message: &str, fields: &[(&str, &str)]) {
-        // Convert to owned strings to avoid lifetime issues
-        let message_owned = message.to_string();
-        let fields_owned: Vec<(String, String)> = fields
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        // TODO fix - Simplified implementation for bridge - just print synchronously
-        eprintln!("[ERROR] {}: {:?}", message_owned, fields_owned);
-    }
-
-    fn emit_event(
-        &self,
-        event: crate::effects::ConsoleEvent,
-    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            // TODO fix - Simplified implementation for bridge
-            println!("[EVENT] {:?}", event);
-        })
+    async fn log_debug(&self, message: &str) -> Result<(), AuraError> {
+        println!("[DEBUG] {}", message);
+        Ok(())
     }
 }
 

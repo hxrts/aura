@@ -5,11 +5,8 @@
 //! unified architecture.
 
 // Local agent handlers
-pub mod auth;
 pub mod invitations;
-pub mod journal;
 pub mod ota;
-pub mod recovery;
 pub mod sessions;
 pub mod storage;
 
@@ -21,6 +18,5 @@ pub use aura_protocol::handlers::agent::{
 // Re-export local agent handlers
 pub use invitations::InvitationOperations;
 pub use ota::{OtaOperations, UpgradeProposalState, UpgradeStatus};
-pub use recovery::{RecoveryOperations, RecoveryStatus};
-pub use sessions::SessionOperations;
+pub use sessions::{SessionHandle, SessionOperations, SessionStats};
 pub use storage::StorageOperations;

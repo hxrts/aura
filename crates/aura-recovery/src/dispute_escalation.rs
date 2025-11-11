@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Escalation severity levels for disputed recoveries
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum EscalationLevel {
     /// Low priority - single guardian dispute
     Low = 1,
@@ -143,12 +143,12 @@ impl DisputeEscalationManager {
             .unwrap_or_default();
 
         // Calculate dispute ratio (guardians disputing / total guardians)
-        let dispute_ratio = dispute_count as f64 / guardian_set.guardians.len().max(1) as f64;
+        let dispute_ratio = dispute_count as f64 / guardian_set.len().max(1) as f64;
 
         EscalationEvaluation {
             level,
             dispute_count,
-            total_guardians: guardian_set.guardians.len(),
+            total_guardians: guardian_set.len(),
             dispute_ratio,
             should_auto_cancel,
             recommended_actions,

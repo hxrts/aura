@@ -35,14 +35,13 @@
 
 use crate::choreography::AuraHandlerAdapter;
 use crate::effects::ChoreographyError;
-use crate::effects::{ConsoleEffects, CryptoEffects, JournalEffects, TimeEffects};
+use crate::effects::TimeEffects;
 use crate::handlers::AuraHandlerError;
 use aura_core::{
     maintenance::{MaintenanceEvent, UpgradeActivated, UpgradeKind, UpgradeProposal},
     DeviceId, Epoch, Hash32, SemanticVersion,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 // ============================================================================
@@ -154,7 +153,9 @@ pub enum OtaError {
 
 impl From<OtaError> for ChoreographyError {
     fn from(e: OtaError) -> Self {
-        ChoreographyError::ProtocolError(e.to_string())
+        ChoreographyError::ProtocolViolation {
+            message: e.to_string(),
+        }
     }
 }
 

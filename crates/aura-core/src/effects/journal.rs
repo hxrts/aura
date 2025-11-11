@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 /// Pure trait for journal/CRDT operations
 #[async_trait]
-pub trait JournalEffects {
+pub trait JournalEffects: Send + Sync {
     /// Merge facts using join semilattice operation
     async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError>;
 

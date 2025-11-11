@@ -11,7 +11,8 @@ crates/
 ├── aura-cli             Command-line interface for account management
 ├── aura-core            Foundation types (ID system, effects, semilattice, config)
 ├── aura-crypto          Crypto primitives (FROST, HPKE, key derivation, middleware)
-├── aura-frost           FROST threshold signatures and key resharing
+├── aura-effects         Standard effect handler implementations (the standard library)
+├── aura-frost           FROST threshold signatures and key resharing (TEMPORARILY EXCLUDED)
 ├── aura-identity        Device identity, key derivation, principal management
 ├── aura-invitation      Invitation and acceptance choreographies
 ├── aura-journal         CRDT-based authenticated ledger for account state
@@ -40,6 +41,9 @@ graph TD
     %% Cryptography Layer
     crypto[aura-crypto]
     verify[aura-verify]
+
+    %% Implementation Layer (Standard Library)
+    effects[aura-effects]
 
     %% Type System & Protocol Specs
     mpst[aura-mpst]
@@ -80,6 +84,8 @@ graph TD
     crypto --> types
     verify --> types
     verify --> crypto
+    effects --> types
+    effects --> crypto
     mpst --> types
     identity --> types
     identity --> crypto
@@ -98,6 +104,7 @@ graph TD
     protocol --> verify
     protocol --> wot
     protocol --> identity
+    protocol --> effects
     wot --> types
     wot --> protocol
     sync --> types
@@ -136,6 +143,7 @@ graph TD
     agent --> sync
     agent --> recovery
     agent --> invitation
+    agent --> effects
     testkit --> agent
     testkit --> crypto
     testkit --> journal
@@ -157,6 +165,7 @@ graph TD
     %% Styling
     classDef foundation fill:#e1f5fe
     classDef crypto fill:#f3e5f5
+    classDef effects fill:#e8f5e8
     classDef types fill:#f8e5f5
     classDef protocol fill:#e8f5e8
     classDef storage fill:#fff8e1
@@ -166,6 +175,7 @@ graph TD
 
     class types foundation
     class crypto,verify crypto
+    class effects effects
     class mpst,identity types
     class journal,protocol,wot,sync protocol
     class transport,store,storage storage
@@ -183,6 +193,9 @@ graph TD
 ### Cryptography Layer (Purple)
 - **aura-crypto**: Cryptographic primitives (FROST, DKD, Ed25519, HPKE)
 - **aura-verify**: Signature verification and authentication checking
+
+### Implementation Layer - Standard Library (Light Green)
+- **aura-effects**: Context-free, stateless effect handler implementations (mock and real variants)
 
 ### Type System & Specification Layer (Light Purple)
 - **aura-mpst**: Multiparty session types and choreographic protocol specifications
@@ -238,6 +251,21 @@ graph TD
 - **Causal Context**: `VectorClock`, `CausalContext`, `OperationId` for CRDT causal ordering
 
 **Dependencies**: None (foundation crate)
+
+---
+
+### aura-effects
+**Purpose**: Standard effect handler implementations - the standard library for Aura's effect system
+
+**Key Exports**:
+- **Basic Handlers**: `RealCryptoHandler`, `MockNetworkHandler`, `MemoryStorageHandler`, `FilesystemStorageHandler`
+- **Testing Variants**: Mock implementations for all core effect traits
+- **Production Variants**: Real implementations using external libraries
+- **Context-Free Operations**: Stateless, single-party effect implementations
+
+**Dependencies**: `aura-core`, external libraries (tokio, blake3, etc.)
+
+**Note**: This is the "standard library" layer - provides basic effect implementations that work in any execution context
 
 ---
 
@@ -459,7 +487,7 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 
 ---
 
-### aura-frost
+### aura-frost (TEMPORARILY EXCLUDED)
 **Purpose**: FROST threshold signatures and key resharing operations
 
 **Key Exports**:
@@ -470,6 +498,8 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 - **Errors**: `FrostError`
 
 **Dependencies**: `aura-core`, `aura-crypto`, `aura-journal`, `aura-mpst`
+
+**Status**: Currently excluded from workspace build due to frost-ed25519 API compatibility issues
 
 ---
 
@@ -484,7 +514,7 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 - **Configuration**: Agent bootstrap and configuration
 - **Errors**: `AgentError`
 
-**Dependencies**: `aura-core`, `aura-protocol`, `aura-journal`, `aura-crypto`, `aura-transport`, `aura-store`, `aura-verify`, `aura-wot`, `aura-sync`, `aura-recovery`, `aura-invitation`
+**Dependencies**: `aura-core`, `aura-protocol`, `aura-journal`, `aura-crypto`, `aura-transport`, `aura-store`, `aura-verify`, `aura-wot`, `aura-sync`, `aura-recovery`, `aura-invitation`, `aura-effects`
 
 **Key Features**:
 - **OTA Support**: Soft/hard fork detection with epoch fence enforcement
@@ -689,9 +719,10 @@ The capability system intentionally uses **multiple architectural layers**, each
 
 ## Known Issues & Notes
 
-1. **Active Workspace**: 22 crates in workspace as of 2024-11-11
+1. **Active Workspace**: 22 crates in workspace as of 2024-11-11 (excluding temporarily excluded `aura-frost`)
 2. **Build Status**: All workspace crates compile successfully; no blockers to 1.0 release
 3. **Test Coverage**: Comprehensive property-based testing across core systems; integration test coverage >85%
 4. **Documentation Alignment**: Synchronized with actual implementation status (updated 2024-11-11)
 5. **Deprecated Crates**: `app-console`, `app-wasm`, `app-analysis-client` referenced in some docs but not in active workspace - planning to add Web UI in post-1.0 phase
 6. **Dependency Graph**: Includes all 22 active crates; diagram is current as of latest refactoring
+7. **Temporarily Excluded**: `aura-frost` is temporarily excluded from workspace build due to frost-ed25519 API compatibility issues

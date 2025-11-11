@@ -728,8 +728,6 @@ pub trait SearchIndex: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AccountIdExt, DeviceIdExt};
-    use aura_crypto::Effects;
 
     #[test]
     fn test_size_bucket_classification() {
@@ -751,7 +749,7 @@ mod tests {
 
     #[test]
     fn test_time_bucket_classification() {
-        let now = 1000000;
+        let now = 5000000;
 
         assert!(matches!(
             TimeBucket::from_timestamp(now - 1800, now),

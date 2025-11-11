@@ -51,12 +51,11 @@ pub async fn handle_scenarios(effects: &AuraEffectSystem, action: &ScenarioActio
 
 /// Handle scenario discovery through effects
 async fn handle_discover(effects: &AuraEffectSystem, root: &PathBuf, validate: bool) -> Result<()> {
-    effects.log_info(
+    let _ = effects.log_info(
         &format!("Discovering scenarios in: {}", root.display()),
-        &[],
     );
 
-    effects.log_info(&format!("Validation: {}", validate), &[]);
+    let _ = effects.log_info(&format!("Validation: {}", validate));
 
     // Check if root directory exists through storage effects
     let root_exists = effects
@@ -65,10 +64,9 @@ async fn handle_discover(effects: &AuraEffectSystem, root: &PathBuf, validate: b
         .unwrap_or(false);
 
     if !root_exists {
-        effects.log_error(
+        let _ = effects.log_error(
             &format!("Root directory not found: {}", root.display()),
-            &[],
-        );
+    );
         return Err(anyhow::anyhow!(
             "Root directory not found: {}",
             root.display()
@@ -78,16 +76,16 @@ async fn handle_discover(effects: &AuraEffectSystem, root: &PathBuf, validate: b
     // Simulate scenario discovery
     let scenarios = discover_scenarios_through_effects(effects, root).await?;
 
-    effects.log_info(&format!("Found {} scenarios", scenarios.len()), &[]);
+    let _ = effects.log_info(&format!("Found {} scenarios", scenarios.len()));
 
     for scenario in &scenarios {
-        effects.log_info(&format!("  - {}", scenario), &[]);
+        let _ = effects.log_info(&format!("  - {}", scenario));
     }
 
     if validate {
-        effects.log_info("Validating discovered scenarios...", &[]);
+        let _ = effects.log_info("Validating discovered scenarios...");
         validate_scenarios_through_effects(effects, &scenarios).await?;
-        effects.log_info("All scenarios validated successfully", &[]);
+        let _ = effects.log_info("All scenarios validated successfully");
     }
 
     Ok(())
@@ -99,23 +97,22 @@ async fn handle_list(
     directory: &PathBuf,
     detailed: bool,
 ) -> Result<()> {
-    effects.log_info(
+    let _ = effects.log_info(
         &format!("Listing scenarios in: {}", directory.display()),
-        &[],
     );
 
-    effects.log_info(&format!("Detailed: {}", detailed), &[]);
+    let _ = effects.log_info(&format!("Detailed: {}", detailed));
 
     // Get scenarios through storage effects
     let scenarios = list_scenarios_through_effects(effects, directory).await?;
 
-    effects.log_info("Available scenarios:", &[]);
+    let _ = effects.log_info("Available scenarios:");
 
     for scenario in scenarios {
         if detailed {
             display_detailed_scenario_info(effects, &scenario).await;
         } else {
-            effects.log_info(&format!("  - {}", scenario.name), &[]);
+            let _ = effects.log_info(&format!("  - {}", scenario.name));
         }
     }
 
@@ -128,13 +125,12 @@ async fn handle_validate(
     directory: &PathBuf,
     strictness: Option<&str>,
 ) -> Result<()> {
-    effects.log_info(
+    let _ = effects.log_info(
         &format!("Validating scenarios in: {}", directory.display()),
-        &[],
     );
 
     if let Some(level) = strictness {
-        effects.log_info(&format!("Strictness: {}", level), &[]);
+        let _ = effects.log_info(&format!("Strictness: {}", level));
     }
 
     // Validate scenarios through storage effects
@@ -143,7 +139,7 @@ async fn handle_validate(
 
     validate_scenarios_through_effects(effects, &scenario_names).await?;
 
-    effects.log_info("All scenarios valid", &[]);
+    let _ = effects.log_info("All scenarios valid");
 
     Ok(())
 }
@@ -158,22 +154,22 @@ async fn handle_run(
     output_file: Option<&PathBuf>,
     detailed_report: bool,
 ) -> Result<()> {
-    effects.log_info("Running scenarios", &[]);
+    let _ = effects.log_info("Running scenarios");
 
     if let Some(dir) = directory {
-        effects.log_info(&format!("Directory: {}", dir.display()), &[]);
+        let _ = effects.log_info(&format!("Directory: {}", dir.display()));
     }
     if let Some(pat) = pattern {
-        effects.log_info(&format!("Pattern: {}", pat), &[]);
+        let _ = effects.log_info(&format!("Pattern: {}", pat));
     }
-    effects.log_info(&format!("Parallel: {}", parallel), &[]);
+    let _ = effects.log_info(&format!("Parallel: {}", parallel));
     if let Some(max) = max_parallel {
-        effects.log_info(&format!("Max parallel: {}", max), &[]);
+        let _ = effects.log_info(&format!("Max parallel: {}", max));
     }
     if let Some(output) = output_file {
-        effects.log_info(&format!("Output file: {}", output.display()), &[]);
+        let _ = effects.log_info(&format!("Output file: {}", output.display()));
     }
-    effects.log_info(&format!("Detailed report: {}", detailed_report), &[]);
+    let _ = effects.log_info(&format!("Detailed report: {}", detailed_report));
 
     // Execute scenarios through effects
     let results =
@@ -185,7 +181,7 @@ async fn handle_run(
         save_scenario_results(effects, output_path, &results, detailed_report).await?;
     }
 
-    effects.log_info("All scenarios completed successfully", &[]);
+    let _ = effects.log_info("All scenarios completed successfully");
 
     Ok(())
 }
@@ -198,14 +194,14 @@ async fn handle_report(
     format: Option<&str>,
     detailed: bool,
 ) -> Result<()> {
-    effects.log_info("Generating report", &[]);
-    effects.log_info(&format!("Input: {}", input.display()), &[]);
-    effects.log_info(&format!("Output: {}", output.display()), &[]);
+    let _ = effects.log_info("Generating report");
+    let _ = effects.log_info(&format!("Input: {}", input.display()));
+    let _ = effects.log_info(&format!("Output: {}", output.display()));
 
     if let Some(fmt) = format {
-        effects.log_info(&format!("Format: {}", fmt), &[]);
+        let _ = effects.log_info(&format!("Format: {}", fmt));
     }
-    effects.log_info(&format!("Detailed: {}", detailed), &[]);
+    let _ = effects.log_info(&format!("Detailed: {}", detailed));
 
     // Load results through storage effects
     let results_data = effects
@@ -223,7 +219,7 @@ async fn handle_report(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to save report: {}", e))?;
 
-    effects.log_info("Report generated successfully", &[]);
+    let _ = effects.log_info("Report generated successfully");
 
     Ok(())
 }
@@ -243,7 +239,7 @@ async fn discover_scenarios_through_effects(
         "network_partition_test.toml".to_string(),
     ];
 
-    effects.log_info(&format!("Scanned directory: {}", root.display()), &[]);
+    let _ = effects.log_info(&format!("Scanned directory: {}", root.display()));
 
     Ok(scenarios)
 }
@@ -254,11 +250,11 @@ async fn validate_scenarios_through_effects(
     scenarios: &[String],
 ) -> Result<()> {
     for scenario in scenarios {
-        effects.log_info(&format!("Validating: {}", scenario), &[]);
+        let _ = effects.log_info(&format!("Validating: {}", scenario));
 
         // Simulate validation
         if scenario.contains("invalid") {
-            effects.log_error(&format!("Invalid scenario: {}", scenario), &[]);
+            let _ = effects.log_error(&format!("Invalid scenario: {}", scenario));
             return Err(anyhow::anyhow!("Invalid scenario: {}", scenario));
         }
     }
@@ -292,13 +288,12 @@ async fn list_scenarios_through_effects(
         },
     ];
 
-    effects.log_info(
+    let _ = effects.log_info(
         &format!(
             "Listed {} scenarios from {}",
             scenarios.len(),
             directory.display()
         ),
-        &[],
     );
 
     Ok(scenarios)
@@ -306,14 +301,13 @@ async fn list_scenarios_through_effects(
 
 /// Display detailed scenario information
 async fn display_detailed_scenario_info(effects: &AuraEffectSystem, scenario: &ScenarioInfo) {
-    effects.log_info(
+    let _ = effects.log_info(
         &format!(
             "  - {} ({} devices, threshold {})",
             scenario.name, scenario.devices, scenario.threshold
         ),
-        &[],
     );
-    effects.log_info(&format!("    Description: {}", scenario.description), &[]);
+    let _ = effects.log_info(&format!("    Description: {}", scenario.description));
 }
 
 /// Execute scenarios through effects
@@ -328,7 +322,7 @@ async fn execute_scenarios_through_effects(
 
     // Simulate scenario execution
     let scenario_names = if let Some(pat) = pattern {
-        effects.log_info(&format!("Filtering scenarios by pattern: {}", pat), &[]);
+        let _ = effects.log_info(&format!("Filtering scenarios by pattern: {}", pat));
         vec!["threshold_test.toml".to_string()]
     } else {
         vec![
@@ -339,20 +333,19 @@ async fn execute_scenarios_through_effects(
 
     if parallel {
         let max = max_parallel.unwrap_or(4);
-        effects.log_info(
+        let _ = effects.log_info(
             &format!(
                 "Running {} scenarios in parallel (max {})",
                 scenario_names.len(),
                 max
             ),
-            &[],
-        );
+    );
     } else {
-        effects.log_info("Running scenarios sequentially", &[]);
+        let _ = effects.log_info("Running scenarios sequentially");
     }
 
     for scenario in scenario_names {
-        effects.log_info(&format!("Executing: {}", scenario), &[]);
+        let _ = effects.log_info(&format!("Executing: {}", scenario));
 
         // Simulate execution
         let result = ScenarioResult {
@@ -363,7 +356,7 @@ async fn execute_scenarios_through_effects(
         };
 
         results.push(result);
-        effects.log_info(&format!("Completed: {}", scenario), &[]);
+        let _ = effects.log_info(&format!("Completed: {}", scenario));
     }
 
     Ok(results)
@@ -391,7 +384,7 @@ async fn save_scenario_results(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to save results: {}", e))?;
 
-    effects.log_info(&format!("Results saved to: {}", output_path.display()), &[]);
+    let _ = effects.log_info(&format!("Results saved to: {}", output_path.display()));
 
     Ok(())
 }

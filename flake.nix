@@ -124,7 +124,6 @@
             findutils
             gawk
             gnused
-            pkgs.grep
 
             # Formal verification and protocol modeling
             quint

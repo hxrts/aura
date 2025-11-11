@@ -20,10 +20,32 @@
 //!
 //! 3. **Handler Composition**: Utilities for combining handlers with delivery effects
 //!
-//! ## Usage Pattern
+//! ## Usage Pattern with Builder API
+//!
+//! The recommended pattern uses the `CrdtCoordinator` builder for clean setup:
 //!
 //! ```rust,ignore
-//! use crate::effects::semilattice::{CvHandler, execute_cv_sync};
+//! use crate::effects::semilattice::CrdtCoordinator;
+//!
+//! // Create coordinator with convergent CRDT handler (builder pattern)
+//! let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_map);
+//!
+//! // Use in choreographic protocols
+//! let result = execute_anti_entropy(
+//!     device_id,
+//!     config,
+//!     is_requester,
+//!     &effect_system,
+//!     coordinator,
+//! ).await?;
+//! ```
+//!
+//! ## Direct Handler Usage
+//!
+//! For cases where you need direct handler control:
+//!
+//! ```rust,ignore
+//! use crate::effects::semilattice::CvHandler;
 //! use aura_core::semilattice::StateMsg;
 //!
 //! // Create handler for state-based CRDT
@@ -39,20 +61,20 @@
 //! ```
 
 pub use cm_handler::CmHandler;
+pub use crdt_coordinator::{CrdtCoordinator, CrdtCoordinatorError};
 pub use cv_handler::CvHandler;
 pub use delivery::{
     CausalContext, DeliveryConfig, DeliveryEffect, DeliveryGuarantee, GossipStrategy, TopicId,
 };
 pub use delta_handler::DeltaHandler;
 pub use mv_handler::{ConstraintEvent, ConstraintResult, MultiConstraintHandler, MvHandler};
-pub use crdt_coordinator::{CrdtCoordinator, CrdtCoordinatorFactory, CrdtCoordinatorError};
 
 pub mod cm_handler;
+pub mod crdt_coordinator;
 pub mod cv_handler;
 pub mod delivery;
 pub mod delta_handler;
 pub mod mv_handler;
-pub mod crdt_coordinator;
 
 use aura_core::identifiers::{DeviceId, SessionId};
 use aura_core::semilattice::{CausalOp, CmApply, CvState, Dedup, Delta, MvState, Top};
@@ -72,10 +94,10 @@ impl HandlerFactory {
     }
 
     /// Create an operation-based CRDT handler
-    pub fn cm_handler<S, Op, Id, Ctx>(state: S) -> CmHandler<S, Op, Id>
+    pub fn cm_handler<S, Op, Id>(state: S) -> CmHandler<S, Op, Id>
     where
         S: CmApply<Op> + Dedup<Id>,
-        Op: CausalOp<Id = Id, Ctx = Ctx>,
+        Op: CausalOp<Id = Id, Ctx = aura_core::CausalContext>,
         Id: Clone + PartialEq,
     {
         CmHandler::new(state)
@@ -200,16 +222,15 @@ pub mod composition {
         }
 
         /// Register a CmRDT handler
-        pub fn register_cm_handler<S, Op, Id, Ctx>(
+        pub fn register_cm_handler<S, Op, Id>(
             &mut self,
             type_name: String,
             handler: CmHandler<S, Op, Id>,
             config: DeliveryConfig,
         ) where
             S: CmApply<Op> + Dedup<Id> + Send + Sync + 'static,
-            Op: CausalOp<Id = Id, Ctx = Ctx> + Send + Sync + 'static,
+            Op: CausalOp<Id = Id, Ctx = aura_core::CausalContext> + Send + Sync + 'static,
             Id: Clone + PartialEq + Send + Sync + 'static,
-            Ctx: Send + Sync + 'static,
         {
             self.handlers.insert(type_name.clone(), Box::new(handler));
             self.delivery_configs.insert(type_name, config);

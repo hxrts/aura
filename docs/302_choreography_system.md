@@ -1,5 +1,7 @@
 # Choreography System Reference
 
+> **⚠️ Important Note**: This document describes the **intended** choreographic programming approach for Aura. Currently, choreographies are primarily used for documentation and specification while implementations use the effect system. For actual rumpsteak-aura DSL syntax that works today, see [Choreography Programming Guide](805_choreography_programming_guide.md).
+
 This document describes the Aura choreography system for implementing distributed protocols. The system uses choreographic programming to specify protocols from a global perspective and automatically projects them to type-safe local implementations.
 
 ## Choreographic Programming Overview
@@ -226,16 +228,12 @@ pub struct DataResponse {
     pub error: Option<String>,
 }
 
-// Choreography specification
-choreography! {
-    protocol SimpleRequestResponse {
-        // Role declarations
-        roles: Client, Server;
-        
-        // Message exchange sequence
-        Client -> Server: DataRequest(request: DataRequest);
-        Server -> Client: DataResponse(response: DataResponse);
-    }
+// Choreography specification (corrected syntax)
+choreography SimpleRequestResponse {
+    roles: Client, Server
+    
+    Client -> Server: DataRequest
+    Server -> Client: DataResponse
 }
 
 // Implementation for Client role
@@ -295,27 +293,33 @@ async fn process_data_request(
 **Purpose**: Demonstrates coordination between multiple participants with threshold requirements.
 
 ```rust
-choreography! {
-    protocol ThresholdApproval {
-        roles: Proposer, Guardian1, Guardian2, Guardian3;
-        
-        // Proposal phase
-        Proposer -> Guardian1: ProposalRequest(proposal: ProposalData);
-        Proposer -> Guardian2: ProposalRequest(proposal: ProposalData);
-        Proposer -> Guardian3: ProposalRequest(proposal: ProposalData);
-        
-        // Approval phase (parallel)
-        par {
-            Guardian1 -> Proposer: ApprovalResponse(approval: GuardianApproval);
-            Guardian2 -> Proposer: ApprovalResponse(approval: GuardianApproval);  
-            Guardian3 -> Proposer: ApprovalResponse(approval: GuardianApproval);
+// Note: This shows simplified choreography syntax. 
+// Current implementation uses manual protocol coordination.
+
+choreography ThresholdApproval {
+    roles: Proposer, Guardian1, Guardian2, Guardian3
+    
+    // Proposal broadcast
+    Proposer -> Guardian1: ProposalRequest
+    Proposer -> Guardian2: ProposalRequest  
+    Proposer -> Guardian3: ProposalRequest
+    
+    // Approval responses (implementation handles collection)
+    Guardian1 -> Proposer: ApprovalResponse
+    Guardian2 -> Proposer: ApprovalResponse
+    Guardian3 -> Proposer: ApprovalResponse
+    
+    // Result notification (conditional in implementation)
+    choice Proposer {
+        threshold_met: {
+            Proposer -> Guardian1: ThresholdResult
+            Proposer -> Guardian2: ThresholdResult
+            Proposer -> Guardian3: ThresholdResult
         }
-        
-        // Result notification
-        if threshold_met {
-            Proposer -> Guardian1: ThresholdResult(result: CompletionStatus);
-            Proposer -> Guardian2: ThresholdResult(result: CompletionStatus);
-            Proposer -> Guardian3: ThresholdResult(result: CompletionStatus);
+        threshold_not_met: {
+            Proposer -> Guardian1: ThresholdFailure
+            Proposer -> Guardian2: ThresholdFailure
+            Proposer -> Guardian3: ThresholdFailure
         }
     }
 }

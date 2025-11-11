@@ -46,9 +46,7 @@
 // Effect trait definitions
 pub mod agent;
 pub mod choreographic;
-pub mod console;
 pub mod crypto;
-pub mod journal;
 pub mod ledger;
 pub mod network;
 pub mod params;
@@ -72,20 +70,25 @@ pub use choreographic::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics,
 };
-pub use console::{ConsoleEffects, ConsoleEvent, LogLevel};
-pub use crypto::{CryptoEffects, CryptoError, FrostSigningPackage, KeyDerivationContext};
-pub use journal::JournalEffects;
+// Import core effects from aura-core
+pub use aura_core::effects::{
+    ConsoleEffects, CryptoEffects, CryptoError, JournalEffects, NetworkAddress, NetworkEffects,
+    NetworkError, PeerEvent, PeerEventStream, RandomEffects, StorageEffects, StorageError,
+    StorageLocation, StorageStats, TimeEffects, TimeError, TimeoutHandle, WakeCondition,
+};
+
+// Import crypto-specific types from crypto module
+pub use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
+// Note: Removed duplicate re-exports to avoid conflicts with aura_core imports
+// Only re-export types that are protocol-specific and don't conflict with aura-core
+
 pub use ledger::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEvent, LedgerEventStream};
-pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 pub use params::*; // Re-export all parameter types
-pub use random::RandomEffects;
 pub use semilattice::{
     CausalContext, CmHandler, CvHandler, DeliveryConfig, DeliveryEffect, DeliveryGuarantee,
     DeltaHandler, GossipStrategy, HandlerFactory, TopicId,
 };
-pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
 pub use sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
-pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 pub use tree::TreeEffects;
 pub use tree_coordination::{
     ApprovalStatus, ApprovalVote, CloseReason, CoordinationConfig, CoordinationError,
@@ -112,10 +115,10 @@ pub trait AuraEffects:
     + NetworkEffects
     + StorageEffects
     + TimeEffects
-    + ConsoleEffects
     + RandomEffects
-    + LedgerEffects
+    + ConsoleEffects
     + JournalEffects
+    + LedgerEffects
     + TreeEffects
     + ChoreographicEffects
     + SystemEffects

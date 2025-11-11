@@ -2,7 +2,7 @@
 //!
 //! Simple merkle tree utilities using the effects system for hashing.
 
-use crate::effects::CryptoEffects;
+use aura_core::effects::CryptoEffects;
 use crate::Result;
 
 /// Merkle proof structure containing sibling path and directions
@@ -64,7 +64,7 @@ pub async fn generate_merkle_proof(
     
     // Hash all leaves to create the bottom level
     for leaf in leaves {
-        current_level.push(effects.hash_async(leaf).await);
+        current_level.push(effects.hash(leaf).await);
     }
 
     let mut sibling_path = Vec::new();
@@ -93,7 +93,7 @@ pub async fn generate_merkle_proof(
                 let mut combined = Vec::new();
                 combined.extend_from_slice(left);
                 combined.extend_from_slice(right);
-                next_level.push(effects.hash_async(&combined).await);
+                next_level.push(effects.hash(&combined).await);
             } else {
                 // Odd node - promote to next level
                 next_level.push(current_level[i]);
@@ -128,7 +128,7 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
     
     // Hash all leaves to create the bottom level
     for leaf in leaves {
-        current_level.push(effects.hash_async(leaf).await);
+        current_level.push(effects.hash(leaf).await);
     }
 
     // Build tree bottom-up until we reach the root
@@ -145,7 +145,7 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
                 let mut combined = Vec::new();
                 combined.extend_from_slice(left);
                 combined.extend_from_slice(right);
-                next_level.push(effects.hash_async(&combined).await);
+                next_level.push(effects.hash(&combined).await);
             } else {
                 // Odd node - promote to next level unchanged
                 next_level.push(current_level[i]);
@@ -175,7 +175,7 @@ pub async fn verify_merkle_proof(
     effects: &impl CryptoEffects,
 ) -> bool {
     // Start with the leaf hash
-    let mut current_hash = effects.hash_async(leaf_value).await;
+    let mut current_hash = effects.hash(leaf_value).await;
     
     // If no siblings, tree has only one leaf
     if proof.sibling_path.is_empty() {
@@ -200,7 +200,7 @@ pub async fn verify_merkle_proof(
         }
         
         // Hash the combined value to get parent hash
-        current_hash = effects.hash_async(&combined).await;
+        current_hash = effects.hash(&combined).await;
         
         // Move to parent level
         index /= 2;

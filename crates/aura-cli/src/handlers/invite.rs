@@ -35,8 +35,7 @@ pub async fn handle_invitation(
                     response.invitation.invitee,
                     response.invitation.expires_at
                 ),
-                &[],
-            );
+    );
             Ok(())
         }
         InvitationAction::Accept { envelope } => {
@@ -56,8 +55,7 @@ pub async fn handle_invitation(
                     "Accepted invitation {} at {}.",
                     acceptance.invitation_id, acceptance.accepted_at
                 ),
-                &[],
-            );
+    );
             Ok(())
         }
     }

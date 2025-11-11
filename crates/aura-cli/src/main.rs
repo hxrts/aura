@@ -150,10 +150,10 @@ async fn main() -> Result<()> {
 
     // Initialize logging through effects
     let log_level = if cli.verbose { "debug" } else { "info" };
-    effect_system.log_info(
-        &format!("Initializing Aura CLI with log level: {}", log_level),
-        &[],
-    );
+    effect_system.log_info(&format!(
+        "Initializing Aura CLI with log level: {}",
+        log_level
+    ));
 
     // Create CLI handler
     let cli_handler = CliHandler::new(effect_system);

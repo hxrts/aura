@@ -7,13 +7,13 @@
 
 use crate::secure_channel::{ChannelKey, SecureChannelRegistry, TeardownReason};
 use aura_core::{
-    flow::FlowBudget, relationships::ContextId, session_epochs::Epoch, AuraError, DeviceId,
+    flow::FlowBudget, session_epochs::Epoch, AuraError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};

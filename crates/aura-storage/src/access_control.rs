@@ -3,7 +3,7 @@
 //! This module implements capability-based access control for storage operations,
 //! ensuring that all storage accesses are mediated by capabilities.
 
-use aura_core::{AccountId, AuraResult, Cap, ChunkId, ContentId, DeviceId};
+use aura_core::{AccountId, AuraResult, Cap, ChunkId, ContentId, DeviceId, Hash32};
 use aura_wot::{Capability, CapabilityEvaluator, StoragePermission};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -288,13 +288,13 @@ mod tests {
         let mut access_control = StorageAccessControl::new(evaluator);
 
         let device_id = DeviceId::new();
-        let capabilities = vec![Capability::Storage];
+        let capabilities = vec![Capability::Read { resource_pattern: "content/*".to_string() }];
         access_control.register_capabilities(device_id, capabilities);
 
         let request = StorageAccessRequest {
             device_id,
             operation: StorageOperation::Read,
-            resource: StorageResource::Content(ContentId::new([0u8; 32])),
+            resource: StorageResource::Content(ContentId::new(Hash32([0u8; 32]))),
             capabilities: vec![],
         };
 
@@ -313,7 +313,7 @@ mod tests {
         let request = StorageAccessRequest {
             device_id,
             operation: StorageOperation::Write,
-            resource: StorageResource::Content(ContentId::new([0u8; 32])),
+            resource: StorageResource::Content(ContentId::new(Hash32([0u8; 32]))),
             capabilities: vec![],
         };
 
@@ -327,13 +327,13 @@ mod tests {
         let mut access_control = StorageAccessControl::new(evaluator);
 
         let device_id = DeviceId::new();
-        let capabilities = vec![Capability::Storage];
+        let capabilities = vec![Capability::Read { resource_pattern: "content/*".to_string() }];
         access_control.register_capabilities(device_id, capabilities);
 
         let content_ids = vec![
-            ContentId::new([1u8; 32]),
-            ContentId::new([2u8; 32]),
-            ContentId::new([3u8; 32]),
+            ContentId::new(Hash32([1u8; 32])),
+            ContentId::new(Hash32([2u8; 32])),
+            ContentId::new(Hash32([3u8; 32])),
         ];
 
         let accessible = access_control

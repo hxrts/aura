@@ -4,17 +4,13 @@
 //! following the Aura protocol guide patterns for distributed protocols with
 //! session type safety and effect system integration.
 
-use crate::effects::ChoreographyError;
 use crate::effects::{
-    ApprovalStatus, ApprovalVote, ConsoleEffects, CoordinationError, CryptoEffects,
-    ReconcileResult, SessionId, SessionRole, SyncProgress, TimeEffects, TreeCoordinationEffects,
-    TreeDigest, TreeEffects, ValidationContext, ValidationResult, VoteDecision,
+    ApprovalStatus, ApprovalVote, ConsoleEffects, CoordinationError, SessionId, SyncProgress, TimeEffects,
+    TreeDigest, ValidationContext, ValidationResult, VoteDecision,
 };
-use aura_core::{AttestedOp, AuraError, DeviceId, Hash32, TreeOpKind};
-use rumpsteak_aura_choreography::choreography;
+use aura_core::{AttestedOp, DeviceId, Hash32, TreeOpKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Range;
 use uuid::Uuid;
 
 /// Tree operation approval configuration
@@ -257,10 +253,8 @@ pub async fn execute_tree_operation_approval(
         ));
     }
 
-    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
-        device_id,
-        effect_system.execution_mode(),
-    );
+    let mut adapter =
+        crate::choreography::AuraHandlerAdapter::new(device_id, effect_system.execution_mode());
 
     // Determine role and execute (following protocol guide pattern)
     if device_id == config.initiator {
@@ -300,13 +294,11 @@ async fn initiator_approval_session(
 
     // Use TimeEffects to get current time and ConsoleEffects for logging (following protocol guide)
     let current_time = adapter.effects().current_timestamp_millis().await;
-    adapter.effects().log_info(
-        "Starting tree operation approval session",
-        &[
-            ("session_id", session_id.to_string().as_str()),
-            ("operation", format!("{:?}", config.operation).as_str()),
-        ],
-    );
+    adapter
+        .effects()
+        .log_info("Starting tree operation approval session")
+        .await
+        .map_err(|e| TreeChoreographyError::CoordinationFailed(e.to_string()))?;
 
     // Phase 1: Propose operation to all participants
     let validation_context = ValidationContext {
@@ -559,23 +551,22 @@ async fn approver_session(
     _config: &TreeApprovalConfig,
 ) -> Result<TreeOperationResult, TreeChoreographyError> {
     // Use ConsoleEffects for logging (following protocol guide pattern)
-    adapter.effects().log_info(
-        "Starting tree operation approval as approver",
-        &[("initiator", initiator_id.to_string().as_str())],
-    );
+    adapter
+        .effects()
+        .log_info("Starting tree operation approval as approver")
+        .await
+        .map_err(|e| TreeChoreographyError::CoordinationFailed(e.to_string()))?;
 
     // Phase 1: Receive operation proposal
     let proposal: TreeOperationProposal = adapter.recv_from(initiator_id).await.map_err(|e| {
         TreeChoreographyError::Communication(format!("Failed to receive proposal: {}", e))
     })?;
 
-    adapter.effects().log_debug(
-        "Received tree operation proposal",
-        &[
-            ("session_id", proposal.session_id.to_string().as_str()),
-            ("operation", format!("{:?}", proposal.operation).as_str()),
-        ],
-    );
+    adapter
+        .effects()
+        .log_debug("Received tree operation proposal")
+        .await
+        .map_err(|e| TreeChoreographyError::CoordinationFailed(e.to_string()))?;
 
     // Phase 2: Validate operation and send result using CryptoEffects for validation
     // For simplicity, always approve unless operation is clearly invalid
@@ -911,10 +902,8 @@ pub async fn execute_tree_synchronization(
         ));
     }
 
-    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
-        device_id,
-        effect_system.execution_mode(),
-    );
+    let mut adapter =
+        crate::choreography::AuraHandlerAdapter::new(device_id, effect_system.execution_mode());
 
     // Execute appropriate role
     if is_coordinator {

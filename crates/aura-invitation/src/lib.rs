@@ -78,9 +78,17 @@ pub use aura_authenticate::{
     AuthenticationError, AuthenticationResult, IdentityProof, VerifiedIdentity,
 };
 
+// Re-export core effect types
+pub use aura_core::effects::{
+    ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, TimeEffects,
+};
+
 // Re-export MPST types
 pub use aura_mpst::{
     AuraRuntime, CapabilityGuard, ExecutionContext, JournalAnnotation, MpstError, MpstResult,
 };
+
+// Re-export effect system
+pub use aura_protocol::AuraEffectSystem;
 
 // Error re-exports removed - use aura_core::AuraError directly

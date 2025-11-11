@@ -605,7 +605,10 @@ impl OpLogSynchronizer {
         // Parse response
         match response {
             SyncMessage::SummaryResponse { peer_summary, .. } => {
-                debug!("Received summary from peer {}: {} ops", peer_id, peer_summary.operation_count);
+                debug!(
+                    "Received summary from peer {}: {} ops",
+                    peer_id, peer_summary.operation_count
+                );
                 Ok(peer_summary)
             }
             _ => Err(SyncError::protocol("Invalid response type")),
@@ -613,7 +616,11 @@ impl OpLogSynchronizer {
     }
 
     /// Send sync request via transport and wait for response
-    async fn send_sync_request(&self, peer_id: DeviceId, request: SyncMessage) -> Result<SyncMessage, SyncError> {
+    async fn send_sync_request(
+        &self,
+        peer_id: DeviceId,
+        request: SyncMessage,
+    ) -> Result<SyncMessage, SyncError> {
         // Serialize request
         let request_bytes = bincode::serialize(&request)
             .map_err(|e| SyncError::protocol(format!("Failed to serialize request: {}", e)))?;
@@ -621,8 +628,9 @@ impl OpLogSynchronizer {
         // Send via transport with timeout
         let response_bytes = tokio::time::timeout(
             Duration::from_secs(30),
-            self.transport_send_and_receive(peer_id, request_bytes)
-        ).await
+            self.transport_send_and_receive(peer_id, request_bytes),
+        )
+        .await
         .map_err(|_| SyncError::protocol("Request timeout"))??;
 
         // Deserialize response
@@ -633,27 +641,35 @@ impl OpLogSynchronizer {
     }
 
     /// Send request via transport and receive response
-    async fn transport_send_and_receive(&self, peer_id: DeviceId, request_bytes: Vec<u8>) -> Result<Vec<u8>, SyncError> {
+    async fn transport_send_and_receive(
+        &self,
+        peer_id: DeviceId,
+        request_bytes: Vec<u8>,
+    ) -> Result<Vec<u8>, SyncError> {
         // This would integrate with the real transport layer
         // For now, we'll use a simplified implementation
-        
-        use std::collections::HashMap;
+
         use tokio::sync::oneshot;
-        
+
         // Create a channel for the response
-        let (response_tx, response_rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) = oneshot::channel();
-        
+        let (_response_tx, _response_rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) =
+            oneshot::channel();
+
         // Store response channel with request ID
-        let request_id = uuid::Uuid::new_v4().to_string();
-        
+        let _request_id = uuid::Uuid::new_v4().to_string();
+
         // Send via mock transport (in real implementation this would use aura-transport)
         let mock_response = self.mock_transport_send(peer_id, request_bytes).await?;
-        
+
         Ok(mock_response)
     }
 
     /// Mock transport send (placeholder for real implementation)
-    async fn mock_transport_send(&self, peer_id: DeviceId, request_bytes: Vec<u8>) -> Result<Vec<u8>, SyncError> {
+    async fn mock_transport_send(
+        &self,
+        peer_id: DeviceId,
+        request_bytes: Vec<u8>,
+    ) -> Result<Vec<u8>, SyncError> {
         debug!("Sending {} bytes to peer {}", request_bytes.len(), peer_id);
 
         // Simulate network delay

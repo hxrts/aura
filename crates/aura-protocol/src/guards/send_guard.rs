@@ -5,7 +5,7 @@
 //! that enforces both authorization and budget constraints at every protocol send site.
 
 use crate::effects::system::AuraEffectSystem;
-use crate::guards::{evaluation::GuardEvaluator, flow::FlowGuard, ProtocolGuard};
+use crate::guards::{flow::FlowGuard, ProtocolGuard};
 use aura_core::{relationships::ContextId, AuraError, AuraResult, DeviceId, Receipt};
 use aura_wot::{Capability, EffectiveCapabilitySet};
 use std::time::Instant;

@@ -138,7 +138,8 @@ impl StunClient {
 
         // Bind local socket
         let local_socket = self.create_local_socket().await?;
-        let local_addr = local_socket.local_addr()
+        let _local_addr = local_socket
+            .local_addr()
             .map_err(|e| AuraError::network(format!("Failed to get local address: {}", e)))?;
 
         // Perform STUN exchange
@@ -150,7 +151,10 @@ impl StunClient {
                 "Sending STUN binding request"
             );
 
-            match self.perform_stun_exchange(&local_socket, server_addr, server_url).await {
+            match self
+                .perform_stun_exchange(&local_socket, server_addr, server_url)
+                .await
+            {
                 Ok(result) => {
                     tracing::info!(
                         server = %server_url,
@@ -182,7 +186,10 @@ impl StunClient {
             }
         }
 
-        Err(AuraError::network(format!("STUN discovery failed with server {}", server_url)))
+        Err(AuraError::network(format!(
+            "STUN discovery failed with server {}",
+            server_url
+        )))
     }
 
     /// Resolve STUN server address
@@ -204,23 +211,29 @@ impl StunClient {
         let addrs: Vec<SocketAddr> = tokio::task::spawn_blocking({
             let server_addr = server_addr.to_string();
             move || {
-                server_addr.to_socket_addrs()
+                server_addr
+                    .to_socket_addrs()
                     .map(|iter| iter.collect())
                     .unwrap_or_default()
             }
-        }).await
+        })
+        .await
         .map_err(|e| AuraError::network(format!("Task join error: {}", e)))?;
 
-        addrs.into_iter().next()
-            .ok_or_else(|| AuraError::network(format!("Failed to resolve STUN server: {}", server_url)))
+        addrs.into_iter().next().ok_or_else(|| {
+            AuraError::network(format!("Failed to resolve STUN server: {}", server_url))
+        })
     }
 
     /// Create local UDP socket for STUN requests
     async fn create_local_socket(&self) -> Result<UdpSocket, AuraError> {
-        let bind_addr = self.config.local_bind_addr
+        let bind_addr = self
+            .config
+            .local_bind_addr
             .unwrap_or_else(|| "0.0.0.0:0".parse().unwrap());
 
-        UdpSocket::bind(bind_addr).await
+        UdpSocket::bind(bind_addr)
+            .await
             .map_err(|e| AuraError::network(format!("Failed to bind STUN socket: {}", e)))
     }
 
@@ -239,18 +252,25 @@ impl StunClient {
         let request = self.create_binding_request(transaction_id);
 
         // Send request
-        socket.send_to(&request, server_addr).await
+        socket
+            .send_to(&request, server_addr)
+            .await
             .map_err(|e| AuraError::network(format!("Failed to send STUN request: {}", e)))?;
 
         // Wait for response with timeout
         let timeout_duration = Duration::from_millis(self.config.timeout_ms);
-        let response = timeout(timeout_duration, self.receive_stun_response(socket, transaction_id)).await
-            .map_err(|_| AuraError::network("STUN request timeout".to_string()))??;
+        let response = timeout(
+            timeout_duration,
+            self.receive_stun_response(socket, transaction_id),
+        )
+        .await
+        .map_err(|_| AuraError::network("STUN request timeout".to_string()))??;
 
         // Parse reflexive address from response
         let reflexive_address = self.parse_reflexive_address(&response, transaction_id)?;
 
-        let local_address = socket.local_addr()
+        let local_address = socket
+            .local_addr()
             .map_err(|e| AuraError::network(format!("Failed to get local address: {}", e)))?;
 
         let timestamp = SystemTime::now()
@@ -288,8 +308,9 @@ impl StunClient {
         let mut buffer = vec![0u8; 1024];
 
         loop {
-            let (len, _from) = socket.recv_from(&mut buffer).await
-                .map_err(|e| AuraError::network(format!("Failed to receive STUN response: {}", e)))?;
+            let (len, _from) = socket.recv_from(&mut buffer).await.map_err(|e| {
+                AuraError::network(format!("Failed to receive STUN response: {}", e))
+            })?;
 
             buffer.truncate(len);
 
@@ -318,7 +339,9 @@ impl StunClient {
             if message_type == StunMessageType::BindingResponse as u16 {
                 return Ok(buffer);
             } else if message_type == StunMessageType::BindingErrorResponse as u16 {
-                return Err(AuraError::network("Received STUN error response".to_string()));
+                return Err(AuraError::network(
+                    "Received STUN error response".to_string(),
+                ));
             } else {
                 tracing::debug!("Received unknown STUN message type: {:#04x}", message_type);
                 continue;
@@ -348,7 +371,8 @@ impl StunClient {
         let mut offset = 20;
         while offset + 4 <= expected_total_length {
             let attr_type = u16::from_be_bytes([response[offset], response[offset + 1]]);
-            let attr_length = u16::from_be_bytes([response[offset + 2], response[offset + 3]]) as usize;
+            let attr_length =
+                u16::from_be_bytes([response[offset + 2], response[offset + 3]]) as usize;
 
             offset += 4;
 
@@ -370,7 +394,9 @@ impl StunClient {
             offset = (offset + 3) & !3;
         }
 
-        Err(AuraError::network("No reflexive address found in STUN response".to_string()))
+        Err(AuraError::network(
+            "No reflexive address found in STUN response".to_string(),
+        ))
     }
 
     /// Parse XOR-MAPPED-ADDRESS attribute
@@ -380,7 +406,9 @@ impl StunClient {
         transaction_id: [u8; 12],
     ) -> Result<SocketAddr, AuraError> {
         if attr_value.len() < 8 {
-            return Err(AuraError::network("XOR-MAPPED-ADDRESS too short".to_string()));
+            return Err(AuraError::network(
+                "XOR-MAPPED-ADDRESS too short".to_string(),
+            ));
         }
 
         let family = u16::from_be_bytes([attr_value[1], attr_value[1]]) >> 8; // First byte is reserved
@@ -393,7 +421,9 @@ impl StunClient {
             0x01 => {
                 // IPv4
                 if attr_value.len() < 8 {
-                    return Err(AuraError::network("XOR-MAPPED-ADDRESS IPv4 too short".to_string()));
+                    return Err(AuraError::network(
+                        "XOR-MAPPED-ADDRESS IPv4 too short".to_string(),
+                    ));
                 }
 
                 let x_addr = [attr_value[4], attr_value[5], attr_value[6], attr_value[7]];
@@ -412,7 +442,9 @@ impl StunClient {
             0x02 => {
                 // IPv6 - XOR with magic cookie + transaction ID
                 if attr_value.len() < 20 {
-                    return Err(AuraError::network("XOR-MAPPED-ADDRESS IPv6 too short".to_string()));
+                    return Err(AuraError::network(
+                        "XOR-MAPPED-ADDRESS IPv6 too short".to_string(),
+                    ));
                 }
 
                 let mut xor_key = Vec::new();
@@ -426,7 +458,10 @@ impl StunClient {
 
                 Ok(SocketAddr::from((addr, port)))
             }
-            _ => Err(AuraError::network(format!("Unsupported address family: {}", family))),
+            _ => Err(AuraError::network(format!(
+                "Unsupported address family: {}",
+                family
+            ))),
         }
     }
 
@@ -443,7 +478,9 @@ impl StunClient {
             0x01 => {
                 // IPv4
                 if attr_value.len() < 8 {
-                    return Err(AuraError::network("MAPPED-ADDRESS IPv4 too short".to_string()));
+                    return Err(AuraError::network(
+                        "MAPPED-ADDRESS IPv4 too short".to_string(),
+                    ));
                 }
 
                 let addr = [attr_value[4], attr_value[5], attr_value[6], attr_value[7]];
@@ -452,14 +489,19 @@ impl StunClient {
             0x02 => {
                 // IPv6
                 if attr_value.len() < 20 {
-                    return Err(AuraError::network("MAPPED-ADDRESS IPv6 too short".to_string()));
+                    return Err(AuraError::network(
+                        "MAPPED-ADDRESS IPv6 too short".to_string(),
+                    ));
                 }
 
                 let mut addr = [0u8; 16];
                 addr.copy_from_slice(&attr_value[4..20]);
                 Ok(SocketAddr::from((addr, port)))
             }
-            _ => Err(AuraError::network(format!("Unsupported address family: {}", family))),
+            _ => Err(AuraError::network(format!(
+                "Unsupported address family: {}",
+                family
+            ))),
         }
     }
 }
@@ -500,19 +542,19 @@ mod tests {
 
         // Check packet structure
         assert_eq!(packet.len(), 20); // STUN header only
-        
+
         // Check message type (first 2 bytes)
         let msg_type = u16::from_be_bytes([packet[0], packet[1]]);
         assert_eq!(msg_type, StunMessageType::BindingRequest as u16);
-        
+
         // Check message length (next 2 bytes, should be 0 for no attributes)
         let msg_length = u16::from_be_bytes([packet[2], packet[3]]);
         assert_eq!(msg_length, 0);
-        
+
         // Check magic cookie (next 4 bytes)
         let magic = u32::from_be_bytes([packet[4], packet[5], packet[6], packet[7]]);
         assert_eq!(magic, STUN_MAGIC_COOKIE);
-        
+
         // Check transaction ID (last 12 bytes)
         assert_eq!(&packet[8..20], &transaction_id);
     }
@@ -520,16 +562,16 @@ mod tests {
     #[test]
     fn test_parse_mapped_address_ipv4() {
         let client = StunClient::new(StunConfig::default());
-        
+
         // Create IPv4 MAPPED-ADDRESS attribute value
         let mut attr_value = Vec::new();
         attr_value.push(0x00); // Reserved
         attr_value.push(0x01); // IPv4 family
         attr_value.extend_from_slice(&8080u16.to_be_bytes()); // Port
         attr_value.extend_from_slice(&[192, 168, 1, 100]); // IPv4 address
-        
+
         let result = client.parse_mapped_address(&attr_value).unwrap();
-        
+
         assert_eq!(result.ip(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
         assert_eq!(result.port(), 8080);
     }
@@ -538,30 +580,32 @@ mod tests {
     fn test_parse_xor_mapped_address_ipv4() {
         let client = StunClient::new(StunConfig::default());
         let transaction_id = [0x12; 12];
-        
+
         // Original address: 192.168.1.100:8080
         let original_ip = [192, 168, 1, 100];
         let original_port = 8080u16;
-        
+
         // XOR with magic cookie
         let magic_bytes = STUN_MAGIC_COOKIE.to_be_bytes();
         let xor_ip = [
             original_ip[0] ^ magic_bytes[0],
-            original_ip[1] ^ magic_bytes[1], 
+            original_ip[1] ^ magic_bytes[1],
             original_ip[2] ^ magic_bytes[2],
             original_ip[3] ^ magic_bytes[3],
         ];
         let xor_port = original_port ^ (STUN_MAGIC_COOKIE as u16);
-        
+
         // Create XOR-MAPPED-ADDRESS attribute value
         let mut attr_value = Vec::new();
         attr_value.push(0x00); // Reserved
         attr_value.push(0x01); // IPv4 family
         attr_value.extend_from_slice(&xor_port.to_be_bytes()); // XOR'd port
         attr_value.extend_from_slice(&xor_ip); // XOR'd IPv4 address
-        
-        let result = client.parse_xor_mapped_address(&attr_value, transaction_id).unwrap();
-        
+
+        let result = client
+            .parse_xor_mapped_address(&attr_value, transaction_id)
+            .unwrap();
+
         assert_eq!(result.ip(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
         assert_eq!(result.port(), 8080);
     }
@@ -569,11 +613,11 @@ mod tests {
     #[test]
     fn test_parse_mapped_address_invalid() {
         let client = StunClient::new(StunConfig::default());
-        
+
         // Too short
         let short_attr = vec![0x00, 0x01];
         assert!(client.parse_mapped_address(&short_attr).is_err());
-        
+
         // Unknown family
         let unknown_family = vec![0x00, 0x99, 0x1f, 0x90, 192, 168, 1, 100];
         assert!(client.parse_mapped_address(&unknown_family).is_err());
@@ -589,7 +633,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_server_address_with_port() {
         let client = StunClient::new(StunConfig::default());
-        
+
         // Test with localhost (should resolve)
         let result = client.resolve_server_address("127.0.0.1:19302").await;
         assert!(result.is_ok());
@@ -601,7 +645,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_server_address_invalid() {
         let client = StunClient::new(StunConfig::default());
-        
+
         // Invalid address should fail
         let result = client.resolve_server_address("invalid.address:99999").await;
         assert!(result.is_err());
@@ -611,10 +655,10 @@ mod tests {
     async fn test_create_local_socket() {
         let config = StunConfig::default();
         let client = StunClient::new(config);
-        
+
         let socket = client.create_local_socket().await;
         assert!(socket.is_ok());
-        
+
         let socket = socket.unwrap();
         let local_addr = socket.local_addr().unwrap();
         assert_eq!(local_addr.ip(), IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
@@ -624,11 +668,11 @@ mod tests {
     #[tokio::test]
     async fn test_discover_with_unreachable_server() {
         let client = StunClient::new(StunConfig {
-            timeout_ms: 100, // Very short timeout
+            timeout_ms: 100,   // Very short timeout
             retry_attempts: 1, // Single attempt
             ..StunConfig::default()
         });
-        
+
         // Use unreachable address
         let result = client.discover_with_server("192.0.2.1:19302").await; // RFC 5737 test address
         assert!(result.is_err());
@@ -638,14 +682,14 @@ mod tests {
     fn test_stun_result_creation() {
         let reflexive_addr = "203.0.113.42:12345".parse().unwrap();
         let local_addr = "192.168.1.100:54321".parse().unwrap();
-        
+
         let result = StunResult {
             reflexive_address: reflexive_addr,
             local_address: local_addr,
             stun_server: "stun.example.com:19302".to_string(),
             discovered_at: 1234567890,
         };
-        
+
         assert_eq!(result.reflexive_address, reflexive_addr);
         assert_eq!(result.local_address, local_addr);
         assert_eq!(result.stun_server, "stun.example.com:19302");

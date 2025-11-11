@@ -39,31 +39,8 @@ pub use aura_core::semilattice::{
 // /// Type alias for device registry handler
 // pub type DeviceRegistryHandler = CvHandler<DeviceRegistry>;
 
-// TODO: Implement factory when effect handlers are available
-// /// Factory for creating journal CRDT handlers
-// pub struct JournalCRDTFactory;
-
-// impl JournalCRDTFactory {
-//     /// Create a new journal handler
-//     pub fn journal_handler() -> JournalHandler {
-//         CvHandler::new()
-//     }
-
-//     /// Create a journal handler with initial state
-//     pub fn journal_handler_with_state(journal: JournalMap) -> JournalHandler {
-//         CvHandler::with_state(journal)
-//     }
-
-//     /// Create an intent pool handler
-//     pub fn intent_pool_handler() -> IntentPoolHandler {
-//         CvHandler::new()
-//     }
-
-//     /// Create a device registry handler
-//     pub fn device_registry_handler() -> DeviceRegistryHandler {
-//         CvHandler::new()
-//     }
-// }
+// Note: Use CvHandler::new() or CvHandler::with_state() directly instead of factory methods.
+// The builder pattern on CrdtCoordinator provides ergonomic CRDT handler setup.
 
 /// Integration utilities for journal CRDTs
 ///

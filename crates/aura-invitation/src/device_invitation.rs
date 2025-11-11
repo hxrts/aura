@@ -1,9 +1,11 @@
 //! Device invitation helpers with FlowGuard integration.
 
-use crate::{transport::deliver_via_rendezvous, InvitationError, InvitationResult};
+use crate::{
+    transport::deliver_via_rendezvous, AuraEffectSystem, InvitationError, InvitationResult,
+};
+use aura_core::effects::{NetworkEffects, TimeEffects};
 use aura_core::{relationships::ContextId, AccountId, Cap, DeviceId};
 use aura_journal::semilattice::{InvitationLedger, InvitationRecord};
-use aura_protocol::effects::{AuraEffectSystem, NetworkEffects, TimeEffects};
 use blake3::Hasher;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -62,7 +64,7 @@ pub struct InvitationEnvelope {
     /// Expiry timestamp
     pub expires_at: u64,
     /// Content hash for deduplication
-    pub content_hash: [u8; 32],
+    pub content_hash: Vec<u8>,
 }
 
 impl InvitationEnvelope {
@@ -86,7 +88,7 @@ impl InvitationEnvelope {
             device_role: request.device_role.clone(),
             created_at,
             expires_at,
-            content_hash: *hash.as_bytes(),
+            content_hash: hash.as_bytes().to_vec(),
         }
     }
 }
@@ -177,7 +179,9 @@ impl DeviceInvitationCoordinator {
 
         NetworkEffects::send_to_peer(&self.effects, envelope.invitee.0, payload)
             .await
-            .map_err(|err| InvitationError::network(err.to_string()))
+            .map_err(|err| InvitationError::network(err.to_string()))?;
+        
+        Ok(())
     }
 
     /// Access the shared ledger (mainly for tests/status).

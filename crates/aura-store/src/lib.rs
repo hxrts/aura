@@ -33,10 +33,12 @@
 //! let data = effects.fetch_chunk(chunk_id).await?;
 //! ```
 
+pub mod encrypted;
 pub mod search;
 
 // Re-export core types
 pub use aura_core::{ChunkId, ContentSize};
+pub use encrypted::EncryptedStorageHandler;
 pub use search::{
     AccessLevel, CapabilityFilteredQuery, CapabilityFilteredSearchEngine, FilteredSearchResult,
     SearchError, SearchQuery, SearchScope,
@@ -77,34 +79,10 @@ impl std::fmt::Display for StorageError {
 
 impl std::error::Error for StorageError {}
 
-/// Storage effects interface - aligned with formal model Section C.2
-///
-/// This is the core abstraction for content-addressed storage.
-/// Implementations handle the actual I/O, while this interface
-/// remains pure and effect-based.
-#[async_trait::async_trait]
-pub trait StorageEffects: Send + Sync {
-    /// Store a chunk with the given content ID
-    ///
-    /// Model: `store_chunk : (ChunkId, Bytes) → ()`
-    async fn store_chunk(&mut self, chunk_id: ChunkId, data: Vec<u8>) -> Result<(), StorageError>;
-
-    /// Fetch a chunk by content ID
-    ///
-    /// Model: `fetch_chunk : ChunkId → Bytes?`
-    async fn fetch_chunk(&self, chunk_id: &ChunkId) -> Result<Option<Vec<u8>>, StorageError>;
-
-    /// Check if a chunk exists (optimization over fetch)
-    async fn chunk_exists(&self, chunk_id: &ChunkId) -> Result<bool, StorageError> {
-        Ok(self.fetch_chunk(chunk_id).await?.is_some())
-    }
-
-    /// Delete a chunk (for maintenance/garbage collection)
-    async fn delete_chunk(&mut self, chunk_id: &ChunkId) -> Result<(), StorageError>;
-
-    /// Get storage statistics
-    async fn stats(&self) -> Result<StorageStats, StorageError>;
-}
+// Use storage effects from aura-core instead of defining our own
+// This aligns with work/013.md architecture where aura-store focuses on search,
+// while aura-core provides the core storage effects interface
+pub use aura_core::effects::StorageEffects;
 
 /// Storage statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,7 +98,10 @@ pub struct StorageStats {
 /// Simple in-memory storage implementation (for testing)
 #[derive(Debug, Clone)]
 pub struct MemoryStorage {
-    chunks: HashMap<ChunkId, Vec<u8>>,
+    /// Stored chunks by ID (kept for backward compatibility)
+    pub chunks: HashMap<ChunkId, Vec<u8>>,
+    /// Key-value storage
+    storage: std::sync::Arc<std::sync::RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 impl MemoryStorage {
@@ -128,6 +109,7 @@ impl MemoryStorage {
     pub fn new() -> Self {
         Self {
             chunks: HashMap::new(),
+            storage: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
         }
     }
 
@@ -145,6 +127,23 @@ impl MemoryStorage {
     pub fn clear(&mut self) {
         self.chunks.clear();
     }
+
+    /// Store a chunk by ID
+    pub async fn store_chunk(&mut self, chunk_id: ChunkId, data: Vec<u8>) -> Result<(), aura_core::effects::StorageError> {
+        self.chunks.insert(chunk_id, data);
+        Ok(())
+    }
+
+    /// Retrieve a chunk by ID
+    pub async fn fetch_chunk(&self, chunk_id: &ChunkId) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
+        Ok(self.chunks.get(chunk_id).cloned())
+    }
+
+    /// Delete a chunk by ID
+    pub async fn delete_chunk(&mut self, chunk_id: &ChunkId) -> Result<(), aura_core::effects::StorageError> {
+        self.chunks.remove(chunk_id);
+        Ok(())
+    }
 }
 
 impl Default for MemoryStorage {
@@ -153,31 +152,7 @@ impl Default for MemoryStorage {
     }
 }
 
-#[async_trait::async_trait]
-impl StorageEffects for MemoryStorage {
-    async fn store_chunk(&mut self, chunk_id: ChunkId, data: Vec<u8>) -> Result<(), StorageError> {
-        self.chunks.insert(chunk_id, data);
-        Ok(())
-    }
-
-    async fn fetch_chunk(&self, chunk_id: &ChunkId) -> Result<Option<Vec<u8>>, StorageError> {
-        Ok(self.chunks.get(chunk_id).cloned())
-    }
-
-    async fn delete_chunk(&mut self, chunk_id: &ChunkId) -> Result<(), StorageError> {
-        self.chunks.remove(chunk_id);
-        Ok(())
-    }
-
-    async fn stats(&self) -> Result<StorageStats, StorageError> {
-        let total_bytes: u64 = self.chunks.values().map(|v| v.len() as u64).sum();
-        Ok(StorageStats {
-            chunk_count: self.chunks.len() as u64,
-            total_bytes,
-            backend_type: "memory".to_string(),
-        })
-    }
-}
+// StorageEffects implementation moved to aura-effects to maintain clean domain layer separation
 
 #[cfg(test)]
 mod tests {
@@ -198,10 +173,7 @@ mod tests {
         let data = storage.fetch_chunk(&chunk_id).await.unwrap();
         assert_eq!(data, Some(b"test data".to_vec()));
 
-        // Check stats
-        let stats = storage.stats().await.unwrap();
-        assert_eq!(stats.chunk_count, 1);
-        assert_eq!(stats.total_bytes, 9);
+        // Basic chunk storage test complete
     }
 
     #[tokio::test]

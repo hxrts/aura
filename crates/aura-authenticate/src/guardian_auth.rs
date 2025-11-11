@@ -508,9 +508,11 @@ mod tests {
             required_guardians: 2,
         };
 
-        // Note: This will return an error since choreography is not fully implemented
+        // Note: This will return Ok with success=false since choreography is not fully implemented
         let result = coordinator.authenticate_guardians(request).await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(!response.success);
         assert!(coordinator.has_active_choreography());
     }
 }

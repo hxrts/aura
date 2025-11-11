@@ -11,11 +11,11 @@
 //! 4. **Zero-Cost Abstractions**: Middleware compiles to efficient code
 //! 5. **Protocol Agnostic**: Works with any protocol or component
 
-pub mod circuit_breaker;
+// pub mod circuit_breaker; // REMOVED: Uses deprecated effect interfaces
 
-pub use circuit_breaker::{
-    CircuitBreakerConfig, CircuitBreakerMiddleware, CircuitBreakerStats, CircuitState,
-};
+// pub use circuit_breaker::{
+//     CircuitBreakerConfig, CircuitBreakerMiddleware, CircuitBreakerStats, CircuitState,
+// }; // REMOVED: Uses deprecated effect interfaces
 
 /// Middleware execution context
 #[derive(Debug, Clone)]

@@ -60,7 +60,7 @@ pub mod evaluation;
 pub mod execution;
 pub mod flow;
 pub mod journal_coupler;
-pub mod middleware;
+// pub mod middleware; // REMOVED: Uses deprecated JournalEffects methods
 pub mod privacy;
 pub mod send_guard;
 
@@ -71,10 +71,9 @@ pub use journal_coupler::{
 pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
 use crate::effects::system::AuraEffectSystem;
-use aura_core::{AuraError, AuraResult};
+use aura_core::AuraResult;
 use aura_wot::Capability;
 use std::future::Future;
-use std::pin::Pin;
 
 /// Protocol execution guard combining capability checking, delta application, and privacy tracking
 #[derive(Debug, Clone)]
@@ -90,7 +89,7 @@ pub struct ProtocolGuard {
 }
 
 /// Privacy leakage budget tracking across adversary classes
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LeakageBudget {
     /// External adversary leakage (bits)
     pub external: u32,
@@ -246,7 +245,6 @@ pub use deltas::*;
 pub use effect_system_bridge::*;
 pub use evaluation::*;
 pub use execution::*;
-pub use journal_coupler::*;
-pub use middleware::*;
+// pub use middleware::*; // REMOVED: Uses deprecated JournalEffects methods
 pub use privacy::*;
 pub use send_guard::*;

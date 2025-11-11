@@ -12,9 +12,18 @@ pub enum ValidationError {
     /// Value is required but missing
     Required { field: String },
     /// Value is out of acceptable range
-    OutOfRange { field: String, min: Option<f64>, max: Option<f64>, actual: f64 },
+    OutOfRange {
+        field: String,
+        min: Option<f64>,
+        max: Option<f64>,
+        actual: f64,
+    },
     /// Value format is invalid
-    InvalidFormat { field: String, expected: String, actual: String },
+    InvalidFormat {
+        field: String,
+        expected: String,
+        actual: String,
+    },
     /// Custom validation failed
     Custom { field: String, message: String },
 }
@@ -25,17 +34,34 @@ impl fmt::Display for ValidationError {
             ValidationError::Required { field } => {
                 write!(f, "Field '{}' is required but missing", field)
             }
-            ValidationError::OutOfRange { field, min, max, actual } => {
+            ValidationError::OutOfRange {
+                field,
+                min,
+                max,
+                actual,
+            } => {
                 let range_desc = match (min, max) {
                     (Some(min), Some(max)) => format!("between {} and {}", min, max),
                     (Some(min), None) => format!("at least {}", min),
                     (None, Some(max)) => format!("at most {}", max),
                     (None, None) => "in valid range".to_string(),
                 };
-                write!(f, "Field '{}' must be {} (got {})", field, range_desc, actual)
+                write!(
+                    f,
+                    "Field '{}' must be {} (got {})",
+                    field, range_desc, actual
+                )
             }
-            ValidationError::InvalidFormat { field, expected, actual } => {
-                write!(f, "Field '{}' has invalid format. Expected: {}, got: {}", field, expected, actual)
+            ValidationError::InvalidFormat {
+                field,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "Field '{}' has invalid format. Expected: {}, got: {}",
+                    field, expected, actual
+                )
             }
             ValidationError::Custom { field, message } => {
                 write!(f, "Field '{}': {}", field, message)
@@ -66,7 +92,7 @@ impl ConfigValidator {
             field_prefix: String::new(),
         }
     }
-    
+
     /// Create a validator for a nested field
     pub fn for_field(&self, field_name: &str) -> Self {
         let prefix = if self.field_prefix.is_empty() {
@@ -74,13 +100,13 @@ impl ConfigValidator {
         } else {
             format!("{}.{}", self.field_prefix, field_name)
         };
-        
+
         Self {
             errors: Vec::new(),
             field_prefix: prefix,
         }
     }
-    
+
     /// Validate that a value is present
     pub fn required<T>(&mut self, field_name: &str, value: &Option<T>) -> &mut Self {
         if value.is_none() {
@@ -90,26 +116,32 @@ impl ConfigValidator {
         }
         self
     }
-    
+
     /// Validate that a number is within range
-    pub fn range<T>(&mut self, field_name: &str, value: T, min: Option<T>, max: Option<T>) -> &mut Self
+    pub fn range<T>(
+        &mut self,
+        field_name: &str,
+        value: T,
+        min: Option<T>,
+        max: Option<T>,
+    ) -> &mut Self
     where
         T: PartialOrd + Copy + Into<f64>,
     {
         let mut out_of_range = false;
-        
+
         if let Some(min_val) = min {
             if value < min_val {
                 out_of_range = true;
             }
         }
-        
+
         if let Some(max_val) = max {
             if value > max_val {
                 out_of_range = true;
             }
         }
-        
+
         if out_of_range {
             self.errors.push(ValidationError::OutOfRange {
                 field: self.full_field_name(field_name),
@@ -118,12 +150,18 @@ impl ConfigValidator {
                 actual: value.into(),
             });
         }
-        
+
         self
     }
-    
+
     /// Validate using a custom predicate
-    pub fn custom<T, F>(&mut self, field_name: &str, value: &T, predicate: F, message: &str) -> &mut Self
+    pub fn custom<T, F>(
+        &mut self,
+        field_name: &str,
+        value: &T,
+        predicate: F,
+        message: &str,
+    ) -> &mut Self
     where
         F: FnOnce(&T) -> bool,
     {
@@ -135,7 +173,7 @@ impl ConfigValidator {
         }
         self
     }
-    
+
     /// Validate string format using regex
     pub fn format(&mut self, field_name: &str, value: &str, pattern: &str) -> &mut Self {
         // Simple format validation without regex dependency
@@ -149,7 +187,7 @@ impl ConfigValidator {
                 !value.is_empty()
             }
         };
-        
+
         if !is_valid {
             self.errors.push(ValidationError::InvalidFormat {
                 field: self.full_field_name(field_name),
@@ -157,10 +195,10 @@ impl ConfigValidator {
                 actual: value.to_string(),
             });
         }
-        
+
         self
     }
-    
+
     /// Validate a collection of items
     pub fn each<T, F>(&mut self, field_name: &str, items: &[T], mut validator: F) -> &mut Self
     where
@@ -173,27 +211,32 @@ impl ConfigValidator {
         }
         self
     }
-    
+
     /// Merge errors from another validator
     pub fn merge(&mut self, other: ConfigValidator) {
         self.errors.extend(other.errors);
     }
-    
+
     /// Get validation result
     pub fn result(self) -> ValidationResult {
         if self.errors.is_empty() {
             Ok(())
         } else {
             // Return the first error (could be enhanced to return all errors)
-            Err(self.errors.into_iter().next().unwrap())
+            // SAFETY: We checked is_empty() so there must be at least one error
+            Err(self
+                .errors
+                .into_iter()
+                .next()
+                .expect("errors list is not empty"))
         }
     }
-    
+
     /// Get all validation errors
     pub fn all_errors(self) -> Vec<ValidationError> {
         self.errors
     }
-    
+
     /// Get full field name with prefix
     fn full_field_name(&self, field_name: &str) -> String {
         if self.field_prefix.is_empty() {
@@ -202,35 +245,38 @@ impl ConfigValidator {
             format!("{}.{}", self.field_prefix, field_name)
         }
     }
-    
+
     /// Simple email validation
     fn is_valid_email(&self, email: &str) -> bool {
-        email.contains('@') && email.contains('.') && !email.starts_with('@') && !email.ends_with('@')
+        email.contains('@')
+            && email.contains('.')
+            && !email.starts_with('@')
+            && !email.ends_with('@')
     }
-    
+
     /// Simple URL validation
     fn is_valid_url(&self, url: &str) -> bool {
         url.starts_with("http://") || url.starts_with("https://") || url.starts_with("ftp://")
     }
-    
+
     /// Simple IPv4 validation
     fn is_valid_ipv4(&self, ip: &str) -> bool {
         let parts: Vec<&str> = ip.split('.').collect();
         if parts.len() != 4 {
             return false;
         }
-        
-        parts.iter().all(|part| {
-            part.parse::<u8>().is_ok()
-        })
+
+        parts.iter().all(|part| part.parse::<u8>().is_ok())
     }
-    
+
     /// Simple hostname validation
     fn is_valid_hostname(&self, hostname: &str) -> bool {
-        !hostname.is_empty() &&
-        hostname.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') &&
-        !hostname.starts_with('-') &&
-        !hostname.ends_with('-')
+        !hostname.is_empty()
+            && hostname
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+            && !hostname.starts_with('-')
+            && !hostname.ends_with('-')
     }
 }
 
@@ -248,15 +294,15 @@ pub trait ValidationRule<T> {
 /// Built-in validation rules
 pub mod rules {
     use super::*;
-    
+
     /// Rule that validates a value is within a numeric range
     pub struct Range<T> {
         pub min: Option<T>,
         pub max: Option<T>,
         pub field_name: String,
     }
-    
-    impl<T> Range<T> 
+
+    impl<T> Range<T>
     where
         T: PartialOrd + Copy + Into<f64>,
     {
@@ -267,37 +313,37 @@ pub mod rules {
                 field_name: field_name.to_string(),
             }
         }
-        
+
         pub fn min(mut self, min: T) -> Self {
             self.min = Some(min);
             self
         }
-        
+
         pub fn max(mut self, max: T) -> Self {
             self.max = Some(max);
             self
         }
     }
-    
+
     impl<T> ValidationRule<T> for Range<T>
     where
         T: PartialOrd + Copy + Into<f64>,
     {
         fn validate(&self, value: &T) -> ValidationResult {
             let mut out_of_range = false;
-            
+
             if let Some(min_val) = self.min {
                 if *value < min_val {
                     out_of_range = true;
                 }
             }
-            
+
             if let Some(max_val) = self.max {
                 if *value > max_val {
                     out_of_range = true;
                 }
             }
-            
+
             if out_of_range {
                 Err(ValidationError::OutOfRange {
                     field: self.field_name.clone(),
@@ -310,13 +356,13 @@ pub mod rules {
             }
         }
     }
-    
+
     /// Rule that validates a string matches a pattern
     pub struct Pattern {
         pub pattern: String,
         pub field_name: String,
     }
-    
+
     impl Pattern {
         pub fn new(field_name: &str, pattern: &str) -> Self {
             Self {
@@ -325,7 +371,7 @@ pub mod rules {
             }
         }
     }
-    
+
     impl ValidationRule<String> for Pattern {
         fn validate(&self, value: &String) -> ValidationResult {
             let validator = ConfigValidator::new();
@@ -336,7 +382,7 @@ pub mod rules {
                 "hostname" => validator.is_valid_hostname(value),
                 _ => !value.is_empty(),
             };
-            
+
             if is_valid {
                 Ok(())
             } else {

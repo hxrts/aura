@@ -57,7 +57,6 @@ pub use transport::*;
 
 // Re-export commonly used external types for convenience
 pub use aura_core::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
-pub use aura_crypto::Effects;
 pub use aura_journal::semilattice::ModernAccountState as AccountState;
 pub use aura_journal::{DeviceMetadata, DeviceType};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};

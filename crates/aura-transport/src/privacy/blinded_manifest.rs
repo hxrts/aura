@@ -4,7 +4,7 @@
 //! feature buckets and hashes are revealed publicly, with full details
 //! revealed lazily in trusted contexts.
 
-use blake3::{Hash, Hasher};
+use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -65,7 +65,7 @@ pub struct FeatureBucket {
 pub enum FeatureCountBucket {
     /// 0 features
     None,
-    /// 1-3 features  
+    /// 1-3 features
     Few,
     /// 4-10 features
     Some,

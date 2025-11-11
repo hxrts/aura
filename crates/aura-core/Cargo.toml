@@ -55,6 +55,8 @@ proptest = { workspace = true, optional = true }
 [features]
 # Enable proptest integration for property testing
 proptest = ["dep:proptest"]
+# Enable JSON debug output for development
+json-debug = []
 default = []
 
 [dev-dependencies]
