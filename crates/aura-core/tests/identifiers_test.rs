@@ -109,8 +109,10 @@ fn test_string_identifiers() {
     assert_eq!(individual1.as_str(), "individual1");
 
     // Test OperationId (UUID-based)
-    let op1 = OperationId::new();
-    let op2 = OperationId::new();
+    let device1 = DeviceId::new();
+    let device2 = DeviceId::new();
+    let op1 = OperationId::new(device1, 1);
+    let op2 = OperationId::new(device2, 2);
 
     assert_ne!(op1, op2);
 
@@ -133,7 +135,7 @@ fn test_identifier_serialization() {
     let session = SessionId::new();
     let event = EventId::new();
     let guardian = GuardianId::new();
-    let operation = OperationId::new();
+    let operation = OperationId::new(device, 123);
     let nonce = EventNonce::new(42);
 
     // Test DAG-CBOR serialization
@@ -183,7 +185,7 @@ fn test_uuid_conversions() {
     let session = SessionId::new();
     let event = EventId::new();
     let guardian = GuardianId::new();
-    let operation = OperationId::new();
+    let operation = OperationId::new(device, 456);
 
     // Test UUID extraction for types that have uuid() method
     let session_uuid = session.uuid();
@@ -203,7 +205,12 @@ fn test_uuid_conversions() {
     assert_eq!(session, session_from_uuid);
     assert_eq!(event, event_from_uuid);
     assert_eq!(guardian, guardian_from_uuid);
-    assert_eq!(operation, operation_from_uuid);
+    
+    // OperationId round-trip is not perfect due to information loss 
+    // (UUID can't hold both DeviceId and sequence), so just test that 
+    // the conversion works without panicking and produces a valid OperationId
+    assert_ne!(operation_from_uuid.actor, device); // actor is derived from operation UUID, not original device
+    assert_eq!(operation_from_uuid.sequence, 0); // sequence is lost in conversion
 }
 
 /// Test string conversions for string-based identifiers

@@ -610,7 +610,8 @@ mod tests {
         let config = SchedulerConfig::default();
         let oplog = OpLog::new();
         let sync_config = crate::sync::SyncConfiguration::default();
-        let synchronizer = OpLogSynchronizer::new(oplog, sync_config);
+        let device_id = crate::DeviceId::new();
+        let synchronizer = OpLogSynchronizer::new(device_id, oplog, sync_config);
         let scheduler = SyncScheduler::new(config, synchronizer);
 
         assert!(!scheduler.is_running());
@@ -623,7 +624,8 @@ mod tests {
         let config = SchedulerConfig::default();
         let oplog = OpLog::new();
         let sync_config = crate::sync::SyncConfiguration::default();
-        let synchronizer = OpLogSynchronizer::new(oplog, sync_config);
+        let device_id = crate::DeviceId::new();
+        let synchronizer = OpLogSynchronizer::new(device_id, oplog, sync_config);
         let mut scheduler = SyncScheduler::new(config, synchronizer);
 
         let peer_id = DeviceId::new();
@@ -645,7 +647,8 @@ mod tests {
         let config = SchedulerConfig::default();
         let oplog = OpLog::new();
         let sync_config = crate::sync::SyncConfiguration::default();
-        let synchronizer = OpLogSynchronizer::new(oplog, sync_config);
+        let device_id = crate::DeviceId::new();
+        let synchronizer = OpLogSynchronizer::new(device_id, oplog, sync_config);
         let mut scheduler = SyncScheduler::new(config, synchronizer);
 
         let peer_id = DeviceId::new();
@@ -666,7 +669,8 @@ mod tests {
         let config = SchedulerConfig::default();
         let oplog = OpLog::new();
         let sync_config = crate::sync::SyncConfiguration::default();
-        let synchronizer = OpLogSynchronizer::new(oplog, sync_config);
+        let device_id = crate::DeviceId::new();
+        let synchronizer = OpLogSynchronizer::new(device_id, oplog, sync_config);
         let scheduler = SyncScheduler::new(config, synchronizer);
 
         let stats = scheduler.get_statistics();

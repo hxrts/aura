@@ -22,6 +22,7 @@ aura-verify = { path = "../aura-verify" }
 aura-wot = { path = "../aura-wot" }
 aura-identity = { path = "../aura-identity" }
 aura-transport = { path = "../aura-transport" }
+aura-mpst = { path = "../aura-mpst" }
 
 # Curve operations
 curve25519-dalek = { workspace = true }

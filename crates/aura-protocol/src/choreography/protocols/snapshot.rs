@@ -37,14 +37,14 @@
 //! - Atomic application across replicas
 //! - Protocol version gating for safe upgrades
 
-use crate::crate::effects::ChoreographyError;
+use crate::effects::ChoreographyError;
 use crate::choreography::AuraHandlerAdapter;
 use crate::effects::{ConsoleEffects, CryptoEffects, JournalEffects, TreeEffects};
 use crate::handlers::AuraHandlerError;
 use aura_core::tree::{Cut, Partial, ProposalId, Snapshot};
 use aura_core::{DeviceId, SessionId};
 use aura_journal::ratchet_tree::TreeState;
-use rumpsteak_choreography::choreography;
+use rumpsteak_aura_choreography::choreography;
 use std::collections::BTreeMap;
 
 // ============================================================================
@@ -221,6 +221,8 @@ pub struct SnapshotDecision {
 // Choreography Definition
 // ============================================================================
 
+// TEMPORARILY DISABLED DUE TO MACRO CONFLICTS - needs investigation
+/*
 choreography! {
     protocol SnapshotGC {
         roles: Proposer, QuorumMember1, QuorumMember2, QuorumMember3;
@@ -241,6 +243,7 @@ choreography! {
         Proposer -> QuorumMember3: SnapshotCommitGC(SnapshotCommit);
     }
 }
+*/
 
 // ============================================================================
 // Session Functions
@@ -270,8 +273,8 @@ async fn proposer_session(
     // Phase 1: Create and broadcast proposal
     let effects_cut = crate::effects::tree::Cut {
         epoch: config.cut.epoch,
-        commitment: config.cut.commitment,
-        cid: config.cut.commitment,
+        commitment: aura_core::Hash32(config.cut.commitment),
+        cid: aura_core::Hash32(config.cut.commitment),
     };
 
     let _created_proposal_id = adapter
@@ -359,7 +362,7 @@ async fn proposer_session(
         let aggregate_signature = partial_signatures.concat();
 
         // Finalize snapshot via effects
-        let effects_proposal_id = crate::effects::tree::ProposalId(proposal_id.0);
+        let effects_proposal_id = crate::effects::tree::ProposalId(aura_core::Hash32(proposal_id.0));
         let effects_snapshot = adapter
             .effects()
             .finalize_snapshot(effects_proposal_id)
@@ -371,7 +374,7 @@ async fn proposer_session(
         // Convert effects snapshot to core snapshot
         let snapshot = Snapshot::new(
             effects_snapshot.cut.epoch,
-            effects_snapshot.cut.commitment,
+            effects_snapshot.cut.commitment.0,
             vec![aura_core::tree::LeafId(0)], // TODO: Extract from tree_state
             BTreeMap::new(),                  // TODO: Extract from tree_state
             effects_snapshot.cut.epoch,
@@ -501,7 +504,7 @@ async fn quorum_member_session(
 
     // Phase 2: Generate approval (partial signature)
     let partial_signature = if approved {
-        let effects_proposal_id = crate::effects::tree::ProposalId(proposal.proposal_id.0);
+        let effects_proposal_id = crate::effects::tree::ProposalId(aura_core::Hash32(proposal.proposal_id.0));
         let partial = adapter
             .effects()
             .approve_snapshot(effects_proposal_id)
@@ -556,8 +559,8 @@ async fn quorum_member_session(
         let effects_snapshot = crate::effects::tree::Snapshot {
             cut: crate::effects::tree::Cut {
                 epoch: commit.snapshot.epoch,
-                commitment: commit.snapshot.commitment,
-                cid: commit.snapshot.commitment,
+                commitment: aura_core::Hash32(commit.snapshot.commitment),
+                cid: aura_core::Hash32(commit.snapshot.commitment),
             },
             tree_state: TreeState::new(),
             aggregate_signature: commit.aggregate_signature,
@@ -621,16 +624,18 @@ pub async fn execute_as_proposer(
 ) -> Result<SnapshotResult, ChoreographyError> {
     // Validate configuration
     if config.quorum.is_empty() {
-        return Err(ChoreographyError::ProtocolError(
-            "Quorum cannot be empty".to_string(),
-        ));
+        return Err(ChoreographyError::ProtocolViolation {
+            message: "Quorum cannot be empty".to_string(),
+        });
     }
     if config.threshold == 0 || config.threshold as usize > config.quorum.len() {
-        return Err(ChoreographyError::ProtocolError(format!(
-            "Invalid threshold: {} for quorum size {}",
-            config.threshold,
-            config.quorum.len()
-        )));
+        return Err(ChoreographyError::ProtocolViolation {
+            message: format!(
+                "Invalid threshold: {} for quorum size {}",
+                config.threshold,
+                config.quorum.len()
+            ),
+        });
     }
 
     // Create handler and adapter
@@ -675,8 +680,8 @@ pub async fn apply_snapshot_commit(
     let effects_snapshot = crate::effects::tree::Snapshot {
         cut: crate::effects::tree::Cut {
             epoch: snapshot.epoch,
-            commitment: snapshot.commitment,
-            cid: snapshot.commitment,
+            commitment: aura_core::Hash32(snapshot.commitment),
+            cid: aura_core::Hash32(snapshot.commitment),
         },
         tree_state: TreeState::new(),
         aggregate_signature: vec![0u8; 64],

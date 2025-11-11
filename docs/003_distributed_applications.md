@@ -1,15 +1,15 @@
 # Aura Distributed Applications
 
-This document demonstrates how Aura's theoretical foundations and system architecture come together in practice. It provides concrete examples of distributed systems, CRDT implementations, testing strategies, and integration patterns. Formal semantics and invariants live in `docs/001_theoretical_foundations.md`; this document references those definitions.
+This document demonstrates how Aura's theoretical foundations and system architecture come together in practice. It provides concrete examples of distributed systems, CRDT implementations, testing strategies, and integration patterns. Formal semantics and invariants live in [Aura Theoretical Foundations](001_theoretical_model.md). This document references those definitions.
 
 ## Overview
 
 This document shows working distributed systems built on Aura's foundations:
 
-1. **Core Distributed Subsystems** - Search, garbage collection, and rendezvous protocols
-2. **Concrete CRDT Examples** - GCounter, OR-Set, PN-Counter implementations
-3. **Testing and Validation** - Strategies for testing distributed protocols
-4. **System Integration** - How components work together with privacy guarantees
+1. Core Distributed Subsystems - Search, garbage collection, and rendezvous protocols
+2. Concrete CRDT Examples - GCounter, OR-Set, PN-Counter implementations
+3. Testing and Validation - Strategies for testing distributed protocols
+4. System Integration - How components work together with privacy guarantees
 
 ---
 
@@ -17,7 +17,7 @@ This document shows working distributed systems built on Aura's foundations:
 
 ### 1.1 Distributed Search / Indexing
 
-**Types:**
+Types
 ```rust
 // Join layer
 type InvIndex = Map<Term, DocSet>   // DocSet is a join-semilattice (e.g., OR-set)
@@ -30,7 +30,7 @@ cap need_post_index(term: Term)  // ability to publish term→docs for a context
 cap need_query(term: Term)       // ability to ask for results on a term
 ```
 
-**Global protocol (sketch):**
+Global protocol
 ```
 G_search:
   role A (querier), role N1..Nk (neighbors)
@@ -42,15 +42,15 @@ G_search:
   A: optional fetch (capability-gated)
 ```
 
-**Laws:**
-- **Index correctness:** `index := index ⊔ δ` only grows; OR-set tombstones handled CRDT-safely
-- **Privacy guard:** `QueryRequest` sent over **RID**/**GID** contexts; if broadcast via SBB, envelope padding + topic ratchets enforced to bound leakage
-- **Capability meet:** A can only receive doc IDs for which `need_read(doc)` is satisfied under its context (responses filtered at Ni)
-- **Flow budgets:** Each `QueryRequest`/`QueryReply` charges the `(RID, peer)` flow ledger before transport sends via the shared `FlowGuard` described in `docs/103_info_flow_budget.md`. New relationships therefore begin with low query throughput until trust raises their per-edge limit.
+Laws
+- Index correctness: `index := index ⊔ δ` only grows. OR-set tombstones are handled CRDT-safely.
+- Privacy guard: `QueryRequest` sent over RID/GID contexts. If broadcast via SBB, envelope padding and topic ratchets are enforced to bound leakage.
+- Capability meet: A can only receive doc IDs for which `need_read(doc)` is satisfied under its context. Responses are filtered at Ni.
+- Flow budgets: Each `QueryRequest` and `QueryReply` charges the flow ledger before transport sends. New relationships begin with low query throughput until trust raises their per-edge limit.
 
 ### 1.2 Distributed Garbage Collection (GC) & Snapshots
 
-**Types:**
+Types
 ```rust
 type SnapId
 struct Snapshot { 
@@ -63,7 +63,7 @@ cap need_snapshot_approve
 cap need_prune_under(SnapId)
 ```
 
-**Global protocol:**
+Global protocol
 ```
 G_gc:
   role P (proposer), role Q1..Qm (quorum)
@@ -77,22 +77,22 @@ G_gc:
          Journal.facts ⊔= {GCMetadata(Snapshot)}
 ```
 
-**Laws:**
-- **Safety:** compaction is a *join-preserving retraction*; post-state is behaviorally equivalent for any future merge (CRDT homomorphism)
-- **Privacy:** snapshot metadata carries no linkable identity beyond quorum class; messages sent under DKD app context; padding/batching per budget
-- **Upgrade safety:** MPST version negotiation on `SnapProposal/Commit`; old clients can refuse prune but keep merging
-- **Flow budgets:** Each gossip round invokes the shared `FlowGuard` before transporting `SnapProposal`, `SnapApprove`, or `SnapCommit`, ensuring spam and leakage controls match the definition in `docs/103_info_flow_budget.md`.
+Laws
+- Safety: compaction is a join-preserving retraction. Post-state is behaviorally equivalent for any future merge (CRDT homomorphism).
+- Privacy: snapshot metadata carries no linkable identity beyond quorum class. Messages are sent under DKD app context with padding and batching per budget.
+- Upgrade safety: MPST version negotiation on `SnapProposal` and `SnapCommit`. Old clients can refuse prune but keep merging.
+- Flow budgets: Each gossip round invokes the shared `FlowGuard` before transporting messages. This ensures spam and leakage controls match the definition in the information flow budget documentation.
 
 ### 1.3 Rendezvous / Social Bulletin Board (SBB)
 
-**Types:**
+Types
 ```rust
 struct Envelope { cid: Cid, body: Cipher, pad_len: u16 }
 cap can_post_envelope(topic)
 cap can_fetch_topic(topic)
 ```
 
-**Global protocol:**
+Global protocol
 ```
 G_rendezvous:
   roles: A (sender), R (relay neighbors), B (receiver)
@@ -103,11 +103,11 @@ G_rendezvous:
   B: check rt ∈ Valid(K_tag); aead_open(K_box, Envelope); process
 ```
 
-**Laws:**
-- **Delivery liveness:** Plumtree + HyParView ensure eventual reception in connected components
-- **Privacy:** rotating tags + padding + cover traffic keep `adv_ngh` inference ≤ threshold
-- **Authorization:** relays only forward if `can_post_envelope(topic)` holds after meet with relay policy; otherwise drop/greylist (rate-cap)
-- **Flow budgets:** Relays require a signed `Receipt` from the previous hop and charge their own ledger entry via `FlowGuard` before forwarding. When either hop runs out of budget, the envelope stalls without leaking timing through unauthorized contexts.
+Laws
+- Delivery liveness: Plumtree + HyParView ensure eventual reception in connected components.
+- Privacy: rotating tags + padding + cover traffic keep `adv_ngh` inference ≤ threshold.
+- Authorization: relays only forward if `can_post_envelope(topic)` holds after meet with relay policy. Otherwise they drop or greylist (rate-cap).
+- Flow budgets: Relays require a signed `Receipt` from the previous hop and charge their own ledger entry via `FlowGuard` before forwarding. When either hop runs out of budget, the envelope stalls without leaking timing through unauthorized contexts.
 
 ---
 
@@ -137,7 +137,8 @@ impl Bottom for Ctr {
 // Handler: on recv c' => state = pointwise_max(state, c')
 ```
 
-**Usage Example:**
+For complete usage patterns with the effect system, see [Aura System Architecture](002_system_architecture.md).
+
 ```rust
 use aura_protocol::effects::semilattice::{CvHandler, HandlerFactory};
 
@@ -183,7 +184,8 @@ impl CausalOp for (Op, VV) {
 // Session (local): OpBroadcast<OpWithCtx<(Op, VV), VV>>
 ```
 
-**Usage Example:**
+For complete effect system integration patterns, see [Aura System Architecture](002_system_architecture.md).
+
 ```rust
 use aura_protocol::effects::semilattice::{CmHandler, HandlerFactory};
 
@@ -210,7 +212,8 @@ impl Delta for DeltaCtr {
 // Session (local): DeltaSync<DeltaCtr>
 ```
 
-**Usage Example:**
+For effect system composition patterns, see [Aura System Architecture](002_system_architecture.md).
+
 ```rust
 use aura_protocol::effects::semilattice::{DeltaHandler, HandlerFactory};
 
@@ -223,12 +226,12 @@ HandlerFactory::execute_delta_gossip(&mut pncounter_handler, peers, session_id).
 
 ### 2.4 Implementation Steps (Complete CRDT System)
 
-1. **Define the CRDT traits** (`JoinSemilattice`, `CvState`, `Delta`, `CmApply`, `Dedup`, `CausalOp`)
-2. **Add message wrappers** (`StateMsg`, `DeltaMsg`, `OpWithCtx`) and concrete payload types
-3. **Implement delivery/order effects** (`CausalBroadcast`, `AtLeastOnce`, `GossipTick`, `ExchangeDigest`)
-4. **Provide generic handlers** (Cv/Δ/Cm) binding session events to CRDT laws
-5. **Ship session templates**: `CvSync<S>`, `DeltaSync<Δ>`, `OpBroadcast<Op, Ctx>`, `OpRepair` as reusable Aura protocols
-6. **Tooling to pretty-print global protocols** and **projected locals** for audits
+1. Define the CRDT traits (`JoinSemilattice`, `CvState`, `Delta`, `CmApply`, `Dedup`, `CausalOp`)
+2. Add message wrappers (`StateMsg`, `DeltaMsg`, `OpWithCtx`) and concrete payload types
+3. Implement delivery/order effects (`CausalBroadcast`, `AtLeastOnce`, `GossipTick`, `ExchangeDigest`)
+4. Provide generic handlers (Cv/Δ/Cm) binding session events to CRDT laws
+5. Ship session templates: `CvSync<S>`, `DeltaSync<Δ>`, `OpBroadcast<Op, Ctx>`, `OpRepair` as reusable Aura protocols
+6. Tooling to pretty-print global protocols and projected locals for audits
 
 ---
 
@@ -236,7 +239,8 @@ HandlerFactory::execute_delta_gossip(&mut pncounter_handler, peers, session_id).
 
 ### 3.1 Unit Testing Patterns
 
-**Effect-Based Unit Tests:**
+For comprehensive effect system testing patterns, see [Aura System Architecture](002_system_architecture.md).
+
 ```rust
 #[tokio::test]
 async fn test_threshold_ceremony() {
@@ -250,7 +254,7 @@ async fn test_threshold_ceremony() {
 }
 ```
 
-**CRDT Property Tests:**
+CRDT Property Tests
 ```rust
 use proptest::prelude::*;
 
@@ -279,7 +283,7 @@ proptest! {
 
 ### 3.2 Integration Testing
 
-**Multi-Node Protocol Tests:**
+Multi-Node Protocol Tests
 ```rust
 #[tokio::test]
 async fn test_distributed_search() {
@@ -298,7 +302,7 @@ async fn test_distributed_search() {
 }
 ```
 
-**CRDT Convergence Tests:**
+CRDT Convergence Tests
 ```rust
 #[tokio::test]
 async fn test_orset_convergence() {
@@ -327,7 +331,7 @@ async fn test_orset_convergence() {
 }
 ```
 
-**Guardian Recovery + Invitation Smoke Tests:**
+Guardian Recovery + Invitation Smoke Tests
 
 - `cargo test -p aura-recovery guardian_recovery` exercises `crates/aura-recovery/tests/guardian_recovery.rs`, covering the FlowGuard-backed happy path plus cooldown enforcement by reusing the shared guardian ledger defined in `choreography_impl.rs`.
 - `cargo test -p aura-invitation invitation_flow` drives `DeviceInvitationCoordinator` and `InvitationAcceptanceCoordinator` end-to-end, validating content-addressed envelopes, ledger updates, and FlowGuard hints before broadcasts.
@@ -335,7 +339,7 @@ async fn test_orset_convergence() {
 
 ### 3.3 Property-Based Testing for Protocols
 
-**Deterministic Protocol Testing:**
+Deterministic Protocol Testing
 ```rust
 proptest! {
     #[test]
@@ -363,7 +367,7 @@ proptest! {
 
 ### 3.4 Chaos Testing
 
-**Byzantine Fault Injection:**
+Byzantine Fault Injection
 ```rust
 #[tokio::test]
 async fn test_byzantine_resilience() {
@@ -388,7 +392,7 @@ async fn test_byzantine_resilience() {
 
 ### 3.5 Privacy Testing
 
-**Context Isolation Verification:**
+Context Isolation Verification
 ```rust
 #[tokio::test]
 async fn test_context_isolation() {
@@ -414,7 +418,7 @@ async fn test_context_isolation() {
 }
 ```
 
-**Leakage Budget Enforcement:**
+Leakage Budget Enforcement
 ```rust
 #[tokio::test]
 async fn test_leakage_budgets() {
@@ -423,6 +427,7 @@ async fn test_leakage_budgets() {
         .with_neighbor_budget(0.5)
         .with_group_budget(0.1);
         
+    // For AuraEffectSystem configuration, see System Architecture guide
     let handler = AuraEffectSystem::for_testing(device_id)
         .with_privacy_budgets(budget_tracker);
         
@@ -450,30 +455,30 @@ Link core invariants from `docs/001_theoretical_foundations.md` to tests in this
 
 ### 4.1 Putting It All Together (Glue Invariants)
 
-**1. Monotone Convergence:**
+1. Monotone Convergence
 - Facts grow by ⊔; Caps shrink by ⊓
 - All protocols preserve `facts' ≥ facts` and `caps' ≤ caps`
 
-**2. Guarded Progress:**
-- MPST progress holds *provided guards discharge*: if a role lacks caps, the protocol does not deadlock — it **refuses earlier** (typestate cannot advance), which is observable but bounded by leakage budgets (dummy/cover transitions available)
+2. Guarded Progress
+- MPST progress holds *provided guards discharge*: if a role lacks caps, the protocol does not deadlock - it refuses earlier (typestate cannot advance), which is observable but bounded by leakage budgets (dummy/cover transitions available)
 
-**3. Context-Bound Privacy:**
+3. Context-Bound Privacy
 - Every message inhabits exactly one context (`RID`, `GID`, or DKD)
-- Cross-context flow must go through an explicit **bridge protocol** with its own guards and leakage accounting
+- Cross-context flow must go through an explicit bridge protocol with its own guards and leakage accounting
 
-**4. Capability Soundness:**
+4. Capability Soundness
 - For any emitted side-effect `σ` (send, store, prune), there exists a proof term/witness `w` such that `need(σ) ≤ caps(ctx)` at the sender role. Handlers enforce this mechanically.
 
-**5. CRDT/GC Compatibility:**
+5. CRDT/GC Compatibility
 - Snapshot/GC is a semilattice homomorphism `h : Fact → Fact` with `h(x ⊔ y) = h(x) ⊔ h(y)` and `h(x) ≤ x`
 - Therefore compaction commutes with future merges
 
-**6. Search Correctness under Privacy:**
-- Returned results are `⋂_i local_i(terms)`, but each `local_i` is **cap-filtered**: no doc identifier escapes without `need_read(doc)` under the active context. Aggregation therefore cannot leak superset IDs.
+6. Search Correctness under Privacy
+- Returned results are `⋂_i local_i(terms)`, but each `local_i` is cap-filtered: no doc identifier escapes without `need_read(doc)` under the active context. Aggregation therefore cannot leak superset IDs.
 
 ### 4.2 Complete Application Example
 
-**Threshold Identity with Social Recovery:**
+Threshold Identity with Social Recovery
 ```rust
 use aura_agent::AuraAgent;
 use aura_protocol::effects::system::AuraEffectSystem;
@@ -578,49 +583,49 @@ pub async fn run_ceremony(
 
 ### 5.1 Communication Rule Set
 
-**1. Replicated truths ⇒ Semilattices**
+1. Replicated truths ⇒ Semilattices
 Anything you expect to survive partitions and be merged across devices/peers should be a lattice:
-- **Facts/knowledge:** join (⊔) CRDTs in the journal
-- **Authority/scope:** meet (⊓) capabilities (computed at use-time, not stored as growing "facts")
-- **Availability states:** use small lattices like `{none < cached < pinned}`
+- Facts/knowledge: join (⊔) CRDTs in the journal
+- Authority/scope: meet (⊓) capabilities (computed at use-time, not stored as growing "facts")
+- Availability states: use small lattices like `{none < cached < pinned}`
 
-**2. Interactive control flow ⇒ MPST sessions (not lattices), but "monotonize the output"**
-Rounds of a threshold ceremony, a recovery vote, a rendezvous offer/answer, or a search RPC are **not** themselves CRDTs. Run them as multi-party session types, and ensure their **projection to the journal** is monotone:
-- The session either emits a **new fact** (e.g., `TreeOp` with threshold sig) or nothing
+2. Interactive control flow ⇒ MPST sessions (not lattices), but "monotonize the output"
+Rounds of a threshold ceremony, a recovery vote, a rendezvous offer/answer, or a search RPC are not themselves CRDTs. Run them as multi-party session types, and ensure their projection to the journal is monotone:
+- The session either emits a new fact (e.g., `TreeOp` with threshold sig) or nothing
 - Avoid negative facts/rollbacks; use epochs and replacement-by-join (e.g., "latest attested config")
 
-**3. Two-phase monotonicity (CALM-style): meets before, joins after**
-- Preconditions as **meets**: guards/caps/policies only **shrink** what's allowed
-- Commit as a **join**: once a result is attested, the journal **only grows** with that fact
+3. Two-phase monotonicity (CALM-style): meets before, joins after
+- Preconditions as meets: guards/caps/policies only shrink what's allowed
+- Commit as a join: once a result is attested, the journal only grows with that fact
 
-**4. Model lifecycles as increasing lattices, not deletes**
+4. Model lifecycles as increasing lattices, not deletes
 For intents/proposals, use a small partial order (e.g., `Proposed < Attesting < Finalized | Aborted`) with an LWW tie-breaker, so merges remain monotone while still expressing "failed/aborted".
 
-**5. Keep non-replicated streams out of the lattice**
-Telemetry, flow control, chunk transfer windows, backpressure signals—these are ephemeral; don't shoehorn them into a CRDT. Let them live in transport/session logic; only publish **durable milestones** to the journal.
+5. Keep non-replicated streams out of the lattice
+Telemetry, flow control, chunk transfer windows, backpressure signals - these are ephemeral; don't shoehorn them into a CRDT. Let them live in transport/session logic; only publish durable milestones to the journal.
 
-**6. Search is split by design**
+6. Search is split by design
 - Index state = join CRDT (term → OR-set(doc))
 - Queries = meet over that state (constraint refinement)
 - Only cache/index updates (plus optional signed attestations) should land in the journal; query/response traffic stays in the session layer.
 
-**7. Rendezvous/SBB stay session-scoped**
+7. Rendezvous/SBB stay session-scoped
 - Flooding, rotating tags, retries, and backoff live entirely in the choreographies
 - Journals only record envelopes-as-facts and relationship/device state changes
 
-**8. GC/Snapshots must be join-preserving retractions**
+8. GC/Snapshots must be join-preserving retractions
 - The session to reach a cut is typed; the snapshot that lands in the journal is a retraction `h` with `h(x ⊔ y) = h(x) ⊔ h(y)` and `h(x) ≤ x`
 - This ensures compaction commutes with future merges
 
 ### 5.2 Decision Test
 
-- "Will this cross partitions and need to merge?" → put its **result** in a lattice
-- "Is this transient control/negotiation?" → keep it in MPST sessions; **only the commit** becomes a lattice fact
+- "Will this cross partitions and need to merge?" → put its result in a lattice
+- "Is this transient control/negotiation?" → keep it in MPST sessions; only the commit becomes a lattice fact
 - "Does it remove information?" → redesign as epoch/replace or a retraction proof that preserves joins
 
-So: semilattices are the **boundary discipline** for durable, mergeable state; MPST sessions are the **engine** for rich multi-party coordination. Use both, and glue them with the pattern: **meet-guarded preconditions, join-only commits.**
+So: semilattices are the boundary discipline for durable, mergeable state; MPST sessions are the engine for rich multi-party coordination. Use both, and glue them with the pattern: meet-guarded preconditions, join-only commits.
 
-Flow budgets live right beside these facts: every `(context, peer)` pair stores `FlowBudget { limit, spent, epoch }` in the journal. Because `spent` is a join (max) and `limit` is a meet (min), budgeting fits seamlessly into this decision tree—rate limiting spam and bounding metadata leak both boil down to guarding effect calls with the same monotone data. See `docs/004_info_flow_model.md` for receipt structure, epoch rotation, fairness, and liveness guidance.
+Flow budgets live right beside these facts: every `(context, peer)` pair stores `FlowBudget { limit, spent, epoch }` in the journal. Because `spent` is a join (max) and `limit` is a meet (min), budgeting fits seamlessly into this decision tree - rate limiting spam and bounding metadata leak both boil down to guarding effect calls with the same monotone data. See `docs/004_info_flow_model.md` for receipt structure, epoch rotation, fairness, and liveness guidance.
 
 ---
 
@@ -669,14 +674,14 @@ let bytes = handler.random_bytes(32).await;  // Works! Uses blanket impl
 
 ### 6.3 When to Use Which Pattern
 
-**Use Typed Traits When:**
+Use Typed Traits When
 - Hot loops with millions of iterations
 - Performance-critical choreographies (DKD, FROST)
 - Known concrete types at compile time
 - Want maximum compiler optimization
 - Writing unit tests with typed mocks
 
-**Use Type-Erased When:**
+Use Type-Erased When
 - Dynamic handler selection at runtime
 - Building middleware stacks
 - Heterogeneous collections of handlers
@@ -691,7 +696,7 @@ let bytes = handler.random_bytes(32).await;  // Works! Uses blanket impl
 
 Aura runs on multiple platforms from day one:
 
-**Web (WebAssembly):**
+Web (WebAssembly)
 ```rust
 #[cfg(target_arch = "wasm32")]
 pub fn create_web_handler(device_id: DeviceId) -> Result<AuraEffectSystem, AuraError> {
@@ -703,7 +708,7 @@ pub fn create_web_handler(device_id: DeviceId) -> Result<AuraEffectSystem, AuraE
 }
 ```
 
-**Mobile (iOS/Android):**
+Mobile (iOS/Android)
 ```rust
 #[cfg(target_os = "ios")]
 pub fn create_ios_handler(device_id: DeviceId) -> Result<AuraEffectSystem, AuraError> {
@@ -715,7 +720,7 @@ pub fn create_ios_handler(device_id: DeviceId) -> Result<AuraEffectSystem, AuraE
 }
 ```
 
-**Desktop (Native):**
+Desktop (Native)
 ```rust
 #[cfg(not(any(target_arch = "wasm32", target_os = "ios", target_os = "android")))]
 pub fn create_desktop_handler(device_id: DeviceId) -> Result<AuraEffectSystem, AuraError> {
@@ -749,10 +754,10 @@ handler.emit_event("protocol.dkd.started", json!({
 
 Aura's distributed applications demonstrate that the theoretical foundations translate into practical, working systems. The combination of:
 
-- **Algebraic effect handlers** for composable system architecture
-- **Session-typed choreographies** for safe distributed coordination  
-- **Semilattice CRDTs** for conflict-free state replication
-- **Privacy-preserving contexts** for secure communication
+- Algebraic effect handlers for composable system architecture
+- Session-typed choreographies for safe distributed coordination  
+- Semilattice CRDTs for conflict-free state replication
+- Privacy-preserving contexts for secure communication
 
 ...enables building complex distributed applications while maintaining strong safety, privacy, and correctness guarantees.
 

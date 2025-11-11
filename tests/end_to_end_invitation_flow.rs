@@ -156,11 +156,10 @@ async fn test_complete_invitation_flow() {
     );
     
     // Create coordinator with custom config
-    let acceptance_coordinator = InvitationAcceptanceCoordinator {
-        effects: test.effects(test.invitee_device).clone(),
-        ledger: test.invitation_ledger.clone(),
-        config: acceptance_config,
-    };
+    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config(
+        test.effects(test.invitee_device).clone(),
+        acceptance_config,
+    );
     
     let acceptance = acceptance_coordinator
         .accept_invitation(invitation_response.invitation.clone())
@@ -329,11 +328,10 @@ async fn test_invitation_with_relationship_formation() {
         protocol_timeout_secs: 60,
     };
     
-    let acceptance_coordinator = InvitationAcceptanceCoordinator {
-        effects: test.effects(test.invitee_device).clone(),
-        ledger: test.invitation_ledger.clone(),
-        config: acceptance_config,
-    };
+    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config(
+        test.effects(test.invitee_device).clone(),
+        acceptance_config,
+    );
     
     let acceptance = acceptance_coordinator
         .accept_invitation(invitation_response.invitation)

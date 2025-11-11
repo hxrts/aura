@@ -14,6 +14,7 @@
 
 pub mod effects;
 pub mod handlers;
+pub mod visualization;
 
 // Re-export key types and traits
 pub use effects::{CliConfig, CliEffects, ConfigEffects, OutputEffects};

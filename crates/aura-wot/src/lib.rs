@@ -28,15 +28,6 @@
 //! let base_policy = CapabilitySet::from_permissions(&["read", "write"]);
 //! let delegation = CapabilitySet::from_permissions(&["read"]);
 
-// Phase 6: Capability/tree policy integration tests
-// DISABLED: Tests reference unimplemented API methods
-// #[cfg(test)]
-// mod capability_tree_policy_tests;
-
-// Phase 6: Property tests for semilattice laws
-// DISABLED: Tests reference unimplemented API methods
-// #[cfg(test)]
-// mod semilattice_property_tests;
 //!
 //! // Effective capabilities = intersection (can only get smaller)
 //! let effective = base_policy.meet(&delegation);

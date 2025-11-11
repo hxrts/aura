@@ -4,76 +4,61 @@ This document describes how to implement systems using Aura's theoretical founda
 
 ## Overview
 
-Aura's system architecture translates mathematical foundations into practical implementation patterns through (formal definitions live in `docs/001_theoretical_foundations.md`):
+Aura's system architecture translates mathematical foundations into practical implementation patterns. Formal definitions live in [Aura Theoretical Foundations](001_theoretical_model.md).
 
-1. **Unified Effect System** - Composable effect handlers with middleware support
-2. **CRDT Implementation Architecture** - 4-layer system for conflict-free replication
-3. **Choreographic Protocol Design** - Session-typed distributed coordination
-4. **Crate Organization** - Clean dependency structure and separation of concerns
+1. Unified Effect System - Composable effect handlers with middleware support
+2. CRDT Implementation Architecture - 4-layer system for conflict-free replication
+3. Choreographic Protocol Design - Session-typed distributed coordination
+4. Crate Organization - Clean dependency structure and separation of concerns
 
 ---
 
 ## Terminology & Layering
 
-**Canonical Reference**: For all architectural terms and concepts, see [`docs/099_glossary.md`](099_glossary.md).
+For all architectural terms and concepts, see the project glossary.
 
 ### Effect System Runtime Objects
 
 The effect system uses these canonical names throughout the codebase:
 
-- **AuraEffectSystem** - Main runtime façade for all effect operations
-  - Implementation: [`crates/aura-protocol/src/effects/system.rs`](../crates/aura-protocol/src/effects/system.rs)
-  - Usage: Primary entry point for applications
-  
-- **CompositeHandler** - Internal composition component within `AuraEffectSystem`
-  - Implementation: [`crates/aura-protocol/src/handlers/composite.rs`](../crates/aura-protocol/src/handlers/composite.rs)  
-  - Usage: Internal delegation pattern, not used directly
-
-- **AuraHandler** - Unified trait interface for type-erased handlers
-  - Implementation: [`crates/aura-protocol/src/handlers/erased.rs`](../crates/aura-protocol/src/handlers/erased.rs)
-  - Usage: Base trait for dynamic dispatch
+- `AuraEffectSystem` - Main runtime façade for all effect operations
+- `CompositeHandler` - Internal composition component within `AuraEffectSystem`
+- `AuraHandler` - Unified trait interface for type-erased handlers
 
 ### Effect Trait Categories
 
-**Core Effect Traits** - Foundational interfaces in [`crates/aura-core/src/effects/`](../crates/aura-core/src/effects/):
+Core Effect Traits provide foundational interfaces:
 - `TimeEffects`, `CryptoEffects`, `StorageEffects`, `NetworkEffects`, `JournalEffects`, `ConsoleEffects`, `RandomEffects`
 
-**Extended Effect Traits** - Higher-level interfaces in [`crates/aura-protocol/src/effects/`](../crates/aura-protocol/src/effects/):
+Extended Effect Traits provide higher-level interfaces:
 - `SystemEffects`, `LedgerEffects`, `ChoreographicEffects`, `TreeEffects`, `AgentEffects`
 
 ### Data Layer Separation
 
-- **Journal** ([`crates/aura-journal/`](../crates/aura-journal/)) - High-level CRDT state management
-- **Ledger** ([`crates/aura-protocol/src/effects/ledger.rs`](../crates/aura-protocol/src/effects/ledger.rs)) - Low-level effect interface
+- `Journal` - High-level CRDT state management
+- `Ledger` - Low-level effect interface
 
-See [`docs/105_journal.md`](105_journal.md) for canonical explanation of Journal vs Ledger architecture.
+See the journal system documentation for explanation of Journal vs Ledger architecture.
 
 ### Protocol Stack Layers
 
-- **Choreographies** - Global protocol specifications (executable via rumpsteak-aura bridge)
-- **Session Types** - Local projections of choreographies (infrastructure complete, runtime bridge working)  
-- **Protocols** - Manual async implementations with choreographic integration
+- Choreographies - Global protocol specifications executable via rumpsteak-aura bridge
+- Session Types - Local projections of choreographies with complete infrastructure
+- Protocols - Manual async implementations with choreographic integration
 
 See Protocol Stack section below for detailed explanation.
 
 ### Auth/Authz Flow
 
-- **Authentication** ([`crates/aura-verify/`](../crates/aura-verify/) + [`crates/aura-authenticate/`](../crates/aura-authenticate/)) - Identity verification (WHO)
-- **Authorization** ([`crates/aura-wot/`](../crates/aura-wot/)) - Capability evaluation (WHAT)
-- **Integration** ([`crates/aura-protocol/src/authorization_bridge.rs`](../crates/aura-protocol/src/authorization_bridge.rs)) - Clean composition
+- Authentication - Identity verification using `aura-verify` and `aura-authenticate`
+- Authorization - Capability evaluation using `aura-wot`
+- Integration - Clean composition via authorization bridge
 
-See [`docs/101_auth_authz.md`](101_auth_authz.md) for complete authentication vs authorization architecture.
+See the authentication and authorization documentation for complete architecture details.
 
-### Projection Roadmap
+### Projection
 
-Aura treats choreographies as the source of truth with working projection infrastructure and runtime bridge:
-
-1. **✅ Runtime Bridge Complete**: `aura-mpst` provides choreography execution via rumpsteak projection. The bridge emits FlowBudget charges and leakage guards automatically for each transition through the guard chain integration.
-2. **✅ Core Integration Working**: Complete guard chain (CapGuard → FlowGuard → JournalCoupler) integration with choreographic execution validates the compiler and runtime bridge.
-3. **⚠️ Protocol Migration**: Protocols can now be written as choreographies, but legacy manual async implementations remain for compatibility. Migration is protocol-by-protocol based on testing validation.
-4. **📋 Tooling Polish**: Protocol generation tooling exists but documentation for new choreography development still needed.
-
-Current status: Infrastructure complete, selective protocol migration in progress.
+Aura treats choreographies as the source of truth with working projection infrastructure and runtime bridge. `aura-mpst` provides choreography execution via rumpsteak projection with FlowBudget charges and leakage guards. The guard chain integrates with choreographic execution.
 
 ---
 
@@ -81,19 +66,19 @@ Current status: Infrastructure complete, selective protocol migration in progres
 
 ### 1.1 Core Principles
 
-Aura uses a **unified effect system architecture** centered around the `AuraEffectSystem`. This system provides:
+Aura uses a unified effect system architecture centered around the `AuraEffectSystem`.
 
-**Architecture Principles:**
-- **Unified**: One effect system for all operations (choreography, agent, simulation)
-- **Middleware-Optional**: Base system works directly; middleware adds enhancements when needed
-- **Context-Driven**: Unified `AuraContext` flows through all operations
-- **Mode-Aware**: Execution mode (Testing, Production, Simulation) drives behavior
+Architecture Principles
+- Unified - One effect system for all operations (choreography, agent, simulation)
+- Middleware-Optional - Base system works directly, middleware adds enhancements when needed
+- Context-Driven - Unified `AuraContext` flows through all operations
+- Mode-Aware - Execution mode drives behavior (Testing, Production, Simulation)
 
 ### 1.2 Algebraic Effect Theory & Terminology
 
 Aura uses algebraic effect terminology with strict separation between abstract interfaces and concrete implementations.
 
-**Effects** define abstract capabilities as trait interfaces:
+Effects define abstract capabilities as trait interfaces:
 ```rust
 #[async_trait]
 pub trait CryptoEffects {
@@ -102,7 +87,7 @@ pub trait CryptoEffects {
 ```
 Effect traits specify operations without implementation details. Multiple handlers can implement the same trait with different behaviors.
 
-**Effect Handlers** provide concrete implementations:
+Effect Handlers provide concrete implementations:
 ```rust
 pub struct RealCryptoHandler;
 impl CryptoEffects for RealCryptoHandler {
@@ -113,7 +98,7 @@ impl CryptoEffects for RealCryptoHandler {
 ```
 Handlers contain the actual business logic. Different handlers enable testing, production, and simulation modes.
 
-**Middleware** wraps handlers with cross-cutting concerns:
+Middleware wraps handlers with cross-cutting concerns:
 ```rust
 pub struct RetryMiddleware<H> { inner: H, max_attempts: u32 }
 ```
@@ -123,29 +108,28 @@ Middleware implements effect traits by delegating to inner handlers with additio
 
 The effect system organizes capabilities into categories:
 
-**Core Effects** provide fundamental operations including network communication, cryptographic primitives, persistent storage, time management, and console output.
+Core Effects provide fundamental operations. These include network communication, cryptographic primitives, persistent storage, time management, and console output.
 
-**Agent Effects** handle device-specific concerns like secure storage, biometric authentication, and session management.
+Agent Effects handle device-specific concerns. These include secure storage, biometric authentication, and session management.
 
-**Simulation Effects** enable controlled testing with fault injection, time manipulation, and property verification.
+Simulation Effects enable controlled testing. These include fault injection, time manipulation, and property verification.
 
-**Privacy Effects** enforce leakage budgets and flow control to maintain confidentiality guarantees across protocol executions.
+Privacy Effects enforce leakage budgets and flow control. These maintain confidentiality guarantees across protocol executions.
 
 ### 1.4 Session Type Algebra Integration
 
 The unified effect system integrates with Aura's session type algebra for choreographic programming:
 
-```
-Session Type Algebra (Global Protocol)
-    ↓ projection
-Local Session Types (Per-Role Protocols)
-    ↓ execution via Effect Interpreter Interface
-Effect Algebra (CryptoEffects, NetworkEffects, etc.)
-    ↓ interpretation by
-Handler Implementations
+```mermaid
+graph TD
+    A[Session Type Algebra (Global Protocol)] --> B{Projection};
+    B --> C[Local Session Types (Per-Role Protocols)];
+    C --> D{Execution via Effect Interpreter Interface};
+    D --> E[Effect Algebra (CryptoEffects, NetworkEffects, etc.)];
+    E --> F[Interpretation by Handler Implementations];
 ```
 
-**Static Path** generates direct effect calls from choreographies:
+Static Path generates direct effect calls from choreographies:
 ```rust
 choreography! {
     protocol P2PDkd {
@@ -156,7 +140,7 @@ choreography! {
 ```
 The macro generates compile-time session types that map directly to effect system operations.
 
-**Dynamic Path** interprets session types at runtime:
+Dynamic Path interprets session types at runtime:
 ```rust
 let Roles(mut alice, mut bob) = setup();
 rumpsteak_aura::try_session(&mut alice, |session| async move {
@@ -179,15 +163,15 @@ Lifecycle and invariants:
 - Reconnect behavior: re-run rendezvous; budget reservations and receipts do not carry across epochs.
 - Receipt scope: per-hop receipts are bound to `(ctx, src, dst, epoch)` and are never reused across channels or epochs.
 
-See `docs/104_rendezvous.md` for full lifecycle details.
+See the rendezvous documentation for full lifecycle details.
 
 ### 1.6 Guard Chain and Predicate
 
 All transport side effects must pass the following guard chain, in order:
 
-1. CapGuard — authorization: `need(message) ≤ Caps(ctx)`
-2. FlowGuard — budgeting: `headroom(ctx, cost)` (charge-before-send)
-3. JournalCoupler — atomic commit of attested facts on success
+1. CapGuard - authorization: `need(message) ≤ Caps(ctx)`
+2. FlowGuard - budgeting: `headroom(ctx, cost)` (charge-before-send)
+3. JournalCoupler - atomic commit of attested facts on success
 
 Observable behavior:
 - If CapGuard fails: deny locally, no packet emitted.
@@ -197,21 +181,149 @@ Observable behavior:
 Definitions:
 - `headroom(ctx, cost)` succeeds iff charging `(ctx, peer)` by `cost` in the current `epoch(ctx)` keeps `spent ≤ limit` and yields a signed receipt bound to the epoch.
 
-See `docs/001_theoretical_foundations.md` §5.3 for the formal contract and `docs/004_info_flow_model.md` for receipt/epoch details.
+See [Aura Theoretical Foundations](001_theoretical_model.md) for the formal contract and information flow model documentation for receipt and epoch details.
+
+#### SendGuard Implementation
+
+The guard chain is implemented by `SendGuardChain` in `crates/aura-protocol/src/guards/send_guard.rs`. This struct encapsulates the complete predicate evaluation:
+
+```rust
+pub struct SendGuardChain {
+    message_capability: Capability,
+    peer: DeviceId,
+    cost: u32,
+    context: ContextId,
+    operation_id: Option<String>,
+}
+```
+
+The evaluation proceeds through three phases:
+
+Phase 1: Capability Guard evaluates `need(m) ≤ Caps(ctx)` by constructing a ProtocolGuard with the required capability and evaluating it against the effective capability set. If this check fails, the guard chain returns immediately with authorization denied and no flow budget charged.
+
+Phase 2: Flow Guard evaluates `headroom(ctx, cost)` by checking whether the flow budget for the context-peer pair can accommodate the cost. If headroom is sufficient, the budget is charged and a signed receipt is issued. If this check fails, authorization is denied and no packet is emitted.
+
+Phase 3: Result Assembly collects metrics including capability evaluation time, flow evaluation time, total time, and the number of capabilities checked. The result includes the authorization decision, the receipt if successful, and a human-readable denial reason if authorization failed.
+
+Decision tree for guard failures:
+
+```mermaid
+graph TD
+    A["evaluate()"] --> B{"CapGuard:<br/>need(m) ≤ Caps(ctx)?"}
+    B -->|NO| C["return authorized: false<br/>Observable: Local denial<br/>no packet, no charge"]
+    B -->|YES| D{"FlowGuard:<br/>headroom(ctx, cost)?"}
+    D -->|NO| E["return authorized: false<br/>Observable: Local block<br/>no packet, no charge"]
+    D -->|YES| F["charge budget, issue receipt<br/>return authorized: true<br/>Observable: Charge recorded<br/>packet may proceed"]
+    
+    C -.-> G["CapGuard FAILED"]
+    E -.-> H["FlowGuard FAILED"]
+    F -.-> I["Guard Chain PASSED"]
+```
+
+The guard chain enforces three critical invariants:
+
+Charge-Before-Send: The flow budget must be successfully charged before any transport send operation occurs. This ensures that no observable behavior happens without accounting.
+
+No-Observable-Without-Charge: If flow budget charging fails, no send operation is performed. The denial is local and produces no network traffic.
+
+Capability-Gated: All sends require the appropriate message capability. Missing capabilities result in immediate denial without attempting flow budget operations.
+
+Usage pattern in protocol implementations:
+
+```rust
+let guard = create_send_guard(
+    Capability::send_message(),
+    context_id,
+    peer_device,
+    100,
+).with_operation_id("frost_signing_round_1");
+
+let result = guard.evaluate(&effect_system).await?;
+if result.authorized {
+    transport.send_with_receipt(message, result.receipt.unwrap()).await?;
+} else {
+    return Err(AuraError::permission_denied(&result.denial_reason.unwrap()));
+}
+```
+
+The SendGuardChain provides convenience methods for common patterns. The `is_send_authorized` method returns a boolean authorization decision. The `authorize_send` method returns the receipt on success or an error on failure.
+
+#### JournalCoupler Implementation
+
+The JournalCoupler sits at the final stage of the guard chain and ensures that protocol operations atomically update the distributed journal state using CRDT operations. The implementation is in `crates/aura-protocol/src/guards/journal_coupler.rs`.
+
+The complete guard chain flow:
+
+```
+CapGuard → FlowGuard → JournalCoupler → Protocol Execution
+    ↓         ↓            ↓                    ↓
+Check     Check       Apply journal      Execute with
+caps      budget      deltas atomically  full context
+```
+
+The JournalCoupler coordinates two execution modes:
+
+Pessimistic Mode: Execute the protocol operation first, then apply journal annotations only after the operation succeeds. This ensures that failed operations do not modify journal state. Journal updates are guaranteed to be consistent with successful protocol outcomes.
+
+Optimistic Mode: Apply journal annotations first, then execute the protocol operation. This mode follows CRDT semantics where operations are monotonic. Even if the protocol operation fails after journal updates, the journal changes are considered committed and do not require rollback.
+
+The coupling operation has three phases:
+
+Phase 1 applies journal annotations according to the execution mode. In optimistic mode, annotations are applied before protocol execution. In pessimistic mode, annotations are applied after successful execution.
+
+Phase 2 executes the protocol operation using the provided closure. The operation receives the effect system and may use any available effects.
+
+Phase 3 assembles the result including the protocol return value, list of applied journal operations, updated journal state, and coupling metrics such as application time and retry attempts.
+
+Journal operations are categorized into four types:
+
+MergeFacts applies join-semilattice operations to add facts to the journal. This corresponds to knowledge accumulation where facts can only grow monotonically.
+
+RefineCapabilities applies meet-semilattice operations to refine capabilities. This corresponds to authority restriction where capabilities can only shrink monotonically.
+
+GeneralMerge applies both facts and capabilities in a single operation. This provides atomic updates to both journal components.
+
+CustomOperation allows application-specific journal operations that may have custom semantics beyond the standard CRDT operations.
+
+The journal coupler provides retry logic for transient failures. If a journal operation fails, it is retried up to a configured maximum number of attempts with exponential backoff. This handles temporary failures in distributed journal operations without requiring manual retry logic in protocol implementations.
+
+Usage pattern with guard chain integration:
+
+```rust
+let mut coupler = JournalCoupler::new();
+coupler.add_annotation(
+    "frost_round_1".to_string(),
+    JournalAnnotation::add_facts("FROST commitment recorded"),
+);
+
+let result = coupler.execute_with_coupling(
+    "frost_round_1",
+    &mut effect_system,
+    |effects| async move {
+        let commitment = compute_frost_commitment().await?;
+        effects.broadcast_commitment(commitment).await?;
+        Ok(commitment)
+    }
+).await?;
+
+assert!(result.coupling_metrics.coupling_successful);
+```
+
+The JournalCoupler ensures that protocol operations maintain consistency between in-memory state and distributed journal state. When a protocol operation modifies shared state, the corresponding journal annotations ensure that all participants eventually observe the same state transitions through CRDT merge operations.
 
 ### 1.7 Hybrid Typed/Type-Erased Architecture
 
 Aura uses a hybrid architecture that provides both typed effect traits and type-erased handlers:
 
-**Two Parallel APIs:**
-1. **Typed Effect Traits** - For performance-critical code and hot paths
-2. **Type-Erased `dyn AuraHandler`** - For dynamic composition and middleware
+Two Parallel APIs
+1. Typed Effect Traits - For performance-critical code and hot paths
+2. Type-Erased `dyn AuraHandler` - For dynamic composition and middleware
 
 | Pattern | API | Overhead | Use Case |
 |---------|-----|----------|----------|
-| **Direct typed traits** | `handler.random_bytes(32)` | **0ns** - Zero overhead | Hot loops, performance-critical |
-| **Type-erased → typed** | `boxed.random_bytes(32)` | **~200ns** - Serialization | Dynamic composition |
-| **Type-erased direct** | `execute_effect(...)` | **~200ns** - Serialization | Runtime effect selection |
+| Direct typed traits | `handler.random_bytes(32)` | 0ns - Zero overhead | Hot loops, performance-critical |
+| Type-erased → typed | `boxed.random_bytes(32)` | ~200ns - Serialization | Dynamic composition |
+| Type-erased direct | `execute_effect(...)` | ~200ns - Serialization | Runtime effect selection |
 
 #### AuraHandler Trait & Typed Bridge
 
@@ -282,37 +394,17 @@ Aura's CRDT system implements a **4-layer architecture** that separates:
 
 ### 2.2 File Organization
 
-```
-aura-core/src/semilattice/          # Foundation layer (workspace-wide)
-├── semantic_traits.rs               # JoinSemilattice, MeetSemiLattice, CvState, MvState, etc.
-├── message_types.rs                 # StateMsg<S>, MeetStateMsg<S>, OpWithCtx<Op,Ctx>, etc.
-├── tests/                          # Property-based tests for algebraic laws
-│   └── meet_properties.rs          # Meet semi-lattice law validation
-└── mod.rs                          # Re-exports and trait implementations
+The CRDT architecture spans four layers:
 
-aura-protocol/src/effects/semilattice/  # Effect interpreter layer
-├── cv_handler.rs                   # CvHandler<S: CvState> - join-based state CRDTs
-├── mv_handler.rs                   # MvHandler<S: MvState> - meet-based constraint CRDTs
-├── delta_handler.rs                # DeltaHandler<S,D> - delta-based
-├── cm_handler.rs                   # CmHandler<S,Op> - operation-based
-├── delivery.rs                     # CausalBroadcast, AtLeastOnce effects
-└── mod.rs                          # Handler composition + execute_* helpers
+**Foundation Layer** (`aura-core/src/semilattice/`) provides core traits (`JoinSemilattice`, `MeetSemiLattice`, `CvState`, `MvState`) and message types (`StateMsg<S>`, `MeetStateMsg<S>`, `OpWithCtx<Op,Ctx>`). Property-based tests validate algebraic laws.
 
-aura-protocol/src/choreography/      # Choreographic protocol layer
-├── protocols/                      # Anti-entropy, snapshot, threshold, tree coordination, etc.
-└── runtime/
-    └── aura_handler_adapter.rs     # AuraHandlerAdapter + factory (testing/prod/sim scaffolding)
+**Effect Interpreter Layer** (`aura-protocol/src/effects/semilattice/`) implements handlers for each CRDT type: `CvHandler<S: CvState>` for join-based state CRDTs, `MvHandler<S: MvState>` for meet-based constraint CRDTs, `DeltaHandler<S,D>` for delta-based updates, and `CmHandler<S,Op>` for operation-based approaches. Delivery effects (`CausalBroadcast`, `AtLeastOnce`) manage message ordering and reliability.
 
-aura-journal/src/semilattice/       # Application semilattice layer
-├── journal_map.rs                  # JournalMap as CvState implementation
-├── account_state.rs                # Modern AccountState using semilattice composition
-├── concrete_types.rs               # Domain-specific CRDT types (DeviceRegistry, etc.)
-├── meet_types.rs                   # Domain-specific meet CRDTs (CapabilitySet, etc.)
-├── op_log.rs                       # Operation logs + replay helpers
-└── mod.rs                          # Journal-specific re-exports
-```
+**Choreographic Protocol Layer** (`aura-protocol/src/choreography/`) defines anti-entropy, snapshot, threshold, and tree coordination protocols. The runtime module provides `AuraHandlerAdapter` for testing, production, and simulation scaffolding.
 
-Projection/runtime glue that connects the algebra to these modules lives in `crates/aura-mpst/src/runtime.rs` and `crates/aura-protocol/src/handlers/rumpsteak_handler.rs`.
+**Application Semilattice Layer** (`aura-journal/src/semilattice/`) implements domain-specific CRDT types (`JournalMap`, `AccountState`, `DeviceRegistry`, `CapabilitySet`). Operation logs support replay and recovery.
+
+Projection and runtime glue connecting these layers lives in `crates/aura-mpst/src/runtime.rs` and `crates/aura-protocol/src/handlers/rumpsteak_handler.rs`.
 
 ### 2.3 Generic Handlers
 
@@ -322,8 +414,8 @@ Generic handlers enforce CRDT laws through typed interfaces:
 ```rust
 pub struct CvHandler<S: CvState> { pub state: S }
 impl<S: CvState> CvHandler<S> {
-    pub fn on_recv(&mut self, msg: StateMsg<S>) { 
-        self.state = self.state.join(&msg.0); 
+    pub fn on_recv(&mut self, msg: StateMsg<S>) {
+        self.state = self.state.join(&msg.0);
     }
 }
 ```
@@ -331,9 +423,9 @@ State-based handlers merge incoming states using join operations that preserve C
 
 **Delta Handler** processes incremental updates:
 ```rust
-pub struct DeltaHandler<S: CvState, D: Delta> { 
-    pub state: S, 
-    pub inbox: Vec<D> 
+pub struct DeltaHandler<S: CvState, D: Delta> {
+    pub state: S,
+    pub inbox: Vec<D>
 }
 ```
 Delta handlers batch updates for efficiency while maintaining causal consistency through ordering constraints.
@@ -344,9 +436,33 @@ pub struct CmHandler<S, Op, Id, Ctx> { pub state: S }
 ```
 Operation-based handlers apply operations in causal order while preventing duplicate application through deduplication tracking.
 
-### 2.4 Delivery Effects
+### 2.3.1 Causal Context Implementation
 
-Delivery effects ensure CRDT messages reach all participants with proper ordering:
+The causal context system in aura-core/src/causal_context.rs provides vector clock based causal ordering for operation-based CRDTs. This ensures that operations are delivered in an order consistent with their causal dependencies, preventing anomalies from out-of-order delivery.
+
+The VectorClock type implements standard vector clock semantics for tracking causality. Each actor maintains a logical clock value that increments with each local operation. The vector clock stores clock values for all known actors using a BTreeMap indexed by ActorId (which is DeviceId). The happens_before method implements the standard partial order where clock A happens before clock B if all entries in A are less than or equal to corresponding entries in B and at least one entry is strictly less. The concurrent_with method identifies concurrent operations that have no causal relationship. The update method merges two vector clocks by taking the maximum value for each actor, implementing the standard vector clock merge operation.
+
+The CausalContext type extends vector clocks with explicit dependency tracking for fine-grained causal ordering. Each context contains a vector clock representing the causal time when the operation was created, a set of explicit operation dependencies that must be satisfied before delivery, and the actor identifier for the operation creator. The after constructor creates a new context that causally follows a previous context by cloning its vector clock and incrementing the actor's entry. The with_dependency method allows operations to declare explicit dependencies on prior operations beyond the vector clock's implicit causality.
+
+The is_ready method determines whether an operation can be safely delivered given the current state. Readiness requires two conditions to hold. First, all explicit dependencies in the dependencies set must have been delivered and applied, verified through a caller-provided predicate. Second, the vector clock dependencies must be satisfied, meaning the current replica clock must dominate all entries in the operation's clock except for the sender's entry. This exception for the sender allows pipelining where a sender can emit multiple operations without waiting for acknowledgments, while still maintaining causal order from the receiver's perspective.
+
+The CmHandler integrates with CausalContext through operation buffering and reordering. When an operation arrives with a CausalContext that is not yet ready, the handler places it in a pending queue. As operations are delivered and the current vector clock advances, the handler repeatedly checks pending operations for readiness. Once an operation becomes ready, it is removed from the pending queue and applied to the CRDT state. This buffering mechanism allows operations to arrive in any order while guaranteeing that application order respects causality.
+
+The OperationId type provides stable identifiers for tracking dependencies. Each operation ID combines an actor identifier with a sequence number, creating a totally ordered set within each actor's operation stream. Operations can reference other operations by ID in their dependency sets, creating an explicit happens-before relation that complements the vector clock's implicit causality. This explicit dependency mechanism handles cases where vector clocks alone would permit premature delivery, such as when operations on different objects have semantic dependencies not captured by device-level causality.
+
+### 2.3.2 CRDT Coordinator Implementation
+
+The CRDT coordinator in aura-protocol/src/effects/semilattice/crdt_coordinator.rs provides unified choreographic access to all four CRDT handler types. This coordinator enables distributed protocols to synchronize state across CvRDT (state-based), CmRDT (operation-based), Delta-CRDT (delta-based), and MvRDT (meet-based) semantics through a single interface.
+
+The coordinator maintains optional handlers for each CRDT type using a builder pattern. Applications register only the handler types they need through with_cv_handler, with_cm_handler, with_delta_handler, and with_mv_handler methods. This selective registration avoids instantiating unused handler types while providing type-safe access to registered handlers. The coordinator tracks a device identifier and vector clock for causal ordering across all handler types.
+
+Handler selection routes synchronization requests to the appropriate CRDT handler based on type tags. When a sync request arrives, the coordinator examines the CrdtType enum to determine whether the request targets convergent, commutative, delta, or meet handlers. The coordinator then delegates to the appropriate handler's merge or apply methods while maintaining causal consistency through vector clock updates. This routing logic centralizes CRDT type dispatch while preserving the distinct semantics of each handler type.
+
+Synchronization proceeds through request-response cycles managed by the coordinator. The handle_sync_request method processes incoming synchronization requests by extracting the current state or operation log from the appropriate handler, serializing it using serde, and packaging it in a CrdtSyncResponse. The handle_sync_response method processes responses by deserializing the payload, validating the CRDT type matches expectations, and merging the received state or applying the received operations through the appropriate handler. Vector clocks are merged during both request and response handling to maintain causal consistency across replicas.
+
+Integration with choreographic protocols occurs through the anti-entropy protocol types. The coordinator consumes CrdtSyncRequest and produces CrdtSyncResponse messages that the anti-entropy choreography exchanges between participants. This tight integration allows choreographies to synchronize CRDT state without knowledge of the specific CRDT types or handler implementations, treating synchronization as an abstract message exchange with the coordinator handling all type-specific logic internally.
+
+### 2.4 Delivery Effects
 
 ```rust
 // Delivery/order effects used alongside SessionSend/Recv
@@ -437,6 +553,22 @@ Journal Coupling automatically updates replicated state during protocol executio
 
 Leakage Budgets track privacy costs with annotations specifying external, neighbor, and group leakage limits.
 
+### 3.3.1 AuraHandlerAdapter Implementation
+
+The AuraHandlerAdapter provides the concrete bridge between choreographic session types and the Aura effect system. This adapter lives in aura-protocol/src/choreography/aura_handler_adapter.rs and serves as the primary integration point for executing rumpsteak-generated protocols.
+
+The adapter maintains several key pieces of state to enable choreographic execution. The `device_id` field identifies the local participant executing the protocol. The `role_mapping` table converts choreographic role names like Alice or Bob into concrete DeviceId values representing physical devices in the network. The `flow_contexts` map associates each peer device with a ContextId governing budget and capability rules for that communication channel. The `guard_profiles` registry stores SendGuardProfile configurations for specific message types, specifying required capabilities, leakage budgets, delta facts for journal updates, and flow costs. The `default_guard` provides fallback settings when no message-specific profile exists.
+
+The adapter exposes methods for protocol execution structured around the send and receive primitives. The send method accepts a target DeviceId and serializable message, retrieves the appropriate guard profile for the message type, configures FlowBudget enforcement using the flow context for the target peer, and invokes the full guard chain before delegating to NetworkEffects for actual transmission. The `recv_from` method accepts a sender DeviceId, uses NetworkEffects to retrieve the message bytes, and deserializes them into the expected message type with proper error handling. Both methods integrate with tracing for observability during protocol execution.
+
+The adapter provides configuration methods to set up choreographic execution contexts. The `add_role_mapping` method registers the DeviceId for a given choreographic role name, enabling the adapter to resolve symbolic role references to concrete network endpoints. The `set_flow_context_for_peer` method associates a specific ContextId with a peer device, determining which budget and capability rules apply to communication with that peer. The `register_message_guard` method allows protocols to specify custom guard profiles for particular message types, controlling capabilities, flow costs, and journal coupling behavior on a per-message basis.
+
+The adapter supports multiple execution modes through the ExecutionMode parameter during construction. Testing mode uses in-memory handlers with deterministic behavior for unit tests. Production mode connects to real network transports and persistent storage. Simulation mode enables fault injection and controlled non-determinism for property testing. The AuraHandlerAdapterFactory provides convenient constructors for each mode while hiding internal effect system setup details.
+
+The adapter integrates with the complete guard chain through its send implementation. For each outgoing message, the adapter constructs a ProtocolGuard with the required capabilities from the message guard profile. It sets the FlowHint on the effect system to inform FlowGuard of the expected cost and context. The effect system then executes the full CapGuard to FlowGuard to JournalCoupler pipeline before allowing the message to reach the network layer. This ensures that every choreographic send operation respects capability constraints, budget limits, and journal consistency requirements without requiring explicit guard invocations in protocol code.
+
+Receipt tracking provides cryptographic proof of budget charges for multi-hop scenarios. The adapter exposes a `latest_receipt` method that returns the Receipt generated by the most recent FlowGuard execution. Protocols can attach these receipts to relay messages, allowing downstream hops to verify that upstream participants properly charged their budgets. The receipt contains the context, source and destination devices, epoch, cost, and a signature binding all fields together, preventing budget inflation through receipt forgery or replay.
+
 ### 3.4 Runtime Execution Modes
 
 **In-Memory Handler** provides fast testing with deterministic message delivery through in-process channels.
@@ -453,49 +585,39 @@ Leakage Budgets track privacy costs with annotations specifying external, neighb
 
 Aura's protocol layer implements a three-tier architecture that separates global specifications from local implementations:
 
-```
-Global View        ┌─────────────────────────────────────┐
-Choreographies  ───┤ choreography! { protocol P2P_DKD    │  Specification
-                   │   roles: Alice, Bob; ... }          │  (Documentation)
-                   └─────────────────┬───────────────────┘
-                                     │ projection (planned)
-                                     ▼
-Local View         ┌─────────────────────────────────────┐
-Session Types   ───┤ LocalSessionType::Alice(...)        │  Infrastructure
-                   │ Generated per-role protocols        │  (Exists)
-                   └─────────────────┬───────────────────┘
-                                     │ implementation
-                                     ▼
-Implementation     ┌─────────────────────────────────────┐
-Protocols       ───┤ async fn execute_dkd_alice(...)     │  Working Code
-                   │ Manual async protocol impls         │  (Current)
-                   └─────────────────────────────────────┘
+```mermaid
+graph TD
+    A["<b>Choreographies</b><br/>Global protocol specifications<br/>choreography! macro"] --> B["<b>Specification</b><br/>Documentation"]
+    A -->|projection<br/>planned| C["<b>Session Types</b><br/>LocalSessionType per role<br/>Generated per-role protocols"]
+    C --> D["<b>Infrastructure</b><br/>Exists"]
+    C -->|implementation| E["<b>Protocols</b><br/>async fn execute_dkd_alice<br/>Manual async protocol impls"]
+    E --> F["<b>Working Code</b><br/>Current"]
+    
+    style A fill:#e1f5ff
+    style C fill:#fff3e0
+    style E fill:#f3e5f5
 ```
 
-### 4.2 Current Implementation Status
+### 4.2 Protocol Stack Components
 
 **Choreographies** - Global protocol specifications using `choreography!` macro:
 - **Location**: [`crates/aura-protocol/src/choreography/protocols/`](../crates/aura-protocol/src/choreography/protocols/)
-- **Status**: ✅ Executable via rumpsteak-aura bridge with guard chain integration
 - **Example**: [`crates/aura-protocol/src/choreography/protocols/anti_entropy.rs`](../crates/aura-protocol/src/choreography/protocols/anti_entropy.rs)
-- **Current Role**: Working protocol implementations with projection to executable session types
 
 **Session Types** - Local projections of choreographies:
-- **Infrastructure**: ✅ [`crates/aura-mpst/`](../crates/aura-mpst/) provides complete MPST extensions
-- **Runtime**: ✅ [`crates/aura-protocol/src/choreography/runtime/`](../crates/aura-protocol/src/choreography/runtime/) working
-- **Status**: ✅ Infrastructure complete with working choreography projection and execution
-- **Extensions**: ✅ Capability guards, journal coupling, leakage budgets fully integrated
+- **Infrastructure**: [`crates/aura-mpst/`](../crates/aura-mpst/) provides complete MPST extensions
+- **Runtime**: [`crates/aura-protocol/src/choreography/runtime/`](../crates/aura-protocol/src/choreography/runtime/)
+- **Features**: Capability guards, journal coupling, leakage budgets
 
 **Protocols** - Hybrid manual and choreographic implementations:
-- **Status**: ✅ Working manual implementations with ✅ choreographic alternatives available
 - **Pattern**: Effect-based implementations with guard chain enforcement
-- **Integration**: ✅ Complete effect system integration for all protocols
 
-### 4.3 Architecture Evolution Path
+### 4.3 Protocol Implementation Patterns
 
-**✅ Current (Working)**: Choreographic execution with guard chain integration
+Protocols can be implemented either as choreographies for specification clarity or as manual async implementations for flexibility. Both patterns integrate fully with the guard chain:
+
 ```rust
-// Choreography defines and executes the protocol with complete guard chain
+// Choreographic protocol specification
 choreography! {
     protocol AntiEntropy {
         roles: Alice, Bob;
@@ -504,26 +626,13 @@ choreography! {
     }
 }
 
-// Direct choreographic execution available
-async fn execute_anti_entropy(config: &AntiEntropyConfig, effects: &AuraEffectSystem) -> Result<()> {
-    execute_anti_entropy_with_guard_chain(config, effects).await
+// Manual protocol implementation
+async fn threshold_signing(effects: &AuraEffectSystem) -> Result<FrostResult> {
+    // Implementation with guard chain enforcement
 }
 ```
 
-**⚠️ Hybrid Pattern**: Manual implementations with choreographic alternatives
-```rust
-// Legacy manual protocols still available for compatibility
-async fn manual_threshold_signing(effects: &AuraEffectSystem) -> Result<FrostResult> {
-    // Manual implementation with guard chain enforcement
-}
-
-// New choreographic protocols preferred for new development
-async fn choreographic_threshold_signing(effects: &AuraEffectSystem) -> Result<FrostResult> {
-    // Uses rumpsteak projection + automatic guard enforcement
-}
-```
-
-Current status: Complete choreographic infrastructure with selective protocol migration.
+Both approaches produce the same observable behavior and integrate identically with the effect system.
 
 ### 4.4 MPST Extensions Integration
 
@@ -559,11 +668,18 @@ Aura maintains strict separation between authentication (WHO) and authorization 
 
 ### 5.2 Data Flow Architecture
 
-```
-Identity Proof → Authentication → Authorization → Permission Grant
-     ↓               ↓               ↓               ↓
-Device/Guardian → Verified Identity → Capability → Allow/Deny
-Signature          (WHO verified)     Evaluation    Operation
+```mermaid
+graph LR
+    A["Identity Proof<br/>(Device/Guardian/Threshold<br/>Signature)"] --> B["Authentication"]
+    B --> C["Verified Identity<br/>(WHO verified)"]
+    C --> D["Authorization"]
+    D --> E["Capability<br/>Evaluation"]
+    E --> F["Permission Grant<br/>(Allow/Deny Operation)"]
+    
+    style A fill:#ffebee
+    style C fill:#e8f5e9
+    style E fill:#fff3e0
+    style F fill:#f3e5f5
 ```
 
 **Linear Data Flow**:
@@ -614,20 +730,9 @@ pub trait AgentEffects: Send + Sync {
 - Bridge orchestrates both through well-defined interfaces
 - Each layer is independently testable with mocks
 
-### 5.5 Implementation Status
+### 5.5 Implementation Details
 
-**✅ Working Components**:
-- Pure cryptographic verification with all proof types
-- Capability evaluation with verified semilattice properties
-- Authorization bridge with zero coupling
-- Effect system integration with unified traits
-
-**⚠️ In Progress**:
-- Choreographic authentication ceremonies (infrastructure exists)
-- Advanced policy evaluation and delegation chains
-- Session management and token lifecycle
-
-**See**: [`docs/101_auth_authz.md`](101_auth_authz.md) for complete implementation details and usage patterns.
+See [`docs/101_auth_authz.md`](101_auth_authz.md) for complete architectural details and usage patterns.
 
 ---
 

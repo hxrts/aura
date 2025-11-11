@@ -72,11 +72,11 @@ impl HandlerFactory {
     }
 
     /// Create an operation-based CRDT handler
-    pub fn cm_handler<S, Op, Id, Ctx>(state: S) -> CmHandler<S, Op, Id, Ctx>
+    pub fn cm_handler<S, Op, Id, Ctx>(state: S) -> CmHandler<S, Op, Id>
     where
         S: CmApply<Op> + Dedup<Id>,
         Op: CausalOp<Id = Id, Ctx = Ctx>,
-        Id: Clone,
+        Id: Clone + PartialEq,
     {
         CmHandler::new(state)
     }
@@ -148,15 +148,15 @@ pub mod execution {
     }
 
     /// Execute operation-based CRDT broadcast
-    pub async fn execute_op_broadcast<S, Op, Id, Ctx>(
-        _handler: &mut CmHandler<S, Op, Id, Ctx>,
+    pub async fn execute_op_broadcast<S, Op, Id>(
+        _handler: &mut CmHandler<S, Op, Id>,
         _peers: Vec<DeviceId>,
         _session_id: SessionId,
     ) -> Result<(), Box<dyn std::error::Error>>
     where
         S: CmApply<Op> + Dedup<Id>,
-        Op: CausalOp<Id = Id, Ctx = Ctx>,
-        Id: Clone,
+        Op: CausalOp<Id = Id, Ctx = aura_core::CausalContext>,
+        Id: Clone + PartialEq,
     {
         // TODO: Integrate with choreographic execution
         tracing::info!("Executing operation broadcast (placeholder)");
@@ -203,12 +203,12 @@ pub mod composition {
         pub fn register_cm_handler<S, Op, Id, Ctx>(
             &mut self,
             type_name: String,
-            handler: CmHandler<S, Op, Id, Ctx>,
+            handler: CmHandler<S, Op, Id>,
             config: DeliveryConfig,
         ) where
             S: CmApply<Op> + Dedup<Id> + Send + Sync + 'static,
             Op: CausalOp<Id = Id, Ctx = Ctx> + Send + Sync + 'static,
-            Id: Clone + Send + Sync + 'static,
+            Id: Clone + PartialEq + Send + Sync + 'static,
             Ctx: Send + Sync + 'static,
         {
             self.handlers.insert(type_name.clone(), Box::new(handler));

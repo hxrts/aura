@@ -39,9 +39,27 @@ mod transport;
 pub type InvitationError = AuraError;
 pub type InvitationResult<T> = AuraResult<T>;
 
+/// A complete relationship record between devices
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Relationship {
+    /// Unique relationship identifier
+    pub id: Vec<u8>,
+    /// Devices participating in relationship
+    pub parties: Vec<DeviceId>,
+    /// Account context
+    pub account_id: AccountId,
+    /// Trust level
+    pub trust_level: TrustLevel,
+    /// Type of relationship
+    pub relationship_type: RelationshipType,
+    /// Additional metadata
+    pub metadata: Vec<(String, String)>,
+    /// Creation timestamp
+    pub created_at: u64,
+}
+
 // Type aliases for compatibility
 pub type Guardian = GuardianId;
-pub type Relationship = RelationshipId;
 pub type GuardianSet = Vec<GuardianId>;
 pub type AuthError = AuthenticationError;
 pub type AuthResult<T> = Result<T, AuthenticationError>;

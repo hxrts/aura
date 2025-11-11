@@ -7,7 +7,7 @@
 //!
 //! This crate implements journal synchronization using effect handlers:
 //! - `SyncService` - Main synchronization service using effect composition
-//! - `AntiEntropyService` - Digest-based reconciliation service  
+//! - `AntiEntropyService` - Digest-based reconciliation service
 //! - `snapshot` - Snapshot and maintenance utilities
 //! - `cache` - Cache invalidation and maintenance
 //!
@@ -33,6 +33,12 @@ pub mod snapshot;
 /// Cache invalidation helpers
 pub mod cache;
 
+/// Journal synchronization choreography (G_sync)
+pub mod journal_sync;
+
+/// Peer discovery and connection management
+pub mod peer_discovery;
+
 /// OTA upgrade orchestration helpers
 pub mod ota;
 
@@ -40,9 +46,7 @@ pub mod ota;
 pub use aura_core::{AccountId, AuraError, AuraResult, DeviceId};
 
 // Re-export protocol effect types
-pub use aura_protocol::effects::{
-    AntiEntropyConfig, BloomDigest, SyncEffects, SyncError,
-};
+pub use aura_protocol::effects::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
 
 // Maintenance helpers
 pub use cache::CacheEpochFloors;

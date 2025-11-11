@@ -12,7 +12,10 @@ use super::{
     storage::{FilesystemStorageHandler, MemoryStorageHandler},
     {AuraHandlerError, EffectType, ExecutionMode},
 };
-use crate::effects::*;
+// Import from aura-core for core effect traits
+use aura_core::effects::{JournalEffects as CoreJournalEffects, ConsoleEffects as CoreConsoleEffects, CryptoEffects as CoreCryptoEffects, NetworkEffects as CoreNetworkEffects, StorageEffects as CoreStorageEffects, TimeEffects as CoreTimeEffects, RandomEffects as CoreRandomEffects};
+// Import from local crate for extended effect traits
+use crate::effects::{AgentEffects, ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, ChoreographyMetrics, LedgerEffects, LedgerError, LedgerEventStream, DeviceMetadata, TreeEffects, SystemEffects, SystemError, TreeCoordinationEffects, SyncEffects, JournalEffects, JournalEffects as ProtocolJournalEffects, TimeEffects, TimeError, TimeoutHandle, WakeCondition, NetworkEffects, NetworkError, PeerEventStream, StorageEffects, StorageError, StorageStats, CryptoEffects, CryptoError, ConsoleEffects, ConsoleEvent, RandomEffects, AuraError, AuraResult};
 use async_trait::async_trait;
 use aura_core::{identifiers::DeviceId, relationships::ContextId, FlowBudget, LocalSessionType};
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
@@ -874,7 +877,7 @@ impl ChoreographicEffects for CompositeHandler {
 
 // Implement JournalEffects by delegating to the journal handler
 #[async_trait]
-impl JournalEffects for CompositeHandler {
+impl ProtocolJournalEffects for CompositeHandler {
     async fn append_attested_tree_op(
         &self,
         op: aura_core::AttestedOp,
@@ -1063,12 +1066,43 @@ impl JournalEffects for CompositeHandler {
         self.journal.list_guardians().await
     }
 
+    // Flow budget methods removed - they belong to aura-core's JournalEffects trait
+}
+
+// Implement aura-core's JournalEffects for flow budget operations
+#[async_trait]
+impl CoreJournalEffects for CompositeHandler {
+    async fn merge_facts(
+        &self,
+        target: &aura_core::Journal,
+        delta: &aura_core::Journal,
+    ) -> Result<aura_core::Journal, aura_core::AuraError> {
+        // Delegate to journal handler for CRDT operations
+        self.journal.merge_facts(target, delta).await.map_err(|e| aura_core::AuraError::internal(&format!("merge_facts failed: {}", e)))
+    }
+
+    async fn refine_caps(
+        &self,
+        target: &aura_core::Journal,
+        refinement: &aura_core::Journal,
+    ) -> Result<aura_core::Journal, aura_core::AuraError> {
+        self.journal.refine_caps(target, refinement).await.map_err(|e| aura_core::AuraError::internal(&format!("refine_caps failed: {}", e)))
+    }
+
+    async fn get_journal(&self) -> Result<aura_core::Journal, aura_core::AuraError> {
+        self.journal.get_journal().await.map_err(|e| aura_core::AuraError::internal(&format!("get_journal failed: {}", e)))
+    }
+
+    async fn persist_journal(&self, journal: &aura_core::Journal) -> Result<(), aura_core::AuraError> {
+        self.journal.persist_journal(journal).await.map_err(|e| aura_core::AuraError::internal(&format!("persist_journal failed: {}", e)))
+    }
+
     async fn get_flow_budget(
         &self,
         context: &ContextId,
         peer: &DeviceId,
     ) -> Result<FlowBudget, aura_core::AuraError> {
-        self.journal.get_flow_budget(context, peer).await
+        self.journal.get_flow_budget(context, peer).await.map_err(|e| aura_core::AuraError::internal(&format!("get_flow_budget failed: {}", e)))
     }
 
     async fn update_flow_budget(
@@ -1077,7 +1111,7 @@ impl JournalEffects for CompositeHandler {
         peer: &DeviceId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, aura_core::AuraError> {
-        self.journal.update_flow_budget(context, peer, budget).await
+        self.journal.update_flow_budget(context, peer, budget).await.map_err(|e| aura_core::AuraError::internal(&format!("update_flow_budget failed: {}", e)))
     }
 
     async fn charge_flow_budget(
@@ -1086,7 +1120,7 @@ impl JournalEffects for CompositeHandler {
         peer: &DeviceId,
         cost: u32,
     ) -> Result<FlowBudget, aura_core::AuraError> {
-        self.journal.charge_flow_budget(context, peer, cost).await
+        self.journal.charge_flow_budget(context, peer, cost).await.map_err(|e| aura_core::AuraError::internal(&format!("charge_flow_budget failed: {}", e)))
     }
 }
 
@@ -1292,7 +1326,8 @@ impl SystemEffects for CompositeHandler {
 }
 
 // Blanket implementation for AuraEffects umbrella trait
-impl AuraEffects for CompositeHandler {}
+// TODO: Re-enable once trait conflicts are resolved
+// impl AuraEffects for CompositeHandler {}
 
 // Implementation of unified AuraHandler trait
 #[async_trait]

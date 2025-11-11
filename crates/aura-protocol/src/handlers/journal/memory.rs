@@ -237,61 +237,8 @@ impl JournalEffects for MemoryJournalHandler {
         Ok(vec![])
     }
 
-    async fn get_flow_budget(
-        &self,
-        context: &ContextId,
-        peer: &DeviceId,
-    ) -> Result<FlowBudget, AuraError> {
-        let budgets = self.flow_budgets.read().await;
-        let key = FlowBudgetKey::new(context.clone(), peer.clone());
-        Ok(budgets
-            .get(&key)
-            .cloned()
-            .unwrap_or_else(|| FlowBudget::new(u64::MAX, SessionEpoch::initial())))
-    }
-
-    async fn update_flow_budget(
-        &self,
-        context: &ContextId,
-        peer: &DeviceId,
-        budget: &FlowBudget,
-    ) -> Result<FlowBudget, AuraError> {
-        let mut budgets = self.flow_budgets.write().await;
-        let key = FlowBudgetKey::new(context.clone(), peer.clone());
-        let merged = if let Some(existing) = budgets.get(&key) {
-            existing.merge(budget)
-        } else {
-            budget.clone()
-        };
-        budgets.insert(key, merged.clone());
-        Ok(merged)
-    }
-
-    async fn charge_flow_budget(
-        &self,
-        context: &ContextId,
-        peer: &DeviceId,
-        cost: u32,
-    ) -> Result<FlowBudget, AuraError> {
-        let mut budgets = self.flow_budgets.write().await;
-        let key = FlowBudgetKey::new(context.clone(), peer.clone());
-        let mut budget = budgets
-            .get(&key)
-            .cloned()
-            .unwrap_or_else(|| FlowBudget::new(u64::MAX, SessionEpoch::initial()));
-
-        budget.rotate_epoch(SessionEpoch::initial());
-        if !budget.record_charge(cost as u64) {
-            return Err(AuraError::permission_denied(format!(
-                "Flow budget exceeded for ctx={} peer={}",
-                context.as_str(),
-                peer
-            )));
-        }
-
-        budgets.insert(key, budget.clone());
-        Ok(budget)
-    }
+    // Flow budget methods removed - they belong to aura-core's JournalEffects trait
+    // This handler only implements aura-protocol's JournalEffects (tree/journal operations)
 }
 
 /// Compute a content-addressed identifier (CID) for an operation

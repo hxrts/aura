@@ -363,7 +363,7 @@ impl EffectType {
 }
 
 // Re-export types from submodules (selective to avoid ambiguous re-exports)
-// pub use crate::middleware::traits::{MiddlewareChain, MiddlewareHandler, ProtocolHandler}; // TODO: Implement when middleware traits are defined
+
 pub use composite::CompositeHandler;
 pub use context::{
     AgentContext, AuraContext, ChoreographicContext, MiddlewareContext, PlatformInfo,

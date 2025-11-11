@@ -8,15 +8,14 @@
 use crate::config::AgentConfig;
 use crate::effects::*;
 use crate::errors::{AuraError, Result as AgentResult};
-use crate::handlers::{AgentEffectSystemHandler, SessionOperations, StorageOperations};
+use crate::handlers::{
+    AgentEffectSystemHandler, OtaOperations, SessionOperations, StorageOperations,
+};
 use crate::maintenance::{MaintenanceController, SnapshotOutcome};
 use crate::middleware::{AgentMiddlewareStack, MiddlewareStackBuilder};
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_protocol::effects::{AuraEffectSystem, SessionType};
-// use aura_sync::WriterFence;  // Temporarily disabled - needs refactor to effect system
-
-// Temporary placeholder type until aura-sync is refactored
-use crate::maintenance::WriterFence;
+use aura_sync::WriterFence;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,6 +44,8 @@ pub struct AuraAgent {
     core_effects: Arc<RwLock<AuraEffectSystem>>,
     /// Storage operations handler
     storage_ops: StorageOperations,
+    /// OTA upgrade operations handler
+    ota_ops: OtaOperations,
     /// Maintenance workflows (snapshots, GC, OTA state)
     maintenance: MaintenanceController,
     /// Configuration cache
@@ -86,6 +87,7 @@ impl AuraAgent {
             device_id,
             format!("agent_{}", device_id.0.simple()),
         );
+        let ota_ops = OtaOperations::new(device_id);
         let maintenance = MaintenanceController::new(core_effects.clone(), device_id);
 
         Self {
@@ -94,6 +96,7 @@ impl AuraAgent {
             middleware: None,
             core_effects,
             storage_ops,
+            ota_ops,
             maintenance,
             config_cache: Arc::new(RwLock::new(None)),
         }
@@ -122,6 +125,11 @@ impl AuraAgent {
     /// Access maintenance controller (snapshots, GC, OTA state).
     pub fn maintenance(&self) -> &MaintenanceController {
         &self.maintenance
+    }
+
+    /// Access OTA upgrade operations handler.
+    pub fn ota(&self) -> &OtaOperations {
+        &self.ota_ops
     }
 
     /// Get the global writer fence for snapshot proposals.

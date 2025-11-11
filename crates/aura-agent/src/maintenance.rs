@@ -17,29 +17,10 @@ use aura_core::{
 use aura_protocol::effects::{
     AuraEffectSystem, ConsoleEffects, LedgerEffects, StorageEffects, TimeEffects, TreeEffects,
 };
-// use aura_sync::{SnapshotManager, WriterFence};  // Temporarily disabled - needs refactor to effect system
-
-// Temporary placeholder types until aura-sync is refactored
-#[derive(Debug, Clone)]
-pub struct WriterFence;
-
-#[derive(Debug)]
-pub struct SnapshotManager;
-
-impl SnapshotManager {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl WriterFence {
-    pub fn new() -> Self {
-        Self
-    }
-}
-use serde::{Serialize, Deserialize};
-use tokio::sync::{RwLock, broadcast};
-use tracing::{info, warn, error};
+use aura_sync::{SnapshotManager, WriterFence};
+use serde::{Deserialize, Serialize};
+use tokio::sync::{broadcast, RwLock};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::errors::Result;
@@ -96,7 +77,7 @@ impl CacheInvalidationSystem {
     /// Create new cache invalidation system
     pub fn new() -> Self {
         let (event_sender, _) = broadcast::channel(1000);
-        
+
         Self {
             epoch_floor: RwLock::new(EpochFloor {
                 current_floor: 0,
@@ -125,19 +106,28 @@ impl CacheInvalidationSystem {
     }
 
     /// Emit cache invalidation event and update epoch floor
-    pub async fn emit_invalidation_event(&self, event: CacheInvalidationEvent) -> crate::errors::Result<()> {
+    pub async fn emit_invalidation_event(
+        &self,
+        event: CacheInvalidationEvent,
+    ) -> crate::errors::Result<()> {
         info!("Emitting cache invalidation event: {:?}", event);
 
         // Update epoch floor based on event type
         match &event {
             CacheInvalidationEvent::SnapshotCompleted { epoch, .. } => {
-                self.update_epoch_floor(*epoch, "snapshot_completed").await?;
+                self.update_epoch_floor(*epoch, "snapshot_completed")
+                    .await?;
             }
-            CacheInvalidationEvent::AdminOverride { affected_devices, .. } => {
+            CacheInvalidationEvent::AdminOverride {
+                affected_devices, ..
+            } => {
                 // Record device-specific invalidations
                 let mut invalidations = self.device_invalidations.write().await;
                 for device in affected_devices {
-                    invalidations.entry(*device).or_default().push(event.clone());
+                    invalidations
+                        .entry(*device)
+                        .or_default()
+                        .push(event.clone());
                 }
             }
             CacheInvalidationEvent::OtaUpgradeCompleted { .. } => {
@@ -161,11 +151,13 @@ impl CacheInvalidationSystem {
     /// Update epoch floor with reason
     async fn update_epoch_floor(&self, new_floor: u64, reason: &str) -> crate::errors::Result<()> {
         let mut floor = self.epoch_floor.write().await;
-        
+
         if new_floor > floor.current_floor {
-            info!("Updating epoch floor from {} to {} (reason: {})", 
-                  floor.current_floor, new_floor, reason);
-            
+            info!(
+                "Updating epoch floor from {} to {} (reason: {})",
+                floor.current_floor, new_floor, reason
+            );
+
             floor.current_floor = new_floor;
             floor.last_updated = SystemTime::now();
             floor.invalidation_reason = reason.to_string();
@@ -176,16 +168,16 @@ impl CacheInvalidationSystem {
 
     /// Handle snapshot completion event
     pub async fn handle_snapshot_completed(
-        &self, 
-        epoch: u64, 
-        snapshot_hash: [u8; 32]
+        &self,
+        epoch: u64,
+        snapshot_hash: [u8; 32],
     ) -> crate::errors::Result<()> {
         let event = CacheInvalidationEvent::SnapshotCompleted {
             epoch,
             snapshot_hash,
             timestamp: SystemTime::now(),
         };
-        
+
         self.emit_invalidation_event(event).await
     }
 
@@ -200,7 +192,7 @@ impl CacheInvalidationSystem {
             affected_devices,
             timestamp: SystemTime::now(),
         };
-        
+
         self.emit_invalidation_event(event).await
     }
 
@@ -215,7 +207,7 @@ impl CacheInvalidationSystem {
             new_version,
             timestamp: SystemTime::now(),
         };
-        
+
         self.emit_invalidation_event(event).await
     }
 
@@ -230,7 +222,7 @@ impl CacheInvalidationSystem {
             freed_bytes,
             timestamp: SystemTime::now(),
         };
-        
+
         self.emit_invalidation_event(event).await
     }
 }
@@ -316,15 +308,30 @@ impl MaintenanceController {
         self.store_snapshot_blob(&effects, proposal_id, &snapshot)
             .await?;
         self.append_event(&effects, &completed).await?;
-        self.cleanup_snapshot_blobs(&effects, proposal_id).await?;
-        self.prune_local_state(&effects, snapshot.epoch).await?;
+
+        // Perform garbage collection and track statistics
+        let snapshot_blobs_deleted = self.cleanup_snapshot_blobs(&effects, proposal_id).await?;
+        let (pruned_items, freed_bytes) = self.prune_local_state(&effects, snapshot.epoch).await?;
+
+        let total_collected = snapshot_blobs_deleted + pruned_items;
+        let total_freed = freed_bytes;
 
         // Emit cache invalidation event for completed snapshot
-        if let Err(e) = self.cache_invalidation.handle_snapshot_completed(
-            snapshot.epoch, 
-            state_digest
-        ).await {
+        if let Err(e) = self
+            .cache_invalidation
+            .handle_snapshot_completed(snapshot.epoch, state_digest)
+            .await
+        {
             error!("Failed to emit cache invalidation event: {}", e);
+        }
+
+        // Emit GC completion event with collected statistics
+        if let Err(e) = self
+            .cache_invalidation
+            .handle_gc_completed(total_collected, total_freed)
+            .await
+        {
+            error!("Failed to emit GC completion event: {}", e);
         }
 
         drop(fence_guard);
@@ -359,15 +366,22 @@ impl MaintenanceController {
         let event = MaintenanceEvent::AdminReplaced(record.clone());
         self.append_event(&effects, &event).await?;
         self.store_admin_override(&effects, &record).await?;
-        
+
         // Emit cache invalidation event for admin override
-        if let Err(e) = self.cache_invalidation.handle_admin_override(
-            format!("Admin replacement: {} -> {}", self.device_id, new_admin),
-            vec![self.device_id, new_admin],
-        ).await {
-            error!("Failed to emit cache invalidation event for admin override: {}", e);
+        if let Err(e) = self
+            .cache_invalidation
+            .handle_admin_override(
+                format!("Admin replacement: {} -> {}", self.device_id, new_admin),
+                vec![self.device_id, new_admin],
+            )
+            .await
+        {
+            error!(
+                "Failed to emit cache invalidation event for admin override: {}",
+                e
+            );
         }
-        
+
         effects.log_info(
             &format!(
                 "Admin replacement stub recorded for account {} (new admin {}, activation epoch {})",
@@ -445,24 +459,30 @@ impl MaintenanceController {
         Ok(())
     }
 
-    async fn cleanup_snapshot_blobs(&self, effects: &AuraEffectSystem, keep: Uuid) -> Result<()> {
+    async fn cleanup_snapshot_blobs(&self, effects: &AuraEffectSystem, keep: Uuid) -> Result<u32> {
         let prefix = "maintenance:snapshot:";
         let keys = StorageEffects::list_keys(effects, Some(prefix))
             .await
             .unwrap_or_default();
+        let mut deleted_count = 0u32;
         for key in keys {
             if !key.ends_with(&keep.to_string()) {
-                let _ = StorageEffects::remove(effects, &key).await;
+                if StorageEffects::remove(effects, &key).await.is_ok() {
+                    deleted_count += 1;
+                }
             }
         }
-        Ok(())
+        Ok(deleted_count)
     }
 
     async fn prune_local_state(
         &self,
         effects: &AuraEffectSystem,
         snapshot_epoch: TreeEpoch,
-    ) -> Result<()> {
+    ) -> Result<(u32, u64)> {
+        let mut deleted_items = 0u32;
+        let mut estimated_freed_bytes = 0u64;
+
         // Drop cached maintenance markers whose epoch is older than the snapshot fence.
         let cache_prefix = "maintenance:cache_epoch:";
         let keys = StorageEffects::list_keys(effects, Some(cache_prefix))
@@ -471,7 +491,10 @@ impl MaintenanceController {
         for key in keys {
             if let Some(epoch) = Self::parse_epoch_suffix(&key) {
                 if epoch < snapshot_epoch {
-                    let _ = StorageEffects::remove(effects, &key).await;
+                    if StorageEffects::remove(effects, &key).await.is_ok() {
+                        deleted_items += 1;
+                        estimated_freed_bytes += 64; // Epoch marker size estimate
+                    }
                 }
             }
         }
@@ -490,11 +513,19 @@ impl MaintenanceController {
         for key in journal_keys {
             if let Some(epoch) = Self::parse_epoch_suffix(&key) {
                 if epoch < snapshot_epoch {
-                    let _ = StorageEffects::remove(effects, &key).await;
+                    // Estimate journal segment size (conservative estimate)
+                    if let Ok(data) = StorageEffects::retrieve(effects, &key).await {
+                        if let Some(bytes) = data {
+                            estimated_freed_bytes += bytes.len() as u64;
+                        }
+                    }
+                    if StorageEffects::remove(effects, &key).await.is_ok() {
+                        deleted_items += 1;
+                    }
                 }
             }
         }
-        Ok(())
+        Ok((deleted_items, estimated_freed_bytes))
     }
 
     fn parse_epoch_suffix(key: &str) -> Option<TreeEpoch> {

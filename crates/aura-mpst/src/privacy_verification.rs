@@ -283,7 +283,7 @@ pub struct ObservableEvent {
 }
 
 /// Privacy attack simulation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AttackType {
     /// Traffic analysis attack
     TrafficAnalysis,
@@ -763,7 +763,7 @@ impl PrivacyVerifier {
         let mut hasher = Hasher::new();
         hasher.update(b"aura-privacy-context");
         hasher.update(&serde_json::to_vec(context_type).map_err(|e| {
-            AuraError::serialization_failed(format!("Context type serialization failed: {}", e))
+            AuraError::serialization(format!("Context type serialization failed: {}", e))
         })?);
         hasher.update(
             &SystemTime::now()
@@ -810,6 +810,7 @@ pub enum VerificationResult {
     /// Operation conditionally allowed with requirements
     Conditional(Vec<String>),
 }
+
 
 /// Comprehensive privacy verification report
 #[derive(Debug, Clone)]
@@ -1162,7 +1163,7 @@ impl ObserverSimulator {
 
         let max_correlation = correlation_strengths
             .iter()
-            .fold(0.0, |max, &val| max.max(val));
+            .fold(0.0f64, |max, &val| max.max(val));
         let success_probability = if max_correlation > 0.2 { 0.8 } else { 0.1 };
 
         Ok(AttackResult {
@@ -1219,7 +1220,7 @@ impl ObserverSimulator {
 
         let max_pattern_strength = timing_patterns
             .iter()
-            .fold(0.0, |max, &val| max.max(1.0 - val));
+            .fold(0.0f64, |max, &val| max.max(1.0 - val));
         let success_probability = if max_pattern_strength > 0.7 { 0.6 } else { 0.1 };
 
         Ok(AttackResult {
@@ -1276,7 +1277,7 @@ impl ObserverSimulator {
             }
         }
 
-        let max_pattern_strength = size_patterns.iter().fold(0.0, |max, &val| max.max(val));
+        let max_pattern_strength = size_patterns.iter().fold(0.0f64, |max, &val| max.max(val));
         let success_probability = if max_pattern_strength > 0.2 { 0.5 } else { 0.1 };
 
         Ok(AttackResult {
@@ -1347,7 +1348,7 @@ impl ObserverSimulator {
 
         let max_pattern_strength = frequency_patterns
             .iter()
-            .fold(0.0, |max, &val| max.max(val.min(1.0)));
+            .fold(0.0f64, |max, &val| max.max(val.min(1.0)));
         let success_probability = if max_pattern_strength > 0.6 { 0.4 } else { 0.1 };
 
         Ok(AttackResult {
@@ -1392,7 +1393,7 @@ impl ObserverSimulator {
             }
         }
 
-        let max_pattern_strength = pattern_matches.iter().fold(0.0, |max, &val| max.max(val));
+        let max_pattern_strength = pattern_matches.iter().fold(0.0f64, |max, &val| max.max(val));
         let success_probability = if max_pattern_strength > 0.5 { 0.7 } else { 0.2 };
 
         Ok(AttackResult {
@@ -1438,7 +1439,7 @@ impl ObserverSimulator {
             ));
         }
 
-        let max_inference_confidence = inference_results.iter().fold(0.0, |max, &val| max.max(val));
+        let max_inference_confidence = inference_results.iter().fold(0.0f64, |max, &val| max.max(val));
         let success_probability = if max_inference_confidence > 0.6 {
             0.8
         } else {
@@ -1582,7 +1583,7 @@ impl ObserverSimulator {
 
         let mut hasher = Hasher::new();
         hasher.update(b"observer-device-fingerprint");
-        hasher.update(&device_id.to_bytes());
+        hasher.update(device_id.0.as_bytes());
 
         let hash = hasher.finalize();
         let mut fingerprint = [0u8; 32];
@@ -1730,7 +1731,7 @@ impl ObserverSimulator {
         // Check if devices have distinctive behavioral patterns
         for (fingerprint, events) in device_patterns {
             if events.len() >= 3 {
-                let features = self.extract_event_features(&events.iter().collect::<Vec<_>>());
+                let features = self.extract_event_features(&events);
                 let distinctiveness = self.calculate_feature_distinctiveness(&features);
 
                 if distinctiveness > 0.4 {

@@ -14,8 +14,8 @@ workspace = true
 # Serialization
 serde = { workspace = true }
 serde_ipld_dagcbor = { workspace = true }
-# Optional JSON for debugging
-serde_json = { workspace = true, optional = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
 
 # Identifiers
 uuid = { workspace = true }
@@ -26,6 +26,7 @@ hex = { workspace = true }
 base64 = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
+tracing = { workspace = true }
 
 # Cryptographic hashing
 blake3 = { workspace = true }
@@ -52,8 +53,6 @@ zeroize = { workspace = true }
 proptest = { workspace = true, optional = true }
 
 [features]
-# Optional JSON export for debugging (not for wire protocol)
-json-debug = ["serde_json"]
 # Enable proptest integration for property testing
 proptest = ["dep:proptest"]
 default = []
@@ -61,3 +60,4 @@ default = []
 [dev-dependencies]
 # For testing DKD functionality
 sha2 = { workspace = true }
+proptest = { workspace = true }

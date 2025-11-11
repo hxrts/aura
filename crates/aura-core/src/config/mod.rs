@@ -196,7 +196,10 @@ pub struct ConfigWatcher<T> {
     file_path: Option<std::path::PathBuf>,
 }
 
-impl<T: AuraConfig> ConfigWatcher<T> {
+impl<T: AuraConfig> ConfigWatcher<T> 
+where
+    AuraError: From<<T as AuraConfig>::Error>,
+{
     /// Create a new configuration watcher
     pub fn new(config: T) -> Self {
         Self {
@@ -264,7 +267,10 @@ impl<T: AuraConfig> ConfigWatcher<T> {
     }
 
     /// Check for configuration changes and reload if necessary
-    pub fn check_for_changes(&mut self) -> Result<bool, AuraError> {
+    pub fn check_for_changes(&mut self) -> Result<bool, AuraError> 
+    where 
+        <T as AuraConfig>::Error: std::fmt::Display,
+    {
         if let Some(path) = &self.file_path {
             // Check if file was modified
             if self.was_file_modified(path)? {
@@ -308,8 +314,8 @@ impl<T: AuraConfig> ConfigWatcher<T> {
         use std::fs;
         use std::time::SystemTime;
         
-        static FILE_TIMESTAMPS: Mutex<std::collections::HashMap<std::path::PathBuf, SystemTime>> = 
-            Mutex::new(std::collections::HashMap::new());
+        static FILE_TIMESTAMPS: std::sync::LazyLock<Mutex<std::collections::HashMap<std::path::PathBuf, SystemTime>>> = 
+            std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
         
         let metadata = fs::metadata(path)
             .map_err(|e| AuraError::not_found(format!("Configuration file not found: {}", e)))?;

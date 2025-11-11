@@ -83,6 +83,7 @@
 // Core modules following unified effect system architecture
 pub mod authorization_bridge;
 pub mod choreography;
+pub mod context;
 pub mod effects;
 pub mod guards;
 pub mod handlers;

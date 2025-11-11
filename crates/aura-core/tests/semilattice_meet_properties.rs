@@ -7,13 +7,15 @@
 mod tests {
     use aura_core::semilattice::{MeetSemiLattice, MvState, Top};
     use proptest::prelude::*;
+    use proptest::{prop_oneof, proptest};
+    use proptest::collection;
     use std::collections::BTreeSet;
 
     // === Test Strategies ===
 
     /// Strategy for generating arbitrary BTreeSet<String> values
     fn btree_string_set_strategy() -> impl Strategy<Value = BTreeSet<String>> {
-        prop::collection::btree_set(
+        collection::btree_set(
             "[a-z]{1,5}", // Generate simple strings
             0..10,        // Sets with 0-10 elements
         )

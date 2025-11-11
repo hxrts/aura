@@ -30,6 +30,18 @@ pub enum ConfigPriority {
     High = 3,
 }
 
+impl ConfigSource {
+    /// Get priority for a configuration source
+    pub fn priority(&self) -> u8 {
+        match self {
+            ConfigSource::Defaults => 0,
+            ConfigSource::File { priority, .. } => *priority as u8,
+            ConfigSource::Environment => 10,
+            ConfigSource::CommandLine => 20,
+        }
+    }
+}
+
 /// Configuration loader trait for different sources
 pub trait ConfigLoader<T> {
     /// Error type for loading operations
@@ -146,7 +158,7 @@ pub struct ConfigMerger<T> {
 
 impl<T> ConfigMerger<T> 
 where
-    T: ConfigLoader<T> + Clone,
+    T: ConfigLoader<T> + Clone + Default,
 {
     /// Create a new configuration merger
     pub fn new() -> Self {
@@ -168,7 +180,7 @@ where
         }
         
         // Sort by priority (lowest to highest)
-        self.configs.sort_by_key(|(_, source)| self.source_priority(source));
+        self.configs.sort_by_key(|(_, source)| ConfigSource::priority(source));
         
         // Start with the first (lowest priority) config
         let mut result = self.configs[0].0.clone();
@@ -182,18 +194,12 @@ where
         Ok(result)
     }
     
-    /// Get priority for a configuration source
-    fn source_priority(&self, source: &ConfigSource) -> u8 {
-        match source {
-            ConfigSource::Defaults => 0,
-            ConfigSource::File { priority, .. } => *priority as u8,
-            ConfigSource::Environment => 10,
-            ConfigSource::CommandLine => 20,
-        }
-    }
 }
 
-impl<T> Default for ConfigMerger<T> {
+impl<T> Default for ConfigMerger<T> 
+where
+    T: ConfigLoader<T> + Clone + Default,
+{
     fn default() -> Self {
         Self::new()
     }

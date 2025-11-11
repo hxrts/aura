@@ -20,10 +20,6 @@ pub mod threshold;
 
 // Pure authentication - no authorization types
 
-// Integration tests
-#[cfg(test)]
-// mod integration_tests; // TODO: Add this file when tests are implemented
-
 // Phase 6: Pure identity verification tests
 #[cfg(test)]
 mod identity_verification_tests;

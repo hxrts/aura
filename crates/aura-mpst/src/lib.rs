@@ -57,6 +57,9 @@ pub mod analysis;
 /// Core protocol infrastructure
 pub mod infrastructure;
 
+/// Privacy contract verification system
+pub mod privacy_verification;
+
 // === Public API Re-exports ===
 
 pub use context::{ContextBarrier, ContextIsolation, ContextType, InformationFlow};

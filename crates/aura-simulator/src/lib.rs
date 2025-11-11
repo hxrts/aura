@@ -65,6 +65,12 @@
 // Core middleware system
 pub mod middleware;
 
+// Simulation effect system
+pub mod effects;
+
+// Simulation handlers
+pub mod handlers;
+
 // Privacy analysis and observer models
 pub mod privacy;
 

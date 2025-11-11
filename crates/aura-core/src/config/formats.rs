@@ -4,6 +4,55 @@ use crate::AuraError;
 use serde::{de::DeserializeOwned, Serialize};
 use std::path::Path;
 
+/// Supported configuration formats
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupportedFormat {
+    /// JSON format
+    Json,
+    /// TOML format  
+    Toml,
+}
+
+impl SupportedFormat {
+    /// Parse configuration from a string
+    pub fn parse<T>(&self, content: &str) -> Result<T, AuraError>
+    where
+        T: DeserializeOwned,
+    {
+        match self {
+            Self::Json => {
+                serde_json::from_str(content).map_err(|e| AuraError::serialization(e.to_string()))
+            }
+            Self::Toml => {
+                toml::from_str(content).map_err(|e| AuraError::serialization(e.to_string()))
+            }
+        }
+    }
+
+    /// Serialize configuration to a string
+    pub fn serialize<T>(&self, config: &T) -> Result<String, AuraError>
+    where
+        T: Serialize,
+    {
+        match self {
+            Self::Json => {
+                serde_json::to_string_pretty(config).map_err(|e| AuraError::serialization(e.to_string()))
+            }
+            Self::Toml => {
+                toml::to_string(config).map_err(|e| AuraError::serialization(e.to_string()))
+            }
+        }
+    }
+
+    /// Get file extensions for this format
+    pub fn file_extensions(&self) -> &[&str] {
+        match self {
+            Self::Json => &["json"],
+            Self::Toml => &["toml"],
+        }
+    }
+}
+
 /// Trait for configuration formats
 pub trait ConfigFormat {
     /// Parse configuration from a string
@@ -114,7 +163,7 @@ pub struct FormatDetector;
 
 impl FormatDetector {
     /// Detect format from file path
-    pub fn detect_from_path(path: &Path) -> Result<Box<dyn ConfigFormat>, AuraError> {
+    pub fn detect_from_path(path: &Path) -> Result<SupportedFormat, AuraError> {
         let extension = path.extension()
             .and_then(|ext| ext.to_str())
             .ok_or_else(|| AuraError::invalid(format!(
@@ -123,9 +172,8 @@ impl FormatDetector {
             )))?;
             
         match extension {
-            "toml" => Ok(Box::new(TomlFormat)),
-            "json" => Ok(Box::new(JsonFormat)),
-            "yaml" | "yml" => Ok(Box::new(YamlFormat)),
+            "toml" => Ok(SupportedFormat::Toml),
+            "json" => Ok(SupportedFormat::Json),
             _ => Err(AuraError::invalid(format!(
                 "Unsupported configuration format: {}", 
                 extension
@@ -134,30 +182,26 @@ impl FormatDetector {
     }
     
     /// Detect format from content (simple heuristics)
-    pub fn detect_from_content(content: &str) -> Result<Box<dyn ConfigFormat>, AuraError> {
+    pub fn detect_from_content(content: &str) -> Result<SupportedFormat, AuraError> {
         let trimmed = content.trim();
         
         if trimmed.starts_with('{') && trimmed.ends_with('}') {
             // Likely JSON
-            Ok(Box::new(JsonFormat))
+            Ok(SupportedFormat::Json)
         } else if trimmed.starts_with('[') || trimmed.contains(" = ") {
             // Likely TOML (arrays or key = value pairs)
-            Ok(Box::new(TomlFormat))
-        } else if trimmed.contains(':') && (trimmed.contains("---") || trimmed.starts_with(' ')) {
-            // Likely YAML (key: value with indentation or document separator)
-            Ok(Box::new(YamlFormat))
+            Ok(SupportedFormat::Toml)
         } else {
             // Default to JSON for simple values
-            Ok(Box::new(JsonFormat))
+            Ok(SupportedFormat::Json)
         }
     }
     
     /// Get all supported formats
-    pub fn supported_formats() -> Vec<Box<dyn ConfigFormat>> {
+    pub fn supported_formats() -> Vec<SupportedFormat> {
         vec![
-            Box::new(TomlFormat),
-            Box::new(JsonFormat),
-            Box::new(YamlFormat),
+            SupportedFormat::Toml,
+            SupportedFormat::Json,
         ]
     }
     
@@ -202,10 +246,9 @@ impl UniversalParser {
     where
         T: Serialize,
     {
-        let format: Box<dyn ConfigFormat> = match format_name.to_lowercase().as_str() {
-            "toml" => Box::new(TomlFormat),
-            "json" => Box::new(JsonFormat),
-            "yaml" | "yml" => Box::new(YamlFormat),
+        let format = match format_name.to_lowercase().as_str() {
+            "toml" => SupportedFormat::Toml,
+            "json" => SupportedFormat::Json,
             _ => return Err(AuraError::invalid(format!(
                 "Unknown format: {}", format_name
             ))),
@@ -264,12 +307,12 @@ mod tests {
         // Test JSON detection
         let json_content = r#"{"name": "test", "value": 42}"#;
         let format = FormatDetector::detect_from_content(json_content).unwrap();
-        assert_eq!(format.name(), "JSON");
+        assert_eq!(format, SupportedFormat::Json);
         
         // Test TOML detection
         let toml_content = r#"name = "test"\nvalue = 42"#;
         let format = FormatDetector::detect_from_content(toml_content).unwrap();
-        assert_eq!(format.name(), "TOML");
+        assert_eq!(format, SupportedFormat::Toml);
     }
     
     #[test]

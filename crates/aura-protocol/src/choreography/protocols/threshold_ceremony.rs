@@ -25,12 +25,12 @@
 //! - Only signature count revealed (threshold satisfied)
 //! - Parent binding prevents replay attacks
 
-use crate::crate::effects::ChoreographyError;
+use crate::effects::ChoreographyError;
 use crate::effects::{ConsoleEffects, CryptoEffects, NetworkEffects, TimeEffects};
 use aura_core::effects::RandomEffects;
 use aura_core::tree::Epoch;
 use aura_core::{AttestedOp, DeviceId, Hash32, SessionId, TreeOp};
-use rumpsteak_choreography::choreography;
+use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -147,6 +147,8 @@ pub struct ThresholdAttestedResult {
 /// Threshold ceremony choreography
 ///
 /// Multi-party protocol: Coordinator orchestrates N signers, broadcasts result to M observers
+// TEMPORARILY DISABLED DUE TO MACRO CONFLICTS - needs investigation
+/*
 choreography! {
     protocol ThresholdCeremony {
         roles: Coordinator, Signer1, Signer2, Signer3, Observer1, Observer2;
@@ -179,6 +181,7 @@ choreography! {
         Coordinator -> Observer2: ThresholdBroadcastResult(ThresholdAttestedResult);
     }
 }
+*/
 
 /// Execute threshold ceremony
 pub async fn execute_threshold_ceremony(

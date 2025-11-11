@@ -27,7 +27,7 @@ pub mod guardian_recovery;
 /// Device key recovery protocols
 pub mod key_recovery;
 
-/// Account access recovery protocols  
+/// Account access recovery protocols
 pub mod account_recovery;
 
 /// Emergency operations (freeze/unfreeze)
@@ -38,6 +38,12 @@ pub mod choreography_impl;
 
 /// Shared recovery data structures
 pub mod types;
+
+/// Dispute escalation tooling for contested recoveries
+pub mod dispute_escalation;
+
+/// Ledger persistence for recovery state and evidence
+pub mod recovery_ledger;
 
 /// Errors for recovery operations
 pub type RecoveryError = AuraError;
@@ -74,9 +80,8 @@ pub use types::{
 
 // Re-export guardian recovery types
 pub use guardian_recovery::{
-    GuardianRecoveryCoordinator, GuardianRecoveryResponse, RecoveryStatus,
-    RecoveryPolicyConfig, RecoveryPolicyEnforcer, PolicyValidationResult,
-    PolicyViolation, PolicyWarning,
+    GuardianRecoveryCoordinator, GuardianRecoveryResponse, PolicyValidationResult, PolicyViolation,
+    PolicyWarning, RecoveryPolicyConfig, RecoveryPolicyEnforcer, RecoveryStatus,
 };
 
 // Re-export choreography implementations
@@ -84,5 +89,14 @@ pub use choreography_impl::{
     RecoveryChoreography, RecoveryMessage, RecoveryRole, RecoverySessionMetrics,
     RecoverySessionResult,
 };
+
+// Re-export dispute escalation tooling
+pub use dispute_escalation::{
+    DisputeEscalationManager, EscalationAction, EscalationEvaluation, EscalationLevel,
+    EscalationNotice, EscalationPolicy,
+};
+
+// Re-export recovery ledger persistence
+pub use recovery_ledger::{RecoveryLedger, RecoverySessionState, RecoverySessionStatus};
 
 // Error re-exports removed - use aura_core::AuraError directly

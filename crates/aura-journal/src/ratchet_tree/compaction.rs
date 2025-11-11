@@ -145,7 +145,7 @@ fn create_snapshot_signature(tree_op: &aura_core::tree::TreeOp) -> Result<Vec<u8
     hasher.update(&op_bytes);
     
     let hash = hasher.finalize();
-    Ok(hash.as_bytes()[..64].to_vec()) // 64-byte signature
+    Ok(hash.as_bytes()[..32].to_vec()) // 32-byte signature (Blake3 hash length)
 }
 
 /// Serialize a tree operation for hashing/signing

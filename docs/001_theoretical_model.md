@@ -11,7 +11,7 @@ Aura's theoretical foundation rests on four mathematical pillars:
 3. **Multi-Party Session Types** - Choreographic protocols with safety guarantees
 4. **CRDT Semantics** - Conflict-free replication with convergence proofs
 
-Together, these form a privacy-preserving, spam-resistant, capability-checked distributed λ-calculus with a unified information‑flow budget, Aura's mathematical kernel.
+These form a privacy-preserving, spam-resistant, capability-checked distributed λ-calculus with a unified information flow budget.
 
 ---
 
@@ -150,7 +150,7 @@ struct Msg<Ctx, Payload, Version> {
 
 ### 2.2 Content Addressing Contract
 
-All Aura artifacts—facts, snapshot blobs, cache metadata, upgrade manifests—are identified by the hash of their canonical encoding:
+All Aura artifacts - facts, snapshot blobs, cache metadata, upgrade manifests - are identified by the hash of their canonical encoding:
 
 - **Canonical encoding**: Structures are serialized using canonical CBOR (sorted maps, deterministic integer width). We call the helper `hash_canonical(bytes)` whenever we need a digest.
 - **Immutable identifiers**: Once a digest is published, the bytes for that artifact MUST NOT change. New content implies a new digest and a new fact in the journal.

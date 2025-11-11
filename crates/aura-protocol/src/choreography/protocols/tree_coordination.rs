@@ -4,14 +4,14 @@
 //! following the Aura protocol guide patterns for distributed protocols with
 //! session type safety and effect system integration.
 
-use crate::crate::effects::ChoreographyError;
+use crate::effects::ChoreographyError;
 use crate::effects::{
     ApprovalStatus, ApprovalVote, ConsoleEffects, CoordinationError, CryptoEffects,
     ReconcileResult, SessionId, SessionRole, SyncProgress, TimeEffects, TreeCoordinationEffects,
     TreeDigest, TreeEffects, ValidationContext, ValidationResult, VoteDecision,
 };
 use aura_core::{AttestedOp, AuraError, DeviceId, Hash32, TreeOpKind};
-use rumpsteak_choreography::choreography;
+use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
@@ -185,6 +185,8 @@ pub struct SyncCompletion {
 /// Tree Operation Approval Choreography
 ///
 /// Multi-party protocol for coordinating tree operations with validation and approval
+// TEMPORARILY DISABLED DUE TO MACRO CONFLICTS - needs investigation
+/*
 choreography! {
     protocol TreeOperationApproval {
         roles: Initiator, Approver1, Approver2, Approver3, Observer1, Observer2;
@@ -226,6 +228,7 @@ choreography! {
         Initiator -> Observer2: SyncUpdate(SyncNotification);
     }
 }
+*/
 
 /// Execute tree operation approval choreography following the protocol guide pattern
 pub async fn execute_tree_operation_approval(
@@ -839,9 +842,9 @@ async fn replica_sync_session(
     // Phase 3: Send digest response
     let digest = TreeDigest {
         epoch_range: digest_request.epoch_range,
-        operations_hash: [0u8; 32], // Would be computed from actual operations
+        operations_hash: Hash32([0u8; 32]), // Would be computed from actual operations
         operation_count: 10,
-        state_hash: [1u8; 32],
+        state_hash: Hash32([1u8; 32]),
     };
 
     let digest_response = DigestResponse {

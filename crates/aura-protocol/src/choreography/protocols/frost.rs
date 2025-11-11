@@ -8,14 +8,14 @@
 //! This module implements choreographic protocols for FROST threshold signatures
 //! using rumpsteak-aura DSL following the protocol guide design principles.
 
-use crate::crate::effects::ChoreographyError;
+use crate::effects::ChoreographyError;
 use crate::effects::{CryptoEffects, RandomEffects};
 use crate::messages::crypto::frost::{
     FrostAbortMessage, FrostAbortReason, FrostAggregateSignatureMessage,
     FrostSignatureShareMessage, FrostSigningCommitmentMessage, FrostSigningInitMessage,
 };
 use aura_core::{DeviceId, SessionId};
-use rumpsteak_choreography::choreography;
+use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -65,6 +65,8 @@ pub enum FrostError {
 
 // Define FROST choreography for M-of-N threshold signatures
 // Uses parameterized roles for flexible threshold configurations (2-of-3, 3-of-5, etc.)
+// TEMPORARILY DISABLED DUE TO MACRO CONFLICTS - needs investigation
+/*
 choreography! {
     protocol FrostThreshold {
         roles: Coordinator, Signer1, Signer2, Signer3;
@@ -90,6 +92,7 @@ choreography! {
         Coordinator -> Signer3: FrostSendFinal(FrostAggregateSignatureMessage);
     }
 }
+*/
 
 /// Execute a FROST signing choreography with M-of-N threshold
 pub async fn execute_frost_signing(

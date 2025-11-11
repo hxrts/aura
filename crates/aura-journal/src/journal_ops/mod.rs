@@ -5,7 +5,7 @@
 //! Phase 2 adds policy-aware derivation and DKD integration.
 //! Phase 3 adds threshold unwrapping with M-of-N secret reconstruction.
 
-use crate::journal::{KeyEdge, KeyNode, NodeKind};
+use crate::journal::{EdgeId, EdgeKind, KeyEdge, KeyNode, NodeId, NodeKind};
 use aura_core::AuraError;
 
 // Public modules
@@ -31,11 +31,6 @@ pub use views::*;
 
 // Phase 3: Distributed operations available via aura-choreography crate
 // Use KeyJournalThresholdChoreography, KeyJournalShareContributionChoreography, etc.
-
-// TODO: Full re-exports when modules are implemented
-// pub use effects::*;
-// pub use handlers::*;
-// pub use middleware::*;
 
 /// KeyJournal Interface
 pub struct KeyJournal {

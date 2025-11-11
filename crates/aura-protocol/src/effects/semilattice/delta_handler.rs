@@ -174,6 +174,7 @@ where
 impl<S> DeltaHandler<S, S::Delta>
 where
     S: CvState + DeltaState,
+    S::Delta: aura_core::semilattice::Delta,
 {
     /// Apply a single delta to the state using DeltaState trait
     ///
@@ -219,6 +220,7 @@ pub type JournalDeltaHandler<J> = DeltaHandler<J, <J as DeltaState>::Delta>;
 impl<S> DeltaHandler<S, S::Delta>
 where
     S: CvState + DeltaState,
+    S::Delta: aura_core::semilattice::Delta,
 {
     /// Create a new delta handler optimized for this state type
     pub fn for_state_type() -> Self {

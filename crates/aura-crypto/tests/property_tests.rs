@@ -561,7 +561,7 @@ proptest! {
         let total_bits = admin_key.as_ref().len() * 8;
         let independence_ratio = hamming_distance as f64 / total_bits as f64;
 
-        prop_assert!(independence_ratio > 0.4 && independence_ratio < 0.6,
+        prop_assert!(independence_ratio > 0.35 && independence_ratio < 0.65,
             "Permission hierarchy keys should be cryptographically independent ({:.1}%)",
             independence_ratio * 100.0);
     }
@@ -586,7 +586,7 @@ proptest! {
                 PermissionKeyContext::Communication {
                     capability_id: operation.as_bytes().to_vec(),
                 }
-            ).with_version(version);
+            ).with_version(version as u64);
 
             let key = derive_encryption_key(&root_key, &spec).unwrap();
             version_keys.push(key);

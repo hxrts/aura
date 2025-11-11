@@ -26,9 +26,6 @@ pub use aura_core::semilattice::{
     MeetSemiLattice, MeetStateMsg, MsgKind, MvState, OpWithCtx, StateMsg, Top,
 };
 
-// TODO: Re-export effect handlers when aura_protocol is available
-// pub use aura_protocol::effects::semilattice::{CvHandler, CmHandler, DeltaHandler};
-
 // TODO: Define type aliases when effect handlers are available
 // /// Type alias for journal CRDT handler
 // ///

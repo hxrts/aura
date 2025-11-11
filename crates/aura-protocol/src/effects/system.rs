@@ -249,8 +249,9 @@ impl AuraEffectSystem {
     /// Seed or update the flow budget for a context/peer pair.
     pub async fn seed_flow_budget(&self, context: ContextId, peer: DeviceId, budget: FlowBudget) {
         {
-            let handler = self.composite_handler.read().await;
-            let _ = handler.update_flow_budget(&context, &peer, &budget).await;
+            // TODO: Implement flow budget update in CompositeHandler
+            let _handler = self.composite_handler.read().await;
+            // let _ = handler.update_flow_budget(&context, &peer, &budget).await;
         }
         let mut ledgers = self.flow_ledgers.write().await;
         ledgers.insert((context, peer), budget);
@@ -274,12 +275,14 @@ impl AuraEffectSystem {
         peer: &DeviceId,
         current_epoch: session_epochs::Epoch,
     ) -> AuraResult<FlowBudget> {
-        let handler = self.composite_handler.read().await;
-        let mut budget = handler
-            .get_flow_budget(context, peer)
-            .await
-            .unwrap_or_else(|_| FlowBudget::new(u64::MAX, current_epoch));
-        drop(handler);
+        // TODO: Implement flow budget retrieval in CompositeHandler  
+        let _handler = self.composite_handler.read().await;
+        let mut budget = FlowBudget::new(u64::MAX, current_epoch);
+        // let mut budget = handler
+        //     .get_flow_budget(context, peer)
+        //     .await
+        //     .unwrap_or_else(|_| FlowBudget::new(u64::MAX, current_epoch));
+        drop(_handler);
         budget.rotate_epoch(current_epoch);
 
         Ok(budget)

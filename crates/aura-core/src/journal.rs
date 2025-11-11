@@ -785,33 +785,51 @@ impl MeetSemiLattice for Cap {
     fn meet(&self, other: &Self) -> Self {
         let mut result_lattice = self.lattice.clone();
         
-        // Meet permissions (intersection with proper lattice semantics)
-        let permissions = PermissionHierarchy {
-            // Intersect atomic permissions
-            atomic_permissions: self.lattice.permissions.atomic_permissions
-                .intersection(&other.lattice.permissions.atomic_permissions)
-                .cloned()
-                .collect(),
-            // For derived permissions, take those common to both
-            derived_permissions: self.lattice.permissions.derived_permissions
-                .iter()
-                .filter_map(|(k, v)| {
-                    other.lattice.permissions.derived_permissions.get(k)
-                        .map(|other_v| {
-                            // Intersection of derived permission sets
-                            let intersection: Vec<_> = v.iter()
-                                .filter(|perm| other_v.contains(perm))
-                                .cloned()
-                                .collect();
-                            (k.clone(), intersection)
-                        })
-                })
-                .collect(),
-            // Wildcards - only keep if both have them
-            wildcards: self.lattice.permissions.wildcards
-                .intersection(&other.lattice.permissions.wildcards)
-                .cloned()
-                .collect(),
+        // Meet permissions (handle wildcard semantics correctly)
+        let permissions = if self.lattice.permissions.wildcards.contains("*") &&
+                           other.lattice.permissions.wildcards.contains("*") {
+            // Both have wildcard - keep wildcard
+            PermissionHierarchy {
+                atomic_permissions: std::collections::BTreeSet::new(),
+                derived_permissions: std::collections::BTreeMap::new(),
+                wildcards: {
+                    let mut wildcards = std::collections::BTreeSet::new();
+                    wildcards.insert("*".to_string());
+                    wildcards
+                },
+            }
+        } else if self.lattice.permissions.wildcards.contains("*") {
+            // Self has wildcard, other doesn't - take other's permissions
+            other.lattice.permissions.clone()
+        } else if other.lattice.permissions.wildcards.contains("*") {
+            // Other has wildcard, self doesn't - take self's permissions  
+            self.lattice.permissions.clone()
+        } else {
+            // Neither has wildcard - do normal intersection
+            PermissionHierarchy {
+                atomic_permissions: self.lattice.permissions.atomic_permissions
+                    .intersection(&other.lattice.permissions.atomic_permissions)
+                    .cloned()
+                    .collect(),
+                derived_permissions: self.lattice.permissions.derived_permissions
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        other.lattice.permissions.derived_permissions.get(k)
+                            .map(|other_v| {
+                                // Intersection of derived permission sets
+                                let intersection: Vec<_> = v.iter()
+                                    .filter(|perm| other_v.contains(perm))
+                                    .cloned()
+                                    .collect();
+                                (k.clone(), intersection)
+                            })
+                    })
+                    .collect(),
+                wildcards: self.lattice.permissions.wildcards
+                    .intersection(&other.lattice.permissions.wildcards)
+                    .cloned()
+                    .collect(),
+            }
         };
         
         // Meet resources (intersection of allowed, union of excluded)

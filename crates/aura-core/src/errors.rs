@@ -134,9 +134,14 @@ impl AuraError {
 pub type Result<T> = std::result::Result<T, AuraError>;
 
 // Conversion traits for common error types
-#[cfg(feature = "json-debug")]
 impl From<serde_json::Error> for AuraError {
     fn from(err: serde_json::Error) -> Self {
+        Self::serialization(err.to_string())
+    }
+}
+
+impl From<toml::de::Error> for AuraError {
+    fn from(err: toml::de::Error) -> Self {
         Self::serialization(err.to_string())
     }
 }

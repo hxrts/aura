@@ -186,6 +186,33 @@ impl OperationId {
     pub fn new(actor: ActorId, sequence: u64) -> Self {
         Self { actor, sequence }
     }
+
+    /// Get the UUID representation of this operation ID
+    pub fn uuid(&self) -> uuid::Uuid {
+        // Create a deterministic UUID from actor ID and sequence using hash
+        use blake3::Hasher;
+        let mut hasher = Hasher::new();
+        
+        // Add actor UUID bytes
+        hasher.update(self.actor.0.as_bytes());
+        // Add sequence bytes
+        hasher.update(&self.sequence.to_be_bytes());
+        
+        // Take first 16 bytes of hash as UUID
+        let hash = hasher.finalize();
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&hash.as_bytes()[0..16]);
+        uuid::Uuid::from_bytes(uuid_bytes)
+    }
+
+    /// Create an operation ID from a UUID 
+    /// Note: This is not a perfect round-trip since UUID has less info than OperationId
+    pub fn from_uuid(uuid: uuid::Uuid) -> Self {
+        // Create a DeviceId from the UUID
+        let actor = crate::DeviceId(uuid);
+        // Set sequence to 0 since we can't recover it from UUID
+        Self::new(actor, 0)
+    }
 }
 
 #[cfg(test)]

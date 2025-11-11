@@ -19,6 +19,7 @@ rumpsteak-aura = "0.2.3"
 
 # Serialization
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
@@ -30,6 +31,10 @@ futures = { workspace = true }
 # Identifiers and time
 uuid = { workspace = true }
 chrono = { workspace = true }
+
+# Cryptographic and utility dependencies  
+blake3 = { workspace = true }
+hex = { workspace = true }
 
 # Logging
 tracing = { workspace = true }

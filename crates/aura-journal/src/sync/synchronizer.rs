@@ -793,7 +793,8 @@ mod tests {
     fn test_synchronizer_creation() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let synchronizer = OpLogSynchronizer::new(oplog, config);
+        let device_id = DeviceId::new();
+        let synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
         assert_eq!(synchronizer.local_oplog().len(), 0);
         assert_eq!(synchronizer.get_active_syncs().len(), 0);
@@ -803,7 +804,8 @@ mod tests {
     fn test_peer_management() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let mut synchronizer = OpLogSynchronizer::new(oplog, config);
+        let device_id = DeviceId::new();
+        let mut synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
         let peer_id = DeviceId::new();
         let peer_info = create_test_peer(peer_id);
@@ -820,7 +822,8 @@ mod tests {
     async fn test_sync_with_nonexistent_peer() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let mut synchronizer = OpLogSynchronizer::new(oplog, config);
+        let device_id = DeviceId::new();
+        let mut synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
         let nonexistent_peer = DeviceId::new();
         let result = synchronizer.sync_with_peer(nonexistent_peer).await;
@@ -836,7 +839,8 @@ mod tests {
     fn test_peers_needing_sync() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let mut synchronizer = OpLogSynchronizer::new(oplog, config);
+        let device_id = DeviceId::new();
+        let mut synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
         let peer1 = DeviceId::new();
         let peer2 = DeviceId::new();
@@ -854,7 +858,8 @@ mod tests {
     fn test_sync_statistics() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let synchronizer = OpLogSynchronizer::new(oplog, config);
+        let device_id = DeviceId::new();
+        let synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
         let stats = synchronizer.get_statistics();
         assert_eq!(stats.total_sync_attempts, 0);

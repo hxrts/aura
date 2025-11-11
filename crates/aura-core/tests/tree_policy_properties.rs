@@ -23,6 +23,7 @@
 
 use aura_core::tree::Policy;
 use proptest::prelude::*;
+use proptest::{prop_oneof, proptest};
 
 /// Generate arbitrary threshold policies
 fn arb_threshold() -> impl Strategy<Value = Policy> {

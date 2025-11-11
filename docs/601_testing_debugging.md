@@ -84,7 +84,7 @@ Developer integration provides seamless incorporation of testing tools into prot
 
 **Basic Testing Infrastructure**:
 - `just test` - Run all tests across workspace
-- `just test-crate <name>` - Test specific crate  
+- `just test-crate <name>` - Test specific crate
 - `just smoke-test` - Phase 0 integration tests
 - `just ci` - Full CI checks (format, lint, test)
 
@@ -151,7 +151,7 @@ just test
 # Run phase 0 integration tests
 just smoke-test
 
-# Test threshold identity functionality  
+# Test threshold identity functionality
 just test-dkd <app_id> <context>
 
 # Run property-based tests for specific components

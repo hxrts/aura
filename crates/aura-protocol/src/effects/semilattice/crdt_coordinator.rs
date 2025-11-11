@@ -11,7 +11,7 @@ use crate::choreography::protocols::anti_entropy::{
 use aura_core::{
     semilattice::{
         Bottom, CausalOp, CmApply, CvState, Dedup, DeltaState, JoinSemilattice, MvState,
-        OpWithCtx,
+        OpWithCtx, Top, Delta,
     },
     CausalContext, DeviceId, SessionId, VectorClock,
 };
@@ -46,8 +46,8 @@ where
     CvS: CvState + Serialize + DeserializeOwned + 'static,
     CmS: CmApply<Op> + Dedup<Id> + Serialize + DeserializeOwned + 'static,
     DeltaS: CvState + DeltaState + Serialize + DeserializeOwned + 'static,
-    DeltaS::Delta: Serialize + DeserializeOwned,
-    MvS: MvState + Serialize + DeserializeOwned + 'static,
+    DeltaS::Delta: Delta + Serialize + DeserializeOwned,
+    MvS: MvState + Top + Serialize + DeserializeOwned + 'static,
     Op: CausalOp<Id = Id, Ctx = CausalContext> + Serialize + DeserializeOwned + Clone,
     Id: Clone + PartialEq + Serialize + DeserializeOwned,
 {
@@ -72,8 +72,8 @@ where
     CvS: CvState + Serialize + DeserializeOwned + 'static,
     CmS: CmApply<Op> + Dedup<Id> + Serialize + DeserializeOwned + 'static,
     DeltaS: CvState + DeltaState + Serialize + DeserializeOwned + 'static,
-    DeltaS::Delta: Serialize + DeserializeOwned,
-    MvS: MvState + Serialize + DeserializeOwned + 'static,
+    DeltaS::Delta: Delta + Serialize + DeserializeOwned,
+    MvS: MvState + Top + Serialize + DeserializeOwned + 'static,
     Op: CausalOp<Id = Id, Ctx = CausalContext> + Serialize + DeserializeOwned + Clone,
     Id: Clone + PartialEq + Serialize + DeserializeOwned,
 {
@@ -187,8 +187,14 @@ where
         match (response.crdt_type, response.sync_data) {
             (CrdtType::Convergent, CrdtSyncData::FullState(state_bytes)) => {
                 if let Some(handler) = &mut self.cv_handler {
-                    let peer_state: CvS = self.deserialize_state(&state_bytes)?;
-                    handler.merge_state(peer_state);
+                    // Deserialize outside the borrow scope to avoid borrowing conflicts
+                    let peer_state: CvS = {
+                        let bytes = &state_bytes;
+                        bincode::deserialize(bytes).map_err(|e| {
+                            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize state: {}", e))
+                        })?
+                    };
+                    handler.update_state(peer_state);
                 } else {
                     return Err(CrdtCoordinatorError::UnsupportedOperation(
                         "CvRDT handler not registered".to_string(),
@@ -197,11 +203,23 @@ where
             }
             (CrdtType::Commutative, CrdtSyncData::Operations(operations)) => {
                 if let Some(handler) = &mut self.cm_handler {
+                    // Deserialize all operations first to avoid borrowing conflicts
+                    let mut ops_with_ctx = Vec::new();
                     for crdt_op in operations {
-                        let op: Op = self.deserialize_operation(&crdt_op.operation_data)?;
-                        let ctx: CausalContext =
-                            self.deserialize_causal_context(&crdt_op.causal_context)?;
-                        let op_with_ctx = OpWithCtx::new(op, ctx);
+                        let op: Op = bincode::deserialize(&crdt_op.operation_data).map_err(|e| {
+                            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize operation: {}", e))
+                        })?;
+                        let ctx: CausalContext = bincode::deserialize(&crdt_op.causal_context).map_err(|e| {
+                            CrdtCoordinatorError::Deserialization(format!(
+                                "Failed to deserialize causal context: {}",
+                                e
+                            ))
+                        })?;
+                        ops_with_ctx.push(OpWithCtx::new(op, ctx));
+                    }
+                    
+                    // Now apply all operations
+                    for op_with_ctx in ops_with_ctx {
                         handler.on_recv(op_with_ctx);
                     }
                 } else {
@@ -212,8 +230,17 @@ where
             }
             (CrdtType::Delta, CrdtSyncData::Deltas(delta_bytes_vec)) => {
                 if let Some(handler) = &mut self.delta_handler {
+                    // Deserialize all deltas first to avoid borrowing conflicts
+                    let mut deltas = Vec::new();
                     for delta_bytes in delta_bytes_vec {
-                        let delta: DeltaS::Delta = self.deserialize_delta(&delta_bytes)?;
+                        let delta: DeltaS::Delta = bincode::deserialize(&delta_bytes).map_err(|e| {
+                            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize delta: {}", e))
+                        })?;
+                        deltas.push(delta);
+                    }
+                    
+                    // Now apply all deltas
+                    for delta in deltas {
                         let delta_msg = handler.create_delta_msg(delta);
                         handler.on_recv(delta_msg);
                     }
@@ -225,8 +252,14 @@ where
             }
             (CrdtType::Meet, CrdtSyncData::Constraints(constraint_bytes)) => {
                 if let Some(handler) = &mut self.mv_handler {
-                    let peer_state: MvS = self.deserialize_state(&constraint_bytes)?;
-                    handler.apply_constraint(peer_state);
+                    // Deserialize outside the borrow scope to avoid borrowing conflicts
+                    let peer_state: MvS = {
+                        let bytes = &constraint_bytes;
+                        bincode::deserialize(bytes).map_err(|e| {
+                            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize state: {}", e))
+                        })?
+                    };
+                    handler.on_constraint(peer_state);
                 } else {
                     return Err(CrdtCoordinatorError::UnsupportedOperation(
                         "MvRDT handler not registered".to_string(),
@@ -384,8 +417,8 @@ impl CrdtCoordinatorFactory {
         CvS: CvState + Serialize + DeserializeOwned + 'static,
         CmS: CmApply<Op> + Dedup<Id> + Serialize + DeserializeOwned + 'static,
         DeltaS: CvState + DeltaState + Serialize + DeserializeOwned + 'static,
-        DeltaS::Delta: Serialize + DeserializeOwned,
-        MvS: MvState + Serialize + DeserializeOwned + 'static,
+        DeltaS::Delta: Delta + Serialize + DeserializeOwned,
+        MvS: MvState + Top + Serialize + DeserializeOwned + 'static,
         Op: CausalOp<Id = Id, Ctx = CausalContext> + Serialize + DeserializeOwned + Clone,
         Id: Clone + PartialEq + Serialize + DeserializeOwned,
     {

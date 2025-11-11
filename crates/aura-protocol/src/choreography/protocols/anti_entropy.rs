@@ -18,7 +18,7 @@
 //! - DeltaHandler: Delta-based synchronization for bandwidth optimization
 //! - MvHandler: Meet-semilattice synchronization for constraint-based CRDTs
 
-use crate::crate::effects::ChoreographyError;
+use crate::effects::ChoreographyError;
 use crate::effects::{
     ConsoleEffects, CryptoEffects, RandomEffects,
     semilattice::{CmHandler, CvHandler, DeltaHandler, MvHandler},
@@ -30,7 +30,7 @@ use aura_core::{
 };
 use aura_mpst::journal_coupling::{JournalAnnotation, JournalOpType};
 use aura_wot::Capability;
-use rumpsteak_choreography::choreography;
+use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -179,8 +179,8 @@ where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
     CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
     DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS::Delta: Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + Serialize + serde::de::DeserializeOwned + 'static,
+    DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
+    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
     Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
@@ -237,8 +237,8 @@ where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
     CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
     DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS::Delta: Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + Serialize + serde::de::DeserializeOwned + 'static,
+    DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
+    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
     Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
@@ -373,8 +373,8 @@ where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
     CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
     DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS::Delta: Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + Serialize + serde::de::DeserializeOwned + 'static,
+    DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
+    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
     Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
@@ -384,8 +384,9 @@ where
             adapter.effects_mut(),
             journal_coupler,
             |effects| async move {
-                // Execute the core anti-entropy protocol logic
-                requester_session_with_crdt(adapter, responder_id, config, crdt_coordinator).await
+                // TODO: Implement core anti-entropy protocol logic
+                // requester_session_with_crdt(adapter, responder_id, config, crdt_coordinator).await
+                Err(aura_core::AuraError::internal("Anti-entropy protocol not yet implemented"))
             },
         )
         .await
@@ -409,8 +410,8 @@ where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
     CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
     DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS::Delta: Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + Serialize + serde::de::DeserializeOwned + 'static,
+    DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
+    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
     Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
@@ -420,8 +421,9 @@ where
             adapter.effects_mut(),
             journal_coupler,
             |effects| async move {
-                // Execute the core anti-entropy protocol logic
-                responder_session_with_crdt(adapter, requester_id, config, crdt_coordinator).await
+                // TODO: Implement core anti-entropy protocol logic  
+                // responder_session_with_crdt(adapter, requester_id, config, crdt_coordinator).await
+                Err(aura_core::AuraError::internal("Anti-entropy responder protocol not yet implemented"))
             },
         )
         .await
@@ -443,8 +445,8 @@ where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
     CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
     DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS::Delta: Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + Serialize + serde::de::DeserializeOwned + 'static,
+    DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
+    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
     Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {
@@ -602,8 +604,8 @@ where
     CvS: aura_core::semilattice::CvState + Serialize + serde::de::DeserializeOwned + 'static,
     CmS: aura_core::semilattice::CmApply<Op> + aura_core::semilattice::Dedup<Id> + Serialize + serde::de::DeserializeOwned + 'static,
     DeltaS: aura_core::semilattice::CvState + aura_core::semilattice::DeltaState + Serialize + serde::de::DeserializeOwned + 'static,
-    DeltaS::Delta: Serialize + serde::de::DeserializeOwned,
-    MvS: aura_core::semilattice::MvState + Serialize + serde::de::DeserializeOwned + 'static,
+    DeltaS::Delta: aura_core::semilattice::Delta + Serialize + serde::de::DeserializeOwned,
+    MvS: aura_core::semilattice::MvState + aura_core::semilattice::Top + Serialize + serde::de::DeserializeOwned + 'static,
     Op: aura_core::semilattice::CausalOp<Id = Id, Ctx = CausalContext> + Serialize + serde::de::DeserializeOwned + Clone,
     Id: Clone + PartialEq + Serialize + serde::de::DeserializeOwned,
 {

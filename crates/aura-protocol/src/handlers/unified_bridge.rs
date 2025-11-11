@@ -114,7 +114,7 @@ impl UnifiedAuraHandlerBridge {
     /// This method provides a type-safe way to execute effects while
     /// maintaining the flexibility of the type-erased interface.
     pub async fn execute_typed_effect<P, R>(
-        &self,
+        &mut self,
         effect_type: EffectType,
         operation: &str,
         params: P,
@@ -409,11 +409,11 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "current_epoch" => {
-                let result = effects.current_epoch().await;
+                let result = aura_core::TimeEffects::current_epoch(effects).await;
                 Ok(bincode::serialize(&result).unwrap_or_default())
             }
             "current_timestamp" => {
-                let result = effects.current_timestamp().await;
+                let result = aura_core::TimeEffects::current_timestamp(effects).await;
                 Ok(bincode::serialize(&result).unwrap_or_default())
             }
             "sleep_ms" => {
@@ -514,8 +514,7 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "current_epoch" => {
-                let result = effects
-                    .current_epoch()
+                let result = crate::effects::ledger::LedgerEffects::current_epoch(effects)
                     .await
                     .map_err(|e| AuraHandlerError::ExecutionFailed { source: Box::new(e) })?;
                 Ok(bincode::serialize(&result).unwrap_or_default())

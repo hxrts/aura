@@ -9,10 +9,10 @@
 //! 2. Each Voter[i] → Leader: Send vote (approve/reject)
 //! 3. Leader → Voter[N]: Broadcast decision
 
-use crate::crate::effects::ChoreographyError;
+use crate::effects::ChoreographyError;
 use crate::effects::{ConsoleEffects, CryptoEffects, RandomEffects};
 use aura_core::{DeviceId, SessionId};
-use rumpsteak_choreography::choreography;
+use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
 
 /// Consensus choreography configuration
@@ -79,6 +79,8 @@ pub struct ConsensusDecision {
 /// - Leader proposes value to all N voters
 /// - Each voter sends vote (approve/reject)
 /// - Leader decides based on threshold and broadcasts decision
+// TEMPORARILY DISABLED DUE TO MACRO CONFLICTS - needs investigation
+/*
 choreography! {
     protocol Consensus {
         roles: Leader, Voter1, Voter2, Voter3;
@@ -99,6 +101,7 @@ choreography! {
         Leader -> Voter3: ConsensusSendDecision(ConsensusDecision);
     }
 }
+*/
 
 /// Execute consensus protocol
 pub async fn execute_consensus(

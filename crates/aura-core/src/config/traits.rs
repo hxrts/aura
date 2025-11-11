@@ -106,8 +106,13 @@ impl AuraConfig for serde_json::Value {
     }
 }
 
-impl serde_json::Value {
+/// Extension trait for serde_json::Value
+pub trait JsonValueExt {
     /// Set a nested value using dot notation (e.g., "a.b.c")
+    fn set_nested_value(&mut self, key: &str, value: impl Into<serde_json::Value>) -> Result<(), AuraError>;
+}
+
+impl JsonValueExt for serde_json::Value {
     fn set_nested_value(&mut self, key: &str, value: impl Into<serde_json::Value>) -> Result<(), AuraError> {
         let parts: Vec<&str> = key.split('.').collect();
         if parts.is_empty() {
@@ -144,8 +149,8 @@ impl serde_json::Value {
 
 /// Merge two JSON values recursively
 fn merge_json_values(target: &mut serde_json::Value, source: &serde_json::Value) {
-    match (target, source) {
-        (serde_json::Value::Object(target_obj), serde_json::Value::Object(source_obj)) => {
+    match (target.as_object_mut(), source.as_object()) {
+        (Some(target_obj), Some(source_obj)) => {
             for (key, source_value) in source_obj {
                 match target_obj.get_mut(key) {
                     Some(target_value) => {

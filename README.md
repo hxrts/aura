@@ -23,9 +23,9 @@ These complementary techniques provide both local and global protocol safety. Ch
 The workspace implements clean architectural boundaries with unified calculus:
 
 **Foundation**: `aura-core` (single source of truth for domain concepts)  
-**Infrastructure**: `aura-protocol` (effects + choreography), `aura-crypto`, `aura-transport`, `aura-store`  
-**Business Logic**: `aura-agent`, `aura-journal`, `aura-authentication`, `aura-wot`  
-**Runtime**: `aura-simulator`, `aura-cli`, `aura-testkit`  
-**Applications**: Console + API crates
+**Infrastructure**: `aura-protocol` (effects + choreography), `aura-crypto`, `aura-frost`, `aura-mpst`, `aura-transport`, `aura-store`, `aura-sync`  
+**Business Logic**: `aura-agent`, `aura-journal`, `aura-authenticate`, `aura-wot`, `aura-identity`, `aura-verify`, `aura-invitation`, `aura-recovery`, `aura-rendezvous`, `aura-storage`  
+**Runtime**: `aura-simulator`, `aura-cli`, `aura-testkit`, `aura-quint-api`  
+**Applications**: (Console and API crates removed from workspace)
 
-See [docs/000_overview.md](docs/000_overview.md) for complete crate breakdown and design principles.
+See [docs/000_project_overview.md](docs/000_project_overview.md) for complete crate breakdown and design principles.
