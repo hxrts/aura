@@ -32,6 +32,7 @@ pub mod erased;
 pub mod factory;
 pub mod registry;
 pub mod typed_bridge;
+pub mod unified_bridge;
 
 /// Execution mode for Aura handlers
 ///
@@ -372,6 +373,7 @@ pub use erased::{AuraHandler, BoxedHandler, HandlerUtils};
 pub use factory::{AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, FactoryError};
 // Unified CompositeHandler replaces old MiddlewareStack
 pub use registry::{EffectRegistry, RegistrableHandler, RegistryError};
+pub use unified_bridge::{UnifiedAuraHandlerBridge, UnifiedHandlerBridgeFactory};
 
 #[cfg(test)]
 mod tests {

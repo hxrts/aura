@@ -154,7 +154,7 @@ impl TreeOpChoreography {
         guard.enforce(my_caps)?;
 
         // 2. Broadcast proposal to all participants
-        let proposal = TreeOpMessage::Proposal {
+        let _proposal = TreeOpMessage::Proposal {
             operation: operation.clone(),
             capability_proof: my_caps.clone(),
         };
@@ -212,7 +212,7 @@ impl TreeOpChoreography {
             };
 
             // 6. Broadcast commit
-            let commit_msg = TreeOpMessage::Commit {
+            let _commit_msg = TreeOpMessage::Commit {
                 attested_op: attested_op.clone(),
             };
 
@@ -232,7 +232,7 @@ impl TreeOpChoreography {
             Ok(Some(attested_op))
         } else {
             // Threshold not met - abort
-            let abort_msg = TreeOpMessage::Abort {
+            let _abort_msg = TreeOpMessage::Abort {
                 reason: format!("Insufficient approvals: {}/{}", approvals.len(), threshold),
             };
 
@@ -271,7 +271,7 @@ impl TreeOpChoreography {
 
         if let TreeOpMessage::Proposal {
             operation,
-            capability_proof,
+            capability_proof: _,
         } = proposal_msg
         {
             // 2. Validate operation and check capabilities
@@ -287,7 +287,7 @@ impl TreeOpChoreography {
                 && self.check_epoch_freshness().is_ok();
 
             // 3. Send vote
-            let vote = if approved {
+            let _vote = if approved {
                 let signature_share = self.create_signature_share(&operation)?;
                 TreeOpMessage::Vote {
                     operation_hash: self.hash_operation(&operation),

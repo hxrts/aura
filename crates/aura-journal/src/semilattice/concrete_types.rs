@@ -416,7 +416,7 @@ mod tests {
                 under: NodeIndex(0),
             },
             vec![],
-            [0u8; 32],
+            aura_core::Hash32::new([0u8; 32]),
             Priority::default_priority(),
             DeviceId::new(),
             1000,

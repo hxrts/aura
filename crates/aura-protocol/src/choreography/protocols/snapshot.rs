@@ -37,10 +37,10 @@
 //! - Atomic application across replicas
 //! - Protocol version gating for safe upgrades
 
-use crate::choreography::common::ChoreographyError;
-use crate::choreography::runtime::AuraHandlerAdapter;
+use crate::crate::effects::ChoreographyError;
+use crate::choreography::AuraHandlerAdapter;
 use crate::effects::{ConsoleEffects, CryptoEffects, JournalEffects, TreeEffects};
-use crate::handlers::{composite::CompositeHandler, AuraHandlerError};
+use crate::handlers::AuraHandlerError;
 use aura_core::tree::{Cut, Partial, ProposalId, Snapshot};
 use aura_core::{DeviceId, SessionId};
 use aura_journal::ratchet_tree::TreeState;
@@ -634,9 +634,7 @@ pub async fn execute_as_proposer(
     }
 
     // Create handler and adapter
-    let handler =
-        CompositeHandler::for_mode(effect_system.execution_mode(), config.proposer.into());
-    let mut adapter = AuraHandlerAdapter::new(handler, config.proposer.into());
+    let mut adapter = AuraHandlerAdapter::new(config.proposer.into(), effect_system.execution_mode());
 
     // Execute proposer session
     proposer_session(&mut adapter, &config.quorum, &config)
@@ -653,8 +651,7 @@ pub async fn execute_as_quorum_member(
     let member_id = DeviceId::new(); // TODO: Get from config
 
     // Create handler and adapter
-    let handler = CompositeHandler::for_mode(effect_system.execution_mode(), member_id.into());
-    let mut adapter = AuraHandlerAdapter::new(handler, member_id.into());
+    let mut adapter = AuraHandlerAdapter::new(member_id.into(), effect_system.execution_mode());
 
     // Execute quorum member session
     quorum_member_session(&mut adapter, config.proposer)

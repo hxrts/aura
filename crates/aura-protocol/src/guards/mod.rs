@@ -10,22 +10,45 @@
 //! - **Guard evaluation**: `need(σ) ≤ C` checking before protocol operations
 //! - **Delta application**: `merge_facts(Δfacts)` atomic with message send
 //! - **Leakage tracking**: Privacy budget enforcement with observer models
+//! - **Send guard chain**: Complete `need(m) ≤ Caps(ctx) ∧ headroom(ctx, cost)` predicate enforcement
 //!
 //! ## Usage
 //!
+//! ### Send Guard Chain (Primary Interface)
+//! ```rust,ignore
+//! use crate::guards::{create_send_guard, SendGuardChain};
+//! use aura_wot::Capability;
+//!
+//! // Create send guard with complete predicate enforcement
+//! let send_guard = create_send_guard(
+//!     Capability::send_message(),
+//!     context_id,
+//!     peer_device,
+//!     100 // flow cost
+//! ).with_operation_id("ping_send");
+//!
+//! // Evaluate complete guard chain: need(m) ≤ Caps(ctx) ∧ headroom(ctx, cost)
+//! let result = send_guard.evaluate(&effect_system).await?;
+//! if result.authorized {
+//!     // Proceed with send using receipt for anti-replay protection
+//!     transport.send_with_receipt(message, result.receipt.unwrap()).await?;
+//! }
+//! ```
+//!
+//! ### Advanced Protocol Guards
 //! ```rust,ignore
 //! use crate::guards::{ProtocolGuard, GuardedExecution};
 //! use aura_wot::capability::Capability;
 //!
-//! // Define guard requirements for a protocol step
-//! let guard = ProtocolGuard::new()
+//! // Define guard requirements for complex protocol steps
+//! let guard = ProtocolGuard::new("complex_operation")
 //!     .require_capability(Capability::send_message())
 //!     .delta_facts(vec![fact1, fact2])
 //!     .leakage_budget(LeakageBudget::new(1, 2, 0));
 //!
 //! // Execute with guards
-//! let result = guard.execute_with_effects(effect_system, || async {
-//!     // Protocol execution here
+//! let result = guard.execute_with_effects(effect_system, |effects| async move {
+//!     // Protocol execution here, using `effects` if needed
 //!     Ok(protocol_result)
 //! }).await?;
 //! ```
@@ -36,10 +59,16 @@ pub mod effect_system_bridge;
 pub mod evaluation;
 pub mod execution;
 pub mod flow;
+pub mod journal_coupler;
 pub mod middleware;
 pub mod privacy;
+pub mod send_guard;
 
 pub use flow::{FlowBudgetEffects, FlowGuard, FlowHint};
+pub use journal_coupler::{
+    JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation, CouplingMetrics,
+};
+pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
 use crate::effects::system::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult};
@@ -143,7 +172,7 @@ impl ProtocolGuard {
         operation: F,
     ) -> AuraResult<GuardedExecutionResult<T>>
     where
-        F: FnOnce() -> Fut,
+        F: FnOnce(&mut AuraEffectSystem) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
         execution::execute_guarded_operation(self, effect_system, operation).await
@@ -217,5 +246,7 @@ pub use deltas::*;
 pub use effect_system_bridge::*;
 pub use evaluation::*;
 pub use execution::*;
+pub use journal_coupler::*;
 pub use middleware::*;
 pub use privacy::*;
+pub use send_guard::*;

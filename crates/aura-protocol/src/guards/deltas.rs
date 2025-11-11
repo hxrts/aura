@@ -186,17 +186,31 @@ async fn rollback_applied_facts(
     // This function exists for completeness but in practice, the journal
     // should use compensation patterns rather than rollbacks.
 
-    // TODO fix - For now, log the facts that would need compensation
+    // Implement compensation patterns for failed operations
     for (index, fact) in applied_facts.iter().enumerate() {
         error!(
             fact_index = index,
             fact = %fact,
-            "Fact applied but sequence failed - consider compensation"
+            "Fact applied but sequence failed - applying compensation"
         );
+        
+        // Generate compensation fact based on fact type
+        if let Some(compensation_fact) = generate_compensation_fact(fact)? {
+            // Apply compensation fact to journal
+            if let Err(compensation_error) = effect_system.append_fact(compensation_fact.clone()).await {
+                error!(
+                    compensation_fact = %compensation_fact,
+                    error = %compensation_error,
+                    "Failed to apply compensation fact"
+                );
+            } else {
+                info!(
+                    compensation_fact = %compensation_fact,
+                    "Applied compensation fact for failed operation"
+                );
+            }
+        }
     }
-
-    // In the future, this could trigger compensation operations
-    // or mark facts as "pending confirmation" with eventual cleanup
 
     Ok(())
 }
@@ -318,6 +332,88 @@ fn parse_result_from_fact(fact: &JsonValue) -> AuraResult<JsonValue> {
         .ok_or_else(|| AuraError::invalid("Missing result"))
 }
 
+/// Generate compensation fact for a failed operation
+fn generate_compensation_fact(fact: &JsonValue) -> AuraResult<Option<JsonValue>> {
+    let fact_type = fact
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("unknown");
+    
+    match fact_type {
+        "device_registration" => {
+            // For device registration failures, mark device as inactive
+            if let Some(device_id) = fact.get("device_id").and_then(|id| id.as_str()) {
+                Ok(Some(JsonValue::Object([
+                    ("type".to_string(), JsonValue::String("device_deactivation".to_string())),
+                    ("device_id".to_string(), JsonValue::String(device_id.to_string())),
+                    ("reason".to_string(), JsonValue::String("registration_compensation".to_string())),
+                    ("timestamp".to_string(), JsonValue::Number(serde_json::Number::from(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs()
+                    ))),
+                ].into())))
+            } else {
+                Ok(None)
+            }
+        },
+        
+        "capability_grant" => {
+            // For capability grant failures, revoke the granted capability
+            if let (Some(capability), Some(target_device)) = (
+                fact.get("capability").and_then(|c| c.as_str()),
+                fact.get("target_device").and_then(|d| d.as_str())
+            ) {
+                Ok(Some(JsonValue::Object([
+                    ("type".to_string(), JsonValue::String("capability_revocation".to_string())),
+                    ("capability".to_string(), JsonValue::String(capability.to_string())),
+                    ("target_device".to_string(), JsonValue::String(target_device.to_string())),
+                    ("reason".to_string(), JsonValue::String("grant_compensation".to_string())),
+                ].into())))
+            } else {
+                Ok(None)
+            }
+        },
+        
+        "session_attestation" => {
+            // For session attestation failures, invalidate the session
+            if let Some(session_id) = fact.get("session_id").and_then(|id| id.as_str()) {
+                Ok(Some(JsonValue::Object([
+                    ("type".to_string(), JsonValue::String("session_invalidation".to_string())),
+                    ("session_id".to_string(), JsonValue::String(session_id.to_string())),
+                    ("reason".to_string(), JsonValue::String("attestation_compensation".to_string())),
+                ].into())))
+            } else {
+                Ok(None)
+            }
+        },
+        
+        "intent_finalization" => {
+            // For intent finalization failures, mark intent as failed
+            if let Some(intent_id) = fact.get("intent_id").and_then(|id| id.as_str()) {
+                Ok(Some(JsonValue::Object([
+                    ("type".to_string(), JsonValue::String("intent_failure".to_string())),
+                    ("intent_id".to_string(), JsonValue::String(intent_id.to_string())),
+                    ("reason".to_string(), JsonValue::String("finalization_compensation".to_string())),
+                ].into())))
+            } else {
+                Ok(None)
+            }
+        },
+        
+        _ => {
+            // For unknown fact types, create a generic compensation record
+            warn!(fact_type = fact_type, "Unknown fact type for compensation");
+            Ok(Some(JsonValue::Object([
+                ("type".to_string(), JsonValue::String("operation_compensation".to_string())),
+                ("original_fact".to_string(), fact.clone()),
+                ("reason".to_string(), JsonValue::String("unknown_type_compensation".to_string())),
+            ].into())))
+        }
+    }
+}
+
 /// Extension trait for AuraEffectSystem to support journal operations
 trait JournalOperationExt {
     async fn apply_journal_operation(&mut self, operation: JournalOperation) -> AuraResult<()>;
@@ -325,13 +421,62 @@ trait JournalOperationExt {
 
 impl JournalOperationExt for AuraEffectSystem {
     async fn apply_journal_operation(&mut self, operation: JournalOperation) -> AuraResult<()> {
-        // This would integrate with the actual journal effects
-        // TODO fix - For now, log the operation
         debug!(operation = ?operation, "Applying journal operation");
 
-        // TODO: Integrate with actual aura-journal CRDT operations
-        // This would call the appropriate journal effects methods
-        // Example: self.journal_effects().append_tree_op(converted_op).await?;
+        // Apply operation via CRDT journal effects
+        match operation {
+            JournalOperation::RegisterDevice { device_id, metadata } => {
+                // Create device registration fact for journal merge
+                let device_fact = JsonValue::Object([
+                    ("type".to_string(), JsonValue::String("device_registration".to_string())),
+                    ("device_id".to_string(), JsonValue::String(device_id)),
+                    ("metadata".to_string(), metadata),
+                    ("timestamp".to_string(), JsonValue::Number(serde_json::Number::from(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs()
+                    ))),
+                ].into());
+                
+                self.append_fact(device_fact).await?;
+            },
+            
+            JournalOperation::GrantCapability { capability, target_device, expiry } => {
+                // Create capability grant fact
+                let mut cap_fact = serde_json::Map::new();
+                cap_fact.insert("type".to_string(), JsonValue::String("capability_grant".to_string()));
+                cap_fact.insert("capability".to_string(), JsonValue::String(capability));
+                cap_fact.insert("target_device".to_string(), JsonValue::String(target_device));
+                if let Some(expiry_time) = expiry {
+                    cap_fact.insert("expiry".to_string(), JsonValue::Number(serde_json::Number::from(expiry_time)));
+                }
+                
+                self.append_fact(JsonValue::Object(cap_fact)).await?;
+            },
+            
+            JournalOperation::AttestSession { session_id, attestation } => {
+                // Create session attestation fact
+                let session_fact = JsonValue::Object([
+                    ("type".to_string(), JsonValue::String("session_attestation".to_string())),
+                    ("session_id".to_string(), JsonValue::String(session_id)),
+                    ("attestation".to_string(), attestation),
+                ].into());
+                
+                self.append_fact(session_fact).await?;
+            },
+            
+            JournalOperation::FinalizeIntent { intent_id, result } => {
+                // Create intent finalization fact
+                let intent_fact = JsonValue::Object([
+                    ("type".to_string(), JsonValue::String("intent_finalization".to_string())),
+                    ("intent_id".to_string(), JsonValue::String(intent_id)),
+                    ("result".to_string(), result),
+                ].into());
+                
+                self.append_fact(intent_fact).await?;
+            },
+        }
 
         Ok(())
     }

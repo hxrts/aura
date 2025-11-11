@@ -6,7 +6,7 @@ use aura_protocol::effects::{AuraEffectSystem, TimeEffects};
 use aura_recovery::{
     guardian_recovery::{
         build_recovery_response, GuardianRecoveryRequest, GuardianRecoveryResponse,
-        DEFAULT_DISPUTE_WINDOW_SECS,
+        DEFAULT_DISPUTE_WINDOW_SECS, RecoveryPolicyConfig, RecoveryPolicyEnforcer,
     },
     RecoveryChoreography, RecoveryDispute, RecoveryEvidence, RecoveryRole, RecoverySessionResult,
     RecoveryShare,
@@ -38,30 +38,83 @@ pub struct RecoveryStatus {
     pub disputed: bool,
 }
 
-/// Recovery operations handler.
+/// Recovery operations handler with policy enforcement.
 pub struct RecoveryOperations {
     effects: Arc<RwLock<AuraEffectSystem>>,
     device_id: DeviceId,
     pending_sessions: Arc<Mutex<usize>>,
     evidence_log: Arc<Mutex<Vec<(String, RecoveryEvidence)>>>,
+    policy_enforcer: RecoveryPolicyEnforcer,
 }
 
 impl RecoveryOperations {
-    /// Create a new recovery operations handler.
+    /// Create a new recovery operations handler with default policy.
     pub fn new(effects: Arc<RwLock<AuraEffectSystem>>, device_id: DeviceId) -> Self {
+        let policy_config = RecoveryPolicyConfig::default();
+        Self::with_policy_config(effects, device_id, policy_config)
+    }
+
+    /// Create a new recovery operations handler with custom policy configuration.
+    pub fn with_policy_config(
+        effects: Arc<RwLock<AuraEffectSystem>>, 
+        device_id: DeviceId, 
+        policy_config: RecoveryPolicyConfig
+    ) -> Self {
+        let effect_system = {
+            let guard = effects.blocking_read();
+            guard.clone()
+        };
+        let policy_enforcer = RecoveryPolicyEnforcer::new(policy_config, effect_system);
+        
         Self {
             effects,
             device_id,
             pending_sessions: Arc::new(Mutex::new(0)),
             evidence_log: Arc::new(Mutex::new(Vec::new())),
+            policy_enforcer,
         }
     }
 
-    /// Start a guardian recovery session (recovering device role).
+    /// Start a guardian recovery session (recovering device role) with policy enforcement.
     pub async fn start_guardian_recovery(
         &self,
         request: GuardianRecoveryRequest,
     ) -> Result<GuardianRecoveryResponse> {
+        // Validate request against recovery policy
+        let validation = self.policy_enforcer.validate_recovery_request(&request).await
+            .map_err(|e| AuraError::internal(e.to_string()))?;
+        
+        if !validation.is_valid {
+            let effects = self.effects.read().await;
+            effects.log_error(
+                &format!("Recovery policy validation failed: {} violations", validation.violations.len()),
+                &[],
+            );
+            
+            for violation in &validation.violations {
+                effects.log_error(
+                    &format!("Policy violation: {:?}", violation),
+                    &[],
+                );
+            }
+            
+            return Err(AuraError::permission_denied(format!(
+                "Recovery request rejected due to policy violations: {}",
+                validation.violations.len()
+            )));
+        }
+
+        // Log policy warnings
+        if !validation.warnings.is_empty() {
+            let effects = self.effects.read().await;
+            for warning in &validation.warnings {
+                effects.log_warn(
+                    &format!("Policy warning: {:?}", warning),
+                    &[],
+                );
+            }
+        }
+
         {
             let mut pending = self.pending_sessions.lock().await;
             *pending += 1;
@@ -109,11 +162,35 @@ impl RecoveryOperations {
             .map_err(|err| AuraError::internal(err.to_string()))
     }
 
-    /// Approve a guardian recovery request from the guardian device.
+    /// Approve a guardian recovery request from the guardian device with policy enforcement.
     pub async fn approve_guardian_recovery(
         &self,
         request: GuardianRecoveryRequest,
     ) -> Result<RecoveryShare> {
+        // Validate guardian approval against policy
+        let validation = self.policy_enforcer.validate_guardian_approval(&self.device_id, &request).await
+            .map_err(|e| AuraError::internal(e.to_string()))?;
+        
+        if !validation.is_valid {
+            let effects = self.effects.read().await;
+            effects.log_error(
+                &format!("Guardian approval policy validation failed: {} violations", validation.violations.len()),
+                &[],
+            );
+            
+            for violation in &validation.violations {
+                effects.log_error(
+                    &format!("Policy violation: {:?}", violation),
+                    &[],
+                );
+            }
+            
+            return Err(AuraError::permission_denied(format!(
+                "Guardian approval rejected due to policy violations: {}",
+                validation.violations.len()
+            )));
+        }
+
         let effects = self.effects.read().await;
         let mut choreography = RecoveryChoreography::new(
             RecoveryRole::Guardian(self.device_id),
@@ -173,6 +250,11 @@ impl RecoveryOperations {
             dispute_window_ends_at,
             disputed,
         })
+    }
+
+    /// Get the device ID for this recovery operations handler
+    pub fn device_id(&self) -> DeviceId {
+        self.device_id
     }
 
     /// File a dispute against an existing recovery evidence entry.

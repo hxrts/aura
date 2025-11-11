@@ -344,8 +344,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_websocket_envelope_serialization() {
-        let device1 = DeviceId("device1".to_string());
-        let device2 = DeviceId("device2".to_string());
+        let device1 = DeviceId::from("device1");
+        let device2 = DeviceId::from("device2");
 
         let envelope = WebSocketEnvelope {
             from: device1,
@@ -376,7 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_websocket_transport_creation() {
-        let device_id = DeviceId("test_device".to_string());
+        let device_id = DeviceId::from("test_device");
         let config = WebSocketConfig::default();
         let transport = WebSocketTransport::new(device_id.clone(), config);
 

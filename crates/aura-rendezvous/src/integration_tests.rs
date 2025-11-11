@@ -8,17 +8,17 @@
 //! - Flow budget enforcement and trust-based forwarding
 
 use crate::{
-    integrated_sbb::{IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbSystemBuilder},
-    messaging::{TransportOfferPayload, TransportMethod, SbbMessageType},
     capability_aware_sbb::SbbForwardingPolicy,
     envelope_encryption::PaddingStrategy,
+    integrated_sbb::{IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbSystemBuilder},
+    messaging::{SbbMessageType, TransportMethod, TransportOfferPayload},
     relationship_keys::derive_test_root_key,
 };
 use aura_core::{AuraResult, DeviceId, RelationshipId};
-use aura_transport::{NetworkTransport, NetworkConfig};
+use aura_transport::{NetworkConfig, NetworkTransport};
 use aura_wot::TrustLevel;
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{timeout, Duration};
 
@@ -90,7 +90,11 @@ pub struct ConnectionTestResult {
 
 impl TestDevice {
     /// Create new test device
-    pub async fn new(device_id: DeviceId, name: String, config: &E2eTestConfig) -> AuraResult<Self> {
+    pub async fn new(
+        device_id: DeviceId,
+        name: String,
+        config: &E2eTestConfig,
+    ) -> AuraResult<Self> {
         // Create network transport
         let net_config = NetworkConfig {
             bind_addr: "127.0.0.1".to_string(),
@@ -152,7 +156,9 @@ impl TestDevice {
         let peer_config = peer_device.transport.read().await.config().clone();
         let peer_addr = format!("{}:{}", peer_config.bind_addr, peer_config.port)
             .parse()
-            .map_err(|e| aura_core::AuraError::coordination_failed(format!("Invalid address: {}", e)))?;
+            .map_err(|e| {
+                aura_core::AuraError::coordination_failed(format!("Invalid address: {}", e))
+            })?;
 
         self.transport
             .write()
@@ -203,7 +209,9 @@ impl TestDevice {
             ttl
         );
 
-        self.sbb_system.flood_discovery_request(discovery_request).await
+        self.sbb_system
+            .flood_discovery_request(discovery_request)
+            .await
     }
 
     /// Get current SBB statistics
@@ -246,7 +254,7 @@ impl SbbTestNetwork {
 
         // Alice ↔ Bob
         let (alice_id, bob_id) = (device_ids[0], device_ids[1]);
-        
+
         // Alice adds Bob as friend
         {
             let bob_device = self.devices.get(&bob_id).unwrap();
@@ -363,10 +371,10 @@ impl SbbTestNetwork {
             Ok(discovery_result) => {
                 // Check if the discovery reached expected devices
                 let expected_devices = if device_ids.len() >= 3 { 2 } else { 1 }; // Bob + Charlie if present
-                
+
                 // Get flow statistics
                 let alice_stats = self.devices.get(&alice_id).unwrap().get_sbb_stats();
-                
+
                 Ok(ConnectionTestResult {
                     success: discovery_result.peers_reached > 0,
                     devices_reached: discovery_result.peers_reached,
@@ -419,7 +427,7 @@ impl SbbTestNetwork {
             tracing::info!("Discovery attempt {}", i + 1);
             let result = self.test_alice_bob_connection().await?;
             results.push(result);
-            
+
             // Small delay between attempts
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -428,7 +436,9 @@ impl SbbTestNetwork {
     }
 
     /// Get network statistics
-    pub fn get_network_stats(&self) -> HashMap<DeviceId, crate::capability_aware_sbb::TrustStatistics> {
+    pub fn get_network_stats(
+        &self,
+    ) -> HashMap<DeviceId, crate::capability_aware_sbb::TrustStatistics> {
         self.devices
             .iter()
             .map(|(id, device)| (*id, device.get_sbb_stats()))
@@ -492,7 +502,10 @@ mod tests {
 
         let result = run_alice_bob_sbb_test(config).await.unwrap();
         assert!(result.success, "Alice→Bob connection should succeed");
-        assert!(result.devices_reached > 0, "Should reach at least one device");
+        assert!(
+            result.devices_reached > 0,
+            "Should reach at least one device"
+        );
     }
 
     #[tokio::test]
@@ -506,7 +519,10 @@ mod tests {
         };
 
         let result = run_alice_bob_sbb_test(config).await.unwrap();
-        assert!(result.success, "Encrypted Alice→Bob connection should succeed");
+        assert!(
+            result.success,
+            "Encrypted Alice→Bob connection should succeed"
+        );
         // Note: encryption_used might be false due to simplified implementation
     }
 
@@ -525,12 +541,15 @@ mod tests {
 
         let result = network.test_alice_bob_connection().await.unwrap();
         assert!(result.success, "Alice→Bob→Charlie network should work");
-        
+
         // In linear topology, Alice's message should reach Bob (and possibly Charlie via Bob)
-        assert!(result.devices_reached > 0, "Should reach devices through network");
+        assert!(
+            result.devices_reached > 0,
+            "Should reach devices through network"
+        );
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_mesh_network() {
         let config = E2eTestConfig {
             device_count: 3,
@@ -544,10 +563,13 @@ mod tests {
         network.setup_mesh_topology().await.unwrap();
 
         let results = network.run_comprehensive_test().await.unwrap();
-        
+
         // At least some tests should succeed in mesh network
         let successful_tests = results.iter().filter(|r| r.success).count();
-        assert!(successful_tests > 0, "Some tests should succeed in mesh network");
+        assert!(
+            successful_tests > 0,
+            "Some tests should succeed in mesh network"
+        );
     }
 
     #[tokio::test]
@@ -592,7 +614,7 @@ mod tests {
         for _i in 0..3 {
             let result = network.test_alice_bob_connection().await.unwrap();
             total_flow += result.flow_consumed;
-            
+
             // Small delay between tests
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -617,9 +639,11 @@ mod tests {
         // Don't set up topology - devices have no relationships
 
         let result = network.test_alice_bob_connection().await.unwrap();
-        
+
         // Should fail because no relationships exist
-        assert!(!result.success || result.devices_reached == 0, 
-                "Isolated devices should not be able to communicate via SBB");
+        assert!(
+            !result.success || result.devices_reached == 0,
+            "Isolated devices should not be able to communicate via SBB"
+        );
     }
 }

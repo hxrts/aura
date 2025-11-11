@@ -45,10 +45,8 @@ pub use aura_crypto::frost::{
     ThresholdSignature, TreeSigningContext,
 };
 
-// Re-export MPST types
-pub use aura_mpst::{
-    AuraRuntime, CapabilityGuard, ExecutionContext, JournalAnnotation, MpstError, MpstResult,
-};
+// Re-export protocol types  
+pub use aura_protocol::effects::{NetworkEffects, CryptoEffects, TimeEffects, ConsoleEffects};
 
 // Re-export FROST coordinators
 pub use distributed_keygen::DkgCoordinator;

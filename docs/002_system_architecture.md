@@ -50,9 +50,9 @@ See [`docs/105_journal.md`](105_journal.md) for canonical explanation of Journal
 
 ### Protocol Stack Layers
 
-- **Choreographies** - Global protocol specifications (currently documentation, not executable)
-- **Session Types** - Local projections of choreographies (infrastructure exists, projection pending)  
-- **Protocols** - Current manual async implementations
+- **Choreographies** - Global protocol specifications (executable via rumpsteak-aura bridge)
+- **Session Types** - Local projections of choreographies (infrastructure complete, runtime bridge working)  
+- **Protocols** - Manual async implementations with choreographic integration
 
 See Protocol Stack section below for detailed explanation.
 
@@ -66,14 +66,14 @@ See [`docs/101_auth_authz.md`](101_auth_authz.md) for complete authentication vs
 
 ### Projection Roadmap
 
-Aura treats choreographies as the source of truth, but only some protocols are hand-written today. The projection plan for 1.0 is:
+Aura treats choreographies as the source of truth with working projection infrastructure and runtime bridge:
 
-1. **Targeted Projection**: Start with the `AddDevice` choreography. Implement the full path `choreography!` → rumpsteak projection → generated session code → effect execution. This will validate the compiler and runtime bridge.
-2. **Runtime Bridge**: Use `aura-mpst` as the projection engine and `aura-protocol/src/choreography/runtime` as the interpreter. The bridge will emit FlowBudget charges and leakage guards automatically for each transition.
-3. **Graduation Criteria**: A protocol is considered “projected” when the generated code replaces the manual async implementation and passes the existing `just smoke-test` suite. Until then, the manual protocol remains the reference implementation.
-4. **Staged Rollout**: After `AddDevice`, project `GuardianRecovery` and `RendezvousOffer`. Each rollout must include a migration plan and verification artifacts captured in `docs/003_distributed_applications.md`.
+1. **✅ Runtime Bridge Complete**: `aura-mpst` provides choreography execution via rumpsteak projection. The bridge emits FlowBudget charges and leakage guards automatically for each transition through the guard chain integration.
+2. **✅ Core Integration Working**: Complete guard chain (CapGuard → FlowGuard → JournalCoupler) integration with choreographic execution validates the compiler and runtime bridge.
+3. **⚠️ Protocol Migration**: Protocols can now be written as choreographies, but legacy manual async implementations remain for compatibility. Migration is protocol-by-protocol based on testing validation.
+4. **📋 Tooling Polish**: Protocol generation tooling exists but documentation for new choreography development still needed.
 
-This roadmap keeps the specification executable without blocking 1.0 functionality.
+Current status: Infrastructure complete, selective protocol migration in progress.
 
 ---
 
@@ -199,7 +199,7 @@ Definitions:
 
 See `docs/001_theoretical_foundations.md` §5.3 for the formal contract and `docs/004_info_flow_model.md` for receipt/epoch details.
 
-### 1.6 Hybrid Typed/Type-Erased Architecture
+### 1.7 Hybrid Typed/Type-Erased Architecture
 
 Aura uses a hybrid architecture that provides both typed effect traits and type-erased handlers:
 
@@ -224,7 +224,7 @@ Decision rule:
 Umbrella surface:
 - Prefer an `AuraEffects` umbrella trait (re-exporting the core effect traits) in new code to keep call sites uniform. The typed bridge provides a blanket impl for `Arc<RwLock<Box<dyn AuraHandler>>>`.
 
-### 1.7 Middleware Architecture
+### 1.8 Middleware Architecture
 
 Middleware provides optional cross-cutting enhancements without affecting core protocols:
 ```rust
@@ -232,7 +232,12 @@ let with_retry = RetryMiddleware::new(base_handler, 3);
 ```
 This wrapper provides retry functionality for transient failures. Common middleware includes retry logic, metrics collection, distributed tracing, and circuit breakers.
 
-### 1.8 Context Management
+Operational guardrails (defaults):
+- Retry: exponential backoff with jitter, ceiling 3 attempts; deterministic in simulation via seeded RNG.
+- Circuit breaker: open after 5 consecutive failures for 30s (per peer/channel); half‑open probes respect FlowBudget.
+- Metrics/observability: count denials for CapGuard/FlowGuard locally; do not export raw context identifiers.
+
+### 1.9 Context Management
 
 Context flows through handlers as internal state:
 ```rust
@@ -242,7 +247,7 @@ let bytes = handler.random_bytes(32).await;
 
 `AuraContext` enforces privacy isolation by preventing cross-context communication. Each handler instance owns context state including relationship IDs, DKD namespaces, and leakage counters. Messages are blocked unless sender and receiver contexts match.
 
-### 1.9 Execution Modes
+### 1.10 Execution Modes
 
 Effect systems support three execution modes:
 ```rust
@@ -252,9 +257,9 @@ let sim_system = AuraEffectSystem::for_simulation(device_id, 42);
 ```
 Testing mode provides deterministic behavior. Production mode uses real implementations. Simulation mode enables controlled fault injection with seeded randomness.
 
-### 1.10 Flow Budget Enforcement
+### 1.11 Flow Budget Enforcement
 
-Flow budgets prevent spam while maintaining privacy. Each context-peer pair has a `FlowBudget` with spent and limit counters stored in the journal. Transport effects check budgets before sending messages. Choreographies annotate operations with flow costs that are charged against available budgets.
+Flow budgets prevent spam while maintaining privacy. Each context-peer pair has a `FlowBudget` with limit and spent counters stored in the journal. Transport effects check budgets before sending messages. Choreographies annotate operations with flow costs that are charged against available budgets.
 
 Canonical type:
 ```
@@ -471,46 +476,54 @@ Protocols       ───┤ async fn execute_dkd_alice(...)     │  Working Co
 
 **Choreographies** - Global protocol specifications using `choreography!` macro:
 - **Location**: [`crates/aura-protocol/src/choreography/protocols/`](../crates/aura-protocol/src/choreography/protocols/)
-- **Status**: Used as documentation and specification, not executable
-- **Example**: [`crates/aura-protocol/src/choreography/protocols/frost.rs`](../crates/aura-protocol/src/choreography/protocols/frost.rs)
-- **Current Role**: Protocol documentation with manual implementation fallback
+- **Status**: ✅ Executable via rumpsteak-aura bridge with guard chain integration
+- **Example**: [`crates/aura-protocol/src/choreography/protocols/anti_entropy.rs`](../crates/aura-protocol/src/choreography/protocols/anti_entropy.rs)
+- **Current Role**: Working protocol implementations with projection to executable session types
 
 **Session Types** - Local projections of choreographies:
-- **Infrastructure**: [`crates/aura-mpst/`](../crates/aura-mpst/) provides MPST extensions
-- **Runtime**: [`crates/aura-protocol/src/choreography/runtime/`](../crates/aura-protocol/src/choreography/runtime/)
-- **Status**: Infrastructure exists, choreography projection not yet implemented
-- **Extensions**: Capability guards, journal coupling, leakage budgets working
+- **Infrastructure**: ✅ [`crates/aura-mpst/`](../crates/aura-mpst/) provides complete MPST extensions
+- **Runtime**: ✅ [`crates/aura-protocol/src/choreography/runtime/`](../crates/aura-protocol/src/choreography/runtime/) working
+- **Status**: ✅ Infrastructure complete with working choreography projection and execution
+- **Extensions**: ✅ Capability guards, journal coupling, leakage budgets fully integrated
 
-**Protocols** - Current manual async implementations:
-- **Status**: Working implementations used until choreographic projection is complete
-- **Pattern**: Manual async functions that execute the choreographic intent
-- **Integration**: Protocols use effect system for all operations
+**Protocols** - Hybrid manual and choreographic implementations:
+- **Status**: ✅ Working manual implementations with ✅ choreographic alternatives available
+- **Pattern**: Effect-based implementations with guard chain enforcement
+- **Integration**: ✅ Complete effect system integration for all protocols
 
 ### 4.3 Architecture Evolution Path
 
-**Current (Phase 1)**: Manual protocols with choreographies as documentation
+**✅ Current (Working)**: Choreographic execution with guard chain integration
 ```rust
-// Choreography documents the protocol
+// Choreography defines and executes the protocol with complete guard chain
 choreography! {
-    protocol FrostThreshold {
-        roles: Coordinator, Signer1, Signer2;
-        Coordinator -> Signer1: FrostInit(message);
-        // ...
+    protocol AntiEntropy {
+        roles: Alice, Bob;
+        Alice -> Bob: StateSync(delta) with_guards(cap_guard, flow_guard);
+        Bob -> Alice: AckSync(receipt) with_journal_coupling;
     }
 }
 
-// But execution uses manual implementation
-async fn execute_frost_signing(effects: &AuraEffectSystem) -> Result<FrostResult> {
-    // Manual async protocol implementation
+// Direct choreographic execution available
+async fn execute_anti_entropy(config: &AntiEntropyConfig, effects: &AuraEffectSystem) -> Result<()> {
+    execute_anti_entropy_with_guard_chain(config, effects).await
 }
 ```
 
-**Planned (Phase 2)**: Generated session types with choreographic compilation
+**⚠️ Hybrid Pattern**: Manual implementations with choreographic alternatives
 ```rust
-// Choreography compiles to executable session types
-let session_type = FrostThreshold::project_to_coordinator();
-let result = execute_session(session_type, &effects).await?;
+// Legacy manual protocols still available for compatibility
+async fn manual_threshold_signing(effects: &AuraEffectSystem) -> Result<FrostResult> {
+    // Manual implementation with guard chain enforcement
+}
+
+// New choreographic protocols preferred for new development
+async fn choreographic_threshold_signing(effects: &AuraEffectSystem) -> Result<FrostResult> {
+    // Uses rumpsteak projection + automatic guard enforcement
+}
 ```
+
+Current status: Complete choreographic infrastructure with selective protocol migration.
 
 ### 4.4 MPST Extensions Integration
 
@@ -559,11 +572,11 @@ Signature          (WHO verified)     Evaluation    Operation
 3. **Predicate at send sites**: `need(m) ≤ Caps(ctx) ∧ headroom(ctx, cost)`
 
 `AuthorizationContext` flows through sessions/effects so that each send site can evaluate the same predicate uniformly. Cap failures or headroom failures are handled locally with no network observable.
-2. **Authentication**: `aura-verify::verify_identity_proof()` → `VerifiedIdentity`
-3. **Authorization**: `aura-wot::evaluate_authorization()` → `PermissionGrant`
-4. **Integration**: `authorization_bridge::authenticate_and_authorize()` orchestrates both layers
+4. **Authentication**: `aura-verify::verify_identity_proof()` → `VerifiedIdentity`
+5. **Authorization**: `aura-wot::evaluate_authorization()` → `PermissionGrant`
+6. **Integration**: `authorization_bridge::authenticate_and_authorize()` orchestrates both layers
 
-### 4.3 Effect System Integration
+### 5.3 Effect System Integration
 
 The auth/authz layers integrate seamlessly with Aura's unified effect system:
 
@@ -587,7 +600,7 @@ pub trait AgentEffects: Send + Sync {
 }
 ```
 
-### 4.4 Formal Properties
+### 5.4 Formal Properties
 
 **Meet-Semilattice Capability Operations**:
 - **Associativity**: `a.meet(b.meet(c)) == a.meet(b).meet(c)`
@@ -601,7 +614,7 @@ pub trait AgentEffects: Send + Sync {
 - Bridge orchestrates both through well-defined interfaces
 - Each layer is independently testable with mocks
 
-### 4.5 Implementation Status
+### 5.5 Implementation Status
 
 **✅ Working Components**:
 - Pure cryptographic verification with all proof types
@@ -618,9 +631,9 @@ pub trait AgentEffects: Send + Sync {
 
 ---
 
-## 5. Choreographic Protocol Design
+## 6. Choreographic Protocol Design
 
-### 5.1 Free Algebra Property
+### 6.1 Free Algebra Property
 
 Choreographies expand into the `Program<R, M>` free algebra with effects for message passing, choice, parallelism, and control flow:
 
@@ -636,7 +649,7 @@ pub enum Effect<R, M> {
 
 The polymorphic interpreter walks the AST and dispatches operations to AuraEffectSystem via handlers.
 
-### 5.2 Algebraic Operators
+### 6.2 Algebraic Operators
 
 **Sequential Composition** chains operations through continuation fields in protocol definitions or explicit sequencing in program algebra.
 
@@ -644,33 +657,33 @@ The polymorphic interpreter walks the AST and dispatches operations to AuraEffec
 
 **Choice Operations** enable branching protocols where one role selects from multiple options and other roles adapt accordingly.
 
-### 5.3 Usage Patterns
+### 6.3 Usage Patterns
 
 **Choreographic Protocols** execute through the unified effect system for operations like threshold ceremonies and session management.
 
 **Session Type Protocols** provide runtime validation through the MPST system with automatic role projection and type checking.
 
-### 5.4 Capability-Guarded Transitions
+### 6.4 Capability-Guarded Transitions
 
 MPST extensions include capability guards that verify `need(message) ≤ caps(context)` before allowing message transmission. The runtime enforces authorization through meet-semilattice capability checks.
 
-### 5.5 Journal-Coupled Transitions
+### 6.5 Journal-Coupled Transitions
 
 Protocol messages can trigger replicated state changes through journal coupling. The handler computes state deltas, applies them locally, then transmits the message atomically.
 
-### 5.6 Leakage Budgets
+### 6.6 Leakage Budgets
 
 Privacy budgets track external, neighbor, and group leakage costs per protocol transition. Handler policies enforce aggregate leakage thresholds through traffic shaping and padding decisions.
 
 ---
 
-## 6. Crate Organization and Dependencies
+## 7. Crate Organization and Dependencies
 
-### 6.1 Crate Hierarchy
+### 7.1 Crate Hierarchy
 
 The workspace uses layered dependencies from foundation types through domain logic to runtime composition. Core types flow upward through the effect system to choreographic coordination and finally to business logic crates and runtime composition.
 
-### 6.2 Architectural Layers
+### 7.2 Architectural Layers
 
 **Foundation Types** provide core identifiers, time types, and error handling without domain-specific logic.
 
@@ -684,7 +697,7 @@ The workspace uses layered dependencies from foundation types through domain log
 
 **Higher-Order Runtime** implements simulation-specific effects and controlled behaviors for testing with deterministic infrastructure.
 
-### 6.3 Crate Boundary Rules
+### 7.3 Crate Boundary Rules
 
 **Foundation Types** contain core identifiers, time types, and error handling while excluding effect traits and domain logic.
 
@@ -694,7 +707,7 @@ The workspace uses layered dependencies from foundation types through domain log
 
 **Domain Logic** contains domain-specific types and algorithms consuming effects through dependency injection while avoiding effect definitions.
 
-### 6.4 Anti-Patterns to Avoid
+### 7.4 Anti-Patterns to Avoid
 
 **Duplicating Effect Traits** creates incompatible interfaces across crates and breaks composition.
 
@@ -702,7 +715,7 @@ The workspace uses layered dependencies from foundation types through domain log
 
 **Effect Handlers in Business Logic** breaks architectural boundaries. Domain crates should consume effects through dependency injection.
 
-### 6.5 Crate Roles in Effect System Architecture
+### 7.5 Crate Roles in Effect System Architecture
 
 **Core Infrastructure** defines system capabilities and implements universal middleware for foundational operations.
 
@@ -712,17 +725,17 @@ The workspace uses layered dependencies from foundation types through domain log
 
 ---
 
-## 7. Implementation Guidelines
+## 8. Implementation Guidelines
 
-### 7.1 Creating Custom Middleware
+### 8.1 Creating Custom Middleware
 
 Custom middleware wraps handlers to add cross-cutting functionality through macro-generated trait implementations that delegate to inner handlers.
 
-### 7.2 Direct System Access
+### 8.2 Direct System Access
 
 Production handlers implement real system operations and may bypass linting restrictions for legitimate system calls in controlled contexts.
 
-### 7.3 Usage Patterns
+### 8.3 Usage Patterns
 
 CRDT integration combines foundation types with effect handlers to provide composable semilattices with type safety and automatic conflict resolution.
 

@@ -114,7 +114,7 @@ mod tests {
         UpgradeProposal {
             package_id: Uuid::new_v4(),
             version: SemanticVersion::new(1, 2, 0),
-            artifact_hash: hash_canonical(b"bundle"),
+            artifact_hash: aura_core::Hash32(hash_canonical(b"bundle").unwrap()),
             artifact_uri: Some("https://example.com/bundle".into()),
             kind,
             activation_fence: fence,
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn hard_fork_requires_fence_and_quorum() {
-        let fence = IdentityEpochFence::new(AccountId::new([0u8; 32]), Epoch(10));
+        let fence = IdentityEpochFence::new(AccountId::from_bytes([0u8; 32]), 10_u64);
         let mut coordinator = UpgradeCoordinator::new();
         let proposal = dummy_proposal(UpgradeKind::HardFork, Some(fence));
         let package = proposal.package_id;
@@ -131,20 +131,20 @@ mod tests {
 
         // before readiness or epoch => no activation
         assert!(coordinator
-            .try_activate(package, 1, Epoch(5))
+            .try_activate(package, 1, 5_u64)
             .unwrap()
             .is_none());
 
         coordinator.record_readiness(DeviceId::new(), SemanticVersion::new(1, 2, 0));
         // epoch still below fence
         assert!(coordinator
-            .try_activate(package, 1, Epoch(5))
+            .try_activate(package, 1, 5_u64)
             .unwrap()
             .is_none());
 
         // fence reached -> activation event emitted
         let event = coordinator
-            .try_activate(package, 1, Epoch(10))
+            .try_activate(package, 1, 10_u64)
             .unwrap()
             .expect("activation event");
         matches!(event, MaintenanceEvent::UpgradeActivated(_));

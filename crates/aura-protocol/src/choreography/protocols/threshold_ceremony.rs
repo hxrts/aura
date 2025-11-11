@@ -25,7 +25,7 @@
 //! - Only signature count revealed (threshold satisfied)
 //! - Parent binding prevents replay attacks
 
-use crate::choreography::common::ChoreographyError;
+use crate::crate::effects::ChoreographyError;
 use crate::effects::{ConsoleEffects, CryptoEffects, NetworkEffects, TimeEffects};
 use aura_core::effects::RandomEffects;
 use aura_core::tree::Epoch;
@@ -201,20 +201,10 @@ pub async fn execute_threshold_ceremony(
     }
 
     // Create handler adapter
-    let composite_handler = match effect_system.execution_mode() {
-        crate::handlers::ExecutionMode::Testing => {
-            crate::handlers::CompositeHandler::for_testing(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Production => {
-            crate::handlers::CompositeHandler::for_production(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Simulation { seed: _ } => {
-            crate::handlers::CompositeHandler::for_simulation(device_id.into())
-        }
-    };
-
-    let mut adapter =
-        crate::choreography::runtime::AuraHandlerAdapter::new(composite_handler, device_id);
+    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
+        device_id,
+        effect_system.execution_mode(),
+    );
 
     // Execute appropriate role
     if is_coordinator {
@@ -240,7 +230,7 @@ pub async fn execute_threshold_ceremony(
 
 /// Coordinator's role in threshold ceremony
 async fn coordinator_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     signers: &[DeviceId],
     observers: &[DeviceId],
     config: &CeremonyConfig,
@@ -373,7 +363,7 @@ async fn coordinator_session(
 
 /// Signer's role in threshold ceremony
 async fn signer_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     coordinator_id: DeviceId,
     signer_id: DeviceId,
     _signer_index: usize,
@@ -451,7 +441,7 @@ async fn signer_session(
 
 /// Observer's role in threshold ceremony
 async fn observer_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     coordinator_id: DeviceId,
 ) -> Result<CeremonyResult, CeremonyError> {
     // Phase 5: Observers only receive the final result
@@ -470,7 +460,7 @@ async fn observer_session(
 /// Aggregate partial signatures (TODO fix - Simplified)
 async fn aggregate_partial_signatures(
     partial_signatures: &HashMap<DeviceId, ThresholdPartialSig>,
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
 ) -> Result<Vec<u8>, CeremonyError> {
     // TODO fix - Simplified aggregation: hash all partial signatures together
     // Real implementation would use FROST aggregation

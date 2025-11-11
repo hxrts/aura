@@ -12,18 +12,18 @@ aura-core = { path = "../aura-core" }
 aura-mpst = { path = "../aura-mpst" }
 aura-verify = { path = "../aura-verify" }
 aura-wot = { path = "../aura-wot" }
-rumpsteak-aura = "0.2.0"
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "2.0"
-tracing = "0.1"
-async-trait = "0.1"
-uuid = { version = "1.0", features = ["v4", "serde"] }
-futures = "0.3"
-tokio = { version = "1.0", features = ["sync"] }
-rand = "0.8"
+rumpsteak-aura = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.0", features = ["full"] }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

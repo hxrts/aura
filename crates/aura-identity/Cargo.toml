@@ -11,18 +11,18 @@ repository.workspace = true
 aura-core = { path = "../aura-core" }
 aura-crypto = { path = "../aura-crypto" }
 aura-mpst = { path = "../aura-mpst" }
-rumpsteak-aura = "0.2.0"
-serde = { version = "1.0", features = ["derive"] }
+rumpsteak-aura = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 blake3 = { workspace = true }
-thiserror = "2.0"
-tracing = "0.1"
-async-trait = "0.1"
-uuid = { version = "1.0", features = ["v4", "serde"] }
-futures = "0.3"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.0", features = ["full"] }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

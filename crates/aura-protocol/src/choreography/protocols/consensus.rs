@@ -9,7 +9,7 @@
 //! 2. Each Voter[i] → Leader: Send vote (approve/reject)
 //! 3. Leader → Voter[N]: Broadcast decision
 
-use crate::choreography::common::ChoreographyError;
+use crate::crate::effects::ChoreographyError;
 use crate::effects::{ConsoleEffects, CryptoEffects, RandomEffects};
 use aura_core::{DeviceId, SessionId};
 use rumpsteak_choreography::choreography;
@@ -126,20 +126,10 @@ pub async fn execute_consensus(
     }
 
     // Create handler adapter
-    let composite_handler = match effect_system.execution_mode() {
-        crate::handlers::ExecutionMode::Testing => {
-            crate::handlers::CompositeHandler::for_testing(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Production => {
-            crate::handlers::CompositeHandler::for_production(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Simulation { seed: _ } => {
-            crate::handlers::CompositeHandler::for_simulation(device_id.into())
-        }
-    };
-
-    let mut adapter =
-        crate::choreography::runtime::AuraHandlerAdapter::new(composite_handler, device_id);
+    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
+        device_id,
+        effect_system.execution_mode(),
+    );
 
     // Execute appropriate role
     if is_leader {
@@ -162,7 +152,7 @@ pub async fn execute_consensus(
 
 /// Leader's role in consensus protocol
 async fn leader_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     voters: &[DeviceId],
     config: &ConsensusConfig,
 ) -> Result<ConsensusResult, ConsensusError> {
@@ -243,7 +233,7 @@ async fn leader_session(
 
 /// Voter's role in consensus protocol
 async fn voter_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     leader_id: DeviceId,
     _voter_index: usize,
     config: &ConsensusConfig,

@@ -269,23 +269,23 @@ mod tests {
     async fn test_digest_with_ops() {
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
 
-        let op1 = create_test_op([1u8; 32]);
-        let op2 = create_test_op([2u8; 32]);
+        let op1 = create_test_op(Hash32::new([1u8; 32]));
+        let op2 = create_test_op(Hash32::new([2u8; 32]));
 
         handler.add_op(op1).await;
         handler.add_op(op2).await;
 
         let digest = handler.get_oplog_digest().await.unwrap();
         assert_eq!(digest.cids.len(), 2);
-        assert!(digest.cids.contains(&[1u8; 32]));
-        assert!(digest.cids.contains(&[2u8; 32]));
+        assert!(digest.cids.contains(Hash32::new([1u8; 32]).as_bytes()));
+        assert!(digest.cids.contains(Hash32::new([2u8; 32]).as_bytes()));
     }
 
     #[tokio::test]
     async fn test_compute_ops_to_push() {
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
 
-        let op1 = create_test_op([1u8; 32]);
+        let op1 = create_test_op(Hash32::new([1u8; 32]));
         handler.add_op(op1.clone()).await;
 
         let local_digest = handler.get_oplog_digest().await.unwrap();
@@ -299,7 +299,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(to_push.len(), 1);
-        assert_eq!(to_push[0].op.parent_commitment, [1u8; 32]);
+        assert_eq!(
+            to_push[0].op.parent_commitment,
+            *Hash32::new([1u8; 32]).as_bytes()
+        );
     }
 
     #[tokio::test]
@@ -311,24 +314,24 @@ mod tests {
         };
 
         let mut remote_cids = BTreeSet::new();
-        remote_cids.insert([1u8; 32]);
-        remote_cids.insert([2u8; 32]);
+        remote_cids.insert(*Hash32::new([1u8; 32]).as_bytes());
+        remote_cids.insert(*Hash32::new([2u8; 32]).as_bytes());
 
         let remote_digest = BloomDigest { cids: remote_cids };
 
         let to_pull = handler.compute_cids_to_pull(&local_digest, &remote_digest);
 
         assert_eq!(to_pull.len(), 2);
-        assert!(to_pull.contains(&[1u8; 32]));
-        assert!(to_pull.contains(&[2u8; 32]));
+        assert!(to_pull.contains(Hash32::new([1u8; 32]).as_bytes()));
+        assert!(to_pull.contains(Hash32::new([2u8; 32]).as_bytes()));
     }
 
     #[tokio::test]
     async fn test_merge_remote_ops() {
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
 
-        let op1 = create_test_op([1u8; 32]);
-        let op2 = create_test_op([2u8; 32]);
+        let op1 = create_test_op(Hash32::new([1u8; 32]));
+        let op2 = create_test_op(Hash32::new([2u8; 32]));
 
         handler.merge_remote_ops(vec![op1, op2]).await.unwrap();
 
@@ -356,13 +359,19 @@ mod tests {
     async fn test_request_op() {
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
 
-        let op = create_test_op([1u8; 32]);
+        let op = create_test_op(Hash32::new([1u8; 32]));
         handler.add_op(op.clone()).await;
 
         let peer_id = Uuid::new_v4();
-        let retrieved = handler.request_op(peer_id, [1u8; 32]).await.unwrap();
+        let retrieved = handler
+            .request_op(peer_id, *Hash32::new([1u8; 32]).as_bytes())
+            .await
+            .unwrap();
 
-        assert_eq!(retrieved.op.parent_commitment, [1u8; 32]);
+        assert_eq!(
+            retrieved.op.parent_commitment,
+            *Hash32::new([1u8; 32]).as_bytes()
+        );
     }
 
     #[tokio::test]
@@ -370,7 +379,9 @@ mod tests {
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
 
         let peer_id = Uuid::new_v4();
-        let result = handler.request_op(peer_id, [99u8; 32]).await;
+        let result = handler
+            .request_op(peer_id, *Hash32::new([99u8; 32]).as_bytes())
+            .await;
 
         assert!(matches!(result, Err(SyncError::OperationNotFound)));
     }

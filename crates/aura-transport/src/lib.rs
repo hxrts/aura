@@ -13,8 +13,14 @@ pub mod hole_punch;
 pub mod network;
 pub mod peers;
 pub mod privacy;
+pub mod reconnect;
+pub mod secure_channel;
 pub mod stun;
 pub mod websocket;
+
+// Integration tests for SecureChannel system
+#[cfg(test)]
+mod secure_channel_integration_tests;
 
 // Re-export essential components
 pub use memory::*;
@@ -23,5 +29,7 @@ pub use hole_punch::*;
 pub use network::*;
 pub use peers::*;
 pub use privacy::*;
+pub use reconnect::*;
+pub use secure_channel::*;
 pub use stun::*;
 pub use websocket::*;

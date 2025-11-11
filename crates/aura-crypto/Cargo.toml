@@ -27,15 +27,15 @@ frost-ed25519 = { workspace = true }
 chacha20poly1305 = { workspace = true }
 
 # Curve operations (transitive dependency from ed25519-dalek but we use it directly)
-curve25519-dalek = "4.1"
+curve25519-dalek = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 bincode = { workspace = true }
-serde_bytes = "0.11"
-getrandom = "0.2"
+serde_bytes = { workspace = true }
+getrandom = { workspace = true }
 
 # Utilities
 thiserror = { workspace = true }
@@ -45,6 +45,6 @@ tokio = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
-tokio-test = "0.4"
+tokio-test = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }

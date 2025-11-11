@@ -8,7 +8,7 @@
 //! This module implements choreographic protocols for FROST threshold signatures
 //! using rumpsteak-aura DSL following the protocol guide design principles.
 
-use crate::choreography::common::ChoreographyError;
+use crate::crate::effects::ChoreographyError;
 use crate::effects::{CryptoEffects, RandomEffects};
 use crate::messages::crypto::frost::{
     FrostAbortMessage, FrostAbortReason, FrostAggregateSignatureMessage,
@@ -118,20 +118,10 @@ pub async fn execute_frost_signing(
     }
 
     // Create handler adapter with a fresh composite handler for this session
-    let composite_handler = match effect_system.execution_mode() {
-        crate::handlers::ExecutionMode::Testing => {
-            crate::handlers::CompositeHandler::for_testing(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Production => {
-            crate::handlers::CompositeHandler::for_production(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Simulation { seed: _ } => {
-            crate::handlers::CompositeHandler::for_simulation(device_id.into())
-        }
-    };
-
-    let mut adapter =
-        crate::choreography::runtime::AuraHandlerAdapter::new(composite_handler, device_id);
+    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
+        device_id,
+        effect_system.execution_mode(),
+    );
 
     // Execute appropriate role
     if is_coordinator {
@@ -176,7 +166,7 @@ pub async fn execute_frost_signing(
 /// 4. Aggregating shares into final signature
 /// 5. Broadcasting final signature to all signers
 async fn coordinator_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     signers: &[DeviceId],
     config: &FrostConfig,
 ) -> Result<FrostResult, FrostError> {
@@ -286,7 +276,7 @@ async fn coordinator_session(
 /// 3. Generating and sending signature share
 /// 4. Receiving final aggregated signature
 async fn signer_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     coordinator_id: DeviceId,
     signer_id: DeviceId,
     signer_index: usize, // Index of this signer in the parameterized Signer[N] array
@@ -358,7 +348,7 @@ struct FrostCommitment {
 
 /// Generate nonce and commitment using real FROST crypto
 async fn generate_frost_commitment(
-    _adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    _adapter: &mut crate::choreography::AuraHandlerAdapter,
     _message: &[u8],
 ) -> Result<(Nonce, FrostCommitment), FrostError> {
     // Use real FROST nonce generation from aura-crypto
@@ -377,7 +367,7 @@ async fn generate_frost_commitment(
 
 /// Generate signature share using real FROST crypto
 async fn generate_frost_share(
-    _adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    _adapter: &mut crate::choreography::AuraHandlerAdapter,
     nonce: &Nonce,
     message: &[u8],
     signer_id: DeviceId,
@@ -417,7 +407,7 @@ async fn generate_frost_share(
 /// Aggregate FROST signature shares using real crypto
 async fn aggregate_frost_shares(
     shares: &HashMap<DeviceId, FrostSignatureShareMessage>,
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
 ) -> Result<Vec<u8>, FrostError> {
     // TODO fix - For now, use TODO fix - Simplified aggregation since we don't have PublicKeyPackage
     // In production, this would use frost_aggregate() with proper PublicKeyPackage from DKG
@@ -434,7 +424,7 @@ async fn aggregate_frost_shares(
 
 async fn derive_group_public_key(
     commitments: &HashMap<DeviceId, FrostSigningCommitmentMessage>,
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
 ) -> Result<Vec<u8>, FrostError> {
     // Derive group public key (TODO fix - Simplified)
     // In production, this would come from the PublicKeyPackage from DKG
@@ -452,7 +442,7 @@ async fn verify_frost_signature(
     signature: &[u8],
     message: &[u8],
     public_key: &[u8],
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
 ) -> Result<bool, FrostError> {
     // Verify signature (TODO fix - Simplified TODO fix - For now)
     // In production, this would use frost_verify_aggregate() with proper VerifyingKey

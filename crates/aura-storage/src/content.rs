@@ -168,7 +168,10 @@ impl ContentStore {
 
         // Split content into chunks
         let chunks = self.chunk_content(content_data).await?;
-        let chunk_ids: Vec<ChunkId> = chunks.iter().map(|c| c.chunk_id).collect();
+        let chunk_ids: Vec<ChunkId> = chunks
+            .iter()
+            .map(|c| ChunkId::from(c.content_hash))
+            .collect();
 
         // Store chunks in chunk store
         for chunk in chunks {
@@ -176,9 +179,9 @@ impl ContentStore {
         }
 
         // Store content metadata and chunk mapping
-        let content_id = metadata.content_id;
-        self.content_metadata.insert(content_id, metadata);
-        self.content_chunks.insert(content_id, chunk_ids);
+        let content_id = metadata.content_id.clone();
+        self.content_metadata.insert(content_id.clone(), metadata);
+        self.content_chunks.insert(content_id.clone(), chunk_ids);
 
         Ok(content_id)
     }
@@ -205,7 +208,7 @@ impl ContentStore {
         for chunk_id in chunk_ids {
             let chunk_request = ChunkRequest {
                 device_id: request.device_id,
-                chunk_id: *chunk_id,
+                chunk_id: chunk_id.clone(),
                 capabilities: request.capabilities.clone(),
             };
 
@@ -507,7 +510,7 @@ impl ChunkStore {
 
         // Create metadata
         let metadata = ChunkMetadata {
-            chunk_id,
+            chunk_id: chunk_id.clone(),
             size: chunk_data.data.len() as u32,
             encryption_info: None,  // TODO: Add encryption support
             compression_info: None, // TODO: Add compression support
@@ -516,11 +519,11 @@ impl ChunkStore {
         };
 
         // Store chunk data and metadata
-        self.chunks.insert(chunk_id, chunk_data);
-        self.chunk_metadata.insert(chunk_id, metadata);
+        self.chunks.insert(chunk_id.clone(), chunk_data);
+        self.chunk_metadata.insert(chunk_id.clone(), metadata);
 
         // Increment reference count
-        *self.reference_counts.entry(chunk_id).or_insert(0) += 1;
+        *self.reference_counts.entry(chunk_id.clone()).or_insert(0) += 1;
 
         Ok(chunk_id)
     }
@@ -560,15 +563,13 @@ impl ChunkStore {
     pub fn get_gc_eligible_chunks(&self) -> Vec<ChunkId> {
         self.reference_counts
             .iter()
-            .filter_map(
-                |(chunk_id, &count)| {
-                    if count == 0 {
-                        Some(chunk_id.clone())
-                    } else {
-                        None
-                    }
-                },
-            )
+            .filter_map(|(chunk_id, &count)| {
+                if count == 0 {
+                    Some(chunk_id.clone())
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 

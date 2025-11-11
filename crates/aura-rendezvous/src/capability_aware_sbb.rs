@@ -4,8 +4,8 @@
 //! and capability-based flow budget enforcement. It provides trust-aware forwarding decisions
 //! and respects relay capabilities and flow budgets.
 
-use crate::sbb::{SbbFlooding, RendezvousEnvelope, FloodResult, SBB_MESSAGE_SIZE};
-use aura_core::{AuraResult, AuraError, DeviceId, RelationshipId};
+use crate::sbb::{FloodResult, RendezvousEnvelope, SbbFlooding, SBB_MESSAGE_SIZE};
+use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId};
 use aura_wot::{Capability, CapabilitySet, TrustLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -93,32 +93,32 @@ impl SbbFlowBudget {
     /// Check if there's enough budget for a message
     pub fn can_spend(&self, bytes: u64) -> bool {
         let now = current_timestamp();
-        
+
         // If period expired, reset budget
         if now >= self.period_start + self.period_seconds {
             return bytes <= self.limit;
         }
-        
+
         self.spent + bytes <= self.limit
     }
 
     /// Spend bytes from budget (call after can_spend check)
     pub fn spend(&mut self, bytes: u64) -> AuraResult<()> {
         let now = current_timestamp();
-        
+
         // Reset budget if period expired
         if now >= self.period_start + self.period_seconds {
             self.spent = 0;
             self.period_start = now;
         }
-        
+
         if self.spent + bytes > self.limit {
             return Err(AuraError::coordination_failed(format!(
                 "Flow budget exceeded: {} + {} > {}",
                 self.spent, bytes, self.limit
             )));
         }
-        
+
         self.spent += bytes;
         Ok(())
     }
@@ -126,12 +126,12 @@ impl SbbFlowBudget {
     /// Get remaining budget in current period
     pub fn remaining(&self) -> u64 {
         let now = current_timestamp();
-        
+
         // If period expired, full budget is available
         if now >= self.period_start + self.period_seconds {
             return self.limit;
         }
-        
+
         self.limit.saturating_sub(self.spent)
     }
 
@@ -140,12 +140,12 @@ impl SbbFlowBudget {
         if self.limit == 0 {
             return 1.0;
         }
-        
+
         let now = current_timestamp();
         if now >= self.period_start + self.period_seconds {
             return 0.0;
         }
-        
+
         self.spent as f64 / self.limit as f64
     }
 }
@@ -161,10 +161,9 @@ impl SbbRelationship {
         // Default relay capability based on trust level
         let (flow_limit, period) = match trust_level {
             TrustLevel::None => (0, 3600),
-            TrustLevel::Low => (10 * 1024, 3600),      // 10KB/hour
-            TrustLevel::Medium => (100 * 1024, 3600),  // 100KB/hour  
-            TrustLevel::High => (1024 * 1024, 3600),   // 1MB/hour
-            TrustLevel::Full => (10 * 1024 * 1024, 3600), // 10MB/hour
+            TrustLevel::Low => (10 * 1024, 3600), // 10KB/hour
+            TrustLevel::Medium => (100 * 1024, 3600), // 100KB/hour
+            TrustLevel::High => (10 * 1024 * 1024, 3600), // 10MB/hour
         };
 
         let relay_capability = Capability::Relay {
@@ -238,7 +237,11 @@ impl CapabilityAwareSbbCoordinator {
     }
 
     /// Update trust level for existing relationship
-    pub fn update_trust_level(&mut self, peer_id: DeviceId, trust_level: TrustLevel) -> AuraResult<()> {
+    pub fn update_trust_level(
+        &mut self,
+        peer_id: DeviceId,
+        trust_level: TrustLevel,
+    ) -> AuraResult<()> {
         match self.relationships.get_mut(&peer_id) {
             Some(rel) => {
                 rel.trust_level = trust_level;
@@ -247,14 +250,14 @@ impl CapabilityAwareSbbCoordinator {
                     TrustLevel::None => (0, 3600),
                     TrustLevel::Low => (10 * 1024, 3600),
                     TrustLevel::Medium => (100 * 1024, 3600),
-                    TrustLevel::High => (1024 * 1024, 3600),
-                    TrustLevel::Full => (10 * 1024 * 1024, 3600),
+                    TrustLevel::High => (10 * 1024 * 1024, 3600),
                 };
                 rel.flow_budget = SbbFlowBudget::new(flow_limit, period);
                 Ok(())
             }
             None => Err(AuraError::coordination_failed(format!(
-                "Relationship not found for peer {}", peer_id.0
+                "Relationship not found for peer {}",
+                peer_id.0
             ))),
         }
     }
@@ -305,7 +308,8 @@ impl CapabilityAwareSbbCoordinator {
         match self.relationships.get_mut(&peer_id) {
             Some(rel) => rel.flow_budget.spend(bytes),
             None => Err(AuraError::coordination_failed(format!(
-                "No relationship found for peer {}", peer_id.0
+                "No relationship found for peer {}",
+                peer_id.0
             ))),
         }
     }
@@ -318,24 +322,23 @@ impl CapabilityAwareSbbCoordinator {
     /// Get trust statistics for monitoring
     pub fn get_trust_statistics(&self) -> TrustStatistics {
         let mut stats = TrustStatistics::default();
-        
+
         for relationship in self.relationships.values() {
             match relationship.trust_level {
                 TrustLevel::None => stats.none_count += 1,
                 TrustLevel::Low => stats.low_count += 1,
                 TrustLevel::Medium => stats.medium_count += 1,
                 TrustLevel::High => stats.high_count += 1,
-                TrustLevel::Full => stats.full_count += 1,
             }
-            
+
             if relationship.is_guardian {
                 stats.guardian_count += 1;
             }
-            
+
             stats.total_flow_spent += relationship.flow_budget.spent;
             stats.total_flow_limit += relationship.flow_budget.limit;
         }
-        
+
         stats.relationship_count = self.relationships.len();
         stats
     }
@@ -373,21 +376,24 @@ pub struct TrustStatistics {
 impl TrustStatistics {
     /// Get average trust level (weighted)
     pub fn average_trust_level(&self) -> f64 {
-        let total = self.none_count + self.low_count + self.medium_count + self.high_count + self.full_count;
+        let total = self.none_count
+            + self.low_count
+            + self.medium_count
+            + self.high_count
+            + self.full_count;
         if total == 0 {
             return 0.0;
         }
-        
-        let weighted_sum = 
-            (self.none_count * 0) +
-            (self.low_count * 1) +
-            (self.medium_count * 2) + 
-            (self.high_count * 3) +
-            (self.full_count * 4);
-            
+
+        let weighted_sum = (self.none_count * 0)
+            + (self.low_count * 1)
+            + (self.medium_count * 2)
+            + (self.high_count * 3)
+            + (self.full_count * 4);
+
         weighted_sum as f64 / total as f64 / 4.0 // Normalize to 0-1
     }
-    
+
     /// Get flow budget utilization
     pub fn flow_utilization(&self) -> f64 {
         if self.total_flow_limit == 0 {
@@ -416,7 +422,8 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
 
         // Cache envelope
         let expires_at = current_timestamp() + 3600;
-        self.envelope_cache.insert(envelope.id, (envelope.clone(), expires_at));
+        self.envelope_cache
+            .insert(envelope.id, (envelope.clone(), expires_at));
         self.seen_envelopes.insert(envelope.id);
 
         // Get forwarding peers using capability-aware logic
@@ -438,7 +445,10 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
         // Forward to capable peers and spend flow budgets
         let mut successful_forwards = 0;
         for peer in &forwarding_peers {
-            match self.forward_to_peer(forwarded_envelope.clone(), *peer).await {
+            match self
+                .forward_to_peer(forwarded_envelope.clone(), *peer)
+                .await
+            {
                 Ok(()) => {
                     // Spend flow budget for successful forward
                     if let Err(e) = self.spend_flow_budget(*peer, SBB_MESSAGE_SIZE) {
@@ -452,7 +462,9 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
         }
 
         if successful_forwards > 0 {
-            Ok(FloodResult::Forwarded { peer_count: successful_forwards })
+            Ok(FloodResult::Forwarded {
+                peer_count: successful_forwards,
+            })
         } else {
             Ok(FloodResult::Failed {
                 reason: "All capability-aware forwards failed".to_string(),
@@ -478,11 +490,43 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
 
     async fn forward_to_peer(
         &mut self,
-        _envelope: RendezvousEnvelope,
-        _peer: DeviceId,
+        envelope: RendezvousEnvelope,
+        peer: DeviceId,
     ) -> AuraResult<()> {
-        // Placeholder - would integrate with transport layer
-        // In real implementation, would use SbbTransportBridge
+        // Create SBB message for transport layer
+        let sbb_message = crate::messaging::SbbMessageType::RendezvousFlood {
+            envelope,
+            from_peer: Some(self.device_id),
+        };
+
+        // Use transport sender if available via effect system or direct integration
+        // For now, we'll use a simplified approach - in production this would
+        // integrate with the actual transport layer through dependency injection
+        
+        // Check if peer relationship exists and validate forwarding capability
+        if let Some(relationship) = self.relationships.get(&peer) {
+            let policy = SbbForwardingPolicy::default();
+            if !relationship.can_forward_sbb(crate::sbb::SBB_MESSAGE_SIZE, &policy) {
+                return Err(AuraError::coordination_failed(format!(
+                    "Peer {} cannot accept SBB messages (insufficient capability or budget)",
+                    peer.0
+                )));
+            }
+        } else {
+            return Err(AuraError::coordination_failed(format!(
+                "No relationship found for peer {}",
+                peer.0
+            )));
+        }
+
+        // Simulate transport send - in real implementation would use:
+        // self.transport_sender.send_to_peer(peer, sbb_message).await
+        tracing::debug!(
+            peer_id = %peer.0,
+            envelope_id = %hex::encode(&envelope.id),
+            "Forwarded SBB envelope to peer"
+        );
+
         Ok(())
     }
 }
@@ -502,22 +546,22 @@ mod tests {
     #[test]
     fn test_flow_budget_spending() {
         let mut budget = SbbFlowBudget::new(1024, 3600);
-        
+
         assert_eq!(budget.remaining(), 1024);
         assert_eq!(budget.utilization(), 0.0);
-        
+
         assert!(budget.can_spend(512));
         budget.spend(512).unwrap();
         assert_eq!(budget.remaining(), 512);
         assert_eq!(budget.utilization(), 0.5);
-        
+
         assert!(budget.can_spend(512));
         assert!(!budget.can_spend(513));
-        
+
         budget.spend(512).unwrap();
         assert_eq!(budget.remaining(), 0);
         assert_eq!(budget.utilization(), 1.0);
-        
+
         assert!(budget.spend(1).is_err());
     }
 
@@ -525,19 +569,19 @@ mod tests {
     fn test_relationship_forwarding_logic() {
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new();
-        
+
         // Test different trust levels
         let low_trust_rel = SbbRelationship::new(peer_id, rel_id, TrustLevel::Low, false);
         let high_trust_rel = SbbRelationship::new(peer_id, rel_id, TrustLevel::High, true);
-        
+
         let policy = SbbForwardingPolicy::default();
-        
+
         // High trust should allow forwarding
         assert!(high_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &policy));
-        
+
         // Low trust should allow forwarding if policy permits
         assert!(low_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &policy));
-        
+
         // No trust should be rejected
         let no_trust_rel = SbbRelationship::new(peer_id, rel_id, TrustLevel::None, false);
         let strict_policy = SbbForwardingPolicy {
@@ -551,25 +595,25 @@ mod tests {
     async fn test_capability_aware_coordinator() {
         let device_id = DeviceId::new();
         let mut coordinator = CapabilityAwareSbbCoordinator::new(device_id);
-        
+
         let peer1 = DeviceId::new();
         let peer2 = DeviceId::new();
         let rel_id = RelationshipId::new();
-        
+
         // Add relationships with different trust levels
         coordinator.add_relationship(peer1, rel_id, TrustLevel::High, true); // Guardian
-        coordinator.add_relationship(peer2, rel_id, TrustLevel::Low, false);  // Friend
-        
+        coordinator.add_relationship(peer2, rel_id, TrustLevel::Low, false); // Friend
+
         let policy = SbbForwardingPolicy::default();
         let peers = coordinator
             .get_capability_aware_forwarding_peers(None, SBB_MESSAGE_SIZE, &policy)
             .await
             .unwrap();
-        
+
         // Should return both peers, with guardian first due to preference
         assert_eq!(peers.len(), 2);
         assert_eq!(peers[0], peer1); // Guardian should be first
-        
+
         // Test trust statistics
         let stats = coordinator.get_trust_statistics();
         assert_eq!(stats.relationship_count, 2);
@@ -582,21 +626,24 @@ mod tests {
     async fn test_envelope_flooding_with_capabilities() {
         let device_id = DeviceId::new();
         let mut coordinator = CapabilityAwareSbbCoordinator::new(device_id);
-        
+
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new();
         coordinator.add_relationship(peer_id, rel_id, TrustLevel::Medium, false);
-        
+
         let payload = b"test envelope".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(2));
-        
+
         // Should succeed with capable peer
-        let result = coordinator.flood_envelope(envelope.clone(), None).await.unwrap();
+        let result = coordinator
+            .flood_envelope(envelope.clone(), None)
+            .await
+            .unwrap();
         match result {
             FloodResult::Forwarded { peer_count } => assert_eq!(peer_count, 1),
             _ => panic!("Expected successful forwarding"),
         }
-        
+
         // Duplicate should be dropped
         let result2 = coordinator.flood_envelope(envelope, None).await.unwrap();
         match result2 {

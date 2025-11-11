@@ -17,6 +17,7 @@ workspace = true
 [dependencies]
 # Workspace crates
 aura-core = { path = "../aura-core" }
+aura-crypto = { path = "../aura-crypto" }
 # session_types removed during refactor - implementation moved to coordination
 # Removed circular dependency: transport no longer depends on coordination
 # aura-coordination = { path = "../coordination" }
@@ -25,15 +26,16 @@ aura-core = { path = "../aura-core" }
 reqwest = { workspace = true }
 snow = { workspace = true }
 async-trait = { workspace = true }
-tokio-tungstenite = "0.20"
+tokio-tungstenite = { workspace = true }
 
 # Choreographic programming
-rumpsteak-aura = "0.2.0"
+rumpsteak-aura = { workspace = true }
 
 # Cryptography provided through aura-crypto
 ed25519-dalek = { workspace = true }
 blake3 = { workspace = true }
 chacha20poly1305 = { workspace = true }
+sha2 = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -53,7 +55,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
-fastrand = "2.0"
+fastrand = { workspace = true }
 
 [dev-dependencies]
-tokio-test = "0.4"
+tokio-test = { workspace = true }

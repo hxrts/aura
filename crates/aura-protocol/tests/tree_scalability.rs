@@ -9,9 +9,10 @@
 //! Run with: cargo test --test tree_scalability --release -- --nocapture
 
 use aura_core::tree::{
-    snapshot::Snapshot, AttestedOp, Epoch, Hash32, LeafId, LeafNode, LeafRole, NodeIndex, Policy,
-    TreeOp, TreeOpKind,
+    snapshot::Snapshot, AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp,
+    TreeOpKind,
 };
+use aura_core::{DeviceId, Hash32};
 use aura_journal::ratchet_tree::{compaction::compact, reduction::reduce};
 use aura_journal::semilattice::OpLog;
 use aura_protocol::sync::PeerView;
@@ -26,14 +27,14 @@ use uuid::Uuid;
 fn create_add_leaf_op(epoch: u64, leaf_id: u32) -> AttestedOp {
     AttestedOp {
         op: TreeOp {
-            parent_epoch: Epoch(epoch),
+            parent_epoch: epoch,
             parent_commitment: [epoch as u8; 32],
             op: TreeOpKind::AddLeaf {
                 leaf: LeafNode {
                     leaf_id: LeafId(leaf_id),
                     role: LeafRole::Device,
                     public_key: vec![0u8; 32],
-                    meta: BTreeMap::new(),
+                    meta: vec![],
                 },
                 under: NodeIndex(0),
             },
@@ -64,7 +65,7 @@ fn test_tree_with_100_devices() {
     let mut oplog = OpLog::new();
     for i in 0..100 {
         let op = create_add_leaf_op(i, i as u32);
-        oplog.add(op);
+        oplog.add_operation(op);
     }
 
     let creation_time = start.elapsed();
@@ -109,7 +110,7 @@ fn test_oplog_with_10000_operations() {
     let mut oplog = OpLog::new();
     for i in 0..10_000 {
         let op = create_add_leaf_op((i / 100) as u64, (i % 1000) as u32);
-        oplog.add(op);
+        oplog.add_operation(op);
     }
 
     let creation_time = start.elapsed();
@@ -226,7 +227,7 @@ fn test_memory_bounded_with_gc() {
     let mut oplog = OpLog::new();
     for i in 0..1000 {
         let op = create_add_leaf_op(i, (i % 100) as u32);
-        oplog.add(op);
+        oplog.add_operation(op);
     }
 
     let memory_before = measure_memory_usage();
@@ -235,7 +236,7 @@ fn test_memory_bounded_with_gc() {
 
     // Create snapshot at epoch 500
     let snapshot = Snapshot {
-        epoch: Epoch(500),
+        epoch: 500,
         commitment: [0x50; 32],
         roster: (0..100).map(|i| LeafId(i)).collect(),
         policies: BTreeMap::new(),
@@ -304,13 +305,13 @@ fn test_combined_load() {
     let mut oplog = OpLog::new();
     for i in 0..100 {
         let op = create_add_leaf_op(i, i as u32);
-        oplog.add(op);
+        oplog.add_operation(op);
     }
 
     // Add 1000 more operations
     for i in 100..1100 {
         let op = create_add_leaf_op((i / 10) as u64, (i % 100) as u32);
-        oplog.add(op);
+        oplog.add_operation(op);
     }
 
     // Create peer view with 50 peers
@@ -348,7 +349,7 @@ fn compute_cid(op: &AttestedOp) -> Hash32 {
     use blake3::Hasher;
     let mut hasher = Hasher::new();
     hasher.update(b"ATTESTED_OP");
-    hasher.update(&op.op.parent_epoch.0.to_le_bytes());
+    hasher.update(&op.op.parent_epoch.to_le_bytes());
     hasher.update(&op.op.parent_commitment);
     hasher.update(&[op.op.version]);
     hasher.update(&(op.signer_count as u64).to_le_bytes());

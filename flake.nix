@@ -41,24 +41,6 @@
               '';
             } // attrs;
 
-            # Override for blake3 (crypto library)
-            blake3 = attrs: {
-              # Ensure consistent deployment target to avoid CC crate issues  
-              MACOSX_DEPLOYMENT_TARGET = "11.0";
-              # Set explicit Rust target for CC crate compatibility
-              TARGET_OS = "darwin";
-              CARGO_CFG_TARGET_OS = "darwin";
-              # Override Rust target detection
-              preBuild = ''
-                export TARGET_OS="darwin"
-                export CARGO_CFG_TARGET_OS="darwin"
-                # Ensure cargo sees darwin target
-                export RUST_TARGET_PATH=${pkgs.stdenv.targetPlatform.config}
-              '';
-            } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
-              buildInputs = [ pkgs.libiconv ];
-            };
-
             # Override for ring (crypto library)
             ring = attrs: {
               nativeBuildInputs = [ pkgs.perl ];
@@ -92,9 +74,7 @@
           regenerate-cargo-nix = pkgs.writeScriptBin "regenerate-cargo-nix" ''
             #!${pkgs.bash}/bin/bash
             echo "Regenerating Cargo.nix with crate2nix..."
-            ${crate2nix.packages.${system}.default}/bin/crate2nix generate \
-              --offline \
-              --no-cargo-build-std
+            ${crate2nix.packages.${system}.default}/bin/crate2nix generate
             echo "Cargo.nix regenerated successfully!"
           '';
         };

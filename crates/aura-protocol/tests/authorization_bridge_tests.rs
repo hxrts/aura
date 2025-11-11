@@ -3,12 +3,12 @@
 //! Tests for the bridge functionality that connects authentication (identity verification)
 //! with authorization (capability evaluation) without mixing concerns.
 
-use crate::authorization_bridge::{
+use aura_core::{AccountId, DeviceId, GuardianId};
+use aura_crypto::Ed25519SigningKey;
+use aura_protocol::authorization_bridge::{
     evaluate_authorization, AuthorizationContext, AuthorizationRequest, AuthorizedEvent,
     PermissionGrant,
 };
-use aura_core::{AccountId, DeviceId, GuardianId};
-use aura_crypto::Ed25519SigningKey;
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use aura_wot::{CapabilitySet, LeafRole, TreeAuthzContext, TreeOp, TreeOpKind};
 use std::collections::BTreeSet;

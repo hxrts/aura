@@ -44,6 +44,7 @@ pub mod effects;
 pub mod handlers;
 pub mod maintenance;
 pub mod middleware;
+pub mod ota_orchestrator;
 
 // Re-export public API
 pub use agent::AuraAgent;
@@ -64,7 +65,8 @@ pub use middleware::{
     OperationMetrics, TracingMiddleware, ValidationMiddleware, ValidationRule,
 };
 
-pub use maintenance::{MaintenanceController, SnapshotOutcome};
+pub use maintenance::{MaintenanceController, SnapshotOutcome, CacheInvalidationSystem, CacheInvalidationEvent};
+pub use ota_orchestrator::{OtaOrchestrator, UpgradeProposal, UpgradeType, OptInPolicy, AdoptionStatus, UpgradeStats, SecuritySeverity};
 
 // Re-export core types from aura-core for convenience
 pub use aura_core::{

@@ -197,9 +197,11 @@ impl<T: JournalEffects + Send + Sync> JournalEffects for CapabilityMiddleware<T>
         &self,
         op: crate::effects::journal::TreeOpRecord,
     ) -> Result<(), AuraError> {
+        // Generate proper delta from tree op
+        let tree_delta = create_tree_op_delta(&op);
         let effect = MergeFactsEffect {
-            delta: Fact::default(),
-        }; // TODO: proper delta from tree op
+            delta: tree_delta,
+        };
         self.execute_guarded(effect)
             .await
             .map_err(|e| AuraError::internal(&format!("Capability check failed: {}", e)))?;
@@ -230,9 +232,11 @@ impl<T: JournalEffects + Send + Sync> JournalEffects for CapabilityMiddleware<T>
         &self,
         intent: crate::effects::journal::Intent,
     ) -> Result<crate::effects::journal::IntentId, AuraError> {
+        // Generate proper delta from intent submission
+        let intent_delta = create_intent_delta(&intent);
         let effect = MergeFactsEffect {
-            delta: Fact::default(),
-        }; // TODO: proper delta from intent
+            delta: intent_delta,
+        };
         self.execute_guarded(effect)
             .await
             .map_err(|e| AuraError::internal(&format!("Capability check failed: {}", e)))?;
@@ -276,9 +280,11 @@ impl<T: JournalEffects + Send + Sync> JournalEffects for CapabilityMiddleware<T>
         &self,
         intent_id: crate::effects::journal::IntentId,
     ) -> Result<(), AuraError> {
+        // Generate proper delta from intent tombstone
+        let tombstone_delta = create_tombstone_delta(&intent_id);
         let effect = MergeFactsEffect {
-            delta: Fact::default(),
-        }; // TODO: proper delta from tombstone
+            delta: tombstone_delta,
+        };
         self.execute_guarded(effect)
             .await
             .map_err(|e| AuraError::internal(&format!("Capability check failed: {}", e)))?;
@@ -290,9 +296,11 @@ impl<T: JournalEffects + Send + Sync> JournalEffects for CapabilityMiddleware<T>
         &self,
         current_commitment: crate::effects::journal::Commitment,
     ) -> Result<usize, AuraError> {
+        // Generate proper delta from intent pruning
+        let pruning_delta = create_pruning_delta(&current_commitment);
         let effect = MergeFactsEffect {
-            delta: Fact::default(),
-        }; // TODO: proper delta from pruning
+            delta: pruning_delta,
+        };
         self.execute_guarded(effect)
             .await
             .map_err(|e| AuraError::internal(&format!("Capability check failed: {}", e)))?;
@@ -337,9 +345,11 @@ impl<T: JournalEffects + Send + Sync> JournalEffects for CapabilityMiddleware<T>
         &self,
         other: crate::effects::journal::JournalMap,
     ) -> Result<(), AuraError> {
+        // Generate proper delta from journal state merge
+        let merge_delta = create_journal_merge_delta(&other);
         let effect = MergeFactsEffect {
-            delta: Fact::default(),
-        }; // TODO: proper delta from merge
+            delta: merge_delta,
+        };
         self.execute_guarded(effect)
             .await
             .map_err(|e| AuraError::internal(&format!("Capability check failed: {}", e)))?;
@@ -397,9 +407,11 @@ impl<T: JournalEffects + Send + Sync> JournalEffects for CapabilityMiddleware<T>
         &self,
         op: aura_core::AttestedOp,
     ) -> Result<aura_core::Hash32, AuraError> {
+        // Generate proper delta from attested operation
+        let attested_delta = create_attested_op_delta(&op);
         let effect = MergeFactsEffect {
-            delta: Fact::default(),
-        }; // TODO: proper delta from attested op
+            delta: attested_delta,
+        };
         self.execute_guarded(effect)
             .await
             .map_err(|e| AuraError::internal(&format!("Capability check failed: {}", e)))?;
@@ -427,9 +439,11 @@ impl<T: JournalEffects + Send + Sync> JournalEffects for CapabilityMiddleware<T>
         &self,
         remote: aura_journal::semilattice::OpLog,
     ) -> Result<(), AuraError> {
+        // Generate proper delta from op log merge
+        let oplog_delta = create_oplog_merge_delta(&remote);
         let effect = MergeFactsEffect {
-            delta: Fact::default(),
-        }; // TODO: proper delta from op log merge
+            delta: oplog_delta,
+        };
         self.execute_guarded(effect)
             .await
             .map_err(|e| AuraError::internal(&format!("Capability check failed: {}", e)))?;
@@ -533,6 +547,152 @@ impl Default for CapabilityMiddlewareBuilder {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Generate fact delta from tree operation
+fn create_tree_op_delta(op: &crate::effects::journal::TreeOpRecord) -> Fact {
+    use aura_core::FactValue;
+    let mut delta = Fact::new();
+    
+    // Add tree operation fact
+    delta.insert(
+        "tree_op".to_string(),
+        FactValue::String(format!("op:{}", op.0))
+    );
+    
+    // Add timestamp
+    delta.insert(
+        "tree_op_timestamp".to_string(),
+        FactValue::Number(aura_core::current_unix_timestamp() as i64)
+    );
+    
+    delta
+}
+
+/// Generate fact delta from intent submission
+fn create_intent_delta(intent: &crate::effects::journal::Intent) -> Fact {
+    use aura_core::FactValue;
+    let mut delta = Fact::new();
+    
+    // Add intent submission fact
+    delta.insert(
+        "intent_submitted".to_string(),
+        FactValue::String(format!("intent:{}", intent.0))
+    );
+    
+    // Add timestamp
+    delta.insert(
+        "intent_timestamp".to_string(),
+        FactValue::Number(aura_core::current_unix_timestamp() as i64)
+    );
+    
+    delta
+}
+
+/// Generate fact delta from intent tombstone
+fn create_tombstone_delta(intent_id: &crate::effects::journal::IntentId) -> Fact {
+    use aura_core::FactValue;
+    let mut delta = Fact::new();
+    
+    // Add tombstone fact
+    delta.insert(
+        "intent_tombstoned".to_string(),
+        FactValue::String(format!("tombstone:{}", intent_id.0))
+    );
+    
+    // Add timestamp
+    delta.insert(
+        "tombstone_timestamp".to_string(),
+        FactValue::Number(aura_core::current_unix_timestamp() as i64)
+    );
+    
+    delta
+}
+
+/// Generate fact delta from intent pruning
+fn create_pruning_delta(commitment: &crate::effects::journal::Commitment) -> Fact {
+    use aura_core::FactValue;
+    let mut delta = Fact::new();
+    
+    // Add pruning fact
+    delta.insert(
+        "intents_pruned".to_string(),
+        FactValue::String(format!("commitment:{:02x?}", &commitment.0[..8]))
+    );
+    
+    // Add timestamp
+    delta.insert(
+        "pruning_timestamp".to_string(),
+        FactValue::Number(aura_core::current_unix_timestamp() as i64)
+    );
+    
+    delta
+}
+
+/// Generate fact delta from journal state merge
+fn create_journal_merge_delta(other: &crate::effects::journal::JournalMap) -> Fact {
+    use aura_core::FactValue;
+    let mut delta = Fact::new();
+    
+    // Add merge fact
+    delta.insert(
+        "journal_merged".to_string(),
+        FactValue::String(format!("entries:{}", other.0.len()))
+    );
+    
+    // Add timestamp
+    delta.insert(
+        "merge_timestamp".to_string(),
+        FactValue::Number(aura_core::current_unix_timestamp() as i64)
+    );
+    
+    delta
+}
+
+/// Generate fact delta from attested operation
+fn create_attested_op_delta(op: &aura_core::AttestedOp) -> Fact {
+    use aura_core::FactValue;
+    let mut delta = Fact::new();
+    
+    // Add attested operation fact
+    delta.insert(
+        "attested_op".to_string(),
+        FactValue::String(format!("op_type:{:?}", op.operation_type()))
+    );
+    
+    // Add commitment binding
+    delta.insert(
+        "op_commitment".to_string(),
+        FactValue::String(format!("commitment:{:02x?}", &op.commitment_hash()[..8]))
+    );
+    
+    // Add timestamp
+    delta.insert(
+        "attested_timestamp".to_string(),
+        FactValue::Number(aura_core::current_unix_timestamp() as i64)
+    );
+    
+    delta
+}
+
+/// Generate fact delta from op log merge
+fn create_oplog_merge_delta(remote: &aura_journal::semilattice::OpLog) -> Fact {
+    use aura_core::FactValue;
+    let mut delta = Fact::new();
+    
+    // Add op log merge fact
+    delta.insert(
+        "oplog_merged".to_string(),
+        FactValue::String(format!("operations:{}", remote.len()))
+    );
+    
+    // Add timestamp
+    delta.insert(
+        "oplog_merge_timestamp".to_string(),
+        FactValue::Number(aura_core::current_unix_timestamp() as i64)
+    );
+    
+    delta
 }
 
 #[cfg(test)]

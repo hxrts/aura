@@ -4,8 +4,8 @@
 //! envelope encryption. It extends the existing DKD system to create deterministic
 //! relationship keys that Alice and Bob can derive independently.
 
-use aura_core::{AuraResult, AuraError, DeviceId};
-use aura_crypto::{IdentityKeyContext, KeyDerivationSpec, derive_encryption_key};
+use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_crypto::{derive_encryption_key, IdentityKeyContext, KeyDerivationSpec};
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -18,7 +18,7 @@ pub type RelationshipKey = [u8; 32];
 pub struct RelationshipContext {
     /// Lower device ID (lexicographically)
     device_a: DeviceId,
-    /// Higher device ID (lexicographically) 
+    /// Higher device ID (lexicographically)
     device_b: DeviceId,
     /// Application context (e.g., "sbb-envelope", "direct-message")
     app_context: String,
@@ -65,7 +65,7 @@ impl RelationshipContext {
         hasher.update(self.device_b.0.as_bytes());
         hasher.update(self.app_context.as_bytes());
         hasher.update(&self.epoch.to_le_bytes());
-        
+
         let hash = hasher.finalize();
         hash.as_bytes().to_vec()
     }
@@ -83,7 +83,7 @@ impl RelationshipKeyManager {
     }
 
     /// Derive relationship key for SBB envelope encryption
-    /// 
+    ///
     /// This is deterministic - Alice and Bob will derive the same key
     /// when given the same parameters and root key material.
     pub fn derive_relationship_key(
@@ -105,9 +105,7 @@ impl RelationshipKeyManager {
 
         // Derive new key using existing DKD infrastructure
         let relationship_id = context.build_relationship_id();
-        let identity_context = IdentityKeyContext::RelationshipKeys { 
-            relationship_id 
-        };
+        let identity_context = IdentityKeyContext::RelationshipKeys { relationship_id };
 
         let spec = KeyDerivationSpec {
             identity_context,
@@ -130,12 +128,8 @@ impl RelationshipKeyManager {
         app_context: &str,
         epoch: u64,
     ) -> AuraResult<RelationshipKey> {
-        let context = RelationshipContext::new(
-            self.device_id,
-            peer_id,
-            app_context.to_string(),
-            epoch,
-        );
+        let context =
+            RelationshipContext::new(self.device_id, peer_id, app_context.to_string(), epoch);
 
         // Check cache first
         if let Some(key) = self.key_cache.get(&context) {
@@ -143,9 +137,7 @@ impl RelationshipKeyManager {
         }
 
         let relationship_id = context.build_relationship_id();
-        let identity_context = IdentityKeyContext::RelationshipKeys { 
-            relationship_id 
-        };
+        let identity_context = IdentityKeyContext::RelationshipKeys { relationship_id };
 
         let spec = KeyDerivationSpec {
             identity_context,
@@ -188,7 +180,7 @@ pub fn derive_test_root_key(device_id: DeviceId) -> [u8; 32] {
     let mut hasher = Hasher::new();
     hasher.update(b"aura-test-root-key-v1");
     hasher.update(device_id.0.as_bytes());
-    
+
     let hash = hasher.finalize();
     let mut key = [0u8; 32];
     key.copy_from_slice(hash.as_bytes());
@@ -203,17 +195,16 @@ mod tests {
     fn test_relationship_context_ordering() {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        
+
         // Context should be same regardless of parameter order
-        let context1 = RelationshipContext::new(
-            alice_id, bob_id, "sbb-envelope".to_string(), 0
-        );
-        let context2 = RelationshipContext::new(
-            bob_id, alice_id, "sbb-envelope".to_string(), 0
-        );
-        
+        let context1 = RelationshipContext::new(alice_id, bob_id, "sbb-envelope".to_string(), 0);
+        let context2 = RelationshipContext::new(bob_id, alice_id, "sbb-envelope".to_string(), 0);
+
         assert_eq!(context1, context2);
-        assert_eq!(context1.build_relationship_id(), context2.build_relationship_id());
+        assert_eq!(
+            context1.build_relationship_id(),
+            context2.build_relationship_id()
+        );
     }
 
     #[test]
@@ -221,53 +212,64 @@ mod tests {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
         let charlie_id = DeviceId::new();
-        
-        let context_ab = RelationshipContext::new(
-            alice_id, bob_id, "sbb-envelope".to_string(), 0
-        );
-        let context_ac = RelationshipContext::new(
-            alice_id, charlie_id, "sbb-envelope".to_string(), 0
-        );
-        let context_ab_dm = RelationshipContext::new(
-            alice_id, bob_id, "direct-message".to_string(), 0
-        );
-        let context_ab_epoch1 = RelationshipContext::new(
-            alice_id, bob_id, "sbb-envelope".to_string(), 1
-        );
-        
+
+        let context_ab = RelationshipContext::new(alice_id, bob_id, "sbb-envelope".to_string(), 0);
+        let context_ac =
+            RelationshipContext::new(alice_id, charlie_id, "sbb-envelope".to_string(), 0);
+        let context_ab_dm =
+            RelationshipContext::new(alice_id, bob_id, "direct-message".to_string(), 0);
+        let context_ab_epoch1 =
+            RelationshipContext::new(alice_id, bob_id, "sbb-envelope".to_string(), 1);
+
         // Different relationships should produce different contexts
         assert_ne!(context_ab, context_ac);
         assert_ne!(context_ab, context_ab_dm);
         assert_ne!(context_ab, context_ab_epoch1);
-        
+
         // Different contexts should produce different IDs
-        assert_ne!(context_ab.build_relationship_id(), context_ac.build_relationship_id());
-        assert_ne!(context_ab.build_relationship_id(), context_ab_dm.build_relationship_id());
-        assert_ne!(context_ab.build_relationship_id(), context_ab_epoch1.build_relationship_id());
+        assert_ne!(
+            context_ab.build_relationship_id(),
+            context_ac.build_relationship_id()
+        );
+        assert_ne!(
+            context_ab.build_relationship_id(),
+            context_ab_dm.build_relationship_id()
+        );
+        assert_ne!(
+            context_ab.build_relationship_id(),
+            context_ab_epoch1.build_relationship_id()
+        );
     }
 
     #[test]
     fn test_key_derivation_deterministic() {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        
+
         // Alice's perspective
         let alice_root = derive_test_root_key(alice_id);
         let mut alice_manager = RelationshipKeyManager::new(alice_id, alice_root);
-        
-        // Bob's perspective 
+
+        // Bob's perspective
         let bob_root = derive_test_root_key(bob_id);
         let mut bob_manager = RelationshipKeyManager::new(bob_id, bob_root);
-        
+
         // If Alice and Bob have same root key, they should derive same relationship key
         let shared_root = [0x42; 32]; // Simulating shared DKD output
         alice_manager.root_key = shared_root;
         bob_manager.root_key = shared_root;
-        
-        let alice_key = alice_manager.derive_relationship_key(bob_id, "sbb-envelope").unwrap();
-        let bob_key = bob_manager.derive_relationship_key(alice_id, "sbb-envelope").unwrap();
-        
-        assert_eq!(alice_key, bob_key, "Alice and Bob should derive identical relationship keys");
+
+        let alice_key = alice_manager
+            .derive_relationship_key(bob_id, "sbb-envelope")
+            .unwrap();
+        let bob_key = bob_manager
+            .derive_relationship_key(alice_id, "sbb-envelope")
+            .unwrap();
+
+        assert_eq!(
+            alice_key, bob_key,
+            "Alice and Bob should derive identical relationship keys"
+        );
     }
 
     #[test]
@@ -275,37 +277,47 @@ mod tests {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
         let root_key = [0x42; 32];
-        
+
         let mut manager = RelationshipKeyManager::new(alice_id, root_key);
-        
-        let key_epoch0 = manager.derive_relationship_key(bob_id, "sbb-envelope").unwrap();
-        
+
+        let key_epoch0 = manager
+            .derive_relationship_key(bob_id, "sbb-envelope")
+            .unwrap();
+
         manager.rotate_epoch();
-        let key_epoch1 = manager.derive_relationship_key(bob_id, "sbb-envelope").unwrap();
-        
+        let key_epoch1 = manager
+            .derive_relationship_key(bob_id, "sbb-envelope")
+            .unwrap();
+
         assert_ne!(key_epoch0, key_epoch1, "Keys should differ across epochs");
         assert_eq!(manager.current_epoch(), 1);
     }
 
-    #[test] 
+    #[test]
     fn test_key_caching() {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
         let root_key = [0x42; 32];
-        
+
         let mut manager = RelationshipKeyManager::new(alice_id, root_key);
-        
+
         assert_eq!(manager.cache_size(), 0);
-        
-        let _key1 = manager.derive_relationship_key(bob_id, "sbb-envelope").unwrap();
+
+        let _key1 = manager
+            .derive_relationship_key(bob_id, "sbb-envelope")
+            .unwrap();
         assert_eq!(manager.cache_size(), 1);
-        
-        let _key2 = manager.derive_relationship_key(bob_id, "sbb-envelope").unwrap(); // From cache
+
+        let _key2 = manager
+            .derive_relationship_key(bob_id, "sbb-envelope")
+            .unwrap(); // From cache
         assert_eq!(manager.cache_size(), 1);
-        
-        let _key3 = manager.derive_relationship_key(bob_id, "direct-message").unwrap(); // New context
+
+        let _key3 = manager
+            .derive_relationship_key(bob_id, "direct-message")
+            .unwrap(); // New context
         assert_eq!(manager.cache_size(), 2);
-        
+
         manager.clear_cache();
         assert_eq!(manager.cache_size(), 0);
     }
@@ -315,12 +327,19 @@ mod tests {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
         let root_key = [0x42; 32];
-        
+
         let mut manager = RelationshipKeyManager::new(alice_id, root_key);
-        
-        let sbb_key = manager.derive_relationship_key(bob_id, "sbb-envelope").unwrap();
-        let dm_key = manager.derive_relationship_key(bob_id, "direct-message").unwrap();
-        
-        assert_ne!(sbb_key, dm_key, "Different app contexts should produce different keys");
+
+        let sbb_key = manager
+            .derive_relationship_key(bob_id, "sbb-envelope")
+            .unwrap();
+        let dm_key = manager
+            .derive_relationship_key(bob_id, "direct-message")
+            .unwrap();
+
+        assert_ne!(
+            sbb_key, dm_key,
+            "Different app contexts should produce different keys"
+        );
     }
 }

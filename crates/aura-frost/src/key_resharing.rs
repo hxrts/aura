@@ -1,11 +1,11 @@
-//! Key Resharing and Rotation Choreography
+//! Key Resharing Protocol
 //!
-//! This module implements choreographic protocols for FROST key resharing
-//! and rotation operations.
+//! This module implements key resharing and rotation protocols for FROST
+//! threshold signatures using the Aura effect system pattern.
 
 use crate::{FrostError, FrostResult};
-use aura_core::{AccountId, DeviceId};
-use aura_crypto::frost::{PublicKeyPackage, Share};
+use aura_core::{AccountId, DeviceId, AuraError};
+use aura_protocol::effects::{NetworkEffects, CryptoEffects, TimeEffects, ConsoleEffects};
 use serde::{Deserialize, Serialize};
 
 /// Key resharing request
@@ -13,61 +13,83 @@ use serde::{Deserialize, Serialize};
 pub struct KeyResharingRequest {
     /// Account for key resharing
     pub account_id: AccountId,
-    /// Old threshold configuration
-    pub old_threshold: usize,
     /// New threshold configuration
     pub new_threshold: usize,
-    /// Old participants
-    pub old_participants: Vec<DeviceId>,
-    /// New participants
+    /// New participant set
     pub new_participants: Vec<DeviceId>,
-    /// Resharing justification
-    pub justification: String,
+    /// Session timeout in seconds
+    pub timeout_seconds: u64,
 }
 
 /// Key resharing response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyResharingResponse {
-    /// New public key package
-    pub new_public_key_package: Option<PublicKeyPackage>,
-    /// Old participants
-    pub old_participants: Vec<DeviceId>,
-    /// New participants
-    pub new_participants: Vec<DeviceId>,
-    /// Success status
+    /// Resharing successful
     pub success: bool,
-    /// Error message if failed
+    /// New participants
+    pub participants: Vec<DeviceId>,
+    /// Error message if any
     pub error: Option<String>,
 }
 
 /// Key resharing coordinator
 pub struct KeyResharingCoordinator {
-    // TODO: Implement key resharing coordinator
+    /// Device ID for this coordinator instance
+    pub device_id: DeviceId,
 }
 
 impl KeyResharingCoordinator {
-    /// Create new key resharing coordinator
-    pub fn new() -> Self {
-        Self {
-            // TODO: Initialize coordinator
-        }
+    /// Create a new key resharing coordinator
+    pub fn new(device_id: DeviceId) -> Self {
+        Self { device_id }
     }
 
     /// Execute key resharing
-    pub async fn reshare_key(
+    pub async fn execute_resharing<E>(
         &self,
         request: KeyResharingRequest,
-    ) -> FrostResult<KeyResharingResponse> {
-        tracing::info!("Starting key resharing for account: {}", request.account_id);
+        effects: &E,
+    ) -> FrostResult<KeyResharingResponse>
+    where
+        E: NetworkEffects + CryptoEffects + TimeEffects + ConsoleEffects,
+    {
+        effects.log_info(&format!("Starting key resharing for account {}", request.account_id), &[]);
 
-        // TODO: Implement key resharing choreography
+        // TODO: Implement actual key resharing protocol
+        // For now, return a placeholder response
 
         Ok(KeyResharingResponse {
-            new_public_key_package: None,
-            old_participants: request.old_participants,
-            new_participants: request.new_participants,
             success: false,
-            error: Some("Key resharing choreography not implemented".to_string()),
+            participants: request.new_participants,
+            error: Some("Key resharing not yet implemented".to_string()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resharing_coordinator_creation() {
+        let device_id = DeviceId::new();
+        let coordinator = KeyResharingCoordinator::new(device_id);
+        assert_eq!(coordinator.device_id, device_id);
+    }
+
+    #[test]
+    fn test_resharing_request_serialization() {
+        let request = KeyResharingRequest {
+            account_id: AccountId::new(),
+            new_threshold: 3,
+            new_participants: vec![DeviceId::new(), DeviceId::new(), DeviceId::new()],
+            timeout_seconds: 300,
+        };
+
+        let serialized = serde_json::to_vec(&request).unwrap();
+        let deserialized: KeyResharingRequest = serde_json::from_slice(&serialized).unwrap();
+        
+        assert_eq!(request.new_threshold, deserialized.new_threshold);
+        assert_eq!(request.new_participants.len(), deserialized.new_participants.len());
     }
 }

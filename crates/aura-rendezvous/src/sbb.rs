@@ -58,10 +58,10 @@ impl SbbEnvelope {
     pub fn new_encrypted(encrypted_payload: EncryptedEnvelope, ttl: Option<u8>) -> Self {
         let ttl = ttl.unwrap_or(6);
         let created_at = current_timestamp();
-        
+
         // Compute ID from encrypted payload for deduplication
         let id = Self::compute_encrypted_envelope_id(&encrypted_payload);
-        
+
         SbbEnvelope::Encrypted {
             id,
             ttl,
@@ -100,7 +100,12 @@ impl SbbEnvelope {
             SbbEnvelope::Plaintext(envelope) => {
                 envelope.decrement_ttl().map(SbbEnvelope::Plaintext)
             }
-            SbbEnvelope::Encrypted { id, ttl, created_at, encrypted_payload } => {
+            SbbEnvelope::Encrypted {
+                id,
+                ttl,
+                created_at,
+                encrypted_payload,
+            } => {
                 if ttl > 0 {
                     Some(SbbEnvelope::Encrypted {
                         id,
@@ -126,7 +131,9 @@ impl SbbEnvelope {
             SbbEnvelope::Plaintext(envelope) => {
                 32 + 1 + 8 + envelope.payload.len() // id + ttl + created_at + payload
             }
-            SbbEnvelope::Encrypted { encrypted_payload, .. } => {
+            SbbEnvelope::Encrypted {
+                encrypted_payload, ..
+            } => {
                 32 + 1 + 8 + encrypted_payload.size() // id + ttl + created_at + encrypted_payload
             }
         }
@@ -141,7 +148,7 @@ impl SbbEnvelope {
         if let Some(hint) = &encrypted_payload.key_hint {
             hasher.update(hint);
         }
-        
+
         let hash = hasher.finalize();
         let mut id = [0u8; 32];
         id.copy_from_slice(hash.as_bytes());
@@ -281,7 +288,8 @@ impl SbbFloodingCoordinator {
     /// Cache envelope to prevent duplicate processing
     fn cache_envelope(&mut self, envelope: &RendezvousEnvelope, expires_at: u64) {
         self.seen_envelopes.insert(envelope.id);
-        self.envelope_cache.insert(envelope.id, (envelope.clone(), expires_at));
+        self.envelope_cache
+            .insert(envelope.id, (envelope.clone(), expires_at));
     }
 
     /// Check if envelope was already seen
@@ -329,7 +337,7 @@ impl SbbFlooding for SbbFloodingCoordinator {
 
         // Get peers to forward to (exclude sender)
         let forwarding_peers = self.get_forwarding_peers(from_peer).await?;
-        
+
         if forwarding_peers.is_empty() {
             return Ok(FloodResult::Dropped);
         }
@@ -343,17 +351,22 @@ impl SbbFlooding for SbbFloodingCoordinator {
         // Forward to all capable peers
         let mut successful_forwards = 0;
         for peer in &forwarding_peers {
-            match self.forward_to_peer(forwarded_envelope.clone(), *peer).await {
+            match self
+                .forward_to_peer(forwarded_envelope.clone(), *peer)
+                .await
+            {
                 Ok(()) => successful_forwards += 1,
                 Err(_) => continue, // Ignore individual forward failures
             }
         }
 
         if successful_forwards > 0 {
-            Ok(FloodResult::Forwarded { peer_count: successful_forwards })
+            Ok(FloodResult::Forwarded {
+                peer_count: successful_forwards,
+            })
         } else {
-            Ok(FloodResult::Failed { 
-                reason: "All forwards failed".to_string() 
+            Ok(FloodResult::Failed {
+                reason: "All forwards failed".to_string(),
             })
         }
     }
@@ -364,7 +377,8 @@ impl SbbFlooding for SbbFloodingCoordinator {
 
         // Add guardians first (preferred for reliability)
         for guardian in &self.guardians {
-            if Some(*guardian) != exclude && self.can_forward_to(guardian, SBB_MESSAGE_SIZE).await? {
+            if Some(*guardian) != exclude && self.can_forward_to(guardian, SBB_MESSAGE_SIZE).await?
+            {
                 peers.push(*guardian);
             }
         }
@@ -431,7 +445,7 @@ mod tests {
     fn test_ttl_decrement() {
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(2));
-        
+
         let decremented = envelope.decrement_ttl().unwrap();
         assert_eq!(decremented.ttl, 1);
 
@@ -446,7 +460,7 @@ mod tests {
     fn test_flooding_coordinator_creation() {
         let device_id = DeviceId::new();
         let coordinator = SbbFloodingCoordinator::new(device_id);
-        
+
         assert_eq!(coordinator.device_id, device_id);
         assert!(coordinator.friends.is_empty());
         assert!(coordinator.guardians.is_empty());
@@ -457,21 +471,21 @@ mod tests {
     fn test_relationship_management() {
         let device_id = DeviceId::new();
         let mut coordinator = SbbFloodingCoordinator::new(device_id);
-        
+
         let friend_id = DeviceId::new();
         let guardian_id = DeviceId::new();
-        
+
         coordinator.add_friend(friend_id);
         coordinator.add_guardian(guardian_id);
-        
+
         assert_eq!(coordinator.friends.len(), 1);
         assert_eq!(coordinator.guardians.len(), 1);
         assert!(coordinator.friends.contains(&friend_id));
         assert!(coordinator.guardians.contains(&guardian_id));
-        
+
         coordinator.remove_friend(&friend_id);
         coordinator.remove_guardian(&guardian_id);
-        
+
         assert!(coordinator.friends.is_empty());
         assert!(coordinator.guardians.is_empty());
     }
@@ -480,16 +494,16 @@ mod tests {
     fn test_duplicate_detection() {
         let device_id = DeviceId::new();
         let mut coordinator = SbbFloodingCoordinator::new(device_id);
-        
+
         let payload = b"test envelope".to_vec();
         let envelope = RendezvousEnvelope::new(payload, None);
-        
+
         // Should not be duplicate initially
         assert!(!coordinator.is_duplicate(&envelope.id));
-        
+
         // Cache envelope
         coordinator.cache_envelope(&envelope, current_timestamp() + 3600);
-        
+
         // Should now be detected as duplicate
         assert!(coordinator.is_duplicate(&envelope.id));
     }
@@ -498,10 +512,10 @@ mod tests {
     async fn test_flood_with_zero_ttl() {
         let device_id = DeviceId::new();
         let mut coordinator = SbbFloodingCoordinator::new(device_id);
-        
+
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(0));
-        
+
         let result = coordinator.flood_envelope(envelope, None).await.unwrap();
         match result {
             FloodResult::Dropped => (), // Expected
@@ -513,17 +527,20 @@ mod tests {
     async fn test_flood_duplicate_envelope() {
         let device_id = DeviceId::new();
         let mut coordinator = SbbFloodingCoordinator::new(device_id);
-        
+
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(2));
-        
+
         // First flood should succeed (though no peers to forward to)
-        let result1 = coordinator.flood_envelope(envelope.clone(), None).await.unwrap();
+        let result1 = coordinator
+            .flood_envelope(envelope.clone(), None)
+            .await
+            .unwrap();
         match result1 {
             FloodResult::Dropped => (), // No peers to forward to
             _ => (),
         }
-        
+
         // Second flood of same envelope should be dropped as duplicate
         let result2 = coordinator.flood_envelope(envelope, None).await.unwrap();
         match result2 {
@@ -537,7 +554,7 @@ mod tests {
         // Test plaintext envelope
         let payload = b"test transport offer".to_vec();
         let plaintext_env = SbbEnvelope::new_plaintext(payload.clone(), Some(4));
-        
+
         assert_eq!(plaintext_env.ttl(), 4);
         match plaintext_env {
             SbbEnvelope::Plaintext(env) => assert_eq!(env.payload, payload),
@@ -548,38 +565,40 @@ mod tests {
         use crate::envelope_encryption::EncryptedEnvelope;
         let encrypted_payload = EncryptedEnvelope::new([1; 12], vec![0; 1024], Some([1, 2, 3, 4]));
         let encrypted_env = SbbEnvelope::new_encrypted(encrypted_payload, Some(3));
-        
+
         assert_eq!(encrypted_env.ttl(), 3);
         match encrypted_env {
-            SbbEnvelope::Encrypted { encrypted_payload, .. } => {
+            SbbEnvelope::Encrypted {
+                encrypted_payload, ..
+            } => {
                 assert_eq!(encrypted_payload.ciphertext.len(), 1024);
-            },
+            }
             _ => panic!("Expected encrypted envelope"),
         }
     }
 
-    #[test] 
+    #[test]
     fn test_sbb_envelope_ttl_decrement() {
         // Test plaintext envelope TTL
         let payload = b"test".to_vec();
         let plaintext_env = SbbEnvelope::new_plaintext(payload, Some(2));
-        
+
         let decremented = plaintext_env.decrement_ttl().unwrap();
         assert_eq!(decremented.ttl(), 1);
-        
+
         let final_env = decremented.decrement_ttl().unwrap();
         assert_eq!(final_env.ttl(), 0);
-        
+
         assert!(final_env.decrement_ttl().is_none());
 
-        // Test encrypted envelope TTL  
+        // Test encrypted envelope TTL
         use crate::envelope_encryption::EncryptedEnvelope;
         let encrypted_payload = EncryptedEnvelope::new([1; 12], vec![0; 1024], None);
         let encrypted_env = SbbEnvelope::new_encrypted(encrypted_payload, Some(1));
-        
+
         let decremented = encrypted_env.decrement_ttl().unwrap();
         assert_eq!(decremented.ttl(), 0);
-        
+
         assert!(decremented.decrement_ttl().is_none());
     }
 
@@ -602,13 +621,13 @@ mod tests {
     #[test]
     fn test_encrypted_envelope_id_uniqueness() {
         use crate::envelope_encryption::EncryptedEnvelope;
-        
+
         let encrypted1 = EncryptedEnvelope::new([1; 12], vec![0; 1024], None);
         let encrypted2 = EncryptedEnvelope::new([2; 12], vec![0; 1024], None); // Different nonce
-        
+
         let env1 = SbbEnvelope::new_encrypted(encrypted1, Some(3));
         let env2 = SbbEnvelope::new_encrypted(encrypted2, Some(3));
-        
+
         // Different encrypted payloads should produce different IDs
         assert_ne!(env1.id(), env2.id());
     }

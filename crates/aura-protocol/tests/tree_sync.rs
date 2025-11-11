@@ -9,15 +9,16 @@
 //! - Network partition healing
 
 use aura_core::tree::{
-    AttestedOp, Epoch, Hash32, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
+    AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
 };
+use aura_core::{DeviceId, Hash32};
 use aura_protocol::{
-    choreography::protocols::{
-        anti_entropy::perform_sync, broadcast::announce_new_operation,
-        threshold_ceremony::execute_ceremony,
-    },
+    // choreography::protocols::{
+    //     anti_entropy::perform_sync, broadcast::announce_new_operation,
+    //     threshold_ceremony::execute_ceremony,
+    // },
     effects::{sync::SyncEffects, tree::TreeEffects},
-    handlers::sync::{anti_entropy::AntiEntropyHandler, broadcaster::BroadcasterHandler},
+    // handlers::sync::{anti_entropy::AntiEntropyHandler, broadcaster::BroadcasterHandler},
     sync::{IntentState, PeerView},
 };
 use std::collections::BTreeMap;
@@ -39,7 +40,7 @@ fn create_test_op(epoch: u64, leaf_id: u32, op_type: &str) -> AttestedOp {
                 leaf_id: LeafId(leaf_id),
                 role: LeafRole::Device,
                 public_key: vec![0u8; 32],
-                meta: BTreeMap::new(),
+                meta: vec![],
             },
             under: NodeIndex(0),
         },
@@ -59,7 +60,7 @@ fn create_test_op(epoch: u64, leaf_id: u32, op_type: &str) -> AttestedOp {
 
     AttestedOp {
         op: TreeOp {
-            parent_epoch: Epoch(epoch),
+            parent_epoch: epoch,
             parent_commitment,
             op,
             version: 1,
@@ -74,7 +75,7 @@ fn compute_cid(op: &AttestedOp) -> Hash32 {
     use blake3::Hasher;
     let mut hasher = Hasher::new();
     hasher.update(b"ATTESTED_OP");
-    hasher.update(&op.op.parent_epoch.0.to_le_bytes());
+    hasher.update(&op.op.parent_epoch.to_le_bytes());
     hasher.update(&op.op.parent_commitment);
     hasher.update(&[op.op.version]);
     hasher.update(&(op.signer_count as u64).to_le_bytes());
@@ -459,7 +460,7 @@ async fn test_snapshot_coordination_concept() {
     use aura_core::tree::snapshot::{Cut, Partial, ProposalId, Snapshot};
 
     let proposer = LeafId(1);
-    let epoch = Epoch(100);
+    let epoch = (100);
     let commitment = [0u8; 32];
 
     // Proposer creates snapshot cut

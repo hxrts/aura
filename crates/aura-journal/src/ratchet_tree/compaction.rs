@@ -1,6 +1,7 @@
 use crate::semilattice::OpLog;
-use aura_core::tree::{AttestedOp, Snapshot};
-use std::collections::BTreeSet;
+use aura_core::tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, Snapshot, Epoch, TreeOp, TreeOpKind, TreeHash32};
+use aura_core::Hash32;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Compact an OpLog by replacing history before a snapshot with the snapshot fact
 ///
@@ -49,8 +50,8 @@ pub fn compact(oplog: &OpLog, snapshot: &Snapshot) -> Result<OpLog, CompactionEr
     let mut compacted = OpLog::new();
 
     // Add snapshot as a special "fact" operation
-    // TODO fix - In a real implementation, this would be a special OpKind::SnapshotFact
-    // TODO fix - For now, we just skip adding before_cut and keep after_cut
+    let snapshot_fact = create_snapshot_fact_operation(&snapshot, snapshot.epoch)?;
+    compacted.append(snapshot_fact);
 
     // Add all operations after cut
     for op in after_cut {
@@ -58,6 +59,138 @@ pub fn compact(oplog: &OpLog, snapshot: &Snapshot) -> Result<OpLog, CompactionEr
     }
 
     Ok(compacted)
+}
+
+/// Create a snapshot fact operation from a snapshot
+fn create_snapshot_fact_operation(snapshot: &Snapshot, cut_epoch: Epoch) -> Result<AttestedOp, CompactionError> {
+    use blake3::Hasher;
+
+    // Create a special tree operation that represents the snapshot fact
+    // For now, use RotateEpoch as a placeholder since SnapshotFact doesn't exist
+    let snapshot_op = TreeOpKind::RotateEpoch {
+        affected: snapshot.roster.iter().map(|leaf_id| NodeIndex(leaf_id.0)).collect(),
+    };
+
+    let tree_op = TreeOp {
+        parent_epoch: cut_epoch.saturating_sub(1),
+        parent_commitment: snapshot.commitment,
+        op: snapshot_op,
+        version: 1,
+    };
+
+    // Create a minimal signature for the snapshot fact
+    let aggregate_signature = create_snapshot_signature(&tree_op)?;
+
+    let attested_op = AttestedOp {
+        op: tree_op,
+        agg_sig: aggregate_signature,
+        signer_count: 1,
+    };
+
+    Ok(attested_op)
+}
+
+/// Serialize snapshot metadata for inclusion in snapshot fact
+fn serialize_snapshot_metadata(snapshot: &Snapshot) -> Result<Vec<u8>, CompactionError> {
+    use std::io::Write;
+    
+    let mut buffer = Vec::new();
+    
+    // Write epoch
+    buffer.write_all(&snapshot.epoch.to_be_bytes())
+        .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
+    
+    // Write tree hash
+    buffer.write_all(&snapshot.commitment)
+        .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
+    
+    // Write roster size
+    buffer.write_all(&(snapshot.roster.len() as u32).to_be_bytes())
+        .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
+    
+    // Write each leaf in roster
+    for leaf_id in &snapshot.roster {
+        let leaf_bytes = serialize_leaf_id(leaf_id)?;
+        buffer.write_all(&(leaf_bytes.len() as u32).to_be_bytes())
+            .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
+        buffer.write_all(&leaf_bytes)
+            .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
+    }
+    
+    Ok(buffer)
+}
+
+/// Serialize a leaf ID for snapshot metadata
+fn serialize_leaf_id(leaf_id: &LeafId) -> Result<Vec<u8>, CompactionError> {
+    // This is simplified - real implementation would use proper serialization
+    let mut buffer = Vec::new();
+    
+    // Write leaf ID
+    buffer.extend_from_slice(&leaf_id.0.to_be_bytes());
+    
+    Ok(buffer)
+}
+
+/// Create a signature for the snapshot fact operation
+fn create_snapshot_signature(tree_op: &aura_core::tree::TreeOp) -> Result<Vec<u8>, CompactionError> {
+    use blake3::Hasher;
+    
+    let mut hasher = Hasher::new();
+    hasher.update(b"SNAPSHOT_FACT");
+    hasher.update(&tree_op.parent_epoch.to_be_bytes());
+    hasher.update(&tree_op.parent_commitment);
+    
+    // Hash the operation
+    let op_bytes = serialize_tree_op(tree_op)?;
+    hasher.update(&op_bytes);
+    
+    let hash = hasher.finalize();
+    Ok(hash.as_bytes()[..64].to_vec()) // 64-byte signature
+}
+
+/// Serialize a tree operation for hashing/signing
+fn serialize_tree_op(tree_op: &aura_core::tree::TreeOp) -> Result<Vec<u8>, CompactionError> {
+    // This is simplified - real implementation would use proper serialization
+    let mut buffer = Vec::new();
+    
+    // Write parent epoch
+    buffer.extend_from_slice(&tree_op.parent_epoch.to_be_bytes());
+    
+    // Write parent commitment
+    buffer.extend_from_slice(&tree_op.parent_commitment);
+    
+    // Write operation type and version
+    buffer.extend_from_slice(&tree_op.version.to_be_bytes());
+    
+    match &tree_op.op {
+        aura_core::TreeOpKind::RotateEpoch { affected } => {
+            buffer.push(4); // Opcode for rotate epoch
+            buffer.extend_from_slice(&(affected.len() as u32).to_be_bytes());
+            for node in affected {
+                buffer.extend_from_slice(&node.0.to_be_bytes());
+            }
+        }
+        aura_core::TreeOpKind::AddLeaf { leaf, under } => {
+            buffer.push(1); // Opcode for add leaf
+            buffer.extend_from_slice(&leaf.leaf_id.0.to_be_bytes());
+            buffer.extend_from_slice(&under.0.to_be_bytes());
+        }
+        aura_core::TreeOpKind::RemoveLeaf { leaf, reason } => {
+            buffer.push(2); // Opcode for remove leaf
+            buffer.extend_from_slice(&leaf.0.to_be_bytes());
+            buffer.push(*reason);
+        }
+        aura_core::TreeOpKind::ChangePolicy { node, new_policy } => {
+            buffer.push(3); // Opcode for change policy
+            buffer.extend_from_slice(&node.0.to_be_bytes());
+            // Serialize policy (simplified)
+            let policy_bytes = serde_json::to_vec(new_policy)
+                .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
+            buffer.extend_from_slice(&policy_bytes);
+        }
+    }
+    
+    Ok(buffer)
 }
 
 /// Partition operations by epoch relative to snapshot
@@ -138,13 +271,13 @@ pub fn verify_join_preserving(
 pub fn verify_retraction(oplog: &OpLog, snapshot: &Snapshot) -> Result<bool, CompactionError> {
     let compacted = compact(oplog, snapshot)?;
 
-    let original_cids: BTreeSet<Hash32> = oplog
+    let original_cids: BTreeSet<[u8; 32]> = oplog
         .list_ops()
         .iter()
         .map(|op| op.op.parent_commitment)
         .collect();
 
-    let compacted_cids: BTreeSet<Hash32> = compacted
+    let compacted_cids: BTreeSet<[u8; 32]> = compacted
         .list_ops()
         .iter()
         .map(|op| op.op.parent_commitment)
@@ -168,18 +301,22 @@ pub enum CompactionError {
     /// Compaction would violate invariants
     #[error("Compaction invariant violation: {0}")]
     InvariantViolation(String),
+
+    /// Serialization error
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_core::{
-        tree::{Epoch, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind},
+        tree::{Epoch, LeafId, LeafNode, NodeIndex, Policy, TreeOp, TreeOpKind},
         Hash32,
     };
     use std::collections::BTreeMap;
 
-    fn create_test_op(epoch: u64, commitment: Hash32, leaf_id: u8) -> AttestedOp {
+    fn create_test_op(epoch: u64, commitment: [u8; 32], leaf_id: u8) -> AttestedOp {
         let device_id = aura_core::DeviceId::new();
         AttestedOp {
             op: TreeOp {
@@ -219,22 +356,22 @@ mod tests {
     #[test]
     fn test_compact_all_before_cut() {
         let mut oplog = OpLog::new();
-        oplog.add_operation(create_test_op(1, [1u8; 32], 1));
-        oplog.add_operation(create_test_op(2, [2u8; 32], 2));
-        oplog.add_operation(create_test_op(3, [3u8; 32], 3));
+        oplog.append(create_test_op(1, [1u8; 32], 1));
+        oplog.append(create_test_op(2, [2u8; 32], 2));
+        oplog.append(create_test_op(3, [3u8; 32], 3));
 
         let snapshot = create_test_snapshot(5, vec![1, 2, 3]);
 
         let compacted = compact(&oplog, &snapshot).unwrap();
-        // All ops before cut should be removed
-        assert_eq!(compacted.list_ops().len(), 0);
+        // All ops before cut should be replaced with one snapshot fact
+        assert_eq!(compacted.list_ops().len(), 1);
     }
 
     #[test]
     fn test_compact_all_after_cut() {
         let mut oplog = OpLog::new();
-        oplog.add_operation(create_test_op(6, [1u8; 32], 1));
-        oplog.add_operation(create_test_op(7, [2u8; 32], 2));
+        oplog.append(create_test_op(6, [1u8; 32], 1));
+        oplog.append(create_test_op(7, [2u8; 32], 2));
 
         let snapshot = create_test_snapshot(5, vec![1]);
 
@@ -246,18 +383,18 @@ mod tests {
     #[test]
     fn test_compact_mixed() {
         let mut oplog = OpLog::new();
-        oplog.add_operation(create_test_op(1, [1u8; 32], 1));
-        oplog.add_operation(create_test_op(2, [2u8; 32], 2));
-        oplog.add_operation(create_test_op(6, [3u8; 32], 3));
-        oplog.add_operation(create_test_op(7, [4u8; 32], 4));
+        oplog.append(create_test_op(1, [1u8; 32], 1));
+        oplog.append(create_test_op(2, [2u8; 32], 2));
+        oplog.append(create_test_op(6, [3u8; 32], 3));
+        oplog.append(create_test_op(7, [4u8; 32], 4));
 
         let snapshot = create_test_snapshot(5, vec![1, 2]);
 
         let compacted = compact(&oplog, &snapshot).unwrap();
-        // Only ops after epoch 5 should remain
-        assert_eq!(compacted.list_ops().len(), 2);
+        // Snapshot fact + 2 ops after epoch 5 should remain
+        assert_eq!(compacted.list_ops().len(), 3);
 
-        let cids: Vec<Hash32> = compacted
+        let cids: Vec<[u8; 32]> = compacted
             .list_ops()
             .iter()
             .map(|op| op.op.parent_commitment)
@@ -316,10 +453,10 @@ mod tests {
         use crate::semilattice::JoinSemilattice;
 
         let mut oplog1 = OpLog::new();
-        oplog1.add_operation(create_test_op(1, [1u8; 32], 1));
+        oplog1.append(create_test_op(1, [1u8; 32], 1));
 
         let mut oplog2 = OpLog::new();
-        oplog2.add_operation(create_test_op(2, [2u8; 32], 2));
+        oplog2.append(create_test_op(2, [2u8; 32], 2));
 
         let snapshot = create_test_snapshot(5, vec![1, 2]);
 
@@ -331,9 +468,9 @@ mod tests {
     #[test]
     fn test_verify_retraction() {
         let mut oplog = OpLog::new();
-        oplog.add_operation(create_test_op(1, [1u8; 32], 1));
-        oplog.add_operation(create_test_op(2, [2u8; 32], 2));
-        oplog.add_operation(create_test_op(6, [3u8; 32], 3));
+        oplog.append(create_test_op(1, [1u8; 32], 1));
+        oplog.append(create_test_op(2, [2u8; 32], 2));
+        oplog.append(create_test_op(6, [3u8; 32], 3));
 
         let snapshot = create_test_snapshot(5, vec![1, 2]);
 
@@ -345,8 +482,8 @@ mod tests {
     #[test]
     fn test_idempotent_compaction() {
         let mut oplog = OpLog::new();
-        oplog.add_operation(create_test_op(1, [1u8; 32], 1));
-        oplog.add_operation(create_test_op(6, [2u8; 32], 2));
+        oplog.append(create_test_op(1, [1u8; 32], 1));
+        oplog.append(create_test_op(6, [2u8; 32], 2));
 
         let snapshot = create_test_snapshot(5, vec![1]);
 

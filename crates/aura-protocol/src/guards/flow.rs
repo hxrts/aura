@@ -7,7 +7,7 @@
 //! `docs/103_information_flow_budget.md`.
 
 use async_trait::async_trait;
-use aura_core::{relationships::ContextId, AuraResult, DeviceId};
+use aura_core::{relationships::ContextId, AuraResult, DeviceId, Receipt};
 use serde::{Deserialize, Serialize};
 
 /// Hint describing which flow bucket should be charged before a send.
@@ -31,7 +31,12 @@ impl FlowHint {
 /// Trait implemented by effect systems that can charge flow budgets.
 #[async_trait]
 pub trait FlowBudgetEffects: Send + Sync {
-    async fn charge_flow(&self, context: &ContextId, peer: &DeviceId, cost: u32) -> AuraResult<()>;
+    async fn charge_flow(
+        &self,
+        context: &ContextId,
+        peer: &DeviceId,
+        cost: u32,
+    ) -> AuraResult<Receipt>;
 }
 
 /// Guard that must run before every transport send.
@@ -55,7 +60,7 @@ impl FlowGuard {
         &self.hint
     }
 
-    pub async fn authorize(&self, effects: &impl FlowBudgetEffects) -> AuraResult<()> {
+    pub async fn authorize(&self, effects: &impl FlowBudgetEffects) -> AuraResult<Receipt> {
         effects
             .charge_flow(&self.hint.context, &self.hint.peer, self.hint.cost)
             .await

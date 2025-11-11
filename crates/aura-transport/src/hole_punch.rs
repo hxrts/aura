@@ -410,7 +410,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_punch_session_creation() {
-        let device_id = DeviceId("test_device".to_string());
+        let device_id = DeviceId::from("test_device");
         let bind_addr = "127.0.0.1:0".parse().unwrap();
         let config = PunchConfig::default();
 
@@ -425,7 +425,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_punch_session_timeout() {
-        let device_id = DeviceId("test_device".to_string());
+        let device_id = DeviceId::from("test_device");
         let bind_addr = "127.0.0.1:0".parse().unwrap();
         let config = PunchConfig {
             punch_duration: Duration::from_millis(100), // Very short for test

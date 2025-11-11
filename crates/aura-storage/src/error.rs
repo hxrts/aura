@@ -108,9 +108,7 @@ impl From<StorageError> for aura_core::AuraError {
             StorageError::ContentNotFound { .. } | StorageError::ChunkNotFound { .. } => {
                 aura_core::AuraError::not_found(err.to_string())
             }
-            StorageError::QuotaExceeded { .. } => {
-                aura_core::AuraError::storage(err.to_string())
-            }
+            StorageError::QuotaExceeded { .. } => aura_core::AuraError::storage(err.to_string()),
             StorageError::ContentCorruption { .. } => {
                 aura_core::AuraError::storage(err.to_string())
             }

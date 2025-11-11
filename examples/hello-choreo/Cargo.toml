@@ -1,0 +1,12 @@
+[package]
+name = "hello-choreo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.35", features = ["macros", "rt-multi-thread", "time"] }
+futures = "0.3"
+rumpsteak-aura = "0.2.3"
+rumpsteak-aura-choreography = "0.2.3"
+bincode = "1.3"

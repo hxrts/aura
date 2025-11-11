@@ -13,7 +13,10 @@ use crate::maintenance::{MaintenanceController, SnapshotOutcome};
 use crate::middleware::{AgentMiddlewareStack, MiddlewareStackBuilder};
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_protocol::effects::{AuraEffectSystem, SessionType};
-use aura_sync::WriterFence;
+// use aura_sync::WriterFence;  // Temporarily disabled - needs refactor to effect system
+
+// Temporary placeholder type until aura-sync is refactored
+use crate::maintenance::WriterFence;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

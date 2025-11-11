@@ -12,6 +12,7 @@ pub mod chaos_coordination;
 pub mod fault_simulation;
 pub mod handler;
 pub mod property_checking;
+pub mod retry;
 pub mod scenario_injection;
 pub mod stack;
 pub mod state_inspection;
@@ -36,6 +37,7 @@ pub use property_checking::{
     PropertyCheckResult, PropertyChecker, PropertyCheckingMiddleware, PropertyType,
     PropertyViolation,
 };
+pub use retry::{RetryConfig, RetryMiddleware};
 pub use scenario_injection::{
     InjectionAction, ScenarioDefinition, ScenarioInjectionMiddleware, TriggerCondition,
 };

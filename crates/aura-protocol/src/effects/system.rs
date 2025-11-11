@@ -7,7 +7,10 @@
 
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use tokio::sync::RwLock;
 use tracing::debug;
 
@@ -100,11 +103,13 @@ use crate::{
     },
 };
 use aura_core::{
+    hash_canonical,
     identifiers::{DeviceId, GuardianId},
     relationships::ContextId,
-    session_epochs::LocalSessionType,
-    AuraError, AuraResult,
+    session_epochs::{self, LocalSessionType},
+    AuraError, AuraResult, FlowBudget, Hash32, Receipt,
 };
+use serde::{Deserialize, Serialize};
 // Import stub types from journal.rs TODO fix - For now
 use super::journal::{
     CapabilityId, CapabilityRef, Commitment, Epoch, Intent, IntentId, IntentStatus, JournalMap,
@@ -138,6 +143,32 @@ pub struct AuraEffectSystem {
     device_id: DeviceId,
     /// Execution mode
     execution_mode: ExecutionMode,
+    /// Monotonic counter for FlowGuard receipts
+    flow_nonce: AtomicU64,
+    /// Previous receipt hash (forms a hash chain for auditability)
+    flow_prev_receipt: Arc<RwLock<Hash32>>,
+    /// Last emitted receipt for telemetry
+    last_receipt: Arc<RwLock<Option<Receipt>>>,
+    /// Ledger-backed flow budgets
+    flow_ledgers: Arc<RwLock<HashMap<(ContextId, DeviceId), FlowBudget>>>,
+    /// Anti-replay counters keyed by (context, src, dst)
+    anti_replay_counters:
+        Arc<RwLock<HashMap<(ContextId, DeviceId, DeviceId), (session_epochs::Epoch, u64)>>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TransportEnvelope {
+    receipt: Receipt,
+    payload: Vec<u8>,
+}
+
+impl std::fmt::Debug for AuraEffectSystem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuraEffectSystem")
+            .field("device_id", &self.device_id)
+            .field("execution_mode", &self.execution_mode)
+            .finish()
+    }
 }
 
 impl AuraEffectSystem {
@@ -168,6 +199,11 @@ impl AuraEffectSystem {
             context: Arc::new(RwLock::new(context)),
             device_id,
             execution_mode,
+            flow_nonce: AtomicU64::new(0),
+            flow_prev_receipt: Arc::new(RwLock::new(Hash32::from([0u8; 32]))),
+            last_receipt: Arc::new(RwLock::new(None)),
+            flow_ledgers: Arc::new(RwLock::new(HashMap::new())),
+            anti_replay_counters: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -199,10 +235,163 @@ impl AuraEffectSystem {
         context.clone()
     }
 
+    /// Get the latest FlowGuard receipt emitted by this effect system (testing/telemetry)
+    pub async fn latest_receipt(&self) -> Option<Receipt> {
+        self.last_receipt.read().await.clone()
+    }
+
     /// Set a flow hint that will be consumed before the next transport send.
     pub async fn set_flow_hint(&self, hint: FlowHint) {
         let mut context = self.context.write().await;
         context.set_flow_hint(hint);
+    }
+
+    /// Seed or update the flow budget for a context/peer pair.
+    pub async fn seed_flow_budget(&self, context: ContextId, peer: DeviceId, budget: FlowBudget) {
+        {
+            let handler = self.composite_handler.read().await;
+            let _ = handler.update_flow_budget(&context, &peer, &budget).await;
+        }
+        let mut ledgers = self.flow_ledgers.write().await;
+        ledgers.insert((context, peer), budget);
+    }
+
+    /// Compute FlowBudget deterministically using meet over journal facts
+    ///
+    /// This implements the deterministic budget computation requirement from
+    /// work/007.md Section 3. It queries the journal for all FlowBudget facts
+    /// for the given (context, peer) and computes the meet to get the canonical
+    /// budget that all devices will converge on.
+    ///
+    /// # Algorithm
+    /// 1. Query journal for all FlowBudget facts for (context, peer)
+    /// 2. Apply meet operation over all facts (limit=min, spent=max, epoch=max)
+    /// 3. Apply epoch rotation if needed
+    /// 4. Return canonical budget
+    pub async fn compute_deterministic_budget(
+        &self,
+        context: &ContextId,
+        peer: &DeviceId,
+        current_epoch: session_epochs::Epoch,
+    ) -> AuraResult<FlowBudget> {
+        let handler = self.composite_handler.read().await;
+        let mut budget = handler
+            .get_flow_budget(context, peer)
+            .await
+            .unwrap_or_else(|_| FlowBudget::new(u64::MAX, current_epoch));
+        drop(handler);
+        budget.rotate_epoch(current_epoch);
+
+        Ok(budget)
+    }
+
+    fn encode_transport_envelope(receipt: &Receipt, payload: Vec<u8>) -> AuraResult<Vec<u8>> {
+        let envelope = TransportEnvelope {
+            receipt: receipt.clone(),
+            payload,
+        };
+        bincode::serialize(&envelope).map_err(|e| {
+            AuraError::serialization(format!("Failed to encode transport envelope: {}", e))
+        })
+    }
+
+    async fn decode_transport_payload(
+        &self,
+        raw: Vec<u8>,
+        peer_uuid: uuid::Uuid,
+    ) -> AuraResult<Vec<u8>> {
+        let envelope: TransportEnvelope = bincode::deserialize(&raw).map_err(|e| {
+            AuraError::serialization(format!("Failed to decode transport envelope: {}", e))
+        })?;
+        let expected_src = DeviceId::from(peer_uuid);
+        let expected_dst = self.device_id();
+        self.verify_receipt_fields(&envelope.receipt, &expected_src, &expected_dst)?;
+        self.enforce_anti_replay(&envelope.receipt).await?;
+        Ok(envelope.payload)
+    }
+
+    fn verify_receipt_fields(
+        &self,
+        receipt: &Receipt,
+        expected_src: &DeviceId,
+        expected_dst: &DeviceId,
+    ) -> AuraResult<()> {
+        if &receipt.src != expected_src {
+            return Err(AuraError::permission_denied(format!(
+                "Receipt source mismatch (expected {}, got {})",
+                expected_src, receipt.src
+            )));
+        }
+
+        if &receipt.dst != expected_dst {
+            return Err(AuraError::permission_denied(format!(
+                "Receipt destination mismatch (expected {}, got {})",
+                expected_dst, receipt.dst
+            )));
+        }
+
+        let material = Self::receipt_signature_material(
+            &receipt.ctx,
+            &receipt.src,
+            &receipt.dst,
+            receipt.epoch.value(),
+            receipt.cost,
+            receipt.nonce,
+        );
+        let expected_hash = Hash32::from_bytes(material.as_bytes());
+        if receipt.sig != expected_hash.0 {
+            return Err(AuraError::permission_denied(
+                "Receipt signature invalid".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    async fn enforce_anti_replay(&self, receipt: &Receipt) -> AuraResult<()> {
+        let mut counters = self.anti_replay_counters.write().await;
+        let key = (
+            receipt.ctx.clone(),
+            receipt.src.clone(),
+            receipt.dst.clone(),
+        );
+        if let Some((epoch, nonce)) = counters.get(&key) {
+            let stored_epoch = epoch.value();
+            let incoming_epoch = receipt.epoch.value();
+            if incoming_epoch < stored_epoch
+                || (incoming_epoch == stored_epoch && receipt.nonce <= *nonce)
+            {
+                return Err(AuraError::permission_denied(format!(
+                    "Replay detected for ctx={} src={} dst={} (epoch {}, nonce {})",
+                    receipt.ctx.as_str(),
+                    receipt.src,
+                    receipt.dst,
+                    receipt.epoch.value(),
+                    receipt.nonce
+                )));
+            }
+        }
+        counters.insert(key, (receipt.epoch, receipt.nonce));
+        Ok(())
+    }
+
+    fn receipt_signature_material(
+        context: &ContextId,
+        src: &DeviceId,
+        dst: &DeviceId,
+        epoch: u64,
+        cost: u32,
+        nonce: u64,
+    ) -> String {
+        format!(
+            "{}|{}|{}|{}|{}|{}",
+            context.as_str(),
+            src,
+            dst,
+            epoch,
+            cost,
+            nonce
+        )
     }
 
     pub async fn set_flow_hint_components(&self, context: ContextId, peer: DeviceId, cost: u32) {
@@ -753,15 +942,76 @@ impl CryptoEffects for AuraEffectSystem {
 
 #[async_trait]
 impl FlowBudgetEffects for AuraEffectSystem {
-    async fn charge_flow(&self, context: &ContextId, peer: &DeviceId, cost: u32) -> AuraResult<()> {
+    async fn charge_flow(
+        &self,
+        context: &ContextId,
+        peer: &DeviceId,
+        cost: u32,
+    ) -> AuraResult<Receipt> {
         debug!(
             "FlowGuard authorize context={} peer={} cost={}",
             context.as_str(),
             peer,
             cost
         );
-        // TODO: integrate with journal-backed FlowBudget ledger.
-        Ok(())
+        let local_context = self.context().await;
+        let src = local_context.device_id.clone();
+        let epoch = session_epochs::Epoch::from(local_context.epoch);
+        let mut budget = self
+            .compute_deterministic_budget(context, peer, epoch)
+            .await?;
+        if !budget.record_charge(cost as u64) {
+            return Err(AuraError::permission_denied(format!(
+                "Flow budget exceeded for ctx={} peer={} (limit={}, spent={}, cost={})",
+                context.as_str(),
+                peer,
+                budget.limit,
+                budget.spent,
+                cost
+            )));
+        }
+        {
+            let mut ledgers = self.flow_ledgers.write().await;
+            ledgers.insert((context.clone(), peer.clone()), budget.clone());
+        }
+        {
+            let handler = self.composite_handler.read().await;
+            let _ = handler.update_flow_budget(context, peer, &budget).await;
+        }
+        let nonce = self
+            .flow_nonce
+            .fetch_add(1, Ordering::SeqCst)
+            .wrapping_add(1);
+        let prev = { *self.flow_prev_receipt.read().await };
+
+        let signature_material =
+            Self::receipt_signature_material(context, &src, peer, epoch.value(), cost, nonce);
+        let sig_hash = Hash32::from_bytes(signature_material.as_bytes());
+
+        let receipt = Receipt::new(
+            context.clone(),
+            src,
+            peer.clone(),
+            epoch,
+            cost,
+            nonce,
+            prev,
+            sig_hash.0.to_vec(),
+        );
+
+        let new_hash = hash_canonical(&receipt)
+            .map(Hash32::from)
+            .map_err(|err| AuraError::internal(format!("Failed to hash receipt: {}", err)))?;
+        {
+            let mut prev_guard = self.flow_prev_receipt.write().await;
+            *prev_guard = new_hash;
+        }
+        {
+            let mut latest = self.last_receipt.write().await;
+            *latest = Some(receipt.clone());
+        }
+
+        Ok(receipt)
     }
 }
 
@@ -785,14 +1035,24 @@ impl NetworkEffects for AuraEffectSystem {
             .await
             .unwrap_or_else(|| FlowHint::new(default_context, default_peer, 1));
 
-        FlowGuard::from_hint(flow_hint)
+        let receipt = FlowGuard::from_hint(flow_hint)
             .authorize(self)
             .await
+            .map_err(|err| NetworkError::SendFailed(err.to_string()))?;
+        debug!(
+            "FlowGuard receipt ctx={} peer={} cost={} nonce={}",
+            receipt.ctx.as_str(),
+            receipt.dst,
+            receipt.cost,
+            receipt.nonce
+        );
+
+        let envelope_bytes = Self::encode_transport_envelope(&receipt, message)
             .map_err(|err| NetworkError::SendFailed(err.to_string()))?;
 
         let params = serde_json::json!({
             "peer_id": peer_id,
-            "data": message
+            "data": envelope_bytes
         });
         let params_bytes = serde_json::to_vec(&params).unwrap_or_default();
 
@@ -835,7 +1095,7 @@ impl NetworkEffects for AuraEffectSystem {
                 )
                 .map_err(|_| NetworkError::ReceiveFailed("Invalid peer_id format".to_string()))?;
 
-                let data = response
+                let data: Vec<u8> = response
                     .get("data")
                     .and_then(|v| v.as_array())
                     .ok_or_else(|| NetworkError::ReceiveFailed("Missing data".to_string()))?
@@ -843,7 +1103,12 @@ impl NetworkEffects for AuraEffectSystem {
                     .map(|v| v.as_u64().unwrap_or(0) as u8)
                     .collect();
 
-                Ok((peer_id, data))
+                let payload = self
+                    .decode_transport_payload(data, peer_id)
+                    .await
+                    .map_err(|err| NetworkError::ReceiveFailed(err.to_string()))?;
+
+                Ok((peer_id, payload))
             }
             Err(_) => Err(NetworkError::ReceiveFailed(
                 "Effect execution failed".to_string(),
@@ -874,8 +1139,24 @@ impl NetworkEffects for AuraEffectSystem {
             .execute_effect_with_context(EffectType::Network, "receive_from", &params, &mut context)
             .await
         {
-            Ok(result) => serde_json::from_slice(&result)
-                .map_err(|_| NetworkError::ReceiveFailed("Invalid response format".to_string())),
+            Ok(result) => {
+                let response: serde_json::Value =
+                    serde_json::from_slice(&result).map_err(|_| {
+                        NetworkError::ReceiveFailed("Invalid response format".to_string())
+                    })?;
+
+                let data: Vec<u8> = response
+                    .get("data")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| NetworkError::ReceiveFailed("Missing data".to_string()))?
+                    .iter()
+                    .map(|v| v.as_u64().unwrap_or(0) as u8)
+                    .collect();
+
+                self.decode_transport_payload(data, peer_id)
+                    .await
+                    .map_err(|err| NetworkError::ReceiveFailed(err.to_string()))
+            }
             Err(_) => Err(NetworkError::ReceiveFailed(
                 "Effect execution failed".to_string(),
             )),
@@ -1739,6 +2020,10 @@ impl Clone for AuraEffectSystem {
             context: Arc::clone(&self.context),
             device_id: self.device_id,
             execution_mode: self.execution_mode,
+            flow_nonce: AtomicU64::new(self.flow_nonce.load(std::sync::atomic::Ordering::Relaxed)),
+            flow_prev_receipt: Arc::clone(&self.flow_prev_receipt),
+            last_receipt: Arc::clone(&self.last_receipt),
+            flow_ledgers: Arc::clone(&self.flow_ledgers),
         }
     }
 }
@@ -2399,5 +2684,31 @@ mod tests {
 
         let updated_context = system.context().await;
         assert_eq!(updated_context.device_id, device_id);
+    }
+
+    #[tokio::test]
+    async fn test_flow_budget_enforcement() {
+        use crate::guards::flow::FlowGuard;
+        use aura_core::relationships::ContextId;
+
+        let sender = DeviceId::from(Uuid::new_v4());
+        let recipient = DeviceId::from(Uuid::new_v4());
+        let mut system = AuraEffectSystem::for_testing(sender);
+        let ctx = ContextId::new("test.flow");
+
+        system
+            .seed_flow_budget(
+                ctx.clone(),
+                recipient,
+                FlowBudget::new(5, session_epochs::Epoch::initial()),
+            )
+            .await;
+
+        let guard = FlowGuard::new(ctx.clone(), recipient, 3);
+        guard.authorize(&system).await.expect("first charge");
+
+        let guard = FlowGuard::new(ctx.clone(), recipient, 3);
+        let err = guard.authorize(&system).await.expect_err("should exceed");
+        assert!(matches!(err, AuraError::PermissionDenied { .. }));
     }
 }

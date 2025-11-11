@@ -247,7 +247,7 @@ impl SearchChoreography {
         let guard = self
             .access_control
             .create_capability_guard(&access_request)?;
-        
+
         // Use the capabilities from the request to check the guard
         let capabilities = aura_core::Cap::default(); // TODO: Use actual device capabilities
         if !guard.check(&capabilities) {
@@ -274,9 +274,12 @@ impl SearchChoreography {
 
         let index_nodes = self.get_available_index_nodes().await?;
         for node_id in &index_nodes {
-            let message_bytes = serde_json::to_vec(&search_msg)
-                .map_err(|e| aura_core::AuraError::internal(format!("Serialization error: {}", e)))?;
-            self.effects.send_to_peer(node_id.0, message_bytes).await
+            let message_bytes = serde_json::to_vec(&search_msg).map_err(|e| {
+                aura_core::AuraError::internal(format!("Serialization error: {}", e))
+            })?;
+            self.effects
+                .send_to_peer(node_id.0, message_bytes)
+                .await
                 .map_err(|e| aura_core::AuraError::network(format!("Send error: {}", e)))?;
         }
 
@@ -291,26 +294,28 @@ impl SearchChoreography {
 
         // Wait for responses with timeout
         for node_id in &index_nodes {
-            if let Ok(response_bytes) = tokio::time::timeout(
+            if let Ok(response_result) = tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 self.effects.receive_from(node_id.0),
             )
             .await
             {
-                if let Ok(response) = serde_json::from_slice::<SearchMessage>(&response_bytes) {
-                    if let SearchMessage::SearchResults {
-                        node_id,
-                        results,
-                        result_count,
-                        ..
-                    } = response
-                    {
-                        all_results.extend(results);
-                        participating_nodes.push(node_id);
+                if let Ok(response_bytes) = response_result {
+                    if let Ok(response) = serde_json::from_slice::<SearchMessage>(&response_bytes) {
+                        if let SearchMessage::SearchResults {
+                            node_id,
+                            results,
+                            result_count,
+                            ..
+                        } = response
+                        {
+                            all_results.extend(results);
+                            participating_nodes.push(node_id);
 
-                        // Update leakage tracking
-                        total_leakage.neighbor += (result_count as f64).log2().max(0.0);
-                        total_leakage.group = 1.0; // Full leakage within search context
+                            // Update leakage tracking
+                            total_leakage.neighbor += (result_count as f64).log2().max(0.0);
+                            total_leakage.group = 1.0; // Full leakage within search context
+                        }
                     }
                 }
             }
@@ -343,7 +348,10 @@ impl SearchChoreography {
         node_id: DeviceId,
     ) -> AuraResult<Option<SearchResults>> {
         // 1. Receive search query
-        let query_bytes = self.effects.receive_from(node_id.0).await
+        let query_bytes = self
+            .effects
+            .receive_from(node_id.0)
+            .await
             .map_err(|e| aura_core::AuraError::network(format!("Receive error: {}", e)))?;
         let query_msg = serde_json::from_slice::<SearchMessage>(&query_bytes)
             .map_err(|e| aura_core::AuraError::internal(format!("Deserialization error: {}", e)))?;
@@ -381,9 +389,12 @@ impl SearchChoreography {
                     result_count,
                 };
 
-                let message_bytes = serde_json::to_vec(&results_msg)
-                    .map_err(|e| aura_core::AuraError::internal(format!("Serialization error: {}", e)))?;
-                self.effects.send_to_peer(querier_id.0, message_bytes).await
+                let message_bytes = serde_json::to_vec(&results_msg).map_err(|e| {
+                    aura_core::AuraError::internal(format!("Serialization error: {}", e))
+                })?;
+                self.effects
+                    .send_to_peer(querier_id.0, message_bytes)
+                    .await
                     .map_err(|e| aura_core::AuraError::network(format!("Send error: {}", e)))?;
             } else {
                 // Send empty results
@@ -394,9 +405,12 @@ impl SearchChoreography {
                     result_count: 0,
                 };
 
-                let message_bytes = serde_json::to_vec(&results_msg)
-                    .map_err(|e| aura_core::AuraError::internal(format!("Serialization error: {}", e)))?;
-                self.effects.send_to_peer(querier_id.0, message_bytes).await
+                let message_bytes = serde_json::to_vec(&results_msg).map_err(|e| {
+                    aura_core::AuraError::internal(format!("Serialization error: {}", e))
+                })?;
+                self.effects
+                    .send_to_peer(querier_id.0, message_bytes)
+                    .await
                     .map_err(|e| aura_core::AuraError::network(format!("Send error: {}", e)))?;
             }
         }
@@ -472,7 +486,7 @@ impl SearchChoreography {
                     }
 
                     results.push(SearchResult {
-                        content_id: *content_id,
+                        content_id: content_id.clone(),
                         owner: None, // Would populate from metadata
                         score: 1.0 - (i as f64 / content_ids.len() as f64),
                         snippet: Some(format!("Result for term: {}", term)),
@@ -497,7 +511,7 @@ impl SearchChoreography {
             let access_request = StorageAccessRequest {
                 device_id: querier_id,
                 operation: StorageOperation::Read,
-                resource: StorageResource::Content(result.content_id),
+                resource: StorageResource::Content(result.content_id.clone()),
                 capabilities: vec![],
             };
 
@@ -582,14 +596,14 @@ mod tests {
 
         let results = vec![
             SearchResult {
-                content_id: ContentId::new(),
+                content_id: ContentId::new([0u8; 32]),
                 owner: None,
                 score: 0.9,
                 snippet: None,
                 required_capabilities: vec![],
             },
             SearchResult {
-                content_id: ContentId::new(),
+                content_id: ContentId::new([0u8; 32]),
                 owner: None,
                 score: 0.7,
                 snippet: None,

@@ -5,7 +5,7 @@
 //! Phase 2 adds policy-aware derivation and DKD integration.
 //! Phase 3 adds threshold unwrapping with M-of-N secret reconstruction.
 
-use crate::journal::{EdgeId, EdgeKind, KeyEdge, KeyNode, NodeId, NodeKind};
+use crate::journal::{KeyEdge, KeyNode, NodeKind};
 use aura_core::AuraError;
 
 // Public modules

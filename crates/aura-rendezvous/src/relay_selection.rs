@@ -234,6 +234,7 @@ impl RelaySelector {
     /// Convert trust level to numeric score
     fn trust_level_score(&self, trust_level: TrustLevel) -> f32 {
         match trust_level {
+            TrustLevel::None => 0.0,
             TrustLevel::Low => 0.3,
             TrustLevel::Medium => 0.6,
             TrustLevel::High => 1.0,

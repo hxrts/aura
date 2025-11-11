@@ -8,12 +8,16 @@ use crate::effects::journal::{
     CapabilityId, CapabilityRef, Commitment, Epoch, Intent, IntentId, IntentStatus, JournalEffects,
     JournalMap, JournalStats, LeafIndex, RatchetTree, TreeOpRecord,
 };
-use aura_core::{AttestedOp, Hash32};
+use aura_core::{
+    flow::FlowBudgetKey, relationships::ContextId, session_epochs::Epoch as SessionEpoch,
+    AttestedOp, AuraError, DeviceId, FlowBudget, Hash32,
+};
 use aura_journal::{
     ratchet_tree::{reduce, TreeState},
     semilattice::OpLog,
 };
 use blake3::Hasher;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -21,9 +25,12 @@ use tokio::sync::RwLock;
 ///
 /// Stores the OpLog CRDT in memory. TreeState is never stored directly -
 /// it's always computed on-demand via the reduction function.
+#[derive(Clone)]
 pub struct MemoryJournalHandler {
     /// OpLog CRDT storing all attested operations
     oplog: Arc<RwLock<OpLog>>,
+    /// FlowBudget ledger keyed by (context, peer)
+    flow_budgets: Arc<RwLock<HashMap<FlowBudgetKey, FlowBudget>>>,
 }
 
 impl MemoryJournalHandler {
@@ -31,6 +38,7 @@ impl MemoryJournalHandler {
     pub fn new() -> Self {
         Self {
             oplog: Arc::new(RwLock::new(OpLog::default())),
+            flow_budgets: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -228,6 +236,62 @@ impl JournalEffects for MemoryJournalHandler {
     ) -> Result<Vec<aura_core::identifiers::GuardianId>, aura_core::AuraError> {
         Ok(vec![])
     }
+
+    async fn get_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &DeviceId,
+    ) -> Result<FlowBudget, AuraError> {
+        let budgets = self.flow_budgets.read().await;
+        let key = FlowBudgetKey::new(context.clone(), peer.clone());
+        Ok(budgets
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| FlowBudget::new(u64::MAX, SessionEpoch::initial())))
+    }
+
+    async fn update_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &DeviceId,
+        budget: &FlowBudget,
+    ) -> Result<FlowBudget, AuraError> {
+        let mut budgets = self.flow_budgets.write().await;
+        let key = FlowBudgetKey::new(context.clone(), peer.clone());
+        let merged = if let Some(existing) = budgets.get(&key) {
+            existing.merge(budget)
+        } else {
+            budget.clone()
+        };
+        budgets.insert(key, merged.clone());
+        Ok(merged)
+    }
+
+    async fn charge_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &DeviceId,
+        cost: u32,
+    ) -> Result<FlowBudget, AuraError> {
+        let mut budgets = self.flow_budgets.write().await;
+        let key = FlowBudgetKey::new(context.clone(), peer.clone());
+        let mut budget = budgets
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| FlowBudget::new(u64::MAX, SessionEpoch::initial()));
+
+        budget.rotate_epoch(SessionEpoch::initial());
+        if !budget.record_charge(cost as u64) {
+            return Err(AuraError::permission_denied(format!(
+                "Flow budget exceeded for ctx={} peer={}",
+                context.as_str(),
+                peer
+            )));
+        }
+
+        budgets.insert(key, budget.clone());
+        Ok(budget)
+    }
 }
 
 /// Compute a content-addressed identifier (CID) for an operation
@@ -274,7 +338,7 @@ fn compute_op_cid(op: &AttestedOp) -> Hash32 {
     let hash = hasher.finalize();
     let mut result = [0u8; 32];
     result.copy_from_slice(hash.as_bytes());
-    aura_core::Hash32(result)
+    aura_core::Hash32::new(result)
 }
 
 #[cfg(test)]

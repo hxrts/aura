@@ -45,12 +45,14 @@ pub use delivery::{
 };
 pub use delta_handler::DeltaHandler;
 pub use mv_handler::{ConstraintEvent, ConstraintResult, MultiConstraintHandler, MvHandler};
+pub use crdt_coordinator::{CrdtCoordinator, CrdtCoordinatorFactory, CrdtCoordinatorError};
 
 pub mod cm_handler;
 pub mod cv_handler;
 pub mod delivery;
 pub mod delta_handler;
 pub mod mv_handler;
+pub mod crdt_coordinator;
 
 use aura_core::identifiers::{DeviceId, SessionId};
 use aura_core::semilattice::{CausalOp, CmApply, CvState, Dedup, Delta, MvState, Top};

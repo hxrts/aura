@@ -383,4 +383,235 @@ proptest! {
         prop_assert_eq!(key.as_ref(), key2.as_ref(),
             "Empty context should produce deterministic key");
     }
+
+    /// Property: Key derivation resists timing attacks
+    /// Same inputs produce keys in similar time regardless of secret value
+    #[test]
+    fn prop_timing_attack_resistance(
+        root_key1 in root_key_strategy(),
+        root_key2 in root_key_strategy(),
+        device_id in device_id_strategy()
+    ) {
+        let spec = KeyDerivationSpec::identity_only(
+            IdentityKeyContext::DeviceEncryption {
+                device_id,
+            }
+        );
+
+        // Time key derivation with different root keys
+        let start1 = std::time::Instant::now();
+        let _key1 = derive_encryption_key(&root_key1, &spec).unwrap();
+        let duration1 = start1.elapsed();
+
+        let start2 = std::time::Instant::now();
+        let _key2 = derive_encryption_key(&root_key2, &spec).unwrap();
+        let duration2 = start2.elapsed();
+
+        // Timing difference should be minimal (less than 10x variance)
+        let ratio = duration1.as_nanos() as f64 / duration2.as_nanos() as f64;
+        prop_assert!(ratio < 10.0 && ratio > 0.1,
+            "Key derivation timing should be consistent (ratio: {:.2})", ratio);
+    }
+
+    /// Property: Key derivation with extreme inputs
+    /// Very large contexts and edge case values should still work
+    #[test]
+    fn prop_extreme_input_handling(
+        root_key in root_key_strategy(),
+        device_size in 0usize..10000 // Up to 10KB device IDs
+    ) {
+        // Create very large device ID
+        let large_device_id = vec![0x42u8; device_size];
+        
+        let spec = KeyDerivationSpec::identity_only(
+            IdentityKeyContext::DeviceEncryption {
+                device_id: large_device_id.clone(),
+            }
+        );
+
+        // Should still derive valid key
+        let key = derive_encryption_key(&root_key, &spec).unwrap();
+        prop_assert_eq!(key.as_ref().len(), 32, "Key length should remain constant");
+
+        // Should be deterministic regardless of input size
+        let key2 = derive_encryption_key(&root_key, &spec).unwrap();
+        prop_assert_eq!(key.as_ref(), key2.as_ref(),
+            "Large context derivation should be deterministic");
+
+        // Different size inputs with same prefix should produce different keys
+        if device_size > 0 {
+            let mut smaller_id = large_device_id.clone();
+            smaller_id.truncate(device_size / 2);
+            
+            let smaller_spec = KeyDerivationSpec::identity_only(
+                IdentityKeyContext::DeviceEncryption {
+                    device_id: smaller_id,
+                }
+            );
+            
+            let smaller_key = derive_encryption_key(&root_key, &smaller_spec).unwrap();
+            prop_assert_ne!(key.as_ref(), smaller_key.as_ref(),
+                "Different length contexts should produce different keys");
+        }
+    }
+
+    /// Property: Cross-context contamination resistance  
+    /// Keys derived for different contexts should be uncorrelated
+    #[test]
+    fn prop_cross_context_isolation(
+        root_key in root_key_strategy(),
+        device_id1 in device_id_strategy(),
+        device_id2 in device_id_strategy(),
+        account_id in account_id_strategy()
+    ) {
+        prop_assume!(device_id1 != device_id2);
+
+        // Device encryption context
+        let device_spec = KeyDerivationSpec::identity_only(
+            IdentityKeyContext::DeviceEncryption {
+                device_id: device_id1.clone(),
+            }
+        );
+
+        // Account root context  
+        let account_spec = KeyDerivationSpec::identity_only(
+            IdentityKeyContext::AccountRoot {
+                account_id: account_id.clone(),
+            }
+        );
+
+        // Guardian context
+        let guardian_spec = KeyDerivationSpec::identity_only(
+            IdentityKeyContext::GuardianKeys {
+                guardian_id: device_id2,
+            }
+        );
+
+        let device_key = derive_encryption_key(&root_key, &device_spec).unwrap();
+        let account_key = derive_encryption_key(&root_key, &account_spec).unwrap();
+        let guardian_key = derive_encryption_key(&root_key, &guardian_spec).unwrap();
+
+        // All keys should be different
+        prop_assert_ne!(device_key.as_ref(), account_key.as_ref(),
+            "Device and account contexts must produce different keys");
+        prop_assert_ne!(device_key.as_ref(), guardian_key.as_ref(),
+            "Device and guardian contexts must produce different keys");
+        prop_assert_ne!(account_key.as_ref(), guardian_key.as_ref(),
+            "Account and guardian contexts must produce different keys");
+
+        // Verify high entropy separation
+        let hamming_device_account: usize = device_key.as_ref()
+            .iter()
+            .zip(account_key.as_ref().iter())
+            .map(|(a, b)| (a ^ b).count_ones() as usize)
+            .sum();
+
+        let total_bits = device_key.as_ref().len() * 8;
+        let separation_ratio = hamming_device_account as f64 / total_bits as f64;
+
+        prop_assert!(separation_ratio > 0.3 && separation_ratio < 0.7,
+            "Cross-context keys should have high entropy separation ({:.1}%)",
+            separation_ratio * 100.0);
+    }
+
+    /// Property: Permission key hierarchies maintain security
+    /// Child permissions cannot derive parent permissions 
+    #[test]
+    fn prop_permission_hierarchy_security(
+        root_key in root_key_strategy(),
+        device_id in device_id_strategy(),
+        resource in context_strategy()
+    ) {
+        // Parent permission (broad access)
+        let admin_spec = KeyDerivationSpec::with_permission(
+            IdentityKeyContext::DeviceEncryption {
+                device_id: device_id.clone(),
+            },
+            PermissionKeyContext::StorageAccess {
+                operation: "admin".to_string(),
+                resource: resource.clone(),
+            }
+        );
+
+        // Child permission (narrow access)
+        let read_spec = KeyDerivationSpec::with_permission(
+            IdentityKeyContext::DeviceEncryption {
+                device_id,
+            },
+            PermissionKeyContext::StorageAccess {
+                operation: "read".to_string(),
+                resource,
+            }
+        );
+
+        let admin_key = derive_encryption_key(&root_key, &admin_spec).unwrap();
+        let read_key = derive_encryption_key(&root_key, &read_spec).unwrap();
+
+        // Keys must be different
+        prop_assert_ne!(admin_key.as_ref(), read_key.as_ref(),
+            "Admin and read permissions must have different keys");
+
+        // Verify no detectable relationship between keys
+        let hamming_distance: usize = admin_key.as_ref()
+            .iter()
+            .zip(read_key.as_ref().iter())
+            .map(|(a, b)| (a ^ b).count_ones() as usize)
+            .sum();
+
+        let total_bits = admin_key.as_ref().len() * 8;
+        let independence_ratio = hamming_distance as f64 / total_bits as f64;
+
+        prop_assert!(independence_ratio > 0.4 && independence_ratio < 0.6,
+            "Permission hierarchy keys should be cryptographically independent ({:.1}%)",
+            independence_ratio * 100.0);
+    }
+
+    /// Property: Key rotation maintains backward secrecy
+    /// New versions cannot be used to derive old versions
+    #[test] 
+    fn prop_backward_secrecy(
+        root_key in root_key_strategy(),
+        device_id in device_id_strategy(),
+        operation in context_strategy(),
+        version_count in 2usize..10
+    ) {
+        let mut version_keys = Vec::new();
+
+        // Generate keys for sequential versions
+        for version in 0..version_count {
+            let spec = KeyDerivationSpec::with_permission(
+                IdentityKeyContext::DeviceEncryption {
+                    device_id: device_id.clone(),
+                },
+                PermissionKeyContext::Communication {
+                    capability_id: operation.as_bytes().to_vec(),
+                }
+            ).with_version(version);
+
+            let key = derive_encryption_key(&root_key, &spec).unwrap();
+            version_keys.push(key);
+        }
+
+        // Verify all versions produce different keys
+        for i in 0..version_keys.len() {
+            for j in i+1..version_keys.len() {
+                prop_assert_ne!(version_keys[i].as_ref(), version_keys[j].as_ref(),
+                    "Versions {} and {} must produce different keys", i, j);
+
+                // Verify high entropy difference
+                let hamming_dist: usize = version_keys[i].as_ref()
+                    .iter()
+                    .zip(version_keys[j].as_ref().iter())
+                    .map(|(a, b)| (a ^ b).count_ones() as usize)
+                    .sum();
+
+                let total_bits = version_keys[i].as_ref().len() * 8;
+                let distance_ratio = hamming_dist as f64 / total_bits as f64;
+
+                prop_assert!(distance_ratio > 0.35 && distance_ratio < 0.65,
+                    "Version {} and {} keys should be uncorrelated ({:.1}%)",
+                    i, j, distance_ratio * 100.0);
+            }
+        }
+    }
 }

@@ -3,17 +3,18 @@
 //! This example demonstrates how to use the aura-wot capability system
 //! for authorization decisions following meet-semilattice laws.
 
+use aura_core::identifiers::DeviceId;
 use aura_wot::{
-    evaluate_capabilities, Capability, CapabilitySet, DelegationChain, EvaluationContext, Policy,
-    PolicyEngine,
+    evaluate_capabilities, Capability, CapabilitySet, DelegationChain, DelegationLink,
+    EvaluationContext, LocalChecks, Policy,
 };
+use std::collections::BTreeSet;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Aura WoT Capability Evaluation Example ===\n");
 
     // 1. Create base capabilities for a user
-    let base_capabilities = CapabilitySet::new(
+    let base_capabilities = CapabilitySet::from_capabilities(
         [
             Capability::Read {
                 resource_pattern: "journal:*".to_string(),
@@ -24,17 +25,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Capability::Execute {
                 operation: "sync".to_string(),
             },
-            Capability::Delegate {
-                target_pattern: "journal:shared/*".to_string(),
-            },
+            Capability::Delegate { max_depth: 2 },
         ]
-        .into(),
+        .into_iter()
+        .collect::<BTreeSet<_>>(),
     );
 
     println!("Base capabilities: {:#?}\n", base_capabilities);
 
     // 2. Create a delegation that restricts capabilities
-    let delegation = CapabilitySet::new(
+    let delegation = CapabilitySet::from_capabilities(
         [
             Capability::Read {
                 resource_pattern: "journal:*".to_string(),
@@ -44,7 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }, // More restrictive
                // No execute capability - further restriction
         ]
-        .into(),
+        .into_iter()
+        .collect::<BTreeSet<_>>(),
     );
 
     println!("Delegation restrictions: {:#?}\n", delegation);
@@ -87,46 +88,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== Policy Evaluation Example ===");
 
-    // 5. Create a policy with context-specific restrictions
-    let mut policy_engine = PolicyEngine::new();
+    // 5. Create a policy with device-specific restrictions
+    let device_id = DeviceId::new();
+    let mut policy = Policy::new();
+    policy.set_device_capabilities(device_id, effective_capabilities.clone());
 
-    let read_policy = Policy::new(
-        CapabilitySet::new(
-            [Capability::Read {
-                resource_pattern: "journal:*".to_string(),
-            }]
-            .into(),
-        ),
-        "read_context".to_string(),
-    );
+    // 6. Evaluate effective capabilities with local checks
+    let context = EvaluationContext::new(device_id, "read_context".to_string());
+    let local_checks = LocalChecks::empty();
 
-    let write_policy = Policy::new(
-        CapabilitySet::new(
-            [Capability::Write {
-                resource_pattern: "journal:personal/*".to_string(),
-            }]
-            .into(),
-        ),
-        "write_context".to_string(),
-    );
+    let evaluation_result = evaluate_capabilities(&policy, &[], &local_checks, &context)?;
 
-    policy_engine.add_policy(read_policy);
-    policy_engine.add_policy(write_policy);
-
-    // 6. Evaluate effective capabilities with policy constraints
-    let context = EvaluationContext::new("example_device".to_string(), "read_context".to_string());
-
-    let evaluation_result =
-        evaluate_capabilities(&effective_capabilities, &policy_engine, &context).await?;
-
-    println!(
-        "Policy-constrained capabilities: {:#?}",
-        evaluation_result.effective_capabilities
-    );
-    println!(
-        "Evaluation took {} policies",
-        evaluation_result.policies_evaluated
-    );
+    println!("Policy-constrained capabilities: {:#?}", evaluation_result);
 
     // 7. Test specific permission checks
     println!("\n=== Permission Checks ===");
@@ -138,25 +111,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "Can read '{}'? {}",
         journal_read,
-        check_permission(
-            &evaluation_result.effective_capabilities,
-            "read",
-            journal_read
-        )
+        check_permission(&evaluation_result, "read", journal_read)
     );
     println!(
         "Can write '{}'? {}",
         journal_write,
-        check_permission(
-            &evaluation_result.effective_capabilities,
-            "write",
-            journal_write
-        )
+        check_permission(&evaluation_result, "write", journal_write)
     );
     println!(
         "Can execute '{}'? {}",
         execute_sync,
-        check_execute_permission(&evaluation_result.effective_capabilities, execute_sync)
+        check_execute_permission(&evaluation_result, execute_sync)
     );
 
     println!("\n=== Capability Delegation Chain ===");
@@ -165,27 +130,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut delegation_chain = DelegationChain::new();
 
     // Add delegation link that further restricts capabilities
-    delegation_chain.add_link(
-        "user1".to_string(),
-        "user2".to_string(),
-        CapabilitySet::new(
+    let user1 = DeviceId::new();
+    let user2 = DeviceId::new();
+    let delegation_link = DelegationLink::new(
+        user1,
+        user2,
+        CapabilitySet::from_capabilities(
             [
                 Capability::Read {
                     resource_pattern: "journal:shared/*".to_string(),
                 }, // Even more restrictive
             ]
-            .into(),
+            .into_iter()
+            .collect::<BTreeSet<_>>(),
         ),
-        None, // No expiration for this example
-    )?;
+        1, // Max delegation depth
+    );
+    delegation_chain.add_delegation(delegation_link)?;
 
     // Apply delegation chain (should further restrict capabilities)
-    let final_capabilities = delegation_chain.apply_to(&effective_capabilities)?;
+    let final_capabilities = delegation_chain.effective_capabilities(&effective_capabilities);
 
     println!("After delegation chain: {:#?}", final_capabilities);
     println!(
         "Final capability count: {}",
-        final_capabilities.capabilities().len()
+        final_capabilities.capabilities().count()
     );
 
     // Verify that delegation only made things more restrictive

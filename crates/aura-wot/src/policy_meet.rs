@@ -4,7 +4,7 @@
 //! ensuring capability intersection follows mathematical laws.
 
 use crate::tree_policy::{Policy, ThresholdConfig};
-use crate::{CapabilitySet, NodeIndex, TreePolicy, WotError};
+use crate::{CapabilitySet, TreePolicy, WotError};
 use std::collections::BTreeMap;
 
 /// Policy meet operations for tree authorization
@@ -158,7 +158,7 @@ impl TreePolicyCapabilityExt for CapabilitySet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NodeIndex, Policy};
+    use crate::tree_policy::{NodeIndex, Policy};
     use aura_core::AccountId;
 
     #[test]

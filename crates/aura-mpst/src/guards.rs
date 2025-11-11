@@ -110,23 +110,108 @@ impl GuardSyntax {
     /// Parse a guard expression from string
     /// Format: "guard: need(requirement) ≤ caps"
     pub fn parse(expr: &str) -> AuraResult<CapabilityGuard> {
-        // This is a TODO fix - Simplified parser for the guard syntax
-        // In a full implementation, this would use a proper parser
-
-        if !expr.starts_with("guard:") {
+        let trimmed = expr.trim();
+        if !trimmed.starts_with("guard:") {
             return Err(AuraError::invalid(
                 "Guard expression must start with 'guard:'",
             ));
         }
 
-        let _expr = expr
+        let remainder = trimmed
             .strip_prefix("guard:")
             .expect("already checked with starts_with")
             .trim();
 
-        // TODO fix - For now, create a placeholder implementation
-        // A real implementation would parse the capability expression
-        todo!("Full guard syntax parsing not implemented yet")
+        // Allow inline descriptions after `//`
+        let (core_expr, description) = match remainder.split_once("//") {
+            Some((core, desc)) => (core.trim(), Some(desc.trim().to_string())),
+            None => (remainder, None),
+        };
+
+        let need_prefix = "need(";
+        if !core_expr.starts_with(need_prefix) {
+            return Err(AuraError::invalid(
+                "Guard expression must include 'need(<permissions>)'",
+            ));
+        }
+
+        let after_need = &core_expr[need_prefix.len()..];
+        let close_idx = after_need.find(')').ok_or_else(|| {
+            AuraError::invalid("Guard expression is missing closing ')' for need(...) block")
+        })?;
+
+        let requirement_block = &after_need[..close_idx];
+        let mut permissions = Vec::new();
+        for token in requirement_block.split(|c| c == ',' || c == '|' || c == '&') {
+            let token = token.trim();
+            if !token.is_empty() {
+                permissions.push(token.to_string());
+            }
+        }
+
+        if permissions.is_empty() {
+            return Err(AuraError::invalid(
+                "Guard expression must list at least one requirement inside need(...)",
+            ));
+        }
+
+        let mut comparator_section = after_need[close_idx + 1..].trim_start();
+        // Accept either unicode ≤ or ASCII <= / =<
+        let consumed = if comparator_section.starts_with('≤') {
+            Some('≤'.len_utf8())
+        } else if comparator_section.starts_with("<=") {
+            Some(2)
+        } else if comparator_section.starts_with("=<") {
+            Some(2)
+        } else {
+            None
+        };
+
+        let consumed = consumed.ok_or_else(|| {
+            AuraError::invalid("Guard expression must include '≤ caps' comparator after need(...)")
+        })?;
+
+        comparator_section = comparator_section[consumed..].trim_start();
+
+        // Expect a capability identifier such as `caps`, `caps_Alice`, etc.
+        // We only validate that it starts with `caps`.
+        if !comparator_section.starts_with("caps") {
+            return Err(AuraError::invalid(
+                "Guard expression must compare against a capability identifier starting with 'caps'",
+            ));
+        }
+
+        // Remove identifier token
+        let rest = comparator_section["caps".len()..]
+            .trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+
+        let description = description
+            .or_else(|| {
+                let trimmed = rest.trim();
+                if trimmed.starts_with("desc:") {
+                    Some(
+                        trimmed
+                            .trim_start_matches("desc:")
+                            .trim()
+                            .trim_matches('"')
+                            .to_string(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .filter(|s| !s.is_empty());
+
+        // Build the capability requirement
+        let mut cap = Cap::new();
+        for permission in permissions {
+            cap.add_permission(permission);
+        }
+
+        Ok(match description {
+            Some(desc) => CapabilityGuard::with_description(cap, desc),
+            None => CapabilityGuard::new(cap),
+        })
     }
 
     /// Compile guard syntax to runtime guard
@@ -138,7 +223,7 @@ impl GuardSyntax {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{Cap, MeetSemiLattice, Top};
+    use aura_core::Cap;
 
     #[test]
     fn test_capability_guard_creation() {
@@ -175,5 +260,30 @@ mod tests {
         let guard = CapabilityGuard::with_description(cap, "Admin access required");
         assert!(guard.description.is_some());
         assert_eq!(guard.description.unwrap(), "Admin access required");
+    }
+
+    #[test]
+    fn parse_simple_guard_expression() {
+        let guard =
+            GuardSyntax::parse("guard: need(admin_request) <= caps_Admin").expect("parse ok");
+        assert!(guard.description.is_none());
+        assert!(guard.required.allows("admin_request"));
+    }
+
+    #[test]
+    fn parse_guard_with_description_comment() {
+        let guard = GuardSyntax::parse(
+            "guard: need(tree_modify | tree_vote) ≤ caps_Tree // tree maintenance",
+        )
+        .expect("parse ok");
+        assert_eq!(guard.description.as_deref(), Some("tree maintenance"));
+        assert!(guard.required.allows("tree_modify"));
+        assert!(guard.required.allows("tree_vote"));
+    }
+
+    #[test]
+    fn parse_guard_rejects_missing_need() {
+        let err = GuardSyntax::parse("guard: caps").unwrap_err();
+        assert!(format!("{}", err).contains("need("));
     }
 }

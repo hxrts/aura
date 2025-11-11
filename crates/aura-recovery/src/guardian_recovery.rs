@@ -9,7 +9,9 @@ use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
 use aura_protocol::effects::AuraEffectSystem;
 use aura_verify::session::SessionTicket;
+use aura_wot::{CapabilitySet, TreePolicy};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub const DEFAULT_DISPUTE_WINDOW_SECS: u64 = 48 * 60 * 60;
 
@@ -144,19 +146,331 @@ pub enum AccountChangeType {
     EmergencyContact,
 }
 
+/// Recovery policy enforcement configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryPolicyConfig {
+    /// Minimum guardian threshold for each priority level
+    pub threshold_requirements: HashMap<RecoveryPriority, usize>,
+    /// Required capabilities for recovery initiation
+    pub initiation_capabilities: CapabilitySet,
+    /// Required capabilities for guardian approval
+    pub approval_capabilities: CapabilitySet,
+    /// Maximum recovery attempts per device per epoch
+    pub max_recovery_attempts: u32,
+    /// Cooldown multipliers for repeated recoveries
+    pub cooldown_multipliers: HashMap<RecoveryPriority, f64>,
+    /// Trust policy for guardian selection
+    pub guardian_trust_policy: TreePolicy,
+    /// Emergency override capabilities
+    pub emergency_override_capabilities: CapabilitySet,
+}
+
+impl Default for RecoveryPolicyConfig {
+    fn default() -> Self {
+        let mut threshold_requirements = HashMap::new();
+        threshold_requirements.insert(RecoveryPriority::Normal, 2);
+        threshold_requirements.insert(RecoveryPriority::Urgent, 3);
+        threshold_requirements.insert(RecoveryPriority::Emergency, 2);
+
+        let mut cooldown_multipliers = HashMap::new();
+        cooldown_multipliers.insert(RecoveryPriority::Normal, 1.0);
+        cooldown_multipliers.insert(RecoveryPriority::Urgent, 1.5);
+        cooldown_multipliers.insert(RecoveryPriority::Emergency, 0.5);
+
+        Self {
+            threshold_requirements,
+            initiation_capabilities: CapabilitySet::guardian_recovery_initiation(),
+            approval_capabilities: CapabilitySet::guardian_approval(),
+            max_recovery_attempts: 3,
+            cooldown_multipliers,
+            guardian_trust_policy: TreePolicy::default_recovery_trust(),
+            emergency_override_capabilities: CapabilitySet::emergency_override(),
+        }
+    }
+}
+
+/// Recovery policy enforcement engine
+#[derive(Debug, Clone)]
+pub struct RecoveryPolicyEnforcer {
+    config: RecoveryPolicyConfig,
+    effect_system: AuraEffectSystem,
+}
+
+impl RecoveryPolicyEnforcer {
+    /// Create new policy enforcer
+    pub fn new(config: RecoveryPolicyConfig, effect_system: AuraEffectSystem) -> Self {
+        Self {
+            config,
+            effect_system,
+        }
+    }
+
+    /// Validate recovery request against policy
+    pub async fn validate_recovery_request(
+        &self,
+        request: &GuardianRecoveryRequest,
+    ) -> RecoveryResult<PolicyValidationResult> {
+        let mut validation = PolicyValidationResult::new();
+
+        // Check threshold requirements
+        if let Some(&required_threshold) = self.config.threshold_requirements.get(&request.priority) {
+            if request.required_threshold < required_threshold {
+                validation.add_violation(PolicyViolation::InsufficientThreshold {
+                    required: required_threshold,
+                    provided: request.required_threshold,
+                    priority: request.priority.clone(),
+                });
+            }
+        }
+
+        // Check recovery attempt limits
+        let current_epoch = self.effect_system.current_timestamp().await / 3600; // Hour-based epochs
+        let attempt_count = self.get_recovery_attempts(
+            &request.requesting_device, 
+            &request.account_id, 
+            current_epoch
+        ).await?;
+        
+        if attempt_count >= self.config.max_recovery_attempts {
+            validation.add_violation(PolicyViolation::TooManyAttempts {
+                limit: self.config.max_recovery_attempts,
+                current: attempt_count,
+                device: request.requesting_device,
+            });
+        }
+
+        // Check guardian trust policy compliance
+        let trust_violations = self.validate_guardian_trust(&request.available_guardians).await?;
+        validation.extend_violations(trust_violations);
+
+        // Check capabilities for initiation
+        let device_capabilities = self.get_device_capabilities(&request.requesting_device).await?;
+        if !device_capabilities.contains_all(&self.config.initiation_capabilities) {
+            validation.add_violation(PolicyViolation::MissingCapabilities {
+                required: self.config.initiation_capabilities.clone(),
+                available: device_capabilities,
+                operation: "recovery_initiation".to_string(),
+            });
+        }
+
+        Ok(validation)
+    }
+
+    /// Validate guardian approval against policy
+    pub async fn validate_guardian_approval(
+        &self,
+        guardian_id: &DeviceId,
+        request: &GuardianRecoveryRequest,
+    ) -> RecoveryResult<PolicyValidationResult> {
+        let mut validation = PolicyValidationResult::new();
+
+        // Check guardian capabilities
+        let guardian_capabilities = self.get_device_capabilities(guardian_id).await?;
+        if !guardian_capabilities.contains_all(&self.config.approval_capabilities) {
+            validation.add_violation(PolicyViolation::MissingCapabilities {
+                required: self.config.approval_capabilities.clone(),
+                available: guardian_capabilities,
+                operation: "guardian_approval".to_string(),
+            });
+        }
+
+        // Check emergency override if applicable
+        if matches!(request.priority, RecoveryPriority::Emergency) {
+            if !guardian_capabilities.contains_all(&self.config.emergency_override_capabilities) {
+                validation.add_violation(PolicyViolation::EmergencyOverrideRequired {
+                    guardian: *guardian_id,
+                    required_capabilities: self.config.emergency_override_capabilities.clone(),
+                });
+            }
+        }
+
+        // Check cooldown multipliers
+        let cooldown_multiplier = self.config.cooldown_multipliers
+            .get(&request.priority)
+            .copied()
+            .unwrap_or(1.0);
+
+        if cooldown_multiplier > 1.0 {
+            validation.add_warning(PolicyWarning::CooldownMultiplier {
+                guardian: *guardian_id,
+                multiplier: cooldown_multiplier,
+                priority: request.priority.clone(),
+            });
+        }
+
+        Ok(validation)
+    }
+
+    /// Calculate policy-adjusted cooldown period
+    pub fn calculate_cooldown_period(
+        &self,
+        base_cooldown: u64,
+        priority: &RecoveryPriority,
+    ) -> u64 {
+        let multiplier = self.config.cooldown_multipliers
+            .get(priority)
+            .copied()
+            .unwrap_or(1.0);
+        (base_cooldown as f64 * multiplier) as u64
+    }
+
+    /// Get recovery attempt count for device/account in current epoch
+    async fn get_recovery_attempts(
+        &self,
+        device_id: &DeviceId,
+        account_id: &AccountId,
+        epoch: u64,
+    ) -> RecoveryResult<u32> {
+        // In production, this would query the journal/ledger
+        // For now, return mock data
+        let key = format!("recovery_attempts:{}:{}:{}", device_id, account_id, epoch);
+        // Mock implementation - would use actual storage
+        Ok(0) // No attempts recorded
+    }
+
+    /// Get device capabilities for policy checking
+    async fn get_device_capabilities(&self, device_id: &DeviceId) -> RecoveryResult<CapabilitySet> {
+        // In production, this would query the WoT system
+        // For now, return default capabilities
+        Ok(CapabilitySet::default_device_capabilities())
+    }
+
+    /// Validate guardian set against trust policy
+    async fn validate_guardian_trust(
+        &self,
+        guardian_set: &GuardianSet,
+    ) -> RecoveryResult<Vec<PolicyViolation>> {
+        let mut violations = Vec::new();
+        
+        // Check minimum trust level for each guardian
+        for guardian in guardian_set.iter() {
+            let trust_score = self.get_guardian_trust_score(&guardian.device_id).await?;
+            if trust_score < self.config.guardian_trust_policy.minimum_trust_score() {
+                violations.push(PolicyViolation::InsufficientTrust {
+                    guardian: guardian.device_id,
+                    required_score: self.config.guardian_trust_policy.minimum_trust_score(),
+                    actual_score: trust_score,
+                });
+            }
+        }
+
+        Ok(violations)
+    }
+
+    /// Get trust score for guardian
+    async fn get_guardian_trust_score(&self, guardian_id: &DeviceId) -> RecoveryResult<f64> {
+        // In production, this would query the WoT system
+        // For now, return a default trust score
+        Ok(0.8) // 80% trust score
+    }
+}
+
+/// Policy validation result
+#[derive(Debug, Clone)]
+pub struct PolicyValidationResult {
+    pub violations: Vec<PolicyViolation>,
+    pub warnings: Vec<PolicyWarning>,
+    pub is_valid: bool,
+}
+
+impl PolicyValidationResult {
+    fn new() -> Self {
+        Self {
+            violations: Vec::new(),
+            warnings: Vec::new(),
+            is_valid: true,
+        }
+    }
+
+    fn add_violation(&mut self, violation: PolicyViolation) {
+        self.violations.push(violation);
+        self.is_valid = false;
+    }
+
+    fn add_warning(&mut self, warning: PolicyWarning) {
+        self.warnings.push(warning);
+    }
+
+    fn extend_violations(&mut self, violations: Vec<PolicyViolation>) {
+        if !violations.is_empty() {
+            self.is_valid = false;
+            self.violations.extend(violations);
+        }
+    }
+}
+
+/// Policy violation types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PolicyViolation {
+    InsufficientThreshold {
+        required: usize,
+        provided: usize,
+        priority: RecoveryPriority,
+    },
+    TooManyAttempts {
+        limit: u32,
+        current: u32,
+        device: DeviceId,
+    },
+    MissingCapabilities {
+        required: CapabilitySet,
+        available: CapabilitySet,
+        operation: String,
+    },
+    InsufficientTrust {
+        guardian: DeviceId,
+        required_score: f64,
+        actual_score: f64,
+    },
+    EmergencyOverrideRequired {
+        guardian: DeviceId,
+        required_capabilities: CapabilitySet,
+    },
+}
+
+/// Policy warning types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PolicyWarning {
+    CooldownMultiplier {
+        guardian: DeviceId,
+        multiplier: f64,
+        priority: RecoveryPriority,
+    },
+}
+
 /// Guardian recovery coordinator is a lightweight facade used by the agent/CLI.
 #[derive(Clone)]
 pub struct GuardianRecoveryCoordinator {
     effect_system: AuraEffectSystem,
+    policy_enforcer: RecoveryPolicyEnforcer,
 }
 
 impl GuardianRecoveryCoordinator {
     /// Create coordinator for the provided effect system.
     pub fn new(effect_system: AuraEffectSystem) -> Self {
-        Self { effect_system }
+        let policy_config = RecoveryPolicyConfig::default();
+        let policy_enforcer = RecoveryPolicyEnforcer::new(policy_config, effect_system.clone());
+        
+        Self { 
+            effect_system,
+            policy_enforcer,
+        }
     }
 
-    /// Execute guardian recovery using the G_recovery choreography.
+    /// Create coordinator with custom policy configuration
+    pub fn with_policy_config(
+        effect_system: AuraEffectSystem,
+        policy_config: RecoveryPolicyConfig,
+    ) -> Self {
+        let policy_enforcer = RecoveryPolicyEnforcer::new(policy_config, effect_system.clone());
+        
+        Self {
+            effect_system,
+            policy_enforcer,
+        }
+    }
+
+    /// Execute guardian recovery using the G_recovery choreography with policy enforcement.
     pub async fn execute_recovery(
         &self,
         request: GuardianRecoveryRequest,
@@ -167,6 +481,35 @@ impl GuardianRecoveryCoordinator {
             ));
         }
 
+        // Enforce recovery policy before proceeding
+        let validation = self.policy_enforcer.validate_recovery_request(&request).await?;
+        if !validation.is_valid {
+            self.effect_system.log_error(
+                &format!("Recovery policy validation failed: {} violations", validation.violations.len()),
+                &[],
+            );
+            
+            for violation in &validation.violations {
+                self.effect_system.log_error(
+                    &format!("Policy violation: {:?}", violation),
+                    &[],
+                );
+            }
+            
+            return Err(RecoveryError::permission_denied(format!(
+                "Recovery request rejected due to policy violations: {}",
+                validation.violations.len()
+            )));
+        }
+
+        // Log policy warnings
+        for warning in &validation.warnings {
+            self.effect_system.log_warn(
+                &format!("Policy warning: {:?}", warning),
+                &[],
+            );
+        }
+
         let mut choreography = RecoveryChoreography::new(
             RecoveryRole::RecoveringDevice(request.requesting_device),
             request.available_guardians.clone(),
@@ -174,10 +517,62 @@ impl GuardianRecoveryCoordinator {
             self.effect_system.clone(),
         );
 
+        // Execute recovery with policy-aware cooldown calculation
+        let mut policy_aware_request = request.clone();
+        self.apply_policy_adjustments(&mut policy_aware_request).await?;
+
         choreography
-            .execute_recovery(request.clone())
+            .execute_recovery(policy_aware_request.clone())
             .await
-            .map(|result| build_recovery_response(request, result))
+            .map(|result| build_recovery_response(policy_aware_request, result))
+    }
+
+    /// Apply policy-based adjustments to recovery request
+    async fn apply_policy_adjustments(&self, request: &mut GuardianRecoveryRequest) -> RecoveryResult<()> {
+        // Adjust dispute window based on priority
+        match request.priority {
+            RecoveryPriority::Emergency => {
+                // Emergency recoveries get shorter dispute window
+                request.dispute_window_secs = request.dispute_window_secs.min(24 * 60 * 60); // Max 24 hours
+            }
+            RecoveryPriority::Urgent => {
+                // Urgent recoveries get standard window
+                // No adjustment needed
+            }
+            RecoveryPriority::Normal => {
+                // Normal recoveries get extended window for additional review
+                request.dispute_window_secs = request.dispute_window_secs.max(48 * 60 * 60); // Min 48 hours
+            }
+        }
+
+        self.effect_system.log_info(
+            &format!(
+                "Applied policy adjustments: dispute_window={}s for {:?} priority",
+                request.dispute_window_secs, request.priority
+            ),
+            &[],
+        );
+
+        Ok(())
+    }
+
+    /// Validate guardian approval with policy enforcement
+    pub async fn validate_guardian_approval(
+        &self,
+        guardian_id: &DeviceId,
+        request: &GuardianRecoveryRequest,
+    ) -> RecoveryResult<PolicyValidationResult> {
+        self.policy_enforcer.validate_guardian_approval(guardian_id, request).await
+    }
+
+    /// Get policy configuration
+    pub fn policy_config(&self) -> &RecoveryPolicyConfig {
+        &self.policy_enforcer.config
+    }
+
+    /// Update policy configuration
+    pub fn update_policy_config(&mut self, config: RecoveryPolicyConfig) {
+        self.policy_enforcer.config = config;
     }
 }
 

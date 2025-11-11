@@ -3,8 +3,9 @@
 //! This module wires `aura-sync` helpers (snapshot manager, writer fence)
 //! into the agent runtime so operator tooling can trigger maintenance flows.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use aura_core::{
     from_slice, hash_canonical,
@@ -16,11 +17,229 @@ use aura_core::{
 use aura_protocol::effects::{
     AuraEffectSystem, ConsoleEffects, LedgerEffects, StorageEffects, TimeEffects, TreeEffects,
 };
-use aura_sync::{SnapshotManager, WriterFence};
-use tokio::sync::RwLock;
+// use aura_sync::{SnapshotManager, WriterFence};  // Temporarily disabled - needs refactor to effect system
+
+// Temporary placeholder types until aura-sync is refactored
+#[derive(Debug, Clone)]
+pub struct WriterFence;
+
+#[derive(Debug)]
+pub struct SnapshotManager;
+
+impl SnapshotManager {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl WriterFence {
+    pub fn new() -> Self {
+        Self
+    }
+}
+use serde::{Serialize, Deserialize};
+use tokio::sync::{RwLock, broadcast};
+use tracing::{info, warn, error};
 use uuid::Uuid;
 
 use crate::errors::Result;
+
+/// Cache invalidation event types for distributed maintenance
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CacheInvalidationEvent {
+    /// Snapshot completed, invalidate all caches before this epoch
+    SnapshotCompleted {
+        epoch: u64,
+        snapshot_hash: [u8; 32],
+        timestamp: SystemTime,
+    },
+    /// Admin override, force cache invalidation
+    AdminOverride {
+        reason: String,
+        affected_devices: Vec<DeviceId>,
+        timestamp: SystemTime,
+    },
+    /// OTA upgrade completed, invalidate protocol caches
+    OtaUpgradeCompleted {
+        old_version: String,
+        new_version: String,
+        timestamp: SystemTime,
+    },
+    /// Garbage collection completed
+    GcCompleted {
+        collected_items: u32,
+        freed_bytes: u64,
+        timestamp: SystemTime,
+    },
+}
+
+/// Local epoch floor tracker for cache invalidation enforcement
+#[derive(Debug, Clone)]
+pub struct EpochFloor {
+    pub current_floor: u64,
+    pub last_updated: SystemTime,
+    pub invalidation_reason: String,
+}
+
+/// Cache invalidation system managing local enforcement
+#[derive(Debug)]
+pub struct CacheInvalidationSystem {
+    /// Current epoch floor - no cache entries below this epoch are valid
+    epoch_floor: RwLock<EpochFloor>,
+    /// Event broadcaster for cache invalidation notifications
+    event_sender: broadcast::Sender<CacheInvalidationEvent>,
+    /// Device-specific invalidation tracking
+    device_invalidations: RwLock<HashMap<DeviceId, Vec<CacheInvalidationEvent>>>,
+}
+
+impl CacheInvalidationSystem {
+    /// Create new cache invalidation system
+    pub fn new() -> Self {
+        let (event_sender, _) = broadcast::channel(1000);
+        
+        Self {
+            epoch_floor: RwLock::new(EpochFloor {
+                current_floor: 0,
+                last_updated: SystemTime::now(),
+                invalidation_reason: "system_init".to_string(),
+            }),
+            event_sender,
+            device_invalidations: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Get current epoch floor
+    pub async fn get_epoch_floor(&self) -> EpochFloor {
+        self.epoch_floor.read().await.clone()
+    }
+
+    /// Check if epoch is valid (above current floor)
+    pub async fn is_epoch_valid(&self, epoch: u64) -> bool {
+        let floor = self.epoch_floor.read().await;
+        epoch >= floor.current_floor
+    }
+
+    /// Subscribe to cache invalidation events
+    pub fn subscribe(&self) -> broadcast::Receiver<CacheInvalidationEvent> {
+        self.event_sender.subscribe()
+    }
+
+    /// Emit cache invalidation event and update epoch floor
+    pub async fn emit_invalidation_event(&self, event: CacheInvalidationEvent) -> crate::errors::Result<()> {
+        info!("Emitting cache invalidation event: {:?}", event);
+
+        // Update epoch floor based on event type
+        match &event {
+            CacheInvalidationEvent::SnapshotCompleted { epoch, .. } => {
+                self.update_epoch_floor(*epoch, "snapshot_completed").await?;
+            }
+            CacheInvalidationEvent::AdminOverride { affected_devices, .. } => {
+                // Record device-specific invalidations
+                let mut invalidations = self.device_invalidations.write().await;
+                for device in affected_devices {
+                    invalidations.entry(*device).or_default().push(event.clone());
+                }
+            }
+            CacheInvalidationEvent::OtaUpgradeCompleted { .. } => {
+                // OTA upgrades invalidate all protocol caches but don't change epoch floor
+                info!("OTA upgrade completed, invalidating protocol caches");
+            }
+            CacheInvalidationEvent::GcCompleted { .. } => {
+                // GC completion doesn't affect epoch floor but may clear cached objects
+                info!("Garbage collection completed");
+            }
+        }
+
+        // Broadcast event to all subscribers
+        if let Err(e) = self.event_sender.send(event) {
+            warn!("Failed to broadcast cache invalidation event: {}", e);
+        }
+
+        Ok(())
+    }
+
+    /// Update epoch floor with reason
+    async fn update_epoch_floor(&self, new_floor: u64, reason: &str) -> crate::errors::Result<()> {
+        let mut floor = self.epoch_floor.write().await;
+        
+        if new_floor > floor.current_floor {
+            info!("Updating epoch floor from {} to {} (reason: {})", 
+                  floor.current_floor, new_floor, reason);
+            
+            floor.current_floor = new_floor;
+            floor.last_updated = SystemTime::now();
+            floor.invalidation_reason = reason.to_string();
+        }
+
+        Ok(())
+    }
+
+    /// Handle snapshot completion event
+    pub async fn handle_snapshot_completed(
+        &self, 
+        epoch: u64, 
+        snapshot_hash: [u8; 32]
+    ) -> crate::errors::Result<()> {
+        let event = CacheInvalidationEvent::SnapshotCompleted {
+            epoch,
+            snapshot_hash,
+            timestamp: SystemTime::now(),
+        };
+        
+        self.emit_invalidation_event(event).await
+    }
+
+    /// Handle admin override event
+    pub async fn handle_admin_override(
+        &self,
+        reason: String,
+        affected_devices: Vec<DeviceId>,
+    ) -> crate::errors::Result<()> {
+        let event = CacheInvalidationEvent::AdminOverride {
+            reason,
+            affected_devices,
+            timestamp: SystemTime::now(),
+        };
+        
+        self.emit_invalidation_event(event).await
+    }
+
+    /// Handle OTA upgrade completion
+    pub async fn handle_ota_upgrade_completed(
+        &self,
+        old_version: String,
+        new_version: String,
+    ) -> crate::errors::Result<()> {
+        let event = CacheInvalidationEvent::OtaUpgradeCompleted {
+            old_version,
+            new_version,
+            timestamp: SystemTime::now(),
+        };
+        
+        self.emit_invalidation_event(event).await
+    }
+
+    /// Handle garbage collection completion
+    pub async fn handle_gc_completed(
+        &self,
+        collected_items: u32,
+        freed_bytes: u64,
+    ) -> crate::errors::Result<()> {
+        let event = CacheInvalidationEvent::GcCompleted {
+            collected_items,
+            freed_bytes,
+            timestamp: SystemTime::now(),
+        };
+        
+        self.emit_invalidation_event(event).await
+    }
+}
+
+impl Default for CacheInvalidationSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Result of a snapshot ceremony initiated by the agent.
 #[derive(Debug, Clone)]
@@ -38,6 +257,7 @@ pub struct MaintenanceController {
     effects: Arc<RwLock<AuraEffectSystem>>,
     device_id: DeviceId,
     snapshot_manager: SnapshotManager,
+    cache_invalidation: Arc<CacheInvalidationSystem>,
 }
 
 impl MaintenanceController {
@@ -47,7 +267,13 @@ impl MaintenanceController {
             effects,
             device_id,
             snapshot_manager: SnapshotManager::new(),
+            cache_invalidation: Arc::new(CacheInvalidationSystem::new()),
         }
+    }
+
+    /// Get reference to cache invalidation system
+    pub fn cache_invalidation_system(&self) -> Arc<CacheInvalidationSystem> {
+        Arc::clone(&self.cache_invalidation)
     }
 
     /// Expose the writer fence so other subsystems can respect the snapshot barrier.
@@ -93,6 +319,14 @@ impl MaintenanceController {
         self.cleanup_snapshot_blobs(&effects, proposal_id).await?;
         self.prune_local_state(&effects, snapshot.epoch).await?;
 
+        // Emit cache invalidation event for completed snapshot
+        if let Err(e) = self.cache_invalidation.handle_snapshot_completed(
+            snapshot.epoch, 
+            state_digest
+        ).await {
+            error!("Failed to emit cache invalidation event: {}", e);
+        }
+
         drop(fence_guard);
         effects.log_info(
             &format!(
@@ -125,6 +359,15 @@ impl MaintenanceController {
         let event = MaintenanceEvent::AdminReplaced(record.clone());
         self.append_event(&effects, &event).await?;
         self.store_admin_override(&effects, &record).await?;
+        
+        // Emit cache invalidation event for admin override
+        if let Err(e) = self.cache_invalidation.handle_admin_override(
+            format!("Admin replacement: {} -> {}", self.device_id, new_admin),
+            vec![self.device_id, new_admin],
+        ).await {
+            error!("Failed to emit cache invalidation event for admin override: {}", e);
+        }
+        
         effects.log_info(
             &format!(
                 "Admin replacement stub recorded for account {} (new admin {}, activation epoch {})",

@@ -62,9 +62,9 @@ pub struct TreeOperationContext {
 
 impl ChoreographicTreeHandler {
     /// Create a new choreographic tree handler
-    pub fn new(runtime: AuraRuntime, device_id: DeviceId, config: TreeHandlerConfig) -> Self {
+    pub fn new(_runtime: AuraRuntime, device_id: DeviceId, config: TreeHandlerConfig) -> Self {
         Self {
-            // coordinator: TreeOperationCoordinator::new(runtime),  // TODO: Implement this
+            // coordinator: TreeOperationCoordinator::new(_runtime),  // TODO: Implement this
             verifier: IdentityVerifier::new(),
             device_id,
             config,

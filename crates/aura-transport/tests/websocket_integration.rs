@@ -6,8 +6,8 @@ use tokio::time::timeout;
 /// Integration test for WebSocket transport
 #[tokio::test]
 async fn test_websocket_transport_basic() {
-    let device1 = DeviceId("device1".to_string());
-    let device2 = DeviceId("device2".to_string());
+    let device1 = DeviceId::from("device1");
+    let device2 = DeviceId::from("device2");
 
     let config1 = WebSocketConfig {
         port: 8082, // Use different port to avoid conflicts
@@ -86,7 +86,7 @@ async fn test_websocket_transport_basic() {
 
 #[tokio::test]
 async fn test_websocket_message_size_limit() {
-    let device_id = DeviceId("test_device".to_string());
+    let device_id = DeviceId::from("test_device");
     let config = WebSocketConfig {
         port: 8084,
         max_message_size: 100, // Small limit for testing
@@ -140,7 +140,7 @@ async fn test_websocket_message_size_limit() {
 
 #[tokio::test]
 async fn test_websocket_connection_lifecycle() {
-    let device_id = DeviceId("lifecycle_test".to_string());
+    let device_id = DeviceId::from("lifecycle_test");
     let config = WebSocketConfig {
         port: 8085,
         ..WebSocketConfig::default()
@@ -175,8 +175,8 @@ async fn test_websocket_envelope_format() {
     use aura_transport::WebSocketEnvelope;
     use serde_cbor;
 
-    let device1 = DeviceId("sender".to_string());
-    let device2 = DeviceId("receiver".to_string());
+    let device1 = DeviceId::from("sender");
+    let device2 = DeviceId::from("receiver");
 
     let envelope = WebSocketEnvelope {
         from: device1.clone(),
@@ -206,7 +206,7 @@ async fn test_websocket_envelope_format() {
 
 #[tokio::test]
 async fn test_websocket_concurrent_connections() {
-    let server_device = DeviceId("server".to_string());
+    let server_device = DeviceId::from("server");
     let config = WebSocketConfig {
         port: 8086,
         ..WebSocketConfig::default()
@@ -226,14 +226,14 @@ async fn test_websocket_concurrent_connections() {
 
     let client_tasks = (0..3)
         .map(|i| {
-            let device_id = DeviceId(format!("client_{}", i));
+            let device_id = DeviceId::from(format!("client_{}", i).as_str());
             let transport = WebSocketTransport::new(device_id.clone(), WebSocketConfig::default());
             let url = url.to_string();
 
             tokio::spawn(async move {
                 let mut conn = transport.connect_client(&url, addr).await?;
                 let message = format!("Hello from client {}", i).into_bytes();
-                conn.send(DeviceId("server".to_string()), &message).await?;
+                conn.send(DeviceId::from("server"), &message).await?;
                 conn.close().await?;
                 Ok::<(), AuraError>(())
             })

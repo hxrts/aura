@@ -410,7 +410,7 @@ mod tests {
             .add_device(DeviceId::new(), DeviceType::Browser)
             .build();
 
-        assert_eq!(state.devices.len(), 2);
+        assert_eq!(state.device_registry.devices.len(), 2);
     }
 
     #[test]
@@ -419,7 +419,7 @@ mod tests {
 
         assert_eq!(scenario.devices.len(), 3);
         assert_eq!(scenario.threshold, 2);
-        assert_eq!(scenario.account_state.devices.len(), 3);
+        assert_eq!(scenario.account_state.device_registry.devices.len(), 3);
         assert!(helpers::verify_scenario_integrity(&scenario));
     }
 

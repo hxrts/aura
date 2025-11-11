@@ -17,7 +17,10 @@
 //! - Join is idempotent: a ⊔ a = a
 //! - Bottom element exists: a ⊔ ⊥ = a
 
-use aura_core::tree::{AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, OpKind, TreeOp};
+use aura_core::tree::{
+    AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
+};
+use aura_core::DeviceId;
 use aura_journal::semilattice::{Bottom, JoinSemilattice, OpLog};
 use aura_protocol::sync::{IntentState, PeerView};
 use proptest::prelude::*;
@@ -32,17 +35,20 @@ fn create_test_op(commitment: [u8; 32], epoch: u64, leaf_id: u64) -> AttestedOp 
         op: TreeOp {
             parent_commitment: commitment,
             parent_epoch: epoch,
-            op: OpKind::AddLeaf {
+            op: TreeOpKind::AddLeaf {
                 leaf: LeafNode {
-                    leaf_id: LeafId(leaf_id),
+                    leaf_id: LeafId(leaf_id.try_into().unwrap()),
+                    device_id: DeviceId::new(),
                     role: LeafRole::Device,
                     public_key: vec![1, 2, 3],
                     meta: vec![],
                 },
                 under: NodeIndex(0),
             },
+            version: 1,
         },
-        signatures: vec![],
+        agg_sig: vec![],
+        signer_count: 0,
     }
 }
 
@@ -54,7 +60,7 @@ fn arb_oplog() -> impl Strategy<Value = OpLog> {
     .prop_map(|ops| {
         let mut oplog = OpLog::new();
         for (commitment, epoch, leaf_id) in ops {
-            oplog.add(create_test_op(commitment, epoch, leaf_id));
+            oplog.add_operation(create_test_op(commitment, epoch, leaf_id));
         }
         oplog
     })
@@ -309,10 +315,10 @@ mod unit_tests {
     fn test_oplog_union_deduplicates() {
         let mut a = OpLog::new();
         let op = create_test_op([1u8; 32], 1, 1);
-        a.add(op.clone());
+        a.add_operation(op.clone());
 
         let mut b = OpLog::new();
-        b.add(op);
+        b.add_operation(op);
 
         let joined = a.join(&b);
         assert_eq!(joined.list_ops().len(), 1); // Deduplicated

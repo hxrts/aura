@@ -4,7 +4,7 @@
 //! delta updates in delta-based CRDTs. The handler buffers deltas and
 //! periodically folds them into the state for bandwidth optimization.
 
-use aura_core::semilattice::{CvState, Delta, DeltaMsg, DeltaProduce, MsgKind};
+use aura_core::semilattice::{CvState, Delta, DeltaMsg, DeltaProduce, DeltaState, MsgKind};
 use std::collections::VecDeque;
 
 /// Delta-based CRDT effect handler
@@ -93,18 +93,13 @@ where
 
     /// Apply a single delta to the state
     ///
-    /// This is a placeholder for delta-to-state application logic.
-    /// Real implementations would need specific logic for converting
-    /// deltas back into state updates.
+    /// This is a generic fallback implementation. For specific CRDT types,
+    /// you should use the specialized DeltaHandler implementations below
+    /// that work with the DeltaState trait.
     fn apply_delta_to_state(&mut self, _delta: D) {
-        // TODO: Implement delta application based on specific CRDT semantics
-        // This typically involves:
-        // 1. Converting delta to state representation
-        // 2. Joining with current state
-        // 3. Updating the state
-
-        // TODO fix - For now, this is a placeholder
-        tracing::debug!("Applied delta to state (placeholder implementation)");
+        // Generic implementation: We cannot apply deltas without knowing the specific
+        // relationship between Delta type and State type. Use the DeltaState implementations below.
+        tracing::debug!("Applied delta to state (generic fallback - consider using DeltaState implementation)");
     }
 
     /// Get current state
@@ -175,6 +170,75 @@ where
     }
 }
 
+/// Specialized DeltaHandler for DeltaState-compatible types
+impl<S> DeltaHandler<S, S::Delta>
+where
+    S: CvState + DeltaState,
+{
+    /// Apply a single delta to the state using DeltaState trait
+    ///
+    /// This implementation uses the DeltaState trait to properly apply deltas
+    /// to states that support delta-based updates.
+    fn apply_delta_to_state(&mut self, delta: S::Delta) {
+        let new_state = self.state.apply_delta(&delta);
+        self.state = self.state.join(&new_state);
+    }
+
+    /// Update state with local change and produce delta
+    ///
+    /// This method combines local state updates with delta production,
+    /// which is useful for tracking local changes that need to be propagated.
+    pub fn update_and_produce_delta(&mut self, new_state: S) -> Option<S::Delta>
+    where
+        S::Delta: DeltaProduce<S>,
+    {
+        if new_state != self.state {
+            let delta = S::Delta::delta_from(&self.state, &new_state);
+            self.state = self.state.join(&new_state);
+            Some(delta)
+        } else {
+            None
+        }
+    }
+
+    /// Apply a batch of deltas efficiently
+    ///
+    /// This method applies multiple deltas in sequence, which can be more
+    /// efficient than applying them one by one through on_recv.
+    pub fn apply_deltas(&mut self, deltas: Vec<S::Delta>) {
+        for delta in deltas {
+            self.apply_delta_to_state(delta);
+        }
+    }
+}
+
+/// Type alias for JournalMap delta handler
+pub type JournalDeltaHandler<J> = DeltaHandler<J, <J as DeltaState>::Delta>;
+
+/// Helper functions for creating specialized handlers
+impl<S> DeltaHandler<S, S::Delta>
+where
+    S: CvState + DeltaState,
+{
+    /// Create a new delta handler optimized for this state type
+    pub fn for_state_type() -> Self {
+        Self {
+            state: S::bottom(),
+            delta_inbox: VecDeque::new(),
+            fold_threshold: 10,
+        }
+    }
+
+    /// Create a delta handler with specific state and optimized folding
+    pub fn for_state_type_with_state(state: S) -> Self {
+        Self {
+            state,
+            delta_inbox: VecDeque::new(),
+            fold_threshold: 10,
+        }
+    }
+}
+
 impl<S, D> Default for DeltaHandler<S, D>
 where
     S: CvState,
@@ -221,6 +285,14 @@ mod tests {
     }
 
     impl CvState for TestCounter {}
+
+    impl DeltaState for TestCounter {
+        type Delta = TestDelta;
+
+        fn apply_delta(&self, delta: &Self::Delta) -> Self {
+            TestCounter(self.0 + delta.0)
+        }
+    }
 
     // Test delta type
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,5 +394,62 @@ mod tests {
 
         handler.set_fold_threshold(20);
         assert_eq!(handler.get_fold_threshold(), 20);
+    }
+
+    #[test]
+    fn test_delta_state_application() {
+        let mut handler = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
+
+        // Apply a delta directly
+        handler.apply_deltas(vec![TestDelta(3), TestDelta(7)]);
+        
+        // State should be updated: 5 + max(3, 7) = 5 + 7 = 12
+        assert_eq!(handler.get_state(), &TestCounter(12));
+    }
+
+    #[test]
+    fn test_update_and_produce_delta() {
+        let mut handler = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
+
+        // Update state and produce delta
+        let delta = handler.update_and_produce_delta(TestCounter(10));
+        
+        assert!(delta.is_some());
+        assert_eq!(delta.unwrap(), TestDelta(5)); // 10 - 5 = 5
+        assert_eq!(handler.get_state(), &TestCounter(10));
+    }
+
+    #[test]
+    fn test_update_and_produce_delta_no_change() {
+        let mut handler = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
+
+        // Update with same state
+        let delta = handler.update_and_produce_delta(TestCounter(5));
+        
+        assert!(delta.is_none()); // No change, no delta produced
+        assert_eq!(handler.get_state(), &TestCounter(5));
+    }
+
+    #[test]
+    fn test_fold_deltas_with_delta_state() {
+        let mut handler = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
+        handler.set_fold_threshold(2);
+
+        // Add deltas to trigger folding
+        handler.on_recv(DeltaMsg::new(TestDelta(3)));
+        handler.on_recv(DeltaMsg::new(TestDelta(7))); // This should trigger folding
+
+        // State should be: 5 + max(3, 7) = 5 + 7 = 12
+        assert_eq!(handler.get_state(), &TestCounter(12));
+        assert_eq!(handler.delta_count(), 0); // Deltas should be folded
+    }
+
+    #[test]
+    fn test_for_state_type_constructors() {
+        let handler1 = DeltaHandler::<TestCounter, TestDelta>::for_state_type();
+        assert_eq!(handler1.get_state(), &TestCounter(0));
+
+        let handler2 = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(42));
+        assert_eq!(handler2.get_state(), &TestCounter(42));
     }
 }

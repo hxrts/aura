@@ -3,6 +3,7 @@
 //! This module provides the core capability abstractions that follow
 //! meet-semilattice laws for monotonic capability restriction.
 
+use aura_core::semilattice::{MeetSemiLattice, Top};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -14,7 +15,7 @@ pub enum TrustLevel {
     None = 0,
     /// Low trust level
     Low = 1,
-    /// Medium trust level  
+    /// Medium trust level
     Medium = 2,
     /// High trust level (top element)
     High = 3,
@@ -271,25 +272,28 @@ impl Capability {
     /// Check if this capability grants a specific storage permission
     pub fn grants_storage_permission(&self, permission: &StoragePermission) -> bool {
         use Capability::*;
-        
+
         match (self, permission) {
             (All, _) => true,
             (None, _) => false,
-            
+
             // Read capabilities grant storage read permissions
             (Read { resource_pattern }, StoragePermission::ContentRead) => {
                 // For now, any read capability grants content read
                 resource_pattern == "*" || resource_pattern.contains("content")
             }
-            
+
             // Write capabilities grant storage write/delete permissions
-            (Write { resource_pattern }, StoragePermission::ContentWrite | StoragePermission::ContentDelete | StoragePermission::DirectoryCreate) => {
-                resource_pattern == "*" || resource_pattern.contains("content")
-            }
-            
+            (
+                Write { resource_pattern },
+                StoragePermission::ContentWrite
+                | StoragePermission::ContentDelete
+                | StoragePermission::DirectoryCreate,
+            ) => resource_pattern == "*" || resource_pattern.contains("content"),
+
             // Admin capabilities grant all storage permissions
             (Admin { scope }, _) => scope == "*" || scope.contains("storage"),
-            
+
             _ => false,
         }
     }
@@ -314,6 +318,12 @@ impl CapabilitySet {
         let mut capabilities = BTreeSet::new();
         capabilities.insert(Capability::All);
         Self { capabilities }
+    }
+
+    /// Create capability set from a BTreeSet of capabilities
+    pub fn from_capabilities(capabilities: BTreeSet<Capability>) -> Self {
+        let temp_set = Self { capabilities };
+        temp_set.normalize()
     }
 
     /// Create capability set from permission strings
@@ -402,28 +412,85 @@ impl CapabilitySet {
     /// Compute the meet (intersection) of two capability sets
     ///
     /// This implements the meet operation for the capability semilattice.
-    /// The result contains the most restrictive capabilities from both sets.
+    /// The result contains capabilities that are present in both sets.
+    /// For meet-semilattice laws: meet is commutative, associative, idempotent.
     pub fn meet(&self, other: &CapabilitySet) -> Self {
-        let mut result_caps = BTreeSet::new();
+        // Handle All capability properly for top element identity
+        if self.capabilities.contains(&Capability::All)
+            && other.capabilities.contains(&Capability::All)
+        {
+            // All ⊓ All = All
+            return Self::all();
+        }
 
-        // For each capability in self, find if there's a compatible one in other
-        for cap1 in &self.capabilities {
-            for cap2 in &other.capabilities {
-                // Check if they can be met (same type or compatible types)
-                let meet_cap = cap1.meet(cap2);
-                if meet_cap != Capability::None {
-                    result_caps.insert(meet_cap);
-                }
+        if self.capabilities.contains(&Capability::All) {
+            // All ⊓ X = X (All is top element)
+            return other.clone();
+        }
+
+        if other.capabilities.contains(&Capability::All) {
+            // X ⊓ All = X (All is top element)
+            return self.clone();
+        }
+
+        // Handle None capability specially - it represents empty capability set
+        let self_has_none = self.capabilities.contains(&Capability::None);
+        let other_has_none = other.capabilities.contains(&Capability::None);
+
+        if self_has_none && other_has_none {
+            // None ⊓ None = None
+            return Self {
+                capabilities: [Capability::None].into(),
+            };
+        }
+
+        if self_has_none || other_has_none {
+            // None ⊓ X = ∅ (empty set) for any X != None
+            return Self::empty();
+        }
+
+        // Standard intersection for regular capabilities
+        let result_caps: BTreeSet<Capability> = self
+            .capabilities
+            .intersection(&other.capabilities)
+            .cloned()
+            .collect();
+
+        // Create result directly (already normalized inputs, so intersection result is valid)
+        Self {
+            capabilities: result_caps,
+        }
+    }
+
+    /// Normalize a capability set by removing redundant capabilities
+    fn normalize(&self) -> Self {
+        // If All is present, only keep All (it subsumes everything)
+        if self.capabilities.contains(&Capability::All) {
+            return Self::all();
+        }
+
+        // If only None is present, keep it
+        if self.capabilities.len() == 1 && self.capabilities.contains(&Capability::None) {
+            return Self {
+                capabilities: [Capability::None].into(),
+            };
+        }
+
+        // For all other cases, filter out None and keep regular capabilities
+        let mut clean_caps = BTreeSet::new();
+        for cap in &self.capabilities {
+            if *cap != Capability::None {
+                clean_caps.insert(cap.clone());
             }
         }
 
-        // If no meets were possible, return empty set (most restrictive)
-        if result_caps.is_empty() {
+        // If we filtered everything out (only had None with other caps), return empty
+        if clean_caps.is_empty() {
             return Self::empty();
         }
 
         Self {
-            capabilities: result_caps,
+            capabilities: clean_caps,
         }
     }
 
@@ -547,7 +614,7 @@ fn capability_permits(capability: &Capability, operation: &str) -> bool {
         Admin { scope } => scope == "*" || operation.contains(&format!(":{}", scope)),
         Relay {
             max_bytes_per_period,
-            period_seconds,
+            period_seconds: _,
             max_streams,
         } => {
             operation.starts_with("relay:") && {
@@ -686,5 +753,19 @@ mod tests {
 
         let default_relay_set = CapabilitySet::from_permissions(&["relay"]);
         assert!(default_relay_set.permits("relay:1000000:5"));
+    }
+}
+
+// === Semilattice Implementations ===
+
+impl MeetSemiLattice for CapabilitySet {
+    fn meet(&self, other: &Self) -> Self {
+        self.meet(other)
+    }
+}
+
+impl Top for CapabilitySet {
+    fn top() -> Self {
+        Self::all()
     }
 }

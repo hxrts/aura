@@ -82,16 +82,14 @@
 
 // Core modules following unified effect system architecture
 pub mod authorization_bridge;
-
-// Authorization bridge tests (TODO: implement tests when needed)
-// #[cfg(test)]
-// mod authorization_bridge_tests;
+pub mod choreography;
 pub mod effects;
 pub mod guards;
 pub mod handlers;
 pub mod messages;
 pub mod middleware;
 pub mod sync;
+pub mod verification;
 
 // Unified AuraEffectSystem architecture only
 
@@ -129,6 +127,11 @@ pub use sync::{IntentState, PeerView};
 pub use authorization_bridge::{
     authenticate_and_authorize, evaluate_authorization, AuthorizationContext, AuthorizationError,
     AuthorizationRequest, AuthorizedEvent, PermissionGrant,
+};
+
+pub use verification::{
+    CapabilitySoundnessVerifier, CapabilityState, SoundnessProperty, SoundnessReport,
+    SoundnessVerificationResult, VerificationConfig,
 };
 
 // Clean API - no legacy compatibility

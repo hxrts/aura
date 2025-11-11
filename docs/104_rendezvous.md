@@ -36,7 +36,7 @@ Aura 1.0 uses a **relay-first with STUN assistance** strategy for NAT traversal.
 When `establish_channel` is invoked, the following connection attempts are made in priority order:
 
 1. **Direct QUIC** (if local network or one peer has public IP) - ~30% of cases
-2. **QUIC via STUN reflexive address** (using NAT-mapped endpoint) - ~40-50% of cases  
+2. **QUIC via STUN reflexive address** (using NAT-mapped endpoint) - ~40-50% of cases
 3. **WebSocket relay** (via guardian/friend from social graph) - ~20-30% of cases
 
 Each attempt has a 2-second timeout before falling back to the next method. The first successful connection is used.
@@ -94,7 +94,7 @@ Explicitly deferred to future releases:
 
 The journal records two structs per relationship:
 
-```
+```rust
 struct RendezvousEnvelope {
     context: ContextId,     // RID or GID
     role: OfferOrAnswer,
@@ -124,13 +124,13 @@ enum TransportHint {
 }
 ```
 
-Payload bytes live in the encrypted blob store and are addressed by `payload_cid`. The envelope header is cleartext so gossip can deduplicate, but the payload is encrypted with `K_box` derived from the pairwise RID. `flow_cost` expresses how much FlowBudget must be available before forwarding. The ledger entry `FlowBudget{spent,limit,epoch}` is keyed by `(context, neighbor_device)` and is updated exactly once per successful forward.
+Payload bytes live in the encrypted blob store and are addressed by `payload_cid`. The envelope header is cleartext so gossip can deduplicate, but the payload is encrypted with `K_box` derived from the pairwise RID. `flow_cost` expresses how much FlowBudget must be available before forwarding. The ledger entry `FlowBudget{limit,spent,epoch}` is keyed by `(context, neighbor_device)` and is updated exactly once per successful forward.
 
 ## Protocol Flow
 
 1. **Offer publication**: Device A needs to reach account B. A derives the current `context = RID_AB`, increments its rendezvous counter using the existing counter choreography, and builds a `RendezvousDescriptor` with its reachable transports. A encrypts the descriptor with `K_box` and writes a new `RendezvousEnvelope{Offer}` fact plus the payload blob. Before the fact enters the journal, the manager charges `flow_cost` against every neighbor that will see the update. If any charge fails, publication is deferred until the budget replenishes.
 
-2. **Replication**: Neighbors pull the updated journal, validate the envelope signature, and store the blob locally. Flow-budget receipts are appended so downstream relays can prove that the upstream hop already charged its ledger slot. This prevents budget laundering and keeps the accounting monotone.
+2. **Replication**: Neighbors pull the updated journal, validate the envelope signature, and store the blob locally. Per-hop receipts are appended so downstream relays can prove that the upstream hop already charged its ledger slot. This prevents budget laundering and keeps the accounting monotone.
 
 3. **Answer publication**: Some device in account B decrypts the offer (it knows `K_box` because it belongs to RID_AB). B selects its preferred transport hint, encrypts a response descriptor with the same context key, and publishes a `RendezvousEnvelope{Answer}` fact. The flow-budget logic mirrors the offer path.
 

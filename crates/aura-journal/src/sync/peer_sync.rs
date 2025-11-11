@@ -599,8 +599,12 @@ mod tests {
         assert!(priority > 50); // Should be high priority
 
         // Add pending operations
-        state.pending_operations.insert([0u8; 32]);
-        state.pending_operations.insert([0u8; 32]);
+        state
+            .pending_operations
+            .insert(aura_core::Hash32([0u8; 32]));
+        state
+            .pending_operations
+            .insert(aura_core::Hash32([1u8; 32]));
         let priority_with_pending = state.get_sync_priority();
         assert!(priority_with_pending > priority);
 

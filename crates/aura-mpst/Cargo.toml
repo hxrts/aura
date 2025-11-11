@@ -15,7 +15,7 @@ workspace = true
 aura-core = { path = "../aura-core" }
 
 # Session types framework
-rumpsteak-aura = "0.2.0"
+rumpsteak-aura = "0.2.3"
 
 # Serialization
 serde = { workspace = true }

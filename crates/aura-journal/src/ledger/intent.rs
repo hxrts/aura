@@ -5,7 +5,7 @@
 //! for executing a batch of compatible intents.
 
 use aura_core::identifiers::DeviceId;
-use aura_core::{Hash32 as Commitment, NodeIndex};
+use aura_core::{Hash32, Hash32 as Commitment, NodeIndex};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -319,14 +319,14 @@ mod tests {
         let intent = Intent::new(
             op,
             vec![NodeIndex(0)],
-            [0u8; 32],
+            Hash32::new([0u8; 32]),
             Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
 
         assert_eq!(intent.priority, Priority::default_priority());
-        assert!(!intent.is_stale(&[0u8; 32]));
+        assert!(!intent.is_stale(&Hash32::new([0u8; 32])));
     }
 
     #[test]
@@ -338,7 +338,7 @@ mod tests {
         let intent1 = Intent::new(
             op.clone(),
             vec![NodeIndex(0), NodeIndex(1)],
-            [1u8; 32],
+            Hash32::new([1u8; 32]),
             Priority::default_priority(),
             DeviceId::new(),
             1000,
@@ -347,7 +347,7 @@ mod tests {
         let intent2 = Intent::new(
             op,
             vec![NodeIndex(1), NodeIndex(2)],
-            [2u8; 32], // Different snapshot
+            Hash32::new([2u8; 32]), // Different snapshot
             Priority::default_priority(),
             DeviceId::new(),
             1000,
@@ -368,7 +368,7 @@ mod tests {
         let intent1 = Intent::new(
             op.clone(),
             vec![NodeIndex(0), NodeIndex(1)],
-            snapshot,
+            Hash32::new(snapshot),
             Priority::default_priority(),
             DeviceId::new(),
             1000,
@@ -377,7 +377,7 @@ mod tests {
         let intent2 = Intent::new(
             op,
             vec![NodeIndex(1), NodeIndex(2)],
-            snapshot, // Same snapshot
+            Hash32::new(snapshot), // Same snapshot
             Priority::default_priority(),
             DeviceId::new(),
             1000,
@@ -394,14 +394,14 @@ mod tests {
                 affected: vec![NodeIndex(0)],
             },
             vec![],
-            [1u8; 32],
+            Hash32::new([1u8; 32]),
             Priority::default_priority(),
             DeviceId::new(),
             1000,
         );
 
-        assert!(!intent.is_stale(&[1u8; 32]));
-        assert!(intent.is_stale(&[2u8; 32]));
+        assert!(!intent.is_stale(&Hash32::new([1u8; 32])));
+        assert!(intent.is_stale(&Hash32::new([2u8; 32])));
     }
 
     #[test]
@@ -412,7 +412,7 @@ mod tests {
                 reason: 0,
             },
             vec![],
-            [0u8; 32],
+            Hash32::new([0u8; 32]),
             Priority::default_priority(),
             DeviceId::new(),
             1000,
@@ -427,7 +427,7 @@ mod tests {
         use aura_core::tree::Policy;
 
         let snapshot = [1u8; 32];
-        let mut batch = IntentBatch::new(snapshot);
+        let mut batch = IntentBatch::new(Hash32::new(snapshot));
 
         let intent1 = Intent::new(
             TreeOperation::ChangePolicy {
@@ -435,7 +435,7 @@ mod tests {
                 new_policy: Policy::All,
             },
             vec![NodeIndex(0)],
-            snapshot,
+            Hash32::new(snapshot),
             Priority::default_priority(),
             DeviceId::new(),
             1000,
@@ -450,14 +450,14 @@ mod tests {
     fn test_intent_batch_rejects_snapshot_mismatch() {
         let snapshot1 = [1u8; 32];
         let snapshot2 = [2u8; 32];
-        let mut batch = IntentBatch::new(snapshot1);
+        let mut batch = IntentBatch::new(Hash32::new(snapshot1));
 
         let intent = Intent::new(
             TreeOperation::RotateEpoch {
                 affected: vec![NodeIndex(0)],
             },
             vec![NodeIndex(0)],
-            snapshot2,
+            Hash32::new(snapshot2),
             Priority::default_priority(),
             DeviceId::new(),
             1000,
@@ -470,14 +470,14 @@ mod tests {
     #[test]
     fn test_intent_batch_intent_ids() {
         let snapshot = [1u8; 32];
-        let mut batch = IntentBatch::new(snapshot);
+        let mut batch = IntentBatch::new(Hash32::new(snapshot));
 
         let intent1 = Intent::new(
             TreeOperation::RotateEpoch {
                 affected: vec![NodeIndex(0)],
             },
             vec![NodeIndex(0)],
-            snapshot,
+            Hash32::new(snapshot),
             Priority::default_priority(),
             DeviceId::new(),
             1000,

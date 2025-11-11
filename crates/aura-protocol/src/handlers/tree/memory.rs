@@ -49,7 +49,7 @@ impl TreeEffects for MemoryTreeHandler {
 
     async fn get_current_commitment(&self) -> Result<Hash32, AuraError> {
         let state = self.get_current_state().await?;
-        Ok(Hash32(state.current_commitment()))
+        Ok(Hash32::new(state.current_commitment()))
     }
 
     async fn get_current_epoch(&self) -> Result<u64, AuraError> {
@@ -99,7 +99,7 @@ impl TreeEffects for MemoryTreeHandler {
         &self,
         _cut: crate::effects::tree::Cut,
     ) -> Result<crate::effects::tree::ProposalId, AuraError> {
-        Ok(crate::effects::tree::ProposalId(Hash32([0u8; 32])))
+        Ok(crate::effects::tree::ProposalId(Hash32::new([0u8; 32])))
     }
 
     async fn approve_snapshot(
@@ -119,8 +119,8 @@ impl TreeEffects for MemoryTreeHandler {
         Ok(crate::effects::tree::Snapshot {
             cut: crate::effects::tree::Cut {
                 epoch: 0,
-                commitment: Hash32([0u8; 32]),
-                cid: Hash32([0u8; 32]),
+                commitment: Hash32::new([0u8; 32]),
+                cid: Hash32::new([0u8; 32]),
             },
             tree_state: TreeState::new(),
             aggregate_signature: vec![0u8; 64],
@@ -187,7 +187,7 @@ mod tests {
 
         // Apply operation
         let cid = handler.apply_attested_op(op).await.unwrap();
-        assert_ne!(cid, [0u8; 32]);
+        assert_ne!(cid, Hash32::new([0u8; 32]).as_bytes());
 
         // Query state
         let state = handler.get_current_state().await.unwrap();
@@ -201,7 +201,7 @@ mod tests {
         let handler = MemoryTreeHandler::new(journal);
 
         let commitment = handler.get_current_commitment().await.unwrap();
-        assert_eq!(commitment, [0u8; 32]); // Empty tree has zero commitment
+        assert_eq!(commitment, Hash32::new([0u8; 32]).as_bytes()); // Empty tree has zero commitment
     }
 
     #[tokio::test]

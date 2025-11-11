@@ -487,7 +487,7 @@ impl RelayCoordinator {
             .relay_metrics
             .get_mut(&node_id)
             .ok_or_else(|| aura_core::AuraError::not_found("Relay node not found"))?;
-        self.update_aggregate_stats(metrics)?;
+        Self::update_aggregate_stats_static(metrics)?;
 
         Ok(())
     }
@@ -509,7 +509,7 @@ impl RelayCoordinator {
             last_updated: self.get_current_timestamp(),
         };
 
-        let relationship_id = routing_table.relationship_id;
+        let relationship_id = routing_table.relationship_id.clone();
         self.routing_tables.insert(relationship_id, routing_table);
         Ok(())
     }
@@ -535,7 +535,9 @@ impl RelayCoordinator {
     ) -> Vec<&RoutingPolicy> {
         self.routing_policies
             .iter()
-            .filter(|policy| self.policy_applies(policy, relationship_id.clone(), message_requirements))
+            .filter(|policy| {
+                self.policy_applies(policy, relationship_id.clone(), message_requirements)
+            })
             .collect()
     }
 
@@ -747,6 +749,11 @@ impl RelayCoordinator {
 
     /// Update aggregate statistics for relay metrics
     fn update_aggregate_stats(&self, metrics: &mut RelayMetrics) -> AuraResult<()> {
+        Self::update_aggregate_stats_static(metrics)
+    }
+
+    /// Update aggregate statistics for relay metrics (static version)
+    fn update_aggregate_stats_static(metrics: &mut RelayMetrics) -> AuraResult<()> {
         if metrics.performance_samples.is_empty() {
             return Ok(());
         }
@@ -778,13 +785,18 @@ impl RelayCoordinator {
         }
 
         metrics.aggregate_stats.total_messages += total_samples as u64;
-        metrics.last_updated = self.get_current_timestamp();
+        metrics.last_updated = Self::get_current_timestamp_static();
 
         Ok(())
     }
 
     /// Get current timestamp
     fn get_current_timestamp(&self) -> u64 {
+        Self::get_current_timestamp_static()
+    }
+
+    /// Get current timestamp (static version)
+    fn get_current_timestamp_static() -> u64 {
         // Would use time effects in real implementation
         1234567890
     }

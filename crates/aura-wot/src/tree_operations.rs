@@ -3,7 +3,7 @@
 //! This module provides authorization evaluation for ratchet tree operations,
 //! integrating tree policies with capability checks.
 
-use crate::tree_policy::{Policy, ThresholdConfig};
+use crate::tree_policy::Policy as TreePolicyEnum;
 use crate::{CapabilitySet, TreePolicy, WotError};
 use aura_core::{AccountId, DeviceId, GuardianId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,7 +22,7 @@ pub enum TreeOpKind {
     /// Change policy at a node (must be more restrictive or equal)
     ChangePolicy {
         node: u32, // NodeIndex
-        new_policy: Policy,
+        new_policy: TreePolicyEnum,
     },
     /// Rotate epoch for affected nodes
     RotateEpoch {
@@ -259,7 +259,7 @@ pub fn tree_operation_capabilities(op: &TreeOpKind) -> CapabilitySet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NodeIndex, Policy};
+    use crate::{NodeIndex, ThresholdConfig};
 
     #[test]
     fn test_tree_operation_authorization() {
@@ -277,9 +277,14 @@ mod tests {
         let policy = TreePolicy::new(
             NodeIndex(0),
             account_id,
-            Policy::Threshold { m: 2, n: 3 },
+            TreePolicyEnum::Threshold { m: 2, n: 3 },
             threshold_config,
-        );
+        )
+        .with_required_capabilities(CapabilitySet::from_permissions(&[
+            "tree:read",
+            "tree:propose",
+            "tree:modify",
+        ]));
 
         context.add_policy(0, policy);
 
@@ -328,9 +333,14 @@ mod tests {
         let policy = TreePolicy::new(
             NodeIndex(0),
             account_id,
-            Policy::Threshold { m: 2, n: 3 },
+            TreePolicyEnum::Threshold { m: 2, n: 3 },
             threshold_config,
-        );
+        )
+        .with_required_capabilities(CapabilitySet::from_permissions(&[
+            "tree:read",
+            "tree:propose",
+            "tree:modify",
+        ]));
 
         context.add_policy(0, policy);
 
@@ -374,7 +384,17 @@ mod tests {
         ]);
 
         let threshold_config = ThresholdConfig::new(1, participants.clone());
-        let policy = TreePolicy::new(NodeIndex(0), account_id, Policy::Any, threshold_config);
+        let policy = TreePolicy::new(
+            NodeIndex(0),
+            account_id,
+            TreePolicyEnum::Any,
+            threshold_config,
+        )
+        .with_required_capabilities(CapabilitySet::from_permissions(&[
+            "tree:read",
+            "tree:propose",
+            "tree:modify",
+        ]));
 
         context.add_policy(0, policy);
 

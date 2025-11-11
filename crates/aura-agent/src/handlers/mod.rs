@@ -6,9 +6,11 @@
 
 // Local agent handlers
 pub mod invitations;
+pub mod journal;
 pub mod recovery;
 pub mod sessions;
 pub mod storage;
+pub mod auth;
 
 // Re-export agent handlers from aura-protocol
 pub use aura_protocol::handlers::agent::{

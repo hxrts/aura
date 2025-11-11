@@ -27,6 +27,6 @@ hex = { workspace = true }
 blake3 = { workspace = true }
 
 [dev-dependencies]
-tokio-test = "0.4"
+tokio-test = { workspace = true }
 signature = { workspace = true }
 tokio = { workspace = true }

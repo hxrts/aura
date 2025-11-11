@@ -10,12 +10,12 @@
 
 use crate::{
     capability_aware_sbb::{CapabilityAwareSbbCoordinator, SbbForwardingPolicy, TrustStatistics},
-    envelope_encryption::{EnvelopeEncryption, EncryptedEnvelope, PaddingStrategy},
-    messaging::{SbbTransportBridge, TransportOfferPayload, SbbMessageType},
-    relationship_keys::{RelationshipKeyManager, derive_test_root_key},
-    sbb::{RendezvousEnvelope, SbbEnvelope, FloodResult, SbbFlooding},
+    envelope_encryption::{EncryptedEnvelope, EnvelopeEncryption, PaddingStrategy},
+    messaging::{SbbMessageType, SbbTransportBridge, TransportOfferPayload},
+    relationship_keys::{derive_test_root_key, RelationshipKeyManager},
+    sbb::{FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding},
 };
-use aura_core::{AuraResult, AuraError, DeviceId, RelationshipId};
+use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId};
 use aura_transport::NetworkTransport;
 use aura_wot::TrustLevel;
 use serde::{Deserialize, Serialize};
@@ -89,13 +89,13 @@ impl IntegratedSbbSystem {
     pub fn new(device_id: DeviceId, config: SbbConfig) -> Self {
         // Initialize components
         let flooding_coordinator = CapabilityAwareSbbCoordinator::new(device_id);
-        
+
         let root_key = derive_test_root_key(device_id); // In production: from DKD
         let key_manager = RelationshipKeyManager::new(device_id, root_key);
         let encryption = EnvelopeEncryption::new(key_manager);
-        
+
         let transport_bridge = SbbTransportBridge::new(device_id);
-        
+
         Self {
             device_id,
             flooding_coordinator,
@@ -112,13 +112,13 @@ impl IntegratedSbbSystem {
         config: SbbConfig,
     ) -> Self {
         let flooding_coordinator = CapabilityAwareSbbCoordinator::new(device_id);
-        
+
         let root_key = derive_test_root_key(device_id);
         let key_manager = RelationshipKeyManager::new(device_id, root_key);
         let encryption = EnvelopeEncryption::new(key_manager);
-        
+
         let transport_bridge = SbbTransportBridge::with_network_transport(device_id, transport);
-        
+
         Self {
             device_id,
             flooding_coordinator,
@@ -135,24 +135,31 @@ impl IntegratedSbbSystem {
         relationship_id: RelationshipId,
         trust_level: TrustLevel,
     ) {
-        self.flooding_coordinator.add_relationship(peer_id, relationship_id, trust_level, false);
+        self.flooding_coordinator
+            .add_relationship(peer_id, relationship_id, trust_level, false);
         self.transport_bridge.add_friend(peer_id).await;
     }
 
     /// Add guardian relationship for SBB flooding (preferred for reliability)
     pub async fn add_guardian(
         &mut self,
-        peer_id: DeviceId, 
+        peer_id: DeviceId,
         relationship_id: RelationshipId,
         trust_level: TrustLevel,
     ) {
-        self.flooding_coordinator.add_relationship(peer_id, relationship_id, trust_level, true);
+        self.flooding_coordinator
+            .add_relationship(peer_id, relationship_id, trust_level, true);
         self.transport_bridge.add_guardian(peer_id).await;
     }
 
     /// Update trust level for existing relationship
-    pub fn update_trust_level(&mut self, peer_id: DeviceId, trust_level: TrustLevel) -> AuraResult<()> {
-        self.flooding_coordinator.update_trust_level(peer_id, trust_level)
+    pub fn update_trust_level(
+        &mut self,
+        peer_id: DeviceId,
+        trust_level: TrustLevel,
+    ) -> AuraResult<()> {
+        self.flooding_coordinator
+            .update_trust_level(peer_id, trust_level)
     }
 
     /// Remove relationship
@@ -167,16 +174,19 @@ impl IntegratedSbbSystem {
         request: SbbDiscoveryRequest,
     ) -> AuraResult<SbbDiscoveryResult> {
         let config = SbbConfig::default();
-        
+
         // Serialize transport offer
-        let payload_bytes = bincode::serialize(&request.transport_offer)
-            .map_err(|e| AuraError::serialization(format!("Failed to serialize transport offer: {}", e)))?;
+        let payload_bytes = bincode::serialize(&request.transport_offer).map_err(|e| {
+            AuraError::serialization(format!("Failed to serialize transport offer: {}", e))
+        })?;
 
         let envelope = if request.use_encryption {
             // For encrypted flooding, we need to encrypt for each potential recipient
             // For simplicity, we'll create an unencrypted envelope first and let the transport bridge handle encryption
             // In a full implementation, we'd encrypt with a broadcast key or multiple recipient keys
-            tracing::info!("Encrypted SBB flooding not yet fully implemented, falling back to plaintext");
+            tracing::info!(
+                "Encrypted SBB flooding not yet fully implemented, falling back to plaintext"
+            );
             RendezvousEnvelope::new(payload_bytes, request.ttl)
         } else {
             // Create plaintext envelope
@@ -184,10 +194,13 @@ impl IntegratedSbbSystem {
         };
 
         let message_size = envelope.payload.len();
-        
+
         // Flood through capability-aware coordinator
-        let flood_result = self.flooding_coordinator.flood_envelope(envelope, None).await?;
-        
+        let flood_result = self
+            .flooding_coordinator
+            .flood_envelope(envelope, None)
+            .await?;
+
         let peers_reached = match &flood_result {
             FloodResult::Forwarded { peer_count } => *peer_count,
             _ => 0,
@@ -208,17 +221,22 @@ impl IntegratedSbbSystem {
         request: SbbDiscoveryRequest,
     ) -> AuraResult<SbbDiscoveryResult> {
         let config = SbbConfig::default();
-        
+
         // Serialize transport offer
-        let payload_bytes = bincode::serialize(&request.transport_offer)
-            .map_err(|e| AuraError::serialization(format!("Failed to serialize transport offer: {}", e)))?;
+        let payload_bytes = bincode::serialize(&request.transport_offer).map_err(|e| {
+            AuraError::serialization(format!("Failed to serialize transport offer: {}", e))
+        })?;
 
         // Create plaintext envelope
         let envelope = RendezvousEnvelope::new(payload_bytes, request.ttl);
-        
+
         // Encrypt envelope for specific peer
-        let encrypted_envelope = self.encryption
-            .encrypt_envelope_with_padding(&envelope, peer_id, &config.app_context, config.padding_strategy)?;
+        let encrypted_envelope = self.encryption.encrypt_envelope_with_padding(
+            &envelope,
+            peer_id,
+            &config.app_context,
+            config.padding_strategy,
+        )?;
 
         // Create encrypted SBB envelope
         let sbb_envelope = SbbEnvelope::new_encrypted(encrypted_envelope, request.ttl);
@@ -237,7 +255,9 @@ impl IntegratedSbbSystem {
 
     /// Handle incoming SBB message from transport layer
     pub async fn handle_incoming_message(&mut self, message: SbbMessageType) -> AuraResult<()> {
-        self.transport_bridge.handle_transport_message(message).await
+        self.transport_bridge
+            .handle_transport_message(message)
+            .await
     }
 
     /// Get trust and flow statistics for monitoring
@@ -261,11 +281,15 @@ impl IntegratedSbbSystem {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        self.flooding_coordinator.cleanup_expired_envelopes(current_time);
+        self.flooding_coordinator
+            .cleanup_expired_envelopes(current_time);
     }
 
     /// Get relationship metadata for peer
-    pub fn get_relationship(&self, peer_id: &DeviceId) -> Option<&crate::capability_aware_sbb::SbbRelationship> {
+    pub fn get_relationship(
+        &self,
+        peer_id: &DeviceId,
+    ) -> Option<&crate::capability_aware_sbb::SbbRelationship> {
         self.flooding_coordinator.get_relationship(peer_id)
     }
 
@@ -377,12 +401,12 @@ mod tests {
     #[tokio::test]
     async fn test_sbb_system_builder() {
         let device_id = DeviceId::new();
-        
+
         let system = SbbSystemBuilder::new(device_id)
             .with_app_context("test-sbb".to_string())
             .with_padding_strategy(PaddingStrategy::ExactSize { size: 2048 })
             .build();
-        
+
         assert_eq!(system.device_id, device_id);
     }
 
@@ -390,15 +414,19 @@ mod tests {
     async fn test_relationship_management() {
         let device_id = DeviceId::new();
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default());
-        
+
         let friend_id = DeviceId::new();
         let guardian_id = DeviceId::new();
         let rel_id = RelationshipId::new();
-        
+
         // Add relationships
-        system.add_friend(friend_id, rel_id, TrustLevel::Medium).await;
-        system.add_guardian(guardian_id, rel_id, TrustLevel::High).await;
-        
+        system
+            .add_friend(friend_id, rel_id, TrustLevel::Medium)
+            .await;
+        system
+            .add_guardian(guardian_id, rel_id, TrustLevel::High)
+            .await;
+
         // Check statistics
         let stats = system.get_statistics();
         assert_eq!(stats.relationship_count, 2);
@@ -412,10 +440,12 @@ mod tests {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
         let mut alice_system = IntegratedSbbSystem::new(alice_id, SbbConfig::default());
-        
+
         let rel_id = RelationshipId::new();
-        alice_system.add_friend(bob_id, rel_id, TrustLevel::Medium).await;
-        
+        alice_system
+            .add_friend(bob_id, rel_id, TrustLevel::Medium)
+            .await;
+
         let transport_offer = create_test_transport_offer(alice_id);
         let discovery_request = SbbDiscoveryRequest {
             device_id: alice_id,
@@ -423,15 +453,18 @@ mod tests {
             use_encryption: false,
             ttl: Some(3),
         };
-        
-        let result = alice_system.flood_discovery_request(discovery_request).await.unwrap();
-        
+
+        let result = alice_system
+            .flood_discovery_request(discovery_request)
+            .await
+            .unwrap();
+
         // Should successfully forward to Bob
         match result.flood_result {
             FloodResult::Forwarded { peer_count } => assert_eq!(peer_count, 1),
             _ => panic!("Expected successful forwarding"),
         }
-        
+
         assert!(!result.encrypted);
         assert_eq!(result.peers_reached, 1);
     }
@@ -441,7 +474,7 @@ mod tests {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
         let mut alice_system = IntegratedSbbSystem::new(alice_id, SbbConfig::default());
-        
+
         let transport_offer = create_test_transport_offer(alice_id);
         let discovery_request = SbbDiscoveryRequest {
             device_id: alice_id,
@@ -449,12 +482,12 @@ mod tests {
             use_encryption: true,
             ttl: Some(3),
         };
-        
+
         let result = alice_system
             .flood_encrypted_discovery_to_peer(bob_id, discovery_request)
             .await
             .unwrap();
-        
+
         assert!(result.encrypted);
         assert_eq!(result.peers_reached, 1);
         assert!(result.message_size > 1024); // Should be padded
@@ -464,20 +497,22 @@ mod tests {
     async fn test_trust_level_updates() {
         let device_id = DeviceId::new();
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default());
-        
+
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new();
-        
+
         // Add with low trust
         system.add_friend(peer_id, rel_id, TrustLevel::Low).await;
-        
+
         let stats1 = system.get_statistics();
         assert_eq!(stats1.low_count, 1);
         assert_eq!(stats1.high_count, 0);
-        
+
         // Update to high trust
-        system.update_trust_level(peer_id, TrustLevel::High).unwrap();
-        
+        system
+            .update_trust_level(peer_id, TrustLevel::High)
+            .unwrap();
+
         let stats2 = system.get_statistics();
         assert_eq!(stats2.low_count, 0);
         assert_eq!(stats2.high_count, 1);
@@ -487,27 +522,27 @@ mod tests {
     async fn test_peer_capability_checking() {
         let device_id = DeviceId::new();
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default());
-        
+
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new();
-        
+
         // Add peer with medium trust
         system.add_friend(peer_id, rel_id, TrustLevel::Medium).await;
-        
+
         // Should be able to forward small messages
         assert!(system.can_forward_to_peer(peer_id, 1024).await);
-        
+
         // Check eligible peers
         let peers = system.get_eligible_peers(1024).await.unwrap();
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0], peer_id);
-        
+
         // Remove relationship
         system.remove_relationship(peer_id).await;
-        
+
         // Should no longer be able to forward
         assert!(!system.can_forward_to_peer(peer_id, 1024).await);
-        
+
         let peers = system.get_eligible_peers(1024).await.unwrap();
         assert!(peers.is_empty());
     }

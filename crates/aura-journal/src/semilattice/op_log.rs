@@ -20,6 +20,37 @@ use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Summary of an OpLog for efficient synchronization
+///
+/// Contains essential information needed for anti-entropy protocols
+/// without transmitting the full operation set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpLogSummary {
+    /// Version counter of the OpLog
+    pub version: u64,
+    /// Total number of operations in the log
+    pub operation_count: usize,
+    /// Set of all operation CIDs in the log
+    pub cids: BTreeSet<Hash32>,
+}
+
+impl OpLogSummary {
+    /// Check if this summary indicates an empty log
+    pub fn is_empty(&self) -> bool {
+        self.operation_count == 0
+    }
+
+    /// Get CIDs that are in other but not in this summary
+    pub fn missing_cids(&self, other: &OpLogSummary) -> BTreeSet<Hash32> {
+        other.cids.difference(&self.cids).copied().collect()
+    }
+
+    /// Get CIDs that are in this summary but not in other
+    pub fn extra_cids(&self, other: &OpLogSummary) -> BTreeSet<Hash32> {
+        self.cids.difference(&other.cids).copied().collect()
+    }
+}
+
 /// OpLog CRDT implementing OR-set semantics for attested tree operations
 ///
 /// The OpLog is the **authoritative source** of all tree operations. TreeState
@@ -280,33 +311,7 @@ impl PartialOrd for OpLog {
     }
 }
 
-/// Summary of an OpLog for efficient synchronization
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpLogSummary {
-    /// Version of the OpLog
-    pub version: u64,
-    /// Number of operations
-    pub operation_count: usize,
-    /// Set of all operation CIDs
-    pub cids: BTreeSet<Hash32>,
-}
-
-impl OpLogSummary {
-    /// Check if this summary indicates an empty log
-    pub fn is_empty(&self) -> bool {
-        self.operation_count == 0
-    }
-
-    /// Get CIDs that are in other but not in this summary
-    pub fn missing_cids(&self, other: &OpLogSummary) -> BTreeSet<Hash32> {
-        other.cids.difference(&self.cids).copied().collect()
-    }
-
-    /// Get CIDs that are in this summary but not in other
-    pub fn extra_cids(&self, other: &OpLogSummary) -> BTreeSet<Hash32> {
-        self.cids.difference(&other.cids).copied().collect()
-    }
-}
+// Duplicate OpLogSummary definition removed - using the one defined earlier in the file
 
 /// Compute content identifier (CID) for an attested operation
 ///

@@ -36,6 +36,7 @@ impl EffectiveCapabilitySet {
 }
 
 /// Capability evaluator with caching and metrics
+#[derive(Debug, Clone)]
 pub struct CapabilityEvaluator {
     device_id: DeviceId,
     cached_results: HashMap<String, EffectiveCapabilitySet>,
@@ -170,7 +171,7 @@ impl CapabilityEvaluator {
             capabilities_count = capabilities.len(),
             "Evaluating storage access"
         );
-        
+
         // Placeholder logic - always allow for now to enable development
         Ok(!capabilities.is_empty())
     }

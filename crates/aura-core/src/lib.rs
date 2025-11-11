@@ -81,6 +81,9 @@ pub mod tree;
 /// Permission types (will be replaced by Cap operations)
 pub mod permissions;
 
+/// FlowBudget primitives
+pub mod flow;
+
 /// Type conversion utilities
 pub mod conversions;
 
@@ -89,6 +92,9 @@ pub mod encoding;
 
 /// Macro utilities
 pub mod macros;
+
+/// Causal context and vector clocks for CRDT ordering
+pub mod causal_context;
 
 // === Public API Re-exports ===
 
@@ -130,6 +136,7 @@ pub use time::{
 
 // Protocol and session types (temporary - will move to app layer)
 // pub use maintenance::*;
+pub use flow::{FlowBudget, Receipt};
 pub use protocols::*;
 pub use relationships::*;
 pub use session_epochs::*;
@@ -142,6 +149,7 @@ pub use tree::{
 // Utilities
 pub use encoding::{FromBase64, FromHex, ToBase64, ToHex};
 pub use permissions::CanonicalPermission;
+pub use causal_context::{CausalContext, OperationId, VectorClock};
 
 /// Standard result type for core operations
 pub type Result<T> = std::result::Result<T, AuraError>;

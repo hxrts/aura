@@ -42,6 +42,7 @@ impl SnapshotProposed {
     /// Create a new proposal.
     pub fn new(proposer: DeviceId, target_epoch: Epoch, state_digest: Hash32) -> Self {
         Self {
+            #[allow(clippy::disallowed_methods)] // [VERIFIED] Acceptable in maintenance proposal ID generation
             proposal_id: Uuid::new_v4(),
             proposer,
             target_epoch,

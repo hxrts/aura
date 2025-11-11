@@ -4,7 +4,7 @@
 //! following the Aura protocol guide patterns for distributed protocols with
 //! session type safety and effect system integration.
 
-use crate::choreography::common::ChoreographyError;
+use crate::crate::effects::ChoreographyError;
 use crate::effects::{
     ApprovalStatus, ApprovalVote, ConsoleEffects, CoordinationError, CryptoEffects,
     ReconcileResult, SessionId, SessionRole, SyncProgress, TimeEffects, TreeCoordinationEffects,
@@ -254,21 +254,10 @@ pub async fn execute_tree_operation_approval(
         ));
     }
 
-    // Create handler adapter following the established pattern
-    let composite_handler = match effect_system.execution_mode() {
-        crate::handlers::ExecutionMode::Testing => {
-            crate::handlers::CompositeHandler::for_testing(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Production => {
-            crate::handlers::CompositeHandler::for_production(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Simulation { seed: _ } => {
-            crate::handlers::CompositeHandler::for_simulation(device_id.into())
-        }
-    };
-
-    let mut adapter =
-        crate::choreography::runtime::AuraHandlerAdapter::new(composite_handler, device_id);
+    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
+        device_id,
+        effect_system.execution_mode(),
+    );
 
     // Determine role and execute (following protocol guide pattern)
     if device_id == config.initiator {
@@ -301,7 +290,7 @@ pub enum TreeOperationRole {
 
 /// Initiator's role in tree operation approval following effect system patterns
 async fn initiator_approval_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     config: &TreeApprovalConfig,
 ) -> Result<TreeOperationResult, TreeChoreographyError> {
     let session_id = SessionId::new_v4();
@@ -561,7 +550,7 @@ async fn initiator_approval_session(
 
 /// Approver's role in tree operation approval following effect system patterns
 async fn approver_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     initiator_id: DeviceId,
     _approver_index: usize,
     _config: &TreeApprovalConfig,
@@ -665,7 +654,7 @@ async fn approver_session(
 
 /// Observer's role in tree operation approval
 async fn observer_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     initiator_id: DeviceId,
     _config: &TreeApprovalConfig,
 ) -> Result<TreeOperationResult, TreeChoreographyError> {
@@ -711,7 +700,7 @@ async fn observer_session(
 
 /// Coordinator's role in tree synchronization
 async fn coordinator_sync_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     config: &TreeSyncConfig,
 ) -> Result<TreeSyncResult, TreeChoreographyError> {
     let sync_id = Uuid::new_v4();
@@ -832,7 +821,7 @@ async fn coordinator_sync_session(
 
 /// Replica's role in tree synchronization
 async fn replica_sync_session(
-    adapter: &mut crate::choreography::runtime::AuraHandlerAdapter,
+    adapter: &mut crate::choreography::AuraHandlerAdapter,
     coordinator_id: DeviceId,
     _replica_index: usize,
     _config: &TreeSyncConfig,
@@ -919,21 +908,10 @@ pub async fn execute_tree_synchronization(
         ));
     }
 
-    // Create handler adapter
-    let composite_handler = match effect_system.execution_mode() {
-        crate::handlers::ExecutionMode::Testing => {
-            crate::handlers::CompositeHandler::for_testing(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Production => {
-            crate::handlers::CompositeHandler::for_production(device_id.into())
-        }
-        crate::handlers::ExecutionMode::Simulation { seed: _ } => {
-            crate::handlers::CompositeHandler::for_simulation(device_id.into())
-        }
-    };
-
-    let mut adapter =
-        crate::choreography::runtime::AuraHandlerAdapter::new(composite_handler, device_id);
+    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
+        device_id,
+        effect_system.execution_mode(),
+    );
 
     // Execute appropriate role
     if is_coordinator {

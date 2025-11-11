@@ -34,7 +34,7 @@ pub async fn execute_guarded_operation<T, F, Fut>(
     operation: F,
 ) -> AuraResult<GuardedExecutionResult<T>>
 where
-    F: FnOnce() -> Fut,
+    F: FnOnce(&mut AuraEffectSystem) -> Fut,
     Fut: Future<Output = AuraResult<T>>,
 {
     let total_start_time = Instant::now();
@@ -65,7 +65,7 @@ where
 
         // Phase 2: Execute the protocol operation
         let execution_start_time = Instant::now();
-        let execution_result = operation().await;
+        let execution_result = operation(effect_system).await;
         let execution_time = execution_start_time.elapsed();
 
         match execution_result {
@@ -164,7 +164,13 @@ where
 pub async fn execute_guarded_sequence<T>(
     guards_and_operations: Vec<(
         ProtocolGuard,
-        Box<dyn FnOnce() -> std::pin::Pin<Box<dyn Future<Output = AuraResult<T>> + Send>> + Send>,
+        Box<
+            dyn FnOnce(
+                    &mut AuraEffectSystem,
+                )
+                    -> std::pin::Pin<Box<dyn Future<Output = AuraResult<T>> + Send>>
+                + Send,
+        >,
     )>,
     effect_system: &mut AuraEffectSystem,
 ) -> AuraResult<Vec<GuardedExecutionResult<T>>> {
@@ -202,7 +208,7 @@ pub async fn execute_guarded_sequence<T>(
 
         for (guard, operation) in guards_and_operations {
             let execution_start = Instant::now();
-            let result = operation().await;
+            let result = operation(effect_system).await;
             let execution_time = execution_start.elapsed();
 
             match result {

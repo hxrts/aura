@@ -1,14 +1,13 @@
 //! Anti-entropy protocols for digest-based reconciliation.
 //!
-//! This module provides a small, self-contained engine for comparing
-//! journal states, planning anti-entropy requests, and merging incoming
-//! operations. It is intentionally generic so higher-level choreographies
-//! (such as `G_sync`) can plug it into their own transport and capability
-//! arrangements.
+//! This module provides effect-based anti-entropy operations for comparing
+//! journal states, planning reconciliation requests, and merging operations.
+//! It uses the algebraic effects pattern to separate pure logic from side effects.
 
 use std::collections::HashSet;
 
-use aura_core::{tree::AttestedOp, AuraError, AuraResult, Journal};
+use aura_core::{AttestedOp, AuraError, AuraResult};
+use aura_journal::Journal;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 
@@ -222,7 +221,7 @@ mod tests {
     use super::*;
     use aura_core::{
         journal::FactValue,
-        tree::{TreeOp, TreeOpKind},
+        TreeOp, TreeOpKind,
     };
 
     fn sample_journal() -> Journal {

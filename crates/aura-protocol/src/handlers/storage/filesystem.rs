@@ -56,9 +56,31 @@ impl StorageEffects for FilesystemStorageHandler {
         }
     }
 
-    async fn list_keys(&self, _prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        // TODO fix - Simplified implementation
-        Ok(vec![])
+    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        let mut keys = Vec::new();
+        let mut read_dir = fs::read_dir(&self.base_path).await
+            .map_err(|e| StorageError::ListFailed(format!("Failed to read directory: {}", e)))?;
+        
+        while let Some(entry) = read_dir.next_entry().await
+            .map_err(|e| StorageError::ListFailed(format!("Failed to read entry: {}", e)))? {
+            
+            if let Ok(file_type) = entry.file_type().await {
+                if file_type.is_file() {
+                    if let Some(file_name) = entry.file_name().to_str() {
+                        let key = file_name.to_string();
+                        if let Some(prefix_str) = prefix {
+                            if key.starts_with(prefix_str) {
+                                keys.push(key);
+                            }
+                        } else {
+                            keys.push(key);
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(keys)
     }
 
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
@@ -87,7 +109,32 @@ impl StorageEffects for FilesystemStorageHandler {
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
-        // Dangerous operation - TODO fix - Simplified TODO fix - For now
+        // Dangerous operation - only proceed if directory exists and is under our control
+        if !self.base_path.exists() {
+            return Ok(()); // Nothing to clear
+        }
+        
+        // Safety check: ensure we're only clearing our own storage directory
+        if !self.base_path.to_string_lossy().contains("aura") {
+            return Err(StorageError::DeleteFailed(
+                "Refusing to clear directory that doesn't appear to be Aura storage".to_string()
+            ));
+        }
+        
+        let mut read_dir = fs::read_dir(&self.base_path).await
+            .map_err(|e| StorageError::DeleteFailed(format!("Failed to read directory: {}", e)))?;
+        
+        while let Some(entry) = read_dir.next_entry().await
+            .map_err(|e| StorageError::DeleteFailed(format!("Failed to read entry: {}", e)))? {
+            
+            if let Ok(file_type) = entry.file_type().await {
+                if file_type.is_file() {
+                    fs::remove_file(entry.path()).await
+                        .map_err(|e| StorageError::DeleteFailed(format!("Failed to remove file: {}", e)))?;
+                }
+            }
+        }
+        
         Ok(())
     }
 

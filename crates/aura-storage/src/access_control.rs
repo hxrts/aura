@@ -201,7 +201,6 @@ impl StorageAccessControl {
         match decision {
             AccessDecision::Allow => {
                 Ok(aura_mpst::CapabilityGuard::new(
-                    request.operation.to_string(),
                     Cap::default(), // Would use actual capability representation
                 ))
             }
@@ -289,13 +288,13 @@ mod tests {
         let mut access_control = StorageAccessControl::new(evaluator);
 
         let device_id = DeviceId::new();
-        let capabilities = vec![Capability::new_storage_read()];
+        let capabilities = vec![Capability::Storage];
         access_control.register_capabilities(device_id, capabilities);
 
         let request = StorageAccessRequest {
             device_id,
             operation: StorageOperation::Read,
-            resource: StorageResource::Content(ContentId::new()),
+            resource: StorageResource::Content(ContentId::new([0u8; 32])),
             capabilities: vec![],
         };
 
@@ -314,7 +313,7 @@ mod tests {
         let request = StorageAccessRequest {
             device_id,
             operation: StorageOperation::Write,
-            resource: StorageResource::Content(ContentId::new()),
+            resource: StorageResource::Content(ContentId::new([0u8; 32])),
             capabilities: vec![],
         };
 
@@ -328,10 +327,14 @@ mod tests {
         let mut access_control = StorageAccessControl::new(evaluator);
 
         let device_id = DeviceId::new();
-        let capabilities = vec![Capability::new_storage_read()];
+        let capabilities = vec![Capability::Storage];
         access_control.register_capabilities(device_id, capabilities);
 
-        let content_ids = vec![ContentId::new(), ContentId::new(), ContentId::new()];
+        let content_ids = vec![
+            ContentId::new([1u8; 32]),
+            ContentId::new([2u8; 32]),
+            ContentId::new([3u8; 32]),
+        ];
 
         let accessible = access_control
             .filter_accessible_content(device_id, content_ids.clone())

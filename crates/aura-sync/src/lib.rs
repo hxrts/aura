@@ -1,33 +1,31 @@
-//! Aura Journal Synchronization
+//! Aura Journal Synchronization - Effect System Implementation
 //!
-//! This crate provides choreographic protocols for journal synchronization
-//! across devices in the Aura threshold identity platform.
+//! This crate provides effect-based journal synchronization for the Aura
+//! threshold identity platform using the algebraic effects architecture.
 //!
 //! # Architecture
 //!
-//! This crate implements journal synchronization choreographies:
-//! - `G_sync` - Main journal synchronization choreography
-//! - `anti_entropy` - Digest-based reconciliation for missing operations
-//! - `peer_discovery` - Finding and connecting to sync peers
+//! This crate implements journal synchronization using effect handlers:
+//! - `SyncService` - Main synchronization service using effect composition
+//! - `AntiEntropyService` - Digest-based reconciliation service  
+//! - `snapshot` - Snapshot and maintenance utilities
+//! - `cache` - Cache invalidation and maintenance
 //!
 //! # Design Principles
 //!
-//! - Uses choreographic programming for distributed sync coordination
-//! - Integrates with the Aura MPST framework for capability guards and journal coupling
-//! - Provides clean separation to avoid namespace conflicts (E0428 errors)
-//! - Works with journal CRDT semantics for eventual consistency
+//! - **Effect-Based**: Uses algebraic effects pattern for side-effect management
+//! - **Composable**: Handlers can be mixed and matched for different environments
+//! - **Testable**: Pure logic separated from side effects via effect interfaces
+//! - **CRDT-First**: Built around journal CRDT semantics for eventual consistency
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
-/// Main journal synchronization choreography (G_sync)
-pub mod journal_sync;
+/// Main synchronization service using effect composition
+pub mod sync_service;
 
 /// Anti-entropy protocols for digest-based reconciliation
 pub mod anti_entropy;
-
-/// Peer discovery and connection management
-pub mod peer_discovery;
 
 /// Snapshot helper utilities (writer fences, events)
 pub mod snapshot;
@@ -38,20 +36,16 @@ pub mod cache;
 /// OTA upgrade orchestration helpers
 pub mod ota;
 
-/// Errors for sync operations
-// errors module removed - use aura_core::AuraError directly
-
 // Re-export core types
-pub use aura_core::{AccountId, AuraError, AuraResult, Cap, DeviceId, Journal};
+pub use aura_core::{AccountId, AuraError, AuraResult, DeviceId};
 
-// Re-export MPST types
-pub use aura_mpst::{
-    AuraRuntime, CapabilityGuard, ExecutionContext, JournalAnnotation, MpstError, MpstResult,
+// Re-export protocol effect types
+pub use aura_protocol::effects::{
+    AntiEntropyConfig, BloomDigest, SyncEffects, SyncError,
 };
 
 // Maintenance helpers
 pub use cache::CacheEpochFloors;
 pub use ota::{UpgradeCoordinator, UpgradeReadiness};
 pub use snapshot::{SnapshotManager, WriterFence};
-
-// Error re-exports removed - use aura_core::AuraError directly
+pub use sync_service::SyncService;

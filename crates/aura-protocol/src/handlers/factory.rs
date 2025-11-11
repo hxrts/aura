@@ -987,9 +987,33 @@ impl PlatformDetector {
 
     /// Detect if secure enclave is available
     fn detect_secure_enclave() -> bool {
-        // Platform-specific detection logic would go here
-        // TODO fix - For now, conservative default
-        false
+        // Platform-specific detection logic
+        match std::env::consts::OS {
+            "macos" => {
+                // Check for Apple Secure Enclave on macOS
+                std::env::consts::ARCH == "aarch64" || 
+                std::process::Command::new("system_profiler")
+                    .args(["SPHardwareDataType"])
+                    .output()
+                    .map(|output| String::from_utf8_lossy(&output.stdout).contains("Apple"))
+                    .unwrap_or(false)
+            },
+            "linux" => {
+                // Check for Intel SGX or AMD SEV on Linux
+                std::path::Path::new("/dev/sgx_enclave").exists() ||
+                std::path::Path::new("/dev/sgx/enclave").exists() ||
+                std::fs::read_to_string("/proc/cpuinfo")
+                    .map(|content| content.contains("sgx") || content.contains("sev"))
+                    .unwrap_or(false)
+            },
+            "windows" => {
+                // Check for Intel SGX on Windows (conservative approach)
+                std::env::var("PROCESSOR_IDENTIFIER")
+                    .map(|proc| proc.to_lowercase().contains("intel"))
+                    .unwrap_or(false)
+            },
+            _ => false, // Conservative default for other platforms
+        }
     }
 
     /// Detect available storage backends
@@ -1014,8 +1038,53 @@ impl PlatformDetector {
 
     /// Detect available network interfaces
     fn detect_network_interfaces() -> Vec<String> {
-        // TODO fix - Simplified detection - real implementation would enumerate actual interfaces
-        vec!["default".to_string(), "loopback".to_string()]
+        let mut interfaces = Vec::new();
+        
+        // Always include loopback
+        interfaces.push("loopback".to_string());
+        
+        // Platform-specific interface detection
+        match std::env::consts::OS {
+            "linux" | "macos" => {
+                // Check for common network interfaces on Unix-like systems
+                if let Ok(output) = std::process::Command::new("ifconfig").output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines() {
+                        if !line.starts_with(' ') && !line.starts_with('\t') && line.contains(':') {
+                            if let Some(iface_name) = line.split(':').next() {
+                                let name = iface_name.trim();
+                                if !name.is_empty() && name != "lo" && name != "lo0" {
+                                    interfaces.push(name.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "windows" => {
+                // Check network adapters on Windows
+                if let Ok(output) = std::process::Command::new("ipconfig").args(["/all"]).output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines() {
+                        if line.contains("adapter") && line.contains(':') {
+                            interfaces.push("ethernet".to_string());
+                            break;
+                        }
+                    }
+                }
+            },
+            _ => {
+                // Conservative default for other platforms
+                interfaces.push("default".to_string());
+            }
+        }
+        
+        // Ensure we always have at least one interface
+        if interfaces.len() == 1 {
+            interfaces.push("default".to_string());
+        }
+        
+        interfaces
     }
 }
 

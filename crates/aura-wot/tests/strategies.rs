@@ -1,8 +1,8 @@
 //! Proptest strategies for capability generation
 
-use crate::{Capability, CapabilitySet, Policy};
+use aura_wot::tree_policy::Policy as TreePolicy;
+use aura_wot::{Capability, CapabilitySet};
 use proptest::prelude::*;
-use std::collections::BTreeSet;
 
 /// Generate arbitrary capabilities for testing
 pub fn arb_capability() -> impl Strategy<Value = Capability> {
@@ -14,18 +14,28 @@ pub fn arb_capability() -> impl Strategy<Value = Capability> {
             resource_pattern: s
         }),
         "[a-z]{1,20}".prop_map(|s| Capability::Execute { operation: s }),
-        "[a-z]{1,20}".prop_map(|s| Capability::Delegate { target_pattern: s }),
+        (1u32..10).prop_map(|depth| Capability::Delegate { max_depth: depth }),
+        Just(Capability::All),
+        Just(Capability::None),
     ]
 }
 
 /// Generate arbitrary capability sets
 pub fn arb_capability_set() -> impl Strategy<Value = CapabilitySet> {
-    prop::collection::btree_set(arb_capability(), 0..10).prop_map(CapabilitySet::new)
+    prop::collection::btree_set(arb_capability(), 0..10).prop_map(CapabilitySet::from_capabilities)
 }
 
 /// Generate arbitrary policies
-pub fn arb_policy() -> impl Strategy<Value = Policy> {
-    (arb_capability_set(), "[a-z]{1,20}").prop_map(|(caps, context)| Policy::new(caps, context))
+pub fn arb_policy() -> impl Strategy<Value = TreePolicy> {
+    prop_oneof![
+        Just(TreePolicy::Any),
+        Just(TreePolicy::All),
+        (1u16..10u16, 1u16..10u16).prop_filter_map("m <= n", |(m, n)| if m <= n {
+            Some(TreePolicy::Threshold { m, n })
+        } else {
+            None
+        })
+    ]
 }
 
 #[cfg(test)]
@@ -42,7 +52,7 @@ mod tests {
         #[test]
         fn test_capability_set_generation(set in arb_capability_set()) {
             // Verify capability sets are valid
-            assert!(set.capabilities().len() <= 10);
+            assert!(set.capabilities().count() <= 10);
         }
     }
 }

@@ -72,23 +72,25 @@ pub use aura_wot::{Capability, RelayPermission, TrustLevel};
 // Re-export MPST types
 pub use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation, MpstError, MpstResult};
 
-// Re-export main APIs  
+// Re-export main APIs
 pub use capability_aware_sbb::{
-    CapabilityAwareSbbCoordinator, SbbFlowBudget, SbbRelationship, SbbForwardingPolicy, TrustStatistics
+    CapabilityAwareSbbCoordinator, SbbFlowBudget, SbbForwardingPolicy, SbbRelationship,
+    TrustStatistics,
 };
 pub use connection_manager::{
     ConnectionConfig, ConnectionManager, ConnectionMethod, ConnectionResult,
 };
 pub use discovery::{DiscoveryQuery, DiscoveryService, RendezvousPoint};
-pub use envelope_encryption::{
-    EnvelopeEncryption, EncryptedEnvelope, PaddingStrategy
-};
+pub use envelope_encryption::{EncryptedEnvelope, EnvelopeEncryption, PaddingStrategy};
 pub use integrated_sbb::{
-    IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbDiscoveryResult, SbbSystemBuilder
+    IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbDiscoveryResult, SbbSystemBuilder,
 };
 pub use messaging::{
-    SbbTransportBridge, SbbMessageType, TransportOfferPayload, TransportMethod, 
-    TransportSender, MockTransportSender, NetworkTransportSender
+    MockTransportSender, NetworkTransportSender, SbbMessageType, SbbTransportBridge,
+    TransportMethod, TransportOfferPayload, TransportSender,
+};
+pub use relationship_keys::{
+    derive_test_root_key, RelationshipContext, RelationshipKey, RelationshipKeyManager,
 };
 pub use relay::{
     RelayCapabilities, RelayCoordinator, RelayNode, RelayStream, StreamFlags, StreamState,
@@ -96,9 +98,6 @@ pub use relay::{
 pub use relay_selection::{
     RelayCandidate, RelaySelectionConfig, RelaySelectionResult, RelaySelector, RelayType,
 };
-pub use relationship_keys::{
-    RelationshipKeyManager, RelationshipContext, RelationshipKey, derive_test_root_key
-};
 pub use sbb::{
-    SbbFlooding, SbbFloodingCoordinator, RendezvousEnvelope, SbbEnvelope, FloodResult, EnvelopeId
+    EnvelopeId, FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding, SbbFloodingCoordinator,
 };

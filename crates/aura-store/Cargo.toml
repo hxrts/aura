@@ -45,5 +45,5 @@ blake3 = { workspace = true }
 chacha20poly1305 = { workspace = true }
 
 [dev-dependencies]
-tokio-test = "0.4"
-tempfile = "3.8"
+tokio-test = { workspace = true }
+tempfile = { workspace = true }

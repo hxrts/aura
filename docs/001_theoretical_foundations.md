@@ -225,7 +225,7 @@ struct FlowBudget {
 - Budgets live in the journal beside capability facts and therefore inherit the same semilattice laws (`spent` only grows, `limit` only shrinks).
 - Sending a message deducts a fixed `flow_cost` from the local budget before the effect executes; if `spent + flow_cost > limit`, the effect runtime blocks the send.
 - Replenishment happens through explicit `BudgetUpdate` facts emitted during epoch-rotation choreographies. Because updates are facts, every replica converges on the same `limit` value without side channels.
-- Multi-hop forwarding charges budgets hop-by-hop. Relays attach a signed `FlowReceipt` that proves the previous hop still had headroom; receipts are scoped to the same context so they never leak to unrelated observers.
+- Multi-hop forwarding charges budgets hop-by-hop. Relays attach a signed `Receipt` that proves the previous hop still had headroom; receipts are scoped to the same context so they never leak to unrelated observers.
 
 This structure lets us express “who may talk, how often, and with what metadata leakage” using the same monotone calculus that already governs capabilities and leakage.
 

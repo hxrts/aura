@@ -78,7 +78,7 @@ pub mod integration {
 
     // TODO: Uncomment when aura-choreography CRDT modules are implemented
     // use aura_protocol::choreography::semilattice::{execute_cv_sync, MultiCRDTCoordinator};
-    // use aura_protocol::choreography::runtime::AuraHandlerAdapter;
+    // use aura_protocol::choreography::AuraHandlerAdapter;
     // use aura_protocol::choreography::types::ChoreographicRole;
     // use rumpsteak_choreography::ChoreographyError;
 

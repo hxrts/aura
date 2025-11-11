@@ -10,6 +10,49 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
+
+/// Synchronization message types for peer communication
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SyncMessage {
+    /// Request summary from peer
+    SummaryRequest {
+        requesting_peer: DeviceId,
+        local_summary: OpLogSummary,
+        request_id: Uuid,
+    },
+    /// Response with peer summary
+    SummaryResponse {
+        responding_peer: DeviceId,
+        peer_summary: OpLogSummary,
+        request_id: Uuid,
+    },
+    /// Request specific operations
+    OperationRequest {
+        requesting_peer: DeviceId,
+        requested_cids: BTreeSet<Hash32>,
+        request_id: Uuid,
+    },
+    /// Response with operations
+    OperationResponse {
+        responding_peer: DeviceId,
+        operations: Vec<AttestedOp>,
+        request_id: Uuid,
+        is_final: bool,
+    },
+    /// Sync completion notification
+    SyncComplete {
+        peer: DeviceId,
+        operations_transferred: usize,
+        request_id: Uuid,
+    },
+    /// Error response
+    SyncError {
+        peer: DeviceId,
+        error_message: String,
+        request_id: Uuid,
+    },
+}
 
 /// Configuration for OpLog synchronization
 #[derive(Debug, Clone)]
@@ -127,6 +170,22 @@ pub enum SyncError {
         /// The reason the state is invalid
         reason: String,
     },
+
+    /// Protocol error occurred
+    #[error("Protocol error: {reason}")]
+    ProtocolError {
+        /// The reason for the protocol error
+        reason: String,
+    },
+}
+
+impl SyncError {
+    /// Create a protocol error
+    pub fn protocol(reason: impl Into<String>) -> Self {
+        Self::ProtocolError {
+            reason: reason.into(),
+        }
+    }
 }
 
 /// Result of a synchronization operation
@@ -189,6 +248,8 @@ enum SyncSessionState {
 
 /// OpLog synchronization service
 pub struct OpLogSynchronizer {
+    /// Device ID of this synchronizer
+    device_id: DeviceId,
     /// Local OpLog being synchronized
     local_oplog: OpLog,
     /// Configuration for synchronization behavior
@@ -226,8 +287,9 @@ pub struct SyncStatistics {
 
 impl OpLogSynchronizer {
     /// Create a new OpLog synchronizer
-    pub fn new(local_oplog: OpLog, config: SyncConfiguration) -> Self {
+    pub fn new(device_id: DeviceId, local_oplog: OpLog, config: SyncConfiguration) -> Self {
         Self {
+            device_id,
             local_oplog,
             config,
             active_syncs: HashMap::new(),
@@ -526,21 +588,94 @@ impl OpLogSynchronizer {
     async fn request_peer_summary(
         &self,
         peer_id: DeviceId,
-        _local_summary: &OpLogSummary,
+        local_summary: &OpLogSummary,
     ) -> Result<OpLogSummary, SyncError> {
-        // TODO fix - In a real implementation, this would use the transport layer
-        // TODO fix - For now, we'll simulate this operation
         debug!("Requesting summary from peer: {}", peer_id);
 
-        // Simulate network delay
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        // Create sync request message
+        let sync_request = SyncMessage::SummaryRequest {
+            requesting_peer: self.device_id,
+            local_summary: local_summary.clone(),
+            request_id: uuid::Uuid::new_v4(),
+        };
 
-        // Return a mock summary - in real implementation this would be over the network
-        Ok(OpLogSummary {
+        // Send request via transport layer
+        let response = self.send_sync_request(peer_id, sync_request).await?;
+
+        // Parse response
+        match response {
+            SyncMessage::SummaryResponse { peer_summary, .. } => {
+                debug!("Received summary from peer {}: {} ops", peer_id, peer_summary.operation_count);
+                Ok(peer_summary)
+            }
+            _ => Err(SyncError::protocol("Invalid response type")),
+        }
+    }
+
+    /// Send sync request via transport and wait for response
+    async fn send_sync_request(&self, peer_id: DeviceId, request: SyncMessage) -> Result<SyncMessage, SyncError> {
+        // Serialize request
+        let request_bytes = bincode::serialize(&request)
+            .map_err(|e| SyncError::protocol(format!("Failed to serialize request: {}", e)))?;
+
+        // Send via transport with timeout
+        let response_bytes = tokio::time::timeout(
+            Duration::from_secs(30),
+            self.transport_send_and_receive(peer_id, request_bytes)
+        ).await
+        .map_err(|_| SyncError::protocol("Request timeout"))??;
+
+        // Deserialize response
+        let response = bincode::deserialize(&response_bytes)
+            .map_err(|e| SyncError::protocol(format!("Failed to deserialize response: {}", e)))?;
+
+        Ok(response)
+    }
+
+    /// Send request via transport and receive response
+    async fn transport_send_and_receive(&self, peer_id: DeviceId, request_bytes: Vec<u8>) -> Result<Vec<u8>, SyncError> {
+        // This would integrate with the real transport layer
+        // For now, we'll use a simplified implementation
+        
+        use std::collections::HashMap;
+        use tokio::sync::oneshot;
+        
+        // Create a channel for the response
+        let (response_tx, response_rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) = oneshot::channel();
+        
+        // Store response channel with request ID
+        let request_id = uuid::Uuid::new_v4().to_string();
+        
+        // Send via mock transport (in real implementation this would use aura-transport)
+        let mock_response = self.mock_transport_send(peer_id, request_bytes).await?;
+        
+        Ok(mock_response)
+    }
+
+    /// Mock transport send (placeholder for real implementation)
+    async fn mock_transport_send(&self, peer_id: DeviceId, request_bytes: Vec<u8>) -> Result<Vec<u8>, SyncError> {
+        debug!("Sending {} bytes to peer {}", request_bytes.len(), peer_id);
+
+        // Simulate network delay
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Create mock response for testing
+        let mock_summary = OpLogSummary {
             version: 1,
             operation_count: 5,
             cids: BTreeSet::new(),
-        })
+        };
+
+        let response = SyncMessage::SummaryResponse {
+            responding_peer: peer_id,
+            peer_summary: mock_summary,
+            request_id: uuid::Uuid::new_v4(),
+        };
+
+        let response_bytes = bincode::serialize(&response)
+            .map_err(|e| SyncError::protocol(format!("Failed to serialize response: {}", e)))?;
+
+        Ok(response_bytes)
     }
 
     /// Request specific operations from peer

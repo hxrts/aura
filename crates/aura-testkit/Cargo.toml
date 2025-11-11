@@ -39,4 +39,4 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 # For testing the test utilities themselves
-tokio-test = "0.4"
+tokio-test = { workspace = true }

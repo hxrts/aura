@@ -6,12 +6,12 @@
 
 use crate::relationship_keys::{RelationshipKey, RelationshipKeyManager};
 use crate::sbb::RendezvousEnvelope;
-use aura_core::{AuraResult, AuraError, DeviceId};
+use aura_core::{AuraError, AuraResult, DeviceId};
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit},
     ChaCha20Poly1305, Nonce,
 };
-use rand_core::{RngCore, OsRng};
+use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 /// Minimum padded envelope size (1KB for traffic analysis resistance)
@@ -78,7 +78,12 @@ impl EnvelopeEncryption {
         peer_id: DeviceId,
         app_context: &str,
     ) -> AuraResult<EncryptedEnvelope> {
-        self.encrypt_envelope_with_padding(envelope, peer_id, app_context, PaddingStrategy::PowerOfTwo)
+        self.encrypt_envelope_with_padding(
+            envelope,
+            peer_id,
+            app_context,
+            PaddingStrategy::PowerOfTwo,
+        )
     }
 
     /// Encrypt envelope with specific padding strategy
@@ -90,11 +95,14 @@ impl EnvelopeEncryption {
         padding: PaddingStrategy,
     ) -> AuraResult<EncryptedEnvelope> {
         // Derive relationship key for this peer
-        let relationship_key = self.key_manager.derive_relationship_key(peer_id, app_context)?;
+        let relationship_key = self
+            .key_manager
+            .derive_relationship_key(peer_id, app_context)?;
 
         // Serialize envelope
-        let plaintext = bincode::serialize(envelope)
-            .map_err(|e| AuraError::serialization(format!("Envelope serialization failed: {}", e)))?;
+        let plaintext = bincode::serialize(envelope).map_err(|e| {
+            AuraError::serialization(format!("Envelope serialization failed: {}", e))
+        })?;
 
         if plaintext.len() > MAX_ENVELOPE_SIZE {
             return Err(AuraError::crypto(format!(
@@ -147,9 +155,8 @@ impl EnvelopeEncryption {
 
         // If key hint is provided, could optimize by checking hint first
         // For now, return the last error
-        Err(last_error.unwrap_or_else(|| {
-            AuraError::crypto("No decryption keys provided".to_string())
-        }))
+        Err(last_error
+            .unwrap_or_else(|| AuraError::crypto("No decryption keys provided".to_string())))
     }
 
     /// Decrypt envelope from specific peer
@@ -160,7 +167,9 @@ impl EnvelopeEncryption {
         app_context: &str,
     ) -> AuraResult<RendezvousEnvelope> {
         // Derive relationship key for this peer
-        let relationship_key = self.key_manager.derive_relationship_key(peer_id, app_context)?;
+        let relationship_key = self
+            .key_manager
+            .derive_relationship_key(peer_id, app_context)?;
 
         // Check key hint if provided (optimization)
         if let Some(hint) = encrypted.key_hint {
@@ -183,8 +192,9 @@ impl EnvelopeEncryption {
         let plaintext = self.remove_padding(padded_plaintext)?;
 
         // Deserialize envelope
-        let envelope: RendezvousEnvelope = bincode::deserialize(&plaintext)
-            .map_err(|e| AuraError::serialization(format!("Envelope deserialization failed: {}", e)))?;
+        let envelope: RendezvousEnvelope = bincode::deserialize(&plaintext).map_err(|e| {
+            AuraError::serialization(format!("Envelope deserialization failed: {}", e))
+        })?;
 
         Ok(envelope)
     }
@@ -218,7 +228,9 @@ impl EnvelopeEncryption {
 
         let padding_length = target_size - data.len() - 1;
         if padding_length > 255 {
-            return Err(AuraError::crypto("Padding length exceeds 255 bytes".to_string()));
+            return Err(AuraError::crypto(
+                "Padding length exceeds 255 bytes".to_string(),
+            ));
         }
 
         // Add padding length byte
@@ -240,7 +252,7 @@ impl EnvelopeEncryption {
 
         // Extract padding length from last byte
         let padding_length = *data.last().unwrap() as usize;
-        
+
         if padding_length + 1 > data.len() {
             return Err(AuraError::crypto(format!(
                 "Invalid padding length: {} for data size {}",
@@ -280,36 +292,33 @@ mod tests {
     use crate::relationship_keys::derive_test_root_key;
 
     fn create_test_envelope() -> RendezvousEnvelope {
-        RendezvousEnvelope::new(
-            b"test transport offer".to_vec(),
-            Some(3),
-        )
+        RendezvousEnvelope::new(b"test transport offer".to_vec(), Some(3))
     }
 
     #[test]
     fn test_envelope_encryption_roundtrip() {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        
+
         // Alice encrypts envelope for Bob
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
         let mut alice_encryption = EnvelopeEncryption::new(alice_key_manager);
-        
+
         let envelope = create_test_envelope();
         let encrypted = alice_encryption
             .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
             .unwrap();
-        
+
         // Bob decrypts envelope from Alice
         let bob_root = alice_root; // Same root key for test
         let bob_key_manager = RelationshipKeyManager::new(bob_id, bob_root);
         let mut bob_encryption = EnvelopeEncryption::new(bob_key_manager);
-        
+
         let decrypted = bob_encryption
             .decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope")
             .unwrap();
-        
+
         assert_eq!(envelope.payload, decrypted.payload);
         assert_eq!(envelope.ttl, decrypted.ttl);
     }
@@ -318,31 +327,44 @@ mod tests {
     fn test_padding_strategies() {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        
+
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
         let mut alice_encryption = EnvelopeEncryption::new(alice_key_manager);
-        
+
         let envelope = create_test_envelope();
-        
+
         // Test power-of-2 padding
         let encrypted_pow2 = alice_encryption
-            .encrypt_envelope_with_padding(&envelope, bob_id, "sbb-envelope", PaddingStrategy::PowerOfTwo)
+            .encrypt_envelope_with_padding(
+                &envelope,
+                bob_id,
+                "sbb-envelope",
+                PaddingStrategy::PowerOfTwo,
+            )
             .unwrap();
         assert!(encrypted_pow2.ciphertext.len() >= MIN_PADDED_SIZE);
         assert!(encrypted_pow2.ciphertext.len().is_power_of_two());
-        
+
         // Test fixed block padding
         let encrypted_fixed = alice_encryption
-            .encrypt_envelope_with_padding(&envelope, bob_id, "sbb-envelope", 
-                PaddingStrategy::FixedBlocks { block_size: 512 })
+            .encrypt_envelope_with_padding(
+                &envelope,
+                bob_id,
+                "sbb-envelope",
+                PaddingStrategy::FixedBlocks { block_size: 512 },
+            )
             .unwrap();
         assert_eq!(encrypted_fixed.ciphertext.len() % 512, 0);
-        
+
         // Test exact size padding
         let encrypted_exact = alice_encryption
-            .encrypt_envelope_with_padding(&envelope, bob_id, "sbb-envelope",
-                PaddingStrategy::ExactSize { size: 2048 })
+            .encrypt_envelope_with_padding(
+                &envelope,
+                bob_id,
+                "sbb-envelope",
+                PaddingStrategy::ExactSize { size: 2048 },
+            )
             .unwrap();
         assert_eq!(encrypted_exact.ciphertext.len(), 2048);
     }
@@ -352,16 +374,16 @@ mod tests {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
         let charlie_id = DeviceId::new();
-        
+
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
         let mut alice_encryption = EnvelopeEncryption::new(alice_key_manager);
-        
+
         let envelope = create_test_envelope();
         let encrypted = alice_encryption
             .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
             .unwrap();
-        
+
         // Bob should be able to decrypt
         let bob_key_manager = RelationshipKeyManager::new(bob_id, alice_root);
         let mut bob_encryption = EnvelopeEncryption::new(bob_key_manager);
@@ -369,12 +391,12 @@ mod tests {
             .decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope")
             .unwrap();
         assert_eq!(envelope.payload, decrypted.payload);
-        
+
         // Charlie should fail to decrypt (key hint mismatch)
         let charlie_key_manager = RelationshipKeyManager::new(charlie_id, alice_root);
         let mut charlie_encryption = EnvelopeEncryption::new(charlie_key_manager);
-        let result = charlie_encryption
-            .decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope");
+        let result =
+            charlie_encryption.decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope");
         assert!(result.is_err());
     }
 
@@ -383,25 +405,25 @@ mod tests {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
         let charlie_id = DeviceId::new();
-        
+
         let root_key = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, root_key);
         let mut alice_encryption = EnvelopeEncryption::new(alice_key_manager);
-        
+
         let envelope = create_test_envelope();
         let encrypted = alice_encryption
             .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
             .unwrap();
-        
+
         // Bob tries to decrypt with multiple peer candidates including Alice
         let bob_key_manager = RelationshipKeyManager::new(bob_id, root_key);
         let mut bob_encryption = EnvelopeEncryption::new(bob_key_manager);
-        
+
         let potential_peers = vec![charlie_id, alice_id]; // Alice is the correct sender
         let decrypted = bob_encryption
             .decrypt_envelope(&encrypted, &potential_peers, "sbb-envelope")
             .unwrap();
-        
+
         assert_eq!(envelope.payload, decrypted.payload);
     }
 
@@ -409,16 +431,16 @@ mod tests {
     fn test_envelope_size_calculation() {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        
+
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
         let mut alice_encryption = EnvelopeEncryption::new(alice_key_manager);
-        
+
         let envelope = create_test_envelope();
         let encrypted = alice_encryption
             .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
             .unwrap();
-        
+
         // Size should include nonce, ciphertext, and key hint
         let expected_size = 12 + encrypted.ciphertext.len() + 4;
         assert_eq!(encrypted.size(), expected_size);
@@ -428,11 +450,11 @@ mod tests {
     fn test_app_context_isolation() {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        
+
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
         let mut alice_encryption = EnvelopeEncryption::new(alice_key_manager);
-        
+
         let envelope = create_test_envelope();
         let encrypted_sbb = alice_encryption
             .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
@@ -440,16 +462,16 @@ mod tests {
         let encrypted_dm = alice_encryption
             .encrypt_envelope(&envelope, bob_id, "direct-message")
             .unwrap();
-        
+
         // Ciphertexts should be different due to different relationship keys
         assert_ne!(encrypted_sbb.ciphertext, encrypted_dm.ciphertext);
-        
+
         // Bob should not be able to decrypt sbb envelope with dm context
         let bob_key_manager = RelationshipKeyManager::new(bob_id, alice_root);
         let mut bob_encryption = EnvelopeEncryption::new(bob_key_manager);
-        
-        let result = bob_encryption
-            .decrypt_envelope_from_peer(&encrypted_sbb, alice_id, "direct-message");
+
+        let result =
+            bob_encryption.decrypt_envelope_from_peer(&encrypted_sbb, alice_id, "direct-message");
         assert!(result.is_err());
     }
 }

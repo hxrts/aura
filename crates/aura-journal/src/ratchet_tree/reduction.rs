@@ -148,7 +148,7 @@ fn topological_sort_with_tiebreak<'a>(
 /// - Operation application: Implemented for all TreeOpKind variants
 /// - Policy meet verification: Implemented for ChangePolicy
 /// - Commitment recomputation: Implemented (TODO fix - Simplified until full tree structure)
-/// - Path commitment updates: TODO: Needs full tree with parent pointers
+/// - Path commitment updates: Implemented with tree traversal
 /// - FROST signature verification: TODO: when Phase 3 (FROST) is complete
 fn apply_operation(state: &mut TreeState, op: &AttestedOp) -> Result<(), ReductionError> {
     // Phase 2.1e: Parent Binding Verification
@@ -253,25 +253,25 @@ fn recompute_commitments(
         return Ok(());
     }
 
-    // Get all paths from affected nodes to root
-    let affected_paths = state.get_affected_paths(affected_nodes, &[]);
-
-    if affected_paths.is_empty() {
-        // Fallback to simple computation if no topology available
-        recompute_root_commitment_simple(state);
-        return Ok(());
+    // Collect all nodes in the paths from affected nodes to root
+    let mut all_affected_nodes = BTreeSet::new();
+    
+    for &node in affected_nodes {
+        // Add the node itself
+        all_affected_nodes.insert(node);
+        
+        // Add all nodes in path to root
+        let path_to_root = compute_path_to_root(state, node);
+        all_affected_nodes.extend(path_to_root);
     }
 
-    // Recompute commitments for affected nodes bottom-up
-    // Start with the deepest nodes (furthest from root) and work upward
-    let mut path_nodes: Vec<_> = affected_paths.into_iter().collect();
+    // Convert to sorted vector for deterministic processing
+    let mut path_nodes: Vec<_> = all_affected_nodes.into_iter().collect();
 
-    // Sort by depth (nodes with no children first, then their parents, etc.)
-    // This ensures bottom-up computation
+    // Sort by dependency order: leaves first, then branches, then root
+    // This ensures we compute commitments in bottom-up order
     path_nodes.sort_by_key(|&node| {
-        // Approximate depth by counting children (leaves have 0, branches have more)
-        let children_count = state.get_children(node).len();
-        std::cmp::Reverse(children_count) // Reverse to get bottom-up order
+        (get_tree_level(state, node), node.0) // Sort by level then by index for determinism
     });
 
     // Recompute each affected branch commitment
@@ -527,6 +527,47 @@ pub enum ReductionError {
     /// Tree state error
     #[error("Tree state error: {0}")]
     TreeStateError(#[from] TreeStateError),
+}
+
+/// Compute path from a node to the root
+fn compute_path_to_root(state: &TreeState, node: NodeIndex) -> Vec<NodeIndex> {
+    let mut path = Vec::new();
+    let mut current = node;
+    
+    // Walk up the tree until we reach the root
+    loop {
+        match state.get_parent(current) {
+            Some(parent) => {
+                path.push(parent);
+                current = parent;
+            }
+            None => break, // Reached root or orphan node
+        }
+    }
+    
+    path
+}
+
+/// Get the level/depth of a node in the tree (0 = leaf, higher = closer to root)
+fn get_tree_level(state: &TreeState, node: NodeIndex) -> u32 {
+    let mut level = 0;
+    let mut current = node;
+    
+    // Count children to approximate tree level (leaves = 0, branches = higher)
+    loop {
+        let children = state.get_children(current);
+        if children.is_empty() {
+            break; // This is a leaf
+        }
+        level += 1;
+        // Move to first child to continue traversal
+        current = *children.iter().next().expect("Children set should not be empty");
+        if level > 100 {
+            break; // Prevent infinite loops
+        }
+    }
+    
+    level
 }
 
 #[cfg(test)]

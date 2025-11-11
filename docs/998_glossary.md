@@ -64,6 +64,8 @@ FlowBudget { limit: u64, spent: u64, epoch: Epoch }
 
 **Session Type** - Local, role-specific protocol type ensuring safety properties (e.g., deadlock freedom). Executed via the effect system interpreter/bridge.
 
+**AuthorizationContext** - The evaluated capability view for the active `ContextId`, carried through sessions/effects to enforce the predicate `need(m) ≤ Caps(ctx) ∧ headroom(ctx, cost)` at send sites.
+
 ---
 
 ## Data Layer

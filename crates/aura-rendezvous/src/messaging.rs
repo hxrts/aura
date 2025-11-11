@@ -4,7 +4,7 @@
 //! for actual message delivery across peer connections.
 
 use crate::sbb::{RendezvousEnvelope, SbbFlooding, SbbFloodingCoordinator};
-use aura_core::{AuraResult, AuraError, DeviceId};
+use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_transport::NetworkTransport;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -19,13 +19,9 @@ pub enum SbbMessageType {
         from_peer: Option<DeviceId>,
     },
     /// Transport offer (payload within envelope)
-    TransportOffer {
-        offer_data: Vec<u8>,
-    },
-    /// Transport answer (payload within envelope) 
-    TransportAnswer {
-        answer_data: Vec<u8>,
-    },
+    TransportOffer { offer_data: Vec<u8> },
+    /// Transport answer (payload within envelope)
+    TransportAnswer { answer_data: Vec<u8> },
 }
 
 /// Transport offer payload for rendezvous
@@ -66,7 +62,7 @@ pub struct SbbTransportBridge {
 pub trait TransportSender: Send + Sync {
     /// Send message to peer via transport layer
     async fn send_to_peer(&self, peer: DeviceId, message: SbbMessageType) -> AuraResult<()>;
-    
+
     /// Check if peer is reachable
     async fn is_peer_reachable(&self, peer: &DeviceId) -> bool;
 }
@@ -82,7 +78,7 @@ impl SbbTransportBridge {
     /// Create new SBB transport bridge
     pub fn new(device_id: DeviceId) -> Self {
         let flooding_coordinator = Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id)));
-        
+
         Self {
             flooding_coordinator,
             transport_sender: None,
@@ -96,7 +92,7 @@ impl SbbTransportBridge {
     ) -> Self {
         let flooding_coordinator = Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id)));
         let sender = NetworkTransportSender::new(transport);
-        
+
         Self {
             flooding_coordinator,
             transport_sender: Some(BoxedTransportSender(Box::new(sender))),
@@ -152,14 +148,12 @@ impl SbbTransportBridge {
     }
 
     /// Handle received SBB message from transport layer
-    pub async fn handle_transport_message(
-        &self,
-        message: SbbMessageType,
-    ) -> AuraResult<()> {
+    pub async fn handle_transport_message(&self, message: SbbMessageType) -> AuraResult<()> {
         match message {
-            SbbMessageType::RendezvousFlood { envelope, from_peer } => {
-                self.handle_rendezvous_flood(envelope, from_peer).await
-            }
+            SbbMessageType::RendezvousFlood {
+                envelope,
+                from_peer,
+            } => self.handle_rendezvous_flood(envelope, from_peer).await,
             SbbMessageType::TransportOffer { offer_data } => {
                 self.handle_transport_offer(offer_data).await
             }
@@ -178,10 +172,10 @@ impl SbbTransportBridge {
         // Process through flooding coordinator for further propagation
         let mut coordinator = self.flooding_coordinator.write().await;
         let _result = coordinator.flood_envelope(envelope, from_peer).await?;
-        
+
         // TODO: If this device is interested in the offer, process it
         // For now, just propagate it
-        
+
         Ok(())
     }
 
@@ -191,21 +185,24 @@ impl SbbTransportBridge {
         let offer: TransportOfferPayload = bincode::deserialize(&offer_data)
             .map_err(|e| AuraError::serialization(format!("Failed to deserialize offer: {}", e)))?;
 
-        println!("Received transport offer from device: {:?}", offer.device_id);
+        println!(
+            "Received transport offer from device: {:?}",
+            offer.device_id
+        );
         println!("Available methods: {:?}", offer.transport_methods);
 
         // TODO: If we want to connect, create transport answer and establish connection
         // For now, just log the offer
-        
+
         Ok(())
     }
 
     /// Handle transport answer (Bob receives Alice's answer)
     async fn handle_transport_answer(&self, answer_data: Vec<u8>) -> AuraResult<()> {
         println!("Received transport answer: {} bytes", answer_data.len());
-        
+
         // TODO: Process answer and establish connection via selected transport method
-        
+
         Ok(())
     }
 }
@@ -223,7 +220,10 @@ impl std::fmt::Debug for BoxedTransportSender {
 impl TransportSender for MockTransportSender {
     async fn send_to_peer(&self, peer: DeviceId, message: SbbMessageType) -> AuraResult<()> {
         if self.reachable_peers.contains(&peer) {
-            println!("Mock transport: sent message to peer {:?}: {:?}", peer, message);
+            println!(
+                "Mock transport: sent message to peer {:?}: {:?}",
+                peer, message
+            );
             Ok(())
         } else {
             Err(AuraError::network("Peer not reachable"))
@@ -265,12 +265,15 @@ impl std::fmt::Debug for NetworkTransportSender {
 impl TransportSender for NetworkTransportSender {
     async fn send_to_peer(&self, peer: DeviceId, message: SbbMessageType) -> AuraResult<()> {
         // Serialize SBB message
-        let payload = bincode::serialize(&message)
-            .map_err(|e| AuraError::serialization(format!("Failed to serialize SBB message: {}", e)))?;
+        let payload = bincode::serialize(&message).map_err(|e| {
+            AuraError::serialization(format!("Failed to serialize SBB message: {}", e))
+        })?;
 
         // Send via network transport
         let transport = self.transport.read().await;
-        transport.send(peer, payload, "sbb-message".to_string()).await
+        transport
+            .send(peer, payload, "sbb-message".to_string())
+            .await
     }
 
     async fn is_peer_reachable(&self, peer: &DeviceId) -> bool {
@@ -315,9 +318,9 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
     ) -> AuraResult<()> {
         // Use transport sender if available, otherwise delegate to coordinator
         if let Some(sender) = &self.transport_sender {
-            let message = SbbMessageType::RendezvousFlood { 
-                envelope, 
-                from_peer: Some(peer) // TODO: Get actual sender ID
+            let message = SbbMessageType::RendezvousFlood {
+                envelope,
+                from_peer: Some(peer), // TODO: Get actual sender ID
             };
             sender.0.send_to_peer(peer, message).await
         } else {
@@ -336,7 +339,7 @@ mod tests {
     async fn test_sbb_transport_bridge_creation() {
         let device_id = DeviceId::new();
         let bridge = SbbTransportBridge::new(device_id);
-        
+
         // Should create successfully
         assert!(bridge.transport_sender.is_none());
     }
@@ -345,13 +348,13 @@ mod tests {
     async fn test_relationship_management() {
         let device_id = DeviceId::new();
         let bridge = SbbTransportBridge::new(device_id);
-        
+
         let friend_id = DeviceId::new();
         let guardian_id = DeviceId::new();
-        
+
         bridge.add_friend(friend_id).await;
         bridge.add_guardian(guardian_id).await;
-        
+
         // Should add relationships to coordinator
         let coordinator = bridge.flooding_coordinator.read().await;
         assert_eq!(coordinator.friends.len(), 1);
@@ -362,22 +365,22 @@ mod tests {
     async fn test_rendezvous_offer_creation() {
         let device_id = DeviceId::new();
         let bridge = SbbTransportBridge::new(device_id);
-        
+
         let offer = TransportOfferPayload {
             device_id,
             transport_methods: vec![
-                TransportMethod::WebSocket { 
-                    url: "ws://127.0.0.1:8080".to_string() 
+                TransportMethod::WebSocket {
+                    url: "ws://127.0.0.1:8080".to_string(),
                 },
-                TransportMethod::Quic { 
-                    addr: "127.0.0.1".to_string(), 
-                    port: 8443 
+                TransportMethod::Quic {
+                    addr: "127.0.0.1".to_string(),
+                    port: 8443,
                 },
             ],
             expires_at: 1234567890 + 3600, // 1 hour from now
             nonce: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
         };
-        
+
         // Should serialize and flood offer
         let result = bridge.flood_rendezvous_offer(offer).await;
         assert!(result.is_ok());
@@ -387,16 +390,16 @@ mod tests {
     async fn test_message_handling() {
         let device_id = DeviceId::new();
         let bridge = SbbTransportBridge::new(device_id);
-        
+
         // Create test envelope
         let payload = b"test offer data".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(2));
-        
+
         let message = SbbMessageType::RendezvousFlood {
             envelope,
             from_peer: Some(DeviceId::new()),
         };
-        
+
         // Should handle message without error
         let result = bridge.handle_transport_message(message).await;
         assert!(result.is_ok());
@@ -407,37 +410,37 @@ mod tests {
         let peer1 = DeviceId::new();
         let peer2 = DeviceId::new();
         let peer3 = DeviceId::new();
-        
+
         let sender = MockTransportSender::new(vec![peer1, peer2]);
-        
+
         // Should report reachable peers correctly
         assert!(sender.is_peer_reachable(&peer1).await);
         assert!(sender.is_peer_reachable(&peer2).await);
         assert!(!sender.is_peer_reachable(&peer3).await);
-        
+
         // Should send to reachable peers
         let message = SbbMessageType::TransportOffer {
             offer_data: b"test offer".to_vec(),
         };
-        
+
         let result1 = sender.send_to_peer(peer1, message.clone()).await;
         assert!(result1.is_ok());
-        
+
         let result3 = sender.send_to_peer(peer3, message).await;
         assert!(result3.is_err());
     }
 
     #[tokio::test]
     async fn test_network_transport_sender_creation() {
-        use aura_transport::{NetworkTransport, NetworkConfig};
-        
+        use aura_transport::{NetworkConfig, NetworkTransport};
+
         let device_id = DeviceId::new();
         let config = NetworkConfig::default();
         let transport = NetworkTransport::new(device_id, config);
         let transport_ref = Arc::new(RwLock::new(transport));
-        
+
         let sender = NetworkTransportSender::new(transport_ref);
-        
+
         // Should create successfully
         let unreachable_peer = DeviceId::new();
         assert!(!sender.is_peer_reachable(&unreachable_peer).await);
@@ -445,34 +448,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_sbb_bridge_with_network_transport() {
-        use aura_transport::{NetworkTransport, NetworkConfig};
-        
+        use aura_transport::{NetworkConfig, NetworkTransport};
+
         let device_id = DeviceId::new();
         let mut bridge = SbbTransportBridge::new(device_id);
-        
+
         // Set up real transport sender
         let config = NetworkConfig::default();
         let transport = NetworkTransport::new(device_id, config);
         let transport_ref = Arc::new(RwLock::new(transport));
         let sender = NetworkTransportSender::new(transport_ref);
-        
+
         bridge.set_transport_sender(Box::new(sender));
-        
+
         // Should have transport sender configured
         assert!(bridge.transport_sender.is_some());
-        
+
         // Test rendezvous offer
         let offer = TransportOfferPayload {
             device_id,
-            transport_methods: vec![
-                TransportMethod::WebSocket { 
-                    url: "ws://127.0.0.1:8080".to_string() 
-                },
-            ],
-            expires_at: 1234567890 + 3600, 
+            transport_methods: vec![TransportMethod::WebSocket {
+                url: "ws://127.0.0.1:8080".to_string(),
+            }],
+            expires_at: 1234567890 + 3600,
             nonce: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
         };
-        
+
         // Should handle offer creation (even if no peers to forward to)
         let result = bridge.flood_rendezvous_offer(offer).await;
         assert!(result.is_ok());

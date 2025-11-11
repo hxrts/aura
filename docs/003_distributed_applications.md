@@ -1,6 +1,6 @@
 # Aura Distributed Applications
 
-This document demonstrates how Aura's theoretical foundations and system architecture come together in practice. It provides concrete examples of distributed systems, CRDT implementations, testing strategies, and integration patterns.
+This document demonstrates how Aura's theoretical foundations and system architecture come together in practice. It provides concrete examples of distributed systems, CRDT implementations, testing strategies, and integration patterns. Formal semantics and invariants live in `docs/001_theoretical_foundations.md`; this document references those definitions.
 
 ## Overview
 
@@ -107,7 +107,7 @@ G_rendezvous:
 - **Delivery liveness:** Plumtree + HyParView ensure eventual reception in connected components
 - **Privacy:** rotating tags + padding + cover traffic keep `adv_ngh` inference ≤ threshold
 - **Authorization:** relays only forward if `can_post_envelope(topic)` holds after meet with relay policy; otherwise drop/greylist (rate-cap)
-- **Flow budgets:** Relays require a signed `FlowReceipt` from the previous hop and charge their own ledger entry via `FlowGuard` before forwarding. When either hop runs out of budget, the envelope stalls without leaking timing through unauthorized contexts.
+- **Flow budgets:** Relays require a signed `Receipt` from the previous hop and charge their own ledger entry via `FlowGuard` before forwarding. When either hop runs out of budget, the envelope stalls without leaking timing through unauthorized contexts.
 
 ---
 

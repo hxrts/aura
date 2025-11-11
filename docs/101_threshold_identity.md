@@ -1,4 +1,4 @@
-# 101 · Threshold Identity 1.0
+# 101 · Threshold Identity
 
 ## Relational Identity Model
 

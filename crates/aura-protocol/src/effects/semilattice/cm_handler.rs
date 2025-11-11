@@ -5,35 +5,43 @@
 //! until causal dependencies are satisfied, then applies them idempotently.
 
 use aura_core::semilattice::{CausalOp, CmApply, Dedup, OpWithCtx};
-use std::collections::VecDeque;
+use aura_core::{CausalContext, OperationId, VectorClock};
+use std::collections::{HashMap, VecDeque};
 
-/// Operation-based CRDT effect handler
+/// Operation-based CRDT effect handler with proper causal ordering
 ///
 /// Enforces causal ordering and deduplication for commutative
-/// replicated data types (CmRDTs).
-pub struct CmHandler<S, Op, Id, Ctx>
+/// replicated data types (CmRDTs). Uses vector clocks to ensure
+/// causal delivery guarantees.
+pub struct CmHandler<S, Op, Id>
 where
     S: CmApply<Op> + Dedup<Id>,
-    Op: CausalOp<Id = Id, Ctx = Ctx>,
-    Id: Clone,
+    Op: CausalOp<Id = Id, Ctx = CausalContext>,
+    Id: Clone + PartialEq,
 {
     /// Current CRDT state
     pub state: S,
     /// Buffer for operations waiting for causal dependencies
-    pub buffer: VecDeque<OpWithCtx<Op, Ctx>>,
+    pub buffer: VecDeque<OpWithCtx<Op, CausalContext>>,
+    /// Current vector clock representing our causal knowledge
+    pub current_clock: VectorClock,
+    /// Applied operations for dependency checking
+    pub applied_operations: HashMap<OperationId, bool>,
 }
 
-impl<S, Op, Id, Ctx> CmHandler<S, Op, Id, Ctx>
+impl<S, Op, Id> CmHandler<S, Op, Id>
 where
     S: CmApply<Op> + Dedup<Id>,
-    Op: CausalOp<Id = Id, Ctx = Ctx>,
-    Id: Clone,
+    Op: CausalOp<Id = Id, Ctx = CausalContext>,
+    Id: Clone + PartialEq,
 {
     /// Create a new handler with initial state
     pub fn new(state: S) -> Self {
         Self {
             state,
             buffer: VecDeque::new(),
+            current_clock: VectorClock::new(),
+            applied_operations: HashMap::new(),
         }
     }
 
@@ -43,11 +51,10 @@ where
     /// 1. Operations are applied only when causally ready
     /// 2. Duplicate operations are detected and ignored
     /// 3. Operations commute under proper causal delivery
-    pub fn on_recv(&mut self, msg: OpWithCtx<Op, Ctx>) {
+    pub fn on_recv(&mut self, msg: OpWithCtx<Op, CausalContext>) {
         if self.is_causal_ready(&msg.ctx) && !self.state.seen(&msg.op.id()) {
             // Apply operation immediately
-            self.state.mark_seen(msg.op.id());
-            self.state.apply(msg.op);
+            self.apply_operation(msg.op, msg.ctx);
 
             // Check if any buffered operations are now ready
             self.process_buffered();
@@ -58,16 +65,31 @@ where
         // If already seen, ignore (deduplication)
     }
 
+    /// Apply an operation and update our causal state
+    fn apply_operation(&mut self, op: Op, ctx: CausalContext) {
+        // Mark as seen for deduplication
+        self.state.mark_seen(op.id());
+        
+        // Create operation ID for dependency tracking
+        let op_id = OperationId::new(ctx.actor, ctx.clock.get(&ctx.actor));
+        self.applied_operations.insert(op_id, true);
+        
+        // Update our vector clock
+        self.current_clock.update(&ctx.clock);
+        
+        // Apply the operation to the state
+        self.state.apply(op);
+    }
+
     /// Check if operation is ready for delivery based on causal context
     ///
-    /// This is a placeholder implementation. Real implementations would:
-    /// - Check vector clocks for causal dependencies
-    /// - Verify dependency sets are satisfied
-    /// - Use Lamport timestamps or other ordering mechanisms
-    fn is_causal_ready(&self, _ctx: &Ctx) -> bool {
-        // TODO fix - For now, assume all operations are ready
-        // TODO: Implement proper causal ordering based on context type
-        true
+    /// Uses vector clocks and explicit dependencies to determine if an operation
+    /// can be safely delivered without violating causal ordering guarantees.
+    fn is_causal_ready(&self, ctx: &CausalContext) -> bool {
+        ctx.is_ready(
+            |op_id| self.applied_operations.contains_key(op_id),
+            &self.current_clock,
+        )
     }
 
     /// Process buffered operations that are now ready
@@ -91,8 +113,7 @@ where
 
         // Apply ready operations
         for msg in ready_ops {
-            self.state.mark_seen(msg.op.id());
-            self.state.apply(msg.op);
+            self.apply_operation(msg.op, msg.ctx);
         }
     }
 
@@ -128,22 +149,33 @@ where
     ///
     /// This is a utility method for creating properly formatted
     /// operation messages for session-type communication.
-    pub fn create_op_msg(&self, op: Op, ctx: Ctx) -> OpWithCtx<Op, Ctx> {
+    pub fn create_op_msg(&self, op: Op, ctx: CausalContext) -> OpWithCtx<Op, CausalContext> {
         OpWithCtx::new(op, ctx)
+    }
+
+    /// Get current vector clock
+    pub fn current_clock(&self) -> &VectorClock {
+        &self.current_clock
+    }
+
+    /// Get applied operations (for debugging/inspection)
+    pub fn applied_operations(&self) -> &HashMap<OperationId, bool> {
+        &self.applied_operations
     }
 }
 
-impl<S, Op, Id, Ctx> std::fmt::Debug for CmHandler<S, Op, Id, Ctx>
+impl<S, Op, Id> std::fmt::Debug for CmHandler<S, Op, Id>
 where
     S: CmApply<Op> + Dedup<Id> + std::fmt::Debug,
-    Op: CausalOp<Id = Id, Ctx = Ctx> + std::fmt::Debug,
-    Ctx: std::fmt::Debug,
-    Id: Clone,
+    Op: CausalOp<Id = Id, Ctx = CausalContext> + std::fmt::Debug,
+    Id: Clone + PartialEq,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CmHandler")
             .field("state", &self.state)
             .field("buffer_len", &self.buffer.len())
+            .field("current_clock", &self.current_clock)
+            .field("applied_operations_count", &self.applied_operations.len())
             .finish()
     }
 }
@@ -151,6 +183,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::DeviceId;
     use std::collections::HashSet;
 
     // Test operation type
@@ -158,18 +191,19 @@ mod tests {
     struct TestOp {
         id: u64,
         value: i32,
+        causal_ctx: CausalContext,
     }
 
     impl CausalOp for TestOp {
         type Id = u64;
-        type Ctx = (); // Simple context for testing
+        type Ctx = CausalContext;
 
         fn id(&self) -> Self::Id {
             self.id
         }
 
         fn ctx(&self) -> &Self::Ctx {
-            &()
+            &self.causal_ctx
         }
     }
 
@@ -205,6 +239,14 @@ mod tests {
         }
     }
 
+    fn create_test_op(id: u64, value: i32, actor: DeviceId) -> TestOp {
+        TestOp {
+            id,
+            value,
+            causal_ctx: CausalContext::new(actor),
+        }
+    }
+
     #[test]
     fn test_cm_handler_new() {
         let state = TestState::new();
@@ -216,9 +258,10 @@ mod tests {
     #[test]
     fn test_on_recv_applies_operation() {
         let mut handler = CmHandler::new(TestState::new());
+        let actor = DeviceId::new();
 
-        let op = TestOp { id: 1, value: 5 };
-        let msg = OpWithCtx::new(op, ());
+        let op = create_test_op(1, 5, actor);
+        let msg = OpWithCtx::new(op.clone(), op.causal_ctx.clone());
 
         handler.on_recv(msg);
         assert_eq!(handler.get_state().sum, 5);
@@ -228,12 +271,13 @@ mod tests {
     #[test]
     fn test_on_recv_deduplicates() {
         let mut handler = CmHandler::new(TestState::new());
+        let actor = DeviceId::new();
 
-        let op1 = TestOp { id: 1, value: 5 };
-        let op2 = TestOp { id: 1, value: 10 }; // Same ID, different value
+        let op1 = create_test_op(1, 5, actor);
+        let op2 = create_test_op(1, 10, actor); // Same ID, different value
 
-        handler.on_recv(OpWithCtx::new(op1, ()));
-        handler.on_recv(OpWithCtx::new(op2, ()));
+        handler.on_recv(OpWithCtx::new(op1.clone(), op1.causal_ctx.clone()));
+        handler.on_recv(OpWithCtx::new(op2.clone(), op2.causal_ctx.clone()));
 
         // Should only apply first operation
         assert_eq!(handler.get_state().sum, 5);
@@ -242,10 +286,15 @@ mod tests {
     #[test]
     fn test_multiple_operations() {
         let mut handler = CmHandler::new(TestState::new());
+        let actor = DeviceId::new();
 
-        handler.on_recv(OpWithCtx::new(TestOp { id: 1, value: 5 }, ()));
-        handler.on_recv(OpWithCtx::new(TestOp { id: 2, value: 3 }, ()));
-        handler.on_recv(OpWithCtx::new(TestOp { id: 3, value: -2 }, ()));
+        let op1 = create_test_op(1, 5, actor);
+        let op2 = create_test_op(2, 3, actor);
+        let op3 = create_test_op(3, -2, actor);
+
+        handler.on_recv(OpWithCtx::new(op1.clone(), op1.causal_ctx.clone()));
+        handler.on_recv(OpWithCtx::new(op2.clone(), op2.causal_ctx.clone()));
+        handler.on_recv(OpWithCtx::new(op3.clone(), op3.causal_ctx.clone()));
 
         assert_eq!(handler.get_state().sum, 6); // 5 + 3 - 2
         assert!(handler.get_state().seen(&1));
@@ -254,10 +303,35 @@ mod tests {
     }
 
     #[test]
+    fn test_causal_ordering() {
+        let mut handler = CmHandler::new(TestState::new());
+        let actor = DeviceId::new();
+
+        // Create operations with causal dependencies
+        let op1_ctx = CausalContext::new(actor);
+        let op1 = TestOp { id: 1, value: 5, causal_ctx: op1_ctx.clone() };
+
+        // op2 depends on op1
+        let op2_ctx = CausalContext::after(actor, &op1_ctx);
+        let op2 = TestOp { id: 2, value: 3, causal_ctx: op2_ctx.clone() };
+
+        // Send op2 first (out of order)
+        handler.on_recv(OpWithCtx::new(op2.clone(), op2.causal_ctx.clone()));
+        assert_eq!(handler.get_state().sum, 0); // Should be buffered
+        assert_eq!(handler.buffer_len(), 1);
+
+        // Send op1
+        handler.on_recv(OpWithCtx::new(op1.clone(), op1.causal_ctx.clone()));
+        assert_eq!(handler.get_state().sum, 8); // Should apply both: 5 + 3
+        assert_eq!(handler.buffer_len(), 0); // Buffer should be empty
+    }
+
+    #[test]
     fn test_create_op_msg() {
         let handler = CmHandler::new(TestState::new());
-        let op = TestOp { id: 1, value: 5 };
-        let msg = handler.create_op_msg(op, ());
+        let actor = DeviceId::new();
+        let op = create_test_op(1, 5, actor);
+        let msg = handler.create_op_msg(op.clone(), op.causal_ctx.clone());
 
         assert_eq!(msg.op.id, 1);
         assert_eq!(msg.op.value, 5);

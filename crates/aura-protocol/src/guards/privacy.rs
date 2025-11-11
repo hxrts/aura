@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
 /// Privacy budget tracking state for a device
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PrivacyBudgetState {
     /// Total budget consumed across all adversary classes
     pub consumed_budget: LeakageBudget,
@@ -25,7 +25,7 @@ pub struct PrivacyBudgetState {
 }
 
 /// Record of budget consumption for a specific operation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BudgetConsumption {
     /// Operation identifier
     pub operation_id: String,
@@ -38,7 +38,7 @@ pub struct BudgetConsumption {
 }
 
 /// Adversary classes for privacy analysis
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AdversaryClass {
     /// External adversary (outside the system)
     External,
@@ -201,31 +201,52 @@ fn create_privacy_tracker(device_id: DeviceId, limits: LeakageBudget) -> Privacy
     PrivacyBudgetTracker::new(device_id, limits)
 }
 
-/// Track leakage consumption for an operation (TODO fix - Simplified safe implementation)
+/// Track leakage consumption for an operation with persistent state management
 pub async fn track_leakage_consumption(
     leakage_budget: &LeakageBudget,
     operation_id: &str,
-    _effect_system: &AuraEffectSystem,
+    effect_system: &AuraEffectSystem,
 ) -> AuraResult<LeakageBudget> {
-    // This is a TODO fix - Simplified implementation without global state
-    // In practice, privacy tracking would be integrated with the effect system
-    // or stored in the journal as facts
-
+    // Get current device ID from effect system
+    let device_id = effect_system.get_device_id().await?;
+    
+    // Load current privacy budget state from storage
+    let mut tracker = load_privacy_tracker(device_id, effect_system).await?;
+    
+    // Classify which adversary classes can observe this operation
+    let observable_by = classify_operation_observability(operation_id, effect_system).await;
+    
+    // Check if we can afford this operation
+    if !tracker.can_afford_operation(leakage_budget) {
+        return Err(AuraError::permission_denied(&format!(
+            "Operation '{}' would exceed privacy budget limits", 
+            operation_id
+        )));
+    }
+    
+    // Consume the budget and record the operation
+    tracker.consume_budget(
+        operation_id.to_string(),
+        leakage_budget.clone(),
+        observable_by
+    )?;
+    
+    // Clean up old records outside the tracking window
+    tracker.cleanup_old_records();
+    
+    // Save updated state back to storage
+    save_privacy_tracker(&tracker, effect_system).await?;
+    
     debug!(
         operation_id = %operation_id,
         external = leakage_budget.external,
         neighbor = leakage_budget.neighbor,
         in_group = leakage_budget.in_group,
-        "Tracking privacy budget consumption"
+        remaining_external = tracker.get_available_budget().external,
+        remaining_neighbor = tracker.get_available_budget().neighbor,
+        remaining_in_group = tracker.get_available_budget().in_group,
+        "Privacy budget consumption tracked and persisted"
     );
-
-    // Validate budget limits (TODO fix - Simplified check)
-    if leakage_budget.external > 1000
-        || leakage_budget.neighbor > 500
-        || leakage_budget.in_group > 100
-    {
-        warn!("Privacy budget consumption exceeds recommended limits");
-    }
 
     Ok(leakage_budget.clone())
 }
@@ -267,38 +288,110 @@ async fn classify_operation_observability(
     observable_by
 }
 
-/// Check if a device can afford a specific operation (placeholder implementation)
-pub async fn can_afford_operation(_device_id: DeviceId, requested_budget: &LeakageBudget) -> bool {
-    // This is a placeholder - in practice, this would check against
-    // actual privacy budget state stored in the journal or effect system
-
-    // Simple validation - reject obviously excessive requests
-    if requested_budget.external > 10000
-        || requested_budget.neighbor > 5000
-        || requested_budget.in_group > 1000
-    {
-        warn!("Requested privacy budget exceeds safe limits");
-        return false;
+/// Load privacy tracker state from persistent storage
+async fn load_privacy_tracker(
+    device_id: DeviceId, 
+    effect_system: &AuraEffectSystem
+) -> AuraResult<PrivacyBudgetTracker> {
+    let storage_key = format!("privacy_budget_{}", device_id);
+    
+    match effect_system.storage_get(&storage_key).await {
+        Ok(Some(data)) => {
+            // Deserialize existing tracker state
+            let state: PrivacyBudgetState = serde_json::from_slice(&data)
+                .map_err(|e| AuraError::invalid_input(&format!("Failed to deserialize privacy state: {}", e)))?;
+            
+            Ok(PrivacyBudgetTracker { device_id, state })
+        }
+        Ok(None) => {
+            // Create new tracker with default limits
+            let default_limits = LeakageBudget {
+                external: 1000,  // Conservative daily limits
+                neighbor: 500,
+                in_group: 100,
+            };
+            Ok(PrivacyBudgetTracker::new(device_id, default_limits))
+        }
+        Err(e) => {
+            warn!("Failed to load privacy budget state: {}", e);
+            // Fallback to conservative default
+            let default_limits = LeakageBudget {
+                external: 100,   // Very conservative fallback
+                neighbor: 50,
+                in_group: 10,
+            };
+            Ok(PrivacyBudgetTracker::new(device_id, default_limits))
+        }
     }
-
-    // Conservative default: allow reasonable operations
-    true
 }
 
-/// Get privacy budget status for a device (placeholder implementation)
-pub async fn get_privacy_budget_status(_device_id: DeviceId) -> Option<PrivacyBudgetState> {
-    // This is a placeholder - in practice, privacy budget state would be
-    // stored in the journal or effect system rather than global state
-    None
+/// Save privacy tracker state to persistent storage
+async fn save_privacy_tracker(
+    tracker: &PrivacyBudgetTracker,
+    effect_system: &AuraEffectSystem
+) -> AuraResult<()> {
+    let storage_key = format!("privacy_budget_{}", tracker.device_id);
+    
+    let serialized = serde_json::to_vec(&tracker.state)
+        .map_err(|e| AuraError::invalid_input(&format!("Failed to serialize privacy state: {}", e)))?;
+    
+    effect_system.storage_put(&storage_key, &serialized).await
+        .map_err(|e| AuraError::internal(&format!("Failed to save privacy budget state: {}", e)))?;
+    
+    Ok(())
 }
 
-/// Reset privacy budget for a device (placeholder implementation)
+/// Check if a device can afford a specific operation using persistent state
+pub async fn can_afford_operation(device_id: DeviceId, requested_budget: &LeakageBudget, effect_system: &AuraEffectSystem) -> AuraResult<bool> {
+    // Load current tracker state
+    let tracker = load_privacy_tracker(device_id, effect_system).await?;
+    
+    // Check affordability
+    Ok(tracker.can_afford_operation(requested_budget))
+}
+
+/// Get privacy budget status for a device using persistent storage
+pub async fn get_privacy_budget_status(device_id: DeviceId, effect_system: &AuraEffectSystem) -> AuraResult<Option<PrivacyBudgetState>> {
+    match load_privacy_tracker(device_id, effect_system).await {
+        Ok(tracker) => {
+            let mut state = tracker.state.clone();
+            // Clean up old records before returning status
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let window_start = current_time.saturating_sub(state.tracking_window_hours * 3600);
+            
+            state.operation_history.retain(|record| record.timestamp >= window_start);
+            
+            Ok(Some(state))
+        }
+        Err(_) => {
+            // Return None if no state exists or cannot be loaded
+            Ok(None)
+        }
+    }
+}
+
+/// Reset privacy budget for a device with new limits
 pub async fn reset_privacy_budget(
     device_id: DeviceId,
-    _new_limits: LeakageBudget,
+    new_limits: LeakageBudget,
+    effect_system: &AuraEffectSystem,
 ) -> AuraResult<()> {
-    // This is a placeholder - in practice, privacy budget reset would be
-    // an operation that affects the journal or effect system state
-    info!(device_id = ?device_id, "Privacy budget reset (placeholder)");
+    // Create fresh tracker with new limits
+    let tracker = PrivacyBudgetTracker::new(device_id, new_limits.clone());
+    
+    // Save to persistent storage
+    save_privacy_tracker(&tracker, effect_system).await?;
+    
+    info!(
+        device_id = ?device_id,
+        new_external_limit = new_limits.external,
+        new_neighbor_limit = new_limits.neighbor,
+        new_in_group_limit = new_limits.in_group,
+        "Privacy budget reset with new limits"
+    );
+    
     Ok(())
 }

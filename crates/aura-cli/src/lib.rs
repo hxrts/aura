@@ -207,6 +207,47 @@ pub enum InvitationAction {
     },
 }
 
+/// OTA upgrade subcommands
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum OtaAction {
+    /// Submit a new upgrade proposal
+    Propose {
+        /// Source version (from)
+        #[arg(long)]
+        from_version: String,
+        /// Target version (to)
+        #[arg(long)]
+        to_version: String,
+        /// Upgrade type: soft, hard, or security
+        #[arg(long, default_value = "soft")]
+        upgrade_type: String,
+        /// Download URL for the upgrade package
+        #[arg(long)]
+        download_url: String,
+        /// Upgrade description
+        #[arg(long)]
+        description: String,
+    },
+    /// Set user opt-in policy
+    Policy {
+        /// Policy type: auto, manual, security, soft-auto
+        #[arg(long)]
+        policy: String,
+    },
+    /// Check upgrade status
+    Status,
+    /// Opt into a specific upgrade
+    OptIn {
+        /// Proposal ID to opt into
+        #[arg(long)]
+        proposal_id: String,
+    },
+    /// List all upgrade proposals
+    List,
+    /// Show upgrade statistics
+    Stats,
+}
+
 /// CLI error types
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {

@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn test_operation_to_string() {
         let op = TreeOperation::AddLeaf {
-            leaf: LeafNode::new_device(LeafId(1), vec![0u8; 32]),
+            leaf: LeafNode::new_device(LeafId(1), aura_core::DeviceId::new(), vec![0u8; 32]),
             under: NodeIndex(0),
         };
         assert_eq!(op.to_operation_string(), "tree:add_leaf");
@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn test_required_capabilities() {
         let op = TreeOperation::AddLeaf {
-            leaf: LeafNode::new_device(LeafId(1), vec![0u8; 32]),
+            leaf: LeafNode::new_device(LeafId(1), aura_core::DeviceId::new(), vec![0u8; 32]),
             under: NodeIndex(0),
         };
         let caps = op.required_capabilities();
@@ -280,7 +280,7 @@ mod tests {
 
         // Should authorize
         let op = TreeOperation::AddLeaf {
-            leaf: LeafNode::new_device(LeafId(1), vec![0u8; 32]),
+            leaf: LeafNode::new_device(LeafId(1), aura_core::DeviceId::new(), vec![0u8; 32]),
             under: NodeIndex(0),
         };
         let result = authz.authorize_operation(device_id, &op, &HashMap::new());
@@ -298,7 +298,7 @@ mod tests {
 
         // Should not authorize write operation
         let op = TreeOperation::AddLeaf {
-            leaf: LeafNode::new_device(LeafId(1), vec![0u8; 32]),
+            leaf: LeafNode::new_device(LeafId(1), aura_core::DeviceId::new(), vec![0u8; 32]),
             under: NodeIndex(0),
         };
         let result = authz.authorize_operation(device_id, &op, &HashMap::new());

@@ -20,11 +20,66 @@ use std::fmt;
 ///
 /// Facts are join-semilattice elements that can only grow through accumulation.
 /// They represent knowledge that has been observed and cannot be "unlearned".
+/// 
+/// Uses a proper CRDT (OR-Set with LWW-Map) for distributed consistency.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fact {
-    /// The underlying data structure storing accumulated facts
-    /// Using a simple map TODO fix - For now, but this would be backed by a proper CRDT
-    data: std::collections::BTreeMap<String, FactValue>,
+    /// CRDT-based fact storage with operation timestamps
+    entries: FactCrdt,
+}
+
+/// CRDT implementation for facts using Observed-Remove Set semantics
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct FactCrdt {
+    /// Last-Writer-Wins map for fact values with vector clocks
+    lww_map: std::collections::BTreeMap<String, VersionedFactValue>,
+    /// Operation set for add/remove operations
+    operation_set: std::collections::BTreeSet<FactOperation>,
+}
+
+/// Versioned fact value with causal ordering
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct VersionedFactValue {
+    value: FactValue,
+    timestamp: u64,
+    actor_id: String, // Device/actor that created this value
+    version: u64,     // Logical clock for causality
+}
+
+/// CRDT operation for fact modifications
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Serialize, Deserialize)]
+enum FactOperation {
+    Add {
+        key: String,
+        value: FactValue,
+        timestamp: u64,
+        actor_id: String,
+        op_id: String, // Unique operation ID for OR-Set semantics
+    },
+    Remove {
+        key: String,
+        timestamp: u64,
+        actor_id: String,
+        op_id: String,
+        /// The specific add operation being removed
+        removed_op_id: String,
+    },
+}
+
+impl Ord for FactOperation {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Order by timestamp, then by op_id for deterministic ordering
+        match (self, other) {
+            (FactOperation::Add { timestamp: t1, op_id: id1, .. }, FactOperation::Add { timestamp: t2, op_id: id2, .. }) => {
+                t1.cmp(t2).then_with(|| id1.cmp(id2))
+            }
+            (FactOperation::Remove { timestamp: t1, op_id: id1, .. }, FactOperation::Remove { timestamp: t2, op_id: id2, .. }) => {
+                t1.cmp(t2).then_with(|| id1.cmp(id2))
+            }
+            (FactOperation::Add { .. }, FactOperation::Remove { .. }) => std::cmp::Ordering::Less,
+            (FactOperation::Remove { .. }, FactOperation::Add { .. }) => std::cmp::Ordering::Greater,
+        }
+    }
 }
 
 /// Individual fact values that can be accumulated
@@ -46,77 +101,209 @@ impl Fact {
     /// Create a new empty fact
     pub fn new() -> Self {
         Self {
-            data: std::collections::BTreeMap::new(),
+            entries: FactCrdt {
+                lww_map: std::collections::BTreeMap::new(),
+                operation_set: std::collections::BTreeSet::new(),
+            },
         }
     }
 
     /// Create a fact with a single key-value pair
     pub fn with_value(key: impl Into<String>, value: FactValue) -> Self {
         let mut fact = Self::new();
-        fact.data.insert(key.into(), value);
+        fact.insert(key, value);
         fact
     }
 
-    /// Insert or update a fact value
+    /// Insert or update a fact value using CRDT semantics
     pub fn insert(&mut self, key: impl Into<String>, value: FactValue) {
         let key = key.into();
-
-        match (self.data.get(&key), &value) {
-            // Join existing fact with new fact
-            (Some(existing), new_value) => {
-                let joined = existing.join(new_value);
-                self.data.insert(key, joined);
+        let timestamp = crate::current_unix_timestamp();
+        let actor_id = std::env::var("AURA_DEVICE_ID")
+            .unwrap_or_else(|_| "localhost".to_string()); // Device ID from environment or localhost default
+        let op_id = format!("{}:{}:{}", actor_id, timestamp, key);
+        
+        // Create add operation for OR-Set
+        let add_op = FactOperation::Add {
+            key: key.clone(),
+            value: value.clone(),
+            timestamp,
+            actor_id: actor_id.clone(),
+            op_id: op_id.clone(),
+        };
+        
+        self.entries.operation_set.insert(add_op);
+        
+        // Update LWW-Map with versioned value
+        let versioned_value = VersionedFactValue {
+            value,
+            timestamp,
+            actor_id,
+            version: timestamp, // Use timestamp as logical clock for now
+        };
+        
+        // Last-Writer-Wins resolution
+        match self.entries.lww_map.get(&key) {
+            Some(existing) if existing.version > versioned_value.version => {
+                // Keep existing value (it's newer)
             }
-            // No existing fact, just insert
-            (None, _) => {
-                self.data.insert(key, value);
+            Some(existing) if existing.version == versioned_value.version => {
+                // Tie-break by actor_id (lexicographic)
+                if existing.actor_id <= versioned_value.actor_id {
+                    // Keep existing
+                } else {
+                    self.entries.lww_map.insert(key, versioned_value);
+                }
+            }
+            _ => {
+                // New value wins
+                self.entries.lww_map.insert(key, versioned_value);
             }
         }
+    }
+    
+    /// Remove a fact value (creates remove operation)
+    pub fn remove(&mut self, key: impl Into<String>) {
+        let key = key.into();
+        let timestamp = crate::current_unix_timestamp();
+        let actor_id = "local".to_string();
+        let op_id = format!("{}:{}:remove:{}", actor_id, timestamp, key);
+        
+        // Find all add operations for this key to remove them
+        let add_ops_to_remove: Vec<_> = self.entries.operation_set
+            .iter()
+            .filter_map(|op| match op {
+                FactOperation::Add { key: op_key, op_id, .. } if op_key == &key => Some(op_id.clone()),
+                _ => None,
+            })
+            .collect();
+        
+        // Create remove operations for each add operation
+        for removed_op_id in add_ops_to_remove {
+            let remove_op = FactOperation::Remove {
+                key: key.clone(),
+                timestamp,
+                actor_id: actor_id.clone(),
+                op_id: format!("{}:{}", op_id, removed_op_id),
+                removed_op_id,
+            };
+            self.entries.operation_set.insert(remove_op);
+        }
+        
+        // Remove from LWW map
+        self.entries.lww_map.remove(&key);
     }
 
     /// Get a fact value by key
     pub fn get(&self, key: &str) -> Option<&FactValue> {
-        self.data.get(key)
+        // Check if key is removed in OR-Set
+        if self.is_key_removed(key) {
+            return None;
+        }
+        
+        self.entries.lww_map.get(key).map(|v| &v.value)
+    }
+    
+    /// Check if a key has been removed according to OR-Set semantics
+    fn is_key_removed(&self, key: &str) -> bool {
+        let mut add_ops = std::collections::HashSet::new();
+        let mut removed_ops = std::collections::HashSet::new();
+        
+        // Collect add and remove operations
+        for op in &self.entries.operation_set {
+            match op {
+                FactOperation::Add { key: op_key, op_id, .. } if op_key == key => {
+                    add_ops.insert(op_id.clone());
+                }
+                FactOperation::Remove { key: op_key, removed_op_id, .. } if op_key == key => {
+                    removed_ops.insert(removed_op_id.clone());
+                }
+                _ => {}
+            }
+        }
+        
+        // Key is removed if all adds have corresponding removes
+        add_ops.is_subset(&removed_ops)
     }
 
     /// Get all fact keys
-    pub fn keys(&self) -> impl Iterator<Item = &String> {
-        self.data.keys()
+    pub fn keys(&self) -> impl Iterator<Item = String> + '_ {
+        self.entries.lww_map
+            .keys()
+            .filter(|k| !self.is_key_removed(k))
+            .cloned()
     }
 
     /// Check if facts contain a key
     pub fn contains_key(&self, key: &str) -> bool {
-        self.data.contains_key(key)
+        !self.is_key_removed(key) && self.entries.lww_map.contains_key(key)
     }
 
     /// Get the number of top-level facts
     pub fn len(&self) -> usize {
-        self.data.len()
+        self.entries.lww_map
+            .keys()
+            .filter(|k| !self.is_key_removed(k))
+            .count()
     }
 
     /// Check if facts are empty
     pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
+        self.len() == 0
+    }
+    
+    /// Get the operation set (for debugging/testing)
+    pub fn operation_count(&self) -> usize {
+        self.entries.operation_set.len()
     }
 }
 
 impl JoinSemilattice for Fact {
     fn join(&self, other: &Self) -> Self {
-        let mut result = self.clone();
-
-        for (key, other_value) in &other.data {
-            match result.data.get(key) {
-                Some(existing_value) => {
-                    let joined = existing_value.join(other_value);
-                    result.data.insert(key.clone(), joined);
+        let mut result = FactCrdt {
+            lww_map: std::collections::BTreeMap::new(),
+            operation_set: std::collections::BTreeSet::new(),
+        };
+        
+        // Union of all operations (OR-Set join)
+        result.operation_set.extend(self.entries.operation_set.iter().cloned());
+        result.operation_set.extend(other.entries.operation_set.iter().cloned());
+        
+        // Merge LWW-Maps with proper conflict resolution
+        let all_keys: std::collections::BTreeSet<_> = self.entries.lww_map
+            .keys()
+            .chain(other.entries.lww_map.keys())
+            .collect();
+            
+        for key in all_keys {
+            let self_val = self.entries.lww_map.get(key);
+            let other_val = other.entries.lww_map.get(key);
+            
+            let merged_val = match (self_val, other_val) {
+                (Some(a), Some(b)) => {
+                    // LWW resolution by version, then actor_id
+                    if a.version > b.version {
+                        a.clone()
+                    } else if b.version > a.version {
+                        b.clone()
+                    } else {
+                        // Same version, tie-break by actor_id
+                        if a.actor_id <= b.actor_id {
+                            a.clone()
+                        } else {
+                            b.clone()
+                        }
+                    }
                 }
-                None => {
-                    result.data.insert(key.clone(), other_value.clone());
-                }
-            }
+                (Some(a), None) => a.clone(),
+                (None, Some(b)) => b.clone(),
+                (None, None) => unreachable!(),
+            };
+            
+            result.lww_map.insert(key.clone(), merged_val);
         }
-
-        result
+        
+        Fact { entries: result }
     }
 }
 
@@ -128,35 +315,42 @@ impl Bottom for Fact {
 
 impl PartialOrd for Fact {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        // Fact A ≤ Fact B if all facts in A are ≤ corresponding facts in B
-        let all_leq = true;
-        let mut any_lt = false;
-
-        for (key, self_value) in &self.data {
-            match other.data.get(key) {
-                Some(other_value) => match self_value.partial_cmp(other_value)? {
-                    std::cmp::Ordering::Greater => return None,
-                    std::cmp::Ordering::Less => any_lt = true,
-                    std::cmp::Ordering::Equal => {}
-                },
-                None => {
-                    // Self has a fact that other doesn't have
-                    return None;
+        // CRDT partial order: A ≤ B if A's operations ⊆ B's operations
+        // and all LWW values in A are ≤ corresponding values in B
+        
+        // Check if operations are subset
+        let ops_subset = self.entries.operation_set.is_subset(&other.entries.operation_set);
+        let ops_superset = other.entries.operation_set.is_subset(&self.entries.operation_set);
+        
+        match (ops_subset, ops_superset) {
+            (true, true) => {
+                // Same operations, compare LWW values
+                if self.entries.lww_map == other.entries.lww_map {
+                    Some(std::cmp::Ordering::Equal)
+                } else {
+                    None // Same operations but different values = incomparable
                 }
             }
-        }
-
-        // Check if other has facts that self doesn't have
-        for key in other.data.keys() {
-            if !self.data.contains_key(key) {
-                any_lt = true;
+            (true, false) => {
+                // Self operations ⊆ Other operations, check value compatibility
+                for (key, self_val) in &self.entries.lww_map {
+                    if !self.is_key_removed(key) {
+                        if let Some(other_val) = other.entries.lww_map.get(key) {
+                            if self_val.version > other_val.version {
+                                return None; // Incomparable versions
+                            }
+                        } else if !other.is_key_removed(key) {
+                            return None; // Self has value, other doesn't
+                        }
+                    }
+                }
+                Some(std::cmp::Ordering::Less)
             }
-        }
-
-        match (all_leq, any_lt) {
-            (true, true) => Some(std::cmp::Ordering::Less),
-            (true, false) => Some(std::cmp::Ordering::Equal),
-            (false, _) => None,
+            (false, true) => {
+                // Other operations ⊆ Self operations
+                Some(std::cmp::Ordering::Greater)
+            }
+            (false, false) => None, // Incomparable operation sets
         }
     }
 }
@@ -236,32 +430,146 @@ impl Default for Fact {
 ///
 /// Capabilities are meet-semilattice elements that can only shrink through refinement.
 /// They represent authority that can be attenuated but never amplified.
+/// 
+/// Uses a proper capability lattice with hierarchical permissions and delegation chains.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cap {
-    /// The underlying capability set
-    /// Using a simple set TODO fix - For now, but this would be a proper capability lattice
-    permissions: std::collections::BTreeSet<String>,
-    /// Resource constraints (what resources these capabilities apply to)
-    resources: std::collections::BTreeSet<String>,
-    /// Time constraints (when these capabilities are valid)
-    valid_until: Option<u64>, // Unix timestamp
+    /// Hierarchical capability lattice with delegation chains
+    lattice: CapabilityLattice,
+}
+
+/// Capability lattice implementation with proper meet-semilattice properties
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CapabilityLattice {
+    /// Permission hierarchy with delegation chains
+    permissions: PermissionHierarchy,
+    /// Resource constraints with scoping
+    resources: ResourceScope,
+    /// Temporal constraints with delegation periods
+    temporal: TemporalConstraints,
+    /// Delegation chain for capability provenance
+    delegation_chain: Vec<DelegationEntry>,
+}
+
+/// Hierarchical permission structure
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct PermissionHierarchy {
+    /// Core permissions (leaf nodes in hierarchy)
+    atomic_permissions: std::collections::BTreeSet<String>,
+    /// Derived permissions (internal nodes)
+    derived_permissions: std::collections::BTreeMap<String, Vec<String>>,
+    /// Wildcard permissions (root nodes)
+    wildcards: std::collections::BTreeSet<String>,
+}
+
+/// Resource scope with hierarchical constraints
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ResourceScope {
+    /// Allowed resource patterns (e.g., "journal:*", "storage:chunk:123")
+    allowed_patterns: std::collections::BTreeSet<ResourcePattern>,
+    /// Explicit resource exclusions
+    excluded_patterns: std::collections::BTreeSet<ResourcePattern>,
+}
+
+/// Resource pattern for capability scoping
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+struct ResourcePattern {
+    /// Pattern string (supports wildcards)
+    pattern: String,
+    /// Pattern type (exact, prefix, wildcard)
+    pattern_type: PatternType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+enum PatternType {
+    Exact,
+    Prefix,
+    Wildcard,
+}
+
+/// Temporal constraints for capability validity
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TemporalConstraints {
+    /// Not valid before this timestamp
+    valid_from: Option<u64>,
+    /// Not valid after this timestamp
+    valid_until: Option<u64>,
+    /// Usage limits (number of operations)
+    usage_limit: Option<u64>,
+    /// Current usage count
+    usage_count: u64,
+}
+
+/// Delegation entry for capability provenance
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct DelegationEntry {
+    /// Who delegated this capability
+    delegator: String,
+    /// Who received the delegation
+    delegate: String,
+    /// When the delegation occurred
+    delegated_at: u64,
+    /// Optional delegation constraints
+    constraints: Option<DelegationConstraints>,
+}
+
+/// Constraints that can be applied during delegation
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegationConstraints {
+    /// Maximum delegation depth
+    max_depth: Option<u32>,
+    /// Required endorsements for delegation
+    required_endorsements: Vec<String>,
+    /// Delegation-specific temporal limits
+    delegation_temporal: Option<TemporalConstraints>,
+}
+
+/// Authentication levels for capability requirements
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AuthLevel {
+    /// No authentication required
+    None = 0,
+    /// Basic device authentication
+    Device = 1,
+    /// Multi-factor authentication
+    MultiFactor = 2,
+    /// Threshold signature required
+    Threshold = 3,
 }
 
 impl Cap {
-    /// Create a new capability set
+    /// Create a new empty capability
     pub fn new() -> Self {
         Self {
-            permissions: std::collections::BTreeSet::new(),
-            resources: std::collections::BTreeSet::new(),
-            valid_until: None,
+            lattice: CapabilityLattice {
+                permissions: PermissionHierarchy {
+                    atomic_permissions: std::collections::BTreeSet::new(),
+                    derived_permissions: std::collections::BTreeMap::new(),
+                    wildcards: std::collections::BTreeSet::new(),
+                },
+                resources: ResourceScope {
+                    allowed_patterns: std::collections::BTreeSet::new(),
+                    excluded_patterns: std::collections::BTreeSet::new(),
+                },
+                temporal: TemporalConstraints {
+                    valid_from: None,
+                    valid_until: None,
+                    usage_limit: None,
+                    usage_count: 0,
+                },
+                delegation_chain: Vec::new(),
+            },
         }
     }
 
     /// Create the top capability (all permissions)
     pub fn top() -> Self {
         let mut cap = Self::new();
-        cap.permissions.insert("*".to_string()); // Wildcard permission
-        cap.resources.insert("*".to_string()); // All resources
+        cap.lattice.permissions.wildcards.insert("*".to_string());
+        cap.lattice.resources.allowed_patterns.insert(ResourcePattern {
+            pattern: "*".to_string(),
+            pattern_type: PatternType::Wildcard,
+        });
         cap
     }
 
@@ -271,110 +579,291 @@ impl Cap {
         I: IntoIterator<Item = String>,
     {
         let mut cap = Self::new();
-        cap.permissions.extend(permissions);
-        cap.resources.insert("*".to_string()); // Default to all resources
+        for permission in permissions {
+            if permission == "*" {
+                cap.lattice.permissions.wildcards.insert(permission);
+            } else {
+                cap.lattice.permissions.atomic_permissions.insert(permission);
+            }
+        }
+        // Default to all resources
+        cap.lattice.resources.allowed_patterns.insert(ResourcePattern {
+            pattern: "*".to_string(),
+            pattern_type: PatternType::Wildcard,
+        });
         cap
+    }
+    
+    /// Add resource constraints to the capability
+    pub fn with_resources(mut self, resources: Vec<String>) -> Self {
+        self.lattice.resources.allowed_patterns.clear(); // Clear default
+        for resource in resources {
+            let pattern_type = if resource.contains('*') {
+                PatternType::Wildcard
+            } else if resource.ends_with(':') {
+                PatternType::Prefix
+            } else {
+                PatternType::Exact
+            };
+            
+            self.lattice.resources.allowed_patterns.insert(ResourcePattern {
+                pattern: resource,
+                pattern_type,
+            });
+        }
+        self
     }
 
     /// Add a permission to this capability
     pub fn add_permission(&mut self, permission: impl Into<String>) {
-        self.permissions.insert(permission.into());
+        let permission = permission.into();
+        if permission == "*" {
+            self.lattice.permissions.wildcards.insert(permission);
+        } else {
+            self.lattice.permissions.atomic_permissions.insert(permission);
+        }
     }
 
     /// Add a resource constraint
     pub fn add_resource(&mut self, resource: impl Into<String>) {
-        self.resources.insert(resource.into());
+        let resource = resource.into();
+        let pattern_type = if resource.contains('*') {
+            PatternType::Wildcard
+        } else if resource.ends_with(':') {
+            PatternType::Prefix
+        } else {
+            PatternType::Exact
+        };
+        
+        self.lattice.resources.allowed_patterns.insert(ResourcePattern {
+            pattern: resource,
+            pattern_type,
+        });
     }
 
     /// Set time constraint
     pub fn set_valid_until(&mut self, timestamp: u64) {
-        self.valid_until = Some(timestamp);
+        self.lattice.temporal.valid_until = Some(timestamp);
+    }
+    
+    /// Set usage limit
+    pub fn set_usage_limit(&mut self, limit: u64) {
+        self.lattice.temporal.usage_limit = Some(limit);
+    }
+    
+    /// Increment usage count
+    pub fn increment_usage(&mut self) {
+        self.lattice.temporal.usage_count += 1;
     }
 
     /// Check if this capability allows a permission
     pub fn allows(&self, permission: &str) -> bool {
-        self.permissions.contains(permission) || self.permissions.contains("*")
+        // Check wildcards first
+        if self.lattice.permissions.wildcards.contains("*") {
+            return true;
+        }
+        
+        // Check atomic permissions
+        if self.lattice.permissions.atomic_permissions.contains(permission) {
+            return true;
+        }
+        
+        // Check derived permissions (hierarchical)
+        for (derived, atomics) in &self.lattice.permissions.derived_permissions {
+            if atomics.contains(&permission.to_string()) &&
+               self.lattice.permissions.atomic_permissions.contains(derived) {
+                return true;
+            }
+        }
+        
+        false
     }
 
     /// Check if this capability applies to a resource
     pub fn applies_to(&self, resource: &str) -> bool {
-        self.resources.is_empty() || // No resource constraints means applies to all
-        self.resources.contains(resource) ||
-        self.resources.contains("*")
+        // Check if explicitly excluded
+        for pattern in &self.lattice.resources.excluded_patterns {
+            if self.matches_pattern(&pattern.pattern, resource, &pattern.pattern_type) {
+                return false;
+            }
+        }
+        
+        // Check allowed patterns
+        for pattern in &self.lattice.resources.allowed_patterns {
+            if self.matches_pattern(&pattern.pattern, resource, &pattern.pattern_type) {
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    /// Helper to match resource patterns
+    fn matches_pattern(&self, pattern: &str, resource: &str, pattern_type: &PatternType) -> bool {
+        match pattern_type {
+            PatternType::Exact => pattern == resource,
+            PatternType::Prefix => resource.starts_with(&pattern[..pattern.len()-1]),
+            PatternType::Wildcard => {
+                if pattern == "*" {
+                    true
+                } else {
+                    // Simple wildcard matching (could be more sophisticated)
+                    pattern.trim_end_matches('*')
+                        .split('*')
+                        .all(|part| resource.contains(part))
+                }
+            }
+        }
     }
 
     /// Check if this capability is currently valid
     pub fn is_valid_at(&self, timestamp: u64) -> bool {
-        match self.valid_until {
-            Some(valid_until) => timestamp <= valid_until,
-            None => true, // No time constraint
+        // Check temporal constraints
+        if let Some(valid_from) = self.lattice.temporal.valid_from {
+            if timestamp < valid_from {
+                return false;
+            }
+        }
+        
+        if let Some(valid_until) = self.lattice.temporal.valid_until {
+            if timestamp > valid_until {
+                return false;
+            }
+        }
+        
+        // Check usage limits
+        if let Some(usage_limit) = self.lattice.temporal.usage_limit {
+            if self.lattice.temporal.usage_count >= usage_limit {
+                return false;
+            }
+        }
+        
+        true
+    }
+    
+    /// Get the authentication level based on capability complexity
+    pub fn auth_level(&self) -> AuthLevel {
+        // Determine auth level based on capability lattice complexity
+        if self.lattice.permissions.wildcards.contains("*") {
+            AuthLevel::Threshold
+        } else if self.lattice.delegation_chain.len() > 1 {
+            AuthLevel::MultiFactor
+        } else {
+            AuthLevel::Device
         }
     }
 
-    /// Get all permissions
-    pub fn permissions(&self) -> &std::collections::BTreeSet<String> {
-        &self.permissions
+    /// Get all permissions (flattened view)
+    pub fn permissions(&self) -> std::collections::BTreeSet<String> {
+        let mut permissions = self.lattice.permissions.atomic_permissions.clone();
+        permissions.extend(self.lattice.permissions.wildcards.iter().cloned());
+        permissions.extend(self.lattice.permissions.derived_permissions.keys().cloned());
+        permissions
     }
 
-    /// Get all resources
-    pub fn resources(&self) -> &std::collections::BTreeSet<String> {
-        &self.resources
+    /// Get all resource patterns (flattened view)
+    pub fn resources(&self) -> std::collections::BTreeSet<String> {
+        self.lattice.resources.allowed_patterns
+            .iter()
+            .map(|p| p.pattern.clone())
+            .collect()
+    }
+    
+    /// Add a delegation entry
+    pub fn add_delegation(&mut self, delegator: String, delegate: String, constraints: Option<DelegationConstraints>) {
+        let entry = DelegationEntry {
+            delegator,
+            delegate,
+            delegated_at: crate::current_unix_timestamp(),
+            constraints,
+        };
+        self.lattice.delegation_chain.push(entry);
     }
 }
 
 impl MeetSemiLattice for Cap {
     fn meet(&self, other: &Self) -> Self {
-        // Meet is intersection of permissions and constraints
-        // Special handling for wildcard permissions "*" (identity element)
-        let permissions = if self.permissions.contains("*") && other.permissions.contains("*") {
-            // Both wildcards - result is wildcard
-            let mut set = std::collections::BTreeSet::new();
-            set.insert("*".to_string());
-            set
-        } else if self.permissions.contains("*") {
-            // Self is wildcard, result is other's permissions
-            other.permissions.clone()
-        } else if other.permissions.contains("*") {
-            // Other is wildcard, result is self's permissions
-            self.permissions.clone()
-        } else {
-            // Neither is wildcard, normal intersection
-            self.permissions
-                .intersection(&other.permissions)
+        let mut result_lattice = self.lattice.clone();
+        
+        // Meet permissions (intersection with proper lattice semantics)
+        let permissions = PermissionHierarchy {
+            // Intersect atomic permissions
+            atomic_permissions: self.lattice.permissions.atomic_permissions
+                .intersection(&other.lattice.permissions.atomic_permissions)
                 .cloned()
-                .collect()
-        };
-
-        // For resources, intersection with empty set or wildcards
-        let resources = if self.resources.is_empty() || other.resources.is_empty() {
-            // Empty means "no constraint" = all resources, so take the non-empty one
-            if self.resources.is_empty() && other.resources.is_empty() {
-                std::collections::BTreeSet::new() // Both unconstrained = unconstrained
-            } else if self.resources.is_empty() {
-                other.resources.clone()
-            } else {
-                self.resources.clone()
-            }
-        } else {
-            // Both have constraints, intersect them
-            self.resources
-                .intersection(&other.resources)
+                .collect(),
+            // For derived permissions, take those common to both
+            derived_permissions: self.lattice.permissions.derived_permissions
+                .iter()
+                .filter_map(|(k, v)| {
+                    other.lattice.permissions.derived_permissions.get(k)
+                        .map(|other_v| {
+                            // Intersection of derived permission sets
+                            let intersection: Vec<_> = v.iter()
+                                .filter(|perm| other_v.contains(perm))
+                                .cloned()
+                                .collect();
+                            (k.clone(), intersection)
+                        })
+                })
+                .collect(),
+            // Wildcards - only keep if both have them
+            wildcards: self.lattice.permissions.wildcards
+                .intersection(&other.lattice.permissions.wildcards)
                 .cloned()
-                .collect()
+                .collect(),
         };
-
-        let valid_until = match (self.valid_until, other.valid_until) {
-            (Some(a), Some(b)) => Some(a.min(b)), // Take earliest expiration
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-            (None, None) => None,
+        
+        // Meet resources (intersection of allowed, union of excluded)
+        let resources = ResourceScope {
+            // Intersection of allowed patterns (more restrictive)
+            allowed_patterns: self.lattice.resources.allowed_patterns
+                .intersection(&other.lattice.resources.allowed_patterns)
+                .cloned()
+                .collect(),
+            // Union of excluded patterns (more restrictive)
+            excluded_patterns: self.lattice.resources.excluded_patterns
+                .union(&other.lattice.resources.excluded_patterns)
+                .cloned()
+                .collect(),
         };
-
-        Cap {
-            permissions,
-            resources,
-            valid_until,
-        }
+        
+        // Meet temporal constraints (most restrictive)
+        let temporal = TemporalConstraints {
+            valid_from: match (self.lattice.temporal.valid_from, other.lattice.temporal.valid_from) {
+                (Some(a), Some(b)) => Some(a.max(b)), // Latest start time
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
+            valid_until: match (self.lattice.temporal.valid_until, other.lattice.temporal.valid_until) {
+                (Some(a), Some(b)) => Some(a.min(b)), // Earliest end time
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
+            usage_limit: match (self.lattice.temporal.usage_limit, other.lattice.temporal.usage_limit) {
+                (Some(a), Some(b)) => Some(a.min(b)), // Minimum usage limit
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
+            usage_count: self.lattice.temporal.usage_count.max(other.lattice.temporal.usage_count),
+        };
+        
+        // Merge delegation chains (preserve full provenance)
+        let mut delegation_chain = self.lattice.delegation_chain.clone();
+        delegation_chain.extend(other.lattice.delegation_chain.iter().cloned());
+        // Deduplicate while preserving order
+        delegation_chain.sort_by_key(|entry| entry.delegated_at);
+        delegation_chain.dedup();
+        
+        result_lattice.permissions = permissions;
+        result_lattice.resources = resources;
+        result_lattice.temporal = temporal;
+        result_lattice.delegation_chain = delegation_chain;
+        
+        Cap { lattice: result_lattice }
     }
 }
 
@@ -386,38 +875,114 @@ impl Top for Cap {
 
 impl PartialOrd for Cap {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        // Cap A ≤ Cap B if A is more restrictive than B
-
-        // Check permissions
-        let perm_cmp = if self.permissions.is_subset(&other.permissions) {
-            if self.permissions == other.permissions {
-                std::cmp::Ordering::Equal
-            } else {
-                std::cmp::Ordering::Less // Fewer permissions = more restrictive
+        // Capability partial order: A ≤ B if A is more restrictive than B
+        // in all dimensions (permissions, resources, temporal constraints)
+        
+        // Compare permission lattices
+        let perm_cmp = self.compare_permissions(&other.lattice.permissions)?;
+        
+        // Compare resource scopes
+        let resource_cmp = self.compare_resources(&other.lattice.resources)?;
+        
+        // Compare temporal constraints
+        let temporal_cmp = self.compare_temporal(&other.lattice.temporal)?;
+        
+        // All dimensions must agree for total ordering
+        match (perm_cmp, resource_cmp, temporal_cmp) {
+            (std::cmp::Ordering::Equal, std::cmp::Ordering::Equal, std::cmp::Ordering::Equal) => {
+                Some(std::cmp::Ordering::Equal)
             }
-        } else if other.permissions.is_subset(&self.permissions) {
-            std::cmp::Ordering::Greater // More permissions = less restrictive
-        } else {
-            return None; // Incomparable
-        };
-
-        // Check time constraints
-        let time_cmp = match (self.valid_until, other.valid_until) {
-            (Some(a), Some(b)) => a.cmp(&b).reverse(), // Earlier expiry = more restrictive
-            (Some(_), None) => std::cmp::Ordering::Less, // Has expiry = more restrictive
-            (None, Some(_)) => std::cmp::Ordering::Greater, // No expiry = less restrictive
-            (None, None) => std::cmp::Ordering::Equal,
-        };
-
-        // Combine orderings
-        match (perm_cmp, time_cmp) {
-            (std::cmp::Ordering::Equal, other_ord) => Some(other_ord),
-            (perm_ord, std::cmp::Ordering::Equal) => Some(perm_ord),
-            (std::cmp::Ordering::Less, std::cmp::Ordering::Less) => Some(std::cmp::Ordering::Less),
-            (std::cmp::Ordering::Greater, std::cmp::Ordering::Greater) => {
+            (std::cmp::Ordering::Less, b, c) if b != std::cmp::Ordering::Greater && c != std::cmp::Ordering::Greater => {
+                Some(std::cmp::Ordering::Less)
+            }
+            (a, std::cmp::Ordering::Less, c) if a != std::cmp::Ordering::Greater && c != std::cmp::Ordering::Greater => {
+                Some(std::cmp::Ordering::Less)
+            }
+            (a, b, std::cmp::Ordering::Less) if a != std::cmp::Ordering::Greater && b != std::cmp::Ordering::Greater => {
+                Some(std::cmp::Ordering::Less)
+            }
+            (std::cmp::Ordering::Greater, b, c) if b != std::cmp::Ordering::Less && c != std::cmp::Ordering::Less => {
                 Some(std::cmp::Ordering::Greater)
             }
+            (a, std::cmp::Ordering::Greater, c) if a != std::cmp::Ordering::Less && c != std::cmp::Ordering::Less => {
+                Some(std::cmp::Ordering::Greater)
+            }
+            (a, b, std::cmp::Ordering::Greater) if a != std::cmp::Ordering::Less && b != std::cmp::Ordering::Less => {
+                Some(std::cmp::Ordering::Greater)
+            }
+            _ => None, // Incomparable dimensions
+        }
+    }
+}
+
+// Helper methods for comparing capability dimensions
+impl Cap {
+    fn compare_permissions(&self, other: &PermissionHierarchy) -> Option<std::cmp::Ordering> {
+        // Compare atomic permissions
+        let atomic_is_subset = self.lattice.permissions.atomic_permissions.is_subset(&other.atomic_permissions);
+        let atomic_is_superset = other.atomic_permissions.is_subset(&self.lattice.permissions.atomic_permissions);
+        
+        // Compare wildcards
+        let wildcards_is_subset = self.lattice.permissions.wildcards.is_subset(&other.wildcards);
+        let wildcards_is_superset = other.wildcards.is_subset(&self.lattice.permissions.wildcards);
+        
+        match (atomic_is_subset, atomic_is_superset, wildcards_is_subset, wildcards_is_superset) {
+            (true, true, true, true) => Some(std::cmp::Ordering::Equal),
+            (true, false, true, false) => Some(std::cmp::Ordering::Less),  // More restrictive
+            (false, true, false, true) => Some(std::cmp::Ordering::Greater), // Less restrictive
             _ => None, // Incomparable
+        }
+    }
+    
+    fn compare_resources(&self, other: &ResourceScope) -> Option<std::cmp::Ordering> {
+        let allowed_is_subset = self.lattice.resources.allowed_patterns.is_subset(&other.allowed_patterns);
+        let allowed_is_superset = other.allowed_patterns.is_subset(&self.lattice.resources.allowed_patterns);
+        
+        let excluded_is_subset = self.lattice.resources.excluded_patterns.is_subset(&other.excluded_patterns);
+        let excluded_is_superset = other.excluded_patterns.is_subset(&self.lattice.resources.excluded_patterns);
+        
+        // More restrictive = fewer allowed, more excluded
+        match (allowed_is_subset, excluded_is_superset) {
+            (true, true) if !allowed_is_superset || !excluded_is_subset => Some(std::cmp::Ordering::Less),
+            (true, true) if allowed_is_superset && excluded_is_subset => Some(std::cmp::Ordering::Equal),
+            _ if allowed_is_superset && excluded_is_subset => Some(std::cmp::Ordering::Greater),
+            _ => None,
+        }
+    }
+    
+    fn compare_temporal(&self, other: &TemporalConstraints) -> Option<std::cmp::Ordering> {
+        let mut cmp_factors = vec![];
+        
+        // Compare valid_from (later start = more restrictive)
+        match (self.lattice.temporal.valid_from, other.valid_from) {
+            (Some(a), Some(b)) => cmp_factors.push(a.cmp(&b)),
+            (Some(_), None) => cmp_factors.push(std::cmp::Ordering::Greater),
+            (None, Some(_)) => cmp_factors.push(std::cmp::Ordering::Less),
+            (None, None) => cmp_factors.push(std::cmp::Ordering::Equal),
+        }
+        
+        // Compare valid_until (earlier end = more restrictive)
+        match (self.lattice.temporal.valid_until, other.valid_until) {
+            (Some(a), Some(b)) => cmp_factors.push(a.cmp(&b).reverse()),
+            (Some(_), None) => cmp_factors.push(std::cmp::Ordering::Greater),
+            (None, Some(_)) => cmp_factors.push(std::cmp::Ordering::Less),
+            (None, None) => cmp_factors.push(std::cmp::Ordering::Equal),
+        }
+        
+        // Compare usage_limit (lower limit = more restrictive)
+        match (self.lattice.temporal.usage_limit, other.usage_limit) {
+            (Some(a), Some(b)) => cmp_factors.push(a.cmp(&b).reverse()),
+            (Some(_), None) => cmp_factors.push(std::cmp::Ordering::Greater),
+            (None, Some(_)) => cmp_factors.push(std::cmp::Ordering::Less),
+            (None, None) => cmp_factors.push(std::cmp::Ordering::Equal),
+        }
+        
+        // All factors must agree
+        let first = cmp_factors[0];
+        if cmp_factors.iter().all(|&cmp| cmp == first || cmp == std::cmp::Ordering::Equal) {
+            Some(first)
+        } else {
+            None // Incomparable
         }
     }
 }
@@ -569,6 +1134,54 @@ mod tests {
         // Identity: a ⊓ ⊤ = a
         assert_eq!(cap1.meet(&Cap::top()), cap1);
     }
+    
+    #[test]
+    fn test_crdt_fact_operations() {
+        let mut fact1 = Fact::new();
+        let mut fact2 = Fact::new();
+        
+        // Add same key from different actors
+        fact1.insert("key1", FactValue::String("value1".to_string()));
+        fact2.insert("key1", FactValue::String("value2".to_string()));
+        
+        // Join should resolve conflicts deterministically
+        let joined = fact1.join(&fact2);
+        assert!(joined.contains_key("key1"));
+        
+        // Test remove operations
+        fact1.remove("key1");
+        assert!(!fact1.contains_key("key1"));
+        
+        // Join with removed fact should handle OR-Set semantics
+        let rejoined = fact1.join(&fact2);
+        // Result depends on operation timestamps and OR-Set semantics
+        
+        assert!(fact1.operation_count() > 0); // Should have operations recorded
+    }
+    
+    #[test]
+    fn test_hierarchical_capabilities() {
+        let mut cap = Cap::with_permissions(vec!["journal:read".to_string(), "journal:write".to_string()])
+            .with_resources(vec!["journal:*".to_string()]);
+            
+        cap.set_usage_limit(10);
+        cap.add_delegation("alice".to_string(), "bob".to_string(), None);
+        
+        assert!(cap.allows("journal:read"));
+        assert!(cap.allows("journal:write"));
+        assert!(!cap.allows("storage:read")); // Outside scope
+        
+        assert!(cap.applies_to("journal:facts"));
+        assert!(cap.applies_to("journal:capabilities"));
+        assert!(!cap.applies_to("storage:chunk:123")); // Outside scope
+        
+        // Test usage limits
+        assert!(cap.is_valid_at(crate::current_unix_timestamp()));
+        for _ in 0..10 {
+            cap.increment_usage();
+        }
+        assert!(!cap.is_valid_at(crate::current_unix_timestamp())); // Exceeded limit
+    }
 
     #[test]
     fn test_journal_operations() {
@@ -583,9 +1196,10 @@ mod tests {
         journal.refine_caps(caps);
 
         // Check authorization
-        assert!(journal.is_authorized("read", "*", u64::MAX));
-        assert!(journal.is_authorized("write", "*", u64::MAX));
-        assert!(!journal.is_authorized("delete", "*", u64::MAX));
+        let timestamp = crate::current_unix_timestamp();
+        assert!(journal.is_authorized("read", "*", timestamp));
+        assert!(journal.is_authorized("write", "*", timestamp));
+        assert!(!journal.is_authorized("delete", "*", timestamp));
     }
 
     #[test]

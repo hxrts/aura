@@ -1,7 +1,7 @@
 //! Concrete guardian recovery choreography implementation used by the agent/CLI.
 
 use crate::{
-    guardian_recovery::{GuardianRecoveryRequest, RecoveryPriority},
+    guardian_recovery::{GuardianRecoveryRequest, RecoveryPriority, RecoveryPolicyEnforcer, RecoveryPolicyConfig},
     types::{GuardianProfile, GuardianSet, RecoveryEvidence, RecoveryShare},
     RecoveryResult,
 };
@@ -99,6 +99,7 @@ pub struct RecoveryChoreography {
     guardian_set: GuardianSet,
     threshold: usize,
     effects: AuraEffectSystem,
+    policy_enforcer: Option<RecoveryPolicyEnforcer>,
 }
 
 impl RecoveryChoreography {
@@ -114,6 +115,25 @@ impl RecoveryChoreography {
             guardian_set,
             threshold,
             effects,
+            policy_enforcer: None,
+        }
+    }
+
+    /// Create choreography with policy enforcement
+    pub fn with_policy_enforcement(
+        role: RecoveryRole,
+        guardian_set: GuardianSet,
+        threshold: usize,
+        effects: AuraEffectSystem,
+        policy_config: RecoveryPolicyConfig,
+    ) -> Self {
+        let policy_enforcer = RecoveryPolicyEnforcer::new(policy_config, effects.clone());
+        Self {
+            role,
+            guardian_set,
+            threshold,
+            effects,
+            policy_enforcer: Some(policy_enforcer),
         }
     }
 
@@ -191,7 +211,8 @@ impl RecoveryChoreography {
 
         {
             let mut cooldowns = GUARDIAN_COOLDOWNS.lock().await;
-            cooldowns.insert(guardian.guardian_id, now + guardian_cooldown(guardian));
+            let cooldown_period = self.calculate_guardian_cooldown(guardian, &request);
+            cooldowns.insert(guardian.guardian_id, now + cooldown_period);
         }
 
         self.effects.log_info(
@@ -281,7 +302,7 @@ impl RecoveryChoreography {
         let signature = aggregate_threshold_signature(&shares);
         let cooldown_expires_at = shares
             .iter()
-            .map(|share| share.issued_at + guardian_cooldown(&share.guardian))
+            .map(|share| share.issued_at + self.calculate_guardian_cooldown(&share.guardian, &request))
             .max()
             .unwrap_or(metrics.started_at);
         let dispute_window_secs = request.dispute_window_secs;
@@ -352,7 +373,8 @@ impl RecoveryChoreography {
 
         {
             let mut cooldowns = GUARDIAN_COOLDOWNS.lock().await;
-            cooldowns.insert(guardian.guardian_id, now + guardian_cooldown(guardian));
+            let cooldown_period = self.calculate_guardian_cooldown(guardian, &request);
+            cooldowns.insert(guardian.guardian_id, now + cooldown_period);
         }
 
         Ok(share)
@@ -436,6 +458,21 @@ impl RecoveryChoreography {
             &request.priority_label(),
         ])
     }
+
+    /// Calculate policy-aware cooldown period for guardian
+    fn calculate_guardian_cooldown(&self, guardian: &GuardianProfile, request: &GuardianRecoveryRequest) -> u64 {
+        let base_cooldown = if guardian.cooldown_secs == 0 {
+            DEFAULT_COOLDOWN_SECS
+        } else {
+            guardian.cooldown_secs
+        };
+
+        if let Some(policy_enforcer) = &self.policy_enforcer {
+            policy_enforcer.calculate_cooldown_period(base_cooldown, &request.priority)
+        } else {
+            base_cooldown
+        }
+    }
 }
 
 /// Result of a choreography execution with detailed information for higher layers.
@@ -483,6 +520,8 @@ fn aggregate_threshold_signature(shares: &[RecoveryShare]) -> ThresholdSignature
 async fn current_cooldown_until(guardian_id: GuardianId) -> u64 {
     let ledger = GUARDIAN_COOLDOWNS.lock().await;
     ledger.get(&guardian_id).copied().unwrap_or(0)
+}
+
 }
 
 fn guardian_cooldown(guardian: &GuardianProfile) -> u64 {

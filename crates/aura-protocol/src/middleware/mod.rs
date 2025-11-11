@@ -1,8 +1,7 @@
 //! Middleware Architecture for Aura
 //!
 //! This module provides the foundational middleware traits and patterns for the unified
-//! AuraHandler architecture. The middleware system has been TODO fix - Simplified to work with the
-//! new effect system architecture.
+//! AuraHandler architecture. The middleware system works with the new effect system architecture.
 //!
 //! ## Design Principles
 //!
@@ -12,7 +11,11 @@
 //! 4. **Zero-Cost Abstractions**: Middleware compiles to efficient code
 //! 5. **Protocol Agnostic**: Works with any protocol or component
 
-// pub mod traits; // TODO: Implement middleware traits if needed
+pub mod circuit_breaker;
+
+pub use circuit_breaker::{
+    CircuitBreakerConfig, CircuitBreakerMiddleware, CircuitBreakerStats, CircuitState,
+};
 
 /// Middleware execution context
 #[derive(Debug, Clone)]

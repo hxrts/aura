@@ -50,13 +50,13 @@ mod tests {
     #[test]
     fn cache_floor_monotonic() {
         let mut tracker = CacheEpochFloors::new();
-        tracker.apply(&CacheInvalidated::new(vec!["foo".into()], TreeEpoch(5)));
-        assert!(!tracker.is_fresh("foo", TreeEpoch(4)));
-        assert!(tracker.is_fresh("foo", TreeEpoch(5)));
+        tracker.apply(&CacheInvalidated::new(vec!["foo".into()], 5_u64));
+        assert!(!tracker.is_fresh("foo", 4_u64));
+        assert!(tracker.is_fresh("foo", 5_u64));
 
         // higher floor overrides
-        tracker.apply(&CacheInvalidated::new(vec!["foo".into()], TreeEpoch(7)));
-        assert!(!tracker.is_fresh("foo", TreeEpoch(6)));
-        assert!(tracker.is_fresh("foo", TreeEpoch(7)));
+        tracker.apply(&CacheInvalidated::new(vec!["foo".into()], 7_u64));
+        assert!(!tracker.is_fresh("foo", 6_u64));
+        assert!(tracker.is_fresh("foo", 7_u64));
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! Effect-based implementations of CLI commands following the unified effect system.
 
-use crate::{AdminAction, InvitationAction, RecoveryAction, ScenarioAction, SnapshotAction};
+use crate::{AdminAction, InvitationAction, OtaAction, RecoveryAction, ScenarioAction, SnapshotAction};
 use anyhow::Result;
 use aura_protocol::{AuraEffectSystem, ConsoleEffects};
 use std::path::PathBuf;
@@ -11,6 +11,7 @@ pub mod admin;
 pub mod init;
 pub mod invite;
 pub mod node;
+pub mod ota;
 pub mod recovery;
 pub mod scenarios;
 pub mod snapshot;
@@ -87,6 +88,11 @@ impl CliHandler {
     /// Handle invitation commands
     pub async fn handle_invitation(&self, action: &InvitationAction) -> Result<()> {
         invite::handle_invitation(&self.effect_system, action).await
+    }
+
+    /// Handle OTA upgrade commands
+    pub async fn handle_ota(&self, action: &OtaAction) -> Result<()> {
+        ota::handle_ota(&self.effect_system, action).await
     }
 
     /// Log error message through effects

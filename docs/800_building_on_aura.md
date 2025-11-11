@@ -1907,6 +1907,111 @@ async fn good_protocol(handler: &Handler) {
 
 ## Conclusion
 
+## Guard Helpers: Using Capability and Flow Guards
+
+Aura provides guard helpers to enforce authorization and budget constraints in your protocols. These prevent unauthorized operations and prevent spam through budget enforcement.
+
+### CapGuard: Capability-Based Authorization
+
+CapGuard enforces the predicate: `need(operation) ≤ Caps(context)`
+
+```rust
+use aura_protocol::guards::CapabilityGuard;
+use aura_core::{Cap, MessageContext};
+
+// Before sending a message, check capabilities
+let cap_guard = CapabilityGuard::new();
+let required = EffectRequirement {
+    permissions: vec!["SEND_MESSAGE".into()].into(),
+    resources: vec![peer_id.to_string()].into(),
+    modifies_state: false,
+};
+
+// This fails if context lacks required capabilities
+cap_guard.check(&context, &required)?;
+// Safe to proceed with operation
+```
+
+### FlowGuard: Budget-Based Rate Limiting
+
+FlowGuard charges operations against per-peer flow budgets, preventing spam while maintaining privacy:
+
+```rust
+use aura_protocol::guards::FlowGuard;
+
+let guard = FlowGuard::new(context_id.clone(), peer_device.clone(), 10);
+
+// Charge before sending (returns a Receipt on success)
+let receipt = guard.authorize(effect_system).await?;
+
+// Receipt proves the charge was recorded
+// Use receipt in message envelope for anti-replay protection
+send_message_with_receipt(peer_id, message, receipt).await?;
+```
+
+### Guard Chain: Atomic Authorization + Charging
+
+For maximum safety, combine guards in a guard chain. The journal coupling ensures atomicity:
+
+```rust
+// 1. CapGuard checks: need(SEND) ≤ Caps(ctx)
+// 2. FlowGuard charges: debit budget, get receipt
+// 3. JournalCoupler merges fact + sends message atomically
+// If any step fails, nothing is committed
+
+// In choreographies, this is automatic:
+choreography! {
+    protocol SafeSend {
+        roles: Alice, Bob;
+        // Guards applied automatically before send
+        Alice -> Bob: Message [
+            need = SEND_MESSAGE,
+            cost = 100,
+            commit = Fact::MessageSent
+        ];
+    }
+}
+```
+
+### Common Patterns
+
+**Pattern 1: Check once, execute many times**
+```rust
+let cap = cap_guard.check(&context, &requirement)?;
+for peer in peers {
+    // No re-checking needed if context unchanged
+    send_to_peer(&peer, &message, &cap).await?;
+}
+```
+
+**Pattern 2: Budget-aware retries**
+```rust
+let available = flow_guard.available(&context, &peer).await?;
+if available < min_budget {
+    return Err("Insufficient budget for operation");
+}
+// Safe to retry knowing budget won't deplete
+```
+
+**Pattern 3: Hierarchical capabilities**
+```rust
+// Derive scoped capabilities for sub-operations
+let relay_cap = parent_cap.meet(&relay_constraint);
+// relay_cap is strictly less permissive than parent_cap
+```
+
+### Best Practices
+
+1. **Check early, use late**: Validate capabilities before expensive operations
+2. **Use guard chains**: Combine CapGuard + FlowGuard + JournalCoupler for safety
+3. **Fail fast**: Return errors immediately if authorization fails
+4. **Log guard failures**: Track authorization failures for debugging and auditing
+5. **Test with restricted caps**: Property-based tests with minimal capabilities catch edge cases
+
+For more details, see `crates/aura-protocol/src/guards/` and `docs/101_auth_authz.md`.
+
+---
+
 You've now learned how to build distributed applications on Aura's unique architecture. This guide covered:
 
 **Key Concepts Mastered:**

@@ -103,7 +103,10 @@ impl EffectRequirement {
             }
         }
 
-        // TODO: Check authentication level when implemented
+        // Check authentication level requirement
+        if caps.auth_level() < self.min_auth_level {
+            return false;
+        }
 
         true
     }

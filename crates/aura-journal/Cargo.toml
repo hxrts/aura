@@ -29,6 +29,7 @@ ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
 signature = { workspace = true }
 aes-gcm = { workspace = true }
+sha2 = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -58,6 +59,6 @@ biscuit-auth = { workspace = true }
 [dev-dependencies]
 # aura-testkit = { path = "../aura-testkit" }  # Temporarily disabled due to aura-protocol compilation issues
 # aura-protocol = { path = "../aura-protocol" }  # Temporarily disabled due to circular dependency
-tokio-test = "0.4"
+tokio-test = { workspace = true }
 rand_chacha = { workspace = true }
 proptest = { workspace = true }

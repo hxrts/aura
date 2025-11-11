@@ -52,6 +52,7 @@ impl WriterFence {
 }
 
 /// RAII guard that releases the fence when dropped.
+#[derive(Debug)]
 pub struct WriterFenceGuard {
     inner: Arc<RwLock<bool>>,
 }
@@ -144,11 +145,9 @@ mod tests {
     #[test]
     fn writer_fence_blocks_parallel_proposals() {
         let manager = SnapshotManager::new();
-        let (_guard, _) = manager
-            .propose(DeviceId::new(), TreeEpoch(5), [0u8; 32])
-            .unwrap();
+        let (_guard, _) = manager.propose(DeviceId::new(), 5_u64, [0u8; 32]).unwrap();
         let err = manager
-            .propose(DeviceId::new(), TreeEpoch(6), [0u8; 32])
+            .propose(DeviceId::new(), 6_u64, [0u8; 32])
             .unwrap_err();
         assert!(format!("{}", err).contains("proposal already in progress"));
     }
@@ -156,16 +155,10 @@ mod tests {
     #[test]
     fn snapshot_completion_clears_pending() {
         let manager = SnapshotManager::new();
-        let (_guard, _) = manager
-            .propose(DeviceId::new(), TreeEpoch(5), [0u8; 32])
-            .unwrap();
+        let (_guard, _) = manager.propose(DeviceId::new(), 5_u64, [0u8; 32]).unwrap();
         let participants = BTreeSet::from([DeviceId::new()]);
         let (event, proposal_id) = manager
-            .complete(
-                dummy_snapshot(TreeEpoch(5)),
-                participants.clone(),
-                vec![1, 2, 3],
-            )
+            .complete(dummy_snapshot(5_u64), participants.clone(), vec![1, 2, 3])
             .unwrap();
         match event {
             MaintenanceEvent::SnapshotCompleted(payload) => {
@@ -176,8 +169,6 @@ mod tests {
         }
 
         // new proposal allowed now
-        assert!(manager
-            .propose(DeviceId::new(), TreeEpoch(7), [0u8; 32])
-            .is_ok());
+        assert!(manager.propose(DeviceId::new(), 7_u64, [0u8; 32]).is_ok());
     }
 }

@@ -176,6 +176,18 @@ pub fn authenticate_and_authorize(
 3. **Composable**: Bridge can be bypassed for scenarios requiring only auth or only authz
 4. **Testable**: Each layer tested independently, bridge tested with mocks
 
+### Send-Site Predicate and Guard Chain
+
+At every send site in a choreography, the runtime enforces a uniform predicate and guard order:
+
+- Predicate: `need(m) ≤ Caps(ctx) ∧ headroom(ctx, cost)`
+- Guard chain: `CapGuard` → `FlowGuard` → `JournalCoupler`
+
+Named invariants:
+- Charge‑Before‑Send and No‑Observable‑Without‑Charge. If a guard fails, the step is handled locally and no packet is emitted.
+
+See also: `docs/002_system_architecture.md` (§1.6 Guard Chain and Predicate) and `docs/001_theoretical_foundations.md` (§2.4, §5.3).
+
 ---
 
 ## Effect System Integration

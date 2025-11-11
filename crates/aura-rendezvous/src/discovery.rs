@@ -262,25 +262,34 @@ impl DiscoveryService {
         advertisement: PeerAdvertisement,
     ) -> AuraResult<PeerToken> {
         // Get rendezvous point
-        let rendezvous = self
-            .rendezvous_points
-            .get_mut(&rendezvous_id)
-            .ok_or_else(|| aura_core::AuraError::not_found("Rendezvous point not found"))?;
+        // Check advertisement policy and authorization first
+        {
+            let rendezvous = self
+                .rendezvous_points
+                .get(&rendezvous_id)
+                .ok_or_else(|| aura_core::AuraError::not_found("Rendezvous point not found"))?;
 
-        // Check advertisement policy
-        self.check_advertisement_policy(&advertisement, &rendezvous.access_policy)?;
+            self.check_advertisement_policy(&advertisement, &rendezvous.access_policy)?;
+        }
 
-        // Verify authorization proof
         self.verify_advertisement_authorization(&advertisement)?;
 
         // Generate peer token
         let peer_token = Self::generate_peer_token(&advertisement)?;
 
-        // Store advertisement
+        // Get timestamp before mutable borrow
+        let current_time = self.get_current_timestamp();
+
+        // Store advertisement with mutable access
+        let rendezvous = self
+            .rendezvous_points
+            .get_mut(&rendezvous_id)
+            .ok_or_else(|| aura_core::AuraError::not_found("Rendezvous point not found"))?;
+
         rendezvous
             .peer_advertisements
             .insert(peer_token, advertisement);
-        rendezvous.last_activity = self.get_current_timestamp();
+        rendezvous.last_activity = current_time;
 
         Ok(peer_token)
     }
@@ -321,9 +330,10 @@ impl DiscoveryService {
             query_latency_ms: 0, // Would measure actual latency
         };
 
+        let total_matches = protected_results.len();
         Ok(DiscoveryResults {
             peers: protected_results,
-            total_matches: protected_results.len(),
+            total_matches,
             execution_metadata,
         })
     }
@@ -382,7 +392,7 @@ impl DiscoveryService {
     fn generate_peer_token(advertisement: &PeerAdvertisement) -> AuraResult<PeerToken> {
         let mut hasher = Hasher::new();
         hasher.update(b"aura-peer-token");
-        hasher.update(&advertisement.authorization_proof.to_bytes()?);
+        hasher.update(advertisement.authorization_proof.to_bytes());
         hasher.update(&advertisement.expires_at.to_le_bytes());
 
         let hash = hasher.finalize();

@@ -40,20 +40,24 @@ frost-ed25519 = { workspace = true }
 ed25519-dalek = { workspace = true }
 
 # Time utilities
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 time = { workspace = true }
 
 # Async runtime and crypto utilities
 tokio = { workspace = true }
-subtle = "2.5"
+subtle = { workspace = true }
 zeroize = { workspace = true }
+
+# Property testing (optional)
+proptest = { workspace = true, optional = true }
 
 [features]
 # Optional JSON export for debugging (not for wire protocol)
 json-debug = ["serde_json"]
+# Enable proptest integration for property testing
+proptest = ["dep:proptest"]
 default = []
 
 [dev-dependencies]
 # For testing DKD functionality
 sha2 = { workspace = true }
-proptest = { workspace = true }

@@ -40,14 +40,14 @@ hkdf = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_cbor = { workspace = true }
-serde_bytes = "0.11"
-bincode = "1.3"
+serde_bytes = { workspace = true }
+bincode = { workspace = true }
 
 # Async
 tokio = { workspace = true }
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 futures = { workspace = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }
@@ -55,16 +55,17 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
-subtle = "2.4"
-zeroize = "1.6"
-hex = "0.4"
-chrono = { version = "0.4", features = ["serde"] }
+subtle = { workspace = true }
+zeroize = { workspace = true }
+hex = { workspace = true }
+chrono = { workspace = true }
+once_cell = { workspace = true }
 
 # Choreographic programming dependencies
-rumpsteak-aura = "0.2.0"
-rumpsteak-aura-choreography = "0.2.0"
+rumpsteak-aura = { workspace = true }
+rumpsteak-aura-choreography = { workspace = true }
 
 
 [dev-dependencies]
-tokio-test = "0.4"
-proptest = "1.5"
+tokio-test = { workspace = true }
+proptest = { workspace = true }

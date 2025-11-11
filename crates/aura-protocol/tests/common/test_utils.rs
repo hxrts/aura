@@ -4,7 +4,7 @@
 //! that should not be used in production code.
 
 use async_trait::async_trait;
-use aura_protocol::effects::*;
+use aura_core::effects::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -215,7 +215,7 @@ impl MockCrypto {
 }
 
 #[async_trait]
-impl CryptoEffects for MockCrypto {
+impl aura_core::RandomEffects for MockCrypto {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         // Deterministic for testing
         (0..len).map(|i| (i % 256) as u8).collect()
@@ -229,10 +229,19 @@ impl CryptoEffects for MockCrypto {
         bytes
     }
 
-    async fn random_range(&self, range: std::ops::Range<u64>) -> u64 {
-        range.start + (range.end - range.start) / 2
+    async fn random_u64(&self) -> u64 {
+        let mut counter = self.counter.lock().unwrap();
+        *counter += 1;
+        *counter
     }
 
+    async fn random_range(&self, min: u64, max: u64) -> u64 {
+        min + (max - min) / 2
+    }
+}
+
+#[async_trait]
+impl aura_core::CryptoEffects for MockCrypto {
     async fn hash(&self, data: &[u8]) -> [u8; 32] {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
@@ -249,42 +258,155 @@ impl CryptoEffects for MockCrypto {
         mac.finalize().into_bytes().into()
     }
 
+    async fn hkdf_derive(
+        &self,
+        _ikm: &[u8],
+        _salt: &[u8],
+        _info: &[u8],
+        output_len: usize,
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![0u8; output_len])
+    }
+
+    async fn derive_key(
+        &self,
+        _master_key: &[u8],
+        _context: &aura_core::effects::crypto::KeyDerivationContext,
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![0u8; 32])
+    }
+
+    async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+        let seed = self.random_bytes_32().await;
+        let private_key = seed.to_vec();
+        let public_key = self.ed25519_public_key(&private_key).await?;
+        Ok((private_key, public_key))
+    }
+
     async fn ed25519_sign(
         &self,
-        data: &[u8],
-        key: &ed25519_dalek::SigningKey,
-    ) -> Result<ed25519_dalek::Signature, CryptoError> {
-        use ed25519_dalek::Signer;
-        Ok(key.sign(data))
+        _message: &[u8],
+        _private_key: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![0u8; 64])
     }
 
     async fn ed25519_verify(
         &self,
-        data: &[u8],
-        signature: &ed25519_dalek::Signature,
-        public_key: &ed25519_dalek::VerifyingKey,
+        _message: &[u8],
+        _signature: &[u8],
+        _public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        match public_key.verify_strict(data, signature) {
-            Ok(()) => Ok(true),
-            Err(_) => Ok(false),
-        }
+        Ok(true)
     }
 
-    async fn ed25519_generate_keypair(
-        &self,
-    ) -> Result<(ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey), CryptoError> {
-        // Use deterministic key generation for testing
-        let seed = self.random_bytes_32().await;
-        let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
-        let verifying_key = signing_key.verifying_key();
-        Ok((signing_key, verifying_key))
+    async fn ed25519_public_key(&self, _private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![0u8; 32])
     }
 
-    async fn ed25519_public_key(
+    async fn frost_generate_keys(
         &self,
-        private_key: &ed25519_dalek::SigningKey,
-    ) -> ed25519_dalek::VerifyingKey {
-        private_key.verifying_key()
+        _threshold: u16,
+        max_signers: u16,
+    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+        Ok((0..max_signers).map(|_| vec![0u8; 32]).collect())
+    }
+
+    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![0u8; 64])
+    }
+
+    async fn frost_create_signing_package(
+        &self,
+        message: &[u8],
+        _nonces: &[Vec<u8>],
+        participants: &[u16],
+    ) -> Result<aura_core::effects::crypto::FrostSigningPackage, CryptoError> {
+        Ok(aura_core::effects::crypto::FrostSigningPackage {
+            message: message.to_vec(),
+            package: vec![0u8; 64],
+            participants: participants.to_vec(),
+        })
+    }
+
+    async fn frost_sign_share(
+        &self,
+        _signing_package: &aura_core::effects::crypto::FrostSigningPackage,
+        _key_share: &[u8],
+        _nonces: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![0u8; 64])
+    }
+
+    async fn frost_aggregate_signatures(
+        &self,
+        _signing_package: &aura_core::effects::crypto::FrostSigningPackage,
+        _signature_shares: &[Vec<u8>],
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![0u8; 64])
+    }
+
+    async fn frost_verify(
+        &self,
+        _message: &[u8],
+        _signature: &[u8],
+        _group_public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
+        Ok(true)
+    }
+
+    async fn chacha20_encrypt(
+        &self,
+        plaintext: &[u8],
+        _key: &[u8; 32],
+        _nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(plaintext.to_vec())
+    }
+
+    async fn chacha20_decrypt(
+        &self,
+        ciphertext: &[u8],
+        _key: &[u8; 32],
+        _nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(ciphertext.to_vec())
+    }
+
+    async fn aes_gcm_encrypt(
+        &self,
+        plaintext: &[u8],
+        _key: &[u8; 32],
+        _nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(plaintext.to_vec())
+    }
+
+    async fn aes_gcm_decrypt(
+        &self,
+        ciphertext: &[u8],
+        _key: &[u8; 32],
+        _nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(ciphertext.to_vec())
+    }
+
+    async fn frost_rotate_keys(
+        &self,
+        _old_shares: &[Vec<u8>],
+        _old_threshold: u16,
+        _new_threshold: u16,
+        new_max_signers: u16,
+    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+        Ok((0..new_max_signers).map(|_| vec![0u8; 32]).collect())
+    }
+
+    fn is_simulated(&self) -> bool {
+        true
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        vec!["ed25519".to_string(), "frost".to_string()]
     }
 
     fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
@@ -402,7 +524,7 @@ mod tests {
 
         // Test keypair generation
         let (sk, vk) = crypto.ed25519_generate_keypair().await.unwrap();
-        let pk = crypto.ed25519_public_key(&sk).await;
+        let pk = crypto.ed25519_public_key(&sk).await.unwrap();
         assert_eq!(vk, pk);
     }
 }

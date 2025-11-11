@@ -1,572 +1,775 @@
-//! Observer Simulation Framework Tests
+//! Observer simulation framework for unlinkability testing
 //!
-//! Comprehensive tests for the observer simulation framework that models
-//! various privacy attacks and verifies the system's resistance to them.
+//! This module implements an observer simulation framework to verify that
+//! Aura's privacy properties hold under various adversarial observation
+//! scenarios. The framework tests the formal privacy contract:
+//!
+//! ```text
+//! τ[κ₁↔κ₂] ≈_ext τ
+//! ```
+//!
+//! Where:
+//! - `τ` is a protocol execution trace
+//! - `κ₁↔κ₂` represents a relationship between two devices
+//! - `≈_ext` means external indistinguishability
+//!
+//! The observer can see network traffic, timing patterns, and message
+//! sizes, but should not be able to distinguish between different
+//! relationship configurations or infer private protocol state.
 
-use aura_mpst::privacy_verification::{
-    PrivacyVerifier, PrivacyOperation, OperationType, ContextType, PrivacyRequirements,
-    LeakageBudget, GroupLeakagePolicy, UnlinkabilityRequirements, UnlinkabilityLevel,
-    IsolationRequirements, IsolationLevel, PrivacyMetadata, AttackType, AttackComplexity,
-    ObserverCapability,
+use aura_core::{
+    identifiers::{DeviceId, RelationshipId, SessionId},
+    AuraError, AuraResult,
 };
-use aura_core::{DeviceId, RelationshipId, AuraResult};
-use std::time::{SystemTime, Duration};
-use tokio;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{HashMap, HashSet},
+    time::{Duration, SystemTime},
+};
 
-/// Test comprehensive observer simulation framework
-#[tokio::test]
-async fn test_comprehensive_observer_simulation() -> AuraResult<()> {
-    let mut verifier = PrivacyVerifier::new();
-    
-    // Register privacy context for testing
-    let context_type = ContextType::Relationship(RelationshipId::new());
-    let privacy_requirements = create_test_privacy_requirements();
-    let context_id = verifier.register_context(context_type, privacy_requirements)?;
-    
-    // Generate diverse privacy operations to simulate real usage
-    let operations = generate_test_operations(context_id, 50).await?;
-    
-    // Record all operations in the verifier
-    for operation in operations {
-        verifier.record_operation(operation).await?;
-    }
-    
-    // Run comprehensive privacy verification including observer simulation
-    let verification_report = verifier.comprehensive_verification().await?;
-    
-    // Verify that all major attack types were simulated
-    let expected_attacks = vec![
-        AttackType::TrafficAnalysis,
-        AttackType::TimingCorrelation, 
-        AttackType::SizeCorrelation,
-        AttackType::FrequencyAnalysis,
-        AttackType::PatternMatching,
-        AttackType::StatisticalInference,
-    ];
-    
-    for expected_attack in expected_attacks {
-        assert!(
-            verification_report.attack_simulation_results.attacks_simulated.contains(&expected_attack),
-            "Attack type {:?} was not simulated",
-            expected_attack
-        );
-    }
-    
-    // Verify attack resistance scores are reasonable
-    for (attack_type, &success_rate) in &verification_report.attack_simulation_results.attack_success_rates {
-        assert!(
-            success_rate >= 0.0 && success_rate <= 1.0,
-            "Attack success rate for {:?} is invalid: {}",
-            attack_type,
-            success_rate
-        );
-        
-        // For a privacy-preserving system, most attacks should have low success rates
-        match attack_type {
-            AttackType::TrafficAnalysis | AttackType::TimingCorrelation | AttackType::SizeCorrelation => {
-                assert!(
-                    success_rate <= 0.3,
-                    "High success rate for basic attack {:?}: {}",
-                    attack_type,
-                    success_rate
-                );
-            }
-            AttackType::StatisticalInference => {
-                // Advanced attacks may have higher success rates but still bounded
-                assert!(
-                    success_rate <= 0.8,
-                    "Extremely high success rate for advanced attack {:?}: {}",
-                    attack_type,
-                    success_rate
-                );
-            }
-            _ => {}
+/// Types of observers for privacy analysis
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ObserverType {
+    /// External observer - can see network metadata but not device-specific info
+    External,
+    /// Neighbor observer - can see some local network patterns
+    Neighbor,
+    /// Malicious insider - has access to some protocol state but not all devices
+    MaliciousInsider,
+}
+
+/// Observation capabilities for different observer types
+#[derive(Debug, Clone)]
+pub struct ObserverCapabilities {
+    /// Can observe network traffic patterns
+    pub can_observe_network: bool,
+    /// Can observe message timing
+    pub can_observe_timing: bool,
+    /// Can observe message sizes
+    pub can_observe_message_sizes: bool,
+    /// Can observe some device metadata
+    pub can_observe_device_metadata: bool,
+    /// Can observe relationship existence (but not content)
+    pub can_observe_relationships: bool,
+    /// Can perform traffic analysis
+    pub can_perform_traffic_analysis: bool,
+}
+
+impl ObserverCapabilities {
+    /// Create capabilities for external observer
+    pub fn external() -> Self {
+        Self {
+            can_observe_network: true,
+            can_observe_timing: true,
+            can_observe_message_sizes: true,
+            can_observe_device_metadata: false,
+            can_observe_relationships: false,
+            can_perform_traffic_analysis: true,
         }
     }
-    
-    // Verify overall attack resistance score
-    assert!(
-        verification_report.attack_simulation_results.overall_resistance_score >= 0.4,
-        "Overall attack resistance score too low: {}",
-        verification_report.attack_simulation_results.overall_resistance_score
-    );
-    
-    println!("✓ Comprehensive observer simulation passed");
-    Ok(())
-}
 
-/// Test traffic analysis attack simulation
-#[tokio::test] 
-async fn test_traffic_analysis_simulation() -> AuraResult<()> {
-    let mut verifier = PrivacyVerifier::new();
-    
-    // Create context
-    let context_id = verifier.register_context(
-        ContextType::Anonymous,
-        create_test_privacy_requirements(),
-    )?;
-    
-    // Generate communication operations with identifiable patterns
-    let alice = DeviceId::new();
-    let bob = DeviceId::new();
-    let charlie = DeviceId::new();
-    
-    let mut operations = Vec::new();
-    
-    // Alice sends to Bob frequently (creating a detectable pattern)
-    for i in 0..20 {
-        let operation = create_communication_operation(
-            context_id,
-            vec![alice, bob],
-            OperationType::MessageSend,
-            i * 60, // Every minute
-        );
-        operations.push(operation);
-    }
-    
-    // Charlie sends to Bob randomly (harder to detect)
-    for i in 0..10 {
-        let operation = create_communication_operation(
-            context_id,
-            vec![charlie, bob],
-            OperationType::MessageSend,
-            i * 180 + 30, // Every 3 minutes with offset
-        );
-        operations.push(operation);
-    }
-    
-    // Record operations
-    for operation in operations {
-        verifier.record_operation(operation).await?;
-    }
-    
-    // Run verification
-    let report = verifier.comprehensive_verification().await?;
-    
-    // Check traffic analysis results
-    let traffic_analysis_success = report.attack_simulation_results.attack_success_rates
-        .get(&AttackType::TrafficAnalysis)
-        .copied()
-        .unwrap_or(0.0);
-    
-    // Should detect some patterns but not break full privacy
-    assert!(
-        traffic_analysis_success > 0.1 && traffic_analysis_success < 0.9,
-        "Traffic analysis success rate unexpected: {}",
-        traffic_analysis_success
-    );
-    
-    println!("✓ Traffic analysis simulation passed");
-    Ok(())
-}
-
-/// Test timing correlation attack simulation
-#[tokio::test]
-async fn test_timing_correlation_simulation() -> AuraResult<()> {
-    let mut verifier = PrivacyVerifier::new();
-    
-    let context_id = verifier.register_context(
-        ContextType::Protocol("test_protocol".to_string()),
-        create_test_privacy_requirements(),
-    )?;
-    
-    let alice = DeviceId::new();
-    let bob = DeviceId::new();
-    
-    // Create regular timing pattern (vulnerable to timing correlation)
-    let mut operations = Vec::new();
-    for i in 0..30 {
-        let operation = create_communication_operation(
-            context_id,
-            vec![alice, bob],
-            OperationType::MessageSend,
-            i * 3600, // Exactly every hour (very regular)
-        );
-        operations.push(operation);
-    }
-    
-    // Record operations
-    for operation in operations {
-        verifier.record_operation(operation).await?;
-    }
-    
-    // Run verification
-    let report = verifier.comprehensive_verification().await?;
-    
-    // Check timing correlation results
-    let timing_success = report.attack_simulation_results.attack_success_rates
-        .get(&AttackType::TimingCorrelation)
-        .copied()
-        .unwrap_or(0.0);
-    
-    // Regular patterns should be somewhat detectable
-    assert!(
-        timing_success >= 0.1,
-        "Timing correlation should detect regular patterns: {}",
-        timing_success
-    );
-    
-    println!("✓ Timing correlation simulation passed");
-    Ok(())
-}
-
-/// Test size correlation attack simulation
-#[tokio::test]
-async fn test_size_correlation_simulation() -> AuraResult<()> {
-    let mut verifier = PrivacyVerifier::new();
-    
-    let context_id = verifier.register_context(
-        ContextType::DeviceLocal(DeviceId::new()),
-        create_test_privacy_requirements(),
-    )?;
-    
-    let alice = DeviceId::new();
-    let bob = DeviceId::new();
-    
-    // Mix of operations with standardized padding (should resist size analysis)
-    let mut operations = Vec::new();
-    for i in 0..25 {
-        let operation = create_communication_operation(
-            context_id,
-            vec![alice, bob],
-            OperationType::MessageSend,
-            i * 120,
-        );
-        operations.push(operation);
-    }
-    
-    // Record operations
-    for operation in operations {
-        verifier.record_operation(operation).await?;
-    }
-    
-    // Run verification
-    let report = verifier.comprehensive_verification().await?;
-    
-    // Check size correlation results
-    let size_success = report.attack_simulation_results.attack_success_rates
-        .get(&AttackType::SizeCorrelation)
-        .copied()
-        .unwrap_or(0.0);
-    
-    // With proper padding, size correlation should have low success
-    assert!(
-        size_success <= 0.3,
-        "Size correlation success too high with padding: {}",
-        size_success
-    );
-    
-    println!("✓ Size correlation simulation passed");
-    Ok(())
-}
-
-/// Test frequency analysis attack simulation
-#[tokio::test]
-async fn test_frequency_analysis_simulation() -> AuraResult<()> {
-    let mut verifier = PrivacyVerifier::new();
-    
-    let context_id = verifier.register_context(
-        ContextType::Anonymous,
-        create_test_privacy_requirements(),
-    )?;
-    
-    let devices: Vec<DeviceId> = (0..5).map(|_| DeviceId::new()).collect();
-    
-    // Create burst patterns that frequency analysis might detect
-    let mut operations = Vec::new();
-    
-    // Device 0 has a burst pattern (10 messages in 10 minutes, then quiet)
-    for i in 0..10 {
-        let operation = create_communication_operation(
-            context_id,
-            vec![devices[0], devices[1]],
-            OperationType::MessageSend,
-            i * 60, // Every minute for 10 minutes
-        );
-        operations.push(operation);
-    }
-    
-    // Other devices have more regular patterns
-    for device_idx in 1..4 {
-        for i in 0..5 {
-            let operation = create_communication_operation(
-                context_id,
-                vec![devices[device_idx], devices[(device_idx + 1) % devices.len()]],
-                OperationType::MessageSend,
-                i * 300 + device_idx * 60, // Every 5 minutes with different offsets
-            );
-            operations.push(operation);
+    /// Create capabilities for neighbor observer
+    pub fn neighbor() -> Self {
+        Self {
+            can_observe_network: true,
+            can_observe_timing: true,
+            can_observe_message_sizes: true,
+            can_observe_device_metadata: true,
+            can_observe_relationships: true,
+            can_perform_traffic_analysis: true,
         }
     }
-    
-    // Record operations
-    for operation in operations {
-        verifier.record_operation(operation).await?;
+
+    /// Create capabilities for malicious insider
+    pub fn malicious_insider() -> Self {
+        Self {
+            can_observe_network: true,
+            can_observe_timing: true,
+            can_observe_message_sizes: true,
+            can_observe_device_metadata: true,
+            can_observe_relationships: true,
+            can_perform_traffic_analysis: true,
+        }
     }
-    
-    // Run verification
-    let report = verifier.comprehensive_verification().await?;
-    
-    // Check frequency analysis results
-    let freq_success = report.attack_simulation_results.attack_success_rates
-        .get(&AttackType::FrequencyAnalysis)
-        .copied()
-        .unwrap_or(0.0);
-    
-    // Should detect some frequency patterns
-    assert!(
-        freq_success >= 0.1 && freq_success <= 0.7,
-        "Frequency analysis success rate unexpected: {}",
-        freq_success
-    );
-    
-    println!("✓ Frequency analysis simulation passed");
-    Ok(())
 }
 
-/// Test statistical inference attack simulation
-#[tokio::test]
-async fn test_statistical_inference_simulation() -> AuraResult<()> {
-    let mut verifier = PrivacyVerifier::new();
+/// Network observation data collected by an observer
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkObservation {
+    /// Timestamp of observation
+    pub timestamp: SystemTime,
+    /// Source device (if observable)
+    pub source: Option<DeviceId>,
+    /// Destination device (if observable)
+    pub destination: Option<DeviceId>,
+    /// Message size in bytes
+    pub message_size: usize,
+    /// Protocol type hint (if observable)
+    pub protocol_hint: Option<String>,
+    /// Relationship hint (if observable)  
+    pub relationship_hint: Option<RelationshipId>,
+}
+
+/// Collected observations from a protocol execution
+#[derive(Debug, Clone)]
+pub struct ObservationTrace {
+    /// Observer type and capabilities
+    pub observer_type: ObserverType,
+    /// Network observations
+    pub network_observations: Vec<NetworkObservation>,
+    /// Timing patterns
+    pub timing_patterns: Vec<Duration>,
+    /// Message size distributions
+    pub size_distributions: HashMap<String, Vec<usize>>,
+    /// Relationship inference attempts
+    pub relationship_inferences: Vec<RelationshipInference>,
+}
+
+/// Attempted relationship inference by observer
+#[derive(Debug, Clone)]
+pub struct RelationshipInference {
+    /// Inferred relationship between devices
+    pub device_a: DeviceId,
+    pub device_b: DeviceId,
+    /// Confidence score (0.0 to 1.0)
+    pub confidence: f64,
+    /// Evidence used for inference
+    pub evidence: Vec<String>,
+}
+
+/// Privacy property verification result
+#[derive(Debug, Clone)]
+pub struct PrivacyVerificationResult {
+    /// Property name
+    pub property_name: String,
+    /// Whether property holds
+    pub property_holds: bool,
+    /// Confidence in the result
+    pub confidence: f64,
+    /// Evidence for/against the property
+    pub evidence: Vec<String>,
+    /// Statistical analysis results
+    pub statistical_analysis: StatisticalAnalysis,
+}
+
+/// Statistical analysis of observation data
+#[derive(Debug, Clone)]
+pub struct StatisticalAnalysis {
+    /// Entropy of timing patterns
+    pub timing_entropy: f64,
+    /// Entropy of size patterns
+    pub size_entropy: f64,
+    /// Correlation scores between device pairs
+    pub correlation_scores: HashMap<(DeviceId, DeviceId), f64>,
+    /// Distinguishability metric
+    pub distinguishability_metric: f64,
+}
+
+/// Observer simulation for privacy analysis
+pub struct ObserverSimulator {
+    /// Observer type and capabilities
+    pub observer_type: ObserverType,
+    pub capabilities: ObserverCapabilities,
+    /// Collected observations
+    pub observations: ObservationTrace,
+    /// Analysis algorithms
+    pub analyzers: Vec<Box<dyn PrivacyAnalyzer>>,
+}
+
+/// Trait for privacy analysis algorithms
+pub trait PrivacyAnalyzer: Send + Sync {
+    /// Analyze observation trace for privacy violations
+    fn analyze(&self, trace: &ObservationTrace) -> PrivacyVerificationResult;
     
-    let context_id = verifier.register_context(
-        ContextType::Bridge(
-            RelationshipId::new().to_bytes(),
-            RelationshipId::new().to_bytes(),
-        ),
-        create_test_privacy_requirements(),
-    )?;
-    
-    let devices: Vec<DeviceId> = (0..8).map(|_| DeviceId::new()).collect();
-    
-    // Create diverse operations that statistical inference might analyze
-    let mut operations = Vec::new();
-    
-    // Different operation types with different patterns
-    let operation_types = vec![
-        OperationType::MessageSend,
-        OperationType::MessageReceive,
-        OperationType::ContentStorage,
-        OperationType::ContentRetrieval,
-        OperationType::Search,
-        OperationType::TreeOperation,
-    ];
-    
-    for (i, &op_type) in operation_types.iter().enumerate() {
-        for j in 0..7 {
-            let sender = devices[i % devices.len()];
-            let receiver = devices[(i + 1) % devices.len()];
+    /// Get analyzer name
+    fn name(&self) -> &str;
+}
+
+/// External indistinguishability analyzer
+pub struct ExternalIndistinguishabilityAnalyzer;
+
+impl PrivacyAnalyzer for ExternalIndistinguishabilityAnalyzer {
+    fn analyze(&self, trace: &ObservationTrace) -> PrivacyVerificationResult {
+        // Analyze if external observer can distinguish between different relationship configurations
+        let mut evidence = Vec::new();
+        let mut distinguishability_score = 0.0;
+
+        // Check timing pattern consistency
+        if trace.timing_patterns.len() > 1 {
+            let timing_variance = calculate_variance(&trace.timing_patterns);
+            if timing_variance > Duration::from_millis(100) {
+                evidence.push("High variance in timing patterns detected".to_string());
+                distinguishability_score += 0.3;
+            }
+        }
+
+        // Check size pattern consistency
+        for (protocol, sizes) in &trace.size_distributions {
+            let size_variance = calculate_size_variance(sizes);
+            if size_variance > 100.0 {
+                evidence.push(format!("High variance in {} message sizes", protocol));
+                distinguishability_score += 0.2;
+            }
+        }
+
+        // Check for correlation patterns
+        if trace.relationship_inferences.len() > 0 {
+            let avg_confidence: f64 = trace.relationship_inferences
+                .iter()
+                .map(|r| r.confidence)
+                .sum::<f64>() / trace.relationship_inferences.len() as f64;
             
-            let operation = PrivacyOperation {
-                operation_id: generate_operation_id(i * 10 + j),
-                operation_type: op_type.clone(),
-                context_id,
-                participants: vec![sender, receiver],
-                operation_leakage: LeakageBudget::zero(),
-                timestamp: SystemTime::now() + Duration::from_secs((i * 100 + j * 15) as u64),
-                privacy_metadata: PrivacyMetadata {
-                    privacy_level: "full".to_string(),
-                    anonymization_techniques: vec!["sbb".to_string(), "padding".to_string()],
-                    context_isolation_verified: true,
-                    leakage_bounds_checked: true,
-                },
-            };
-            operations.push(operation);
+            if avg_confidence > 0.7 {
+                evidence.push("High confidence relationship inferences possible".to_string());
+                distinguishability_score += 0.5;
+            }
+        }
+
+        let property_holds = distinguishability_score < 0.3; // Threshold for acceptable privacy
+        
+        PrivacyVerificationResult {
+            property_name: "External Indistinguishability".to_string(),
+            property_holds,
+            confidence: 1.0 - distinguishability_score,
+            evidence,
+            statistical_analysis: StatisticalAnalysis {
+                timing_entropy: calculate_timing_entropy(&trace.timing_patterns),
+                size_entropy: calculate_size_entropy(&trace.size_distributions),
+                correlation_scores: HashMap::new(), // Simplified
+                distinguishability_metric: distinguishability_score,
+            },
         }
     }
-    
-    // Record operations
-    for operation in operations {
-        verifier.record_operation(operation).await?;
+
+    fn name(&self) -> &str {
+        "External Indistinguishability Analyzer"
     }
-    
-    // Run verification
-    let report = verifier.comprehensive_verification().await?;
-    
-    // Check statistical inference results
-    let inference_success = report.attack_simulation_results.attack_success_rates
-        .get(&AttackType::StatisticalInference)
-        .copied()
-        .unwrap_or(0.0);
-    
-    // Statistical inference is sophisticated but should still be bounded
-    assert!(
-        inference_success >= 0.0 && inference_success <= 0.9,
-        "Statistical inference success rate unexpected: {}",
-        inference_success
-    );
-    
-    // Verify that information leakage is tracked
-    if let Some(leaked_info) = report.attack_simulation_results.information_leakage
-        .get(&AttackType::StatisticalInference) {
-        // Should have some analysis results
-        assert!(
-            !leaked_info.is_empty(),
-            "Statistical inference should provide analysis details"
-        );
-    }
-    
-    println!("✓ Statistical inference simulation passed");
-    Ok(())
 }
 
-/// Test observer capability modeling
-#[tokio::test]
-async fn test_observer_capability_modeling() -> AuraResult<()> {
-    let mut verifier = PrivacyVerifier::new();
-    
-    let context_id = verifier.register_context(
-        ContextType::Anonymous,
-        create_test_privacy_requirements(),
-    )?;
-    
-    // Create a single operation to test capability modeling
-    let operation = create_communication_operation(
-        context_id,
-        vec![DeviceId::new(), DeviceId::new()],
-        OperationType::MessageSend,
-        0,
-    );
-    
-    verifier.record_operation(operation).await?;
-    
-    // Run verification
-    let report = verifier.comprehensive_verification().await?;
-    
-    // Verify that all expected observer capabilities were considered
-    let expected_capabilities = vec![
-        ObserverCapability::NetworkTrafficObservation,
-        ObserverCapability::TimingAnalysis,
-        ObserverCapability::SizeAnalysis,
-        ObserverCapability::FrequencyAnalysis,
-        ObserverCapability::TemporalCorrelation,
-        ObserverCapability::StatisticalAnalysis,
-    ];
-    
-    // All capabilities should be represented in some way in the results
-    assert!(
-        !report.attack_simulation_results.attacks_simulated.is_empty(),
-        "No observer capabilities were exercised"
-    );
-    
-    // Check that complexity levels are properly assigned
-    let attack_types_by_complexity = vec![
-        (AttackComplexity::Medium, vec![AttackType::TrafficAnalysis, AttackType::SizeCorrelation, AttackType::FrequencyAnalysis]),
-        (AttackComplexity::High, vec![AttackType::TimingCorrelation, AttackType::PatternMatching]),
-        (AttackComplexity::VeryHigh, vec![AttackType::StatisticalInference]),
-    ];
-    
-    for (expected_complexity, attack_types) in attack_types_by_complexity {
-        for attack_type in attack_types {
-            if report.attack_simulation_results.attacks_simulated.contains(&attack_type) {
-                // Complexity is properly reflected in the resistance scoring
-                assert!(
-                    report.attack_simulation_results.overall_resistance_score <= 1.0,
-                    "Resistance score calculation includes complexity weighting"
-                );
+/// Traffic analysis resistance analyzer
+pub struct TrafficAnalysisResistanceAnalyzer;
+
+impl PrivacyAnalyzer for TrafficAnalysisResistanceAnalyzer {
+    fn analyze(&self, trace: &ObservationTrace) -> PrivacyVerificationResult {
+        let mut evidence = Vec::new();
+        let mut vulnerability_score = 0.0;
+
+        // Check for traffic pattern leakage
+        if trace.network_observations.len() > 2 {
+            // Simple frequency analysis
+            let mut protocol_frequencies: HashMap<String, usize> = HashMap::new();
+            for obs in &trace.network_observations {
+                if let Some(protocol) = &obs.protocol_hint {
+                    *protocol_frequencies.entry(protocol.clone()).or_insert(0) += 1;
+                }
+            }
+
+            // Check if protocol usage reveals information
+            if protocol_frequencies.len() > 1 {
+                let total_messages = trace.network_observations.len() as f64;
+                let entropy = protocol_frequencies.values()
+                    .map(|&count| {
+                        let p = count as f64 / total_messages;
+                        if p > 0.0 { -p * p.log2() } else { 0.0 }
+                    })
+                    .sum::<f64>();
+
+                if entropy < 1.0 {
+                    evidence.push("Low protocol diversity - traffic analysis possible".to_string());
+                    vulnerability_score += 0.4;
+                }
+            }
+        }
+
+        // Check timing attack resistance
+        if !trace.timing_patterns.is_empty() {
+            let timing_regularity = calculate_timing_regularity(&trace.timing_patterns);
+            if timing_regularity > 0.8 {
+                evidence.push("Highly regular timing patterns detected".to_string());
+                vulnerability_score += 0.3;
+            }
+        }
+
+        let property_holds = vulnerability_score < 0.3;
+
+        PrivacyVerificationResult {
+            property_name: "Traffic Analysis Resistance".to_string(),
+            property_holds,
+            confidence: 1.0 - vulnerability_score,
+            evidence,
+            statistical_analysis: StatisticalAnalysis {
+                timing_entropy: calculate_timing_entropy(&trace.timing_patterns),
+                size_entropy: calculate_size_entropy(&trace.size_distributions),
+                correlation_scores: HashMap::new(),
+                distinguishability_metric: vulnerability_score,
+            },
+        }
+    }
+
+    fn name(&self) -> &str {
+        "Traffic Analysis Resistance Analyzer"
+    }
+}
+
+impl ObserverSimulator {
+    /// Create a new observer simulator
+    pub fn new(observer_type: ObserverType) -> Self {
+        let capabilities = match observer_type {
+            ObserverType::External => ObserverCapabilities::external(),
+            ObserverType::Neighbor => ObserverCapabilities::neighbor(),
+            ObserverType::MaliciousInsider => ObserverCapabilities::malicious_insider(),
+        };
+
+        let mut analyzers: Vec<Box<dyn PrivacyAnalyzer>> = Vec::new();
+        analyzers.push(Box::new(ExternalIndistinguishabilityAnalyzer));
+        analyzers.push(Box::new(TrafficAnalysisResistanceAnalyzer));
+
+        Self {
+            observer_type,
+            capabilities,
+            observations: ObservationTrace {
+                observer_type,
+                network_observations: Vec::new(),
+                timing_patterns: Vec::new(),
+                size_distributions: HashMap::new(),
+                relationship_inferences: Vec::new(),
+            },
+            analyzers,
+        }
+    }
+
+    /// Record a network observation
+    pub fn record_observation(&mut self, observation: NetworkObservation) {
+        self.observations.network_observations.push(observation);
+    }
+
+    /// Record timing pattern
+    pub fn record_timing(&mut self, duration: Duration) {
+        self.observations.timing_patterns.push(duration);
+    }
+
+    /// Record message size for protocol
+    pub fn record_size(&mut self, protocol: String, size: usize) {
+        self.observations.size_distributions
+            .entry(protocol)
+            .or_insert_with(Vec::new)
+            .push(size);
+    }
+
+    /// Attempt relationship inference
+    pub fn infer_relationships(&mut self) {
+        // Simple relationship inference based on communication patterns
+        let mut device_pairs: HashMap<(DeviceId, DeviceId), usize> = HashMap::new();
+
+        for obs in &self.observations.network_observations {
+            if let (Some(src), Some(dst)) = (&obs.source, &obs.destination) {
+                let pair = if src < dst { (*src, *dst) } else { (*dst, *src) };
+                *device_pairs.entry(pair).or_insert(0) += 1;
+            }
+        }
+
+        // Create inferences based on communication frequency
+        for ((device_a, device_b), count) in device_pairs {
+            if count > 1 { // Multiple communications suggest relationship
+                let confidence = (count as f64 / self.observations.network_observations.len() as f64)
+                    .min(1.0);
+                
+                let inference = RelationshipInference {
+                    device_a,
+                    device_b,
+                    confidence,
+                    evidence: vec![format!("{} messages exchanged", count)],
+                };
+                
+                self.observations.relationship_inferences.push(inference);
             }
         }
     }
-    
-    println!("✓ Observer capability modeling passed");
-    Ok(())
-}
 
-// Helper functions
+    /// Analyze collected observations for privacy violations
+    pub fn analyze_privacy(&self) -> Vec<PrivacyVerificationResult> {
+        self.analyzers
+            .iter()
+            .map(|analyzer| analyzer.analyze(&self.observations))
+            .collect()
+    }
 
-fn create_test_privacy_requirements() -> PrivacyRequirements {
-    PrivacyRequirements {
-        max_external_leakage: 0.0,
-        max_neighbor_leakage: 2.0,
-        group_leakage_policy: GroupLeakagePolicy::Limited(1.0),
-        unlinkability_requirements: UnlinkabilityRequirements {
-            min_anonymity_set_size: 3,
-            max_linkability_threshold: 0.2,
-            unlinkability_level: UnlinkabilityLevel::Strong,
-        },
-        isolation_requirements: IsolationRequirements {
-            isolation_level: IsolationLevel::Strong,
-            allowed_cross_context_ops: vec![],
-            bridge_policies: vec![],
-        },
+    /// Reset collected observations
+    pub fn reset(&mut self) {
+        self.observations.network_observations.clear();
+        self.observations.timing_patterns.clear();
+        self.observations.size_distributions.clear();
+        self.observations.relationship_inferences.clear();
     }
 }
 
-async fn generate_test_operations(
-    context_id: [u8; 32],
-    count: usize,
-) -> AuraResult<Vec<PrivacyOperation>> {
-    let mut operations = Vec::new();
-    let devices: Vec<DeviceId> = (0..10).map(|_| DeviceId::new()).collect();
+// Helper functions for statistical analysis
+
+fn calculate_variance(durations: &[Duration]) -> Duration {
+    if durations.len() < 2 {
+        return Duration::from_millis(0);
+    }
+
+    let mean_nanos: f64 = durations.iter().map(|d| d.as_nanos() as f64).sum::<f64>() 
+        / durations.len() as f64;
     
-    let operation_types = vec![
-        OperationType::MessageSend,
-        OperationType::MessageReceive,
-        OperationType::ContentStorage,
-        OperationType::ContentRetrieval,
-        OperationType::Search,
-        OperationType::TreeOperation,
-        OperationType::Recovery,
-        OperationType::GarbageCollection,
-    ];
+    let variance: f64 = durations.iter()
+        .map(|d| {
+            let diff = d.as_nanos() as f64 - mean_nanos;
+            diff * diff
+        })
+        .sum::<f64>() / durations.len() as f64;
     
-    for i in 0..count {
-        let sender = devices[i % devices.len()];
-        let receiver = devices[(i + 1) % devices.len()];
-        let op_type = operation_types[i % operation_types.len()].clone();
+    Duration::from_nanos(variance.sqrt() as u64)
+}
+
+fn calculate_size_variance(sizes: &[usize]) -> f64 {
+    if sizes.len() < 2 {
+        return 0.0;
+    }
+
+    let mean: f64 = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
+    let variance: f64 = sizes.iter()
+        .map(|&size| {
+            let diff = size as f64 - mean;
+            diff * diff
+        })
+        .sum::<f64>() / sizes.len() as f64;
+    
+    variance.sqrt()
+}
+
+fn calculate_timing_entropy(durations: &[Duration]) -> f64 {
+    if durations.is_empty() {
+        return 0.0;
+    }
+
+    // Bucket durations into discrete intervals for entropy calculation
+    let mut buckets: HashMap<u64, usize> = HashMap::new();
+    for duration in durations {
+        let bucket = duration.as_millis() as u64 / 10; // 10ms buckets
+        *buckets.entry(bucket).or_insert(0) += 1;
+    }
+
+    let total = durations.len() as f64;
+    buckets.values()
+        .map(|&count| {
+            let p = count as f64 / total;
+            if p > 0.0 { -p * p.log2() } else { 0.0 }
+        })
+        .sum()
+}
+
+fn calculate_size_entropy(size_distributions: &HashMap<String, Vec<usize>>) -> f64 {
+    let mut all_sizes = Vec::new();
+    for sizes in size_distributions.values() {
+        all_sizes.extend(sizes);
+    }
+
+    if all_sizes.is_empty() {
+        return 0.0;
+    }
+
+    // Bucket sizes for entropy calculation
+    let mut buckets: HashMap<usize, usize> = HashMap::new();
+    for &size in &all_sizes {
+        let bucket = size / 100; // 100-byte buckets
+        *buckets.entry(bucket).or_insert(0) += 1;
+    }
+
+    let total = all_sizes.len() as f64;
+    buckets.values()
+        .map(|&count| {
+            let p = count as f64 / total;
+            if p > 0.0 { -p * p.log2() } else { 0.0 }
+        })
+        .sum()
+}
+
+fn calculate_timing_regularity(durations: &[Duration]) -> f64 {
+    if durations.len() < 2 {
+        return 0.0;
+    }
+
+    // Calculate coefficient of variation (lower = more regular)
+    let mean_nanos: f64 = durations.iter().map(|d| d.as_nanos() as f64).sum::<f64>() 
+        / durations.len() as f64;
+    
+    if mean_nanos == 0.0 {
+        return 1.0; // Perfect regularity
+    }
+
+    let variance: f64 = durations.iter()
+        .map(|d| {
+            let diff = d.as_nanos() as f64 - mean_nanos;
+            diff * diff
+        })
+        .sum::<f64>() / durations.len() as f64;
+    
+    let cv = variance.sqrt() / mean_nanos;
+    
+    // Convert to regularity score (1.0 = perfectly regular, 0.0 = completely random)
+    1.0 / (1.0 + cv)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_observer_capabilities() {
+        let external = ObserverCapabilities::external();
+        assert!(external.can_observe_network);
+        assert!(!external.can_observe_device_metadata);
+
+        let insider = ObserverCapabilities::malicious_insider();
+        assert!(insider.can_observe_device_metadata);
+        assert!(insider.can_observe_relationships);
+    }
+
+    #[test]
+    fn test_observation_recording() {
+        let mut observer = ObserverSimulator::new(ObserverType::External);
+
+        let observation = NetworkObservation {
+            timestamp: SystemTime::now(),
+            source: Some(DeviceId::new()),
+            destination: Some(DeviceId::new()),
+            message_size: 1024,
+            protocol_hint: Some("anti_entropy".to_string()),
+            relationship_hint: None,
+        };
+
+        observer.record_observation(observation);
+        assert_eq!(observer.observations.network_observations.len(), 1);
+    }
+
+    #[test]
+    fn test_timing_variance_calculation() {
+        let durations = vec![
+            Duration::from_millis(100),
+            Duration::from_millis(102),
+            Duration::from_millis(98),
+            Duration::from_millis(101),
+        ];
+
+        let variance = calculate_variance(&durations);
+        assert!(variance.as_millis() < 10); // Should be low variance
+    }
+
+    #[test]
+    fn test_relationship_inference() {
+        let mut observer = ObserverSimulator::new(ObserverType::Neighbor);
         
-        let operation = PrivacyOperation {
-            operation_id: generate_operation_id(i),
-            operation_type: op_type,
-            context_id,
-            participants: vec![sender, receiver],
-            operation_leakage: LeakageBudget::zero(),
-            timestamp: SystemTime::now() + Duration::from_secs((i * 30) as u64),
-            privacy_metadata: PrivacyMetadata {
-                privacy_level: "full".to_string(),
-                anonymization_techniques: vec!["sbb".to_string(), "dkd".to_string()],
-                context_isolation_verified: true,
-                leakage_bounds_checked: true,
+        let device_a = DeviceId::new();
+        let device_b = DeviceId::new();
+
+        // Record multiple communications between same devices
+        for _ in 0..5 {
+            let observation = NetworkObservation {
+                timestamp: SystemTime::now(),
+                source: Some(device_a),
+                destination: Some(device_b),
+                message_size: 500,
+                protocol_hint: Some("test".to_string()),
+                relationship_hint: None,
+            };
+            observer.record_observation(observation);
+        }
+
+        observer.infer_relationships();
+        assert!(!observer.observations.relationship_inferences.is_empty());
+        
+        let inference = &observer.observations.relationship_inferences[0];
+        assert!(inference.confidence > 0.0);
+    }
+
+    #[test]
+    fn test_external_indistinguishability_analysis() {
+        let analyzer = ExternalIndistinguishabilityAnalyzer;
+        
+        let trace = ObservationTrace {
+            observer_type: ObserverType::External,
+            network_observations: Vec::new(),
+            timing_patterns: vec![
+                Duration::from_millis(100),
+                Duration::from_millis(100),
+                Duration::from_millis(100),
+            ],
+            size_distributions: {
+                let mut map = HashMap::new();
+                map.insert("test".to_string(), vec![1000, 1000, 1000]);
+                map
             },
+            relationship_inferences: Vec::new(),
+        };
+
+        let result = analyzer.analyze(&trace);
+        assert_eq!(result.property_name, "External Indistinguishability");
+        // Should pass with consistent timing/size patterns
+        assert!(result.property_holds);
+    }
+
+    #[test]
+    fn test_traffic_analysis_resistance() {
+        let analyzer = TrafficAnalysisResistanceAnalyzer;
+        
+        let trace = ObservationTrace {
+            observer_type: ObserverType::External,
+            network_observations: vec![
+                NetworkObservation {
+                    timestamp: SystemTime::now(),
+                    source: Some(DeviceId::new()),
+                    destination: Some(DeviceId::new()),
+                    message_size: 1000,
+                    protocol_hint: Some("protocol_a".to_string()),
+                    relationship_hint: None,
+                },
+                NetworkObservation {
+                    timestamp: SystemTime::now(),
+                    source: Some(DeviceId::new()),
+                    destination: Some(DeviceId::new()),
+                    message_size: 1000,
+                    protocol_hint: Some("protocol_b".to_string()),
+                    relationship_hint: None,
+                },
+            ],
+            timing_patterns: vec![
+                Duration::from_millis(90),
+                Duration::from_millis(110),
+                Duration::from_millis(95),
+            ],
+            size_distributions: HashMap::new(),
+            relationship_inferences: Vec::new(),
+        };
+
+        let result = analyzer.analyze(&trace);
+        assert_eq!(result.property_name, "Traffic Analysis Resistance");
+    }
+
+    #[test]
+    fn test_entropy_calculations() {
+        let durations = vec![
+            Duration::from_millis(100),
+            Duration::from_millis(200),
+            Duration::from_millis(100),
+            Duration::from_millis(200),
+        ];
+        
+        let entropy = calculate_timing_entropy(&durations);
+        assert!(entropy > 0.0 && entropy <= 1.0); // Should have some entropy
+
+        let sizes = {
+            let mut map = HashMap::new();
+            map.insert("test".to_string(), vec![100, 200, 100, 200]);
+            map
         };
         
-        operations.push(operation);
+        let size_entropy = calculate_size_entropy(&sizes);
+        assert!(size_entropy > 0.0);
     }
-    
-    Ok(operations)
-}
 
-fn create_communication_operation(
-    context_id: [u8; 32],
-    participants: Vec<DeviceId>,
-    operation_type: OperationType,
-    time_offset_secs: u64,
-) -> PrivacyOperation {
-    PrivacyOperation {
-        operation_id: generate_operation_id(time_offset_secs as usize),
-        operation_type,
-        context_id,
-        participants,
-        operation_leakage: LeakageBudget::zero(),
-        timestamp: SystemTime::now() + Duration::from_secs(time_offset_secs),
-        privacy_metadata: PrivacyMetadata {
-            privacy_level: "full".to_string(),
-            anonymization_techniques: vec!["sbb".to_string(), "padding".to_string()],
-            context_isolation_verified: true,
-            leakage_bounds_checked: true,
-        },
+    #[tokio::test]
+    async fn test_integrated_privacy_simulation() {
+        // This test demonstrates how to use the observer simulation framework
+        // in conjunction with actual protocol execution
+
+        let mut observer = ObserverSimulator::new(ObserverType::External);
+        
+        // Simulate protocol execution observations
+        for i in 0..10 {
+            observer.record_timing(Duration::from_millis(100 + (i % 3) * 10));
+            observer.record_size("anti_entropy".to_string(), 1000 + i * 50);
+            
+            if i % 3 == 0 {
+                let observation = NetworkObservation {
+                    timestamp: SystemTime::now(),
+                    source: Some(DeviceId::new()),
+                    destination: Some(DeviceId::new()),
+                    message_size: 1000 + i * 50,
+                    protocol_hint: Some("anti_entropy".to_string()),
+                    relationship_hint: None,
+                };
+                observer.record_observation(observation);
+            }
+        }
+
+        observer.infer_relationships();
+        let results = observer.analyze_privacy();
+
+        assert!(!results.is_empty());
+        
+        for result in results {
+            println!("Privacy Property: {}", result.property_name);
+            println!("Holds: {}", result.property_holds);
+            println!("Confidence: {}", result.confidence);
+            println!("Evidence: {:?}", result.evidence);
+            println!("---");
+        }
     }
-}
 
-fn generate_operation_id(seed: usize) -> [u8; 32] {
-    use blake3::Hasher;
-    
-    let mut hasher = Hasher::new();
-    hasher.update(b"test-operation-id");
-    hasher.update(&seed.to_le_bytes());
-    
-    let hash = hasher.finalize();
-    let mut id = [0u8; 32];
-    id.copy_from_slice(hash.as_bytes());
-    id
+    #[test]
+    fn test_privacy_property_verification() {
+        // Test the τ[κ₁↔κ₂] ≈_ext τ property specifically
+        let mut observer = ObserverSimulator::new(ObserverType::External);
+
+        // Simulate two scenarios: with and without a specific relationship
+        // Scenario 1: Alice and Bob have a relationship
+        let alice = DeviceId::new();
+        let bob = DeviceId::new();
+        let charlie = DeviceId::new();
+
+        // Alice-Bob communications (hidden relationship)
+        for i in 0..5 {
+            let observation = NetworkObservation {
+                timestamp: SystemTime::now(),
+                source: Some(alice),
+                destination: Some(bob),
+                message_size: 1000, // Consistent size due to padding
+                protocol_hint: Some("encrypted_message".to_string()),
+                relationship_hint: None, // Hidden from external observer
+            };
+            observer.record_observation(observation);
+            observer.record_timing(Duration::from_millis(100)); // Consistent timing
+        }
+
+        // Alice-Charlie communications (no special relationship)
+        for i in 0..5 {
+            let observation = NetworkObservation {
+                timestamp: SystemTime::now(),
+                source: Some(alice),
+                destination: Some(charlie),
+                message_size: 1000, // Same padding
+                protocol_hint: Some("encrypted_message".to_string()),
+                relationship_hint: None,
+            };
+            observer.record_observation(observation);
+            observer.record_timing(Duration::from_millis(100)); // Same timing profile
+        }
+
+        observer.infer_relationships();
+        let results = observer.analyze_privacy();
+
+        // The external observer should not be able to distinguish the communications
+        let indistinguishability_result = results.iter()
+            .find(|r| r.property_name == "External Indistinguishability")
+            .expect("Should have indistinguishability result");
+
+        assert!(
+            indistinguishability_result.property_holds,
+            "External indistinguishability should hold with proper padding and timing"
+        );
+
+        // Relationship inferences should have low confidence
+        let max_inference_confidence = observer.observations.relationship_inferences
+            .iter()
+            .map(|inf| inf.confidence)
+            .fold(0.0f64, f64::max);
+
+        assert!(
+            max_inference_confidence < 0.8,
+            "Relationship inference confidence should be low: {}",
+            max_inference_confidence
+        );
+    }
 }

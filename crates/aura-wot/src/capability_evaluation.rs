@@ -3,9 +3,9 @@
 //! This module provides high-level capability evaluation functions that integrate
 //! tree policies, delegation chains, and meet operations.
 
-use crate::tree_policy::{Policy, ThresholdConfig};
+use crate::tree_policy::Policy as TreePolicyEnum;
 use crate::{
-    CapabilitySet, DelegationChain, NodeIndex, PolicyMeet, TreeAuthzContext, TreeOp, TreePolicy,
+    CapabilitySet, DelegationChain, PolicyMeet, TreeAuthzContext, TreeOp, TreePolicy,
     TreePolicyCapabilityExt, WotError,
 };
 use aura_core::{AccountId, DeviceId, GuardianId};
@@ -146,9 +146,9 @@ pub fn evaluate_tree_operation_capabilities(
 
     if !effective_capabilities.satisfies_tree_policy(
         &TreePolicy::new(
-            crate::NodeIndex(0),
+            crate::tree_policy::NodeIndex(0),
             context.tree_context.account_id,
-            Policy::Any,
+            TreePolicyEnum::Any,
             crate::ThresholdConfig::new(1, std::collections::BTreeSet::new()),
         )
         .with_required_capabilities(operation_requirements),
@@ -209,7 +209,7 @@ impl TreePolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NodeIndex, Policy, ThresholdConfig};
+    use crate::tree_policy::{NodeIndex, Policy as TreePolicyEnum, ThresholdConfig};
 
     #[test]
     fn test_complete_capability_evaluation() {
@@ -221,7 +221,17 @@ mod tests {
 
         let participants = BTreeSet::from([device_id]);
         let threshold_config = ThresholdConfig::new(1, participants.clone());
-        let tree_policy = TreePolicy::new(NodeIndex(0), account_id, Policy::Any, threshold_config);
+        let tree_policy = TreePolicy::new(
+            NodeIndex(0),
+            account_id,
+            TreePolicyEnum::Any,
+            threshold_config,
+        )
+        .with_required_capabilities(CapabilitySet::from_permissions(&[
+            "tree:read",
+            "tree:propose",
+            "tree:modify",
+        ]));
 
         tree_context.add_policy(0, tree_policy);
 
@@ -273,9 +283,17 @@ mod tests {
         let tree_policy = TreePolicy::new(
             NodeIndex(0),
             account_id,
-            Policy::All, // Requires all signers
+            TreePolicyEnum::All, // Requires all signers
             threshold_config,
         );
+
+        // Set the correct required capabilities for tree operations
+        let tree_policy =
+            tree_policy.with_required_capabilities(CapabilitySet::from_permissions(&[
+                "tree:read",
+                "tree:propose",
+                "tree:modify",
+            ]));
 
         tree_context.add_policy(0, tree_policy);
 

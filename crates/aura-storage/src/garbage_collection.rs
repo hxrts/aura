@@ -226,7 +226,6 @@ impl GcChoreography {
     ) -> AuraResult<Option<GcSnapshot>> {
         // 1. Capability guard: need(gc_propose) ≤ caps_Proposer
         let guard = CapabilityGuard::new(
-            "gc_propose".to_string(),
             aura_core::Cap::default(), // Would use actual proposer capabilities
         );
         let capabilities = aura_core::Cap::default(); // TODO: Use actual capabilities
@@ -253,7 +252,9 @@ impl GcChoreography {
         for member_id in &quorum_members {
             let message_bytes = serde_json::to_vec(&proposal_msg)
                 .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
-            self.effects.send_to_peer(member_id.0, message_bytes).await
+            self.effects
+                .send_to_peer(member_id.0, message_bytes)
+                .await
                 .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
         }
 
@@ -265,15 +266,15 @@ impl GcChoreography {
 
         // Wait for responses with timeout
         for member_id in &quorum_members {
-            if let Ok(response) = tokio::time::timeout(
-                std::time::Duration::from_secs(60),
-                async {
-                    let bytes = self.effects.receive_from(member_id.0).await
-                        .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
-                    serde_json::from_slice::<GcMessage>(&bytes)
-                        .map_err(|e| aura_core::AuraError::serialization(e.to_string()))
-                },
-            )
+            if let Ok(response) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+                let bytes = self
+                    .effects
+                    .receive_from(member_id.0)
+                    .await
+                    .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
+                serde_json::from_slice::<GcMessage>(&bytes)
+                    .map_err(|e| aura_core::AuraError::serialization(e.to_string()))
+            })
             .await
             {
                 match response? {
@@ -307,8 +308,8 @@ impl GcChoreography {
             // 7. Create committed snapshot
             let snapshot = GcSnapshot {
                 snapshot_id: self.compute_snapshot_id(&proposal, &approvals)?,
-                root_commit: proposal.root_commit,
-                watermarks: proposal.watermarks,
+                root_commit: proposal.root_commit.clone(),
+                watermarks: proposal.watermarks.clone(),
                 epoch: current_epoch,
                 timestamp: self.get_current_timestamp(),
                 collectible_chunks: self.compute_collectible_chunks(&proposal).await?,
@@ -324,7 +325,9 @@ impl GcChoreography {
             for member_id in &quorum_members {
                 let message_bytes = serde_json::to_vec(&commit_msg)
                     .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
-                self.effects.send_to_peer(member_id.0, message_bytes).await
+                self.effects
+                    .send_to_peer(member_id.0, message_bytes)
+                    .await
                     .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
             }
 
@@ -339,8 +342,8 @@ impl GcChoreography {
 
             // 10. Capability refinement based on GC policy
             let capability_annotation =
-                JournalAnnotation::add_facts("CapabilityUpdate(gc_policy_applied)".into());
-            // TODO: Apply journal delta through effect system  
+                JournalAnnotation::add_facts("CapabilityUpdate(gc_policy_applied)".to_string());
+            // TODO: Apply journal delta through effect system
             // self.effects.apply_journal_delta(&capability_annotation).await?;
             // For now, skip journal application
 
@@ -362,7 +365,10 @@ impl GcChoreography {
         member_id: DeviceId,
     ) -> AuraResult<Option<GcSnapshot>> {
         // 1. Receive snapshot proposal
-        let bytes = self.effects.receive_from(member_id.0).await
+        let bytes = self
+            .effects
+            .receive_from(member_id.0)
+            .await
             .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
         let proposal_msg = serde_json::from_slice::<GcMessage>(&bytes)
             .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
@@ -383,7 +389,6 @@ impl GcChoreography {
             if safety_check.is_ok() && invariants_check.is_ok() {
                 // Check approval capability guard
                 let guard = CapabilityGuard::new(
-                    "gc_approve".to_string(),
                     aura_core::Cap::default(), // Would use actual quorum capabilities
                 );
 
@@ -403,7 +408,9 @@ impl GcChoreography {
 
                     let message_bytes = serde_json::to_vec(&approval_msg)
                         .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
-                    self.effects.send_to_peer(proposer_id.0, message_bytes).await
+                    self.effects
+                        .send_to_peer(proposer_id.0, message_bytes)
+                        .await
                         .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
                 } else {
                     // Insufficient capabilities
@@ -415,7 +422,9 @@ impl GcChoreography {
 
                     let message_bytes = serde_json::to_vec(&reject_msg)
                         .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
-                    self.effects.send_to_peer(proposer_id.0, message_bytes).await
+                    self.effects
+                        .send_to_peer(proposer_id.0, message_bytes)
+                        .await
                         .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
                 }
             } else {
@@ -439,22 +448,25 @@ impl GcChoreography {
                 };
 
                 let message_bytes = serde_json::to_vec(&reject_msg)
-                        .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
-                    self.effects.send_to_peer(proposer_id.0, message_bytes).await
-                        .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
+                    .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
+                self.effects
+                    .send_to_peer(proposer_id.0, message_bytes)
+                    .await
+                    .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
             }
 
             // 4. Wait for commit notification
-            if let Ok(commit_msg) = tokio::time::timeout(
-                std::time::Duration::from_secs(120),
-                async {
-                    let bytes = self.effects.receive_from(member_id.0).await
+            if let Ok(commit_msg) =
+                tokio::time::timeout(std::time::Duration::from_secs(120), async {
+                    let bytes = self
+                        .effects
+                        .receive_from(member_id.0)
+                        .await
                         .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
                     serde_json::from_slice::<GcMessage>(&bytes)
                         .map_err(|e| aura_core::AuraError::serialization(e.to_string()))
-                },
-            )
-            .await
+                })
+                .await
             {
                 if let GcMessage::SnapshotCommit {
                     snapshot,
@@ -570,7 +582,10 @@ impl GcChoreography {
     /// Combine partial signatures into threshold signature
     fn combine_signatures(&self, partial_sigs: Vec<Vec<u8>>) -> AuraResult<ThresholdSignature> {
         // Use FROST to aggregate partial signatures
-        Ok(ThresholdSignature::new(b"placeholder_signature".to_vec(), vec![1, 2, 3])) // Placeholder
+        Ok(ThresholdSignature::new(
+            b"placeholder_signature".to_vec(),
+            vec![1, 2, 3],
+        )) // Placeholder
     }
 
     /// Get local watermark for this node
@@ -618,7 +633,7 @@ mod tests {
     #[test]
     fn test_gc_proposal_creation() {
         let proposal = GcProposal {
-            root_commit: Hash32::default(),
+            root_commit: Hash32::new([0u8; 32]),
             watermarks: HashMap::new(),
             safety_constraints: vec![
                 SafetyConstraint::MinRetentionTime(3600),
@@ -634,8 +649,8 @@ mod tests {
     #[test]
     fn test_snapshot_creation() {
         let snapshot = GcSnapshot {
-            snapshot_id: Hash32::default(),
-            root_commit: Hash32::default(),
+            snapshot_id: Hash32::new([0u8; 32]),
+            root_commit: Hash32::new([0u8; 32]),
             watermarks: HashMap::new(),
             epoch: 1,
             timestamp: 1234567890,

@@ -17,8 +17,8 @@ Each `(context, peer)` pair stores a **flow budget fact** in the journal:
 
 ```rust
 struct FlowBudget {
-    spent: u64,   // join-semilattice: merge = max
     limit: u64,   // meet-semilattice: merge = min
+    spent: u64,   // join-semilattice: merge = max
     epoch: Epoch, // ties the fact to the active key epoch
 }
 ```
@@ -42,15 +42,11 @@ struct FlowBudget {
 
 ```
 fn charge(ctx: ContextId, peer: DeviceId, cost: u64) -> Result<(), FlowError> {
-    let FlowBudget { spent, limit, epoch } = ledger.lookup(ctx, peer);
+    let FlowBudget { limit, spent, epoch } = ledger.lookup(ctx, peer);
     if spent.saturating_add(cost) > limit {
         return Err(FlowError::BudgetExhausted { ctx, peer, epoch });
     }
-    ledger.update(ctx, peer, FlowBudget {
-        spent: spent + cost,
-        limit,
-        epoch,
-    });
+    ledger.update(ctx, peer, FlowBudget { limit, spent: spent + cost, epoch });
     Ok(())
 }
 ```
@@ -62,19 +58,21 @@ Charging happens **before** the corresponding `TransportEffects::send` call. If 
 Relays require proof that the upstream hop already charged its budget:
 
 ```
-struct FlowReceipt {
+struct Receipt {
     ctx: ContextId,
-    from: DeviceId,
-    to: DeviceId,
-    remaining: u64,     // limit - spent after the charge
+    src: DeviceId,
+    dst: DeviceId,
     epoch: Epoch,
+    cost: u32,
+    nonce: u64,
+    prev: Hash32,       // anti-replay chaining within epoch
     sig: Signature,     // signed by sender using context key
 }
 ```
 
 Protocol:
 1. Sender charges its `(ctx, receiver)` budget.
-2. Sender emits the payload plus `FlowReceipt`.
+2. Sender emits the payload plus `Receipt`.
 3. Relay validates the signature and checks `remaining > 0`.
 4. Relay charges its own `(ctx, next_hop)` budget before forwarding.
 5. If any step fails, the message is dropped locally.
@@ -138,24 +136,38 @@ Error surface area is intentionally tiny: only the handler performing the send c
 Every choreography must invoke a `FlowGuard` before calling any transport effect. The guard enforces both flow budgets and leakage annotations:
 
 ```rust
-pub struct FlowGuard<'a> {
-    ctx: &'a ContextId,
-    peer: &'a DeviceId,
+pub struct FlowGuard {
+    ctx: ContextId,
+    peer: DeviceId,
     flow_cost: u32,
-    leakage: LeakageTuple,
 }
 
-impl<'a> FlowGuard<'a> {
-    pub async fn authorize(&self, effects: &impl FlowBudgetEffects) -> Result<(), FlowError> {
-        effects.charge_flow(self.ctx, self.peer, self.flow_cost).await?;
-        effects.record_leakage(self.ctx, self.leakage).await?;
-        Ok(())
+impl FlowGuard {
+    pub async fn authorize(
+        &self,
+        effects: &impl FlowBudgetEffects,
+    ) -> Result<Receipt, FlowError> {
+        let receipt = effects
+            .charge_flow(&self.ctx, &self.peer, self.flow_cost)
+            .await?;
+        // Leakage accounting runs after we know the send will proceed.
+        Ok(receipt)
     }
+}
+
+#[async_trait]
+pub trait FlowBudgetEffects {
+    async fn charge_flow(
+        &self,
+        context: &ContextId,
+        peer: &DeviceId,
+        cost: u32,
+    ) -> Result<Receipt, FlowError>;
 }
 ```
 
 **Requirements**:
-- All transport calls in choreographies (`Send`, `Broadcast`, `Forward`) must pass through `FlowGuard::authorize`.
+- All transport calls in choreographies (`Send`, `Broadcast`, `Forward`) must pass through `FlowGuard::authorize` and ignore packets lacking a matching `Receipt`.
 - Manual protocols must call the same guard until the session-type projection emits the code automatically.
 - FlowGuard implementations live in `aura-protocol/src/guards/privacy.rs` and are reused by rendezvous, search, recovery, storage sync, and any future protocol that emits network traffic.
 
@@ -169,7 +181,7 @@ This makes FlowBudget enforcement a mandatory part of every protocol rather than
 |-----------|----------------|
 | **Journal CRDT** | Store `FlowBudget` facts; merge via max/min. |
 | **Protocol compiler** | Emit `flow_cost` metadata for each send node. |
-| **Transport handler** | Enforce `charge` + attach `FlowReceipt`; drop packets without valid receipts. |
+| **Transport handler** | Enforce `charge` + attach `Receipt`; drop packets without valid receipts. |
 | **Effect guards** | Expose `FlowError` up to the choreography so sessions can retry/defer. |
 | **Simulator** | Provide deterministic knobs for budget limits to test spam scenarios and privacy leakage counters together. |
 
@@ -231,7 +243,7 @@ This spec should give every implementation team (protocols, transport, simulator
 The described APIs in this document correspond to real implementation:
 
 **Working Today**:
-- `FlowBudget { spent, limit, epoch }` - CRDT facts in journal
+- `FlowBudget { limit, spent, epoch }` - CRDT facts in journal
 - `charge(flow_cost)` - Budget charging before message emission
 - `PrivacyGuard` - Combined leakage and budget enforcement
 - Context-scoped budget tracking

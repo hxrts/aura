@@ -1,8 +1,8 @@
-# Top-level workspace for Aura - threshold identity and encrypted storage platform
+# Top-level workspace for Aura
 [workspace]
 resolver = "2"
 exclude = ["ext/*"]  # ext/* are temporary external repos
-# Note: ext/quint/evaluator still shows profile warnings due to path dependency in quint-api
+
 members = [
     "crates/aura-agent",
     "crates/aura-verify",
@@ -26,6 +26,8 @@ members = [
     "crates/aura-storage",
     "crates/aura-recovery",
     "crates/aura-rendezvous",
+    "examples/hello-crdt",
+    "examples/hello-choreo",
 ]
 
 
@@ -63,10 +65,10 @@ bincode = "1.3"
 serde_ipld_dagcbor = "0.6"
 
 # Async runtime & networking
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.40", features = ["full"] }
 futures = "0.3"
 async-trait = "0.1"
-reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 axum = "0.7"
 snow = "0.9"
 
@@ -83,19 +85,25 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # CLI
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 toml = "0.8"
 
 # Additional utilities
 rand = "0.8"
 rand_chacha = "0.3"
-base64 = "0.21"
-indexmap = "2.0"
-proptest = "1.4"
+rand_core = { version = "0.6", features = ["std"] }
+base64 = "0.22"
+indexmap = "2.5"
+proptest = "1.5"
 dirs = "5.0"
+glob = "0.3"
+fastrand = "2.1"
+subtle = "2.6"
+getrandom = "0.2"
 
 # Session types & choreographic programming
-rumpsteak-aura = "0.2.0"
+rumpsteak-aura = "0.2.3"
+rumpsteak-aura-choreography = "0.2.3"
 
 # Additional dependencies for cryptography
 x25519-dalek = { version = "2.0", features = ["serde", "reusable_secrets", "static_secrets"] }
@@ -104,8 +112,27 @@ derive_more = { version = "1.0", features = ["from", "into", "try_into", "deref"
 
 # KeyJournal dependencies - external libraries for threshold operations and graph algorithms
 petgraph = "0.6"
-# secret_sharing = "0.1"  # Removed due to yanked zeroize dependency - using MVP placeholder
+# secret_sharing removed due to yanked zeroize dependency - using threshold cryptography via FROST instead
 biscuit-auth = "6.0"    # For OCAP capability tokens
+
+# Additional serialization formats
+serde_bytes = "0.11"
+
+# WebSocket and networking
+tokio-tungstenite = "0.20"
+tokio-stream = "0.1"
+
+# Platform-specific dependencies (versions only - conditionals in individual crates)
+security-framework = "2.9"
+core-foundation = "0.9"
+windows = { version = "0.52", features = ["Win32_Security_Credentials", "Win32_System_Diagnostics_ToolHelp", "Win32_Foundation"] }
+keyutils = "0.1"
+jni = "0.21"
+
+# Development and testing
+tokio-test = "0.4"
+tempfile = "3.8"
+quickcheck = "1.0"
 
 # WASM Core
 app-wasm = { path = "crates/app-wasm" }
