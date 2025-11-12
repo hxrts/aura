@@ -195,7 +195,7 @@ impl NetworkEffects for MockNetworkHandler {
 
     async fn is_peer_connected(&self, peer_id: Uuid) -> bool {
         let connections = self.connections.lock().unwrap();
-        connections.get(&peer_id).unwrap_or(&false).clone()
+        *connections.get(&peer_id).unwrap_or(&false)
     }
 
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {

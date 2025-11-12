@@ -414,13 +414,13 @@ fn apply_operation_to_state(
             let old_policy = &branch.policy;
             if !is_policy_stricter_or_equal(new_policy, old_policy) {
                 return Err(ApplicationError::PolicyWeakening {
-                    old: old_policy.clone(),
-                    new: new_policy.clone(),
+                    old: *old_policy,
+                    new: *new_policy,
                 });
             }
 
             // Update policy
-            state.set_policy(*node, new_policy.clone());
+            state.set_policy(*node, *new_policy);
             affected_nodes.push(*node);
         }
 
@@ -619,7 +619,11 @@ mod tests {
             affected: vec![]
         }));
         assert!(!requires_epoch_update(&TreeOpKind::AddLeaf {
-            leaf: LeafNode::new_device(LeafId(1), aura_core::DeviceId(uuid::Uuid::new_v4()), vec![0u8; 32]),
+            leaf: LeafNode::new_device(
+                LeafId(1),
+                aura_core::DeviceId(uuid::Uuid::new_v4()),
+                vec![0u8; 32]
+            ),
             under: NodeIndex(0)
         }));
     }

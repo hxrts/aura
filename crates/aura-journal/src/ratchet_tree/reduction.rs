@@ -278,7 +278,7 @@ fn recompute_commitments(
     for &node in &path_nodes {
         // Get the policy first to avoid borrowing conflicts
         let policy = if let Some(branch) = state.branches.get(&node) {
-            branch.policy.clone()
+            branch.policy
         } else {
             continue;
         };

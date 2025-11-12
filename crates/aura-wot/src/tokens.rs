@@ -376,7 +376,7 @@ impl CapabilityToken {
 
         Ok(Self {
             token_id: CapabilityId::from_blake3_hash(&blake3::hash(&new_nonce)),
-            issuer: self.issuer.clone(),
+            issuer: self.issuer,
             permissions: delegated_permissions,
             resources: delegated_resources,
             issued_at: current_time,

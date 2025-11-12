@@ -116,8 +116,8 @@ impl AuraHandlerAdapter {
     ) -> Result<(), AuraHandlerError> {
         use crate::effects::NetworkEffects;
 
-        let target_device = target.clone();
-        let target_uuid: uuid::Uuid = target_device.clone().into();
+        let target_device = target;
+        let target_uuid: uuid::Uuid = target_device.into();
         let message_bytes =
             bincode::serialize(&message).map_err(|e| AuraHandlerError::EffectSerialization {
                 effect_type: crate::handlers::EffectType::Network,
@@ -139,11 +139,7 @@ impl AuraHandlerAdapter {
         let flow_context = self.ensure_flow_context(&target_device);
         let flow_cost = guard_profile.flow_cost.max(1);
         self.effect_system
-            .set_flow_hint(FlowHint::new(
-                flow_context,
-                target_device.clone(),
-                flow_cost,
-            ))
+            .set_flow_hint(FlowHint::new(flow_context, target_device, flow_cost))
             .await;
 
         // TODO: Apply guard constraints properly
@@ -166,7 +162,7 @@ impl AuraHandlerAdapter {
     ) -> Result<T, AuraHandlerError> {
         use crate::effects::NetworkEffects;
 
-        let sender_uuid: uuid::Uuid = sender.clone().into();
+        let sender_uuid: uuid::Uuid = sender.into();
         let message_bytes = self
             .effect_system
             .receive_from(sender_uuid)
@@ -189,7 +185,7 @@ impl AuraHandlerAdapter {
 
     fn ensure_flow_context(&mut self, peer: &DeviceId) -> ContextId {
         self.flow_contexts
-            .entry(peer.clone())
+            .entry(*peer)
             .or_insert_with(|| ContextId::new(format!("choreo://{}->{}", self.device_id, peer)))
             .clone()
     }

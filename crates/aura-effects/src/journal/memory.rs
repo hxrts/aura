@@ -73,8 +73,8 @@ impl JournalEffects for MemoryJournalHandler {
     ) -> Result<FlowBudget, AuraError> {
         let budgets = self.flow_budgets.read().await;
         Ok(budgets
-            .get(&(context.clone(), peer.clone()))
-            .cloned()
+            .get(&(context.clone(), *peer))
+            .copied()
             .unwrap_or_default())
     }
 
@@ -85,8 +85,8 @@ impl JournalEffects for MemoryJournalHandler {
         budget: &FlowBudget,
     ) -> Result<FlowBudget, AuraError> {
         let mut budgets = self.flow_budgets.write().await;
-        budgets.insert((context.clone(), peer.clone()), budget.clone());
-        Ok(budget.clone())
+        budgets.insert((context.clone(), *peer), *budget);
+        Ok(*budget)
     }
 
     async fn charge_flow_budget(
@@ -99,8 +99,8 @@ impl JournalEffects for MemoryJournalHandler {
         // Real implementation would check headroom and update
         let budgets = self.flow_budgets.read().await;
         Ok(budgets
-            .get(&(context.clone(), peer.clone()))
-            .cloned()
+            .get(&(context.clone(), *peer))
+            .copied()
             .unwrap_or_default())
     }
 }

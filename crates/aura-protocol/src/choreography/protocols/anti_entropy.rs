@@ -591,7 +591,7 @@ where
 
     // Phase 1: Request digest
     let digest_request = DigestRequest {
-        session_id: session_id.clone(),
+        session_id,
         requester_id: adapter.device_id(),
     };
 
