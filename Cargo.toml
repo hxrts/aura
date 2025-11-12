@@ -9,6 +9,7 @@ exclude = [
 
 members = [
     "crates/aura-agent",
+    "crates/aura-macros",
     "crates/aura-verify",
     "crates/aura-protocol",
     "crates/aura-effects",
