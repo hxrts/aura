@@ -197,11 +197,11 @@ impl StorageOperations {
             .await
             .map_err(|e| AuraError::storage(e.to_string()))?;
 
-        effects.log_debug(&format!(
+        let _ = effects.log_debug(&format!(
             "Stored {} bytes with key: {}",
             data.len(),
             full_key
-        ));
+        )).await;
         Ok(())
     }
 

@@ -21,11 +21,11 @@ pub async fn handle_init(
         ),
     );
 
-    effects.log_info(&format!("Output directory: {}", output.display()));
+    let _ = effects.log_info(&format!("Output directory: {}", output.display())).await;
 
     // Validate parameters through effects
     if threshold > num_devices {
-        effects.log_error("Threshold cannot be greater than number of devices");
+        let _ = effects.log_error("Threshold cannot be greater than number of devices").await;
         return Err(anyhow::anyhow!(
             "Invalid parameters: threshold ({}) > num_devices ({})",
             threshold,
@@ -34,7 +34,7 @@ pub async fn handle_init(
     }
 
     if threshold == 0 {
-        effects.log_error("Threshold must be greater than 0");
+        let _ = effects.log_error("Threshold must be greater than 0").await;
         return Err(anyhow::anyhow!("Invalid threshold: 0"));
     }
 
@@ -65,11 +65,11 @@ pub async fn handle_init(
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create device config {}: {}", i, e))?;
 
-        effects.log_info(&format!("Created device_{}.toml", i));
+        let _ = effects.log_info(&format!("Created device_{}.toml", i)).await;
     }
 
     // Success message
-    effects.log_info("Account initialized successfully!");
+    let _ = effects.log_info("Account initialized successfully!").await;
 
     Ok(())
 }
@@ -105,7 +105,7 @@ async fn create_placeholder_ledger(
         threshold, num_devices, timestamp
     );
 
-    effects.log_info("Created placeholder ledger");
+    let _ = effects.log_info("Created placeholder ledger").await;
 
     Ok(ledger_data.into_bytes())
 }

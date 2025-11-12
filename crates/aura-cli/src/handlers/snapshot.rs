@@ -15,7 +15,7 @@ pub async fn handle_snapshot(effects: AuraEffectSystem, action: &SnapshotAction)
 
 async fn propose_snapshot(effects: AuraEffectSystem) -> Result<()> {
     let device_id = effects.device_id();
-    effects.log_info("Starting snapshot proposal…");
+    let _ = effects.log_info("Starting snapshot proposal…").await;
     // Move the effect system into the agent runtime so maintenance wiring is reused.
     let agent = AuraAgent::new(effects, device_id);
     let outcome = agent
