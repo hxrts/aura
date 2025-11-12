@@ -49,6 +49,14 @@ impl Default for E2eTestConfig {
     }
 }
 
+/// Temporary device info for avoiding borrowing issues
+#[derive(Debug, Clone)]
+struct TempDeviceInfo {
+    device_id: DeviceId,
+    name: String,
+    transport_config: NetworkConfig,
+}
+
 /// Test device in the SBB network
 #[derive(Debug)]
 pub struct TestDevice {
@@ -140,7 +148,7 @@ impl TestDevice {
         trust_level: TrustLevel,
         is_guardian: bool,
     ) -> AuraResult<()> {
-        let relationship_id = RelationshipId::new();
+        let relationship_id = RelationshipId::new([0u8; 32]);
 
         if is_guardian {
             self.sbb_system
@@ -170,6 +178,49 @@ impl TestDevice {
             "{} added {} as {} (trust: {:?})",
             self.name,
             peer_device.name,
+            if is_guardian { "guardian" } else { "friend" },
+            trust_level
+        );
+
+        Ok(())
+    }
+
+    /// Add relationship using temporary device info (avoids borrowing issues)
+    async fn add_relationship_from_info(
+        &mut self,
+        peer_info: &TempDeviceInfo,
+        trust_level: TrustLevel,
+        is_guardian: bool,
+    ) -> AuraResult<()> {
+        let relationship_id = RelationshipId::new([0u8; 32]);
+
+        if is_guardian {
+            self.sbb_system
+                .add_guardian(peer_info.device_id, relationship_id, trust_level)
+                .await;
+        } else {
+            self.sbb_system
+                .add_friend(peer_info.device_id, relationship_id, trust_level)
+                .await;
+        }
+
+        // Add peer to transport (simulate network connectivity)
+        let peer_addr = format!("{}:{}", peer_info.transport_config.bind_addr, peer_info.transport_config.port)
+            .parse()
+            .map_err(|e| {
+                aura_core::AuraError::coordination_failed(format!("Invalid address: {}", e))
+            })?;
+
+        self.transport
+            .write()
+            .await
+            .add_peer(peer_info.device_id, peer_addr)
+            .await?;
+
+        tracing::info!(
+            "{} added {} as {} (trust: {:?})",
+            self.name,
+            peer_info.name,
             if is_guardian { "guardian" } else { "friend" },
             trust_level
         );
@@ -257,21 +308,47 @@ impl SbbTestNetwork {
 
         // Alice adds Bob as friend
         {
-            let bob_device = self.devices.get(&bob_id).unwrap();
+            // Clone the necessary data from bob_device to avoid simultaneous borrows
+            let (bob_device_id, bob_name, bob_transport_config) = {
+                let bob_device = self.devices.get(&bob_id).unwrap();
+                let transport_config = bob_device.transport.read().await.config().clone();
+                (bob_device.device_id, bob_device.name.clone(), transport_config)
+            };
+            
+            // Create a temporary device-like struct with just the needed data
+            let temp_bob = TempDeviceInfo {
+                device_id: bob_device_id,
+                name: bob_name,
+                transport_config: bob_transport_config,
+            };
+            
             self.devices
                 .get_mut(&alice_id)
                 .unwrap()
-                .add_relationship(bob_device, self.config.trust_level, false)
+                .add_relationship_from_info(&temp_bob, self.config.trust_level, false)
                 .await?;
         }
 
         // Bob adds Alice as friend
         {
-            let alice_device = self.devices.get(&alice_id).unwrap();
+            // Clone the necessary data from alice_device to avoid simultaneous borrows
+            let (alice_device_id, alice_name, alice_transport_config) = {
+                let alice_device = self.devices.get(&alice_id).unwrap();
+                let transport_config = alice_device.transport.read().await.config().clone();
+                (alice_device.device_id, alice_device.name.clone(), transport_config)
+            };
+            
+            // Create a temporary device-like struct with just the needed data
+            let temp_alice = TempDeviceInfo {
+                device_id: alice_device_id,
+                name: alice_name,
+                transport_config: alice_transport_config,
+            };
+            
             self.devices
                 .get_mut(&bob_id)
                 .unwrap()
-                .add_relationship(alice_device, self.config.trust_level, false)
+                .add_relationship_from_info(&temp_alice, self.config.trust_level, false)
                 .await?;
         }
 
@@ -281,21 +358,45 @@ impl SbbTestNetwork {
 
             // Bob adds Charlie as friend
             {
-                let charlie_device = self.devices.get(&charlie_id).unwrap();
+                // Clone the necessary data from charlie_device to avoid simultaneous borrows
+                let (charlie_device_id, charlie_name, charlie_transport_config) = {
+                    let charlie_device = self.devices.get(&charlie_id).unwrap();
+                    let transport_config = charlie_device.transport.read().await.config().clone();
+                    (charlie_device.device_id, charlie_device.name.clone(), transport_config)
+                };
+                
+                let temp_charlie = TempDeviceInfo {
+                    device_id: charlie_device_id,
+                    name: charlie_name,
+                    transport_config: charlie_transport_config,
+                };
+                
                 self.devices
                     .get_mut(&bob_id)
                     .unwrap()
-                    .add_relationship(charlie_device, self.config.trust_level, false)
+                    .add_relationship_from_info(&temp_charlie, self.config.trust_level, false)
                     .await?;
             }
 
             // Charlie adds Bob as guardian (preferred for reliability)
             {
-                let bob_device = self.devices.get(&bob_id).unwrap();
+                // Clone the necessary data from bob_device to avoid simultaneous borrows
+                let (bob_device_id, bob_name, bob_transport_config) = {
+                    let bob_device = self.devices.get(&bob_id).unwrap();
+                    let transport_config = bob_device.transport.read().await.config().clone();
+                    (bob_device.device_id, bob_device.name.clone(), transport_config)
+                };
+                
+                let temp_bob = TempDeviceInfo {
+                    device_id: bob_device_id,
+                    name: bob_name,
+                    transport_config: bob_transport_config,
+                };
+                
                 self.devices
                     .get_mut(&charlie_id)
                     .unwrap()
-                    .add_relationship(bob_device, self.config.trust_level, true)
+                    .add_relationship_from_info(&temp_bob, self.config.trust_level, true)
                     .await?;
             }
         }
@@ -314,13 +415,25 @@ impl SbbTestNetwork {
                     let device_a_id = device_ids[i];
                     let device_b_id = device_ids[j];
 
-                    let device_b = self.devices.get(&device_b_id).unwrap();
+                    // Clone the necessary data from device_b to avoid simultaneous borrows
+                    let (device_b_device_id, device_b_name, device_b_transport_config) = {
+                        let device_b = self.devices.get(&device_b_id).unwrap();
+                        let transport_config = device_b.transport.read().await.config().clone();
+                        (device_b.device_id, device_b.name.clone(), transport_config)
+                    };
+                    
+                    let temp_device_b = TempDeviceInfo {
+                        device_id: device_b_device_id,
+                        name: device_b_name,
+                        transport_config: device_b_transport_config,
+                    };
+                    
                     let is_guardian = j == 0; // Make first device a guardian
 
                     self.devices
                         .get_mut(&device_a_id)
                         .unwrap()
-                        .add_relationship(device_b, self.config.trust_level, is_guardian)
+                        .add_relationship_from_info(&temp_device_b, self.config.trust_level, is_guardian)
                         .await?;
                 }
             }

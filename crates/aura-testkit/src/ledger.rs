@@ -4,7 +4,8 @@
 //! (CRDT-based account ledgers) across the Aura test suite.
 
 use aura_core::{AccountId, DeviceId};
-use aura_crypto::Effects;
+use aura_core::effects::{RandomEffects, TimeEffects};
+use crate::Effects;
 use aura_journal::semilattice::ModernAccountState as AccountState;
 use aura_journal::{DeviceMetadata, DeviceType};
 use ed25519_dalek::SigningKey;
@@ -46,20 +47,26 @@ pub struct LedgerTestFixture {
 
 impl LedgerTestFixture {
     /// Create a new ledger test fixture with a specific account ID
-    pub fn new(account_id: AccountId) -> Self {
+    pub async fn new(account_id: AccountId) -> Self {
         // Create a minimal AccountState for testing
         let effects = Effects::for_test("ledger_test");
-        let key_bytes = effects.random_bytes::<32>();
+        let key_bytes = effects.random_bytes_32().await;
         let signing_key = SigningKey::from_bytes(&key_bytes);
         let group_public_key = signing_key.verifying_key();
 
+        // Generate deterministic UUID from random bytes
+        let uuid_bytes = effects.random_bytes(16).await;
+        let uuid_array: [u8; 16] = uuid_bytes.try_into().unwrap();
+        let uuid = Uuid::from_bytes(uuid_array);
+
+        let timestamp = effects.current_timestamp_millis().await;
         let device_metadata = DeviceMetadata {
-            device_id: DeviceId(effects.gen_uuid()),
+            device_id: DeviceId(uuid),
             device_name: "Test Device".to_string(),
             device_type: DeviceType::Native,
             public_key: group_public_key,
-            added_at: effects.now().unwrap(),
-            last_seen: effects.now().unwrap(),
+            added_at: timestamp,
+            last_seen: timestamp,
             dkd_commitment_proofs: Default::default(),
             next_nonce: 0,
             key_share_epoch: 0,
@@ -80,12 +87,12 @@ impl LedgerTestFixture {
     }
 
     /// Create a random ledger fixture
-    pub fn random() -> Self {
+    pub async fn random() -> Self {
         let hash_input = "ledger-fixture-random";
         let hash_bytes = blake3::hash(hash_input.as_bytes());
         let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
         let account_id = AccountId(uuid);
-        Self::new(account_id)
+        Self::new(account_id).await
     }
 
     /// Get the account ID
@@ -110,17 +117,18 @@ impl LedgerTestFixture {
         device_type: DeviceType,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let effects = Effects::for_test("add_device");
-        let key_bytes = effects.random_bytes::<32>();
+        let key_bytes = effects.random_bytes_32().await;
         let signing_key = SigningKey::from_bytes(&key_bytes);
         let public_key = signing_key.verifying_key();
 
+        let timestamp = effects.current_timestamp_millis().await;
         let _metadata = DeviceMetadata {
             device_id,
             device_name: format!("Device {:?}", device_id),
             device_type,
             public_key,
-            added_at: effects.now().unwrap(),
-            last_seen: effects.now().unwrap(),
+            added_at: timestamp,
+            last_seen: timestamp,
             dkd_commitment_proofs: Default::default(),
             next_nonce: 0,
             key_share_epoch: 0,
@@ -199,7 +207,7 @@ impl LedgerBuilder {
             AccountId(uuid)
         });
 
-        let mut fixture = LedgerTestFixture::new(account_id);
+        let mut fixture = LedgerTestFixture::new(account_id).await;
 
         // Add devices to the ledger
         for i in 0..self.device_count {
@@ -231,13 +239,13 @@ pub mod ledger_helpers {
     use super::*;
 
     /// Create a single test ledger with default configuration
-    pub fn test_ledger() -> LedgerTestFixture {
-        LedgerTestFixture::random()
+    pub async fn test_ledger() -> LedgerTestFixture {
+        LedgerTestFixture::random().await
     }
 
     /// Create a test ledger with a specific account ID
-    pub fn test_ledger_for_account(account_id: AccountId) -> LedgerTestFixture {
-        LedgerTestFixture::new(account_id)
+    pub async fn test_ledger_for_account(account_id: AccountId) -> LedgerTestFixture {
+        LedgerTestFixture::new(account_id).await
     }
 
     /// Create a test ledger with multiple devices
@@ -275,7 +283,7 @@ pub mod ledger_helpers {
             .build()
             .await?;
 
-        let ledger2 = LedgerTestFixture::new(account_id);
+        let ledger2 = LedgerTestFixture::new(account_id).await;
 
         Ok((ledger1, ledger2))
     }
@@ -295,9 +303,9 @@ pub mod ledger_helpers {
             .await?;
 
         Ok((
-            LedgerTestFixture::new(account_id),
-            LedgerTestFixture::new(account_id),
-            LedgerTestFixture::new(account_id),
+            LedgerTestFixture::new(account_id).await,
+            LedgerTestFixture::new(account_id).await,
+            LedgerTestFixture::new(account_id).await,
         ))
     }
 
@@ -345,7 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ledger_fixture_creation() {
-        let ledger = LedgerTestFixture::random();
+        let ledger = LedgerTestFixture::random().await;
         assert_eq!(ledger.devices().len(), 0);
     }
 
@@ -375,8 +383,8 @@ mod tests {
     #[tokio::test]
     async fn test_ledger_consistency() {
         let account_id = AccountId::new();
-        let ledger1 = LedgerTestFixture::new(account_id);
-        let ledger2 = LedgerTestFixture::new(account_id);
+        let ledger1 = LedgerTestFixture::new(account_id).await;
+        let ledger2 = LedgerTestFixture::new(account_id).await;
 
         let ledgers = vec![ledger1, ledger2];
         let consistent = ledger_helpers::verify_ledger_consistency(&ledgers)
@@ -388,7 +396,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ledger_helpers() {
-        let ledger = ledger_helpers::test_ledger();
+        let ledger = ledger_helpers::test_ledger().await;
         assert!(!ledger.account_id().0.is_nil());
 
         let ledger_with_devices = ledger_helpers::test_ledger_with_devices(3)

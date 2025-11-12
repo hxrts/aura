@@ -512,7 +512,7 @@ mod tests {
     use super::*;
     use aura_core::{semilattice::Bottom, DeviceId};
     use aura_mpst::journal_coupling::JournalAnnotation;
-    use aura_protocol::handlers::ExecutionMode;
+    use crate::handlers::ExecutionMode;
 
     #[tokio::test]
     async fn test_journal_coupler_creation() {

@@ -3,6 +3,7 @@
 use aura_recovery::types::RecoveryEvidence;
 use aura_recovery::{RecoverySessionState, RecoverySessionStatus};
 use std::fmt::Write;
+use std::time::SystemTime;
 
 /// Format recovery evidence for CLI display
 pub fn format_recovery_evidence(evidence: &RecoveryEvidence) -> String {
@@ -322,7 +323,7 @@ pub fn format_recovery_dashboard(
 /// Helper to format field values with proper padding
 fn format_field(value: &str, max_width: usize) -> String {
     if value.len() >= max_width {
-        format!("{}...", &value[..max_width.saturating_sub(3)])
+        format!("{}...║", &value[..max_width.saturating_sub(3)])
     } else {
         format!("{:<width$}║", value, width = max_width)
     }

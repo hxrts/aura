@@ -11,8 +11,6 @@ Aura's system architecture translates mathematical foundations into practical im
 3. Choreographic Protocol Design - Session-typed distributed coordination
 4. Crate Organization - Clean dependency structure and separation of concerns
 
----
-
 ## Terminology & Layering
 
 For all architectural terms and concepts, see the project glossary.
@@ -42,7 +40,7 @@ See the journal system documentation for explanation of Journal vs Ledger archit
 
 ### Protocol Stack Layers
 
-- Choreographies - Global protocol specifications executable via rumpsteak-aura bridge
+- Choreographies - Global protocol specifications executable via aura-choreography bridge
 - Session Types - Local projections of choreographies with complete infrastructure
 - Protocols - Manual async implementations with choreographic integration
 
@@ -58,9 +56,7 @@ See the authentication and authorization documentation for complete architecture
 
 ### Projection
 
-Aura treats choreographies as the source of truth with working projection infrastructure and runtime bridge. `aura-mpst` provides choreography execution via rumpsteak projection with FlowBudget charges and leakage guards. The guard chain integrates with choreographic execution.
-
----
+Aura treats choreographies as the source of truth with working projection infrastructure and runtime bridge. `aura-mpst` provides choreography execution via aura-choreography projection with FlowBudget charges and leakage guards. The guard chain integrates with choreographic execution.
 
 ## 1. Unified Effect System Architecture
 
@@ -170,19 +166,20 @@ The unified effect system integrates with Aura's session type algebra for choreo
 
 ```mermaid
 graph TD
-    A[Session Type Algebra (Global Protocol)] --> B{Projection};
-    B --> C[Local Session Types (Per-Role Protocols)];
+    A[Session Type Algebra - Global Protocol] --> B{Projection};
+    B --> C[Local Session Types - Per-Role Protocols];
     C --> D{Execution via Effect Interpreter Interface};
-    D --> E[Effect Algebra (CryptoEffects, NetworkEffects, etc.)];
+    D --> E[Effect Algebra - CryptoEffects, NetworkEffects, etc.];
     E --> F[Interpretation by Handler Implementations];
 ```
 
 Static Path generates direct effect calls from choreographies:
 ```rust
-choreography! {
+aura_choreography! {
+    #[namespace = "p2p_dkd"]
     protocol P2PDkd {
         roles: Alice, Bob;
-        Alice -> Bob: Hello;
+        Alice[guard_capability = "send_hello", flow_cost = 10] -> Bob: Hello(message: String);
     }
 }
 ```
@@ -191,7 +188,7 @@ The macro generates compile-time session types that map directly to effect syste
 Dynamic Path interprets session types at runtime:
 ```rust
 let Roles(mut alice, mut bob) = setup();
-rumpsteak_aura::try_session(&mut alice, |session| async move {
+aura_choreography::try_session(&mut alice, |session| async move {
     execute_alice_role(session, &effect_system).await
 }).await?
 ```
@@ -427,8 +424,6 @@ FlowBudget { limit: u64, spent: u64, epoch: Epoch }
 ```
 Invariants: charge-before-send; no observable without charge; deterministic replenishment per epoch (see `docs/004_info_flow_model.md`). Cover traffic is explicitly deferred in 1.0; see `docs/004_info_flow_model.md` §Cover Traffic Strategy.
 
----
-
 ## 2. CRDT Implementation Architecture
 
 ### 2.1 4-Layer Architecture
@@ -452,7 +447,7 @@ The CRDT architecture spans four layers:
 
 **Application Semilattice Layer** (`aura-journal/src/semilattice/`) implements domain-specific CRDT types (`JournalMap`, `AccountState`, `DeviceRegistry`, `CapabilitySet`). Operation logs support replay and recovery.
 
-Projection and runtime glue connecting these layers lives in `crates/aura-mpst/src/runtime.rs` and `crates/aura-protocol/src/handlers/rumpsteak_handler.rs`.
+Projection and runtime glue connecting these layers lives in `crates/aura-mpst/src/runtime.rs` and `crates/aura-protocol/src/handlers/choreography_handler.rs`.
 
 ### 2.3 Generic Handlers
 
@@ -547,13 +542,11 @@ let prog = Program::new()
 ```
 This creates atomic protocol sequences that maintain causal consistency across all participants.
 
----
-
-## 3. Rumpsteak-Aura Choreographic System
+## 3. Aura Choreographic System
 
 ### 3.1 System Overview
 
-Rumpsteak-Aura is Aura's choreographic programming system. It enables writing distributed protocols as global specifications that automatically compile to local implementations for each participant.
+Aura's choreographic programming system enables writing distributed protocols as global specifications that automatically compile to local implementations for each participant.
 
 The system translates global protocol descriptions into session-typed Rust code. This prevents communication errors like deadlocks while enabling optimization through asynchronous subtyping.
 
@@ -561,11 +554,12 @@ The system translates global protocol descriptions into session-typed Rust code.
 
 **DSL Parser** converts choreographic syntax into Abstract Syntax Trees:
 ```rust
-choreography! {
-    PingPong {
-        roles: Alice, Bob
-        Alice -> Bob: Ping
-        Bob -> Alice: Pong
+aura_choreography! {
+    #[namespace = "ping_pong"]
+    protocol PingPong {
+        roles: Alice, Bob;
+        Alice[guard_capability = "send_ping", flow_cost = 5] -> Bob: Ping(data: Vec<u8>);
+        Bob[guard_capability = "send_pong", flow_cost = 5] -> Alice: Pong(response: Vec<u8>);
     }
 }
 ```
@@ -599,7 +593,7 @@ Handlers implement protocol execution using different transport mechanisms while
 
 ### 3.3 Integration with Aura Effects
 
-Rumpsteak-Aura integrates with Aura's unified effect system through handler adapters. Choreographic operations map to effect system calls:
+Aura's choreographic system integrates with Aura's unified effect system through handler adapters. Choreographic operations map to effect system calls:
 
 ```rust
 // Choreographic send operation
@@ -618,7 +612,7 @@ Leakage Budgets track privacy costs with annotations specifying external, neighb
 
 ### 3.3.1 AuraHandlerAdapter Implementation
 
-The AuraHandlerAdapter provides the concrete bridge between choreographic session types and the Aura effect system. This adapter lives in aura-protocol/src/choreography/aura_handler_adapter.rs and serves as the primary integration point for executing rumpsteak-generated protocols.
+The AuraHandlerAdapter provides the concrete bridge between choreographic session types and the Aura effect system. This adapter lives in aura-protocol/src/choreography/aura_handler_adapter.rs and serves as the primary integration point for executing choreography-generated protocols.
 
 The adapter maintains several key pieces of state to enable choreographic execution. The `device_id` field identifies the local participant executing the protocol. The `role_mapping` table converts choreographic role names like Alice or Bob into concrete DeviceId values representing physical devices in the network. The `flow_contexts` map associates each peer device with a ContextId governing budget and capability rules for that communication channel. The `guard_profiles` registry stores SendGuardProfile configurations for specific message types, specifying required capabilities, leakage budgets, delta facts for journal updates, and flow costs. The `default_guard` provides fallback settings when no message-specific profile exists.
 
@@ -640,8 +634,6 @@ Receipt tracking provides cryptographic proof of budget charges for multi-hop sc
 
 **Simulation Handler** enables controlled testing with configurable fault injection including delays, message drops, and Byzantine failures.
 
----
-
 ## 4. Protocol Stack Architecture
 
 ### 4.1 Three-Layer Protocol Stack
@@ -650,11 +642,11 @@ Aura's protocol layer implements a three-tier architecture that separates global
 
 ```mermaid
 graph TD
-    A["<b>Choreographies</b><br/>Global protocol specifications<br/>choreography! macro"] --> B["<b>Specification</b><br/>Documentation"]
-    A -->|projection<br/>planned| C["<b>Session Types</b><br/>LocalSessionType per role<br/>Generated per-role protocols"]
-    C --> D["<b>Infrastructure</b><br/>Exists"]
+    A["<b>Choreographies</b><br/>Global protocol specifications<br/>choreography! macro"] --> B["<b>Specification</b>"]
+    A -->|projection| C["<b>Session Types</b><br/>LocalSessionType per role<br/>Generated per-role protocols"]
+    C --> D["<b>Patterns</b>"]
     C -->|implementation| E["<b>Protocols</b><br/>async fn execute_dkd_alice<br/>Manual async protocol impls"]
-    E --> F["<b>Working Code</b><br/>Current"]
+    E --> F["<b>Concrete Code</b>"]
 
     style A fill:#e1f5ff
     style C fill:#fff3e0
@@ -663,7 +655,7 @@ graph TD
 
 ### 4.2 Protocol Stack Components
 
-**Choreographies** - Global protocol specifications using `choreography!` macro:
+**Choreographies** - Global protocol specifications using `aura_choreography!` macro:
 - **Location**: [`crates/aura-protocol/src/choreography/protocols/`](../crates/aura-protocol/src/choreography/protocols/)
 - **Example**: [`crates/aura-protocol/src/choreography/protocols/anti_entropy.rs`](../crates/aura-protocol/src/choreography/protocols/anti_entropy.rs)
 
@@ -680,12 +672,19 @@ graph TD
 Protocols can be implemented either as choreographies for specification clarity or as manual async implementations for flexibility. Both patterns integrate fully with the guard chain:
 
 ```rust
+/// Sealed supertrait for anti-entropy effects
+pub trait AntiEntropyEffects: NetworkEffects + StorageEffects + JournalEffects {}
+impl<T> AntiEntropyEffects for T where T: NetworkEffects + StorageEffects + JournalEffects {}
+
 // Choreographic protocol specification
-choreography! {
+aura_choreography! {
+    #[namespace = "anti_entropy"]
     protocol AntiEntropy {
         roles: Alice, Bob;
-        Alice -> Bob: StateSync(delta) with_guards(cap_guard, flow_guard);
-        Bob -> Alice: AckSync(receipt) with_journal_coupling;
+        Alice[guard_capability = "sync_state", flow_cost = 100, journal_facts = "state_synced"] 
+        -> Bob: StateSync(delta: JournalDelta);
+        Bob[guard_capability = "ack_sync", flow_cost = 20, journal_facts = "sync_acknowledged"] 
+        -> Alice: AckSync(receipt: SyncReceipt);
     }
 }
 
@@ -710,8 +709,6 @@ The session type infrastructure includes Aura-specific extensions:
 ### 4.5 Effect System Integration
 
 Choreographic protocols execute through the unified effect system for operations like message transmission, journal updates, and signature verification. This provides testability through mock effects, deterministic simulation, and clean protocol composition.
-
----
 
 ## 5. Authentication vs Authorization Flow
 
@@ -797,8 +794,6 @@ pub trait AgentEffects: Send + Sync {
 
 See [`docs/101_auth_authz.md`](101_auth_authz.md) for complete architectural details and usage patterns.
 
----
-
 ## 6. Choreographic Protocol Design
 
 ### 6.1 Free Algebra Property
@@ -842,8 +837,6 @@ Protocol messages can trigger replicated state changes through journal coupling.
 ### 6.6 Leakage Budgets
 
 Privacy budgets track external, neighbor, and group leakage costs per protocol transition. Handler policies enforce aggregate leakage thresholds through traffic shaping and padding decisions.
-
----
 
 ## 7. Crate Organization and Dependencies
 
@@ -896,8 +889,6 @@ The workspace uses layered dependencies from foundation types through domain log
 **Runtime Composition (`aura-agent`)** provides how to assemble components into working systems - the runtime libraries that applications use.
 
 **Applications (`aura-cli`)** provide what users actually run - the main entry points that instantiate and drive runtime systems.
-
----
 
 ## 8. Implementation Guidelines
 

@@ -48,7 +48,7 @@ impl TreeEffects for ChoreographicTreeEffectHandler {
 
         // TODO: Implement actual commitment retrieval
         warn!("Tree commitment retrieval not implemented - returning zeros");
-        Ok(Hash32::new([0u8; 32]))
+        Ok(aura_core::Hash32([0u8; 32]))
     }
 
     async fn get_current_epoch(&self) -> AuraResult<u64> {
@@ -68,7 +68,7 @@ impl TreeEffects for ChoreographicTreeEffectHandler {
             "Tree operation applied: epoch={}, op={:?}",
             op.op.parent_epoch, op.op.op
         );
-        Ok(Hash32::new([0u8; 32])) // Placeholder commitment
+        Ok(aura_core::Hash32([0u8; 32])) // Placeholder commitment
     }
 
     async fn verify_aggregate_sig(&self, op: &AttestedOp, _state: &TreeState) -> AuraResult<bool> {

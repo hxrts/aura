@@ -15,6 +15,7 @@ aura-mpst = { path = "../aura-mpst" }
 aura-wot = { path = "../aura-wot" }
 aura-authenticate = { path = "../aura-authenticate" }
 aura-journal = { path = "../aura-journal" }
+aura-macros = { path = "../aura-macros" }
 rumpsteak-aura = { workspace = true }
 rumpsteak-aura-choreography = { workspace = true }
 serde = { workspace = true }

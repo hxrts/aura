@@ -46,11 +46,24 @@ summary:
 
 # Build the book after regenerating the summary
 book: summary
-    mdbook build
+    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c 'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build'
 
 # Serve locally with live reload
 serve-book: summary
-    mdbook serve --open
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Kill any existing mdbook servers
+    if pgrep -x mdbook > /dev/null; then
+        echo "Stopping existing mdbook server..."
+        pkill mdbook
+        sleep 1
+    fi
+
+    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c 'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook serve --open'
+
+# Serve documentation with live reload (alias for serve-book)
+serve: serve-book
 
 # Build all crates
 build:

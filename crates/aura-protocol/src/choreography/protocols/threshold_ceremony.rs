@@ -489,20 +489,22 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode {
                         leaf_id: LeafId(1),
+                        device_id: DeviceId::new(),
                         role: LeafRole::Device,
                         public_key: vec![1, 2, 3],
                         meta: vec![],
                     },
                     under: NodeIndex(0),
                 },
+                version: 1,
             },
-            parent_binding: ParentBinding::new(1, [1u8; 32], [2u8; 32]),
+            parent_binding: ParentBinding::new(1, aura_core::Hash32([1u8; 32]), aura_core::Hash32([2u8; 32])),
         }
     }
 
     #[test]
     fn test_parent_binding_message() {
-        let binding = ParentBinding::new(5, [1u8; 32], [2u8; 32]);
+        let binding = ParentBinding::new(5, aura_core::Hash32([1u8; 32]), aura_core::Hash32([2u8; 32]));
         let op_bytes = vec![3, 4, 5];
         let msg = binding.binding_message(&op_bytes);
 

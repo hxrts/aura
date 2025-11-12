@@ -5,7 +5,8 @@
 
 use crate::device::DeviceSetBuilder;
 use aura_core::{AccountId, DeviceId};
-use aura_crypto::Effects;
+use aura_core::effects::{RandomEffects, TimeEffects};
+use crate::Effects;
 use aura_journal::semilattice::ModernAccountState as AccountState;
 use aura_journal::{DeviceMetadata, DeviceType};
 use ed25519_dalek::SigningKey;
@@ -149,9 +150,9 @@ impl AccountStateFactory {
     }
 
     /// Add a device to the account state
-    pub fn add_device(mut self, device_id: DeviceId, device_type: DeviceType) -> Self {
+    pub async fn add_device(mut self, device_id: DeviceId, device_type: DeviceType) -> Self {
         let effects = Effects::for_test("factory_device");
-        let key_bytes = effects.random_bytes::<32>();
+        let key_bytes = effects.random_bytes_32().await;
         let signing_key = SigningKey::from_bytes(&key_bytes);
         let public_key = signing_key.verifying_key();
 
@@ -160,8 +161,8 @@ impl AccountStateFactory {
             device_name: format!("Device {:?}", device_id),
             device_type,
             public_key,
-            added_at: effects.now().unwrap(),
-            last_seen: effects.now().unwrap(),
+            added_at: effects.current_timestamp_millis().await,
+            last_seen: effects.current_timestamp_millis().await,
             dkd_commitment_proofs: Default::default(),
             next_nonce: 0,
             key_share_epoch: 0,
@@ -172,16 +173,16 @@ impl AccountStateFactory {
     }
 
     /// Add multiple devices of a specific type
-    pub fn add_devices(mut self, count: usize, device_type: DeviceType) -> Self {
+    pub async fn add_devices(mut self, count: usize, device_type: DeviceType) -> Self {
         for _ in 0..count {
             let device_id = DeviceId::new();
-            self = self.add_device(device_id, device_type);
+            self = self.add_device(device_id, device_type).await;
         }
         self
     }
 
     /// Build the account state
-    pub fn build(self) -> AccountState {
+    pub async fn build(self) -> AccountState {
         // Create AccountState using the new constructor
         // We need at least one device
         let initial_device = if let Some(first_device) = self.devices.first() {
@@ -189,7 +190,7 @@ impl AccountStateFactory {
         } else {
             // Create a default device if none exists
             let effects = Effects::for_test("factory_default_device");
-            let key_bytes = effects.random_bytes::<32>();
+            let key_bytes = effects.random_bytes_32().await;
             let signing_key = SigningKey::from_bytes(&key_bytes);
             let public_key = signing_key.verifying_key();
 
@@ -198,8 +199,8 @@ impl AccountStateFactory {
                 device_name: "Default Device".to_string(),
                 device_type: DeviceType::Native,
                 public_key,
-                added_at: effects.now().unwrap(),
-                last_seen: effects.now().unwrap(),
+                added_at: effects.current_timestamp().await,
+                last_seen: effects.current_timestamp().await,
                 dkd_commitment_proofs: Default::default(),
                 next_nonce: 0,
                 key_share_epoch: 0,
@@ -259,7 +260,7 @@ impl MultiDeviceScenarioFactory {
     }
 
     /// Build all test data components
-    pub fn build(self) -> MultiDeviceScenarioData {
+    pub async fn build(self) -> MultiDeviceScenarioData {
         // Build devices
         let devices = DeviceSetBuilder::new(self.device_count)
             .with_seed(self.base_seed)
@@ -273,10 +274,10 @@ impl MultiDeviceScenarioFactory {
             } else {
                 DeviceType::Browser
             };
-            account_builder = account_builder.add_device(device.device_id(), device_type);
+            account_builder = account_builder.add_device(device.device_id(), device_type).await;
         }
 
-        let account_state = account_builder.build();
+        let account_state = account_builder.build().await;
 
         MultiDeviceScenarioData {
             account_id: self.account_id,
@@ -335,12 +336,12 @@ pub mod helpers {
     }
 
     /// Create a complete multi-device scenario
-    pub fn multi_device_scenario(device_count: usize, threshold: u16) -> MultiDeviceScenarioData {
-        MultiDeviceScenarioFactory::new(device_count, threshold).build()
+    pub async fn multi_device_scenario(device_count: usize, threshold: u16) -> MultiDeviceScenarioData {
+        MultiDeviceScenarioFactory::new(device_count, threshold).build().await
     }
 
     /// Create a multi-device scenario with custom account
-    pub fn multi_device_scenario_with_account(
+    pub async fn multi_device_scenario_with_account(
         account_id: AccountId,
         device_count: usize,
         threshold: u16,
@@ -348,6 +349,7 @@ pub mod helpers {
         MultiDeviceScenarioFactory::new(device_count, threshold)
             .with_account_id(account_id)
             .build()
+            .await
     }
 
     /// Get all available scenario names
@@ -402,20 +404,23 @@ mod tests {
         assert_eq!(config.threshold, 2);
     }
 
-    #[test]
-    fn test_account_state_factory() {
+    #[tokio::test]
+    async fn test_account_state_factory() {
         let account_id = AccountId::new();
         let state = AccountStateFactory::new(account_id)
             .add_device(DeviceId::new(), DeviceType::Native)
+            .await
             .add_device(DeviceId::new(), DeviceType::Browser)
-            .build();
+            .await
+            .build()
+            .await;
 
         assert_eq!(state.device_registry.devices.len(), 2);
     }
 
-    #[test]
-    fn test_multi_device_scenario_factory() {
-        let scenario = MultiDeviceScenarioFactory::new(3, 2).build();
+    #[tokio::test]
+    async fn test_multi_device_scenario_factory() {
+        let scenario = MultiDeviceScenarioFactory::new(3, 2).build().await;
 
         assert_eq!(scenario.devices.len(), 3);
         assert_eq!(scenario.threshold, 2);
@@ -443,9 +448,9 @@ mod tests {
         assert!(scenarios.contains(&"threshold-3-5"));
     }
 
-    #[test]
-    fn test_scenario_integrity_verification() {
-        let scenario = helpers::multi_device_scenario(5, 3);
+    #[tokio::test]
+    async fn test_scenario_integrity_verification() {
+        let scenario = helpers::multi_device_scenario(5, 3).await;
         assert!(helpers::verify_scenario_integrity(&scenario));
     }
 }

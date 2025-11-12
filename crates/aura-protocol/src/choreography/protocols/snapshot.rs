@@ -868,6 +868,8 @@ mod tests {
             proposal_id: ProposalId::new_random(),
             cut: Cut::new(10, [1u8; 32], [2u8; 32], LeafId(1)),
             proposer: DeviceId::new(),
+            protocol_version: ProtocolVersion::SNAPSHOT_GC_CAPABLE,
+            enables_gc: true,
         };
 
         let serialized = serde_json::to_string(&proposal).unwrap();

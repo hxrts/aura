@@ -147,7 +147,7 @@ impl AuraHandler for UnifiedAuraHandlerBridge {
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        ctx: &mut AuraContext,
+        _ctx: &mut AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError> {
         // Check if effect type is supported
         if !self.supports_effect(effect_type) {
@@ -205,8 +205,8 @@ impl AuraHandler for UnifiedAuraHandlerBridge {
 
     async fn execute_session(
         &mut self,
-        session: LocalSessionType,
-        ctx: &mut AuraContext,
+        _session: LocalSessionType,
+        _ctx: &mut AuraContext,
     ) -> Result<(), AuraHandlerError> {
         // Session execution would typically use choreographic effects
         // For now, provide a basic implementation that delegates to choreographic effects

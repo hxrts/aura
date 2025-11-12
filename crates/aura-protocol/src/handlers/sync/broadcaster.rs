@@ -151,7 +151,7 @@ impl BroadcasterHandler {
 
 #[async_trait]
 impl SyncEffects for BroadcasterHandler {
-    async fn sync_with_peer(&self, peer_id: Uuid) -> Result<(), SyncError> {
+    async fn sync_with_peer(&self, _peer_id: Uuid) -> Result<(), SyncError> {
         // Broadcaster doesn't implement full sync - delegate to AntiEntropyHandler
         Err(SyncError::OperationNotFound)
     }
@@ -180,7 +180,7 @@ impl SyncEffects for BroadcasterHandler {
 
     async fn request_ops_from_peer(
         &self,
-        peer_id: Uuid,
+        _peer_id: Uuid,
         cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError> {
         let oplog = self.oplog.read().await;
@@ -288,7 +288,7 @@ mod tests {
         let peer1 = Uuid::new_v4();
         handler.add_peer(peer1).await;
 
-        let op = create_test_op([1u8; 32]);
+        let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
 
         let result = handler.eager_push_to_neighbors(op).await;
@@ -303,7 +303,7 @@ mod tests {
         };
         let handler = BroadcasterHandler::new(config);
 
-        let op = create_test_op([1u8; 32]);
+        let op = create_test_op(aura_core::Hash32([1u8; 32]));
         let result = handler.eager_push_to_neighbors(op).await;
         assert!(result.is_ok()); // Returns Ok but does nothing
     }
@@ -322,7 +322,7 @@ mod tests {
 
         // Push 3 ops - third should be queued due to rate limit
         for i in 0..3 {
-            let op = create_test_op([i as u8; 32]);
+            let op = create_test_op(aura_core::Hash32([i as u8; 32]));
             handler.add_op(op.clone()).await;
             let _ = handler.eager_push_to_neighbors(op).await;
         }
@@ -343,12 +343,12 @@ mod tests {
 
         // Fill pending queue to capacity
         for i in 0..6 {
-            let cid = [i as u8; 32];
+            let cid = aura_core::Hash32([i as u8; 32]);
             let mut pending = handler.pending_announcements.write().await;
             pending.insert(cid, BTreeSet::new());
         }
 
-        let op = create_test_op([99u8; 32]);
+        let op = create_test_op(aura_core::Hash32([99u8; 32]));
         let result = handler.eager_push_to_neighbors(op).await;
 
         assert!(matches!(result, Err(SyncError::BackPressure)));
@@ -363,14 +363,14 @@ mod tests {
         };
         let handler = BroadcasterHandler::new(config);
 
-        let op = create_test_op([1u8; 32]);
+        let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
 
         let peer_id = Uuid::new_v4();
-        let retrieved = handler.lazy_pull_response(peer_id, [1u8; 32]).await;
+        let retrieved = handler.lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32])).await;
 
         assert!(retrieved.is_ok());
-        assert_eq!(retrieved.unwrap().op.parent_commitment, [1u8; 32]);
+        assert_eq!(retrieved.unwrap().op.parent_commitment, aura_core::Hash32([1u8; 32]).0);
     }
 
     #[tokio::test]
@@ -381,11 +381,11 @@ mod tests {
         };
         let handler = BroadcasterHandler::new(config);
 
-        let op = create_test_op([1u8; 32]);
+        let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op).await;
 
         let peer_id = Uuid::new_v4();
-        let result = handler.lazy_pull_response(peer_id, [1u8; 32]).await;
+        let result = handler.lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32])).await;
 
         assert!(matches!(result, Err(SyncError::OperationNotFound)));
     }
@@ -397,10 +397,10 @@ mod tests {
         let peer1 = Uuid::new_v4();
         handler.add_peer(peer1).await;
 
-        let op = create_test_op([1u8; 32]);
+        let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
 
-        let result = handler.announce_new_op([1u8; 32]).await;
+        let result = handler.announce_new_op(aura_core::Hash32([1u8; 32])).await;
         assert!(result.is_ok());
     }
 
@@ -408,9 +408,9 @@ mod tests {
     async fn test_merge_deduplication() {
         let handler = BroadcasterHandler::new(BroadcastConfig::default());
 
-        let op1 = create_test_op([1u8; 32]);
-        let op1_dup = create_test_op([1u8; 32]);
-        let op2 = create_test_op([2u8; 32]);
+        let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
+        let op1_dup = create_test_op(aura_core::Hash32([1u8; 32]));
+        let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
 
         handler
             .merge_remote_ops(vec![op1, op1_dup, op2])
@@ -433,7 +433,7 @@ mod tests {
         handler.add_peer(peer1).await;
 
         // Hit rate limit
-        let op = create_test_op([1u8; 32]);
+        let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
         let _ = handler.eager_push_to_neighbors(op.clone()).await;
 

@@ -11,7 +11,7 @@ use aura_protocol::handlers::{
     AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
 };
 use aura_core::identifiers::DeviceId;
-use aura_core::sessions::LocalSessionType;
+use aura_core::LocalSessionType;
 
 /// Fault injection configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,7 +201,7 @@ mod tests {
     async fn test_fault_operations() {
         let device_id = DeviceId::new();
         let mut middleware = FaultInjectionMiddleware::for_simulation(device_id, 42);
-        let mut ctx = AuraContext::new(device_id);
+        let mut ctx = AuraContext::for_testing(device_id);
 
         // Test inject message drop
         let result = middleware

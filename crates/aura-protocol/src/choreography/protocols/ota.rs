@@ -370,7 +370,7 @@ impl UpgradeOrchestrator {
     pub fn generate_maintenance_event(
         &self,
         proposal: &UpgradeProposal,
-        adoption_count: u16,
+        _adoption_count: u16,
     ) -> MaintenanceEvent {
         let account_id = if let Some(fence) = &proposal.activation_fence {
             fence.account_id

@@ -11,7 +11,7 @@ use aura_protocol::handlers::{
     AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
 };
 use aura_core::identifiers::DeviceId;
-use aura_core::sessions::LocalSessionType;
+use aura_core::LocalSessionType;
 
 /// Time control middleware for simulation effect system
 pub struct TimeControlMiddleware {
@@ -190,7 +190,7 @@ mod tests {
     async fn test_time_operations() {
         let device_id = DeviceId::new();
         let mut middleware = TimeControlMiddleware::for_simulation(device_id, 42);
-        let mut ctx = AuraContext::new(device_id);
+        let mut ctx = AuraContext::for_testing(device_id);
 
         // Test get current time
         let result = middleware

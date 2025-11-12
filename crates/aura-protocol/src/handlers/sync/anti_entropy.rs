@@ -13,6 +13,7 @@ use uuid::Uuid;
 /// through periodic background synchronization.
 #[derive(Clone)]
 pub struct AntiEntropyHandler {
+    #[allow(dead_code)]
     config: AntiEntropyConfig,
     // In real implementation, these would be trait objects for Journal and Transport
     oplog: Arc<RwLock<Vec<AttestedOp>>>,
@@ -269,23 +270,23 @@ mod tests {
     async fn test_digest_with_ops() {
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
 
-        let op1 = create_test_op(Hash32::new([1u8; 32]));
-        let op2 = create_test_op(Hash32::new([2u8; 32]));
+        let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
+        let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
 
         handler.add_op(op1).await;
         handler.add_op(op2).await;
 
         let digest = handler.get_oplog_digest().await.unwrap();
         assert_eq!(digest.cids.len(), 2);
-        assert!(digest.cids.contains(Hash32::new([1u8; 32]).as_bytes()));
-        assert!(digest.cids.contains(Hash32::new([2u8; 32]).as_bytes()));
+        assert!(digest.cids.contains(&aura_core::Hash32([1u8; 32])));
+        assert!(digest.cids.contains(&aura_core::Hash32([2u8; 32])));
     }
 
     #[tokio::test]
     async fn test_compute_ops_to_push() {
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
 
-        let op1 = create_test_op(Hash32::new([1u8; 32]));
+        let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op1.clone()).await;
 
         let local_digest = handler.get_oplog_digest().await.unwrap();
@@ -301,7 +302,7 @@ mod tests {
         assert_eq!(to_push.len(), 1);
         assert_eq!(
             to_push[0].op.parent_commitment,
-            *Hash32::new([1u8; 32]).as_bytes()
+            aura_core::Hash32([1u8; 32]).0
         );
     }
 
@@ -314,24 +315,24 @@ mod tests {
         };
 
         let mut remote_cids = BTreeSet::new();
-        remote_cids.insert(*Hash32::new([1u8; 32]).as_bytes());
-        remote_cids.insert(*Hash32::new([2u8; 32]).as_bytes());
+        remote_cids.insert(aura_core::Hash32([1u8; 32]));
+        remote_cids.insert(aura_core::Hash32([2u8; 32]));
 
         let remote_digest = BloomDigest { cids: remote_cids };
 
         let to_pull = handler.compute_cids_to_pull(&local_digest, &remote_digest);
 
         assert_eq!(to_pull.len(), 2);
-        assert!(to_pull.contains(Hash32::new([1u8; 32]).as_bytes()));
-        assert!(to_pull.contains(Hash32::new([2u8; 32]).as_bytes()));
+        assert!(to_pull.contains(&aura_core::Hash32([1u8; 32])));
+        assert!(to_pull.contains(&aura_core::Hash32([2u8; 32])));
     }
 
     #[tokio::test]
     async fn test_merge_remote_ops() {
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
 
-        let op1 = create_test_op(Hash32::new([1u8; 32]));
-        let op2 = create_test_op(Hash32::new([2u8; 32]));
+        let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
+        let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
 
         handler.merge_remote_ops(vec![op1, op2]).await.unwrap();
 
@@ -359,18 +360,18 @@ mod tests {
     async fn test_request_op() {
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
 
-        let op = create_test_op(Hash32::new([1u8; 32]));
+        let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
 
         let peer_id = Uuid::new_v4();
         let retrieved = handler
-            .request_op(peer_id, *Hash32::new([1u8; 32]).as_bytes())
+            .request_op(peer_id, aura_core::Hash32([1u8; 32]))
             .await
             .unwrap();
 
         assert_eq!(
             retrieved.op.parent_commitment,
-            *Hash32::new([1u8; 32]).as_bytes()
+            aura_core::Hash32([1u8; 32]).0
         );
     }
 
@@ -380,7 +381,7 @@ mod tests {
 
         let peer_id = Uuid::new_v4();
         let result = handler
-            .request_op(peer_id, *Hash32::new([99u8; 32]).as_bytes())
+            .request_op(peer_id, aura_core::Hash32([99u8; 32]))
             .await;
 
         assert!(matches!(result, Err(SyncError::OperationNotFound)));

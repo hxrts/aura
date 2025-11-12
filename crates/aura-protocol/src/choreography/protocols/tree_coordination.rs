@@ -928,8 +928,14 @@ mod tests {
             approvers: vec![DeviceId::new(), DeviceId::new()],
             observers: vec![DeviceId::new()],
             operation: TreeOpKind::AddLeaf {
-                leaf: LeafNode::new(DeviceId::new(), vec![]),
-                under: NodeIndex::from_u32(0),
+                leaf: LeafNode {
+                    leaf_id: LeafId(1),
+                    device_id: DeviceId::new(),
+                    role: LeafRole::Device,
+                    public_key: vec![],
+                    meta: vec![],
+                },
+                under: NodeIndex(0),
             },
             threshold: 2,
             timeout_ms: 30000,

@@ -12,12 +12,12 @@
 //!
 //! # Usage
 //!
-//! ```rust
-//! use quint_api::{QuintRunner, PropertySpec, VerificationResult};
+//! ```rust,no_run
+//! use aura_quint_api::{QuintRunner, PropertySpec, VerificationResult};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let runner = QuintRunner::new()?;
+//!     let mut runner = QuintRunner::new()?;
 //!     
 //!     let property = PropertySpec::new("always safety")
 //!         .with_invariant("counter >= 0")

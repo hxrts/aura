@@ -250,7 +250,7 @@ impl ReconnectCoordinator {
         for attempt in ready {
             // Check epoch boundary before attempting reconnection
             if self.config.require_epoch_advancement
-                && attempt.epoch.value() <= current_epoch.value()
+                && attempt.epoch.value() < current_epoch.value()
             {
                 results.push(ReconnectResult::SkippedEpochViolation {
                     channel_key: attempt.channel_key,

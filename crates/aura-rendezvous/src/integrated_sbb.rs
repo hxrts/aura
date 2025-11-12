@@ -417,11 +417,11 @@ mod tests {
 
         let friend_id = DeviceId::new();
         let guardian_id = DeviceId::new();
-        let rel_id = RelationshipId::new();
+        let rel_id = RelationshipId::new([0u8; 32]);
 
         // Add relationships
         system
-            .add_friend(friend_id, rel_id, TrustLevel::Medium)
+            .add_friend(friend_id, rel_id.clone(), TrustLevel::Medium)
             .await;
         system
             .add_guardian(guardian_id, rel_id, TrustLevel::High)
@@ -441,7 +441,7 @@ mod tests {
         let bob_id = DeviceId::new();
         let mut alice_system = IntegratedSbbSystem::new(alice_id, SbbConfig::default());
 
-        let rel_id = RelationshipId::new();
+        let rel_id = RelationshipId::new([0u8; 32]);
         alice_system
             .add_friend(bob_id, rel_id, TrustLevel::Medium)
             .await;
@@ -499,7 +499,7 @@ mod tests {
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default());
 
         let peer_id = DeviceId::new();
-        let rel_id = RelationshipId::new();
+        let rel_id = RelationshipId::new([0u8; 32]);
 
         // Add with low trust
         system.add_friend(peer_id, rel_id, TrustLevel::Low).await;
@@ -524,7 +524,7 @@ mod tests {
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default());
 
         let peer_id = DeviceId::new();
-        let rel_id = RelationshipId::new();
+        let rel_id = RelationshipId::new([0u8; 32]);
 
         // Add peer with medium trust
         system.add_friend(peer_id, rel_id, TrustLevel::Medium).await;

@@ -457,7 +457,7 @@ use aura_core::{AccountId, DeviceId, GuardianId};
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use aura_wot::{
     evaluate_tree_operation_capabilities, CapabilityEvaluationContext, CapabilitySet, EntityId,
-    TreeAuthzContext, TreeCapabilityRequest, TreeOp, WotError,
+    TreeAuthzContext, TreeCapabilityRequest, TreeOp, TreeOpKind, WotError,
 };
 use std::collections::BTreeSet;
 

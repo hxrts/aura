@@ -39,7 +39,6 @@ pub struct GuardEvaluationMetrics {
 /// Guard evaluator that integrates with the capability system
 pub struct GuardEvaluator {
     capability_evaluator: CapabilityEvaluator,
-    device_id: DeviceId,
 }
 
 impl GuardEvaluator {
@@ -47,7 +46,6 @@ impl GuardEvaluator {
     pub fn new(device_id: DeviceId) -> Self {
         Self {
             capability_evaluator: CapabilityEvaluator::new(device_id),
-            device_id,
         }
     }
 

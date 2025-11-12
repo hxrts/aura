@@ -114,6 +114,8 @@
 
             # Documentation
             mdbook
+            mdbook-mermaid
+            mdbook-katex
 
             # Development tools
             git

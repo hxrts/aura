@@ -306,8 +306,8 @@ impl CryptoEffects for TypedHandlerBridge {
 
     async fn frost_generate_keys(
         &self,
-        threshold: u16,
-        max_signers: u16,
+        _threshold: u16,
+        _max_signers: u16,
     ) -> Result<Vec<Vec<u8>>, CryptoError> {
         Err(AuraError::crypto(
             "FROST operations not supported through bridge",

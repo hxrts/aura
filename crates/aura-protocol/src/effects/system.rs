@@ -1780,7 +1780,7 @@ impl ChoreographicEffects for AuraEffectSystem {
         event: crate::effects::ChoreographyEvent,
     ) -> Result<(), crate::effects::ChoreographyError> {
         // Convert to console event and delegate
-        let console_event = crate::effects::ConsoleEvent::Custom {
+        let _console_event = crate::effects::ConsoleEvent::Custom {
             event_type: "choreography".to_string(),
             data: serde_json::to_value(event).unwrap_or_default(),
         };
@@ -2265,7 +2265,7 @@ impl crate::effects::agent::SessionManagementEffects for AuraEffectSystem {
             .await
         {
             Ok(result) => {
-                let session_id: String = serde_json::from_slice(&result).unwrap_or_else(|_| {
+                let _session_id: String = serde_json::from_slice(&result).unwrap_or_else(|_| {
                     // Generate fallback session ID
                     format!(
                         "session_{}_{}",

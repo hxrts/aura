@@ -905,7 +905,7 @@ impl SystemEffects for MonitoringSystemHandler {
         let mut metadata = HashMap::new();
         metadata.insert("action".to_string(), "shutdown".to_string());
 
-        let alert = Alert {
+        let _alert = Alert {
             id: Uuid::new_v4(),
             component: "monitoring".to_string(),
             severity: AlertSeverity::Info,

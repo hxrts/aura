@@ -651,7 +651,7 @@ mod tests {
         let submission = PartialSignatureSubmission {
             session_id: "test_session".to_string(),
             signer_id: DeviceId::new(),
-            partial_signature: PartialSignature::from_bytes(vec![1, 2, 3, 4]).unwrap(),
+            partial_signature: PartialSignature::from_bytes(vec![1; 32]).unwrap(), // 32-byte signature as required
             signature_index: 1,
         };
 

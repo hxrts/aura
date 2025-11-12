@@ -290,7 +290,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_websocket_handler_creation() {
-        let device_id = DeviceId("test_device".to_string());
+        let device_id = DeviceId::from("test_device");
         let config = WebSocketConfig::default();
         let handler = WebSocketNetworkHandler::new(device_id.clone(), config);
 
@@ -300,7 +300,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_uuid_device_id_conversion() {
-        let device_id = DeviceId("test_device".to_string());
+        let device_id = DeviceId::from("test_device");
         let config = WebSocketConfig::default();
         let handler = WebSocketNetworkHandler::new(device_id, config);
 

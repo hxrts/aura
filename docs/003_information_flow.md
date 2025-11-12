@@ -1,4 +1,4 @@
-# Privacy and Information Flow Model
+# Privacy and Information Flow
 
 Aura's model is fundamentally consent-based and articulated as a unified information-flow system. Privacy boundaries align with social relationships rather than technical perimeters. Violations occur when information crosses trust boundaries without consent. Acceptable flows consume explicitly budgeted headroom.
 

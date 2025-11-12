@@ -49,15 +49,23 @@ Responsibilities include device authentication ceremonies, session establishment
 
 Authentication ceremonies use the choreographic protocol framework with roles like Requester, Authenticator, and Witness. For protocol composition patterns and implementation guidelines, see [Choreography System Reference](302_choreography_system.md#protocol-composition). The `AuthenticationResult` struct contains the verified identity, session ticket, and ceremony transcript.
 
-This crate depends on `aura-verify` for cryptographic verification and adds choreographic coordination on top. The key components include:
+This crate depends on `aura-verify` for cryptographic verification and adds choreographic coordination on top. The choreographic protocols use sealed supertraits for clean effect interfaces and guard capabilities for access control. The key components include:
 ```rust
+/// Sealed supertrait for authentication effects
+pub trait AuthenticationEffects: NetworkEffects + CryptoEffects + TimeEffects {}
+impl<T> AuthenticationEffects for T where T: NetworkEffects + CryptoEffects + TimeEffects {}
+
 // Choreographic authentication protocol
-choreography! {
-    protocol G_auth {
+aura_choreography! {
+    #[namespace = "g_auth"]
+    protocol GAuth {
         roles: Requester, Authenticator, Witness;
-        Requester -> Authenticator: AuthRequest(device_id, challenge);
-        Authenticator -> Requester: AuthResponse(signature, session_ticket);
-        // ...
+        
+        Requester[guard_capability = "initiate_auth", flow_cost = 20] 
+        -> Authenticator: AuthRequest(device_id: DeviceId, challenge: Vec<u8>);
+        
+        Authenticator[guard_capability = "respond_auth", flow_cost = 15, journal_facts = "auth_response_sent"] 
+        -> Requester: AuthResponse(signature: Vec<u8>, session_ticket: SessionTicket);
     }
 }
 

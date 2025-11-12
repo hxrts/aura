@@ -339,7 +339,10 @@ fn generate_random_bytes() -> [u8; 32] {
 /// Returns a constant value for testability. In production,
 /// this should come from TimeEffects.
 fn current_timestamp() -> u64 {
-    0u64
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -451,7 +454,7 @@ mod tests {
                 packets_sent,
                 ..
             } => {
-                assert!(reason.contains("timeout"));
+                assert!(reason.contains("timed out"));
                 assert!(packets_sent > 0);
             }
             _ => panic!("Expected punch to fail"),

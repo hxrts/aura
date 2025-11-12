@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn test_bloom_digest_contains() {
         let mut digest = BloomDigest::empty();
-        let cid = [1u8; 32];
+        let cid = aura_core::Hash32([1u8; 32]);
 
         digest.cids.insert(cid);
         assert!(digest.contains(&cid));

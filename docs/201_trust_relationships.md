@@ -250,19 +250,37 @@ Effect composition enables relationship integration with other system components
 Trust relationship ceremonies use choreographic programming for deadlock-free coordination between devices. Choreographies ensure both parties complete formation steps or both parties abort consistently.
 
 ```rust
-choreography! {
+/// Sealed supertrait for relationship formation effects
+pub trait RelationshipFormationEffects: NetworkEffects + CryptoEffects + StorageEffects {}
+impl<T> RelationshipFormationEffects for T where T: NetworkEffects + CryptoEffects + StorageEffects {}
+
+aura_choreography! {
+    #[namespace = "relationship_formation"]
     protocol RelationshipFormation {
         roles: Initiator, Responder;
         
-        Initiator -> Responder: RelationshipInitRequest;
-        Responder -> Initiator: RelationshipKeyOffer;
-        Initiator -> Responder: RelationshipKeyExchange;
-        // Parallel validation phase
-        Initiator -> Responder: RelationshipValidation;
-        Responder -> Initiator: RelationshipValidation;
+        Initiator[guard_capability = "initiate_relationship", flow_cost = 30] 
+        -> Responder: RelationshipInitRequest(device_id: DeviceId, trust_level: TrustLevel);
+        
+        Responder[guard_capability = "offer_key", flow_cost = 25, journal_facts = "key_offered"] 
+        -> Initiator: RelationshipKeyOffer(public_key: Vec<u8>, capabilities: CapabilitySet);
+        
+        Initiator[guard_capability = "exchange_key", flow_cost = 25, journal_facts = "key_exchanged"] 
+        -> Responder: RelationshipKeyExchange(public_key: Vec<u8>, signature: Vec<u8>);
+        
+        // Mutual validation phase
+        Initiator[guard_capability = "validate_relationship", flow_cost = 20] 
+        -> Responder: RelationshipValidation(proof: ValidationProof);
+        
+        Responder[guard_capability = "validate_relationship", flow_cost = 20] 
+        -> Initiator: RelationshipValidation(proof: ValidationProof);
+        
         // Final confirmation
-        Initiator -> Responder: RelationshipConfirmation;
-        Responder -> Initiator: RelationshipConfirmation;
+        Initiator[guard_capability = "confirm_relationship", flow_cost = 15, journal_facts = "relationship_confirmed"] 
+        -> Responder: RelationshipConfirmation(relationship_id: RelationshipId);
+        
+        Responder[guard_capability = "confirm_relationship", flow_cost = 15, journal_facts = "relationship_confirmed"] 
+        -> Initiator: RelationshipConfirmation(relationship_id: RelationshipId);
     }
 }
 ```

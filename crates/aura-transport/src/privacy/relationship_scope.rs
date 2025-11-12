@@ -434,13 +434,13 @@ mod tests {
         assert!(public_view.capabilities.has_storage);
         assert!(public_view.capabilities.storage_category.is_none());
 
-        let trusted_view = manager.create_scoped_view(peer_id, &capabilities, 1000, 0.7, 5);
+        let trusted_view = manager.create_scoped_view(peer_id, &capabilities, 1400, 0.7, 5);
         assert_eq!(trusted_view.scope, RelationshipScope::Trusted);
         assert!(trusted_view.capabilities.storage_category.is_some());
         assert!(trusted_view.capabilities.capacity_bucket.is_some());
         assert!(trusted_view.capabilities.exact_metrics.is_none());
 
-        let intimate_view = manager.create_scoped_view(peer_id, &capabilities, 1000, 0.9, 10);
+        let intimate_view = manager.create_scoped_view(peer_id, &capabilities, 1800, 0.9, 10);
         assert_eq!(intimate_view.scope, RelationshipScope::Intimate);
         assert!(intimate_view.capabilities.exact_metrics.is_some());
     }

@@ -13,7 +13,7 @@
 use aura_core::{AuraResult, Cap, DeviceId, Fact};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 

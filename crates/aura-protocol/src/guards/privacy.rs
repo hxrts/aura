@@ -194,11 +194,6 @@ impl PrivacyBudgetTracker {
     }
 }
 
-/// Create a new privacy budget tracker for tracking (TODO fix - Simplified safe implementation)
-fn create_privacy_tracker(device_id: DeviceId, limits: LeakageBudget) -> PrivacyBudgetTracker {
-    PrivacyBudgetTracker::new(device_id, limits)
-}
-
 /// Track leakage consumption for an operation with persistent state management
 pub async fn track_leakage_consumption(
     leakage_budget: &LeakageBudget,

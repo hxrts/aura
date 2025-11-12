@@ -1180,8 +1180,8 @@ mod tests {
         let stream = RelayStream::new_open(stream_id, source, dest);
         let size = stream.stream_size();
 
-        // 100 payload + 32 source + 32 dest + 64 overhead = 228
-        assert_eq!(size, 64);
+        // 0 payload + 32 source + 32 dest + 64 overhead = 128
+        assert_eq!(size, 128);
 
         let data_stream = RelayStream::new_data(stream_id, payload, 1);
         let data_size = data_stream.stream_size();

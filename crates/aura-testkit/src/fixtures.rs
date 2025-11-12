@@ -6,7 +6,7 @@
 
 use crate::{test_account_with_threshold, test_effects_deterministic};
 use aura_core::{AccountId, DeviceId};
-use aura_crypto::Effects;
+use crate::Effects;
 use aura_journal::semilattice::ModernAccountState as AccountState;
 
 /// High-level fixture for protocol testing scenarios
@@ -29,8 +29,8 @@ impl ProtocolTestFixture {
     /// Create a new protocol test fixture with default configuration
     ///
     /// Creates a 3-of-3 account with three devices and deterministic effects.
-    pub fn new() -> Self {
-        Self::with_config(3, 3, 42)
+    pub async fn new() -> Self {
+        Self::with_config(3, 3, 42).await
     }
 
     /// Create a protocol test fixture with specific configuration
@@ -39,9 +39,9 @@ impl ProtocolTestFixture {
     /// * `threshold` - Minimum number of devices required for operations (M in M-of-N)
     /// * `total_devices` - Total number of devices (N in M-of-N)
     /// * `seed` - Random seed for deterministic effects
-    pub fn with_config(threshold: u16, total_devices: u16, seed: u64) -> Self {
+    pub async fn with_config(threshold: u16, total_devices: u16, seed: u64) -> Self {
         let effects = test_effects_deterministic(seed, 1000);
-        let account_state = test_account_with_threshold(&effects, threshold, total_devices);
+        let account_state = test_account_with_threshold(&effects, threshold, total_devices).await;
         let device_id = account_state
             .device_registry
             .devices
@@ -100,11 +100,8 @@ impl ProtocolTestFixture {
     }
 }
 
-impl Default for ProtocolTestFixture {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: Default implementation removed because async constructors cannot implement Default
+// Use ProtocolTestFixture::new().await instead
 
 /// High-level fixture for cryptographic operation testing
 ///
@@ -180,8 +177,8 @@ pub struct AccountTestFixture {
 
 impl AccountTestFixture {
     /// Create a new account test fixture with default configuration
-    pub fn new() -> Self {
-        Self::with_devices(3, 2)
+    pub async fn new() -> Self {
+        Self::with_devices(3, 2).await
     }
 
     /// Create an account test fixture with specific device configuration
@@ -189,14 +186,14 @@ impl AccountTestFixture {
     /// # Arguments
     /// * `total_devices` - Total number of devices (N in M-of-N)
     /// * `threshold` - Minimum devices required (M in M-of-N)
-    pub fn with_devices(total_devices: u16, threshold: u16) -> Self {
-        Self::with_seed(42, total_devices, threshold)
+    pub async fn with_devices(total_devices: u16, threshold: u16) -> Self {
+        Self::with_seed(42, total_devices, threshold).await
     }
 
     /// Create an account test fixture with specific configuration
-    pub fn with_seed(seed: u64, total_devices: u16, threshold: u16) -> Self {
+    pub async fn with_seed(seed: u64, total_devices: u16, threshold: u16) -> Self {
         let effects = test_effects_deterministic(seed, 1000);
-        let account_state = test_account_with_threshold(&effects, threshold, total_devices);
+        let account_state = test_account_with_threshold(&effects, threshold, total_devices).await;
         let account_id = account_state.account_id;
         let primary_device = account_state
             .device_registry
@@ -252,8 +249,5 @@ impl AccountTestFixture {
     }
 }
 
-impl Default for AccountTestFixture {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: Default implementation removed because async constructors cannot implement Default
+// Use AccountTestFixture::new().await instead

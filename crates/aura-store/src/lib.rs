@@ -12,10 +12,10 @@
 //! ## Model Alignment
 //!
 //! From the formal model (Section C.2):
-//! ```
+//! ```ignore
 //! Storage is simply an effect family:
-//!   store_chunk : (ChunkId, Bytes) → ()
-//!   fetch_chunk : ChunkId → Bytes?
+//!   store_chunk : (ChunkId, Bytes) -> ()
+//!   fetch_chunk : ChunkId -> Bytes?
 //! ```
 //!
 //! Search is defined as capability-filtered queries over join-semilattice indices (Section E.1).

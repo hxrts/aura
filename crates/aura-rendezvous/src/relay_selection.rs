@@ -4,6 +4,7 @@
 //! Clean, minimal implementation following "zero legacy code" principle.
 
 use aura_core::{AuraError, DeviceId};
+use uuid::Uuid;
 use aura_wot::{CapabilitySet, TrustLevel};
 use serde::{Deserialize, Serialize};
 
@@ -257,7 +258,7 @@ mod tests {
         let selector = RelaySelector::new(RelaySelectionConfig::default());
 
         let guardian = RelayCandidate {
-            device_id: DeviceId("guardian_1".to_string()),
+            device_id: DeviceId::from("guardian_1"),
             relay_type: RelayType::Guardian,
             trust_level: TrustLevel::High,
             capabilities: CapabilitySet::from_permissions(&["relay:1048576:3600:10"]),
@@ -267,7 +268,7 @@ mod tests {
         };
 
         let friend = RelayCandidate {
-            device_id: DeviceId("friend_1".to_string()),
+            device_id: DeviceId::from("friend_1"),
             relay_type: RelayType::Friend,
             trust_level: TrustLevel::High,
             capabilities: CapabilitySet::from_permissions(&["relay:1048576:3600:10"]),
@@ -291,7 +292,7 @@ mod tests {
         let selector = RelaySelector::new(RelaySelectionConfig::default());
 
         let sufficient_relay = RelayCandidate {
-            device_id: DeviceId("sufficient".to_string()),
+            device_id: DeviceId::from("sufficient"),
             relay_type: RelayType::Guardian,
             trust_level: TrustLevel::High,
             capabilities: CapabilitySet::from_permissions(&["relay:1048576:3600:10"]),
@@ -301,7 +302,7 @@ mod tests {
         };
 
         let insufficient_relay = RelayCandidate {
-            device_id: DeviceId("insufficient".to_string()),
+            device_id: DeviceId::from("insufficient"),
             relay_type: RelayType::Guardian,
             trust_level: TrustLevel::High,
             capabilities: CapabilitySet::from_permissions(&["relay:512:3600:5"]), // Too small budget
@@ -324,7 +325,7 @@ mod tests {
         let selector = RelaySelector::new(RelaySelectionConfig::default());
 
         let relay1 = RelayCandidate {
-            device_id: DeviceId("relay_1".to_string()),
+            device_id: DeviceId::from("relay_1"),
             relay_type: RelayType::Guardian,
             trust_level: TrustLevel::High,
             capabilities: CapabilitySet::from_permissions(&["relay:1048576:3600:10"]),
@@ -334,7 +335,7 @@ mod tests {
         };
 
         let relay2 = RelayCandidate {
-            device_id: DeviceId("relay_2".to_string()),
+            device_id: DeviceId::from("relay_2"),
             relay_type: RelayType::Friend,
             trust_level: TrustLevel::High,
             capabilities: CapabilitySet::from_permissions(&["relay:1048576:3600:10"]),
@@ -363,7 +364,7 @@ mod tests {
         });
 
         let poor_relay = RelayCandidate {
-            device_id: DeviceId("poor_relay".to_string()),
+            device_id: DeviceId::from("poor_relay"),
             relay_type: RelayType::Friend,
             trust_level: TrustLevel::Low, // Too low
             capabilities: CapabilitySet::from_permissions(&["relay:1048576:3600:10"]),

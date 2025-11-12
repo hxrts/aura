@@ -4,7 +4,8 @@
 //! and cryptographic material across the Aura test suite.
 
 use aura_core::DeviceId;
-use aura_crypto::Effects;
+use aura_core::effects::RandomEffects;
+use crate::Effects;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
 
@@ -45,10 +46,10 @@ impl KeyTestFixture {
     }
 
     /// Create a random key fixture
-    pub fn random() -> Self {
+    pub async fn random() -> Self {
         // Use deterministic key generation from fixed seed
         let effects = Effects::for_test("key_fixture_random");
-        let key_bytes = effects.random_bytes::<32>();
+        let key_bytes = effects.random_bytes_32().await;
         let signing_key = SigningKey::from_bytes(&key_bytes);
         let verifying_key = signing_key.verifying_key();
 
@@ -251,10 +252,10 @@ pub mod helpers {
     ///
     /// Returns key shares and public key package for the given threshold and total.
     /// Uses the provided effects for deterministic key generation.
-    pub fn test_frost_key_shares(
+    pub async fn test_frost_key_shares(
         threshold: u16,
         total: u16,
-        effects: &aura_crypto::Effects,
+        effects: &Effects,
     ) -> (
         std::collections::BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::KeyPackage>,
         frost_ed25519::keys::PublicKeyPackage,
@@ -265,8 +266,9 @@ pub mod helpers {
         // Use a deterministic RNG from effects - it implements CryptoRng for testing
         let mut rng = {
             // Create a seed from the effects
-            let seed = effects.random_bytes::<8>();
-            let seed_u64 = u64::from_le_bytes(seed);
+            let seed = effects.random_bytes(8).await;
+            let seed_array: [u8; 8] = seed.try_into().unwrap();
+            let seed_u64 = u64::from_le_bytes(seed_array);
 
             // Create a deterministic RNG that also implements CryptoRng
             struct TestRng {

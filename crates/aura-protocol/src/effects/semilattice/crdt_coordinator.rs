@@ -51,7 +51,7 @@ use crate::choreography::protocols::anti_entropy::{
 };
 use aura_core::{
     semilattice::{
-        Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,
+        Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, JoinSemilattice, MvState, OpWithCtx, Top,
     },
     CausalContext, DeviceId, SessionId, VectorClock,
 };
@@ -107,6 +107,7 @@ where
     _phantom: PhantomData<(CvS, CmS, DeltaS, MvS, Op, Id)>,
 }
 
+#[allow(dead_code)]
 impl<CvS, CmS, DeltaS, MvS, Op, Id> CrdtCoordinator<CvS, CmS, DeltaS, MvS, Op, Id>
 where
     CvS: CvState + Serialize + DeserializeOwned + 'static,

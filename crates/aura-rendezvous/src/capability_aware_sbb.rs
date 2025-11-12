@@ -571,11 +571,11 @@ mod tests {
     #[test]
     fn test_relationship_forwarding_logic() {
         let peer_id = DeviceId::new();
-        let rel_id = RelationshipId::new();
+        let rel_id = RelationshipId::new([0u8; 32]);
 
         // Test different trust levels
-        let low_trust_rel = SbbRelationship::new(peer_id, rel_id, TrustLevel::Low, false);
-        let high_trust_rel = SbbRelationship::new(peer_id, rel_id, TrustLevel::High, true);
+        let low_trust_rel = SbbRelationship::new(peer_id, rel_id.clone(), TrustLevel::Low, false);
+        let high_trust_rel = SbbRelationship::new(peer_id, rel_id.clone(), TrustLevel::High, true);
 
         let policy = SbbForwardingPolicy::default();
 
@@ -601,10 +601,10 @@ mod tests {
 
         let peer1 = DeviceId::new();
         let peer2 = DeviceId::new();
-        let rel_id = RelationshipId::new();
+        let rel_id = RelationshipId::new([0u8; 32]);
 
         // Add relationships with different trust levels
-        coordinator.add_relationship(peer1, rel_id, TrustLevel::High, true); // Guardian
+        coordinator.add_relationship(peer1, rel_id.clone(), TrustLevel::High, true); // Guardian
         coordinator.add_relationship(peer2, rel_id, TrustLevel::Low, false); // Friend
 
         let policy = SbbForwardingPolicy::default();
@@ -631,7 +631,7 @@ mod tests {
         let mut coordinator = CapabilityAwareSbbCoordinator::new(device_id);
 
         let peer_id = DeviceId::new();
-        let rel_id = RelationshipId::new();
+        let rel_id = RelationshipId::new([0u8; 32]);
         coordinator.add_relationship(peer_id, rel_id, TrustLevel::Medium, false);
 
         let payload = b"test envelope".to_vec();

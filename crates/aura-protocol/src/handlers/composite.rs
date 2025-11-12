@@ -216,7 +216,7 @@ impl CompositeHandler {
     /// Create a composite handler for testing with all mock/memory implementations
     pub fn for_testing(device_id: Uuid) -> Self {
         let journal = super::journal::MemoryJournalHandler::new();
-        let tree_journal: Arc<dyn CoreJournalEffects> = std::sync::Arc::new(journal.clone());
+        let _tree_journal: Arc<dyn CoreJournalEffects> = std::sync::Arc::new(journal.clone());
         Self {
             device_id,
             is_simulation: true,
@@ -235,7 +235,7 @@ impl CompositeHandler {
     /// Create a composite handler for production with real implementations
     pub fn for_production(device_id: Uuid) -> Self {
         let journal = super::journal::MemoryJournalHandler::new();
-        let tree_journal: Arc<dyn CoreJournalEffects> = std::sync::Arc::new(journal.clone());
+        let _tree_journal: Arc<dyn CoreJournalEffects> = std::sync::Arc::new(journal.clone());
         Self {
             device_id,
             is_simulation: false,
@@ -257,7 +257,7 @@ impl CompositeHandler {
     /// Create a composite handler for simulation with a specific seed for deterministic behavior
     pub fn for_simulation_with_seed(device_id: Uuid, seed: u64) -> Self {
         let journal = super::journal::MemoryJournalHandler::new();
-        let tree_journal: Arc<dyn CoreJournalEffects> = std::sync::Arc::new(journal.clone());
+        let _tree_journal: Arc<dyn CoreJournalEffects> = std::sync::Arc::new(journal.clone());
         Self {
             device_id,
             is_simulation: true,
@@ -916,7 +916,7 @@ impl ChoreographicEffects for CompositeHandler {
 
     async fn emit_choreo_event(&self, event: ChoreographyEvent) -> Result<(), ChoreographyError> {
         // Convert to console event
-        let console_event = ConsoleEvent::Custom {
+        let _console_event = ConsoleEvent::Custom {
             event_type: "choreography".to_string(),
             data: serde_json::to_value(event).unwrap_or_default(),
         };
@@ -1154,7 +1154,7 @@ impl SystemEffects for CompositeHandler {
         message: &str,
         context: std::collections::HashMap<String, String>,
     ) -> Result<(), SystemError> {
-        let fields: Vec<(&str, &str)> = context
+        let _fields: Vec<(&str, &str)> = context
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();

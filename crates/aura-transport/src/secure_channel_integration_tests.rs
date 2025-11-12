@@ -285,6 +285,9 @@ async fn test_reconnect_coordinator_integration() {
         .update_epoch(Epoch::new(2))
         .await;
 
+    // Wait for the scheduled delay to pass
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+
     // Process reconnections
     let results = fixture
         .reconnect_coordinator

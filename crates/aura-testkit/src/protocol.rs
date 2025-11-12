@@ -3,7 +3,7 @@
 //! Factory functions for creating test protocol contexts and related structures.
 //! This addresses the complex protocol setup patterns found in test files.
 
-use aura_crypto::Effects;
+use crate::Effects;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 

@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::time::SystemTime;
 
 use aura_core::identifiers::DeviceId;
-use aura_core::sessions::LocalSessionType;
+use aura_core::LocalSessionType;
 use aura_protocol::handlers::{
     AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
 };
@@ -320,7 +320,7 @@ impl PropertyCheckingMiddleware {
         match state_type {
             "journal" => {
                 match invariant {
-                    "consistent" => ctx.execution_mode == ExecutionMode::Real,
+                    "consistent" => ctx.execution_mode == ExecutionMode::Production,
                     "non_empty" => true, // Journal always exists
                     _ => true, // Unknown invariants pass by default
                 }

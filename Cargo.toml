@@ -3,8 +3,6 @@
 resolver = "2"
 exclude = [
     "ext/*",  # ext/* are temporary external repos
-    "crates/aura-testkit",  # TODO: Update to new effect system
-    "crates/aura-simulator",  # TODO: Update to new effect system
 ]
 
 members = [
@@ -17,9 +15,9 @@ members = [
     "crates/aura-journal",
     "crates/aura-store",
     "crates/aura-transport",
-    # "crates/aura-testkit",  # Excluded - needs update to new effect system
+    "crates/aura-testkit",
     "crates/aura-cli",
-    # "crates/aura-simulator",  # Excluded - needs update to new effect system
+    "crates/aura-simulator",
     "crates/aura-wot",
     "crates/aura-mpst",
     "crates/aura-quint-api",
