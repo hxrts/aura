@@ -99,7 +99,9 @@ async fn propose_upgrade(
 }
 
 async fn set_policy(effects: &AuraEffectSystem, policy: &str) -> Result<()> {
-    let _ = effects.log_info(&format!("Setting OTA policy to: {}", policy)).await;
+    let _ = effects
+        .log_info(&format!("Setting OTA policy to: {}", policy))
+        .await;
     println!("OTA policy set to: {}", policy);
     // TODO: Store policy in agent configuration
     Ok(())
@@ -113,7 +115,9 @@ async fn get_status(effects: &AuraEffectSystem) -> Result<()> {
 }
 
 async fn opt_in(effects: &AuraEffectSystem, proposal_id: &str) -> Result<()> {
-    let _ = effects.log_info(&format!("Opting into upgrade proposal: {}", proposal_id)).await;
+    let _ = effects
+        .log_info(&format!("Opting into upgrade proposal: {}", proposal_id))
+        .await;
     println!("Opted into proposal: {}", proposal_id);
     // TODO: Send opt-in to coordinator
     Ok(())

@@ -6,19 +6,14 @@ use crate::{
     transport::deliver_via_rendezvous,
     InvitationError, InvitationResult,
 };
-use aura_core::effects::{JournalEffects, NetworkEffects, TimeEffects};
-use aura_core::{
-    relationships::ContextId, AccountId, Cap, DeviceId, RelationshipId, RelationshipType,
-    TrustLevel,
-};
+use aura_core::effects::{NetworkEffects, TimeEffects};
+use aura_core::{relationships::ContextId, AccountId, Cap, DeviceId, RelationshipId, TrustLevel};
 use aura_journal::semilattice::InvitationLedger;
 use aura_protocol::effects::system::AuraEffectSystem;
 use aura_protocol::effects::LedgerEffects;
-use aura_wot::CapabilitySet;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
 /// Result of accepting an invitation.
 #[derive(Debug, Clone, Serialize, Deserialize)]

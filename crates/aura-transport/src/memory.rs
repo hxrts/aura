@@ -189,8 +189,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_transport_send_receive() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
+        let device1 = DeviceId(uuid::Uuid::new_v4());
+        let device2 = DeviceId(uuid::Uuid::new_v4());
 
         let transport1 = MemoryTransport::new(device1);
         let transport2 = MemoryTransport::new(device2);
@@ -216,7 +216,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_network_creation() {
-        let devices = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
+        let devices = vec![DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())];
         let network = create_memory_network_async(devices.clone()).await;
 
         assert_eq!(network.len(), 3);
@@ -231,7 +231,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_broadcast() {
-        let devices = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
+        let devices = vec![DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())];
         let network = create_memory_network_async(devices.clone()).await;
 
         let device1 = devices[0];

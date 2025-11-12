@@ -1,8 +1,12 @@
 //! Real time effect handler for production use
+//!
+//! This module wraps low-level time operations and needs to use disallowed
+//! methods like `SystemTime::now()` to provide the time effect system.
+#![allow(clippy::disallowed_methods)]
 
+use async_trait::async_trait;
 use aura_core::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 use aura_core::AuraError;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -111,7 +115,10 @@ impl TimeEffects for RealTimeHandler {
                 tokio::task::yield_now().await;
                 Ok(())
             }
-            WakeCondition::ThresholdEvents { threshold: _, timeout_ms } => {
+            WakeCondition::ThresholdEvents {
+                threshold: _,
+                timeout_ms,
+            } => {
                 // Simplified: just wait for the timeout
                 tokio::time::sleep(tokio::time::Duration::from_millis(timeout_ms)).await;
                 Ok(())
@@ -134,22 +141,22 @@ impl TimeEffects for RealTimeHandler {
     }
 
     async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
-        self.yield_until(condition).await.map_err(|e| {
-            AuraError::internal(format!("Wait condition failed: {}", e))
-        })
+        self.yield_until(condition)
+            .await
+            .map_err(|e| AuraError::internal(format!("Wait condition failed: {}", e)))
     }
 
     async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
         let handle = Uuid::new_v4();
         let registry = Arc::clone(&self.registry);
         let handle_clone = handle;
-        
+
         let timeout_task = tokio::spawn(async move {
             time::sleep(Duration::from_millis(timeout_ms)).await;
             let mut reg = registry.write().await;
             reg.timeouts.remove(&handle_clone);
         });
-        
+
         let mut registry = self.registry.write().await;
         registry.timeouts.insert(handle, timeout_task);
         handle
@@ -157,13 +164,13 @@ impl TimeEffects for RealTimeHandler {
 
     async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
         let mut registry = self.registry.write().await;
-        
+
         if let Some(task) = registry.timeouts.remove(&handle) {
             task.abort();
             Ok(())
         } else {
             Err(TimeError::TimeoutNotFound {
-                handle: handle.to_string()
+                handle: handle.to_string(),
             })
         }
     }

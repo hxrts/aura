@@ -51,8 +51,7 @@ use crate::choreography::protocols::anti_entropy::{
 };
 use aura_core::{
     semilattice::{
-        Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState,
-        OpWithCtx, Top,
+        Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,
     },
     CausalContext, DeviceId, SessionId, VectorClock,
 };

@@ -521,7 +521,11 @@ impl CapabilitySet {
 
     /// Create default device capabilities
     pub fn default_device_capabilities() -> Self {
-        Self::from_permissions(&["device:basic", "communication:send", "communication:receive"])
+        Self::from_permissions(&[
+            "device:basic",
+            "communication:send",
+            "communication:receive",
+        ])
     }
 }
 

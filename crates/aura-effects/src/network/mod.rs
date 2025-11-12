@@ -6,7 +6,7 @@ pub mod memory;
 pub mod mock;
 pub mod tcp;
 // Note: these modules have dependency issues, commenting out for now
-// pub mod transport_integrated; 
+// pub mod transport_integrated;
 // pub mod websocket;
 
 pub use memory::MemoryNetworkHandler;

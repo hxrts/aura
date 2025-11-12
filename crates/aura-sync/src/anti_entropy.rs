@@ -6,8 +6,8 @@
 
 use std::collections::HashSet;
 
-use aura_core::{AttestedOp, AuraError, AuraResult};
 use aura_core::Journal;
+use aura_core::{AttestedOp, AuraError, AuraResult};
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 
@@ -219,10 +219,7 @@ fn fingerprint(op: &AttestedOp) -> AuraResult<OperationFingerprint> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{
-        journal::FactValue,
-        TreeOp, TreeOpKind,
-    };
+    use aura_core::{journal::FactValue, TreeOp, TreeOpKind};
 
     fn sample_journal() -> Journal {
         let mut journal = Journal::new();

@@ -3,18 +3,16 @@
 //! This module implements the G_dkg choreography for distributed threshold
 //! key generation using the Aura effect system pattern and rumpsteak-aura DSL.
 
-use crate::{FrostError, FrostResult};
+use crate::FrostResult;
 use async_trait::async_trait;
 use aura_core::effects::{ConsoleEffects, CryptoEffects, NetworkEffects, TimeEffects};
 use aura_core::{AccountId, AuraError, DeviceId};
-use aura_crypto::frost::{PublicKeyPackage, Share};
+use aura_crypto::frost::PublicKeyPackage;
 use aura_mpst::{
     infrastructure::{ChoreographyFramework, ChoreographyMetadata, ProtocolCoordinator},
     runtime::{AuraRuntime, ExecutionContext},
     MpstResult,
 };
-use rand::RngCore;
-use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -216,10 +214,12 @@ impl DkgChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_info(&format!(
-            "Starting DKG choreography as coordinator for session {}",
-            request.session_id
-        )).await;
+        let _ = effects
+            .log_info(&format!(
+                "Starting DKG choreography as coordinator for session {}",
+                request.session_id
+            ))
+            .await;
 
         self.dkg_request = Some(request.clone());
 
@@ -262,10 +262,12 @@ impl DkgChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_info(&format!(
-            "Participating in DKG choreography for device {}",
-            self.device_id
-        )).await;
+        let _ = effects
+            .log_info(&format!(
+                "Participating in DKG choreography for device {}",
+                self.device_id
+            ))
+            .await;
 
         // Wait for and process DKG init
         let request = self.receive_dkg_init(effects).await?;
@@ -283,7 +285,9 @@ impl DkgChoreographyExecutor {
         // Wait for final result
         let response = self.receive_final_result(effects).await?;
 
-        let _ = effects.log_info("DKG choreography participation completed").await;
+        let _ = effects
+            .log_info("DKG choreography participation completed")
+            .await;
         Ok(response)
     }
 
@@ -307,7 +311,9 @@ impl DkgChoreographyExecutor {
             .await
             .map_err(|e| AuraError::network(format!("Failed to send DKG init: {}", e)))?;
 
-        let _ = effects.log_debug(&format!("Sent DKG init to {}", participant)).await;
+        let _ = effects
+            .log_debug(&format!("Sent DKG init to {}", participant))
+            .await;
         Ok(())
     }
 
@@ -331,7 +337,9 @@ impl DkgChoreographyExecutor {
                     let device_id = DeviceId(peer_id);
                     if participants.contains(&device_id) {
                         commitments.insert(device_id, commitment_data);
-                        let _ = effects.log_debug(&format!("Received commitment from {}", peer_id)).await;
+                        let _ = effects
+                            .log_debug(&format!("Received commitment from {}", peer_id))
+                            .await;
                     }
                 }
             }
@@ -360,7 +368,9 @@ impl DkgChoreographyExecutor {
     where
         E: NetworkEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Distributing commitments and collecting shares").await;
+        let _ = effects
+            .log_debug("Distributing commitments and collecting shares")
+            .await;
 
         // Send commitment bundle to all participants
         let bundle = DkgCommitmentBundle {
@@ -392,7 +402,9 @@ impl DkgChoreographyExecutor {
                     let device_id = DeviceId(peer_id);
                     if participants.contains(&device_id) {
                         shares.insert(device_id, share_data);
-                        let _ = effects.log_debug(&format!("Received share revelation from {}", peer_id)).await;
+                        let _ = effects
+                            .log_debug(&format!("Received share revelation from {}", peer_id))
+                            .await;
                     }
                 }
             }
@@ -432,10 +444,12 @@ impl DkgChoreographyExecutor {
                     let device_id = DeviceId(peer_id);
                     if participants.contains(&device_id) {
                         results.insert(device_id, verified);
-                        let _ = effects.log_debug(&format!(
-                            "Received verification result from {}: {}",
-                            peer_id, verified
-                        )).await;
+                        let _ = effects
+                            .log_debug(&format!(
+                                "Received verification result from {}: {}",
+                                peer_id, verified
+                            ))
+                            .await;
                     }
                 }
             }
@@ -463,7 +477,9 @@ impl DkgChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Generating public key package from verified shares").await;
+        let _ = effects
+            .log_debug("Generating public key package from verified shares")
+            .await;
 
         // Aggregate the verified shares into a proper PublicKeyPackage using FROST DKG
         use frost_ed25519 as frost;
@@ -510,7 +526,9 @@ impl DkgChoreographyExecutor {
                 .map_err(|e| AuraError::network(format!("Failed to send success result: {}", e)))?;
         }
 
-        let _ = effects.log_info("Public key package generated and distributed").await;
+        let _ = effects
+            .log_info("Public key package generated and distributed")
+            .await;
 
         Ok(DkgResponse {
             public_key_package: Some(pubkey_package),
@@ -529,7 +547,9 @@ impl DkgChoreographyExecutor {
     where
         E: NetworkEffects + ConsoleEffects,
     {
-        let _ = effects.log_warn("DKG verification failed, aborting protocol").await;
+        let _ = effects
+            .log_warn("DKG verification failed, aborting protocol")
+            .await;
 
         let failure_message = "DKG verification failed".to_string();
         let failure_bytes = serde_json::to_vec(&failure_message)
@@ -578,7 +598,9 @@ impl DkgChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Generating and sending share commitment").await;
+        let _ = effects
+            .log_debug("Generating and sending share commitment")
+            .await;
 
         // Generate real FROST share commitment through DKG
         use frost_ed25519 as frost;
@@ -634,7 +656,9 @@ impl DkgChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Waiting for commitment bundle and revealing share").await;
+        let _ = effects
+            .log_debug("Waiting for commitment bundle and revealing share")
+            .await;
 
         // Wait for commitment bundle
         let (_peer_id, message_bytes) = effects.receive().await.map_err(|e| {
@@ -663,7 +687,9 @@ impl DkgChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Verifying shares and reporting result").await;
+        let _ = effects
+            .log_debug("Verifying shares and reporting result")
+            .await;
 
         // Verify the revealed shares against commitments using FROST verification
         use frost_ed25519 as frost;
@@ -674,16 +700,22 @@ impl DkgChoreographyExecutor {
                 local_shares[..32].try_into().unwrap_or([0u8; 32]),
             ) {
                 Ok(_signing_share) => {
-                    let _ = effects.log_debug("Local FROST shares verified successfully").await;
+                    let _ = effects
+                        .log_debug("Local FROST shares verified successfully")
+                        .await;
                     true
                 }
                 Err(e) => {
-                    let _ = effects.log_warn(&format!("FROST share verification failed: {}", e)).await;
+                    let _ = effects
+                        .log_warn(&format!("FROST share verification failed: {}", e))
+                        .await;
                     false
                 }
             }
         } else {
-            let _ = effects.log_warn("No local shares available for verification").await;
+            let _ = effects
+                .log_warn("No local shares available for verification")
+                .await;
             false
         };
 

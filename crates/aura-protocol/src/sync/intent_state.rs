@@ -116,8 +116,6 @@ impl IntentState {
     /// Takes the "greater" state according to the partial order.
     /// For concurrent states (e.g., Attesting vs Aborted), uses timestamp.
     pub fn merge(&self, other: &IntentState) -> IntentState {
-        
-
         // If states are equal, return self
         if self == other {
             return *self;

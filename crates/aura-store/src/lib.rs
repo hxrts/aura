@@ -129,18 +129,28 @@ impl MemoryStorage {
     }
 
     /// Store a chunk by ID
-    pub async fn store_chunk(&mut self, chunk_id: ChunkId, data: Vec<u8>) -> Result<(), aura_core::effects::StorageError> {
+    pub async fn store_chunk(
+        &mut self,
+        chunk_id: ChunkId,
+        data: Vec<u8>,
+    ) -> Result<(), aura_core::effects::StorageError> {
         self.chunks.insert(chunk_id, data);
         Ok(())
     }
 
     /// Retrieve a chunk by ID
-    pub async fn fetch_chunk(&self, chunk_id: &ChunkId) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
+    pub async fn fetch_chunk(
+        &self,
+        chunk_id: &ChunkId,
+    ) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
         Ok(self.chunks.get(chunk_id).cloned())
     }
 
     /// Delete a chunk by ID
-    pub async fn delete_chunk(&mut self, chunk_id: &ChunkId) -> Result<(), aura_core::effects::StorageError> {
+    pub async fn delete_chunk(
+        &mut self,
+        chunk_id: &ChunkId,
+    ) -> Result<(), aura_core::effects::StorageError> {
         self.chunks.remove(chunk_id);
         Ok(())
     }

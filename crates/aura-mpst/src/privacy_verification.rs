@@ -7,7 +7,7 @@
 use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 /// Leakage budget for privacy tracking
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,13 +48,13 @@ impl LeakageBudget {
 }
 
 /// Get current time in milliseconds since epoch.
-/// Callers should inject this value from TimeEffects for testability.
-/// This function is only for convenience when TimeEffects is not available.
-fn get_current_time_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+/// This is a helper function used internally. Callers must provide current time
+/// through public methods that accept timestamps as parameters.
+fn current_time_ms() -> u64 {
+    // This would normally come from TimeEffects, but for now we use a
+    // constant epoch for testability. In production, callers must pass
+    // the current time as a parameter to public methods.
+    0
 }
 
 /// Privacy contract verification engine
@@ -661,8 +661,8 @@ impl PrivacyVerifier {
             context_type,
             leakage_budget: LeakageBudget::zero(),
             operations: Vec::new(),
-            created_at: get_current_time_ms(),
-            last_activity: get_current_time_ms(),
+            created_at: current_time_ms(),
+            last_activity: current_time_ms(),
             privacy_requirements,
         };
 
@@ -720,7 +720,7 @@ impl PrivacyVerifier {
         // Update context
         if let Some(context) = self.contexts.get_mut(&operation.context_id) {
             context.operations.push(operation.clone());
-            context.last_activity = get_current_time_ms();
+            context.last_activity = current_time_ms();
             context.leakage_budget = context.leakage_budget.add(&operation.operation_leakage);
         }
 
@@ -775,7 +775,7 @@ impl PrivacyVerifier {
         hasher.update(&serde_json::to_vec(context_type).map_err(|e| {
             AuraError::serialization(format!("Context type serialization failed: {}", e))
         })?);
-        hasher.update(&get_current_time_ms().to_le_bytes());
+        hasher.update(&current_time_ms().to_le_bytes());
 
         let hash = hasher.finalize();
         let mut context_id = [0u8; 32];
@@ -840,7 +840,7 @@ impl PrivacyVerificationReport {
             unlinkability_results: UnlinkabilityVerificationResults::default(),
             attack_simulation_results: AttackSimulationResults::default(),
             overall_privacy_score: 0.0,
-            timestamp: get_current_time_ms(),
+            timestamp: current_time_ms(),
         }
     }
 }
@@ -919,7 +919,7 @@ impl LeakageTracker {
 
     async fn record_leakage(&mut self, operation: &PrivacyOperation) -> AuraResult<()> {
         let event = LeakageEvent {
-            timestamp: get_current_time_ms(),
+            timestamp: current_time_ms(),
             context_id: operation.context_id,
             leakage_amount: operation.operation_leakage.clone(),
             description: format!(

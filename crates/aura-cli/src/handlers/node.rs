@@ -18,7 +18,9 @@ pub async fn handle_node(
         port, daemon
     ));
 
-    let _ = effects.log_info(&format!("Config: {}", config_path.display())).await;
+    let _ = effects
+        .log_info(&format!("Config: {}", config_path.display()))
+        .await;
 
     // Validate config exists through storage effects
     if effects
@@ -28,7 +30,9 @@ pub async fn handle_node(
         .unwrap()
         .is_none()
     {
-        let _ = effects.log_error(&format!("Config file not found: {}", config_path.display())).await;
+        let _ = effects
+            .log_error(&format!("Config file not found: {}", config_path.display()))
+            .await;
         return Err(anyhow::anyhow!(
             "Config file not found: {}",
             config_path.display()
@@ -72,7 +76,9 @@ async fn run_daemon_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
 
     // Simulate daemon initialization
     let start_time = effects.current_epoch().await;
-    let _ = effects.log_info(&format!("Node started at epoch: {}", start_time)).await;
+    let _ = effects
+        .log_info(&format!("Node started at epoch: {}", start_time))
+        .await;
 
     // Simulate some startup delay
     simulate_startup_delay(effects).await;
@@ -83,7 +89,9 @@ async fn run_daemon_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
     ));
 
     // TODO fix - In a real implementation, this would start the actual node service
-    let _ = effects.log_info("Daemon is running. Use 'aura status' to check node status.").await;
+    let _ = effects
+        .log_info("Daemon is running. Use 'aura status' to check node status.")
+        .await;
 
     Ok(())
 }
@@ -96,7 +104,9 @@ async fn run_interactive_mode(effects: &AuraEffectSystem, port: u16) -> Result<(
     ));
 
     let start_time = effects.current_epoch().await;
-    let _ = effects.log_info(&format!("Started at epoch: {}", start_time)).await;
+    let _ = effects
+        .log_info(&format!("Started at epoch: {}", start_time))
+        .await;
 
     // Simulate interactive mode - in real implementation would handle signals
     simulate_interactive_session(effects).await;
@@ -130,13 +140,17 @@ async fn simulate_interactive_session(effects: &AuraEffectSystem) {
 
     for i in 1..=3 {
         let current = effects.current_epoch().await;
-        let _ = effects.log_info(&format!("Interactive tick {} at epoch {}", i, current)).await;
+        let _ = effects
+            .log_info(&format!("Interactive tick {} at epoch {}", i, current))
+            .await;
 
         // Simulate some work
         tokio::task::yield_now().await;
     }
 
-    let _ = effects.log_info("Interactive session ended (simulated)").await;
+    let _ = effects
+        .log_info("Interactive session ended (simulated)")
+        .await;
 }
 
 /// Node configuration structure

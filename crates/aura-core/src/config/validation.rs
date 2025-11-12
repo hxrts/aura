@@ -223,12 +223,8 @@ impl ConfigValidator {
             Ok(())
         } else {
             // Return the first error (could be enhanced to return all errors)
-            // SAFETY: We checked is_empty() so there must be at least one error
-            Err(self
-                .errors
-                .into_iter()
-                .next()
-                .expect("errors list is not empty"))
+            // We know errors is not empty since we just checked is_empty()
+            self.errors.into_iter().next().map(Err).unwrap_or(Ok(()))
         }
     }
 

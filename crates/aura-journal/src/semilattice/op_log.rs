@@ -261,7 +261,8 @@ impl OpLog {
     /// In production, this should be stored in OpLog metadata
     pub fn local_device_id(&self) -> DeviceId {
         // Placeholder - in production, OpLog should store its owner device ID
-        DeviceId::new()
+        // Using nil UUID as constant placeholder to avoid random UUID generation
+        DeviceId(uuid::Uuid::nil())
     }
 }
 
@@ -377,7 +378,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode::new_device(
                         LeafId(leaf_id),
-                        aura_core::DeviceId::new(),
+                        aura_core::DeviceId(uuid::Uuid::new_v4()),
                         vec![leaf_id as u8; 32],
                     ),
                     under: NodeIndex(0),

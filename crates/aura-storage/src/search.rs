@@ -6,7 +6,7 @@
 use crate::access_control::{
     StorageAccessControl, StorageAccessRequest, StorageOperation, StorageResource,
 };
-use aura_core::{AccountId, AuraResult, ContentId, DeviceId, Hash32};
+use aura_core::{AccountId, AuraResult, ContentId, DeviceId};
 use aura_protocol::effects::{AuraEffectSystem, NetworkEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

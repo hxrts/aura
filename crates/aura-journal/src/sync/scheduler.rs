@@ -610,7 +610,7 @@ mod tests {
         let config = SchedulerConfig::default();
         let oplog = OpLog::new();
         let sync_config = crate::sync::SyncConfiguration::default();
-        let device_id = crate::DeviceId::new();
+        let device_id = crate::DeviceId(uuid::Uuid::new_v4());
         let synchronizer = OpLogSynchronizer::new(device_id, oplog, sync_config);
         let scheduler = SyncScheduler::new(config, synchronizer);
 
@@ -624,11 +624,11 @@ mod tests {
         let config = SchedulerConfig::default();
         let oplog = OpLog::new();
         let sync_config = crate::sync::SyncConfiguration::default();
-        let device_id = crate::DeviceId::new();
+        let device_id = crate::DeviceId(uuid::Uuid::new_v4());
         let synchronizer = OpLogSynchronizer::new(device_id, oplog, sync_config);
         let mut scheduler = SyncScheduler::new(config, synchronizer);
 
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
         let peer_info = create_test_peer_info(peer_id);
 
         scheduler.add_peer(peer_info);
@@ -647,18 +647,18 @@ mod tests {
         let config = SchedulerConfig::default();
         let oplog = OpLog::new();
         let sync_config = crate::sync::SyncConfiguration::default();
-        let device_id = crate::DeviceId::new();
+        let device_id = crate::DeviceId(uuid::Uuid::new_v4());
         let synchronizer = OpLogSynchronizer::new(device_id, oplog, sync_config);
         let mut scheduler = SyncScheduler::new(config, synchronizer);
 
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
 
         scheduler.schedule_peer_sync(peer_id, 100);
         assert_eq!(scheduler.sync_queue.len(), 1);
         assert_eq!(scheduler.statistics.syncs_scheduled, 1);
 
         // Higher priority should be queued first
-        let peer_id2 = DeviceId::new();
+        let peer_id2 = DeviceId(uuid::Uuid::new_v4());
         scheduler.schedule_peer_sync(peer_id2, 150);
         assert_eq!(scheduler.sync_queue.len(), 2);
         assert_eq!(scheduler.sync_queue[0].peer_id, peer_id2); // Higher priority first
@@ -669,7 +669,7 @@ mod tests {
         let config = SchedulerConfig::default();
         let oplog = OpLog::new();
         let sync_config = crate::sync::SyncConfiguration::default();
-        let device_id = crate::DeviceId::new();
+        let device_id = crate::DeviceId(uuid::Uuid::new_v4());
         let synchronizer = OpLogSynchronizer::new(device_id, oplog, sync_config);
         let scheduler = SyncScheduler::new(config, synchronizer);
 
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn test_scheduled_sync_priority() {
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
         let sync = ScheduledSync {
             peer_id,
             scheduled_at: Instant::now(),

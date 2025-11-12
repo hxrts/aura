@@ -3,18 +3,16 @@
 //! This module implements the G_reshare choreography for FROST key resharing
 //! and rotation protocols using the Aura effect system pattern and rumpsteak-aura DSL.
 
-use crate::{FrostError, FrostResult};
+use crate::FrostResult;
 use async_trait::async_trait;
 use aura_core::effects::{ConsoleEffects, CryptoEffects, NetworkEffects, TimeEffects};
 use aura_core::{AccountId, AuraError, DeviceId};
-use aura_crypto::frost::{PublicKeyPackage, Share};
+use aura_crypto::frost::PublicKeyPackage;
 use aura_mpst::{
     infrastructure::{ChoreographyFramework, ChoreographyMetadata, ProtocolCoordinator},
     runtime::{AuraRuntime, ExecutionContext},
     MpstResult,
 };
-use rand::RngCore;
-use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -260,7 +258,9 @@ impl KeyResharingChoreographyExecutor {
                 .await?
         };
 
-        let _ = effects.log_info("Key resharing choreography completed").await;
+        let _ = effects
+            .log_info("Key resharing choreography completed")
+            .await;
         Ok(response)
     }
 
@@ -287,7 +287,9 @@ impl KeyResharingChoreographyExecutor {
         // Wait for final result
         let response = self.receive_final_result(effects).await?;
 
-        let _ = effects.log_info("Key resharing participation as old guardian completed").await;
+        let _ = effects
+            .log_info("Key resharing participation as old guardian completed")
+            .await;
         Ok(response)
     }
 
@@ -317,7 +319,9 @@ impl KeyResharingChoreographyExecutor {
         // Wait for final result
         let response = self.receive_final_result(effects).await?;
 
-        let _ = effects.log_info("Key resharing participation as new guardian completed").await;
+        let _ = effects
+            .log_info("Key resharing participation as new guardian completed")
+            .await;
         Ok(response)
     }
 
@@ -372,7 +376,9 @@ impl KeyResharingChoreographyExecutor {
     where
         E: NetworkEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Collecting share preparations from old guardians").await;
+        let _ = effects
+            .log_debug("Collecting share preparations from old guardians")
+            .await;
 
         let mut preparations = HashMap::new();
         let timeout_at = effects.current_timestamp().await + 60000; // 60 second timeout
@@ -417,7 +423,9 @@ impl KeyResharingChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Distributing new shares to new guardians").await;
+        let _ = effects
+            .log_debug("Distributing new shares to new guardians")
+            .await;
 
         // Redistribute shares using FROST algorithms
         for participant in new_participants {
@@ -457,7 +465,9 @@ impl KeyResharingChoreographyExecutor {
                 .await
                 .map_err(|e| AuraError::network(format!("Failed to send share package: {}", e)))?;
 
-            let _ = effects.log_debug(&format!("Sent new share package to {}", participant)).await;
+            let _ = effects
+                .log_debug(&format!("Sent new share package to {}", participant))
+                .await;
         }
 
         Ok(())
@@ -471,7 +481,9 @@ impl KeyResharingChoreographyExecutor {
     where
         E: NetworkEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Collecting verification results from new guardians").await;
+        let _ = effects
+            .log_debug("Collecting verification results from new guardians")
+            .await;
 
         let mut results = HashMap::new();
         let timeout_at = effects.current_timestamp().await + 30000;
@@ -515,7 +527,9 @@ impl KeyResharingChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Completing successful key resharing").await;
+        let _ = effects
+            .log_debug("Completing successful key resharing")
+            .await;
 
         // Generate the new public key package from verified reshared shares
         use frost_ed25519 as frost;
@@ -571,7 +585,9 @@ impl KeyResharingChoreographyExecutor {
                 .map_err(|e| AuraError::network(format!("Failed to send success result: {}", e)))?;
         }
 
-        let _ = effects.log_info("Key resharing completed successfully").await;
+        let _ = effects
+            .log_info("Key resharing completed successfully")
+            .await;
 
         Ok(ResharingResponse {
             public_key_package: Some(pubkey_package),
@@ -590,7 +606,9 @@ impl KeyResharingChoreographyExecutor {
     where
         E: NetworkEffects + ConsoleEffects,
     {
-        let _ = effects.log_warn("Key resharing verification failed, aborting protocol").await;
+        let _ = effects
+            .log_warn("Key resharing verification failed, aborting protocol")
+            .await;
 
         let failure_message = "Key resharing verification failed".to_string();
         let failure_bytes = serde_json::to_vec(&failure_message)
@@ -639,7 +657,9 @@ impl KeyResharingChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Preparing and sending share data for resharing").await;
+        let _ = effects
+            .log_debug("Preparing and sending share data for resharing")
+            .await;
 
         // Prepare shares for redistribution using FROST algorithms
         use frost_ed25519 as frost;
@@ -697,7 +717,9 @@ impl KeyResharingChoreographyExecutor {
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Verifying new share and reporting result").await;
+        let _ = effects
+            .log_debug("Verifying new share and reporting result")
+            .await;
 
         // Verify the new share using FROST verification
         use frost_ed25519 as frost;
@@ -710,16 +732,22 @@ impl KeyResharingChoreographyExecutor {
                     .unwrap_or([0u8; 32]),
             ) {
                 Ok(_signing_share) => {
-                    let _ = effects.log_debug("New FROST share verified successfully").await;
+                    let _ = effects
+                        .log_debug("New FROST share verified successfully")
+                        .await;
                     true
                 }
                 Err(e) => {
-                    let _ = effects.log_warn(&format!("FROST share verification failed: {}", e)).await;
+                    let _ = effects
+                        .log_warn(&format!("FROST share verification failed: {}", e))
+                        .await;
                     false
                 }
             }
         } else {
-            let _ = effects.log_warn("No share package received for verification").await;
+            let _ = effects
+                .log_warn("No share package received for verification")
+                .await;
             false
         };
 
@@ -741,7 +769,9 @@ impl KeyResharingChoreographyExecutor {
     where
         E: NetworkEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Waiting for final resharing result").await;
+        let _ = effects
+            .log_debug("Waiting for final resharing result")
+            .await;
 
         let (_peer_id, message_bytes) = effects
             .receive()
@@ -750,7 +780,9 @@ impl KeyResharingChoreographyExecutor {
 
         // Try to deserialize as successful result first
         if let Ok(pubkey_package) = serde_json::from_slice::<PublicKeyPackage>(&message_bytes) {
-            let _ = effects.log_debug("Received successful resharing result").await;
+            let _ = effects
+                .log_debug("Received successful resharing result")
+                .await;
             return Ok(ResharingResponse {
                 public_key_package: Some(pubkey_package),
                 success: true,
@@ -761,7 +793,9 @@ impl KeyResharingChoreographyExecutor {
 
         // Try to deserialize as failure message
         if let Ok(error_msg) = serde_json::from_slice::<String>(&message_bytes) {
-            let _ = effects.log_debug("Received resharing failure notification").await;
+            let _ = effects
+                .log_debug("Received resharing failure notification")
+                .await;
             return Ok(ResharingResponse {
                 public_key_package: None,
                 success: false,

@@ -18,6 +18,7 @@ use crate::{
 use aura_core::{
     flow::FlowBudget, relationships::ContextId, session_epochs::Epoch, AuraError, DeviceId,
 };
+use uuid::Uuid;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -36,8 +37,8 @@ struct SecureChannelTestFixture {
 
 impl SecureChannelTestFixture {
     async fn new() -> Self {
-        let device_id = DeviceId::new();
-        let peer_device = DeviceId::new();
+        let device_id = DeviceId(Uuid::new_v4());
+        let peer_device = DeviceId(Uuid::new_v4());
         let context = ContextId::new("test_context");
         let epoch = Epoch::new(1);
         let flow_budget = FlowBudget::new(1000, epoch);
@@ -64,17 +65,19 @@ impl SecureChannelTestFixture {
 
     async fn create_channel(&self) -> Result<(), AuraError> {
         self.registry
-            .get_or_create_channel(self.context, self.peer_device, self.epoch, self.flow_budget)
+            .get_or_create_channel(self.context.clone(), self.peer_device, self.epoch, self.flow_budget.clone())
             .await
     }
 
     async fn channel_exists(&self) -> bool {
-        self.registry.has_channel(self.context, self.peer_device).await
+        self.registry
+            .has_channel(self.context.clone(), self.peer_device)
+            .await
     }
 
     async fn channel_is_active(&self) -> bool {
         self.registry
-            .get_active_channel(self.context, self.peer_device)
+            .get_active_channel(self.context.clone(), self.peer_device)
             .await
             .is_some()
     }
@@ -91,7 +94,10 @@ async fn test_one_channel_per_context_peer_invariant() {
 
     let stats = fixture.registry.get_registry_stats().await;
     assert_eq!(stats.total_channels, 1, "Should have exactly one channel");
-    assert_eq!(stats.establishing_channels, 1, "Channel should be establishing");
+    assert_eq!(
+        stats.establishing_channels, 1,
+        "Channel should be establishing"
+    );
 
     // Validate registry invariants
     let violations = fixture.registry.validate_invariants().await.unwrap();
@@ -120,7 +126,10 @@ async fn test_epoch_rotation_teardown_trigger() {
 
     // Verify channel state after teardown
     let stats = fixture.registry.get_registry_stats().await;
-    assert_eq!(stats.terminated_channels, 1, "Should have one terminated channel");
+    assert_eq!(
+        stats.terminated_channels, 1,
+        "Should have one terminated channel"
+    );
 }
 
 #[tokio::test]
@@ -134,13 +143,16 @@ async fn test_capability_shrink_teardown_trigger() {
     // Trigger capability shrink
     fixture
         .registry
-        .trigger_capability_shrink(fixture.context, fixture.peer_device, shrunk_budget)
+        .trigger_capability_shrink(fixture.context.clone(), fixture.peer_device, shrunk_budget)
         .await
         .unwrap();
 
     // Process teardown queue
     let teardown_count = fixture.registry.process_teardown_queue().await.unwrap();
-    assert_eq!(teardown_count, 1, "Should have torn down one channel due to capability shrink");
+    assert_eq!(
+        teardown_count, 1,
+        "Should have torn down one channel due to capability shrink"
+    );
 }
 
 #[tokio::test]
@@ -150,11 +162,11 @@ async fn test_context_invalidation_teardown_trigger() {
     // Create multiple channels in the same context
     fixture.create_channel().await.unwrap();
 
-    let another_peer = DeviceId::new();
+    let another_peer = DeviceId(Uuid::new_v4());
     let another_budget = FlowBudget::new(1000, fixture.epoch);
     fixture
         .registry
-        .get_or_create_channel(fixture.context, another_peer, fixture.epoch, another_budget)
+        .get_or_create_channel(fixture.context.clone(), another_peer, fixture.epoch, another_budget)
         .await
         .unwrap();
 
@@ -166,12 +178,15 @@ async fn test_context_invalidation_teardown_trigger() {
     let invalidation_reason = "Test context invalidation".to_string();
     fixture
         .registry
-        .trigger_context_invalidation(fixture.context, invalidation_reason)
+        .trigger_context_invalidation(fixture.context.clone(), invalidation_reason)
         .await;
 
     // Process teardown queue
     let teardown_count = fixture.registry.process_teardown_queue().await.unwrap();
-    assert_eq!(teardown_count, 2, "Should have torn down both channels in context");
+    assert_eq!(
+        teardown_count, 2,
+        "Should have torn down both channels in context"
+    );
 
     // Verify all channels in context are terminated
     let final_stats = fixture.registry.get_registry_stats().await;
@@ -190,10 +205,10 @@ async fn test_registry_capacity_limits() {
     let budget = FlowBudget::new(1000, epoch);
 
     // Create channels up to limit
-    for i in 0..2 {
-        let peer = DeviceId::new();
+    for _i in 0..2 {
+        let peer = DeviceId(Uuid::new_v4());
         registry
-            .get_or_create_channel(context, peer, epoch, budget)
+            .get_or_create_channel(context.clone(), peer, epoch, budget.clone())
             .await
             .unwrap();
     }
@@ -203,9 +218,9 @@ async fn test_registry_capacity_limits() {
     assert_eq!(stats.total_channels, 2);
 
     // Attempt to exceed capacity
-    let excess_peer = DeviceId::new();
+    let excess_peer = DeviceId(Uuid::new_v4());
     let result = registry
-        .get_or_create_channel(context, excess_peer, epoch, budget)
+        .get_or_create_channel(context.clone(), excess_peer, epoch, budget.clone())
         .await;
 
     assert!(result.is_err(), "Should fail when exceeding capacity");
@@ -296,7 +311,7 @@ async fn test_epoch_boundary_enforcement() {
     let coordinator = ReconnectCoordinator::new(registry, config, Epoch::new(5));
 
     let context = ContextId::new("test_context");
-    let peer = DeviceId::new();
+    let peer = DeviceId(Uuid::new_v4());
     let channel_key = ChannelKey::new(context, peer);
 
     // Try to schedule reconnect with old epoch
@@ -323,11 +338,11 @@ async fn test_network_transport_integration() {
     fixture
         .network_transport
         .add_peer_for_context(
-            fixture.context,
+            fixture.context.clone(),
             fixture.peer_device,
             peer_addr,
             fixture.epoch,
-            fixture.flow_budget,
+            fixture.flow_budget.clone(),
         )
         .await
         .unwrap();
@@ -336,7 +351,7 @@ async fn test_network_transport_integration() {
     assert!(fixture.channel_exists().await);
 
     // Test legacy method (should warn but work)
-    let legacy_peer = DeviceId::new();
+    let legacy_peer = DeviceId(Uuid::new_v4());
     fixture
         .network_transport
         .add_peer(legacy_peer, peer_addr)
@@ -355,7 +370,7 @@ async fn test_network_transport_integration() {
 #[tokio::test]
 async fn test_multiple_contexts_isolation() {
     let registry: Arc<SecureChannelRegistry> = Arc::new(SecureChannelRegistry::with_defaults());
-    let peer = DeviceId::new();
+    let peer = DeviceId(Uuid::new_v4());
     let epoch = Epoch::new(1);
     let budget = FlowBudget::new(1000, epoch);
 
@@ -364,11 +379,11 @@ async fn test_multiple_contexts_isolation() {
     let context2 = ContextId::new("context2");
 
     registry
-        .get_or_create_channel(context1, peer, epoch, budget)
+        .get_or_create_channel(context1.clone(), peer, epoch, budget.clone())
         .await
         .unwrap();
     registry
-        .get_or_create_channel(context2, peer, epoch, budget)
+        .get_or_create_channel(context2.clone(), peer, epoch, budget.clone())
         .await
         .unwrap();
 
@@ -380,7 +395,7 @@ async fn test_multiple_contexts_isolation() {
 
     // Invalidate one context
     registry
-        .trigger_context_invalidation(context1, "Test invalidation".to_string())
+        .trigger_context_invalidation(context1.clone(), "Test invalidation".to_string())
         .await;
     registry.process_teardown_queue().await.unwrap();
 
@@ -399,14 +414,15 @@ async fn test_concurrent_operations() {
 
     // Create multiple channels concurrently
     let mut handles = Vec::new();
-    for i in 0..10 {
+    for _i in 0..10 {
         let registry_clone = registry.clone();
-        let peer = DeviceId::new();
+        let context_clone = context.clone();
+        let peer = DeviceId(Uuid::new_v4());
         let budget = FlowBudget::new(1000, epoch);
 
         let handle = tokio::spawn(async move {
             registry_clone
-                .get_or_create_channel(context, peer, epoch, budget)
+                .get_or_create_channel(context_clone, peer, epoch, budget)
                 .await
         });
         handles.push(handle);
@@ -425,7 +441,9 @@ async fn test_concurrent_operations() {
     assert_eq!(stats.total_channels, 10);
 
     // Trigger concurrent teardowns
-    registry.trigger_context_invalidation(context, "Cleanup".to_string()).await;
+    registry
+        .trigger_context_invalidation(context.clone(), "Cleanup".to_string())
+        .await;
     let teardown_count = registry.process_teardown_queue().await.unwrap();
     assert_eq!(teardown_count, 10);
 

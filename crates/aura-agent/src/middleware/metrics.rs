@@ -4,6 +4,7 @@
 //! monitoring, performance analysis, and operational insights.
 
 use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
+use uuid;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -442,7 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_metrics() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let mut metrics = AgentMetrics::new(device_id);
 
         metrics.record_operation("test_op", Duration::from_millis(100), true);
@@ -462,7 +463,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_middleware() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let middleware = MetricsMiddleware::new(device_id).await.unwrap();
 
         middleware
@@ -484,7 +485,7 @@ mod tests {
 
     #[test]
     fn test_metrics_summary_report() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let summary = MetricsSummary {
             device_id,
             uptime: Duration::from_secs(3600), // 1 hour

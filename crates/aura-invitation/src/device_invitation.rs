@@ -180,7 +180,7 @@ impl DeviceInvitationCoordinator {
         NetworkEffects::send_to_peer(&self.effects, envelope.invitee.0, payload)
             .await
             .map_err(|err| InvitationError::network(err.to_string()))?;
-        
+
         Ok(())
     }
 

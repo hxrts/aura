@@ -1,7 +1,7 @@
 //! Mock console effect handler for testing
 
-use aura_core::effects::ConsoleEffects;
 use async_trait::async_trait;
+use aura_core::effects::ConsoleEffects;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -78,5 +78,4 @@ impl ConsoleEffects for MockConsoleHandler {
         self.add_log("DEBUG", message);
         Ok(())
     }
-
 }

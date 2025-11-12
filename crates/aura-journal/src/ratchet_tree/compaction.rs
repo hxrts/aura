@@ -1,5 +1,5 @@
 use crate::semilattice::OpLog;
-use aura_core::tree::{AttestedOp, LeafId, NodeIndex, Snapshot, Epoch, TreeOp, TreeOpKind};
+use aura_core::tree::{AttestedOp, Epoch, LeafId, NodeIndex, Snapshot, TreeOp, TreeOpKind};
 use std::collections::BTreeSet;
 
 /// Compact an OpLog by replacing history before a snapshot with the snapshot fact
@@ -63,13 +63,18 @@ pub fn compact(oplog: &OpLog, snapshot: &Snapshot) -> Result<OpLog, CompactionEr
 }
 
 /// Create a snapshot fact operation from a snapshot
-fn create_snapshot_fact_operation(snapshot: &Snapshot, cut_epoch: Epoch) -> Result<AttestedOp, CompactionError> {
-    
-
+fn create_snapshot_fact_operation(
+    snapshot: &Snapshot,
+    cut_epoch: Epoch,
+) -> Result<AttestedOp, CompactionError> {
     // Create a special tree operation that represents the snapshot fact
     // For now, use RotateEpoch as a placeholder since SnapshotFact doesn't exist
     let snapshot_op = TreeOpKind::RotateEpoch {
-        affected: snapshot.roster.iter().map(|leaf_id| NodeIndex(leaf_id.0)).collect(),
+        affected: snapshot
+            .roster
+            .iter()
+            .map(|leaf_id| NodeIndex(leaf_id.0))
+            .collect(),
     };
 
     let tree_op = TreeOp {
@@ -94,30 +99,35 @@ fn create_snapshot_fact_operation(snapshot: &Snapshot, cut_epoch: Epoch) -> Resu
 /// Serialize snapshot metadata for inclusion in snapshot fact
 fn serialize_snapshot_metadata(snapshot: &Snapshot) -> Result<Vec<u8>, CompactionError> {
     use std::io::Write;
-    
+
     let mut buffer = Vec::new();
-    
+
     // Write epoch
-    buffer.write_all(&snapshot.epoch.to_be_bytes())
+    buffer
+        .write_all(&snapshot.epoch.to_be_bytes())
         .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
-    
+
     // Write tree hash
-    buffer.write_all(&snapshot.commitment)
+    buffer
+        .write_all(&snapshot.commitment)
         .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
-    
+
     // Write roster size
-    buffer.write_all(&(snapshot.roster.len() as u32).to_be_bytes())
+    buffer
+        .write_all(&(snapshot.roster.len() as u32).to_be_bytes())
         .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
-    
+
     // Write each leaf in roster
     for leaf_id in &snapshot.roster {
         let leaf_bytes = serialize_leaf_id(leaf_id)?;
-        buffer.write_all(&(leaf_bytes.len() as u32).to_be_bytes())
+        buffer
+            .write_all(&(leaf_bytes.len() as u32).to_be_bytes())
             .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
-        buffer.write_all(&leaf_bytes)
+        buffer
+            .write_all(&leaf_bytes)
             .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
     }
-    
+
     Ok(buffer)
 }
 
@@ -125,26 +135,28 @@ fn serialize_snapshot_metadata(snapshot: &Snapshot) -> Result<Vec<u8>, Compactio
 fn serialize_leaf_id(leaf_id: &LeafId) -> Result<Vec<u8>, CompactionError> {
     // This is simplified - real implementation would use proper serialization
     let mut buffer = Vec::new();
-    
+
     // Write leaf ID
     buffer.extend_from_slice(&leaf_id.0.to_be_bytes());
-    
+
     Ok(buffer)
 }
 
 /// Create a signature for the snapshot fact operation
-fn create_snapshot_signature(tree_op: &aura_core::tree::TreeOp) -> Result<Vec<u8>, CompactionError> {
+fn create_snapshot_signature(
+    tree_op: &aura_core::tree::TreeOp,
+) -> Result<Vec<u8>, CompactionError> {
     use blake3::Hasher;
-    
+
     let mut hasher = Hasher::new();
     hasher.update(b"SNAPSHOT_FACT");
     hasher.update(&tree_op.parent_epoch.to_be_bytes());
     hasher.update(&tree_op.parent_commitment);
-    
+
     // Hash the operation
     let op_bytes = serialize_tree_op(tree_op)?;
     hasher.update(&op_bytes);
-    
+
     let hash = hasher.finalize();
     Ok(hash.as_bytes()[..32].to_vec()) // 32-byte signature (Blake3 hash length)
 }
@@ -153,16 +165,16 @@ fn create_snapshot_signature(tree_op: &aura_core::tree::TreeOp) -> Result<Vec<u8
 fn serialize_tree_op(tree_op: &aura_core::tree::TreeOp) -> Result<Vec<u8>, CompactionError> {
     // This is simplified - real implementation would use proper serialization
     let mut buffer = Vec::new();
-    
+
     // Write parent epoch
     buffer.extend_from_slice(&tree_op.parent_epoch.to_be_bytes());
-    
+
     // Write parent commitment
     buffer.extend_from_slice(&tree_op.parent_commitment);
-    
+
     // Write operation type and version
     buffer.extend_from_slice(&tree_op.version.to_be_bytes());
-    
+
     match &tree_op.op {
         aura_core::TreeOpKind::RotateEpoch { affected } => {
             buffer.push(4); // Opcode for rotate epoch
@@ -190,7 +202,7 @@ fn serialize_tree_op(tree_op: &aura_core::tree::TreeOp) -> Result<Vec<u8>, Compa
             buffer.extend_from_slice(&policy_bytes);
         }
     }
-    
+
     Ok(buffer)
 }
 
@@ -318,7 +330,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn create_test_op(epoch: u64, commitment: [u8; 32], leaf_id: u8) -> AttestedOp {
-        let device_id = aura_core::DeviceId::new();
+        let device_id = aura_core::DeviceId(uuid::Uuid::new_v4());
         AttestedOp {
             op: TreeOp {
                 parent_commitment: commitment,

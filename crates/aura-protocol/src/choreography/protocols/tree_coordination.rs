@@ -5,8 +5,8 @@
 //! session type safety and effect system integration.
 
 use crate::effects::{
-    ApprovalStatus, ApprovalVote, ConsoleEffects, CoordinationError, SessionId, SyncProgress, TimeEffects,
-    TreeDigest, ValidationContext, ValidationResult, VoteDecision,
+    ApprovalStatus, ApprovalVote, ConsoleEffects, CoordinationError, SessionId, SyncProgress,
+    TimeEffects, TreeDigest, ValidationContext, ValidationResult, VoteDecision,
 };
 use aura_core::{AttestedOp, DeviceId, Hash32, TreeOpKind};
 use serde::{Deserialize, Serialize};

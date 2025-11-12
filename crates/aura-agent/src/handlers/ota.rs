@@ -260,7 +260,7 @@ mod tests {
 
     #[tokio::test]
     async fn ota_operations_tracks_proposals() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let ops = OtaOperations::new(device_id);
 
         // Should start with no upgrades
@@ -270,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn ota_operations_opt_in() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let ops = OtaOperations::new(device_id);
         let proposal_id = Uuid::new_v4();
 

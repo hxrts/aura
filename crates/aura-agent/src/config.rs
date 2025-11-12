@@ -9,6 +9,7 @@
 //! Authentication settings are handled by choreographic protocols.
 
 pub use aura_core::{AccountId, DeviceId};
+use uuid;
 
 /// Minimal essential configuration for agent startup
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -32,7 +33,7 @@ impl AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            device_id: DeviceId::new(),
+            device_id: DeviceId(uuid::Uuid::new_v4()),
             account_id: None,
         }
     }

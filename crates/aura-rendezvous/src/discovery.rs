@@ -3,12 +3,12 @@
 //! This module implements privacy-preserving peer discovery using rendezvous
 //! points and unlinkable credentials for anonymous peer finding.
 
-use crate::{BlindSignature, UnlinkableCredential};
+use crate::UnlinkableCredential;
 use aura_core::{AuraResult, DeviceId, RelationshipId};
 use aura_wot::{Capability, TrustLevel};
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Discovery service for finding peers anonymously
 #[derive(Debug, Clone)]

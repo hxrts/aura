@@ -454,7 +454,7 @@ mod tests {
     fn test_add_leaf() {
         let mut state = TreeState::new();
 
-        let leaf = LeafNode::new_device(LeafId(1), aura_core::DeviceId::new(), vec![0u8; 32]);
+        let leaf = LeafNode::new_device(LeafId(1), aura_core::DeviceId(uuid::Uuid::new_v4()), vec![0u8; 32]);
 
         state.add_leaf(leaf.clone());
 
@@ -466,7 +466,7 @@ mod tests {
     fn test_remove_leaf() {
         let mut state = TreeState::new();
 
-        let leaf = LeafNode::new_device(LeafId(1), aura_core::DeviceId::new(), vec![0u8; 32]);
+        let leaf = LeafNode::new_device(LeafId(1), aura_core::DeviceId(uuid::Uuid::new_v4()), vec![0u8; 32]);
 
         state.add_leaf(leaf.clone());
         assert_eq!(state.num_leaves(), 1);

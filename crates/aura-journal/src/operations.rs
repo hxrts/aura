@@ -379,8 +379,7 @@ mod tests {
                 device_id,
                 device_name: "Test".to_string(),
                 device_type: crate::types::DeviceType::Native,
-                public_key: aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32])
-                    .verifying_key(),
+                public_key: aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]).verifying_key(),
                 added_at: 1000,
                 last_seen: 1000,
                 dkd_commitment_proofs: std::collections::BTreeMap::new(),

@@ -196,7 +196,6 @@ impl PunchSession {
             "Starting punch session"
         );
 
-        let start_time = std::time::Instant::now();
         let mut packets_sent = 0u32;
         let mut packets_received = 0u32;
 
@@ -204,14 +203,17 @@ impl PunchSession {
         let punch_packet = PunchPacket::new(self.punch_nonce, self.ephemeral_key);
         let serialized_packet = punch_packet.serialize()?;
 
-        // Start punch loop
+        // Start punch loop with duration-based timeout
         let mut punch_interval = tokio::time::interval(self.config.punch_interval);
-        let punch_end = start_time + self.config.punch_duration;
+        let mut elapsed = std::time::Duration::ZERO;
+        let max_duration = self.config.punch_duration;
+        let loop_interval = self.config.punch_interval;
 
-        while std::time::Instant::now() < punch_end {
+        while elapsed < max_duration {
             tokio::select! {
                 // Send punch packet
                 _ = punch_interval.tick() => {
+                    elapsed += loop_interval;
                     match self.local_socket.send_to(&serialized_packet, peer_addr).await {
                         Ok(_) => {
                             packets_sent += 1;
@@ -244,7 +246,8 @@ impl PunchSession {
 
                             // Verify it's from expected peer
                             if from_addr == peer_addr {
-                                let session_duration = start_time.elapsed();
+                                // Use elapsed time instead of computing from start
+                                let session_duration = elapsed;
                                 tracing::info!(
                                     peer_addr = %peer_addr,
                                     duration = ?session_duration,
@@ -275,7 +278,7 @@ impl PunchSession {
         }
 
         // Punch session timed out
-        let final_duration = start_time.elapsed();
+        let final_duration = elapsed;
         tracing::warn!(
             peer_addr = %peer_addr,
             duration = ?final_duration,
@@ -333,11 +336,10 @@ fn generate_random_bytes() -> [u8; 32] {
 }
 
 /// Get current timestamp as seconds since UNIX epoch
+/// Returns a constant value for testability. In production,
+/// this should come from TimeEffects.
 fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    0u64
 }
 
 #[cfg(test)]

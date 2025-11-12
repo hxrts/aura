@@ -343,9 +343,9 @@ mod tests {
         let mut journal = KeyJournal::new();
 
         // Create identity with 2 devices
-        let identity_id = NodeId::new();
-        let device1_id = NodeId::new();
-        let device2_id = NodeId::new();
+        let identity_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let device1_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let device2_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
 
         let identity = KeyNode::new(
             identity_id,
@@ -394,8 +394,8 @@ mod tests {
         let journal = create_test_journal();
 
         // Create a new disconnected node
-        let new_node_id = NodeId::new();
-        let new_device_id = NodeId::new();
+        let new_node_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let new_device_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
 
         let edge = KeyEdge::new(new_node_id, new_device_id, EdgeKind::Contains);
 

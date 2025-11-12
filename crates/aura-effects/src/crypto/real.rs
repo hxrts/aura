@@ -1,6 +1,12 @@
 //! Real cryptographic handler using actual crypto operations
 //!
 //! Provides secure cryptographic operations for production use.
+//!
+//! This module is the implementation layer that wraps low-level cryptographic
+//! and random number generation operations. It's expected to use disallowed methods
+//! like `rand::thread_rng()` since its purpose is to abstract these operations
+//! for the effect system.
+#![allow(clippy::disallowed_methods)]
 
 use async_trait::async_trait;
 use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};

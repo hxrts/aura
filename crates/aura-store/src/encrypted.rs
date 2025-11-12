@@ -42,15 +42,12 @@ impl EncryptedStorageHandler {
     /// Get information about the storage configuration
     pub async fn stack_info(&self) -> HashMap<String, String> {
         let storage = self.storage.read().await;
-        let stats = storage
-            .stats()
-            .await
-            .unwrap_or_else(|_| aura_core::effects::StorageStats {
-                key_count: 0,
-                total_size: 0,
-                available_space: None,
-                backend_type: "unknown".to_string(),
-            });
+        let stats = aura_core::effects::StorageStats {
+            key_count: storage.len() as u64,
+            total_size: storage.chunks.values().map(|v| v.len() as u64).sum(),
+            available_space: None,
+            backend_type: "memory".to_string(),
+        };
 
         let mut info = HashMap::new();
         info.insert("backend_type".to_string(), stats.backend_type);

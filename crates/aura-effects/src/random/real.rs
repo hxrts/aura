@@ -1,7 +1,11 @@
 //! Real random effect handler for production use
+//!
+//! This module wraps low-level random number generation operations and needs
+//! to use disallowed methods like `rand::thread_rng()` for production use.
+#![allow(clippy::disallowed_methods)]
 
-use aura_core::effects::RandomEffects;
 use async_trait::async_trait;
+use aura_core::effects::RandomEffects;
 use rand::RngCore;
 
 /// Real random handler for production use

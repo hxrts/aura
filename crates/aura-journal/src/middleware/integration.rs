@@ -443,12 +443,11 @@ mod tests {
 
     #[test]
     fn test_builder_pattern() {
-        let effects = Effects::test();
-        let account_id = aura_core::AccountId::new_with_effects(&effects);
+        let account_id = aura_core::AccountId(uuid::Uuid::new_v4());
 
         let state = Arc::new(RwLock::new(AccountState::new(
             account_id,
-            aura_crypto::Ed25519SigningKey::from_bytes(&effects.random_bytes::<32>())
+            aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32])
                 .verifying_key(),
         )));
 
@@ -460,7 +459,7 @@ mod tests {
         let now = aura_core::time::current_unix_timestamp();
         let context = super::JournalContext::new(
             account_id,
-            aura_core::DeviceId::new_with_effects(&effects),
+            aura_core::DeviceId(uuid::Uuid::new_v4()),
             "test".to_string(),
             now,
         );

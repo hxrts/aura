@@ -14,18 +14,20 @@ pub async fn handle_init(
     output: &PathBuf,
 ) -> Result<()> {
     // Log initialization start
-    effects.log_info(
-        &format!(
-            "Initializing {}-of-{} threshold account",
-            threshold, num_devices
-        ),
-    );
+    effects.log_info(&format!(
+        "Initializing {}-of-{} threshold account",
+        threshold, num_devices
+    ));
 
-    let _ = effects.log_info(&format!("Output directory: {}", output.display())).await;
+    let _ = effects
+        .log_info(&format!("Output directory: {}", output.display()))
+        .await;
 
     // Validate parameters through effects
     if threshold > num_devices {
-        let _ = effects.log_error("Threshold cannot be greater than number of devices").await;
+        let _ = effects
+            .log_error("Threshold cannot be greater than number of devices")
+            .await;
         return Err(anyhow::anyhow!(
             "Invalid parameters: threshold ({}) > num_devices ({})",
             threshold,
@@ -65,7 +67,9 @@ pub async fn handle_init(
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create device config {}: {}", i, e))?;
 
-        let _ = effects.log_info(&format!("Created device_{}.toml", i)).await;
+        let _ = effects
+            .log_info(&format!("Created device_{}.toml", i))
+            .await;
     }
 
     // Success message

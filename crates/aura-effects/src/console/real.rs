@@ -1,7 +1,7 @@
 //! Real console effect handler for production use
 
-use aura_core::effects::ConsoleEffects;
 use async_trait::async_trait;
+use aura_core::effects::ConsoleEffects;
 
 /// Real console handler for production use
 #[derive(Debug, Clone, Default)]
@@ -12,7 +12,6 @@ impl RealConsoleHandler {
     pub fn new() -> Self {
         Self
     }
-
 }
 
 #[async_trait]
@@ -36,5 +35,4 @@ impl ConsoleEffects for RealConsoleHandler {
         tracing::debug!("{}", message);
         Ok(())
     }
-
 }

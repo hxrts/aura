@@ -66,7 +66,7 @@ pub mod send_guard;
 
 pub use flow::{FlowBudgetEffects, FlowGuard, FlowHint};
 pub use journal_coupler::{
-    JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation, CouplingMetrics,
+    CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
 pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 

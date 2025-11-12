@@ -118,7 +118,6 @@ impl Default for EffectRequirement {
     }
 }
 
-
 /// Trait for effects that require capability checking
 #[async_trait]
 pub trait GuardedEffect {

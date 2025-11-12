@@ -6,7 +6,6 @@
 use aura_core::{AuraError, DeviceId};
 use aura_wot::{CapabilitySet, TrustLevel};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Relay selection result
 #[derive(Debug, Clone)]

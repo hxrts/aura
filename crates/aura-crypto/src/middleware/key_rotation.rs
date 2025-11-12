@@ -523,17 +523,16 @@ pub struct RotationStats {
 mod tests {
     use super::*;
     use crate::middleware::handler::NoOpHandler;
-    use crate::Effects;
-    use aura_core::{AccountIdExt, DeviceIdExt};
+    use aura_core::{AccountId, DeviceId};
+    use uuid::Uuid;
 
     #[test]
     fn test_key_rotation_middleware() {
-        let effects = Effects::test();
-        let account_id = aura_core::AccountId::new_with_effects(&effects);
-        let device_id = aura_core::DeviceId::new_with_effects(&effects);
-        let participant1 = aura_core::DeviceId::new_with_effects(&effects);
-        let participant2 = aura_core::DeviceId::new_with_effects(&effects);
-        let participant3 = aura_core::DeviceId::new_with_effects(&effects);
+        let account_id = AccountId(Uuid::new_v4());
+        let device_id = DeviceId(Uuid::new_v4());
+        let participant1 = DeviceId(Uuid::new_v4());
+        let participant2 = DeviceId(Uuid::new_v4());
+        let participant3 = DeviceId(Uuid::new_v4());
 
         let middleware = KeyRotationMiddleware::new(RotationConfig::default());
         let handler = NoOpHandler;
@@ -561,9 +560,8 @@ mod tests {
 
     #[test]
     fn test_rotation_validation() {
-        let effects = Effects::test();
-        let account_id = aura_core::AccountId::new_with_effects(&effects);
-        let device_id = aura_core::DeviceId::new_with_effects(&effects);
+        let account_id = AccountId(Uuid::new_v4());
+        let device_id = DeviceId(Uuid::new_v4());
 
         let middleware = KeyRotationMiddleware::new(RotationConfig::default());
         let context = CryptoContext::new(
@@ -573,8 +571,8 @@ mod tests {
             SecurityLevel::Critical,
         );
 
-        let participant1 = aura_core::DeviceId::new_with_effects(&effects);
-        let participant2 = aura_core::DeviceId::new_with_effects(&effects);
+        let participant1 = DeviceId(Uuid::new_v4());
+        let participant2 = DeviceId(Uuid::new_v4());
         let participants = vec![device_id.clone(), participant1, participant2];
 
         // Valid rotation (2 out of 3 participants)
@@ -613,9 +611,8 @@ mod tests {
 
     #[test]
     fn test_insufficient_security_level() {
-        let effects = Effects::test();
-        let account_id = aura_core::AccountId::new_with_effects(&effects);
-        let device_id = aura_core::DeviceId::new_with_effects(&effects);
+        let account_id = AccountId(Uuid::new_v4());
+        let device_id = DeviceId(Uuid::new_v4());
 
         let middleware = KeyRotationMiddleware::new(RotationConfig::default());
         let context = CryptoContext::new(

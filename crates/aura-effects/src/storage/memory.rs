@@ -1,7 +1,7 @@
 //! In-memory storage handler for testing
 
-use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use async_trait::async_trait;
+use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

@@ -405,15 +405,15 @@ mod tests {
             TreeOpKind::AddLeaf {
                 leaf: LeafNode::new_device(
                     aura_core::tree::LeafId(0),
-                    aura_core::DeviceId::new(),
+                    aura_core::DeviceId(uuid::Uuid::new_v4()),
                     vec![0u8; 32],
                 ),
                 under: NodeIndex(0),
             },
             vec![],
-            aura_core::Hash32::new([0u8; 32]),
+            aura_core::Hash32([0u8; 32]),
             Priority::default_priority(),
-            DeviceId::new(),
+            DeviceId(uuid::Uuid::new_v4()),
             1000,
         );
 

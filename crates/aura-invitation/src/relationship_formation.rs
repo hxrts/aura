@@ -32,10 +32,8 @@
 //! - Non-repudiation through validation proofs
 //! - Bidirectional trust establishment
 
-use crate::{InvitationError, InvitationResult, Relationship, TrustLevel};
-use aura_core::effects::{
-    ConsoleEffects, CryptoEffects, JournalEffects, RandomEffects, TimeEffects,
-};
+use crate::{InvitationResult, Relationship, TrustLevel};
+use aura_core::effects::{ConsoleEffects, CryptoEffects, RandomEffects, TimeEffects};
 use aura_core::{AccountId, ContextId, DeviceId, Hash32};
 use hex;
 use rumpsteak_aura_choreography::choreography;
@@ -208,7 +206,6 @@ async fn initiator_session(
     adapter: &mut aura_protocol::choreography::AuraHandlerAdapter,
     config: &RelationshipFormationConfig,
 ) -> Result<RelationshipFormationResult, RelationshipFormationError> {
-
     // Phase 1: Send initialization request
     let nonce = adapter.effects().random_bytes(32).await;
     let timestamp = adapter.effects().current_timestamp_millis().await;
@@ -266,7 +263,8 @@ async fn initiator_session(
 
     // Phase 3: Send validation proof and receive responder validation
     let validation_proof =
-        create_validation_proof(&relationship_keys, &config.initiator_id, adapter.effects()).await?;
+        create_validation_proof(&relationship_keys, &config.initiator_id, adapter.effects())
+            .await?;
     let key_hash = hash_relationship_keys(&relationship_keys, adapter.effects()).await?;
 
     let initiator_validation = RelationshipValidation {
@@ -314,7 +312,8 @@ async fn initiator_session(
     )
     .await?;
 
-    let signature = sign_trust_record(&trust_record_hash, &config.initiator_id, adapter.effects()).await?;
+    let signature =
+        sign_trust_record(&trust_record_hash, &config.initiator_id, adapter.effects()).await?;
 
     let initiator_confirmation = RelationshipConfirmation {
         context_id: key_offer.context_id.clone(),
@@ -340,10 +339,17 @@ async fn initiator_session(
         })?;
 
     // Verify responder's confirmation signature
-    verify_trust_record_signature(&responder_confirmation, &config.responder_id, adapter.effects()).await?;
+    verify_trust_record_signature(
+        &responder_confirmation,
+        &config.responder_id,
+        adapter.effects(),
+    )
+    .await?;
 
-    let _ = adapter.effects()
-        .log_info("Relationship formation ceremony completed successfully").await;
+    let _ = adapter
+        .effects()
+        .log_info("Relationship formation ceremony completed successfully")
+        .await;
 
     Ok(RelationshipFormationResult {
         context_id: key_offer.context_id,
@@ -358,7 +364,6 @@ async fn responder_session(
     adapter: &mut aura_protocol::choreography::AuraHandlerAdapter,
     config: &RelationshipFormationConfig,
 ) -> Result<RelationshipFormationResult, RelationshipFormationError> {
-
     // Phase 1: Receive initialization request
     let init_request: RelationshipInitRequest =
         adapter.recv_from(config.initiator_id).await.map_err(|e| {
@@ -440,7 +445,8 @@ async fn responder_session(
     .await?;
 
     let validation_proof =
-        create_validation_proof(&relationship_keys, &config.responder_id, adapter.effects()).await?;
+        create_validation_proof(&relationship_keys, &config.responder_id, adapter.effects())
+            .await?;
     let key_hash = hash_relationship_keys(&relationship_keys, adapter.effects()).await?;
 
     let responder_validation = RelationshipValidation {
@@ -480,9 +486,15 @@ async fn responder_session(
         })?;
 
     // Verify initiator's confirmation signature
-    verify_trust_record_signature(&initiator_confirmation, &config.initiator_id, adapter.effects()).await?;
+    verify_trust_record_signature(
+        &initiator_confirmation,
+        &config.initiator_id,
+        adapter.effects(),
+    )
+    .await?;
 
-    let signature = sign_trust_record(&trust_record_hash, &config.responder_id, adapter.effects()).await?;
+    let signature =
+        sign_trust_record(&trust_record_hash, &config.responder_id, adapter.effects()).await?;
 
     let responder_confirmation = RelationshipConfirmation {
         context_id: context_id.clone(),
@@ -499,7 +511,8 @@ async fn responder_session(
             RelationshipFormationError::Communication(format!("Failed to send confirmation: {}", e))
         })?;
 
-    let _ = adapter.effects()
+    let _ = adapter
+        .effects()
         .log_info("Relationship formation ceremony completed successfully")
         .await;
 

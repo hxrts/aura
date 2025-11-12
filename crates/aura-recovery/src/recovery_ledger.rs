@@ -9,7 +9,6 @@ use aura_core::{
 };
 use aura_protocol::effects::{AuraEffectSystem, StorageEffects};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Recovery state ledger for persistent audit trail
 #[derive(Debug, Clone)]
@@ -80,9 +79,8 @@ impl RecoveryLedger {
 
         match StorageEffects::retrieve(&self.effects, &key).await {
             Ok(Some(bytes)) => {
-                let evidence = from_slice(&bytes).map_err(|e| {
-                    AuraError::serialization(format!("decode evidence: {}", e))
-                })?;
+                let evidence = from_slice(&bytes)
+                    .map_err(|e| AuraError::serialization(format!("decode evidence: {}", e)))?;
                 Ok(Some(evidence))
             }
             Ok(None) => Ok(None),
@@ -132,9 +130,8 @@ impl RecoveryLedger {
 
         match StorageEffects::retrieve(&self.effects, &key).await {
             Ok(Some(bytes)) => {
-                let session = from_slice(&bytes).map_err(|e| {
-                    AuraError::serialization(format!("decode session: {}", e))
-                })?;
+                let session = from_slice(&bytes)
+                    .map_err(|e| AuraError::serialization(format!("decode session: {}", e)))?;
                 Ok(Some(session))
             }
             Ok(None) => Ok(None),

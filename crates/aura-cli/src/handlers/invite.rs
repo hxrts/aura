@@ -28,14 +28,12 @@ pub async fn handle_invitation(
                 .await
                 .context("failed to create invitation")?;
 
-            effects.log_info(
-                &format!(
-                    "Invitation {} sent to {} (expires at {}).",
-                    response.invitation.invitation_id,
-                    response.invitation.invitee,
-                    response.invitation.expires_at
-                ),
-    );
+            effects.log_info(&format!(
+                "Invitation {} sent to {} (expires at {}).",
+                response.invitation.invitation_id,
+                response.invitation.invitee,
+                response.invitation.expires_at
+            ));
             Ok(())
         }
         InvitationAction::Accept { envelope } => {
@@ -50,12 +48,10 @@ pub async fn handle_invitation(
                 .await
                 .context("failed to accept invitation")?;
 
-            effects.log_info(
-                &format!(
-                    "Accepted invitation {} at {}.",
-                    acceptance.invitation_id, acceptance.accepted_at
-                ),
-    );
+            effects.log_info(&format!(
+                "Accepted invitation {} at {}.",
+                acceptance.invitation_id, acceptance.accepted_at
+            ));
             Ok(())
         }
     }

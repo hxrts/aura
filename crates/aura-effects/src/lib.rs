@@ -64,7 +64,6 @@
 
 pub mod console;
 pub mod crypto;
-pub mod id_generation;
 pub mod journal;
 pub mod network;
 pub mod random;
@@ -75,9 +74,7 @@ pub mod time;
 pub use console::{MockConsoleHandler, RealConsoleHandler};
 pub use crypto::{MockCryptoHandler, RealCryptoHandler};
 pub use journal::MemoryJournalHandler;
-pub use network::{
-    MemoryNetworkHandler, MockNetworkHandler, TcpNetworkHandler,
-};
+pub use network::{MemoryNetworkHandler, MockNetworkHandler, TcpNetworkHandler};
 pub use random::{MockRandomHandler, RealRandomHandler};
 pub use storage::{FilesystemStorageHandler, MemoryStorageHandler};
 pub use time::{RealTimeHandler, SimulatedTimeHandler};
@@ -85,9 +82,4 @@ pub use time::{RealTimeHandler, SimulatedTimeHandler};
 // Re-export core effect traits for convenience
 pub use aura_core::effects::*;
 
-// TODO: TEMPORARY COMPATIBILITY BRIDGE - REMOVE AFTER FIXING ARCHITECTURAL VIOLATIONS
-// Export ID generation traits that were moved from aura-core
-// These should be removed once all domain crates stop using Effects-based ID generation
-pub use id_generation::{
-    AccountIdExt, DeviceIdExt, EffectsLike, EventIdExt, GuardianIdExt,
-};
+// Compatibility bridge has been removed after fixing all architectural violations

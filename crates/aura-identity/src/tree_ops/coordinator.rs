@@ -5,7 +5,7 @@
 use crate::tree_ops::choreography_impl::{TreeOpChoreography, TreeOpRole};
 use aura_core::{
     tree::{AttestedOp, TreeOp},
-    AuraResult, Cap, DeviceId, Epoch, Policy,
+    AuraResult, Cap, DeviceId, Policy,
 };
 use aura_mpst::AuraRuntime;
 use std::collections::HashMap;

@@ -60,7 +60,7 @@ impl AuraContext {
             operation_id: Uuid::new_v4(),
             metadata: HashMap::new(),
             epoch: 0,
-             flow_hint: None,
+            flow_hint: None,
         }
     }
 

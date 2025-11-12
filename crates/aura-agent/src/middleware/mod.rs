@@ -39,6 +39,7 @@ pub use tracing::{OperationTracer, TracingMiddleware};
 pub use validation::{InputValidator, ValidationMiddleware, ValidationRule};
 
 use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
+use uuid;
 use aura_protocol::effects::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -248,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_middleware_stack_creation() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = AuraEffectSystem::for_testing(device_id);
         let stack = AgentMiddlewareStack::new(effects, device_id);
 
@@ -260,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_middleware_builder() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = AuraEffectSystem::for_testing(device_id);
 
         let stack = MiddlewareStackBuilder::new(effects, device_id)
@@ -277,7 +278,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_operation_execution() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = AuraEffectSystem::for_testing(device_id);
         let stack = AgentMiddlewareStack::new(effects, device_id);
 

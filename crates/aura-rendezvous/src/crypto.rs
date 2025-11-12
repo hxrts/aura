@@ -1,6 +1,6 @@
 //! Lightweight placeholder crypto types until aura-crypto exposes real implementations.
 
-use aura_core::{relationships::RelationshipId, AuraError, AuraResult};
+use aura_core::{relationships::RelationshipId, AuraResult};
 use serde::{Deserialize, Serialize};
 
 /// Blind signature placeholder.

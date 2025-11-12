@@ -192,12 +192,12 @@ impl OperationId {
         // Create a deterministic UUID from actor ID and sequence using hash
         use blake3::Hasher;
         let mut hasher = Hasher::new();
-        
+
         // Add actor UUID bytes
         hasher.update(self.actor.0.as_bytes());
         // Add sequence bytes
         hasher.update(&self.sequence.to_be_bytes());
-        
+
         // Take first 16 bytes of hash as UUID
         let hash = hasher.finalize();
         let mut uuid_bytes = [0u8; 16];
@@ -205,7 +205,7 @@ impl OperationId {
         uuid::Uuid::from_bytes(uuid_bytes)
     }
 
-    /// Create an operation ID from a UUID 
+    /// Create an operation ID from a UUID
     /// Note: This is not a perfect round-trip since UUID has less info than OperationId
     pub fn from_uuid(uuid: uuid::Uuid) -> Self {
         // Create a DeviceId from the UUID
@@ -228,12 +228,12 @@ mod tests {
     fn test_vector_clock_basic() {
         let mut vc1 = VectorClock::new();
         let actor = test_actor();
-        
+
         assert_eq!(vc1.get(&actor), 0);
-        
+
         vc1.increment(actor);
         assert_eq!(vc1.get(&actor), 1);
-        
+
         vc1.set(actor, 5);
         assert_eq!(vc1.get(&actor), 5);
     }
@@ -242,15 +242,15 @@ mod tests {
     fn test_vector_clock_happens_before() {
         let actor1 = test_actor();
         let actor2 = test_actor();
-        
+
         let mut vc1 = VectorClock::new();
         vc1.set(actor1, 1);
         vc1.set(actor2, 2);
-        
+
         let mut vc2 = VectorClock::new();
         vc2.set(actor1, 2);
         vc2.set(actor2, 3);
-        
+
         assert!(vc1.happens_before(&vc2));
         assert!(!vc2.happens_before(&vc1));
     }
@@ -259,15 +259,15 @@ mod tests {
     fn test_vector_clock_concurrent() {
         let actor1 = test_actor();
         let actor2 = test_actor();
-        
+
         let mut vc1 = VectorClock::new();
         vc1.set(actor1, 2);
         vc1.set(actor2, 1);
-        
+
         let mut vc2 = VectorClock::new();
         vc2.set(actor1, 1);
         vc2.set(actor2, 2);
-        
+
         assert!(vc1.concurrent_with(&vc2));
         assert!(vc2.concurrent_with(&vc1));
     }
@@ -276,13 +276,13 @@ mod tests {
     fn test_causal_context_ready() {
         let actor1 = test_actor();
         let actor2 = test_actor();
-        
+
         let ctx = CausalContext::new(actor1);
         let mut current_clock = VectorClock::new();
-        
+
         // Should be ready when we have no dependencies
         assert!(ctx.is_ready(|_| true, &current_clock));
-        
+
         // Should be ready when current clock dominates required clock
         current_clock.set(actor1, 1);
         current_clock.set(actor2, 1);
@@ -293,13 +293,13 @@ mod tests {
     fn test_causal_context_with_dependencies() {
         let actor = test_actor();
         let dep_id = OperationId::new(actor, 42);
-        
+
         let ctx = CausalContext::new(actor).with_dependency(dep_id.clone());
         let current_clock = VectorClock::new();
-        
+
         // Should not be ready when dependency is not satisfied
         assert!(!ctx.is_ready(|id| id != &dep_id, &current_clock));
-        
+
         // Should be ready when dependency is satisfied
         assert!(ctx.is_ready(|id| id == &dep_id, &current_clock));
     }

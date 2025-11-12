@@ -7,7 +7,7 @@ use crate::{
 };
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
-use aura_protocol::effects::{AuraEffectSystem, TimeEffects, ConsoleEffects};
+use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects, TimeEffects};
 use aura_verify::session::SessionTicket;
 use aura_wot::{CapabilitySet, TreePolicy};
 use serde::{Deserialize, Serialize};
@@ -252,7 +252,11 @@ impl RecoveryPolicyEnforcer {
         let device_capabilities = self
             .get_device_capabilities(&request.requesting_device)
             .await?;
-        if !self.config.initiation_capabilities.is_subset_of(&device_capabilities) {
+        if !self
+            .config
+            .initiation_capabilities
+            .is_subset_of(&device_capabilities)
+        {
             validation.add_violation(PolicyViolation::MissingCapabilities {
                 required: self.config.initiation_capabilities.clone(),
                 available: device_capabilities,
@@ -273,7 +277,11 @@ impl RecoveryPolicyEnforcer {
 
         // Check guardian capabilities
         let guardian_capabilities = self.get_device_capabilities(guardian_id).await?;
-        if !self.config.approval_capabilities.is_subset_of(&guardian_capabilities) {
+        if !self
+            .config
+            .approval_capabilities
+            .is_subset_of(&guardian_capabilities)
+        {
             validation.add_violation(PolicyViolation::MissingCapabilities {
                 required: self.config.approval_capabilities.clone(),
                 available: guardian_capabilities.clone(),
@@ -283,7 +291,11 @@ impl RecoveryPolicyEnforcer {
 
         // Check emergency override if applicable
         if matches!(request.priority, RecoveryPriority::Emergency) {
-            if !self.config.emergency_override_capabilities.is_subset_of(&guardian_capabilities) {
+            if !self
+                .config
+                .emergency_override_capabilities
+                .is_subset_of(&guardian_capabilities)
+            {
                 validation.add_violation(PolicyViolation::EmergencyOverrideRequired {
                     guardian: *guardian_id,
                     required_capabilities: self.config.emergency_override_capabilities.clone(),
@@ -559,12 +571,13 @@ impl GuardianRecoveryCoordinator {
             }
         }
 
-        let _ = self.effect_system.log_info(
-            &format!(
+        let _ = self
+            .effect_system
+            .log_info(&format!(
                 "Applied policy adjustments: dispute_window={}s for {:?} priority",
                 request.dispute_window_secs, request.priority
-            ),
-        ).await;
+            ))
+            .await;
 
         Ok(())
     }

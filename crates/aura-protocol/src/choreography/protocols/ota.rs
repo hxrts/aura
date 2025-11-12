@@ -277,7 +277,11 @@ impl UpgradeOrchestrator {
         for participant in &self.config.participants {
             if participant != &adapter.device_id() {
                 // Log: Broadcasting upgrade proposal (simplified for now)
-                tracing::info!("Broadcasting upgrade proposal to {}: version {}", participant, proposal.version);
+                tracing::info!(
+                    "Broadcasting upgrade proposal to {}: version {}",
+                    participant,
+                    proposal.version
+                );
             }
         }
 
@@ -341,7 +345,11 @@ impl UpgradeOrchestrator {
             timestamp,
         };
 
-        tracing::info!("Broadcasting activation signal: version {} at epoch {}", proposal.version, activation_epoch);
+        tracing::info!(
+            "Broadcasting activation signal: version {} at epoch {}",
+            proposal.version,
+            activation_epoch
+        );
 
         Ok(())
     }

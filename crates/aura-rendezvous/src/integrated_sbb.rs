@@ -10,7 +10,7 @@
 
 use crate::{
     capability_aware_sbb::{CapabilityAwareSbbCoordinator, SbbForwardingPolicy, TrustStatistics},
-    envelope_encryption::{EncryptedEnvelope, EnvelopeEncryption, PaddingStrategy},
+    envelope_encryption::{EnvelopeEncryption, PaddingStrategy},
     messaging::{SbbMessageType, SbbTransportBridge, TransportOfferPayload},
     relationship_keys::{derive_test_root_key, RelationshipKeyManager},
     sbb::{FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding},

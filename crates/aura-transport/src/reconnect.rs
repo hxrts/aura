@@ -6,9 +6,7 @@
 //! - Implement exponential backoff and retry limits
 
 use crate::secure_channel::{ChannelKey, SecureChannelRegistry, TeardownReason};
-use aura_core::{
-    flow::FlowBudget, session_epochs::Epoch, AuraError,
-};
+use aura_core::{flow::FlowBudget, session_epochs::Epoch, AuraError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -141,10 +139,7 @@ impl ReconnectCoordinator {
     }
 
     /// Create with default configuration
-    pub fn with_defaults(
-        registry: Arc<SecureChannelRegistry>,
-        initial_epoch: Epoch,
-    ) -> Self {
+    pub fn with_defaults(registry: Arc<SecureChannelRegistry>, initial_epoch: Epoch) -> Self {
         Self::new(registry, ReconnectConfig::default(), initial_epoch)
     }
 
@@ -157,7 +152,7 @@ impl ReconnectCoordinator {
         flow_budget: FlowBudget,
     ) -> Result<(), AuraError> {
         let current_epoch = *self.current_epoch.read().await;
-        
+
         // Ensure we don't violate epoch boundaries
         if self.config.require_epoch_advancement && epoch.value() <= current_epoch.value() {
             warn!(
@@ -222,7 +217,7 @@ impl ReconnectCoordinator {
         let mut current = self.current_epoch.write().await;
         if new_epoch.value() > current.value() {
             *current = new_epoch;
-            
+
             info!(
                 old_epoch = current.value(),
                 new_epoch = new_epoch.value(),
@@ -254,8 +249,8 @@ impl ReconnectCoordinator {
 
         for attempt in ready {
             // Check epoch boundary before attempting reconnection
-            if self.config.require_epoch_advancement 
-                && attempt.epoch.value() <= current_epoch.value() 
+            if self.config.require_epoch_advancement
+                && attempt.epoch.value() <= current_epoch.value()
             {
                 results.push(ReconnectResult::SkippedEpochViolation {
                     channel_key: attempt.channel_key,
@@ -290,7 +285,7 @@ impl ReconnectCoordinator {
                         // Schedule next attempt
                         let next_delay = self.calculate_backoff_delay(new_attempt_count + 1);
                         let next_attempt_at = current_time + next_delay;
-                        
+
                         let next_attempt = ReconnectAttempt {
                             channel_key: attempt.channel_key.clone(),
                             attempt_number: new_attempt_count + 1,
@@ -302,7 +297,7 @@ impl ReconnectCoordinator {
 
                         let mut pending = self.pending_attempts.lock().await;
                         pending.push(next_attempt);
-                        
+
                         results.push(ReconnectResult::FailedWillRetry {
                             channel_key: attempt.channel_key,
                             attempt_number: new_attempt_count,
@@ -320,8 +315,11 @@ impl ReconnectCoordinator {
     /// Calculate exponential backoff delay for an attempt
     fn calculate_backoff_delay(&self, attempt_number: u32) -> u64 {
         let delay = self.config.base_delay_seconds as f64
-            * self.config.backoff_multiplier.powi((attempt_number - 1) as i32);
-        
+            * self
+                .config
+                .backoff_multiplier
+                .powi((attempt_number - 1) as i32);
+
         (delay as u64).min(self.config.max_delay_seconds)
     }
 
@@ -344,7 +342,7 @@ impl ReconnectCoordinator {
         // 2. Exchange transport offers via SBB
         // 3. Perform NAT traversal if needed
         // 4. Establish new encrypted connection
-        
+
         // For now, simulate the reconnection process
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -363,7 +361,7 @@ impl ReconnectCoordinator {
         // - TCP/QUIC connection establishment
         // - TLS handshake with device identity verification
         // - SecureChannel activation
-        
+
         let mock_peer_addr: SocketAddr = "192.168.1.100:8080".parse().unwrap();
 
         Ok(ReconnectResult::Success {
@@ -381,7 +379,10 @@ impl ReconnectCoordinator {
         ReconnectStats {
             total_attempts: failed.values().sum::<u32>() as u64,
             successful_reconnects: 0, // TODO: Track this
-            failed_reconnects: failed.values().filter(|&&count| count >= self.config.max_attempts).count() as u64,
+            failed_reconnects: failed
+                .values()
+                .filter(|&&count| count >= self.config.max_attempts)
+                .count() as u64,
             skipped_epoch_violations: 0, // TODO: Track this
             pending_attempts: pending.len() as u64,
         }
@@ -392,7 +393,7 @@ impl ReconnectCoordinator {
         let mut pending = self.pending_attempts.lock().await;
         let initial_len = pending.len();
         pending.retain(|attempt| &attempt.channel_key != channel_key);
-        
+
         let cancelled = initial_len != pending.len();
         if cancelled {
             info!(
@@ -401,20 +402,24 @@ impl ReconnectCoordinator {
                 "Cancelled pending reconnection attempts"
             );
         }
-        
+
         cancelled
     }
 
     /// Start the reconnection processing loop
     pub async fn start_processing_loop(&self, interval: Duration) -> Result<(), AuraError> {
         info!("Starting ReconnectCoordinator processing loop");
-        
+
         loop {
             let results = self.process_reconnections().await?;
-            
+
             for result in results {
                 match result {
-                    ReconnectResult::Success { channel_key, attempt_number, new_peer_addr } => {
+                    ReconnectResult::Success {
+                        channel_key,
+                        attempt_number,
+                        new_peer_addr,
+                    } => {
                         info!(
                             context = %channel_key.context.as_str(),
                             peer = %channel_key.peer_device.0,
@@ -423,7 +428,12 @@ impl ReconnectCoordinator {
                             "Channel reconnection successful"
                         );
                     }
-                    ReconnectResult::FailedWillRetry { channel_key, attempt_number, error, .. } => {
+                    ReconnectResult::FailedWillRetry {
+                        channel_key,
+                        attempt_number,
+                        error,
+                        ..
+                    } => {
                         warn!(
                             context = %channel_key.context.as_str(),
                             peer = %channel_key.peer_device.0,
@@ -432,7 +442,11 @@ impl ReconnectCoordinator {
                             "Channel reconnection failed, will retry"
                         );
                     }
-                    ReconnectResult::FailedExhausted { channel_key, attempt_number, error } => {
+                    ReconnectResult::FailedExhausted {
+                        channel_key,
+                        attempt_number,
+                        error,
+                    } => {
                         error!(
                             context = %channel_key.context.as_str(),
                             peer = %channel_key.peer_device.0,
@@ -441,7 +455,11 @@ impl ReconnectCoordinator {
                             "Channel reconnection exhausted all retries"
                         );
                     }
-                    ReconnectResult::SkippedEpochViolation { channel_key, current_epoch, required_epoch } => {
+                    ReconnectResult::SkippedEpochViolation {
+                        channel_key,
+                        current_epoch,
+                        required_epoch,
+                    } => {
                         debug!(
                             context = %channel_key.context.as_str(),
                             peer = %channel_key.peer_device.0,
@@ -452,7 +470,7 @@ impl ReconnectCoordinator {
                     }
                 }
             }
-            
+
             sleep(interval).await;
         }
     }
@@ -462,13 +480,14 @@ impl ReconnectCoordinator {
 mod tests {
     use super::*;
     use crate::secure_channel::RegistryConfig;
+    use aura_core::{ContextId, DeviceId};
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_reconnect_coordinator_creation() {
         let registry = Arc::new(SecureChannelRegistry::new(RegistryConfig::default()));
         let coordinator = ReconnectCoordinator::with_defaults(registry, Epoch::new(1));
-        
+
         let stats = coordinator.get_reconnect_stats().await;
         assert_eq!(stats.pending_attempts, 0);
         assert_eq!(stats.total_attempts, 0);
@@ -478,9 +497,9 @@ mod tests {
     async fn test_schedule_reconnect() {
         let registry = Arc::new(SecureChannelRegistry::new(RegistryConfig::default()));
         let coordinator = ReconnectCoordinator::with_defaults(registry, Epoch::new(1));
-        
+
         let context = ContextId::new("test_context");
-        let peer = DeviceId::new();
+        let peer = DeviceId(uuid::Uuid::new_v4());
         let channel_key = ChannelKey::new(context, peer);
         let epoch = Epoch::new(2);
         let budget = FlowBudget::new(1000, epoch);
@@ -502,9 +521,9 @@ mod tests {
     async fn test_epoch_boundary_enforcement() {
         let registry = Arc::new(SecureChannelRegistry::new(RegistryConfig::default()));
         let coordinator = ReconnectCoordinator::with_defaults(registry, Epoch::new(5));
-        
+
         let context = ContextId::new("test_context");
-        let peer = DeviceId::new();
+        let peer = DeviceId(uuid::Uuid::new_v4());
         let channel_key = ChannelKey::new(context, peer);
         let old_epoch = Epoch::new(3); // Earlier than current epoch
         let budget = FlowBudget::new(1000, old_epoch);
@@ -528,13 +547,13 @@ mod tests {
             max_delay_seconds: 60,
             ..Default::default()
         };
-        
+
         let registry = Arc::new(SecureChannelRegistry::new(RegistryConfig::default()));
         let coordinator = ReconnectCoordinator::new(registry, config, Epoch::new(1));
 
-        assert_eq!(coordinator.calculate_backoff_delay(1), 2);  // 2 * 2^0 = 2
-        assert_eq!(coordinator.calculate_backoff_delay(2), 4);  // 2 * 2^1 = 4
-        assert_eq!(coordinator.calculate_backoff_delay(3), 8);  // 2 * 2^2 = 8
+        assert_eq!(coordinator.calculate_backoff_delay(1), 2); // 2 * 2^0 = 2
+        assert_eq!(coordinator.calculate_backoff_delay(2), 4); // 2 * 2^1 = 4
+        assert_eq!(coordinator.calculate_backoff_delay(3), 8); // 2 * 2^2 = 8
         assert_eq!(coordinator.calculate_backoff_delay(10), 60); // Capped at max_delay
     }
 }

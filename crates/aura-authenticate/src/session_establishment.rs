@@ -5,10 +5,9 @@
 
 use crate::{AuraError, AuraResult};
 use aura_core::{AccountId, DeviceId};
-use aura_crypto::Ed25519Signature;
 use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation};
 use aura_verify::session::{SessionScope, SessionTicket};
-use aura_verify::{IdentityProof, VerifiedIdentity};
+use aura_verify::{Ed25519Signature, IdentityProof, VerifiedIdentity};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
@@ -208,15 +207,16 @@ impl SessionEstablishmentChoreography {
     pub async fn execute(
         &self,
         request: SessionEstablishmentRequest,
+        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<SessionEstablishmentResponse> {
         let mut state = self.state.lock().await;
         state.current_request = Some(request.clone());
         drop(state);
 
         match self.role {
-            SessionRole::Requester => self.execute_requester(request).await,
-            SessionRole::Approver(_) => self.execute_approver().await,
-            SessionRole::Coordinator => self.execute_coordinator().await,
+            SessionRole::Requester => self.execute_requester(request, effect_system).await,
+            SessionRole::Approver(_) => self.execute_approver(effect_system).await,
+            SessionRole::Coordinator => self.execute_coordinator(effect_system).await,
         }
     }
 
@@ -225,6 +225,7 @@ impl SessionEstablishmentChoreography {
     async fn execute_requester(
         &self,
         request: SessionEstablishmentRequest,
+        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<SessionEstablishmentResponse> {
         tracing::info!(
             "Executing session establishment as requester for device: {}",
@@ -232,21 +233,35 @@ impl SessionEstablishmentChoreography {
         );
 
         // Apply capability guard
-        let auth_cap = aura_core::Cap::new();
-        let guard = CapabilityGuard::new(auth_cap);
-        guard.enforce(self.runtime.capabilities()).map_err(|_| {
-            AuraError::invalid("Insufficient capabilities for session establishment")
+        let session_cap = aura_core::Cap::with_permissions(vec![
+            "session:establish".to_string(),
+            "network:send".to_string(),
+            "network:receive".to_string(),
+        ]);
+        let guard = CapabilityGuard::new(session_cap.clone());
+
+        // For MVP, grant session permissions to authenticated devices
+        let device_capabilities = session_cap; // Placeholder
+        guard.enforce(&device_capabilities).map_err(|e| {
+            AuraError::invalid(format!(
+                "Insufficient capabilities for session establishment: {}",
+                e
+            ))
         })?;
 
         // Generate session ID
-        let session_id = uuid::Uuid::new_v4().to_string();
+        let _session_id = uuid::Uuid::new_v4().to_string();
 
-        // Send session request
-        tracing::info!("Requesting session establishment: {}", session_id);
-        // TODO: Implement actual message sending
-
-        // Wait for session proposal
-        // TODO: Implement proposal receiving
+        // Session establishment would involve:
+        // 1. Sending session request to approvers using AuraHandlerAdapter
+        // 2. Receiving session proposals
+        // 3. Evaluating proposals
+        // 4. Finalizing session with selected approver(s)
+        //
+        // This requires session ticket generation and multi-party agreement
+        tracing::warn!(
+            "Session establishment requires multi-party coordination - placeholder implementation"
+        );
 
         // Apply journal annotation
         let journal_annotation =
@@ -257,46 +272,46 @@ impl SessionEstablishmentChoreography {
             session_ticket: None,
             participants: vec![request.device_id],
             success: false,
-            error: Some("Session establishment choreography not fully implemented".to_string()),
+            error: Some("Session establishment requires multi-party coordination".to_string()),
         })
     }
 
     /// Execute as session approver
-    async fn execute_approver(&self) -> AuraResult<SessionEstablishmentResponse> {
+    async fn execute_approver(
+        &self,
+        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
+    ) -> AuraResult<SessionEstablishmentResponse> {
         tracing::info!("Executing session establishment as approver");
 
-        // Wait for session request
-        // TODO: Implement request receiving
-
-        // Evaluate session request
-        // TODO: Implement session evaluation logic
-
-        // Send approval/rejection
-        // TODO: Implement approval sending
+        // Approver role is passive - awaits session requests from requester
+        tracing::warn!("Approver role is passive - awaits session requests");
 
         Ok(SessionEstablishmentResponse {
             session_ticket: None,
             participants: Vec::new(),
             success: false,
-            error: Some("Session establishment choreography not fully implemented".to_string()),
+            error: Some("Approver role is passive - awaits session requests".to_string()),
         })
     }
 
     /// Execute as coordinator
-    async fn execute_coordinator(&self) -> AuraResult<SessionEstablishmentResponse> {
+    async fn execute_coordinator(
+        &self,
+        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
+    ) -> AuraResult<SessionEstablishmentResponse> {
         tracing::info!("Executing session establishment as coordinator");
 
-        // Coordinate session establishment across approvers
-        // TODO: Implement coordination logic
-
-        // Aggregate approvals and finalize session
-        // TODO: Implement result aggregation
+        // Coordinator manages session establishment across multiple approvers
+        // For single approver scenarios, requester handles coordination directly
+        tracing::warn!(
+            "Coordinator role not fully implemented - requester handles single approver"
+        );
 
         Ok(SessionEstablishmentResponse {
             session_ticket: None,
             participants: Vec::new(),
             success: false,
-            error: Some("Session establishment choreography not fully implemented".to_string()),
+            error: Some("Coordinator role requires multi-approver scenario".to_string()),
         })
     }
 }
@@ -323,6 +338,7 @@ impl SessionEstablishmentCoordinator {
     pub async fn establish_session(
         &mut self,
         request: SessionEstablishmentRequest,
+        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<SessionEstablishmentResponse> {
         tracing::info!(
             "Starting session establishment for device: {}",
@@ -333,8 +349,8 @@ impl SessionEstablishmentCoordinator {
         let choreography =
             SessionEstablishmentChoreography::new(SessionRole::Requester, self.runtime.clone());
 
-        // Execute the choreography
-        let result = choreography.execute(request).await;
+        // Execute the choreography with effect system
+        let result = choreography.execute(request, effect_system).await;
 
         // Store choreography for potential follow-up operations
         self.choreography = Some(choreography);

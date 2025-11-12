@@ -5,14 +5,12 @@
 //! distributed synchronization operations.
 
 use aura_core::{AttestedOp, DeviceId, Hash32};
-use aura_protocol::effects::{
-    AntiEntropyConfig, BloomDigest, SyncError, SyncEffects,
-};
+use aura_protocol::effects::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Synchronization session state
@@ -38,7 +36,7 @@ pub enum SyncPhase {
     /// Exchanging digests with peer
     DigestExchange,
     /// Computing differences between OpLogs
-    DifferenceComputation, 
+    DifferenceComputation,
     /// Requesting missing operations
     OperationRequest,
     /// Merging received operations
@@ -104,11 +102,7 @@ where
     E: SyncEffects + Send + Sync + 'static,
 {
     /// Create a new synchronization service
-    pub fn new(
-        effects: Arc<E>,
-        config: AntiEntropyConfig,
-        device_id: DeviceId,
-    ) -> Self {
+    pub fn new(effects: Arc<E>, config: AntiEntropyConfig, device_id: DeviceId) -> Self {
         Self {
             effects,
             config,
@@ -146,7 +140,7 @@ where
         {
             let mut sessions = self.sessions.lock().await;
             sessions.insert(session_id, session.clone());
-            
+
             let mut stats = self.stats.lock().await;
             stats.sessions_initiated += 1;
             stats.active_sessions += 1;
@@ -171,21 +165,28 @@ where
     }
 
     /// Execute the synchronization protocol
-    async fn execute_sync_protocol(&self, mut session: SyncSession) -> Result<SyncSession, SyncError> {
+    async fn execute_sync_protocol(
+        &self,
+        mut session: SyncSession,
+    ) -> Result<SyncSession, SyncError> {
         // Phase 1: Digest Exchange
         session.phase = SyncPhase::DigestExchange;
         self.update_session(session.clone()).await;
-        
+
         debug!(session_id = %session.session_id, "Exchanging digests");
         let local_digest = self.get_local_digest().await?;
-        let remote_digest = self.exchange_digest_with_peer(session.peer_id, &local_digest).await?;
+        let remote_digest = self
+            .exchange_digest_with_peer(session.peer_id, &local_digest)
+            .await?;
 
         // Phase 2: Difference Computation
         session.phase = SyncPhase::DifferenceComputation;
         self.update_session(session.clone()).await;
 
         debug!(session_id = %session.session_id, "Computing differences");
-        let missing_cids = self.compute_missing_operations(&local_digest, &remote_digest).await?;
+        let missing_cids = self
+            .compute_missing_operations(&local_digest, &remote_digest)
+            .await?;
 
         if missing_cids.is_empty() {
             debug!(session_id = %session.session_id, "No missing operations, sync complete");
@@ -202,7 +203,9 @@ where
             missing_ops = missing_cids.len(),
             "Requesting missing operations"
         );
-        let missing_ops = self.request_operations_from_peer(session.peer_id, missing_cids).await?;
+        let missing_ops = self
+            .request_operations_from_peer(session.peer_id, missing_cids)
+            .await?;
 
         // Phase 4: Operation Merge
         session.phase = SyncPhase::OperationMerge;
@@ -241,7 +244,7 @@ where
         // For now, just get the missing ops from the peer
         // In a full implementation, this would involve digest exchange protocol
         let remote_digest = BloomDigest::empty(); // Placeholder
-        
+
         debug!(
             peer_id = %peer_id,
             local_ops = local_digest.len(),
@@ -417,7 +420,11 @@ mod tests {
             Err(SyncError::OperationNotFound)
         }
 
-        async fn push_op_to_peers(&self, _op: AttestedOp, _peers: Vec<Uuid>) -> Result<(), SyncError> {
+        async fn push_op_to_peers(
+            &self,
+            _op: AttestedOp,
+            _peers: Vec<Uuid>,
+        ) -> Result<(), SyncError> {
             Ok(())
         }
 

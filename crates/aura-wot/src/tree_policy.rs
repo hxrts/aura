@@ -224,27 +224,32 @@ impl TreePolicy {
         let default_node = NodeIndex(0);
         let default_account = AccountId::new();
         let recovery_policy = Policy::Threshold { m: 2, n: 3 }; // 2-of-3 threshold for recovery
-        
+
         // Create default participants for recovery policy
         let mut participants = BTreeSet::new();
         participants.insert(DeviceId::new());
         participants.insert(DeviceId::new());
         participants.insert(DeviceId::new());
-        
+
         let threshold_config = ThresholdConfig::new(2, participants);
-        
-        Self::new(default_node, default_account, recovery_policy, threshold_config)
+
+        Self::new(
+            default_node,
+            default_account,
+            recovery_policy,
+            threshold_config,
+        )
     }
 
     /// Get minimum trust score required by this policy
     pub fn minimum_trust_score(&self) -> f64 {
         match &self.policy {
-            Policy::Any => 0.3,      // Low trust for any approval
+            Policy::Any => 0.3, // Low trust for any approval
             Policy::Threshold { m, n } => {
                 let ratio = *m as f64 / *n as f64;
-                0.5 + ratio * 0.3  // Scale from 0.5 to 0.8 based on threshold strictness
+                0.5 + ratio * 0.3 // Scale from 0.5 to 0.8 based on threshold strictness
             }
-            Policy::All => 0.8,     // High trust for unanimous approval
+            Policy::All => 0.8, // High trust for unanimous approval
         }
     }
 }

@@ -3,7 +3,7 @@
 //! This module implements the G_sigagg choreography for FROST signature
 //! aggregation and verification using the Aura effect system pattern and rumpsteak-aura DSL.
 
-use crate::{FrostError, FrostResult};
+use crate::FrostResult;
 use async_trait::async_trait;
 use aura_core::effects::{ConsoleEffects, CryptoEffects, NetworkEffects, TimeEffects};
 use aura_core::{AuraError, DeviceId};
@@ -13,8 +13,6 @@ use aura_mpst::{
     runtime::{AuraRuntime, ExecutionContext},
     MpstResult,
 };
-use rand::RngCore;
-use rumpsteak_aura_choreography::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -188,7 +186,9 @@ impl SignatureAggregationChoreographyExecutor {
         // Aggregation phase: Aggregate signatures and broadcast result
         let response = self.aggregate_and_broadcast(effects, &signers).await?;
 
-        let _ = effects.log_info("Signature aggregation choreography completed").await;
+        let _ = effects
+            .log_info("Signature aggregation choreography completed")
+            .await;
         Ok(response)
     }
 
@@ -217,7 +217,9 @@ impl SignatureAggregationChoreographyExecutor {
         // Wait for final result
         let response = self.receive_aggregation_result(effects).await?;
 
-        let _ = effects.log_info("Signature aggregation participation completed").await;
+        let _ = effects
+            .log_info("Signature aggregation participation completed")
+            .await;
         Ok(response)
     }
 
@@ -243,7 +245,9 @@ impl SignatureAggregationChoreographyExecutor {
                 .map_err(|e| {
                     AuraError::network(format!("Failed to send aggregation init: {}", e))
                 })?;
-            let _ = effects.log_debug(&format!("Sent aggregation init to {}", signer)).await;
+            let _ = effects
+                .log_debug(&format!("Sent aggregation init to {}", signer))
+                .await;
         }
 
         Ok(())
@@ -258,7 +262,9 @@ impl SignatureAggregationChoreographyExecutor {
     where
         E: NetworkEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Collecting partial signatures from signers").await;
+        let _ = effects
+            .log_debug("Collecting partial signatures from signers")
+            .await;
 
         let mut signatures = HashMap::new();
         let timeout_at = effects.current_timestamp().await + 30000; // 30 second timeout
@@ -271,7 +277,9 @@ impl SignatureAggregationChoreographyExecutor {
                     let device_id = DeviceId(peer_id);
                     if signers.contains(&device_id) && submission.signer_id == device_id {
                         signatures.insert(device_id, submission);
-                        let _ = effects.log_debug(&format!("Received partial signature from {}", peer_id)).await;
+                        let _ = effects
+                            .log_debug(&format!("Received partial signature from {}", peer_id))
+                            .await;
                     }
                 }
             }
@@ -385,11 +393,15 @@ impl SignatureAggregationChoreographyExecutor {
                             })?;
                     }
 
-                    let _ = effects.log_info("FROST signature aggregation completed successfully").await;
+                    let _ = effects
+                        .log_info("FROST signature aggregation completed successfully")
+                        .await;
                     Ok(response)
                 }
                 Err(e) => {
-                    let _ = effects.log_error(&format!("FROST aggregation failed: {}", e)).await;
+                    let _ = effects
+                        .log_error(&format!("FROST aggregation failed: {}", e))
+                        .await;
 
                     let response = AggregationResponse {
                         signature: None,
@@ -444,7 +456,9 @@ impl SignatureAggregationChoreographyExecutor {
                     })?;
             }
 
-            let _ = effects.log_warn("Signature aggregation failed due to insufficient signatures").await;
+            let _ = effects
+                .log_warn("Signature aggregation failed due to insufficient signatures")
+                .await;
             Ok(response)
         }
     }
@@ -523,9 +537,13 @@ impl SignatureAggregationChoreographyExecutor {
             })?;
 
         if response.success {
-            let _ = effects.log_debug("Received successful aggregation result").await;
+            let _ = effects
+                .log_debug("Received successful aggregation result")
+                .await;
         } else {
-            let _ = effects.log_debug("Received failed aggregation result").await;
+            let _ = effects
+                .log_debug("Received failed aggregation result")
+                .await;
         }
 
         Ok(response)

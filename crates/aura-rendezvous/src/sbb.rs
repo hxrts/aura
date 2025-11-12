@@ -4,7 +4,7 @@
 //! SBB enables envelope propagation through friend/guardian relationships with TTL limits,
 //! duplicate detection, and capability enforcement.
 
-use crate::envelope_encryption::{EncryptedEnvelope, EnvelopeEncryption};
+use crate::envelope_encryption::EncryptedEnvelope;
 use aura_core::{AuraResult, DeviceId};
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};

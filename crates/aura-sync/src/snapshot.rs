@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use aura_core::{
     maintenance::{MaintenanceEvent, SnapshotCompleted, SnapshotProposed},
-    tree::{Epoch as TreeEpoch, NodeIndex, Snapshot},
+    tree::{Epoch as TreeEpoch, Snapshot},
     AuraError, AuraResult, DeviceId, Hash32,
 };
 use parking_lot::{Mutex, RwLock};

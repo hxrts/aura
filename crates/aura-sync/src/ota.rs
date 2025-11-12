@@ -1,12 +1,10 @@
 //! OTA upgrade orchestration helpers.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use aura_core::{
-    maintenance::{
-        IdentityEpochFence, MaintenanceEvent, UpgradeActivated, UpgradeKind, UpgradeProposal,
-    },
-    AccountId, AuraError, AuraResult, DeviceId, Epoch, SemanticVersion,
+    maintenance::{MaintenanceEvent, UpgradeActivated, UpgradeKind, UpgradeProposal},
+    AuraError, AuraResult, DeviceId, Epoch, SemanticVersion,
 };
 use uuid::Uuid;
 

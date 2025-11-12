@@ -99,7 +99,9 @@ where
     fn apply_delta_to_state_generic(&mut self, _delta: D) {
         // Generic implementation: We cannot apply deltas without knowing the specific
         // relationship between Delta type and State type. Use the DeltaState implementations below.
-        tracing::debug!("Applied delta to state (generic fallback - consider using DeltaState implementation)");
+        tracing::debug!(
+            "Applied delta to state (generic fallback - consider using DeltaState implementation)"
+        );
     }
 
     /// Get current state
@@ -400,22 +402,24 @@ mod tests {
 
     #[test]
     fn test_delta_state_application() {
-        let mut handler = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
+        let mut handler =
+            DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
 
         // Apply a delta directly
         handler.apply_deltas(vec![TestDelta(3), TestDelta(7)]);
-        
+
         // State should be updated: 5 + max(3, 7) = 5 + 7 = 12
         assert_eq!(handler.get_state(), &TestCounter(12));
     }
 
     #[test]
     fn test_update_and_produce_delta() {
-        let mut handler = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
+        let mut handler =
+            DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
 
         // Update state and produce delta
         let delta = handler.update_and_produce_delta(TestCounter(10));
-        
+
         assert!(delta.is_some());
         assert_eq!(delta.unwrap(), TestDelta(5)); // 10 - 5 = 5
         assert_eq!(handler.get_state(), &TestCounter(10));
@@ -423,18 +427,20 @@ mod tests {
 
     #[test]
     fn test_update_and_produce_delta_no_change() {
-        let mut handler = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
+        let mut handler =
+            DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
 
         // Update with same state
         let delta = handler.update_and_produce_delta(TestCounter(5));
-        
+
         assert!(delta.is_none()); // No change, no delta produced
         assert_eq!(handler.get_state(), &TestCounter(5));
     }
 
     #[test]
     fn test_fold_deltas_with_delta_state() {
-        let mut handler = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
+        let mut handler =
+            DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(5));
         handler.set_fold_threshold(2);
 
         // Add deltas to trigger folding
@@ -451,7 +457,8 @@ mod tests {
         let handler1 = DeltaHandler::<TestCounter, TestDelta>::for_state_type();
         assert_eq!(handler1.get_state(), &TestCounter(0));
 
-        let handler2 = DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(42));
+        let handler2 =
+            DeltaHandler::<TestCounter, TestDelta>::for_state_type_with_state(TestCounter(42));
         assert_eq!(handler2.get_state(), &TestCounter(42));
     }
 }

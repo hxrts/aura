@@ -143,9 +143,12 @@ impl ManifestManager {
         &self,
         current_time: u64,
     ) -> Result<DeviceManifest, ManifestError> {
+        // Use a constant zero UUID as dummy peer ID for public context
+        // (prevents random UUID generation for testability)
+        let dummy_peer = DeviceId(uuid::Uuid::nil());
         self.generate_manifest_for_scope(
             RelationshipScope::Public,
-            DeviceId::new(), // Dummy peer ID for public context
+            dummy_peer,
             current_time,
             0.0, // No trust for public
             0,   // No shared sessions for public
@@ -418,9 +421,8 @@ pub struct ManifestStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AccountIdExt, DeviceIdExt};
-    use aura_crypto::Effects;
-
+    use aura_core::identifiers::{AccountId, DeviceId};
+    use uuid::Uuid;
     fn create_test_capabilities() -> PeerCapabilities {
         PeerCapabilities {
             storage_available: true,
@@ -432,10 +434,9 @@ mod tests {
 
     #[test]
     fn test_manifest_generation() {
-        let effects = Effects::test();
-        let account_id = AccountId::new_with_effects(&effects);
-        let device_id = DeviceId::new_with_effects(&effects);
-        let peer_id = DeviceId::new_with_effects(&effects);
+        let account_id = AccountId(Uuid::new_v4());
+        let device_id = DeviceId(Uuid::new_v4());
+        let peer_id = DeviceId(Uuid::new_v4());
 
         let capabilities = create_test_capabilities();
         let manager = ManifestManager::new(device_id, account_id, capabilities);
@@ -462,10 +463,9 @@ mod tests {
 
     #[test]
     fn test_manifest_caching() {
-        let effects = Effects::test();
-        let account_id = AccountId::new_with_effects(&effects);
-        let device_id = DeviceId::new_with_effects(&effects);
-        let peer_id = DeviceId::new_with_effects(&effects);
+        let account_id = AccountId(Uuid::new_v4());
+        let device_id = DeviceId(Uuid::new_v4());
+        let peer_id = DeviceId(Uuid::new_v4());
 
         let capabilities = create_test_capabilities();
         let manager = ManifestManager::new(device_id, account_id, capabilities);
@@ -486,9 +486,8 @@ mod tests {
 
     #[test]
     fn test_capability_buckets() {
-        let effects = Effects::test();
-        let account_id = AccountId::new_with_effects(&effects);
-        let device_id = DeviceId::new_with_effects(&effects);
+        let account_id = AccountId(Uuid::new_v4());
+        let device_id = DeviceId(Uuid::new_v4());
 
         let capabilities = create_test_capabilities();
         let manager = ManifestManager::new(device_id, account_id, capabilities);
@@ -502,16 +501,15 @@ mod tests {
 
     #[test]
     fn test_manifest_expiration() {
-        let effects = Effects::test();
-        let account_id = AccountId::new_with_effects(&effects);
-        let device_id = DeviceId::new_with_effects(&effects);
+        let account_id = AccountId(Uuid::new_v4());
+        let device_id = DeviceId(Uuid::new_v4());
 
         let capabilities = create_test_capabilities();
         let manager = ManifestManager::new(device_id, account_id, capabilities);
 
         let public_manifest = manager.generate_public_manifest(1000).unwrap();
         let intimate_manifest = manager
-            .generate_manifest_for_peer(DeviceId::new_with_effects(&effects), 1000, 0.9, 10)
+            .generate_manifest_for_peer(DeviceId(Uuid::new_v4()), 1000, 0.9, 10)
             .unwrap();
 
         // Public manifests should have longer TTL than intimate ones

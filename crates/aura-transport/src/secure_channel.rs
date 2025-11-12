@@ -53,20 +53,14 @@ impl Default for ChannelStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TeardownReason {
     /// Epoch rotation triggered teardown
-    EpochRotation {
-        old_epoch: Epoch,
-        new_epoch: Epoch,
-    },
+    EpochRotation { old_epoch: Epoch, new_epoch: Epoch },
     /// Capability shrink triggered teardown
     CapabilityShrink {
         old_budget: FlowBudget,
         new_budget: FlowBudget,
     },
     /// Context invalidation triggered teardown
-    ContextInvalidation {
-        context: ContextId,
-        reason: String,
-    },
+    ContextInvalidation { context: ContextId, reason: String },
     /// Manual teardown requested
     Manual,
     /// Connection failed
@@ -102,7 +96,7 @@ impl Default for TeardownConfig {
 }
 
 /// A secure channel binding to a specific context and peer device
-/// 
+///
 /// Each SecureChannel represents a bidirectional communication channel
 /// between this device and a peer device within a specific context.
 /// The channel enforces epoch boundaries and capability constraints.
@@ -188,7 +182,7 @@ impl SecureChannel {
         self.connection = Some(connection);
         self.status = ChannelStatus::Active;
         self.last_activity = current_timestamp();
-        
+
         info!(
             channel_id = %self.channel_id,
             context = %self.context.as_str(),
@@ -213,7 +207,7 @@ impl SecureChannel {
     /// Returns true if the channel should be torn down due to capability shrink
     pub fn update_flow_budget(&mut self, new_budget: FlowBudget) -> Option<TeardownReason> {
         let old_budget = self.flow_budget;
-        
+
         if self.should_teardown_for_budget_shrink(&new_budget) {
             Some(TeardownReason::CapabilityShrink {
                 old_budget,
@@ -230,7 +224,7 @@ impl SecureChannel {
     /// Returns true if the channel should be torn down due to epoch rotation
     pub fn update_epoch(&mut self, new_epoch: Epoch) -> Option<TeardownReason> {
         let old_epoch = self.epoch;
-        
+
         if self.should_teardown_for_epoch(new_epoch) {
             Some(TeardownReason::EpochRotation {
                 old_epoch,
@@ -248,7 +242,7 @@ impl SecureChannel {
         self.status = ChannelStatus::TearingDown;
         self.stats.last_teardown_reason = Some(reason.clone());
         self.last_activity = current_timestamp();
-        
+
         warn!(
             channel_id = %self.channel_id,
             context = %self.context.as_str(),
@@ -263,7 +257,7 @@ impl SecureChannel {
         self.status = ChannelStatus::Terminated;
         self.connection = None;
         self.last_activity = current_timestamp();
-        
+
         debug!(
             channel_id = %self.channel_id,
             context = %self.context.as_str(),
@@ -338,7 +332,10 @@ impl std::fmt::Debug for SecureChannelRegistry {
         f.debug_struct("SecureChannelRegistry")
             .field("config", &self.config)
             .field("channels", &"<RwLock<HashMap<ChannelKey, SecureChannel>>>")
-            .field("teardown_queue", &"<Mutex<Vec<(ChannelKey, TeardownReason)>>>")
+            .field(
+                "teardown_queue",
+                &"<Mutex<Vec<(ChannelKey, TeardownReason)>>>",
+            )
             .finish()
     }
 }
@@ -386,7 +383,7 @@ impl SecureChannelRegistry {
     }
 
     /// Get or create a SecureChannel for the given context and peer
-    /// 
+    ///
     /// Enforces the invariant: one active channel per (ContextId, peer_device)
     /// If a channel already exists, returns the existing one.
     /// If the existing channel is terminated, creates a new one.
@@ -404,9 +401,10 @@ impl SecureChannelRegistry {
             Some(existing_channel) => {
                 if existing_channel.is_terminated() {
                     // Replace terminated channel with a new one
-                    let new_channel = SecureChannel::new(context.clone(), peer_device, epoch, flow_budget);
+                    let new_channel =
+                        SecureChannel::new(context.clone(), peer_device, epoch, flow_budget);
                     channels.insert(key, new_channel);
-                    
+
                     info!(
                         context = %context.as_str(),
                         peer = %peer_device.0,
@@ -432,9 +430,10 @@ impl SecureChannelRegistry {
                 }
 
                 // Create new channel
-                let new_channel = SecureChannel::new(context.clone(), peer_device, epoch, flow_budget);
+                let new_channel =
+                    SecureChannel::new(context.clone(), peer_device, epoch, flow_budget);
                 channels.insert(key, new_channel);
-                
+
                 info!(
                     context = %context.as_str(),
                     peer = %peer_device.0,
@@ -454,14 +453,10 @@ impl SecureChannelRegistry {
     ) -> Option<ChannelKey> {
         let key = ChannelKey::new(context.clone(), peer_device);
         let channels = self.channels.read().await;
-        
-        channels.get(&key).and_then(|channel| {
-            if channel.is_active() {
-                Some(key)
-            } else {
-                None
-            }
-        })
+
+        channels
+            .get(&key)
+            .and_then(|channel| if channel.is_active() { Some(key) } else { None })
     }
 
     /// Check if a channel exists for the given context and peer
@@ -485,7 +480,7 @@ impl SecureChannelRegistry {
                 }
             }) {
                 teardown_queue.push((key.clone(), reason));
-                
+
                 info!(
                     context = %key.context.as_str(),
                     peer = %key.peer_device.0,
@@ -516,7 +511,7 @@ impl SecureChannelRegistry {
 
                 let mut teardown_queue = self.teardown_queue.lock().await;
                 teardown_queue.push((key, reason));
-                
+
                 info!(
                     context = %context.as_str(),
                     peer = %peer_device.0,
@@ -542,7 +537,7 @@ impl SecureChannelRegistry {
                     reason: reason.clone(),
                 };
                 teardown_queue.push((key.clone(), teardown_reason));
-                
+
                 info!(
                     context = %key.context.as_str(),
                     peer = %key.peer_device.0,
@@ -565,14 +560,14 @@ impl SecureChannelRegistry {
         for (key, reason) in to_teardown {
             if let Some(channel) = channels.get_mut(&key) {
                 channel.initiate_teardown(reason);
-                
+
                 // Complete teardown immediately for now
                 // In a full implementation, this might be asynchronous
                 channel.complete_teardown();
-                
+
                 if channel.teardown_config.auto_reconnect {
                     channel.stats.reconnect_count += 1;
-                    
+
                     // TODO: Implement reconnect behavior
                     // This would involve re-running rendezvous and establishing new channel
                     debug!(
@@ -602,7 +597,7 @@ impl SecureChannelRegistry {
 
         channels.retain(|key, channel| {
             let should_retain = !channel.is_terminated();
-            
+
             if !should_retain {
                 debug!(
                     context = %key.context.as_str(),
@@ -610,7 +605,7 @@ impl SecureChannelRegistry {
                     "Cleaned up terminated SecureChannel"
                 );
             }
-            
+
             should_retain
         });
 
@@ -670,7 +665,8 @@ impl SecureChannelRegistry {
         if unique_keys.len() != total_channels {
             violations.push(format!(
                 "Duplicate channel keys detected: {} channels, {} unique keys",
-                total_channels, unique_keys.len()
+                total_channels,
+                unique_keys.len()
             ));
         }
 
@@ -735,7 +731,7 @@ mod tests {
     async fn test_registry_creation() {
         let registry = SecureChannelRegistry::with_defaults();
         let stats = registry.get_registry_stats().await;
-        
+
         assert_eq!(stats.total_channels, 0);
         assert_eq!(stats.active_channels, 0);
     }
@@ -744,39 +740,39 @@ mod tests {
     async fn test_channel_creation_and_retrieval() {
         let registry = SecureChannelRegistry::with_defaults();
         let context = ContextId::new("test_context");
-        let peer = DeviceId::new();
+        let peer = DeviceId(uuid::Uuid::new_v4());
         let epoch = Epoch::new(1);
         let budget = FlowBudget::new(1000, epoch);
 
         // Create channel
         registry
-            .get_or_create_channel(context, peer, epoch, budget)
+            .get_or_create_channel(context.clone(), peer, epoch, budget)
             .await
             .unwrap();
 
         // Verify channel exists
-        assert!(registry.has_channel(context, peer).await);
+        assert!(registry.has_channel(context.clone(), peer).await);
 
         let stats = registry.get_registry_stats().await;
         assert_eq!(stats.total_channels, 1);
         assert_eq!(stats.establishing_channels, 1); // New channels start as establishing
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_one_channel_per_context_peer_pair() {
         let registry = SecureChannelRegistry::with_defaults();
         let context = ContextId::new("test_context");
-        let peer = DeviceId::new();
+        let peer = DeviceId(uuid::Uuid::new_v4());
         let epoch = Epoch::new(1);
         let budget = FlowBudget::new(1000, epoch);
 
         // Create channel twice - should not create duplicate
         registry
-            .get_or_create_channel(context, peer, epoch, budget)
+            .get_or_create_channel(context.clone(), peer, epoch, budget.clone())
             .await
             .unwrap();
         registry
-            .get_or_create_channel(context, peer, epoch, budget)
+            .get_or_create_channel(context.clone(), peer, epoch, budget.clone())
             .await
             .unwrap();
 
@@ -788,7 +784,7 @@ mod tests {
     async fn test_epoch_rotation_teardown() {
         let registry = SecureChannelRegistry::with_defaults();
         let context = ContextId::new("test_context");
-        let peer = DeviceId::new();
+        let peer = DeviceId(uuid::Uuid::new_v4());
         let epoch = Epoch::new(1);
         let budget = FlowBudget::new(1000, epoch);
 
@@ -811,20 +807,20 @@ mod tests {
     async fn test_capability_shrink_teardown() {
         let registry = SecureChannelRegistry::with_defaults();
         let context = ContextId::new("test_context");
-        let peer = DeviceId::new();
+        let peer = DeviceId(uuid::Uuid::new_v4());
         let epoch = Epoch::new(1);
         let budget = FlowBudget::new(1000, epoch);
 
         // Create channel
         registry
-            .get_or_create_channel(context, peer, epoch, budget)
+            .get_or_create_channel(context.clone(), peer, epoch, budget)
             .await
             .unwrap();
 
         // Trigger capability shrink (new budget limit is < 3/4 of original)
         let shrunk_budget = FlowBudget::new(500, epoch);
         registry
-            .trigger_capability_shrink(context, peer, shrunk_budget)
+            .trigger_capability_shrink(context.clone(), peer, shrunk_budget)
             .await
             .unwrap();
 
@@ -837,24 +833,24 @@ mod tests {
     async fn test_context_invalidation_teardown() {
         let registry = SecureChannelRegistry::with_defaults();
         let context = ContextId::new("test_context");
-        let peer1 = DeviceId::new();
-        let peer2 = DeviceId::new();
+        let peer1 = DeviceId(uuid::Uuid::new_v4());
+        let peer2 = DeviceId(uuid::Uuid::new_v4());
         let epoch = Epoch::new(1);
         let budget = FlowBudget::new(1000, epoch);
 
         // Create channels for same context, different peers
         registry
-            .get_or_create_channel(context, peer1, epoch, budget)
+            .get_or_create_channel(context.clone(), peer1, epoch, budget.clone())
             .await
             .unwrap();
         registry
-            .get_or_create_channel(context, peer2, epoch, budget)
+            .get_or_create_channel(context.clone(), peer2, epoch, budget.clone())
             .await
             .unwrap();
 
         // Trigger context invalidation
         registry
-            .trigger_context_invalidation(context, "Test invalidation".to_string())
+            .trigger_context_invalidation(context.clone(), "Test invalidation".to_string())
             .await;
 
         // Process teardown queue - should tear down both channels
@@ -866,7 +862,7 @@ mod tests {
     async fn test_registry_invariants() {
         let registry = SecureChannelRegistry::with_defaults();
         let context = ContextId::new("test_context");
-        let peer = DeviceId::new();
+        let peer = DeviceId(uuid::Uuid::new_v4());
         let epoch = Epoch::new(1);
         let budget = FlowBudget::new(1000, epoch);
 
@@ -878,14 +874,18 @@ mod tests {
 
         // Validate invariants
         let violations = registry.validate_invariants().await.unwrap();
-        assert!(violations.is_empty(), "Invariant violations: {:?}", violations);
+        assert!(
+            violations.is_empty(),
+            "Invariant violations: {:?}",
+            violations
+        );
     }
 
     #[tokio::test]
     async fn test_cleanup_terminated_channels() {
         let registry = SecureChannelRegistry::with_defaults();
         let context = ContextId::new("test_context");
-        let peer = DeviceId::new();
+        let peer = DeviceId(uuid::Uuid::new_v4());
         let epoch = Epoch::new(1);
         let budget = FlowBudget::new(1000, epoch);
 
@@ -894,7 +894,7 @@ mod tests {
             .get_or_create_channel(context, peer, epoch, budget)
             .await
             .unwrap();
-        
+
         registry.trigger_epoch_rotation(Epoch::new(2)).await;
         registry.process_teardown_queue().await.unwrap();
 

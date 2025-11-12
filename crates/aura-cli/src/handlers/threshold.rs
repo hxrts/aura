@@ -15,14 +15,12 @@ pub async fn handle_threshold(
 ) -> Result<()> {
     let config_paths: Vec<&str> = configs.split(',').collect();
 
-    effects.log_info(
-        &format!(
-            "Running threshold operation with {} configs (threshold: {}, mode: {})",
-            config_paths.len(),
-            threshold,
-            mode
-        ),
-    );
+    effects.log_info(&format!(
+        "Running threshold operation with {} configs (threshold: {}, mode: {})",
+        config_paths.len(),
+        threshold,
+        mode
+    ));
 
     // Validate all config files exist through storage effects
     let mut valid_configs = Vec::new();
@@ -32,16 +30,22 @@ pub async fn handle_threshold(
         match effects.retrieve(&path.display().to_string()).await {
             Ok(Some(data)) => match parse_config_data(&data) {
                 Ok(config) => {
-                    let _ = effects.log_info(&format!("Loaded config: {}", config_path)).await;
+                    let _ = effects
+                        .log_info(&format!("Loaded config: {}", config_path))
+                        .await;
                     valid_configs.push((path, config));
                 }
                 Err(e) => {
-                    let _ = effects.log_error(&format!("Invalid config {}: {}", config_path, e)).await;
+                    let _ = effects
+                        .log_error(&format!("Invalid config {}: {}", config_path, e))
+                        .await;
                     return Err(anyhow::anyhow!("Invalid config {}: {}", config_path, e));
                 }
             },
             Ok(None) | Err(_) => {
-                let _ = effects.log_error(&format!("Config file not found: {}", config_path)).await;
+                let _ = effects
+                    .log_error(&format!("Config file not found: {}", config_path))
+                    .await;
                 return Err(anyhow::anyhow!("Config file not found: {}", config_path));
             }
         }
@@ -56,7 +60,9 @@ pub async fn handle_threshold(
         "verify" => execute_threshold_verification(effects, &valid_configs, threshold).await,
         "keygen" => execute_threshold_keygen(effects, &valid_configs, threshold).await,
         _ => {
-            let _ = effects.log_error(&format!("Unknown threshold mode: {}", mode)).await;
+            let _ = effects
+                .log_error(&format!("Unknown threshold mode: {}", mode))
+                .await;
             Err(anyhow::anyhow!("Unknown threshold mode: {}", mode))
         }
     }
@@ -87,12 +93,10 @@ async fn validate_threshold_params(
     let num_devices = configs.len() as u32;
 
     if threshold > num_devices {
-        effects.log_error(
-            &format!(
-                "Threshold ({}) cannot be greater than number of devices ({})",
-                threshold, num_devices
-            ),
-    );
+        effects.log_error(&format!(
+            "Threshold ({}) cannot be greater than number of devices ({})",
+            threshold, num_devices
+        ));
         return Err(anyhow::anyhow!(
             "Invalid threshold: {} > {}",
             threshold,
@@ -108,14 +112,12 @@ async fn validate_threshold_params(
     // Verify all configs have compatible threshold settings
     for (path, config) in configs {
         if config.threshold != configs[0].1.threshold {
-            effects.log_error(
-                &format!(
-                    "Threshold mismatch in {}: expected {}, got {}",
-                    path.display(),
-                    configs[0].1.threshold,
-                    config.threshold
-                ),
-    );
+            effects.log_error(&format!(
+                "Threshold mismatch in {}: expected {}, got {}",
+                path.display(),
+                configs[0].1.threshold,
+                config.threshold
+            ));
             return Err(anyhow::anyhow!("Threshold mismatch in {}", path.display()));
         }
     }
@@ -130,27 +132,25 @@ async fn execute_threshold_signing(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
-    let _ = effects.log_info("Executing threshold signing operation").await;
+    let _ = effects
+        .log_info("Executing threshold signing operation")
+        .await;
 
     // Simulate threshold signing process
     for (i, (path, config)) in configs.iter().enumerate() {
-        effects.log_info(
-            &format!(
-                "Signing with device {} ({}): {}",
-                i + 1,
-                config.device_id,
-                path.display()
-            ),
-    );
+        effects.log_info(&format!(
+            "Signing with device {} ({}): {}",
+            i + 1,
+            config.device_id,
+            path.display()
+        ));
     }
 
-    effects.log_info(
-        &format!(
-            "Threshold signing completed with {}/{} signatures",
-            configs.len(),
-            threshold
-        ),
-    );
+    effects.log_info(&format!(
+        "Threshold signing completed with {}/{} signatures",
+        configs.len(),
+        threshold
+    ));
 
     Ok(())
 }
@@ -161,27 +161,25 @@ async fn execute_threshold_verification(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
-    let _ = effects.log_info("Executing threshold verification operation").await;
+    let _ = effects
+        .log_info("Executing threshold verification operation")
+        .await;
 
     // Simulate threshold verification process
     for (i, (path, config)) in configs.iter().enumerate() {
-        effects.log_info(
-            &format!(
-                "Verifying with device {} ({}): {}",
-                i + 1,
-                config.device_id,
-                path.display()
-            ),
-    );
+        effects.log_info(&format!(
+            "Verifying with device {} ({}): {}",
+            i + 1,
+            config.device_id,
+            path.display()
+        ));
     }
 
-    effects.log_info(
-        &format!(
-            "Threshold verification completed with {}/{} verifications",
-            configs.len(),
-            threshold
-        ),
-    );
+    effects.log_info(&format!(
+        "Threshold verification completed with {}/{} verifications",
+        configs.len(),
+        threshold
+    ));
 
     Ok(())
 }
@@ -192,27 +190,25 @@ async fn execute_threshold_keygen(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
-    let _ = effects.log_info("Executing threshold key generation operation").await;
+    let _ = effects
+        .log_info("Executing threshold key generation operation")
+        .await;
 
     // Simulate threshold key generation process
     for (i, (path, config)) in configs.iter().enumerate() {
-        effects.log_info(
-            &format!(
-                "Generating keys with device {} ({}): {}",
-                i + 1,
-                config.device_id,
-                path.display()
-            ),
-    );
+        effects.log_info(&format!(
+            "Generating keys with device {} ({}): {}",
+            i + 1,
+            config.device_id,
+            path.display()
+        ));
     }
 
-    effects.log_info(
-        &format!(
-            "Threshold key generation completed with {}/{} participants",
-            configs.len(),
-            threshold
-        ),
-    );
+    effects.log_info(&format!(
+        "Threshold key generation completed with {}/{} participants",
+        configs.len(),
+        threshold
+    ));
 
     Ok(())
 }

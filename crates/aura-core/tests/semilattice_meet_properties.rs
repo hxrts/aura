@@ -6,9 +6,9 @@
 #[cfg(test)]
 mod tests {
     use aura_core::semilattice::{MeetSemiLattice, MvState, Top};
+    use proptest::collection;
     use proptest::prelude::*;
     use proptest::{prop_oneof, proptest};
-    use proptest::collection;
     use std::collections::BTreeSet;
 
     // === Test Strategies ===

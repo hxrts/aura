@@ -52,7 +52,9 @@ async fn start_recovery(
     ));
     let _ = effects.log_info(&format!("Guardians: {}", guardians)).await;
     let _ = effects.log_info(&format!("Threshold: {}", threshold)).await;
-    let _ = effects.log_info(&format!("Dispute window: {} hours", dispute_hours)).await;
+    let _ = effects
+        .log_info(&format!("Dispute window: {} hours", dispute_hours))
+        .await;
 
     if let Some(just) = justification {
         let _ = effects.log_info(&format!("Justification: {}", just)).await;
@@ -84,7 +86,9 @@ async fn get_status(effects: &AuraEffectSystem) -> Result<()> {
 }
 
 async fn dispute_recovery(effects: &AuraEffectSystem, evidence: &str, reason: &str) -> Result<()> {
-    let _ = effects.log_info(&format!("Filing dispute for evidence: {}", evidence)).await;
+    let _ = effects
+        .log_info(&format!("Filing dispute for evidence: {}", evidence))
+        .await;
     let _ = effects.log_info(&format!("Reason: {}", reason)).await;
     println!("Recovery dispute not yet implemented");
     // TODO: Integrate with aura-recovery protocol

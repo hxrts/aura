@@ -3,9 +3,8 @@
 //! This module implements choreographic protocols for device key recovery
 //! using guardian approval and threshold signatures.
 
-use crate::{RecoveryError, RecoveryResult};
+use crate::RecoveryResult;
 use aura_core::{AccountId, DeviceId};
-use aura_crypto::frost::ThresholdSignature;
 use serde::{Deserialize, Serialize};
 
 /// Device key recovery request

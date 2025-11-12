@@ -3,11 +3,12 @@
 //! Factory functions for creating test AccountState instances.
 //! Consolidates the account creation pattern found in 18 test files.
 
-use aura_core::{AccountId, AccountIdExt, DeviceId};
+use aura_core::{AccountId, DeviceId};
 use aura_crypto::Effects;
 use aura_journal::semilattice::ModernAccountState as AccountState;
 use aura_journal::{DeviceMetadata, DeviceType};
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use uuid::Uuid;
 
 /// Helper function to create test device metadata with effects
 fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
@@ -52,7 +53,7 @@ pub fn test_account_with_effects(effects: &Effects) -> AccountState {
 
     let device_metadata = test_device_with_effects(effects);
 
-    let mut state = AccountState::new(AccountId::new_with_effects(effects), group_public_key);
+    let mut state = AccountState::new(AccountId(Uuid::new_v4()), group_public_key);
 
     // Add the initial device
     state.add_device(device_metadata);
@@ -93,7 +94,7 @@ pub fn test_account_with_threshold(effects: &Effects, threshold: u16, total: u16
 
     let device_metadata = test_device_with_effects(effects);
 
-    let mut state = AccountState::new(AccountId::new_with_effects(effects), group_public_key);
+    let mut state = AccountState::new(AccountId(Uuid::new_v4()), group_public_key);
 
     // Add the initial device
     state.add_device(device_metadata);
@@ -139,7 +140,7 @@ pub fn test_account_with_group_key(
 ) -> AccountState {
     let device_metadata = test_device_with_effects(effects);
 
-    let mut state = AccountState::new(AccountId::new_with_effects(effects), group_public_key);
+    let mut state = AccountState::new(AccountId(Uuid::new_v4()), group_public_key);
     state.add_device(device_metadata);
     state
 }

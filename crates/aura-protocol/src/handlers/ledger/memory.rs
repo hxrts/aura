@@ -109,9 +109,12 @@ impl LedgerEffects for MemoryLedgerHandler {
 
     async fn current_timestamp(&self) -> Result<u64, LedgerError> {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| LedgerError::Corrupted { reason: "Failed to get current time".to_string() })?;
+        let duration =
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| LedgerError::Corrupted {
+                    reason: "Failed to get current time".to_string(),
+                })?;
         Ok(duration.as_secs())
     }
 

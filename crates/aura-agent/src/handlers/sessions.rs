@@ -627,12 +627,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_creation() {
-        let device_id = DeviceId::new();
-        let account_id = AccountId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let account_id = AccountId(uuid::Uuid::new_v4());
         let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
         let sessions = SessionOperations::new(effects, device_id, account_id);
 
-        let participants = vec![device_id, DeviceId::new(), DeviceId::new()];
+        let participants = vec![device_id, DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())];
         let handle = sessions
             .create_session(SessionType::Coordination, participants.clone())
             .await
@@ -640,17 +640,17 @@ mod tests {
 
         assert!(!handle.session_id.is_empty());
         assert_eq!(handle.participants, participants);
-        assert_eq!(handle.my_role.device_id(), device_id);
+        assert_eq!(DeviceId(handle.my_role.device_id), device_id);
     }
 
     #[tokio::test]
     async fn test_threshold_session() {
-        let device_id = DeviceId::new();
-        let account_id = AccountId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let account_id = AccountId(uuid::Uuid::new_v4());
         let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
         let sessions = SessionOperations::new(effects, device_id, account_id);
 
-        let participants = vec![device_id, DeviceId::new(), DeviceId::new()];
+        let participants = vec![device_id, DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())];
         let handle = sessions
             .create_threshold_session(participants, 2)
             .await
@@ -665,12 +665,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_recovery_session() {
-        let device_id = DeviceId::new();
-        let account_id = AccountId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let account_id = AccountId(uuid::Uuid::new_v4());
         let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
         let sessions = SessionOperations::new(effects, device_id, account_id);
 
-        let guardians = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
+        let guardians = vec![DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())];
         let handle = sessions
             .create_recovery_session(guardians, 2)
             .await
@@ -686,8 +686,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_stats() {
-        let device_id = DeviceId::new();
-        let account_id = AccountId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let account_id = AccountId(uuid::Uuid::new_v4());
         let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
         let sessions = SessionOperations::new(effects, device_id, account_id);
 
@@ -709,8 +709,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_metadata_update() {
-        let device_id = DeviceId::new();
-        let account_id = AccountId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let account_id = AccountId(uuid::Uuid::new_v4());
         let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
         let sessions = SessionOperations::new(effects, device_id, account_id);
 

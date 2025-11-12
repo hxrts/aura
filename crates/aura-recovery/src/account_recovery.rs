@@ -3,7 +3,7 @@
 //! This module implements choreographic protocols for account access recovery
 //! using guardian consensus and capability restoration.
 
-use crate::{RecoveryError, RecoveryResult};
+use crate::RecoveryResult;
 use aura_core::{AccountId, Cap, DeviceId};
 use aura_verify::session::SessionTicket;
 use serde::{Deserialize, Serialize};

@@ -7,6 +7,7 @@ use aura_core::{
     identifiers::{AccountId, DeviceId, SessionId},
     AuraError, AuraResult as Result,
 };
+use uuid;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -452,8 +453,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_device_id_validation() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
+        let device1 = DeviceId(uuid::Uuid::new_v4());
+        let device2 = DeviceId(uuid::Uuid::new_v4());
 
         let rules = vec![ValidationRuleBuilder::device_id_rule(
             "strict_device".to_string(),
@@ -478,10 +479,10 @@ mod tests {
 
     #[test]
     fn test_input_validator() {
-        let account_id = AccountId::new();
+        let account_id = AccountId(uuid::Uuid::new_v4());
         assert!(InputValidator::validate_account_id(&account_id).is_ok());
 
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         assert!(InputValidator::validate_device_id_format(&device_id).is_ok());
 
         // Test string validation

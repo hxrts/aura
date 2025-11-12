@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn test_peer_sync_state_creation() {
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
         let peer_info = create_test_peer_info(peer_id);
         let state = PeerSyncState::new(peer_info);
 
@@ -557,7 +557,7 @@ mod tests {
 
     #[test]
     fn test_backoff_calculation() {
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
         let peer_info = create_test_peer_info(peer_id);
         let mut state = PeerSyncState::new(peer_info);
 
@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn test_sync_priority_calculation() {
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
         let peer_info = create_test_peer_info(peer_id);
         let mut state = PeerSyncState::new(peer_info);
 
@@ -619,7 +619,7 @@ mod tests {
         let mut manager =
             PeerSyncManager::new(3, Duration::from_millis(100), Duration::from_secs(30), 0.1);
 
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
         let peer_info = create_test_peer_info(peer_id);
 
         // Add peer

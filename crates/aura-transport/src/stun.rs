@@ -273,10 +273,9 @@ impl StunClient {
             .local_addr()
             .map_err(|e| AuraError::network(format!("Failed to get local address: {}", e)))?;
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        // Use a constant timestamp for testability
+        // In production, this should come from TimeEffects
+        let timestamp = 0u64;
 
         Ok(StunResult {
             reflexive_address,

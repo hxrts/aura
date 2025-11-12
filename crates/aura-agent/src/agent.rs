@@ -6,6 +6,7 @@
 //! implementing effects directly.
 
 use crate::config::AgentConfig;
+use uuid;
 use crate::effects::*;
 use crate::errors::{AuraError, Result as AgentResult};
 use crate::handlers::{AgentEffectSystemHandler, OtaOperations, StorageOperations};
@@ -345,7 +346,7 @@ impl AuraAgent {
     async fn get_or_create_session_ops(&self) -> AgentResult<crate::handlers::SessionOperations> {
         // Get config to get account_id
         let config = self.get_config().await?;
-        let account_id = config.account_id.unwrap_or_else(|| AccountId::new());
+        let account_id = config.account_id.unwrap_or_else(|| AccountId(uuid::Uuid::new_v4()));
 
         // Create fresh session operations each time
         // This is simpler than trying to cache non-cloneable operations
@@ -457,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_creation() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = AuraEffectSystem::for_testing(device_id);
         let agent = AuraAgent::new(effects, device_id);
 
@@ -466,7 +467,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_initialization() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = AuraEffectSystem::for_testing(device_id);
         let agent = AuraAgent::new(effects, device_id);
 
@@ -483,7 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_secure_storage_operations() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = AuraEffectSystem::for_testing(device_id);
         let agent = AuraAgent::new(effects, device_id);
 
@@ -526,7 +527,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_management() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = AuraEffectSystem::for_testing(device_id);
         let agent = AuraAgent::new(effects, device_id);
 
@@ -560,7 +561,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_config_management() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = AuraEffectSystem::for_testing(device_id);
         let agent = AuraAgent::new(effects, device_id);
 

@@ -255,11 +255,11 @@ fn recompute_commitments(
 
     // Collect all nodes in the paths from affected nodes to root
     let mut all_affected_nodes = BTreeSet::new();
-    
+
     for &node in affected_nodes {
         // Add the node itself
         all_affected_nodes.insert(node);
-        
+
         // Add all nodes in path to root
         let path_to_root = compute_path_to_root(state, node);
         all_affected_nodes.extend(path_to_root);
@@ -533,7 +533,7 @@ pub enum ReductionError {
 fn compute_path_to_root(state: &TreeState, node: NodeIndex) -> Vec<NodeIndex> {
     let mut path = Vec::new();
     let mut current = node;
-    
+
     // Walk up the tree until we reach the root
     loop {
         match state.get_parent(current) {
@@ -544,7 +544,7 @@ fn compute_path_to_root(state: &TreeState, node: NodeIndex) -> Vec<NodeIndex> {
             None => break, // Reached root or orphan node
         }
     }
-    
+
     path
 }
 
@@ -552,7 +552,7 @@ fn compute_path_to_root(state: &TreeState, node: NodeIndex) -> Vec<NodeIndex> {
 fn get_tree_level(state: &TreeState, node: NodeIndex) -> u32 {
     let mut level = 0;
     let mut current = node;
-    
+
     // Count children to approximate tree level (leaves = 0, branches = higher)
     loop {
         let children = state.get_children(current);
@@ -561,12 +561,15 @@ fn get_tree_level(state: &TreeState, node: NodeIndex) -> u32 {
         }
         level += 1;
         // Move to first child to continue traversal
-        current = *children.iter().next().expect("Children set should not be empty");
+        current = *children
+            .iter()
+            .next()
+            .expect("Children set should not be empty");
         if level > 100 {
             break; // Prevent infinite loops
         }
     }
-    
+
     level
 }
 
@@ -584,7 +587,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode::new_device(
                         LeafId(leaf_id),
-                        aura_core::DeviceId::new(),
+                        aura_core::DeviceId(uuid::Uuid::new_v4()),
                         vec![leaf_id as u8; 32],
                     ),
                     under: NodeIndex(0),

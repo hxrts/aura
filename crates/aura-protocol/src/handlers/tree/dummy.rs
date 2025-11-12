@@ -4,7 +4,10 @@
 //! Used as a placeholder when tree operations are not needed or will be replaced later.
 
 use async_trait::async_trait;
-use aura_core::{tree::{AttestedOp, TreeOpKind, LeafId, LeafNode, NodeIndex, Policy}, AuraError, Hash32};
+use aura_core::{
+    tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind},
+    AuraError, Hash32,
+};
 use aura_journal::ratchet_tree::TreeState;
 
 use crate::effects::tree::{Cut, Partial, ProposalId, Snapshot, TreeEffects};
@@ -67,21 +70,13 @@ impl TreeEffects for DummyTreeHandler {
         })
     }
 
-    async fn add_leaf(
-        &self,
-        _leaf: LeafNode,
-        _under: NodeIndex,
-    ) -> Result<TreeOpKind, AuraError> {
+    async fn add_leaf(&self, _leaf: LeafNode, _under: NodeIndex) -> Result<TreeOpKind, AuraError> {
         Err(AuraError::Internal {
             message: "Tree operations not available in dummy handler".to_string(),
         })
     }
 
-    async fn remove_leaf(
-        &self,
-        _leaf_id: LeafId,
-        _reason: u8,
-    ) -> Result<TreeOpKind, AuraError> {
+    async fn remove_leaf(&self, _leaf_id: LeafId, _reason: u8) -> Result<TreeOpKind, AuraError> {
         Err(AuraError::Internal {
             message: "Tree operations not available in dummy handler".to_string(),
         })
@@ -97,10 +92,7 @@ impl TreeEffects for DummyTreeHandler {
         })
     }
 
-    async fn rotate_epoch(
-        &self,
-        _affected: Vec<NodeIndex>,
-    ) -> Result<TreeOpKind, AuraError> {
+    async fn rotate_epoch(&self, _affected: Vec<NodeIndex>) -> Result<TreeOpKind, AuraError> {
         Err(AuraError::Internal {
             message: "Tree operations not available in dummy handler".to_string(),
         })

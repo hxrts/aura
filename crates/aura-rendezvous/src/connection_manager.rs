@@ -547,28 +547,32 @@ impl ConnectionManager {
     /// Try QUIC connection
     async fn try_quic_connection(&self, addr: SocketAddr) -> Result<SocketAddr, AuraError> {
         use std::net::UdpSocket;
-        
+
         tracing::debug!(addr = %addr, "Attempting QUIC connection");
 
         // Create QUIC connection configuration
         let quic_config = self.create_quic_client_config()?;
-        
+
         // Attempt to establish UDP socket first
-        let local_socket = UdpSocket::bind("0.0.0.0:0")
-            .map_err(|e| AuraError::coordination_failed(format!("Failed to bind UDP socket: {}", e)))?;
-        
-        let local_addr = local_socket.local_addr()
-            .map_err(|e| AuraError::coordination_failed(format!("Failed to get local address: {}", e)))?;
-        
+        let local_socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| {
+            AuraError::coordination_failed(format!("Failed to bind UDP socket: {}", e))
+        })?;
+
+        let local_addr = local_socket.local_addr().map_err(|e| {
+            AuraError::coordination_failed(format!("Failed to get local address: {}", e))
+        })?;
+
         // Perform QUIC handshake simulation (real implementation would use quinn)
-        let connection_result = self.perform_quic_handshake(local_socket, addr, quic_config).await?;
-        
+        let connection_result = self
+            .perform_quic_handshake(local_socket, addr, quic_config)
+            .await?;
+
         tracing::info!(
             local_addr = %local_addr,
             remote_addr = %addr,
             "QUIC connection established"
         );
-        
+
         Ok(connection_result)
     }
 
@@ -584,29 +588,33 @@ impl ConnectionManager {
 
     /// Perform QUIC handshake
     async fn perform_quic_handshake(
-        &self, 
-        local_socket: std::net::UdpSocket, 
-        remote_addr: SocketAddr, 
-        config: QuicConfig
+        &self,
+        local_socket: std::net::UdpSocket,
+        remote_addr: SocketAddr,
+        config: QuicConfig,
     ) -> Result<SocketAddr, AuraError> {
         // This is simplified - real implementation would use quinn or similar QUIC library
-        
+
         // Set socket to non-blocking
-        local_socket.set_nonblocking(true)
-            .map_err(|e| AuraError::coordination_failed(format!("Failed to set non-blocking: {}", e)))?;
-        
+        local_socket.set_nonblocking(true).map_err(|e| {
+            AuraError::coordination_failed(format!("Failed to set non-blocking: {}", e))
+        })?;
+
         // Send initial QUIC packet (simplified)
         let handshake_packet = self.create_initial_quic_packet()?;
-        
+
         // Simulate handshake process
         tokio::time::sleep(Duration::from_millis(50)).await;
-        
+
         // Verify connection can be established
         let test_msg = b"QUIC_PING";
         if let Err(e) = local_socket.send_to(test_msg, remote_addr) {
-            return Err(AuraError::coordination_failed(format!("QUIC handshake failed: {}", e)));
+            return Err(AuraError::coordination_failed(format!(
+                "QUIC handshake failed: {}",
+                e
+            )));
         }
-        
+
         tracing::debug!("QUIC handshake completed successfully");
         Ok(remote_addr)
     }
@@ -618,7 +626,10 @@ impl ConnectionManager {
         packet.push(0x80); // Long header, Initial packet
         packet.extend_from_slice(b"AURA"); // Protocol identifier
         packet.extend_from_slice(&[0x01]); // Version
-        let device_bytes = self.device_id.to_bytes().map_err(|e| AuraError::invalid(e))?;
+        let device_bytes = self
+            .device_id
+            .to_bytes()
+            .map_err(|e| AuraError::invalid(e))?;
         packet.extend_from_slice(&device_bytes[..8]); // Connection ID
         Ok(packet)
     }
@@ -628,35 +639,37 @@ impl ConnectionManager {
         tracing::debug!(addr = %addr, "Attempting WebSocket connection");
 
         // Establish TCP connection first
-        let tcp_stream = tokio::net::TcpStream::connect(addr).await
+        let tcp_stream = tokio::net::TcpStream::connect(addr)
+            .await
             .map_err(|e| AuraError::coordination_failed(format!("TCP connection failed: {}", e)))?;
-        
+
         // Convert to std::net::TcpStream for synchronous operations
-        let std_stream = tcp_stream.into_std()
-            .map_err(|e| AuraError::coordination_failed(format!("Failed to convert stream: {}", e)))?;
-        
+        let std_stream = tcp_stream.into_std().map_err(|e| {
+            AuraError::coordination_failed(format!("Failed to convert stream: {}", e))
+        })?;
+
         // Perform WebSocket handshake
         let ws_connection = self.perform_websocket_handshake(std_stream, addr).await?;
-        
+
         tracing::info!(
             remote_addr = %addr,
             "WebSocket connection established"
         );
-        
+
         Ok(ws_connection)
     }
 
     /// Perform WebSocket handshake
     async fn perform_websocket_handshake(
-        &self, 
-        mut stream: TcpStream, 
-        addr: SocketAddr
+        &self,
+        mut stream: TcpStream,
+        addr: SocketAddr,
     ) -> Result<SocketAddr, AuraError> {
         use std::io::{Read, Write};
-        
+
         // Generate WebSocket key
         let ws_key = self.generate_websocket_key();
-        
+
         // Create WebSocket upgrade request
         let request = format!(
             "GET /aura-peer HTTP/1.1\r\n\
@@ -669,22 +682,24 @@ impl ConnectionManager {
             \r\n",
             addr, ws_key
         );
-        
+
         // Send upgrade request
-        stream.write_all(request.as_bytes())
-            .map_err(|e| AuraError::coordination_failed(format!("Failed to send WebSocket request: {}", e)))?;
-        
+        stream.write_all(request.as_bytes()).map_err(|e| {
+            AuraError::coordination_failed(format!("Failed to send WebSocket request: {}", e))
+        })?;
+
         // Read response
         let mut response = vec![0u8; 1024];
-        let bytes_read = stream.read(&mut response)
-            .map_err(|e| AuraError::coordination_failed(format!("Failed to read WebSocket response: {}", e)))?;
-        
+        let bytes_read = stream.read(&mut response).map_err(|e| {
+            AuraError::coordination_failed(format!("Failed to read WebSocket response: {}", e))
+        })?;
+
         response.truncate(bytes_read);
         let response_str = String::from_utf8_lossy(&response);
-        
+
         // Validate WebSocket response
         self.validate_websocket_response(&response_str, &ws_key)?;
-        
+
         tracing::debug!("WebSocket handshake completed successfully");
         Ok(addr)
     }
@@ -692,59 +707,71 @@ impl ConnectionManager {
     /// Generate WebSocket key for handshake
     fn generate_websocket_key(&self) -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
+
         // Simple key generation (real implementation would use proper randomness)
         let key_data = format!("aura-{}-{}", self.device_id, timestamp);
-        
+
         // Simple base64 encoding implementation
         let mut result = String::new();
         let bytes = key_data.as_bytes();
         let chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        
+
         for chunk in bytes.chunks(3) {
             let mut buf = [0u8; 3];
             for (i, &b) in chunk.iter().enumerate() {
                 buf[i] = b;
             }
-            
+
             let b = ((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32);
             result.push(chars[((b >> 18) & 63) as usize] as char);
             result.push(chars[((b >> 12) & 63) as usize] as char);
-            result.push(if chunk.len() > 1 { chars[((b >> 6) & 63) as usize] as char } else { '=' });
-            result.push(if chunk.len() > 2 { chars[(b & 63) as usize] as char } else { '=' });
+            result.push(if chunk.len() > 1 {
+                chars[((b >> 6) & 63) as usize] as char
+            } else {
+                '='
+            });
+            result.push(if chunk.len() > 2 {
+                chars[(b & 63) as usize] as char
+            } else {
+                '='
+            });
         }
-        
+
         result
     }
 
     /// Validate WebSocket upgrade response
-    fn validate_websocket_response(&self, response: &str, expected_key: &str) -> Result<(), AuraError> {
+    fn validate_websocket_response(
+        &self,
+        response: &str,
+        expected_key: &str,
+    ) -> Result<(), AuraError> {
         // Check for proper HTTP 101 Switching Protocols
         if !response.contains("HTTP/1.1 101 Switching Protocols") {
             return Err(AuraError::coordination_failed(
-                "Invalid WebSocket response: missing 101 status".to_string()
+                "Invalid WebSocket response: missing 101 status".to_string(),
             ));
         }
-        
+
         // Check for upgrade header
         if !response.to_lowercase().contains("upgrade: websocket") {
             return Err(AuraError::coordination_failed(
-                "Invalid WebSocket response: missing upgrade header".to_string()
+                "Invalid WebSocket response: missing upgrade header".to_string(),
             ));
         }
-        
+
         // Check for connection header
         if !response.to_lowercase().contains("connection: upgrade") {
             return Err(AuraError::coordination_failed(
-                "Invalid WebSocket response: missing connection header".to_string()
+                "Invalid WebSocket response: missing connection header".to_string(),
             ));
         }
-        
+
         // In a real implementation, would verify Sec-WebSocket-Accept header
         tracing::debug!("WebSocket response validation successful");
         Ok(())

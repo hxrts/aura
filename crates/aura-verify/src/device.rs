@@ -65,12 +65,13 @@ pub fn verify_signature(
 mod tests {
     use super::*;
     use aura_crypto::Effects;
-    use aura_core::DeviceIdExt;
+    use aura_core::DeviceId;
+    use uuid::Uuid;
 
     #[test]
     fn test_verify_device_signature_success() {
         let effects = Effects::test();
-        let device_id = DeviceId::new_with_effects(&effects);
+        let device_id = DeviceId(Uuid::new_v4());
 
         // Generate a key pair for testing
         let signing_key = aura_crypto::generate_ed25519_key();
@@ -87,7 +88,7 @@ mod tests {
     #[test]
     fn test_verify_device_signature_invalid() {
         let effects = Effects::test();
-        let device_id = DeviceId::new_with_effects(&effects);
+        let device_id = DeviceId(Uuid::new_v4());
 
         // Generate two different key pairs
         let signing_key1 = aura_crypto::generate_ed25519_key();

@@ -8,7 +8,7 @@ use crate::tree_ops::TreeOperationCoordinator;
 use crate::verification::{DeviceInfo, DeviceStatus, IdentityResult, IdentityVerifier};
 use async_trait::async_trait;
 use aura_core::{
-    tree::{AttestedOp, Epoch, LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind},
+    tree::{AttestedOp, LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind},
     AccountId, AuraError, Cap, DeviceId, Policy,
 };
 use aura_mpst::AuraRuntime;

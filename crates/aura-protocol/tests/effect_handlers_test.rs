@@ -7,10 +7,7 @@ mod common;
 
 use aura_protocol::{
     effects::*,
-    handlers::{
-        choreographic::MemoryChoreographicHandler,
-        CompositeHandler,
-    },
+    handlers::{choreographic::MemoryChoreographicHandler, CompositeHandler},
 };
 // Import handlers from aura-effects
 use aura_effects::{
@@ -126,7 +123,7 @@ async fn test_storage_effects() {
     let stats = memory_handler.stats().await.unwrap();
     assert!(stats.key_count > 0);
 
-    // Test filesystem handler (basic instantiation)  
+    // Test filesystem handler (basic instantiation)
     let fs_handler = FilesystemStorageHandler::new("/tmp/test_storage".into()).unwrap();
     let list_result = fs_handler.list_keys(None).await;
     assert!(list_result.is_ok());
@@ -218,9 +215,7 @@ async fn test_console_effects() {
     real_handler.log_error("Test error").await;
 
     // Test log with fields
-    real_handler.log_info(
-        "Test with fields",
-    ).await;
+    real_handler.log_info("Test with fields").await;
     real_handler.log_debug("Debug message").await;
 
     // Test event emission

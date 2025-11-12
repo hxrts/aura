@@ -198,7 +198,9 @@ async fn rollback_applied_facts(
         if let Some(compensation_fact) = generate_compensation_fact(fact)? {
             // Apply compensation fact to journal
             tracing::info!("Applying compensation fact: {}", compensation_fact);
-            if let Err(compensation_error) = effect_system.append_fact(compensation_fact.clone()).await {
+            if let Err(compensation_error) =
+                effect_system.append_fact(compensation_fact.clone()).await
+            {
                 error!(
                     compensation_fact = %compensation_fact,
                     error = %compensation_error,

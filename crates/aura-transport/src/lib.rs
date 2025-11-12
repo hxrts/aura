@@ -22,8 +22,8 @@ pub mod websocket;
 mod secure_channel_integration_tests;
 
 // Re-export essential components
-pub use memory::*;
 pub use hole_punch::*;
+pub use memory::*;
 pub use network::*;
 pub use peers::*;
 pub use privacy::*;

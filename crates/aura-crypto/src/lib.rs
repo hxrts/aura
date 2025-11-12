@@ -54,7 +54,6 @@ pub use middleware::*;
 // Re-export effects system from aura-core
 pub use aura_core::effects::{CryptoEffects, TimeEffects};
 
-
 // Re-export key derivation functions and types
 pub use key_derivation::{
     derive_encryption_key, derive_key_material, IdentityKeyContext, KeyDerivationSpec,

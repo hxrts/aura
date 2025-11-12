@@ -6,7 +6,7 @@
 //! Phase 3 adds threshold unwrapping with M-of-N secret reconstruction.
 
 use crate::journal::{EdgeId, EdgeKind, KeyEdge, KeyNode, NodeId, NodeKind};
-use aura_core::AuraError;
+use aura_core::{AuraError, Hash32};
 
 // Public modules
 pub mod graph;
@@ -139,8 +139,8 @@ mod tests {
         let mut journal = KeyJournal::new();
 
         // Test adding nodes
-        let node1 = KeyNode::new(NodeId::new(), NodeKind::Device, NodePolicy::Any);
-        let node2 = KeyNode::new(NodeId::new(), NodeKind::Guardian, NodePolicy::Any);
+        let node1 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Device, NodePolicy::Any);
+        let node2 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Guardian, NodePolicy::Any);
 
         journal.add_node(node1.clone()).unwrap();
         journal.add_node(node2.clone()).unwrap();
@@ -162,9 +162,9 @@ mod tests {
     fn test_node_validation() {
         let mut journal = KeyJournal::new();
 
-        let node1 = KeyNode::new(NodeId::new(), NodeKind::Device, NodePolicy::Any);
-        let node2 = KeyNode::new(NodeId::new(), NodeKind::Guardian, NodePolicy::Any);
-        let node3 = KeyNode::new(NodeId::new(), NodeKind::Device, NodePolicy::Any);
+        let node1 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Device, NodePolicy::Any);
+        let node2 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Guardian, NodePolicy::Any);
+        let node3 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Device, NodePolicy::Any);
 
         journal.add_node(node1.clone()).unwrap();
         journal.add_node(node2.clone()).unwrap();

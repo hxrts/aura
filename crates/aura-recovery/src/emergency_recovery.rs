@@ -3,7 +3,7 @@
 //! This module implements choreographic protocols for emergency operations
 //! such as account freezing and unfreezing.
 
-use crate::{RecoveryError, RecoveryResult};
+use crate::RecoveryResult;
 use aura_core::{AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 

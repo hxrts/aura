@@ -3,7 +3,7 @@
 //! This module implements capability-based access control for storage operations,
 //! ensuring that all storage accesses are mediated by capabilities.
 
-use aura_core::{AccountId, AuraResult, Cap, ChunkId, ContentId, DeviceId, Hash32};
+use aura_core::{AccountId, AuraResult, Cap, ChunkId, ContentId, DeviceId};
 use aura_wot::{Capability, CapabilityEvaluator, StoragePermission};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -288,7 +288,9 @@ mod tests {
         let mut access_control = StorageAccessControl::new(evaluator);
 
         let device_id = DeviceId::new();
-        let capabilities = vec![Capability::Read { resource_pattern: "content/*".to_string() }];
+        let capabilities = vec![Capability::Read {
+            resource_pattern: "content/*".to_string(),
+        }];
         access_control.register_capabilities(device_id, capabilities);
 
         let request = StorageAccessRequest {
@@ -327,7 +329,9 @@ mod tests {
         let mut access_control = StorageAccessControl::new(evaluator);
 
         let device_id = DeviceId::new();
-        let capabilities = vec![Capability::Read { resource_pattern: "content/*".to_string() }];
+        let capabilities = vec![Capability::Read {
+            resource_pattern: "content/*".to_string(),
+        }];
         access_control.register_capabilities(device_id, capabilities);
 
         let content_ids = vec![

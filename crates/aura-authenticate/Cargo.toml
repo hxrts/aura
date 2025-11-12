@@ -11,6 +11,7 @@ repository.workspace = true
 aura-core = { path = "../aura-core" }
 aura-crypto = { path = "../aura-crypto" }
 aura-mpst = { path = "../aura-mpst" }
+aura-protocol = { path = "../aura-protocol" }
 aura-verify = { path = "../aura-verify" }
 aura-wot = { path = "../aura-wot" }
 rumpsteak-aura = { workspace = true }

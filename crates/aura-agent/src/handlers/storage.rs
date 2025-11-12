@@ -6,6 +6,7 @@
 //! **Phase 5 Update**: Now integrated with authorization operations system.
 
 use crate::{errors::Result, operations::*};
+use uuid;
 use aura_core::AuraError;
 use aura_core::DeviceId;
 use aura_protocol::effects::{
@@ -160,7 +161,9 @@ impl StorageOperations {
             .await
             .map_err(|e| AuraError::storage(e.to_string()))?;
 
-        let _ = effects.log_debug(&format!("Stored {} bytes with key: {}", data.len(), key)).await;
+        let _ = effects
+            .log_debug(&format!("Stored {} bytes with key: {}", data.len(), key))
+            .await;
         Ok(key)
     }
 
@@ -197,11 +200,13 @@ impl StorageOperations {
             .await
             .map_err(|e| AuraError::storage(e.to_string()))?;
 
-        let _ = effects.log_debug(&format!(
-            "Stored {} bytes with key: {}",
-            data.len(),
-            full_key
-        )).await;
+        let _ = effects
+            .log_debug(&format!(
+                "Stored {} bytes with key: {}",
+                data.len(),
+                full_key
+            ))
+            .await;
         Ok(())
     }
 
@@ -220,9 +225,13 @@ impl StorageOperations {
         if data.is_some() {
             // Update last accessed timestamp in metadata
             self.update_last_accessed(&full_key).await?;
-            let _ = effects.log_debug(&format!("Retrieved data for key: {}", full_key)).await;
+            let _ = effects
+                .log_debug(&format!("Retrieved data for key: {}", full_key))
+                .await;
         } else {
-            let _ = effects.log_debug(&format!("No data found for key: {}", full_key)).await;
+            let _ = effects
+                .log_debug(&format!("No data found for key: {}", full_key))
+                .await;
         }
 
         Ok(data)
@@ -244,7 +253,9 @@ impl StorageOperations {
         let metadata_key = format!("{}:meta", full_key);
         let _ = effects.remove(&metadata_key).await; // Ignore errors for metadata
 
-        let _ = effects.log_debug(&format!("Deleted data for key: {}", full_key)).await;
+        let _ = effects
+            .log_debug(&format!("Deleted data for key: {}", full_key))
+            .await;
         Ok(())
     }
 
@@ -273,14 +284,11 @@ impl StorageOperations {
             }
         }
 
-        effects.log_debug(
-            &format!(
-                "Listed {} keys in namespace {}",
-                storage_keys.len(),
-                self.namespace
-            ),
-            
-        );
+        effects.log_debug(&format!(
+            "Listed {} keys in namespace {}",
+            storage_keys.len(),
+            self.namespace
+        ));
         Ok(storage_keys)
     }
 
@@ -323,10 +331,10 @@ impl StorageOperations {
         }
 
         let effects = self.effects.read().await;
-        effects.log_info(
-            &format!("Cleared {} keys from namespace {}", count, self.namespace),
-            
-        );
+        effects.log_info(&format!(
+            "Cleared {} keys from namespace {}",
+            count, self.namespace
+        ));
         Ok(count)
     }
 
@@ -378,14 +386,11 @@ impl StorageOperations {
         }
 
         let effects = self.effects.read().await;
-        effects.log_info(
-            &format!(
-                "Backed up {} keys from namespace {}",
-                backup.len(),
-                self.namespace
-            ),
-            
-        );
+        effects.log_info(&format!(
+            "Backed up {} keys from namespace {}",
+            backup.len(),
+            self.namespace
+        ));
         Ok(backup)
     }
 
@@ -400,10 +405,10 @@ impl StorageOperations {
         }
 
         let effects = self.effects.read().await;
-        effects.log_info(
-            &format!("Restored {} keys to namespace {}", restored, self.namespace),
-            
-        );
+        effects.log_info(&format!(
+            "Restored {} keys to namespace {}",
+            restored, self.namespace
+        ));
         Ok(restored)
     }
 
@@ -454,7 +459,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_storage_operations() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
         let storage = StorageOperations::new(effects, device_id, "test".to_string());
 
@@ -490,7 +495,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backup_restore() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
         let storage = StorageOperations::new(effects, device_id, "backup_test".to_string());
 

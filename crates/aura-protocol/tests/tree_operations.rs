@@ -17,7 +17,7 @@ use aura_protocol::effects::TreeEffects;
 
 #[tokio::test]
 async fn test_add_leaf_operation() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(uuid::Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     // Get initial state
@@ -37,7 +37,7 @@ async fn test_add_leaf_operation() {
 
 #[tokio::test]
 async fn test_remove_leaf_operation() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(uuid::Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     // Create RemoveLeaf operation
@@ -52,7 +52,7 @@ async fn test_remove_leaf_operation() {
 
 #[tokio::test]
 async fn test_change_policy_operation() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(uuid::Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     // Create ChangePolicy operation (Any → Threshold is valid)
@@ -67,7 +67,7 @@ async fn test_change_policy_operation() {
 
 #[tokio::test]
 async fn test_rotate_epoch_operation() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(uuid::Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     // Create RotateEpoch operation
@@ -83,17 +83,17 @@ async fn test_rotate_epoch_operation() {
 fn test_operation_application_updates_state() {
     // Create initial state from empty OpLog
     let oplog = OpLog::new();
-    let mut state = reduce(&oplog.list_ops().iter().cloned().collect::<Vec<_>>()).unwrap();
+    let mut state = reduce(&oplog.list_ops()).unwrap();
 
-    let initial_epoch = state.epoch();
+    let initial_epoch = state.epoch;
 
     // Create an attested operation
     let attested_op = AttestedOp {
         op: TreeOp {
-            parent_commitment: state.root_commitment(),
+            parent_commitment: state.root_commitment,
             parent_epoch: initial_epoch,
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode::new_device(LeafId(1), DeviceId::new(), vec![1, 2, 3]),
+                leaf: LeafNode::new_device(LeafId(1), DeviceId(uuid::Uuid::new_v4()), vec![1, 2, 3]),
                 under: NodeIndex(0),
             },
             version: 1,
@@ -113,16 +113,16 @@ fn test_operation_application_updates_state() {
 #[test]
 fn test_parent_binding_validation() {
     let oplog = OpLog::new();
-    let mut state = reduce(&oplog.list_ops().iter().cloned().collect::<Vec<_>>()).unwrap();
+    let mut state = reduce(&oplog.list_ops()).unwrap();
 
     // Create operation with incorrect parent epoch
     let wrong_epoch = 999;
     let attested_op = AttestedOp {
         op: TreeOp {
-            parent_commitment: state.root_commitment(),
+            parent_commitment: state.root_commitment,
             parent_epoch: wrong_epoch, // Wrong epoch
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode::new_device(LeafId(1), DeviceId::new(), vec![1, 2, 3]),
+                leaf: LeafNode::new_device(LeafId(1), DeviceId(uuid::Uuid::new_v4()), vec![1, 2, 3]),
                 under: NodeIndex(0),
             },
             version: 1,
@@ -142,7 +142,7 @@ fn test_parent_binding_validation() {
 #[test]
 fn test_invariant_validation() {
     let oplog = OpLog::new();
-    let state = reduce(&oplog.list_ops().iter().cloned().collect::<Vec<_>>()).unwrap();
+    let state = reduce(&oplog.list_ops()).unwrap();
 
     // Validate invariants on empty state
     let result = validate_invariants(&state);
@@ -152,7 +152,7 @@ fn test_invariant_validation() {
 #[test]
 fn test_policy_strictness_enforcement() {
     let oplog = OpLog::new();
-    let mut state = reduce(&oplog.list_ops().iter().cloned().collect::<Vec<_>>()).unwrap();
+    let mut state = reduce(&oplog.list_ops()).unwrap();
 
     // Attempt to change policy from stricter to weaker (should fail)
     // First, we'd need to set a threshold policy, then try to change to Any
@@ -167,17 +167,17 @@ fn test_policy_strictness_enforcement() {
 fn test_concurrent_operations_deterministic() {
     // Create two operations with same parent
     let oplog = OpLog::new();
-    let state = reduce(&oplog.list_ops().iter().cloned().collect::<Vec<_>>()).unwrap();
+    let state = reduce(&oplog.list_ops()).unwrap();
 
-    let parent_commitment = state.root_commitment();
-    let parent_epoch = state.epoch();
+    let parent_commitment = state.root_commitment;
+    let parent_epoch = state.epoch;
 
     let op1 = AttestedOp {
         op: TreeOp {
             parent_commitment,
             parent_epoch,
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode::new_device(LeafId(1), DeviceId::new(), vec![1, 2, 3]),
+                leaf: LeafNode::new_device(LeafId(1), DeviceId(uuid::Uuid::new_v4()), vec![1, 2, 3]),
                 under: NodeIndex(0),
             },
             version: 1,
@@ -191,7 +191,7 @@ fn test_concurrent_operations_deterministic() {
             parent_commitment,
             parent_epoch,
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode::new_device(LeafId(2), DeviceId::new(), vec![4, 5, 6]),
+                leaf: LeafNode::new_device(LeafId(2), DeviceId(uuid::Uuid::new_v4()), vec![4, 5, 6]),
                 under: NodeIndex(0),
             },
             version: 1,
@@ -209,24 +209,24 @@ fn test_concurrent_operations_deterministic() {
     let state1 = reduce(&oplog_new.list_ops().iter().cloned().collect::<Vec<_>>()).unwrap();
     let state2 = reduce(&oplog_new.list_ops().iter().cloned().collect::<Vec<_>>()).unwrap();
 
-    assert_eq!(state1.epoch(), state2.epoch());
-    assert_eq!(state1.root_commitment(), state2.root_commitment());
+    assert_eq!(state1.epoch, state2.epoch);
+    assert_eq!(state1.root_commitment, state2.root_commitment);
 }
 
 #[tokio::test]
 async fn test_get_current_state() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(uuid::Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     let state = effect_system.get_current_state().await.unwrap();
 
     // Initial state should have epoch 0
-    assert_eq!(state.epoch(), 0);
+    assert_eq!(state.epoch, 0);
 }
 
 #[tokio::test]
 async fn test_get_current_commitment() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(uuid::Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     let commitment = effect_system.get_current_commitment().await.unwrap();
@@ -237,7 +237,7 @@ async fn test_get_current_commitment() {
 
 #[tokio::test]
 async fn test_get_current_epoch() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(uuid::Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     let epoch = effect_system.get_current_epoch().await.unwrap();
@@ -256,7 +256,7 @@ fn test_multiple_operations_in_sequence() {
             parent_commitment: [0u8; 32],
             parent_epoch: 0,
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode::new_device(LeafId(1), DeviceId::new(), vec![1, 2, 3]),
+                leaf: LeafNode::new_device(LeafId(1), DeviceId(uuid::Uuid::new_v4()), vec![1, 2, 3]),
                 under: NodeIndex(0),
             },
             version: 1,
@@ -266,13 +266,13 @@ fn test_multiple_operations_in_sequence() {
     };
     oplog.add_operation(op1);
 
-    let state1 = reduce(&oplog.list_ops().iter().cloned().collect::<Vec<_>>()).unwrap();
-    let epoch1 = state1.epoch();
+    let state1 = reduce(&oplog.list_ops()).unwrap();
+    let epoch1 = state1.epoch;
 
     // Operation 2: Rotate epoch
     let op2 = AttestedOp {
         op: TreeOp {
-            parent_commitment: state1.root_commitment(),
+            parent_commitment: state1.root_commitment,
             parent_epoch: epoch1,
             op: TreeOpKind::RotateEpoch {
                 affected: vec![NodeIndex(0)],
@@ -284,10 +284,10 @@ fn test_multiple_operations_in_sequence() {
     };
     oplog.add_operation(op2);
 
-    let state2 = reduce(&oplog.list_ops().iter().cloned().collect::<Vec<_>>()).unwrap();
+    let state2 = reduce(&oplog.list_ops()).unwrap();
 
     // Epoch should have incremented or state changed
-    assert!(state2.epoch() >= epoch1);
+    assert!(state2.epoch >= epoch1);
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn test_operation_deduplication() {
             parent_commitment: [1u8; 32],
             parent_epoch: 0,
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode::new_device(LeafId(1), DeviceId::new(), vec![1, 2, 3]),
+                leaf: LeafNode::new_device(LeafId(1), DeviceId(uuid::Uuid::new_v4()), vec![1, 2, 3]),
                 under: NodeIndex(0),
             },
             version: 1,

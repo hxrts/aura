@@ -29,6 +29,7 @@
 
 pub mod account;
 pub mod assertions;
+pub mod clean_fixtures;
 pub mod config;
 pub mod device;
 pub mod effects;
@@ -44,6 +45,7 @@ pub mod transport;
 // Re-export commonly used items
 pub use account::*;
 pub use assertions::*;
+pub use clean_fixtures::TestFixtures;
 pub use config::*;
 pub use device::{DeviceSetBuilder, DeviceTestFixture};
 pub use effects::*;
@@ -56,7 +58,7 @@ pub use protocol::*;
 pub use transport::*;
 
 // Re-export commonly used external types for convenience
-pub use aura_core::{AccountId, AccountIdExt, DeviceId, DeviceIdExt};
+pub use aura_core::{AccountId, DeviceId};
 pub use aura_journal::semilattice::ModernAccountState as AccountState;
 pub use aura_journal::{DeviceMetadata, DeviceType};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};

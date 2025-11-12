@@ -3,17 +3,15 @@
 //! This module implements the G_frost choreography for distributed threshold
 //! signature generation using the Aura effect system pattern.
 
-use crate::{FrostError, FrostResult};
-use aura_core::{AccountId, Cap, DeviceId, AuraError};
+use crate::FrostResult;
+use aura_core::effects::{ConsoleEffects, CryptoEffects, NetworkEffects, TimeEffects};
+use aura_core::{AccountId, AuraError, DeviceId};
 use aura_crypto::frost::{
-    Nonce, NonceCommitment, PartialSignature, Share, SigningSession, ThresholdSignature,
-    TreeSigningContext,
+    NonceCommitment, PartialSignature, ThresholdSignature, TreeSigningContext,
 };
-use aura_core::effects::{NetworkEffects, CryptoEffects, TimeEffects, ConsoleEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
 /// Threshold signing request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,7 +223,12 @@ impl FrostSigningCoordinator {
     where
         E: NetworkEffects + CryptoEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_info(&format!("Starting FROST signing as coordinator for account {}", request.account_id)).await;
+        let _ = effects
+            .log_info(&format!(
+                "Starting FROST signing as coordinator for account {}",
+                request.account_id
+            ))
+            .await;
 
         let session_id = self.generate_session_id(effects).await?;
         let timeout_at = effects.current_timestamp().await + (request.timeout_seconds * 1000);
@@ -270,22 +273,33 @@ impl FrostSigningCoordinator {
     }
 
     /// Execute signing as signer
-    pub async fn execute_as_signer<E>(
-        &self,
-        effects: &E,
-    ) -> FrostResult<ThresholdSigningResponse>
+    pub async fn execute_as_signer<E>(&self, effects: &E) -> FrostResult<ThresholdSigningResponse>
     where
         E: NetworkEffects + CryptoEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_info(&format!("Starting FROST signing as signer for device {}", self.device_id)).await;
+        let _ = effects
+            .log_info(&format!(
+                "Starting FROST signing as signer for device {}",
+                self.device_id
+            ))
+            .await;
 
         // Wait for signing initialization
         let init_message = self.wait_for_init_message(effects).await?;
-        
+
         let session_id = match init_message {
-            FrostSigningMessage::SigningInit { session_id, message, context, account_id, threshold, timeout_at } => {
-                let _ = effects.log_info(&format!("Received signing init for session {}", session_id)).await;
-                
+            FrostSigningMessage::SigningInit {
+                session_id,
+                message,
+                context,
+                account_id,
+                threshold,
+                timeout_at,
+            } => {
+                let _ = effects
+                    .log_info(&format!("Received signing init for session {}", session_id))
+                    .await;
+
                 // Initialize local session state
                 let signers = vec![self.device_id]; // Will be filled as we learn about others
                 {
@@ -308,7 +322,9 @@ impl FrostSigningCoordinator {
         };
 
         // Participate in the signing protocol
-        let result = self.participate_in_signing_protocol(effects, &session_id).await;
+        let result = self
+            .participate_in_signing_protocol(effects, &session_id)
+            .await;
 
         // Clean up session
         {
@@ -331,17 +347,25 @@ impl FrostSigningCoordinator {
     }
 
     /// Broadcast a signing message to all participants
-    async fn broadcast_message<E>(&self, effects: &E, message: &FrostSigningMessage) -> FrostResult<()>
+    async fn broadcast_message<E>(
+        &self,
+        effects: &E,
+        message: &FrostSigningMessage,
+    ) -> FrostResult<()>
     where
         E: NetworkEffects + ConsoleEffects,
     {
-        let serialized = serde_json::to_vec(message)
-            .map_err(|e| AuraError::serialization(format!("Failed to serialize signing message: {}", e)))?;
+        let serialized = serde_json::to_vec(message).map_err(|e| {
+            AuraError::serialization(format!("Failed to serialize signing message: {}", e))
+        })?;
 
-        effects.broadcast(serialized).await
-            .map_err(|e| AuraError::network(format!("Failed to broadcast signing message: {}", e)))?;
+        effects.broadcast(serialized).await.map_err(|e| {
+            AuraError::network(format!("Failed to broadcast signing message: {}", e))
+        })?;
 
-        let _ = effects.log_debug(&format!("Broadcasted signing message: {:?}", message)).await;
+        let _ = effects
+            .log_debug(&format!("Broadcasted signing message: {:?}", message))
+            .await;
         Ok(())
     }
 
@@ -350,24 +374,37 @@ impl FrostSigningCoordinator {
     where
         E: NetworkEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug("Waiting for signing initialization message").await;
+        let _ = effects
+            .log_debug("Waiting for signing initialization message")
+            .await;
 
         loop {
-            let (_peer_id, message_bytes) = effects.receive().await
+            let (_peer_id, message_bytes) = effects
+                .receive()
+                .await
                 .map_err(|e| AuraError::network(format!("Failed to receive message: {}", e)))?;
 
             match serde_json::from_slice::<FrostSigningMessage>(&message_bytes) {
                 Ok(FrostSigningMessage::SigningInit { .. }) => {
                     let message: FrostSigningMessage = serde_json::from_slice(&message_bytes)
-                        .map_err(|e| AuraError::serialization(format!("Failed to deserialize signing message: {}", e)))?;
+                        .map_err(|e| {
+                            AuraError::serialization(format!(
+                                "Failed to deserialize signing message: {}",
+                                e
+                            ))
+                        })?;
                     return Ok(message);
                 }
                 Ok(_) => {
-                    let _ = effects.log_debug("Received non-init signing message, continuing to wait").await;
+                    let _ = effects
+                        .log_debug("Received non-init signing message, continuing to wait")
+                        .await;
                     continue;
                 }
                 Err(_) => {
-                    let _ = effects.log_debug("Received non-signing message, continuing to wait").await;
+                    let _ = effects
+                        .log_debug("Received non-signing message, continuing to wait")
+                        .await;
                     continue;
                 }
             }
@@ -375,11 +412,20 @@ impl FrostSigningCoordinator {
     }
 
     /// Coordinate the signing protocol as coordinator
-    async fn coordinate_signing_protocol<E>(&self, effects: &E, session_id: &str) -> FrostResult<ThresholdSigningResponse>
+    async fn coordinate_signing_protocol<E>(
+        &self,
+        effects: &E,
+        session_id: &str,
+    ) -> FrostResult<ThresholdSigningResponse>
     where
         E: NetworkEffects + CryptoEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_info(&format!("Coordinating signing protocol for session {}", session_id)).await;
+        let _ = effects
+            .log_info(&format!(
+                "Coordinating signing protocol for session {}",
+                session_id
+            ))
+            .await;
 
         // Round 1: Collect nonce commitments
         self.collect_nonce_commitments(effects, session_id).await?;
@@ -400,27 +446,50 @@ impl FrostSigningCoordinator {
 
         self.broadcast_message(effects, &completion_message).await?;
 
-        let _ = effects.log_info(&format!("Signing coordination complete for session {}", session_id)).await;
+        let _ = effects
+            .log_info(&format!(
+                "Signing coordination complete for session {}",
+                session_id
+            ))
+            .await;
         Ok(response)
     }
 
     /// Participate in the signing protocol as signer
-    async fn participate_in_signing_protocol<E>(&self, effects: &E, session_id: &str) -> FrostResult<ThresholdSigningResponse>
+    async fn participate_in_signing_protocol<E>(
+        &self,
+        effects: &E,
+        session_id: &str,
+    ) -> FrostResult<ThresholdSigningResponse>
     where
         E: NetworkEffects + CryptoEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_info(&format!("Participating in signing protocol for session {}", session_id)).await;
+        let _ = effects
+            .log_info(&format!(
+                "Participating in signing protocol for session {}",
+                session_id
+            ))
+            .await;
 
         // Round 1: Generate and send nonce commitment
-        self.generate_and_send_nonce_commitment(effects, session_id).await?;
+        self.generate_and_send_nonce_commitment(effects, session_id)
+            .await?;
 
         // Round 2: Generate and send partial signature
-        self.generate_and_send_partial_signature(effects, session_id).await?;
+        self.generate_and_send_partial_signature(effects, session_id)
+            .await?;
 
         // Round 3: Wait for completion
-        let response = self.wait_for_signing_completion(effects, session_id).await?;
+        let response = self
+            .wait_for_signing_completion(effects, session_id)
+            .await?;
 
-        let _ = effects.log_info(&format!("Signing participation complete for session {}", session_id)).await;
+        let _ = effects
+            .log_info(&format!(
+                "Signing participation complete for session {}",
+                session_id
+            ))
+            .await;
         Ok(response)
     }
 
@@ -429,21 +498,33 @@ impl FrostSigningCoordinator {
     where
         E: NetworkEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug(&format!("Collecting nonce commitments for session {}", session_id)).await;
+        let _ = effects
+            .log_debug(&format!(
+                "Collecting nonce commitments for session {}",
+                session_id
+            ))
+            .await;
 
         loop {
-            let (_peer_id, message_bytes) = effects.receive().await
+            let (_peer_id, message_bytes) = effects
+                .receive()
+                .await
                 .map_err(|e| AuraError::network(format!("Failed to receive message: {}", e)))?;
 
-            if let Ok(FrostSigningMessage::NonceCommitment { session_id: msg_session_id, signer_id, commitment }) =
-                serde_json::from_slice::<FrostSigningMessage>(&message_bytes) {
-                
+            if let Ok(FrostSigningMessage::NonceCommitment {
+                session_id: msg_session_id,
+                signer_id,
+                commitment,
+            }) = serde_json::from_slice::<FrostSigningMessage>(&message_bytes)
+            {
                 if msg_session_id == session_id {
                     let mut sessions = self.active_sessions.lock().await;
                     if let Some(session) = sessions.get_mut(session_id) {
                         session.nonce_commitments.insert(signer_id, commitment);
-                        let _ = effects.log_debug(&format!("Received nonce commitment from {}", signer_id)).await;
-                        
+                        let _ = effects
+                            .log_debug(&format!("Received nonce commitment from {}", signer_id))
+                            .await;
+
                         if session.can_advance_to_round(1) {
                             session.current_round = 1;
                             break;
@@ -461,21 +542,33 @@ impl FrostSigningCoordinator {
     where
         E: NetworkEffects + TimeEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug(&format!("Collecting partial signatures for session {}", session_id)).await;
+        let _ = effects
+            .log_debug(&format!(
+                "Collecting partial signatures for session {}",
+                session_id
+            ))
+            .await;
 
         loop {
-            let (_peer_id, message_bytes) = effects.receive().await
+            let (_peer_id, message_bytes) = effects
+                .receive()
+                .await
                 .map_err(|e| AuraError::network(format!("Failed to receive message: {}", e)))?;
 
-            if let Ok(FrostSigningMessage::PartialSignature { session_id: msg_session_id, signer_id, signature }) =
-                serde_json::from_slice::<FrostSigningMessage>(&message_bytes) {
-                
+            if let Ok(FrostSigningMessage::PartialSignature {
+                session_id: msg_session_id,
+                signer_id,
+                signature,
+            }) = serde_json::from_slice::<FrostSigningMessage>(&message_bytes)
+            {
                 if msg_session_id == session_id {
                     let mut sessions = self.active_sessions.lock().await;
                     if let Some(session) = sessions.get_mut(session_id) {
                         session.partial_signatures.insert(signer_id, signature);
-                        let _ = effects.log_debug(&format!("Received partial signature from {}", signer_id)).await;
-                        
+                        let _ = effects
+                            .log_debug(&format!("Received partial signature from {}", signer_id))
+                            .await;
+
                         if session.can_advance_to_round(2) {
                             session.current_round = 2;
                             break;
@@ -489,31 +582,40 @@ impl FrostSigningCoordinator {
     }
 
     /// Finalize signing and generate result (Round 3)
-    async fn finalize_signing<E>(&self, effects: &E, session_id: &str) -> FrostResult<ThresholdSigningResponse>
+    async fn finalize_signing<E>(
+        &self,
+        effects: &E,
+        session_id: &str,
+    ) -> FrostResult<ThresholdSigningResponse>
     where
         E: CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug(&format!("Finalizing signing for session {}", session_id)).await;
+        let _ = effects
+            .log_debug(&format!("Finalizing signing for session {}", session_id))
+            .await;
 
         let mut sessions = self.active_sessions.lock().await;
-        let session = sessions.get_mut(session_id)
+        let session = sessions
+            .get_mut(session_id)
             .ok_or_else(|| AuraError::invalid("Session not found"))?;
 
         // Check if we have enough partial signatures
         if session.partial_signatures.len() >= session.threshold {
-            let _ = effects.log_info("Sufficient partial signatures collected - aggregating signature").await;
-            
+            let _ = effects
+                .log_info("Sufficient partial signatures collected - aggregating signature")
+                .await;
+
             // Aggregate partial signatures using real FROST cryptography
-            use aura_crypto::frost::tree_signing::{frost_aggregate, binding_message};
+            use aura_crypto::frost::tree_signing::{binding_message, frost_aggregate};
             use frost_ed25519 as frost;
             use std::collections::BTreeMap;
-            
+
             // Create binding message
             let bound_message = binding_message(&session.context, &session.message);
-            
+
             // Convert partial signatures to aggregation format
             let partials: Vec<_> = session.partial_signatures.values().cloned().collect();
-            
+
             // Convert commitments to the right format
             let mut frost_commitments = BTreeMap::new();
             for (signer_id, commitment) in &session.nonce_commitments {
@@ -521,28 +623,36 @@ impl FrostSigningCoordinator {
                 let signer_u16 = device_id_bytes.unwrap()[0] as u16 % 3 + 1;
                 frost_commitments.insert(signer_u16, commitment.clone());
             }
-            
+
             // Generate temporary public key package for aggregation
             let mut rng = rand::thread_rng();
             let (_shares, pubkey_package) = frost::keys::generate_with_dealer(
-                3, 2, frost::keys::IdentifierList::Default, &mut rng
-            ).map_err(|e| AuraError::crypto(format!("Failed to generate keys: {}", e)))?;
-            
+                3,
+                2,
+                frost::keys::IdentifierList::Default,
+                &mut rng,
+            )
+            .map_err(|e| AuraError::crypto(format!("Failed to generate keys: {}", e)))?;
+
             // Aggregate the signatures
-            match frost_aggregate(&partials, &bound_message, &frost_commitments, &pubkey_package) {
+            match frost_aggregate(
+                &partials,
+                &bound_message,
+                &frost_commitments,
+                &pubkey_package,
+            ) {
                 Ok(signature_bytes) => {
-                    let participating_signers: Vec<u16> = session.partial_signatures
+                    let participating_signers: Vec<u16> = session
+                        .partial_signatures
                         .keys()
                         .map(|device_id| device_id.to_bytes().unwrap()[0] as u16)
                         .collect();
-                    
-                    let threshold_signature = ThresholdSignature::new(
-                        signature_bytes,
-                        participating_signers.clone(),
-                    );
-                    
+
+                    let threshold_signature =
+                        ThresholdSignature::new(signature_bytes, participating_signers.clone());
+
                     session.threshold_signature = Some(threshold_signature.clone());
-                    
+
                     Ok(ThresholdSigningResponse {
                         signature: Some(threshold_signature),
                         participating_signers: session.signers.clone(),
@@ -552,8 +662,10 @@ impl FrostSigningCoordinator {
                     })
                 }
                 Err(e) => {
-                    let _ = effects.log_error(&format!("Signature aggregation failed: {}", e)).await;
-                    
+                    let _ = effects
+                        .log_error(&format!("Signature aggregation failed: {}", e))
+                        .await;
+
                     Ok(ThresholdSigningResponse {
                         signature: None,
                         participating_signers: session.signers.clone(),
@@ -564,8 +676,10 @@ impl FrostSigningCoordinator {
                 }
             }
         } else {
-            let _ = effects.log_warn("Insufficient partial signatures for threshold").await;
-            
+            let _ = effects
+                .log_warn("Insufficient partial signatures for threshold")
+                .await;
+
             Ok(ThresholdSigningResponse {
                 signature: None,
                 participating_signers: session.signers.clone(),
@@ -577,31 +691,42 @@ impl FrostSigningCoordinator {
     }
 
     /// Generate and send nonce commitment (Signer Round 1)
-    async fn generate_and_send_nonce_commitment<E>(&self, effects: &E, session_id: &str) -> FrostResult<()>
+    async fn generate_and_send_nonce_commitment<E>(
+        &self,
+        effects: &E,
+        session_id: &str,
+    ) -> FrostResult<()>
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug(&format!("Generating nonce commitment for session {}", session_id)).await;
+        let _ = effects
+            .log_debug(&format!(
+                "Generating nonce commitment for session {}",
+                session_id
+            ))
+            .await;
 
         // Get signing share from session context
         let sessions = self.active_sessions.lock().await;
-        let session = sessions.get(session_id)
+        let session = sessions
+            .get(session_id)
             .ok_or_else(|| AuraError::invalid("Session not found"))?;
         drop(sessions);
 
         // Generate proper FROST nonce commitment using real cryptography
         use aura_crypto::frost::tree_signing::generate_nonce_with_share;
-        
+
         // Create mock signing share for this implementation
         // In production, this would come from DKG ceremony stored securely
         use frost_ed25519 as frost;
         let identifier = frost::Identifier::try_from(1u16)
             .map_err(|e| AuraError::crypto(format!("Invalid identifier: {}", e)))?;
-        
+
         // Generate test signing share
         let mut rng = rand::thread_rng();
-        let signing_share = frost::keys::SigningShare::deserialize([rand::RngCore::next_u32(&mut rng) as u8; 32])
-            .map_err(|e| AuraError::crypto(format!("Failed to create signing share: {}", e)))?;
+        let signing_share =
+            frost::keys::SigningShare::deserialize([rand::RngCore::next_u32(&mut rng) as u8; 32])
+                .map_err(|e| AuraError::crypto(format!("Failed to create signing share: {}", e)))?;
 
         let (_nonce, commitment) = generate_nonce_with_share(1, &signing_share);
 
@@ -616,22 +741,32 @@ impl FrostSigningCoordinator {
     }
 
     /// Generate and send partial signature (Signer Round 2)
-    async fn generate_and_send_partial_signature<E>(&self, effects: &E, session_id: &str) -> FrostResult<()>
+    async fn generate_and_send_partial_signature<E>(
+        &self,
+        effects: &E,
+        session_id: &str,
+    ) -> FrostResult<()>
     where
         E: NetworkEffects + CryptoEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug(&format!("Generating partial signature for session {}", session_id)).await;
+        let _ = effects
+            .log_debug(&format!(
+                "Generating partial signature for session {}",
+                session_id
+            ))
+            .await;
 
         // Get session data and nonce commitments
         let (message, context, commitments) = {
             let sessions = self.active_sessions.lock().await;
-            let session = sessions.get(session_id)
+            let session = sessions
+                .get(session_id)
                 .ok_or_else(|| AuraError::invalid("Session not found"))?;
-            
+
             let message = session.message.clone();
             let context = session.context.clone();
             let commitments = session.nonce_commitments.clone();
-            
+
             (message, context, commitments)
         };
 
@@ -642,29 +777,33 @@ impl FrostSigningCoordinator {
         // Generate real FROST partial signature
         use aura_crypto::frost::tree_signing::frost_sign_partial_with_keypackage;
         use frost_ed25519 as frost;
-        
+
         // Create mock key package for this implementation
         let mut rng = rand::thread_rng();
         let identifier = frost::Identifier::try_from(1u16)
             .map_err(|e| AuraError::crypto(format!("Invalid identifier: {}", e)))?;
-        
-        let signing_share = frost::keys::SigningShare::deserialize([rand::RngCore::next_u32(&mut rng) as u8; 32])
-            .map_err(|e| AuraError::crypto(format!("Failed to create signing share: {}", e)))?;
-        
+
+        let signing_share =
+            frost::keys::SigningShare::deserialize([rand::RngCore::next_u32(&mut rng) as u8; 32])
+                .map_err(|e| AuraError::crypto(format!("Failed to create signing share: {}", e)))?;
+
         // Generate temporary shares and public key package for signing
-        let (secret_shares, pubkey_package) = frost::keys::generate_with_dealer(
-            3, 2, frost::keys::IdentifierList::Default, &mut rng
-        ).map_err(|e| AuraError::crypto(format!("Failed to generate keys: {}", e)))?;
-        
-        let secret_share = secret_shares.get(&identifier)
+        let (secret_shares, pubkey_package) =
+            frost::keys::generate_with_dealer(3, 2, frost::keys::IdentifierList::Default, &mut rng)
+                .map_err(|e| AuraError::crypto(format!("Failed to generate keys: {}", e)))?;
+
+        let secret_share = secret_shares
+            .get(&identifier)
             .ok_or_else(|| AuraError::crypto("Secret share not found"))?;
-            
+
         // Create KeyPackage from components
         let signing_share = secret_share.signing_share();
-        let verifying_share = pubkey_package.verifying_shares().get(&identifier)
+        let verifying_share = pubkey_package
+            .verifying_shares()
+            .get(&identifier)
             .ok_or_else(|| AuraError::crypto("Verifying share not found"))?;
         let verifying_key = pubkey_package.verifying_key();
-        
+
         let key_package = frost::keys::KeyPackage::new(
             identifier,
             signing_share.clone(),
@@ -673,7 +812,7 @@ impl FrostSigningCoordinator {
             2, // min_signers
         );
 
-        // Convert commitments to the right format  
+        // Convert commitments to the right format
         use std::collections::BTreeMap;
         let mut frost_commitments = BTreeMap::new();
         for (signer_id, commitment) in commitments {
@@ -682,11 +821,9 @@ impl FrostSigningCoordinator {
             frost_commitments.insert(signer_u16, commitment.clone());
         }
 
-        let partial_signature = frost_sign_partial_with_keypackage(
-            &key_package,
-            &bound_message,
-            &frost_commitments,
-        ).map_err(|e| AuraError::crypto(format!("FROST signing failed: {}", e)))?;
+        let partial_signature =
+            frost_sign_partial_with_keypackage(&key_package, &bound_message, &frost_commitments)
+                .map_err(|e| AuraError::crypto(format!("FROST signing failed: {}", e)))?;
 
         let signature_message = FrostSigningMessage::PartialSignature {
             session_id: session_id.to_string(),
@@ -699,19 +836,34 @@ impl FrostSigningCoordinator {
     }
 
     /// Wait for signing completion (Signer Round 3)
-    async fn wait_for_signing_completion<E>(&self, effects: &E, session_id: &str) -> FrostResult<ThresholdSigningResponse>
+    async fn wait_for_signing_completion<E>(
+        &self,
+        effects: &E,
+        session_id: &str,
+    ) -> FrostResult<ThresholdSigningResponse>
     where
         E: NetworkEffects + ConsoleEffects,
     {
-        let _ = effects.log_debug(&format!("Waiting for signing completion for session {}", session_id)).await;
+        let _ = effects
+            .log_debug(&format!(
+                "Waiting for signing completion for session {}",
+                session_id
+            ))
+            .await;
 
         loop {
-            let (_peer_id, message_bytes) = effects.receive().await
+            let (_peer_id, message_bytes) = effects
+                .receive()
+                .await
                 .map_err(|e| AuraError::network(format!("Failed to receive message: {}", e)))?;
 
-            if let Ok(FrostSigningMessage::SigningCompletion { session_id: msg_session_id, signature, success, error }) =
-                serde_json::from_slice::<FrostSigningMessage>(&message_bytes) {
-                
+            if let Ok(FrostSigningMessage::SigningCompletion {
+                session_id: msg_session_id,
+                signature,
+                success,
+                error,
+            }) = serde_json::from_slice::<FrostSigningMessage>(&message_bytes)
+            {
                 if msg_session_id == session_id {
                     return Ok(ThresholdSigningResponse {
                         signature,
@@ -752,10 +904,13 @@ mod tests {
 
         let serialized = serde_json::to_vec(&request).unwrap();
         let deserialized: ThresholdSigningRequest = serde_json::from_slice(&serialized).unwrap();
-        
+
         assert_eq!(request.message, deserialized.message);
         assert_eq!(request.threshold, deserialized.threshold);
-        assert_eq!(request.available_signers.len(), deserialized.available_signers.len());
+        assert_eq!(
+            request.available_signers.len(),
+            deserialized.available_signers.len()
+        );
     }
 
     #[test]
@@ -771,9 +926,14 @@ mod tests {
 
         let serialized = serde_json::to_vec(&message).unwrap();
         let deserialized: FrostSigningMessage = serde_json::from_slice(&serialized).unwrap();
-        
+
         match deserialized {
-            FrostSigningMessage::SigningInit { session_id, message: msg, threshold, .. } => {
+            FrostSigningMessage::SigningInit {
+                session_id,
+                message: msg,
+                threshold,
+                ..
+            } => {
                 assert_eq!(session_id, "test_session");
                 assert_eq!(msg, b"test_message".to_vec());
                 assert_eq!(threshold, 2);

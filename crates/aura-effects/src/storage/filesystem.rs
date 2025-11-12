@@ -7,6 +7,10 @@
 //! - Secure file permissions and access control
 //! - Storage quota monitoring and management
 //! - Metadata journaling for disaster recovery
+//!
+//! This module needs to use disallowed methods like `SystemTime::now()` to get
+//! current timestamps for file metadata and journaling operations.
+#![allow(clippy::disallowed_methods)]
 
 use aes_gcm::{
     aead::{Aead, KeyInit},

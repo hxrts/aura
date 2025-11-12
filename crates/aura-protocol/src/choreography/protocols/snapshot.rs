@@ -349,7 +349,8 @@ async fn proposer_session(
             "Collected {} approvals (threshold: {}), {} support GC",
             approval_count, config.threshold, gc_capable_count
         ))
-        .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+        .await
+        .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
     // Phase 3: Finalize or abort based on threshold
     if approval_count >= config.threshold {
@@ -363,7 +364,8 @@ async fn proposer_session(
                     "Snapshot approved but GC disabled: only {}/{} peers support safe GC",
                     gc_capable_count, config.threshold
                 ))
-                .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+                .await
+                .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
         }
 
         adapter
@@ -372,7 +374,8 @@ async fn proposer_session(
                 "Threshold met, finalizing snapshot (GC enabled: {})",
                 safe_for_gc
             ))
-            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+            .await
+            .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         // Aggregate partial signatures
         // TODO fix - For now, concatenate them - in production, use proper FROST aggregation
@@ -425,7 +428,8 @@ async fn proposer_session(
         adapter
             .effects()
             .log_info("Snapshot committed successfully")
-            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+            .await
+            .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         Ok(SnapshotResult {
             snapshot: Some(snapshot),
@@ -453,7 +457,8 @@ async fn proposer_session(
         adapter
             .effects()
             .log_warn(&format!("Snapshot aborted: {}", abort.reason))
-            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+            .await
+            .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         Ok(SnapshotResult {
             snapshot: None,
@@ -481,7 +486,8 @@ async fn quorum_member_session(
             "Received snapshot proposal {:?} at epoch {}",
             proposal.proposal_id, proposal.cut.epoch
         ))
-        .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+        .await
+        .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
     // Evaluate proposal locally with upgrade safety checks
     // Check if cut is valid and acceptable:
@@ -562,7 +568,8 @@ async fn quorum_member_session(
         adapter
             .effects()
             .log_info("Snapshot proposal approved")
-            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+            .await
+            .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
     } else {
         adapter
             .effects()
@@ -570,7 +577,8 @@ async fn quorum_member_session(
                 "Snapshot proposal rejected: {}",
                 reason.unwrap_or_default()
             ))
-            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+            .await
+            .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
     }
 
     // Phase 3: Receive commit or abort
@@ -579,7 +587,8 @@ async fn quorum_member_session(
         adapter
             .effects()
             .log_info("Received snapshot commit, applying")
-            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+            .await
+            .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         // Convert to effects snapshot
         let effects_snapshot = crate::effects::tree::Snapshot {
@@ -598,7 +607,8 @@ async fn quorum_member_session(
                 adapter
                     .effects()
                     .log_info("Snapshot applied successfully")
-                    .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+                    .await
+                    .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
                 SnapshotResult {
                     snapshot: Some(commit.snapshot),
@@ -611,7 +621,8 @@ async fn quorum_member_session(
                 adapter
                     .effects()
                     .log_error(&format!("Failed to apply snapshot: {}", e))
-                    .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+                    .await
+                    .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
                 SnapshotResult {
                     snapshot: Some(commit.snapshot),
@@ -625,7 +636,8 @@ async fn quorum_member_session(
         adapter
             .effects()
             .log_warn(&format!("Snapshot aborted: {}", abort.reason))
-            .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+            .await
+            .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
         SnapshotResult {
             snapshot: None,
@@ -730,7 +742,8 @@ pub async fn apply_snapshot_commit(
         }
         Err(e) => {
             ConsoleEffects::log_error(effect_system, &format!("Failed to apply snapshot: {}", e))
-                .await.map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
+                .await
+                .map_err(|e| SnapshotError::EffectSystem(e.to_string()))?;
 
             Ok(SnapshotResult {
                 snapshot: Some(snapshot),

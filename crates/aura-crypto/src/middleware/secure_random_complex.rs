@@ -421,14 +421,13 @@ mod tests {
     use super::*;
     use crate::middleware::handler::NoOpHandler;
     use crate::middleware::SecurityLevel;
-    use crate::Effects;
-    use aura_core::{AccountIdExt, DeviceIdExt};
+    use aura_core::{AccountId, DeviceId};
+    use uuid::Uuid;
 
     #[test]
     fn test_secure_random_middleware() {
-        let effects = Effects::test();
-        let account_id = aura_core::AccountId::new_with_effects(&effects);
-        let device_id = aura_core::DeviceId::new_with_effects(&effects);
+        let account_id = AccountId(Uuid::new_v4());
+        let device_id = DeviceId(Uuid::new_v4());
 
         let middleware = SecureRandomMiddleware::new(RandomConfig::default());
         let handler = NoOpHandler;

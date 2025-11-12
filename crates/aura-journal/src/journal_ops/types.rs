@@ -343,7 +343,7 @@ mod tests {
     #[test]
     fn test_node_addition() {
         let mut journal = KeyJournal::new();
-        let node_id = NodeId::new();
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
         let node = KeyNode::new(node_id, NodeKind::Device, NodePolicy::Any);
 
         assert!(journal.add_node(node).is_ok());
@@ -356,8 +356,8 @@ mod tests {
         let mut journal = KeyJournal::new();
 
         // Add two nodes
-        let parent_id = NodeId::new();
-        let child_id = NodeId::new();
+        let parent_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let child_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
         let parent = KeyNode::new(
             parent_id,
             NodeKind::Identity,
@@ -385,17 +385,17 @@ mod tests {
     #[test]
     fn test_invalid_edge() {
         let mut journal = KeyJournal::new();
-        let node_id = NodeId::new();
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
 
         // Try to add edge to non-existent node
-        let edge = KeyEdge::new(node_id, NodeId::new(), EdgeKind::Contains);
+        let edge = KeyEdge::new(node_id, aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), EdgeKind::Contains);
         assert!(journal.add_edge(edge).is_err());
     }
 
     #[test]
     fn test_self_referential_edge() {
         let mut journal = KeyJournal::new();
-        let node_id = NodeId::new();
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
         let node = KeyNode::new(node_id, NodeKind::Device, NodePolicy::Any);
 
         journal.add_node(node).unwrap();

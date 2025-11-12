@@ -100,7 +100,8 @@ pub fn verify_threshold_signature_with_signers(
 mod tests {
     use super::*;
     use aura_crypto::Effects;
-    use aura_core::DeviceIdExt;
+    use aura_core::DeviceId;
+    use uuid::Uuid;
 
     #[test]
     fn test_verify_threshold_signature_sufficient_signers() {
@@ -141,7 +142,7 @@ mod tests {
     fn test_verify_threshold_signature_with_signers() {
         let effects = Effects::test();
 
-        let expected_signers = vec![DeviceId::new_with_effects(&effects)];
+        let expected_signers = vec![DeviceId(Uuid::new_v4())];
 
         let signing_key = aura_crypto::generate_ed25519_key();
         let verifying_key = aura_crypto::ed25519_verifying_key(&signing_key);

@@ -36,13 +36,9 @@
 //! - DeltaHandler: Delta-based synchronization for bandwidth optimization
 //! - MvHandler: Meet-semilattice synchronization for constraint-based CRDTs
 
-use crate::effects::{
-    CryptoEffects, RandomEffects,
-};
+use crate::effects::{CryptoEffects, RandomEffects};
 use crate::guards::{JournalCoupler, JournalCouplerBuilder, ProtocolGuard};
-use aura_core::{
-    CausalContext, DeviceId, SessionId,
-};
+use aura_core::{CausalContext, DeviceId, SessionId};
 use aura_mpst::journal_coupling::JournalAnnotation;
 use aura_wot::Capability;
 use rumpsteak_aura_choreography::choreography;

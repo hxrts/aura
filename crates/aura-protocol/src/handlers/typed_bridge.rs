@@ -26,9 +26,7 @@
 use super::erased::{AuraHandler, HandlerUtils};
 use super::EffectType;
 use crate::effects::crypto::CryptoError;
-use crate::effects::params::{
-    DelayParams, RandomBytesParams, RandomRangeParams,
-};
+use crate::effects::params::{DelayParams, RandomBytesParams, RandomRangeParams};
 use crate::effects::*;
 use crate::handlers::context::AuraContext;
 use async_trait::async_trait;

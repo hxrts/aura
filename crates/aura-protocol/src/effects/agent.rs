@@ -5,7 +5,8 @@
 
 use async_trait::async_trait;
 use aura_core::{
-    identifiers::{AccountId, DeviceId, SessionId}, AuraResult as Result,
+    identifiers::{AccountId, DeviceId, SessionId},
+    AuraResult as Result,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -285,13 +286,13 @@ pub trait ConfigurationEffects: Send + Sync {
 
     /// Validate configuration settings
     async fn validate_config(&self, config: &DeviceConfig) -> Result<Vec<ConfigValidationError>>;
-    
+
     /// Get configuration value as JSON
     async fn get_config_json(&self, key: &str) -> Result<Option<serde_json::Value>>;
-    
+
     /// Set configuration value as JSON
     async fn set_config_json(&self, key: &str, value: &serde_json::Value) -> Result<()>;
-    
+
     /// Get all configuration as key-value pairs
     async fn get_all_config(&self) -> Result<std::collections::HashMap<String, serde_json::Value>>;
 }

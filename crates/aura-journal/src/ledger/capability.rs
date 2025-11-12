@@ -303,7 +303,7 @@ mod tests {
             CapabilityId::new(),
             ResourceRef::recovery(0, 1),
             1000,
-            CapabilitySignature::new(vec![0u8; 64], DeviceId::new()),
+            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::new_v4())),
         );
 
         assert!(!cap.is_expired(500));
@@ -317,7 +317,7 @@ mod tests {
             CapabilityId::new(),
             ResourceRef::recovery(0, 1),
             1000,
-            CapabilitySignature::new(vec![0u8; 64], DeviceId::new()),
+            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::new_v4())),
         );
 
         assert_eq!(cap.time_until_expiration(500), 500);
@@ -335,7 +335,7 @@ mod tests {
             CapabilityId::new(),
             ResourceRef::storage("/data"),
             1000,
-            CapabilitySignature::new(vec![0u8; 64], DeviceId::new()),
+            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::new_v4())),
         )
         .with_attenuation(attenuation);
 
@@ -366,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_capability_signature() {
-        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId::new());
+        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::new_v4()));
         assert_eq!(sig.signature.len(), 64);
     }
 }
@@ -468,9 +468,9 @@ mod recovery_tests {
 
     #[test]
     fn test_recovery_capability_creation() {
-        let target = DeviceId::new();
-        let guardians = vec![DeviceId::new(), DeviceId::new()];
-        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId::new());
+        let target = DeviceId(uuid::Uuid::new_v4());
+        let guardians = vec![DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())];
+        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::new_v4()));
 
         let recovery_cap = RecoveryCapability::new(target, guardians.clone(), 2, 10000, 0, 1, sig);
 
@@ -482,10 +482,10 @@ mod recovery_tests {
 
     #[test]
     fn test_recovery_capability_expiration() {
-        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId::new());
+        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::new_v4()));
         let recovery_cap = RecoveryCapability::new(
-            DeviceId::new(),
-            vec![DeviceId::new(), DeviceId::new()],
+            DeviceId(uuid::Uuid::new_v4()),
+            vec![DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())],
             2,
             1000,
             0,
@@ -499,10 +499,10 @@ mod recovery_tests {
 
     #[test]
     fn test_recovery_capability_insufficient_guardians() {
-        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId::new());
+        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::new_v4()));
         let recovery_cap = RecoveryCapability::new(
-            DeviceId::new(),
-            vec![DeviceId::new()], // Only 1 guardian
+            DeviceId(uuid::Uuid::new_v4()),
+            vec![DeviceId(uuid::Uuid::new_v4())], // Only 1 guardian
             2,                     // But need 2
             10000,
             0,
@@ -516,10 +516,10 @@ mod recovery_tests {
 
     #[test]
     fn test_recovery_capability_with_reason() {
-        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId::new());
+        let sig = CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::new_v4()));
         let recovery_cap = RecoveryCapability::new(
-            DeviceId::new(),
-            vec![DeviceId::new(), DeviceId::new()],
+            DeviceId(uuid::Uuid::new_v4()),
+            vec![DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())],
             2,
             10000,
             0,

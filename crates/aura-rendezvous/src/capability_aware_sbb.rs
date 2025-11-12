@@ -495,7 +495,7 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
     ) -> AuraResult<()> {
         // Extract envelope ID before moving envelope
         let envelope_id = envelope.id.clone();
-        
+
         // Create SBB message for transport layer
         let sbb_message = crate::messaging::SbbMessageType::RendezvousFlood {
             envelope,
@@ -505,7 +505,7 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
         // Use transport sender if available via effect system or direct integration
         // For now, we'll use a simplified approach - in production this would
         // integrate with the actual transport layer through dependency injection
-        
+
         // Check if peer relationship exists and validate forwarding capability
         if let Some(relationship) = self.relationships.get(&peer) {
             let policy = SbbForwardingPolicy::default();

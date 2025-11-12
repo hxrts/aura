@@ -1,4 +1,8 @@
 //! TCP network effect handler for production use
+//!
+//! This module needs to use disallowed methods like `Uuid::new_v4()` to generate
+//! unique connection identifiers for network events.
+#![allow(clippy::disallowed_methods)]
 
 use async_trait::async_trait;
 use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};

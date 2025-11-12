@@ -202,10 +202,8 @@ pub async fn execute_threshold_ceremony(
     }
 
     // Create handler adapter
-    let mut adapter = crate::choreography::AuraHandlerAdapter::new(
-        device_id,
-        effect_system.execution_mode(),
-    );
+    let mut adapter =
+        crate::choreography::AuraHandlerAdapter::new(device_id, effect_system.execution_mode());
 
     // Execute appropriate role
     if is_coordinator {

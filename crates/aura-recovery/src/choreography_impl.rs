@@ -11,9 +11,7 @@ use aura_core::{
     identifiers::GuardianId, relationships::ContextId, AuraError, AuraResult, DeviceId,
 };
 use aura_crypto::frost::ThresholdSignature;
-use aura_protocol::effects::{
-    AuraEffectSystem, ConsoleEffects, NetworkEffects, RandomEffects, TimeEffects,
-};
+use aura_protocol::effects::{AuraEffectSystem, NetworkEffects, RandomEffects, TimeEffects};
 use blake3::Hasher;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};

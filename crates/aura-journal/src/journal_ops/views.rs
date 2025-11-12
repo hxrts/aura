@@ -407,7 +407,7 @@ mod tests {
     use crate::journal::{NodeKind, NodePolicy};
 
     fn create_test_node(kind: NodeKind, policy: NodePolicy) -> KeyNode {
-        KeyNode::new(NodeId::new(), kind, policy)
+        KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), kind, policy)
     }
 
     /// Test-specific ViewEffects that owns its data for lifetime compatibility
@@ -458,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_view_materialization() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
 
         // Create identity with devices
         let identity = create_test_node(NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 3 });
@@ -499,7 +499,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_with_guardians() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
 
         // Create identity with devices and guardians
         let identity = create_test_node(NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 4 });
@@ -544,7 +544,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_view_materialization() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
 
         // Create group with member references
         let group = create_test_node(NodeKind::Group, NodePolicy::Threshold { m: 2, n: 3 });

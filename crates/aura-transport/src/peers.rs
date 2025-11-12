@@ -262,8 +262,8 @@ mod tests {
         trust: TrustLevel,
         storage_capacity: u64,
     ) -> PeerInfo {
-        let peer_id = DeviceId::new();
-        let account_id = AccountId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let account_id = AccountId(uuid::Uuid::new_v4());
 
         let capabilities = if storage_capacity > 0 {
             PeerCapabilities::full_service_peer(storage_capacity)

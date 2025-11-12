@@ -172,12 +172,13 @@ fn serialize_session_ticket(ticket: &SessionTicket) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use aura_crypto::Effects;
-    use aura_core::DeviceIdExt;
+    use aura_core::DeviceId;
+    use uuid::Uuid;
 
     fn create_test_ticket(effects: &Effects) -> SessionTicket {
         SessionTicket {
             session_id: Uuid::new_v4(),
-            issuer_device_id: aura_core::DeviceId::new_with_effects(effects),
+            issuer_device_id: DeviceId(Uuid::new_v4()),
             issued_at: 1000,
             expires_at: 2000,
             scope: SessionScope::Dkd {

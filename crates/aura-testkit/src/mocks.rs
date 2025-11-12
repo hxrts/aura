@@ -106,7 +106,7 @@ impl Storage for MockStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::AccountIdExt;
+    use aura_core::AccountId;
 
     #[tokio::test]
     async fn test_mock_storage() {

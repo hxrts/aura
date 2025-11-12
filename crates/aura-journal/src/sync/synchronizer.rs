@@ -596,7 +596,7 @@ impl OpLogSynchronizer {
         let sync_request = SyncMessage::SummaryRequest {
             requesting_peer: self.device_id,
             local_summary: local_summary.clone(),
-            request_id: uuid::Uuid::new_v4(),
+            request_id: uuid::Uuid::nil(),
         };
 
         // Send request via transport layer
@@ -656,7 +656,7 @@ impl OpLogSynchronizer {
             oneshot::channel();
 
         // Store response channel with request ID
-        let _request_id = uuid::Uuid::new_v4().to_string();
+        let _request_id = uuid::Uuid::nil().to_string();
 
         // Send via mock transport (in real implementation this would use aura-transport)
         let mock_response = self.mock_transport_send(peer_id, request_bytes).await?;
@@ -685,7 +685,7 @@ impl OpLogSynchronizer {
         let response = SyncMessage::SummaryResponse {
             responding_peer: peer_id,
             peer_summary: mock_summary,
-            request_id: uuid::Uuid::new_v4(),
+            request_id: uuid::Uuid::nil(),
         };
 
         let response_bytes = bincode::serialize(&response)
@@ -809,7 +809,7 @@ mod tests {
     fn test_synchronizer_creation() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
         assert_eq!(synchronizer.local_oplog().len(), 0);
@@ -820,10 +820,10 @@ mod tests {
     fn test_peer_management() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let mut synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
         let peer_info = create_test_peer(peer_id);
 
         synchronizer.add_peer(peer_info);
@@ -838,10 +838,10 @@ mod tests {
     async fn test_sync_with_nonexistent_peer() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let mut synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
-        let nonexistent_peer = DeviceId::new();
+        let nonexistent_peer = DeviceId(uuid::Uuid::new_v4());
         let result = synchronizer.sync_with_peer(nonexistent_peer).await;
 
         assert!(result.is_err());
@@ -855,11 +855,11 @@ mod tests {
     fn test_peers_needing_sync() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let mut synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
-        let peer1 = DeviceId::new();
-        let peer2 = DeviceId::new();
+        let peer1 = DeviceId(uuid::Uuid::new_v4());
+        let peer2 = DeviceId(uuid::Uuid::new_v4());
 
         synchronizer.add_peer(create_test_peer(peer1));
         synchronizer.add_peer(create_test_peer(peer2));
@@ -874,7 +874,7 @@ mod tests {
     fn test_sync_statistics() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
         let stats = synchronizer.get_statistics();

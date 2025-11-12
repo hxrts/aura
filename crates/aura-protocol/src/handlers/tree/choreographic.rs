@@ -3,7 +3,10 @@
 //! This handler replaces the old hand-coded tree coordination with
 //! choreographic implementations from aura-identity.
 
-use crate::effects::{TreeEffects, tree::{Cut, ProposalId, Partial, Snapshot}};
+use crate::effects::{
+    tree::{Cut, Partial, ProposalId, Snapshot},
+    TreeEffects,
+};
 use async_trait::async_trait;
 use aura_core::{
     tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind},
@@ -80,20 +83,12 @@ impl TreeEffects for ChoreographicTreeEffectHandler {
         Ok(true)
     }
 
-    async fn add_leaf(
-        &self,
-        leaf: LeafNode,
-        under: NodeIndex,
-    ) -> AuraResult<TreeOpKind> {
+    async fn add_leaf(&self, leaf: LeafNode, under: NodeIndex) -> AuraResult<TreeOpKind> {
         info!("Creating add leaf operation");
         Ok(TreeOpKind::AddLeaf { leaf, under })
     }
 
-    async fn remove_leaf(
-        &self,
-        leaf_id: LeafId,
-        reason: u8,
-    ) -> AuraResult<TreeOpKind> {
+    async fn remove_leaf(&self, leaf_id: LeafId, reason: u8) -> AuraResult<TreeOpKind> {
         info!("Creating remove leaf operation");
         Ok(TreeOpKind::RemoveLeaf {
             leaf: leaf_id,
@@ -101,19 +96,12 @@ impl TreeEffects for ChoreographicTreeEffectHandler {
         })
     }
 
-    async fn change_policy(
-        &self,
-        node: NodeIndex,
-        new_policy: Policy,
-    ) -> AuraResult<TreeOpKind> {
+    async fn change_policy(&self, node: NodeIndex, new_policy: Policy) -> AuraResult<TreeOpKind> {
         info!("Creating change policy operation");
         Ok(TreeOpKind::ChangePolicy { node, new_policy })
     }
 
-    async fn rotate_epoch(
-        &self,
-        affected: Vec<NodeIndex>,
-    ) -> AuraResult<TreeOpKind> {
+    async fn rotate_epoch(&self, affected: Vec<NodeIndex>) -> AuraResult<TreeOpKind> {
         info!(
             "Creating rotate epoch operation for {} affected nodes",
             affected.len()

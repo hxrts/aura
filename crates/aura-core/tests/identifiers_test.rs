@@ -205,9 +205,9 @@ fn test_uuid_conversions() {
     assert_eq!(session, session_from_uuid);
     assert_eq!(event, event_from_uuid);
     assert_eq!(guardian, guardian_from_uuid);
-    
-    // OperationId round-trip is not perfect due to information loss 
-    // (UUID can't hold both DeviceId and sequence), so just test that 
+
+    // OperationId round-trip is not perfect due to information loss
+    // (UUID can't hold both DeviceId and sequence), so just test that
     // the conversion works without panicking and produces a valid OperationId
     assert_ne!(operation_from_uuid.actor, device); // actor is derived from operation UUID, not original device
     assert_eq!(operation_from_uuid.sequence, 0); // sequence is lost in conversion

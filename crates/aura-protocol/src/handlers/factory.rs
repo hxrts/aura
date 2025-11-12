@@ -991,27 +991,27 @@ impl PlatformDetector {
         match std::env::consts::OS {
             "macos" => {
                 // Check for Apple Secure Enclave on macOS
-                std::env::consts::ARCH == "aarch64" || 
-                std::process::Command::new("system_profiler")
-                    .args(["SPHardwareDataType"])
-                    .output()
-                    .map(|output| String::from_utf8_lossy(&output.stdout).contains("Apple"))
-                    .unwrap_or(false)
-            },
+                std::env::consts::ARCH == "aarch64"
+                    || std::process::Command::new("system_profiler")
+                        .args(["SPHardwareDataType"])
+                        .output()
+                        .map(|output| String::from_utf8_lossy(&output.stdout).contains("Apple"))
+                        .unwrap_or(false)
+            }
             "linux" => {
                 // Check for Intel SGX or AMD SEV on Linux
-                std::path::Path::new("/dev/sgx_enclave").exists() ||
-                std::path::Path::new("/dev/sgx/enclave").exists() ||
-                std::fs::read_to_string("/proc/cpuinfo")
-                    .map(|content| content.contains("sgx") || content.contains("sev"))
-                    .unwrap_or(false)
-            },
+                std::path::Path::new("/dev/sgx_enclave").exists()
+                    || std::path::Path::new("/dev/sgx/enclave").exists()
+                    || std::fs::read_to_string("/proc/cpuinfo")
+                        .map(|content| content.contains("sgx") || content.contains("sev"))
+                        .unwrap_or(false)
+            }
             "windows" => {
                 // Check for Intel SGX on Windows (conservative approach)
                 std::env::var("PROCESSOR_IDENTIFIER")
                     .map(|proc| proc.to_lowercase().contains("intel"))
                     .unwrap_or(false)
-            },
+            }
             _ => false, // Conservative default for other platforms
         }
     }
@@ -1039,10 +1039,10 @@ impl PlatformDetector {
     /// Detect available network interfaces
     fn detect_network_interfaces() -> Vec<String> {
         let mut interfaces = Vec::new();
-        
+
         // Always include loopback
         interfaces.push("loopback".to_string());
-        
+
         // Platform-specific interface detection
         match std::env::consts::OS {
             "linux" | "macos" => {
@@ -1060,10 +1060,13 @@ impl PlatformDetector {
                         }
                     }
                 }
-            },
+            }
             "windows" => {
                 // Check network adapters on Windows
-                if let Ok(output) = std::process::Command::new("ipconfig").args(["/all"]).output() {
+                if let Ok(output) = std::process::Command::new("ipconfig")
+                    .args(["/all"])
+                    .output()
+                {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     for line in stdout.lines() {
                         if line.contains("adapter") && line.contains(':') {
@@ -1072,18 +1075,18 @@ impl PlatformDetector {
                         }
                     }
                 }
-            },
+            }
             _ => {
                 // Conservative default for other platforms
                 interfaces.push("default".to_string());
             }
         }
-        
+
         // Ensure we always have at least one interface
         if interfaces.len() == 1 {
             interfaces.push("default".to_string());
         }
-        
+
         interfaces
     }
 }

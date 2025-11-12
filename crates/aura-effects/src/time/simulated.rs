@@ -1,8 +1,12 @@
 //! Simulated time effect handler for testing
+//!
+//! This module needs to use disallowed methods like `Uuid::new_v4()` to generate
+//! unique timeout identifiers for testing and simulation scenarios.
+#![allow(clippy::disallowed_methods)]
 
+use async_trait::async_trait;
 use aura_core::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 use aura_core::AuraError;
-use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;
@@ -89,7 +93,7 @@ impl TimeEffects for SimulatedTimeHandler {
     async fn sleep_ms(&self, ms: u64) {
         // In simulation, we can either advance time immediately or actually sleep scaled time
         let scaled_duration = Duration::from_millis((ms as f64 / self.time_scale) as u64);
-        
+
         if self.time_scale > 100.0 {
             // For very fast simulation, just advance time immediately
             self.advance_time(ms);
@@ -129,9 +133,9 @@ impl TimeEffects for SimulatedTimeHandler {
     }
 
     async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
-        self.yield_until(condition).await.map_err(|e| {
-            AuraError::internal(format!("Wait condition failed: {}", e))
-        })
+        self.yield_until(condition)
+            .await
+            .map_err(|e| AuraError::internal(format!("Wait condition failed: {}", e)))
     }
 
     async fn set_timeout(&self, _timeout_ms: u64) -> TimeoutHandle {

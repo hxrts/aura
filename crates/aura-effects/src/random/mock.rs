@@ -1,7 +1,7 @@
 //! Mock random effect handler for testing
 
-use aura_core::effects::RandomEffects;
 use async_trait::async_trait;
+use aura_core::effects::RandomEffects;
 use std::sync::{Arc, Mutex};
 
 /// Mock random handler that provides deterministic values for testing

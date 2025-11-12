@@ -181,7 +181,7 @@ impl OtaOrchestrator {
         if should_auto_adopt {
             info!("Auto-adopting upgrade based on policy: {:?}", policy);
             drop(proposals); // Release lock before calling adopt
-            self.opt_in_to_upgrade(proposal.id, DeviceId::new()).await?;
+            self.opt_in_to_upgrade(proposal.id, DeviceId(uuid::Uuid::new_v4())).await?;
         }
 
         Ok(())
@@ -550,7 +550,7 @@ mod tests {
             checksum: [0u8; 32],
             signature: vec![0u8; 64], // Non-empty signature for validation
             proposed_at: SystemTime::now(),
-            proposed_by: DeviceId::new(),
+            proposed_by: DeviceId(uuid::Uuid::new_v4()),
         };
 
         orchestrator.submit_proposal(proposal).await.unwrap();

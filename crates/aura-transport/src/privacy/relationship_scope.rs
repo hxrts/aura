@@ -373,8 +373,8 @@ mod tests {
 
     #[test]
     fn test_relationship_scope_derivation() {
-        let local = DeviceId::new();
-        let remote = DeviceId::new();
+        let local = DeviceId(uuid::Uuid::new_v4());
+        let remote = DeviceId(uuid::Uuid::new_v4());
 
         assert_eq!(
             RelationshipScope::from_dkd_strength(local, remote, 10, 0.9),
@@ -422,9 +422,9 @@ mod tests {
 
     #[test]
     fn test_scoped_capability_view_creation() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let mut manager = CapabilityViewManager::new(device_id);
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId(uuid::Uuid::new_v4());
 
         let capabilities = PeerCapabilities::full_service_peer(5_000_000_000); // 5GB
 
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_storage_categorization() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId(uuid::Uuid::new_v4());
         let manager = CapabilityViewManager::new(device_id);
 
         assert!(matches!(

@@ -619,7 +619,7 @@ mod tests {
             affected: vec![]
         }));
         assert!(!requires_epoch_update(&TreeOpKind::AddLeaf {
-            leaf: LeafNode::new_device(LeafId(1), aura_core::DeviceId::new(), vec![0u8; 32]),
+            leaf: LeafNode::new_device(LeafId(1), aura_core::DeviceId(uuid::Uuid::new_v4()), vec![0u8; 32]),
             under: NodeIndex(0)
         }));
     }
@@ -627,7 +627,7 @@ mod tests {
     #[test]
     fn test_apply_operation_add_leaf() {
         let mut state = TreeState::new();
-        let device_id = aura_core::DeviceId::new();
+        let device_id = aura_core::DeviceId(uuid::Uuid::new_v4());
         let leaf = LeafNode::new_device(LeafId(1), device_id, vec![0u8; 32]);
 
         let op = TreeOp {

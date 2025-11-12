@@ -3,9 +3,9 @@
 //! Tests for the clean authentication layer that only verifies WHO signed something.
 //! These tests ensure authentication is stateless and contains no authorization logic.
 
-use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};
 use aura_core::{DeviceId, GuardianId};
 use aura_crypto::Ed25519SigningKey;
+use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};
 use signature::Signer;
 use uuid::Uuid;
 

@@ -2,8 +2,8 @@
 //!
 //! Simple merkle tree utilities using the effects system for hashing.
 
-use aura_core::effects::CryptoEffects;
 use crate::Result;
+use aura_core::effects::CryptoEffects;
 
 /// Merkle proof structure containing sibling path and directions
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -25,7 +25,7 @@ impl SimpleMerkleProof {
             tree_size: 0,
         }
     }
-    
+
     /// Create a new Merkle proof with the specified parameters
     pub fn with_params(sibling_path: Vec<[u8; 32]>, leaf_index: usize, tree_size: usize) -> Self {
         Self {
@@ -61,7 +61,7 @@ pub async fn generate_merkle_proof(
     }
 
     let mut current_level: Vec<[u8; 32]> = Vec::new();
-    
+
     // Hash all leaves to create the bottom level
     for leaf in leaves {
         current_level.push(effects.hash(leaf).await);
@@ -73,22 +73,22 @@ pub async fn generate_merkle_proof(
     // Build path up to root, collecting sibling hashes
     while current_level.len() > 1 {
         let mut next_level = Vec::new();
-        
+
         for i in (0..current_level.len()).step_by(2) {
             if i + 1 < current_level.len() {
                 // We have a pair - combine left and right
                 let left = &current_level[i];
                 let right = &current_level[i + 1];
-                
+
                 // If this pair contains our target node, save the sibling
                 if i == index || i + 1 == index {
                     if i == index {
                         sibling_path.push(*right); // Right sibling
                     } else {
-                        sibling_path.push(*left);  // Left sibling
+                        sibling_path.push(*left); // Left sibling
                     }
                 }
-                
+
                 // Combine left and right hashes
                 let mut combined = Vec::new();
                 combined.extend_from_slice(left);
@@ -99,7 +99,7 @@ pub async fn generate_merkle_proof(
                 next_level.push(current_level[i]);
             }
         }
-        
+
         current_level = next_level;
         index /= 2; // Move up one level in the tree
     }
@@ -125,7 +125,7 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
     }
 
     let mut current_level: Vec<[u8; 32]> = Vec::new();
-    
+
     // Hash all leaves to create the bottom level
     for leaf in leaves {
         current_level.push(effects.hash(leaf).await);
@@ -134,13 +134,13 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
     // Build tree bottom-up until we reach the root
     while current_level.len() > 1 {
         let mut next_level = Vec::new();
-        
+
         for i in (0..current_level.len()).step_by(2) {
             if i + 1 < current_level.len() {
                 // We have a pair - combine left and right
                 let left = &current_level[i];
                 let right = &current_level[i + 1];
-                
+
                 // Combine left and right hashes: H(left || right)
                 let mut combined = Vec::new();
                 combined.extend_from_slice(left);
@@ -151,7 +151,7 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
                 next_level.push(current_level[i]);
             }
         }
-        
+
         current_level = next_level;
     }
 
@@ -176,18 +176,18 @@ pub async fn verify_merkle_proof(
 ) -> bool {
     // Start with the leaf hash
     let mut current_hash = effects.hash(leaf_value).await;
-    
+
     // If no siblings, tree has only one leaf
     if proof.sibling_path.is_empty() {
         return &current_hash == root;
     }
-    
+
     let mut index = proof.leaf_index;
-    
+
     // Walk up the tree using sibling path
     for sibling_hash in &proof.sibling_path {
         let mut combined = Vec::new();
-        
+
         // Determine if we're the left or right child based on index
         if index % 2 == 0 {
             // We're the left child, sibling is right
@@ -198,14 +198,14 @@ pub async fn verify_merkle_proof(
             combined.extend_from_slice(sibling_hash);
             combined.extend_from_slice(&current_hash);
         }
-        
+
         // Hash the combined value to get parent hash
         current_hash = effects.hash(&combined).await;
-        
+
         // Move to parent level
         index /= 2;
     }
-    
+
     // Check if computed root matches expected root
     &current_hash == root
 }
@@ -228,9 +228,9 @@ pub async fn build_commitment_tree(
 
     // Build the merkle root
     let root = build_merkle_root(commitments, effects).await;
-    
+
     // Generate proof for the first commitment (index 0)
     let proof = generate_merkle_proof(commitments, 0, effects).await?;
-    
+
     Ok((Some(root), proof))
 }

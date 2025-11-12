@@ -6,10 +6,9 @@
 
 use aura_core::identifiers::DeviceId;
 use aura_protocol::handlers::{
-    AuraHandler, CompositeHandler, EffectRegistry, EffectType, ExecutionMode,
-    RegistrableHandler, UnifiedAuraHandlerBridge, UnifiedHandlerBridgeFactory,
-    AuraContext, AuraHandlerError,
-    erased::AuraHandlerFactory,
+    erased::AuraHandlerFactory, AuraContext, AuraHandler, AuraHandlerError, CompositeHandler,
+    EffectRegistry, EffectType, ExecutionMode, RegistrableHandler, UnifiedAuraHandlerBridge,
+    UnifiedHandlerBridgeFactory,
 };
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -18,7 +17,7 @@ use uuid::Uuid;
 #[test]
 fn test_effect_coverage_completeness() {
     let device_id = DeviceId::from(Uuid::new_v4());
-    
+
     // Create handlers for all execution modes
     let testing_handler = AuraHandlerFactory::for_testing(device_id);
     let production_handler = AuraHandlerFactory::for_production(device_id).unwrap();
@@ -26,7 +25,7 @@ fn test_effect_coverage_completeness() {
 
     // Get all effect types
     let all_effect_types = EffectType::all();
-    
+
     // Core effect types that should be supported by all handlers
     let core_effect_types = vec![
         EffectType::Crypto,
@@ -72,7 +71,7 @@ fn test_effect_coverage_completeness() {
     let supported_count = core_effect_types.len();
     let total_count = all_effect_types.len();
     let coverage_ratio = supported_count as f64 / total_count as f64;
-    
+
     assert!(
         coverage_ratio >= 0.5,
         "Handler coverage should be at least 50% of all effect types. Got {}/{} = {:.1}%",
@@ -90,11 +89,11 @@ async fn test_effect_registry_validation() {
 
     // Create a composite handler to register
     let composite_handler = CompositeHandler::for_testing(device_id.into());
-    
+
     // Convert CompositeHandler to a type that implements RegistrableHandler
     // This demonstrates the pattern of wrapping handlers for registry use
     struct RegistrableCompositeHandler(CompositeHandler);
-    
+
     #[async_trait::async_trait]
     impl AuraHandler for RegistrableCompositeHandler {
         async fn execute_effect(
@@ -104,7 +103,9 @@ async fn test_effect_registry_validation() {
             parameters: &[u8],
             ctx: &mut AuraContext,
         ) -> Result<Vec<u8>, AuraHandlerError> {
-            self.0.execute_effect(effect_type, operation, parameters, ctx).await
+            self.0
+                .execute_effect(effect_type, operation, parameters, ctx)
+                .await
         }
 
         async fn execute_session(
@@ -123,7 +124,7 @@ async fn test_effect_registry_validation() {
             self.0.execution_mode()
         }
     }
-    
+
     #[async_trait::async_trait]
     impl RegistrableHandler for RegistrableCompositeHandler {
         async fn execute_operation_bytes(
@@ -133,7 +134,8 @@ async fn test_effect_registry_validation() {
             parameters: &[u8],
             ctx: &mut AuraContext,
         ) -> Result<Vec<u8>, AuraHandlerError> {
-            self.execute_effect(effect_type, operation, parameters, ctx).await
+            self.execute_effect(effect_type, operation, parameters, ctx)
+                .await
         }
 
         fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
@@ -205,7 +207,10 @@ fn test_handler_factory_coverage() {
     let production_result = AuraHandlerFactory::for_production(device_id);
     assert!(production_result.is_ok());
     let production_handler = production_result.unwrap();
-    assert_eq!(production_handler.execution_mode(), ExecutionMode::Production);
+    assert_eq!(
+        production_handler.execution_mode(),
+        ExecutionMode::Production
+    );
 
     // Test simulation mode
     let simulation_handler = AuraHandlerFactory::for_simulation(device_id, 42);
@@ -219,7 +224,7 @@ fn test_handler_factory_coverage() {
 #[test]
 fn test_comprehensive_effect_type_validation() {
     let all_effect_types = EffectType::all();
-    
+
     // Categorize effect types
     let mut protocol_effects = Vec::new();
     let mut agent_effects = Vec::new();
@@ -239,7 +244,7 @@ fn test_comprehensive_effect_type_validation() {
 
     // Validate categorization is complete and non-overlapping for core types
     assert!(!protocol_effects.is_empty(), "Should have protocol effects");
-    
+
     // Validate specific effect types exist
     assert!(all_effect_types.contains(&EffectType::Crypto));
     assert!(all_effect_types.contains(&EffectType::Network));
@@ -250,7 +255,7 @@ fn test_comprehensive_effect_type_validation() {
     // Validate that we have handlers for critical protocol effects
     let device_id = DeviceId::from(Uuid::new_v4());
     let handler = AuraHandlerFactory::for_testing(device_id);
-    
+
     for effect_type in &protocol_effects {
         if matches!(
             effect_type,
@@ -275,7 +280,7 @@ fn test_comprehensive_effect_type_validation() {
 #[tokio::test]
 async fn test_handler_determinism() {
     let device_id = DeviceId::from(Uuid::new_v4());
-    
+
     // Create two handlers with the same device ID for deterministic testing
     let mut handler1 = AuraHandlerFactory::for_testing(device_id);
     let mut handler2 = AuraHandlerFactory::for_testing(device_id);
@@ -289,24 +294,21 @@ async fn test_handler_determinism() {
     // Test deterministic random generation (if supported)
     let random_params = 32usize;
     let params_bytes = bincode::serialize(&random_params).unwrap();
-    
-    let result1 = handler1.execute_effect(
-        EffectType::Random,
-        "random_bytes",
-        &params_bytes,
-        &mut ctx1,
-    ).await;
-    
-    let result2 = handler2.execute_effect(
-        EffectType::Random,
-        "random_bytes", 
-        &params_bytes,
-        &mut ctx2,
-    ).await;
+
+    let result1 = handler1
+        .execute_effect(EffectType::Random, "random_bytes", &params_bytes, &mut ctx1)
+        .await;
+
+    let result2 = handler2
+        .execute_effect(EffectType::Random, "random_bytes", &params_bytes, &mut ctx2)
+        .await;
 
     // Both should succeed
     assert!(result1.is_ok(), "First handler should execute successfully");
-    assert!(result2.is_ok(), "Second handler should execute successfully");
+    assert!(
+        result2.is_ok(),
+        "Second handler should execute successfully"
+    );
 
     // For truly deterministic handlers with the same seed, results would be equal
     // Note: Current implementation may not guarantee this, so we just check success
@@ -317,30 +319,31 @@ async fn test_handler_determinism() {
 fn test_handler_coverage_metrics() {
     let device_id = DeviceId::from(Uuid::new_v4());
     let handler = AuraHandlerFactory::for_testing(device_id);
-    
+
     let all_effects = EffectType::all();
     let supported_effects = handler.supported_effects();
-    
+
     // Calculate coverage metrics
     let total_effects = all_effects.len();
     let supported_count = supported_effects.len();
     let coverage_percentage = (supported_count as f64 / total_effects as f64) * 100.0;
-    
+
     println!("Effect Coverage Metrics:");
     println!("  Total effect types: {}", total_effects);
     println!("  Supported effect types: {}", supported_count);
     println!("  Coverage percentage: {:.1}%", coverage_percentage);
-    
+
     // List supported effects
     println!("  Supported effects: {:?}", supported_effects);
-    
+
     // List unsupported effects
     let supported_set: HashSet<_> = supported_effects.into_iter().collect();
-    let unsupported: Vec<_> = all_effects.into_iter()
+    let unsupported: Vec<_> = all_effects
+        .into_iter()
         .filter(|effect| !supported_set.contains(effect))
         .collect();
     println!("  Unsupported effects: {:?}", unsupported);
-    
+
     // Validate minimum coverage threshold
     assert!(
         coverage_percentage >= 40.0,
@@ -350,15 +353,15 @@ fn test_handler_coverage_metrics() {
 }
 
 /// Test registry capability validation
-#[test] 
+#[test]
 fn test_registry_capability_validation() {
     let mut registry = EffectRegistry::new(ExecutionMode::Testing);
-    
+
     // Initially empty
     let capabilities = registry.capability_summary();
     assert_eq!(capabilities.effect_type_count(), 0);
     assert_eq!(capabilities.total_operations, 0);
-    
+
     // Validate empty registry behavior
     assert!(!capabilities.has_effect_type(EffectType::Crypto));
     assert!(!capabilities.supports_operation(EffectType::Crypto, "hash"));
@@ -369,15 +372,15 @@ fn test_registry_capability_validation() {
 #[tokio::test]
 async fn test_complete_handler_system_integration() {
     let device_id = DeviceId::from(Uuid::new_v4());
-    
+
     // Test all factory methods work
     let testing_handler = AuraHandlerFactory::for_testing(device_id);
     let production_handler = AuraHandlerFactory::for_production(device_id).unwrap();
     let simulation_handler = AuraHandlerFactory::for_simulation(device_id, 123);
-    
+
     // Test all handlers support core operations
     let core_effects = vec![EffectType::System, EffectType::Console];
-    
+
     for effect_type in core_effects {
         assert!(testing_handler.supports_effect(effect_type));
         assert!(production_handler.supports_effect(effect_type));
@@ -388,12 +391,12 @@ async fn test_complete_handler_system_integration() {
     // Note: UnifiedHandlerBridgeFactory requires AuraEffects trait - skipping for now
     // let composite = CompositeHandler::for_testing(device_id.into());
     // let bridge = UnifiedHandlerBridgeFactory::create_bridge(composite, ExecutionMode::Testing);
-    
+
     // assert_eq!(bridge.execution_mode(), ExecutionMode::Testing);
-    
+
     // Test registry integration
     let registry = EffectRegistry::new(ExecutionMode::Testing);
     assert_eq!(registry.execution_mode(), ExecutionMode::Testing);
-    
+
     println!("Complete handler system integration test passed");
 }

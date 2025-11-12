@@ -131,13 +131,10 @@ impl AuraHandlerAdapter {
             .cloned()
             .unwrap_or_else(|| self.default_guard.clone());
 
-        let guard = ProtocolGuard::new(format!(
-            "choreography_send::{}",
-            type_name::<T>()
-        ))
-        .require_capabilities(guard_profile.capabilities.clone())
-        .delta_facts(guard_profile.delta_facts.clone())
-        .leakage_budget(guard_profile.leakage_budget.clone());
+        let guard = ProtocolGuard::new(format!("choreography_send::{}", type_name::<T>()))
+            .require_capabilities(guard_profile.capabilities.clone())
+            .delta_facts(guard_profile.delta_facts.clone())
+            .leakage_budget(guard_profile.leakage_budget.clone());
 
         let flow_context = self.ensure_flow_context(&target_device);
         let flow_cost = guard_profile.flow_cost.max(1);
@@ -149,7 +146,7 @@ impl AuraHandlerAdapter {
             ))
             .await;
 
-        // TODO: Apply guard constraints properly 
+        // TODO: Apply guard constraints properly
         // For now, execute the operation directly to avoid lifetime issues
         self.effect_system
             .send_to_peer(target_uuid, message_bytes.clone())
@@ -193,12 +190,7 @@ impl AuraHandlerAdapter {
     fn ensure_flow_context(&mut self, peer: &DeviceId) -> ContextId {
         self.flow_contexts
             .entry(peer.clone())
-            .or_insert_with(|| {
-                ContextId::new(format!(
-                    "choreo://{}->{}",
-                    self.device_id, peer
-                ))
-            })
+            .or_insert_with(|| ContextId::new(format!("choreo://{}->{}", self.device_id, peer)))
             .clone()
     }
 }
@@ -308,14 +300,7 @@ mod tests {
         profile.flow_cost = 64;
         adapter.register_message_guard::<GuardedPayload>(profile);
 
-        let _ = adapter
-            .send(
-                device_b,
-                GuardedPayload {
-                    value: 7,
-                },
-            )
-            .await;
+        let _ = adapter.send(device_b, GuardedPayload { value: 7 }).await;
 
         let receipt = adapter.latest_receipt().await.expect("receipt");
         assert_eq!(receipt.cost, 64);

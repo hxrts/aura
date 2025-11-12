@@ -3,7 +3,7 @@
 //! Provides programmatic dispute handling, escalation paths, and resolution workflows.
 
 use crate::types::{GuardianSet, RecoveryDispute};
-use aura_core::{identifiers::GuardianId, AccountId, AuraError, AuraResult, DeviceId};
+use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

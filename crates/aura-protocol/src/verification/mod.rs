@@ -6,6 +6,6 @@
 pub mod capability_soundness;
 
 pub use capability_soundness::{
-    CapabilitySoundnessVerifier, SoundnessProperty, SoundnessVerificationResult,
-    CapabilityState, VerificationConfig, SoundnessReport,
+    CapabilitySoundnessVerifier, CapabilityState, SoundnessProperty, SoundnessReport,
+    SoundnessVerificationResult, VerificationConfig,
 };

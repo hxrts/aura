@@ -495,7 +495,7 @@ mod tests {
     use aura_core::{LeafId, LeafNode, LeafRole, TreeOp, TreeOpKind};
 
     fn create_test_leaf(id: u32) -> LeafNode {
-        LeafNode::new_device(LeafId(id), aura_core::DeviceId::new(), vec![id as u8; 32])
+        LeafNode::new_device(LeafId(id), aura_core::DeviceId(uuid::Uuid::new_v4()), vec![id as u8; 32])
     }
 
     async fn create_test_operation(leaf_id: u32, parent_epoch: u64) -> AttestedOp {
@@ -508,7 +508,7 @@ mod tests {
             },
             version: 1,
         };
-        
+
         // Create test attested op with dummy signature
         AttestedOp {
             op: tree_op,

@@ -1,18 +1,20 @@
 //! Integration tests for bidirectional relationship key establishment ceremony
 
 use aura_core::{AccountId, ContextId, DeviceId};
+use aura_protocol::effects::AuraEffectSystem;
 use aura_invitation::relationship_formation::{
     execute_relationship_formation, RelationshipFormationConfig, RelationshipFormationError,
     RelationshipKeys,
 };
+use uuid::Uuid;
 // Note: For testing, use mock handlers from aura-effects
 
 /// Test successful relationship formation ceremony
 #[tokio::test]
 async fn test_successful_relationship_formation() {
-    let initiator_id = DeviceId::new();
-    let responder_id = DeviceId::new();
-    let account_context = Some(AccountId::new());
+    let initiator_id = DeviceId(Uuid::new_v4());
+    let responder_id = DeviceId(Uuid::new_v4());
+    let account_context = Some(AccountId(Uuid::new_v4()));
 
     let initiator_effects = AuraEffectSystem::for_testing(initiator_id);
     let responder_effects = AuraEffectSystem::for_testing(responder_id);
@@ -41,7 +43,7 @@ async fn test_successful_relationship_formation() {
     match result {
         Ok(formation_result) => {
             assert!(formation_result.success);
-            assert_ne!(formation_result.context_id, ContextId::new()); // Should be derived
+            assert_ne!(formation_result.context_id, ContextId(Uuid::new_v4())); // Should be derived
             assert_ne!(formation_result.relationship_keys.encryption_key, [0u8; 32]); // Should be generated
             assert_ne!(formation_result.relationship_keys.mac_key, [0u8; 32]); // Should be generated
             assert!(!formation_result
@@ -64,7 +66,7 @@ async fn test_successful_relationship_formation() {
 /// Test relationship formation with invalid configuration
 #[tokio::test]
 async fn test_invalid_configuration() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     let config = RelationshipFormationConfig {
@@ -86,13 +88,13 @@ async fn test_invalid_configuration() {
 /// Test relationship key properties
 #[tokio::test]
 async fn test_relationship_key_properties() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     // Test that identical inputs produce identical keys
     let private_key = [42u8; 32];
     let peer_public_key = [24u8; 32];
-    let context_id = ContextId::new();
+    let context_id = ContextId(Uuid::new_v4());
 
     let keys1 = aura_invitation::relationship_formation::derive_relationship_keys(
         &private_key,
@@ -136,12 +138,12 @@ async fn test_relationship_key_properties() {
 /// Test bidirectional key derivation symmetry
 #[tokio::test]
 async fn test_bidirectional_key_symmetry() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     let alice_private = [1u8; 32];
     let bob_private = [2u8; 32];
-    let context_id = ContextId::new();
+    let context_id = ContextId(Uuid::new_v4());
 
     // Derive public keys (simplified)
     let alice_public =
@@ -224,13 +226,13 @@ async fn test_validation_proof_system() {
 
     // Create validation structures
     let alice_validation = aura_invitation::relationship_formation::RelationshipValidation {
-        context_id: ContextId::new(),
+        context_id: ContextId(Uuid::new_v4()),
         validation_proof: alice_proof.try_into().unwrap(),
         key_hash: key_hash.clone().try_into().unwrap(),
     };
 
     let bob_validation = aura_invitation::relationship_formation::RelationshipValidation {
-        context_id: ContextId::new(),
+        context_id: ContextId(Uuid::new_v4()),
         validation_proof: bob_proof.try_into().unwrap(),
         key_hash: key_hash.try_into().unwrap(),
     };
@@ -277,7 +279,7 @@ async fn test_trust_record_system() {
     let bob_device = DeviceId::new();
     let effect_system = AuraEffectSystem::for_testing(alice_device);
 
-    let context_id = ContextId::new();
+    let context_id = ContextId(Uuid::new_v4());
     let relationship_keys = RelationshipKeys {
         encryption_key: [50u8; 32],
         mac_key: [60u8; 32],
@@ -336,15 +338,15 @@ async fn test_trust_record_system() {
 /// Test context ID derivation consistency
 #[tokio::test]
 async fn test_context_id_derivation() {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId(Uuid::new_v4());
     let effect_system = AuraEffectSystem::for_testing(device_id);
 
     let init_request = aura_invitation::relationship_formation::RelationshipInitRequest {
-        initiator_id: DeviceId::new(),
-        responder_id: DeviceId::new(),
-        account_context: Some(AccountId::new()),
+        initiator_id: DeviceId(Uuid::new_v4()),
+        responder_id: DeviceId(Uuid::new_v4()),
+        account_context: Some(AccountId(Uuid::new_v4())),
         timestamp: 1234567890,
-        nonce: [42u8; 32],
+        nonce: vec![42u8; 32],
     };
 
     // Same request should produce same context ID
@@ -362,7 +364,7 @@ async fn test_context_id_derivation() {
 
     // Different nonce should produce different context ID
     let mut different_request = init_request.clone();
-    different_request.nonce = [99u8; 32];
+    different_request.nonce = vec![99u8; 32];
 
     let context3 = aura_invitation::relationship_formation::derive_context_id(
         &different_request,

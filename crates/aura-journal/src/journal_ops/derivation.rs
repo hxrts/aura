@@ -26,7 +26,6 @@ pub trait DerivationEffects: Send + Sync {
 }
 
 /// Simple derivation effects adapter for MVP
-/// TODO: complete complete implementation
 pub struct SimpleDerivationEffects;
 
 #[async_trait::async_trait]
@@ -212,7 +211,11 @@ mod tests {
     use crate::journal::{NodeKind, NodePolicy};
 
     fn create_test_node(kind: NodeKind, policy: NodePolicy) -> KeyNode {
-        KeyNode::new(NodeId::new(), kind, policy)
+        KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()),
+            kind,
+            policy,
+        )
     }
 
     #[tokio::test]

@@ -28,12 +28,10 @@ async fn replace_admin(
     let new_admin_id: DeviceId = new_admin.parse().map_err(|e: uuid::Error| anyhow!(e))?;
 
     let device_id = effects.device_id();
-    effects.log_info(
-        &format!(
-            "Replacing admin for account {} with {} (activation epoch {})",
-            account_id, new_admin_id, activation_epoch
-        ),
-    );
+    effects.log_info(&format!(
+        "Replacing admin for account {} with {} (activation epoch {})",
+        account_id, new_admin_id, activation_epoch
+    ));
 
     let agent = AuraAgent::new(effects, device_id);
     agent

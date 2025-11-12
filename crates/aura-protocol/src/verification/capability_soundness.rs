@@ -10,10 +10,7 @@
 //! - **Context Isolation**: Capability contexts remain properly isolated
 //! - **Authorization Soundness**: All operations are properly authorized
 
-use aura_core::{
-    DeviceId,
-    Cap, Fact, AuraResult,
-};
+use aura_core::{AuraResult, Cap, DeviceId, Fact};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -223,7 +220,7 @@ impl CapabilitySoundnessVerifier {
         initial_state: CapabilityState,
     ) -> AuraResult<SoundnessVerificationResult> {
         let start_time = SystemTime::now();
-        
+
         // Initialize verification state
         let verification_state = VerificationState {
             explored_states: HashMap::new(),
@@ -236,7 +233,7 @@ impl CapabilitySoundnessVerifier {
                 temporal_coverage: 0.0,
             },
         };
-        
+
         self.current_state = Some(verification_state);
 
         // Perform property-specific verification
@@ -244,9 +241,7 @@ impl CapabilitySoundnessVerifier {
             SoundnessProperty::NonInterference => {
                 self.verify_non_interference(initial_state).await?
             }
-            SoundnessProperty::Monotonicity => {
-                self.verify_monotonicity(initial_state).await?
-            }
+            SoundnessProperty::Monotonicity => self.verify_monotonicity(initial_state).await?,
             SoundnessProperty::TemporalConsistency => {
                 self.verify_temporal_consistency(initial_state).await?
             }
@@ -279,7 +274,9 @@ impl CapabilitySoundnessVerifier {
 
         let mut results = Vec::new();
         for property in properties {
-            let result = self.verify_property(property, initial_state.clone()).await?;
+            let result = self
+                .verify_property(property, initial_state.clone())
+                .await?;
             results.push(result);
         }
 
@@ -298,20 +295,28 @@ impl CapabilitySoundnessVerifier {
 
         // Test various operation sequences
         let test_operations = self.generate_test_operations(&initial_state);
-        
+
         for operation_sequence in test_operations {
             operations_tested += 1;
             let mut current_state = initial_state.clone();
-            
+
             for operation in &operation_sequence {
-                match self.execute_operation(&mut current_state, operation.clone()).await {
+                match self
+                    .execute_operation(&mut current_state, operation.clone())
+                    .await
+                {
                     Ok(new_state) => {
                         // Check if operation exceeded authorized capabilities
-                        if self.exceeds_authorized_capabilities(&current_state, &new_state, operation) {
+                        if self.exceeds_authorized_capabilities(
+                            &current_state,
+                            &new_state,
+                            operation,
+                        ) {
                             violations_found += 1;
                             if self.config.collect_counterexamples {
                                 counterexamples.push(SoundnessCounterexample {
-                                    description: "Operation exceeded authorized capabilities".to_string(),
+                                    description: "Operation exceeded authorized capabilities"
+                                        .to_string(),
                                     initial_state: current_state.clone(),
                                     violating_operation: format!("{:?}", operation.operation_type),
                                     final_state: new_state.clone(),
@@ -323,7 +328,10 @@ impl CapabilitySoundnessVerifier {
                     }
                     Err(_) => {
                         // Operation failed, which is expected for unauthorized operations
-                        evidence.push(format!("Operation {:?} properly rejected", operation.operation_type));
+                        evidence.push(format!(
+                            "Operation {:?} properly rejected",
+                            operation.operation_type
+                        ));
                     }
                 }
             }
@@ -358,19 +366,23 @@ impl CapabilitySoundnessVerifier {
 
         // Test capability restriction operations
         let restriction_operations = self.generate_restriction_operations(&initial_state);
-        
+
         for operation in restriction_operations {
             operations_tested += 1;
             let mut current_state = initial_state.clone();
-            
-            match self.execute_operation(&mut current_state, operation.clone()).await {
+
+            match self
+                .execute_operation(&mut current_state, operation.clone())
+                .await
+            {
                 Ok(new_state) => {
                     // Check if capabilities were expanded (violation of monotonicity)
                     if self.capabilities_expanded(&initial_state, &new_state) {
                         violations_found += 1;
                         if self.config.collect_counterexamples {
                             counterexamples.push(SoundnessCounterexample {
-                                description: "Capabilities were expanded instead of restricted".to_string(),
+                                description: "Capabilities were expanded instead of restricted"
+                                    .to_string(),
                                 initial_state: initial_state.clone(),
                                 violating_operation: format!("{:?}", operation.operation_type),
                                 final_state: new_state,
@@ -378,7 +390,9 @@ impl CapabilitySoundnessVerifier {
                             });
                         }
                     } else {
-                        evidence.push("Capability restriction properly enforced monotonicity".to_string());
+                        evidence.push(
+                            "Capability restriction properly enforced monotonicity".to_string(),
+                        );
                     }
                 }
                 Err(_) => {
@@ -416,20 +430,24 @@ impl CapabilitySoundnessVerifier {
 
         // Test operations at different time points
         let time_scenarios = self.generate_time_scenarios(&initial_state);
-        
+
         for (timestamp, operation) in time_scenarios {
             operations_tested += 1;
             let mut timed_state = initial_state.clone();
             timed_state.timestamp = timestamp;
-            
-            match self.execute_operation(&mut timed_state, operation.clone()).await {
+
+            match self
+                .execute_operation(&mut timed_state, operation.clone())
+                .await
+            {
                 Ok(new_state) => {
                     // Check if operation succeeded when capabilities should be invalid
                     if self.capabilities_should_be_invalid_at_time(&timed_state, timestamp) {
                         violations_found += 1;
                         if self.config.collect_counterexamples {
                             counterexamples.push(SoundnessCounterexample {
-                                description: "Operation succeeded with expired capabilities".to_string(),
+                                description: "Operation succeeded with expired capabilities"
+                                    .to_string(),
                                 initial_state: timed_state.clone(),
                                 violating_operation: format!("{:?}", operation.operation_type),
                                 final_state: new_state,
@@ -441,7 +459,8 @@ impl CapabilitySoundnessVerifier {
                     }
                 }
                 Err(_) => {
-                    evidence.push("Operation with expired capabilities properly rejected".to_string());
+                    evidence
+                        .push("Operation with expired capabilities properly rejected".to_string());
                 }
             }
         }
@@ -475,23 +494,29 @@ impl CapabilitySoundnessVerifier {
 
         // Test operations across different contexts
         let context_scenarios = self.generate_context_scenarios(&initial_state);
-        
+
         for (context_a, context_b, operation) in context_scenarios {
             operations_tested += 1;
             let mut state_a = initial_state.clone();
             let mut state_b = initial_state.clone();
-            
+
             // Execute operation in context A
-            let result_a = self.execute_operation_in_context(&mut state_a, operation.clone(), &context_a).await;
+            let result_a = self
+                .execute_operation_in_context(&mut state_a, operation.clone(), &context_a)
+                .await;
             // Execute operation in context B
-            let result_b = self.execute_operation_in_context(&mut state_b, operation.clone(), &context_b).await;
-            
+            let result_b = self
+                .execute_operation_in_context(&mut state_b, operation.clone(), &context_b)
+                .await;
+
             // Check for context leakage
             if self.contexts_interfere(&state_a, &state_b, &context_a, &context_b) {
                 violations_found += 1;
                 if self.config.collect_counterexamples {
                     counterexamples.push(SoundnessCounterexample {
-                        description: "Context isolation violated - contexts interfered with each other".to_string(),
+                        description:
+                            "Context isolation violated - contexts interfered with each other"
+                                .to_string(),
                         initial_state: initial_state.clone(),
                         violating_operation: format!("{:?}", operation.operation_type),
                         final_state: state_a,
@@ -532,24 +557,28 @@ impl CapabilitySoundnessVerifier {
 
         // Test various authorization scenarios
         let auth_scenarios = self.generate_authorization_scenarios(&initial_state);
-        
+
         for (required_auth, available_auth, operation) in auth_scenarios {
             operations_tested += 1;
             let mut auth_state = initial_state.clone();
-            
+
             // Set available authorization level
             for (device, level) in available_auth {
                 auth_state.auth_levels.insert(device, level);
             }
-            
-            match self.execute_authorized_operation(&mut auth_state, operation.clone(), required_auth).await {
+
+            match self
+                .execute_authorized_operation(&mut auth_state, operation.clone(), required_auth)
+                .await
+            {
                 Ok(_) => {
                     // Check if operation should have been denied
                     if !self.authorization_sufficient(&auth_state, required_auth) {
                         violations_found += 1;
                         if self.config.collect_counterexamples {
                             counterexamples.push(SoundnessCounterexample {
-                                description: "Operation succeeded with insufficient authorization".to_string(),
+                                description: "Operation succeeded with insufficient authorization"
+                                    .to_string(),
                                 initial_state: auth_state.clone(),
                                 violating_operation: format!("{:?}", operation.operation_type),
                                 final_state: auth_state,
@@ -561,7 +590,8 @@ impl CapabilitySoundnessVerifier {
                     }
                 }
                 Err(_) => {
-                    evidence.push("Insufficiently authorized operation properly rejected".to_string());
+                    evidence
+                        .push("Insufficiently authorized operation properly rejected".to_string());
                 }
             }
         }
@@ -586,19 +616,28 @@ impl CapabilitySoundnessVerifier {
     // Helper methods for verification
 
     /// Generate test operation sequences
-    fn generate_test_operations(&self, _initial_state: &CapabilityState) -> Vec<Vec<CapabilityOperation>> {
+    fn generate_test_operations(
+        &self,
+        _initial_state: &CapabilityState,
+    ) -> Vec<Vec<CapabilityOperation>> {
         // Generate diverse operation sequences for testing
         vec![
             vec![CapabilityOperation {
                 operation_type: CapabilityOperationType::Grant,
-                parameters: [("permission".to_string(), "test:read".to_string())].iter().cloned().collect(),
+                parameters: [("permission".to_string(), "test:read".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
                 timestamp: self.current_timestamp(),
                 context: "test_context".to_string(),
                 result: OperationResult::Success,
             }],
             vec![CapabilityOperation {
                 operation_type: CapabilityOperationType::Restrict,
-                parameters: [("permission".to_string(), "test:write".to_string())].iter().cloned().collect(),
+                parameters: [("permission".to_string(), "test:write".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
                 timestamp: self.current_timestamp(),
                 context: "test_context".to_string(),
                 result: OperationResult::Success,
@@ -607,78 +646,124 @@ impl CapabilitySoundnessVerifier {
     }
 
     /// Generate capability restriction operations
-    fn generate_restriction_operations(&self, _initial_state: &CapabilityState) -> Vec<CapabilityOperation> {
-        vec![
-            CapabilityOperation {
-                operation_type: CapabilityOperationType::Restrict,
-                parameters: [("permission".to_string(), "test:admin".to_string())].iter().cloned().collect(),
-                timestamp: self.current_timestamp(),
-                context: "restriction_test".to_string(),
-                result: OperationResult::Success,
-            }
-        ]
+    fn generate_restriction_operations(
+        &self,
+        _initial_state: &CapabilityState,
+    ) -> Vec<CapabilityOperation> {
+        vec![CapabilityOperation {
+            operation_type: CapabilityOperationType::Restrict,
+            parameters: [("permission".to_string(), "test:admin".to_string())]
+                .iter()
+                .cloned()
+                .collect(),
+            timestamp: self.current_timestamp(),
+            context: "restriction_test".to_string(),
+            result: OperationResult::Success,
+        }]
     }
 
     /// Generate time-based test scenarios
-    fn generate_time_scenarios(&self, _initial_state: &CapabilityState) -> Vec<(u64, CapabilityOperation)> {
+    fn generate_time_scenarios(
+        &self,
+        _initial_state: &CapabilityState,
+    ) -> Vec<(u64, CapabilityOperation)> {
         let base_time = self.current_timestamp();
-        vec![
-            (base_time + 3600, CapabilityOperation {
+        vec![(
+            base_time + 3600,
+            CapabilityOperation {
                 operation_type: CapabilityOperationType::Authorize,
-                parameters: [("permission".to_string(), "test:read".to_string())].iter().cloned().collect(),
+                parameters: [("permission".to_string(), "test:read".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
                 timestamp: base_time + 3600,
                 context: "future_context".to_string(),
                 result: OperationResult::Success,
-            }),
-        ]
+            },
+        )]
     }
 
     /// Generate context isolation test scenarios
-    fn generate_context_scenarios(&self, _initial_state: &CapabilityState) -> Vec<(String, String, CapabilityOperation)> {
-        vec![
-            ("context_a".to_string(), "context_b".to_string(), CapabilityOperation {
+    fn generate_context_scenarios(
+        &self,
+        _initial_state: &CapabilityState,
+    ) -> Vec<(String, String, CapabilityOperation)> {
+        vec![(
+            "context_a".to_string(),
+            "context_b".to_string(),
+            CapabilityOperation {
                 operation_type: CapabilityOperationType::ExecuteEffect,
-                parameters: [("effect".to_string(), "test_effect".to_string())].iter().cloned().collect(),
+                parameters: [("effect".to_string(), "test_effect".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
                 timestamp: self.current_timestamp(),
                 context: "isolation_test".to_string(),
                 result: OperationResult::Success,
-            }),
-        ]
+            },
+        )]
     }
 
     /// Generate authorization test scenarios
-    fn generate_authorization_scenarios(&self, _initial_state: &CapabilityState) -> Vec<(u32, BTreeMap<DeviceId, u32>, CapabilityOperation)> {
+    fn generate_authorization_scenarios(
+        &self,
+        _initial_state: &CapabilityState,
+    ) -> Vec<(u32, BTreeMap<DeviceId, u32>, CapabilityOperation)> {
         let device = DeviceId::new();
-        vec![
-            (2, [(device, 1)].iter().cloned().collect(), CapabilityOperation {
+        vec![(
+            2,
+            [(device, 1)].iter().cloned().collect(),
+            CapabilityOperation {
                 operation_type: CapabilityOperationType::ExecuteEffect,
-                parameters: [("effect".to_string(), "admin_effect".to_string())].iter().cloned().collect(),
+                parameters: [("effect".to_string(), "admin_effect".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
                 timestamp: self.current_timestamp(),
                 context: "auth_test".to_string(),
                 result: OperationResult::Success,
-            }),
-        ]
+            },
+        )]
     }
 
     /// Execute a capability operation
-    async fn execute_operation(&self, state: &mut CapabilityState, _operation: CapabilityOperation) -> AuraResult<CapabilityState> {
+    async fn execute_operation(
+        &self,
+        state: &mut CapabilityState,
+        _operation: CapabilityOperation,
+    ) -> AuraResult<CapabilityState> {
         // Simplified operation execution for verification
         Ok(state.clone())
     }
 
     /// Execute operation in specific context
-    async fn execute_operation_in_context(&self, state: &mut CapabilityState, operation: CapabilityOperation, context: &str) -> AuraResult<CapabilityState> {
+    async fn execute_operation_in_context(
+        &self,
+        state: &mut CapabilityState,
+        operation: CapabilityOperation,
+        context: &str,
+    ) -> AuraResult<CapabilityState> {
         state.active_contexts.insert(context.to_string());
         self.execute_operation(state, operation).await
     }
 
     /// Execute authorized operation
-    async fn execute_authorized_operation(&self, state: &mut CapabilityState, operation: CapabilityOperation, _required_auth: u32) -> AuraResult<CapabilityState> {
+    async fn execute_authorized_operation(
+        &self,
+        state: &mut CapabilityState,
+        operation: CapabilityOperation,
+        _required_auth: u32,
+    ) -> AuraResult<CapabilityState> {
         self.execute_operation(state, operation).await
     }
 
     /// Check if operation exceeded authorized capabilities
-    fn exceeds_authorized_capabilities(&self, _initial: &CapabilityState, _final: &CapabilityState, _operation: &CapabilityOperation) -> bool {
+    fn exceeds_authorized_capabilities(
+        &self,
+        _initial: &CapabilityState,
+        _final: &CapabilityState,
+        _operation: &CapabilityOperation,
+    ) -> bool {
         // Simplified check for verification
         false
     }
@@ -690,20 +775,33 @@ impl CapabilitySoundnessVerifier {
     }
 
     /// Check if capabilities should be invalid at given time
-    fn capabilities_should_be_invalid_at_time(&self, _state: &CapabilityState, _timestamp: u64) -> bool {
+    fn capabilities_should_be_invalid_at_time(
+        &self,
+        _state: &CapabilityState,
+        _timestamp: u64,
+    ) -> bool {
         // Simplified temporal check
         false
     }
 
     /// Check if contexts interfere with each other
-    fn contexts_interfere(&self, _state_a: &CapabilityState, _state_b: &CapabilityState, _context_a: &str, _context_b: &str) -> bool {
+    fn contexts_interfere(
+        &self,
+        _state_a: &CapabilityState,
+        _state_b: &CapabilityState,
+        _context_a: &str,
+        _context_b: &str,
+    ) -> bool {
         // Simplified interference check
         false
     }
 
     /// Check if authorization is sufficient
     fn authorization_sufficient(&self, state: &CapabilityState, required_auth: u32) -> bool {
-        state.auth_levels.values().any(|&level| level >= required_auth)
+        state
+            .auth_levels
+            .values()
+            .any(|&level| level >= required_auth)
     }
 
     /// Get current timestamp
@@ -716,19 +814,22 @@ impl CapabilitySoundnessVerifier {
 
     /// Compute verification statistics
     fn compute_statistics(&self, operations_tested: usize) -> VerificationStatistics {
-        let duration = self.current_state
+        let duration = self
+            .current_state
             .as_ref()
             .map(|state| state.start_time.elapsed().unwrap_or_default())
             .unwrap_or_default();
 
         VerificationStatistics {
-            states_explored: self.current_state
+            states_explored: self
+                .current_state
                 .as_ref()
                 .map(|state| state.explored_states.len())
                 .unwrap_or(0),
             operations_tested,
             verification_duration: duration,
-            coverage_metrics: self.current_state
+            coverage_metrics: self
+                .current_state
                 .as_ref()
                 .map(|state| state.coverage.clone())
                 .unwrap_or_else(|| CoverageMetrics {
@@ -748,7 +849,8 @@ impl CapabilitySoundnessVerifier {
     /// Generate comprehensive soundness report
     pub fn generate_soundness_report(&self) -> SoundnessReport {
         let total_verifications = self.verification_history.len();
-        let successful_verifications = self.verification_history
+        let successful_verifications = self
+            .verification_history
             .iter()
             .filter(|result| result.holds)
             .count();
@@ -757,7 +859,8 @@ impl CapabilitySoundnessVerifier {
             self.verification_history
                 .iter()
                 .map(|result| result.confidence)
-                .sum::<f64>() / total_verifications as f64
+                .sum::<f64>()
+                / total_verifications as f64
         } else {
             0.0
         };
@@ -776,7 +879,8 @@ impl CapabilitySoundnessVerifier {
         let mut recommendations = Vec::new();
 
         // Check for failed verifications
-        let failed_properties: Vec<_> = self.verification_history
+        let failed_properties: Vec<_> = self
+            .verification_history
             .iter()
             .filter(|result| !result.holds)
             .map(|result| &result.property)
@@ -790,7 +894,8 @@ impl CapabilitySoundnessVerifier {
         }
 
         // Check for low confidence
-        let low_confidence_properties: Vec<_> = self.verification_history
+        let low_confidence_properties: Vec<_> = self
+            .verification_history
             .iter()
             .filter(|result| result.confidence < 0.9)
             .map(|result| &result.property)
@@ -829,15 +934,12 @@ pub struct SoundnessReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{FactValue, identifiers::DeviceId};
+    use aura_core::{identifiers::DeviceId, FactValue};
 
     fn create_test_capability_state() -> CapabilityState {
         let device = DeviceId::new();
-        let caps = Cap::with_permissions(vec![
-            "test:read".to_string(),
-            "test:write".to_string(),
-        ]);
-        
+        let caps = Cap::with_permissions(vec!["test:read".to_string(), "test:write".to_string()]);
+
         CapabilityState {
             capabilities: caps,
             journal_facts: Fact::with_value("test", FactValue::String("value".to_string())),
@@ -929,7 +1031,7 @@ mod tests {
             .expect("Verification should succeed");
 
         assert_eq!(results.len(), 5);
-        
+
         let properties: HashSet<_> = results.iter().map(|r| r.property.clone()).collect();
         assert!(properties.contains(&SoundnessProperty::NonInterference));
         assert!(properties.contains(&SoundnessProperty::Monotonicity));
@@ -950,7 +1052,7 @@ mod tests {
             .expect("Verification should succeed");
 
         let report = verifier.generate_soundness_report();
-        
+
         assert_eq!(report.total_verifications, 5);
         assert!(report.overall_confidence >= 0.0);
         assert!(report.overall_confidence <= 1.0);
@@ -960,7 +1062,7 @@ mod tests {
     #[test]
     fn test_verification_config_defaults() {
         let config = VerificationConfig::default();
-        
+
         assert_eq!(config.max_states, 1000);
         assert_eq!(config.max_duration, Duration::from_secs(60));
         assert_eq!(config.min_confidence, 0.95);
