@@ -623,7 +623,7 @@ where
     let missing_cids = vec![diff_hash.to_vec()];
 
     let missing_request = MissingOpsRequest {
-        session_id: session_id.clone(),
+        session_id,
         missing_cids,
     };
 
@@ -646,7 +646,7 @@ where
     // Sync convergent CRDTs
     if crdt_coordinator.has_handler(CrdtType::Convergent) {
         let cv_request = crdt_coordinator
-            .create_sync_request(session_id.clone(), CrdtType::Convergent)
+            .create_sync_request(session_id, CrdtType::Convergent)
             .map_err(|e| {
                 AntiEntropyError::SyncFailed(format!("Failed to create CV sync request: {}", e))
             })?;
@@ -671,7 +671,7 @@ where
     // Sync commutative CRDTs
     if crdt_coordinator.has_handler(CrdtType::Commutative) {
         let cm_request = crdt_coordinator
-            .create_sync_request(session_id.clone(), CrdtType::Commutative)
+            .create_sync_request(session_id, CrdtType::Commutative)
             .map_err(|e| {
                 AntiEntropyError::SyncFailed(format!("Failed to create CM sync request: {}", e))
             })?;
@@ -696,7 +696,7 @@ where
     // Sync delta CRDTs
     if crdt_coordinator.has_handler(CrdtType::Delta) {
         let delta_request = crdt_coordinator
-            .create_sync_request(session_id.clone(), CrdtType::Delta)
+            .create_sync_request(session_id, CrdtType::Delta)
             .map_err(|e| {
                 AntiEntropyError::SyncFailed(format!("Failed to create Delta sync request: {}", e))
             })?;
@@ -804,7 +804,7 @@ where
     let bloom_filter = adapter.effects().random_bytes(32).await;
 
     let digest_response = DigestResponse {
-        session_id: digest_request.session_id.clone(),
+        session_id: digest_request.session_id,
         bloom_filter: bloom_filter.to_vec(),
         operation_count: 10, // TODO fix - Simplified
     };

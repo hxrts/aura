@@ -807,7 +807,7 @@ impl FrostSigningCoordinator {
         let key_package = frost::keys::KeyPackage::new(
             identifier,
             signing_share,
-            verifying_share,
+            *verifying_share,
             verifying_key,
             2, // min_signers
         );

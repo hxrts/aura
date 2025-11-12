@@ -382,11 +382,7 @@ impl AuraEffectSystem {
 
     async fn enforce_anti_replay(&self, receipt: &Receipt) -> AuraResult<()> {
         let mut counters = self.anti_replay_counters.write().await;
-        let key = (
-            receipt.ctx.clone(),
-            receipt.src.clone(),
-            receipt.dst.clone(),
-        );
+        let key = (receipt.ctx.clone(), receipt.src, receipt.dst);
         if let Some((epoch, nonce)) = counters.get(&key) {
             let stored_epoch = epoch.value();
             let incoming_epoch = receipt.epoch.value();
@@ -987,7 +983,7 @@ impl FlowBudgetEffects for AuraEffectSystem {
             cost
         );
         let local_context = self.context().await;
-        let src = local_context.device_id.clone();
+        let src = local_context.device_id;
         let epoch = session_epochs::Epoch::from(local_context.epoch);
         let mut budget = self
             .compute_deterministic_budget(context, peer, epoch)
@@ -1004,7 +1000,7 @@ impl FlowBudgetEffects for AuraEffectSystem {
         }
         {
             let mut ledgers = self.flow_ledgers.write().await;
-            ledgers.insert((context.clone(), peer.clone()), budget.clone());
+            ledgers.insert((context.clone(), *peer), budget.clone());
         }
         {
             let handler = self.composite_handler.read().await;
@@ -1023,7 +1019,7 @@ impl FlowBudgetEffects for AuraEffectSystem {
         let receipt = Receipt::new(
             context.clone(),
             src,
-            peer.clone(),
+            *peer,
             epoch,
             cost,
             nonce,
