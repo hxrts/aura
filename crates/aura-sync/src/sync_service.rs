@@ -48,7 +48,7 @@ pub enum SyncPhase {
 }
 
 /// Statistics about synchronization operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SyncStats {
     /// Total synchronization sessions initiated
     pub sessions_initiated: u64,
@@ -62,19 +62,6 @@ pub struct SyncStats {
     pub active_sessions: usize,
     /// Rate limiting violations
     pub rate_limit_violations: u64,
-}
-
-impl Default for SyncStats {
-    fn default() -> Self {
-        Self {
-            sessions_initiated: 0,
-            sessions_completed: 0,
-            sessions_failed: 0,
-            operations_synced: 0,
-            active_sessions: 0,
-            rate_limit_violations: 0,
-        }
-    }
 }
 
 /// Main synchronization service implementing effect-based coordination
@@ -126,7 +113,7 @@ where
         // Check rate limits
         self.check_rate_limit(peer_id).await?;
 
-        let session_id = Uuid::new_v4();
+        let session_id = Uuid::nil();
         let session = SyncSession {
             session_id,
             peer_id,
@@ -313,10 +300,10 @@ where
     /// Get current time from effects
     async fn current_time(&self) -> Result<u64, SyncError> {
         use std::time::{SystemTime, UNIX_EPOCH};
-        Ok(SystemTime::now()
+        SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64)
+            .map(|d| d.as_millis() as u64)
+            .map_err(|_| SyncError::TimeError)
     }
 
     /// Update session state

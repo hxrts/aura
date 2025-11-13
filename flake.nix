@@ -14,8 +14,16 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, crate2nix }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      rust-overlay,
+      crate2nix,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs {
@@ -23,7 +31,10 @@
         };
 
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [ "rust-src" "rust-analyzer" ];
+          extensions = [
+            "rust-src"
+            "rust-analyzer"
+          ];
           targets = [ "wasm32-unknown-unknown" ];
         };
 
@@ -34,12 +45,15 @@
           # Apply CC crate fix for macOS builds and other common overrides
           defaultCrateOverrides = pkgs.defaultCrateOverrides // {
             # Override for cc crate - fix Apple target detection on macOS
-            cc = attrs: pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
-              # Fix CC crate Apple target detection: it expects "darwin" but Nix reports "macos"
-              preBuild = ''
-                export CARGO_CFG_TARGET_OS="darwin"
-              '';
-            } // attrs;
+            cc =
+              attrs:
+              pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+                # Fix CC crate Apple target detection: it expects "darwin" but Nix reports "macos"
+                preBuild = ''
+                  export CARGO_CFG_TARGET_OS="darwin"
+                '';
+              }
+              // attrs;
 
             # Override for ring (crypto library)
             ring = attrs: {
@@ -130,7 +144,7 @@
             # Formal verification and protocol modeling
             quint
             nodejs_20
-            jre  # Java Runtime Environment for ANTLR4TS
+            jre # Java Runtime Environment for ANTLR4TS
 
             # Nix tools and formatting
             nixpkgs-fmt

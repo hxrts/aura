@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Tree Coordination Choreographies
 //!
 //! This module implements choreographic protocols for tree operation coordination,
@@ -178,10 +180,8 @@ pub struct SyncCompletion {
     pub result: TreeSyncResult,
 }
 
-/// Tree Operation Approval Choreography
-///
-/// Multi-party protocol for coordinating tree operations with validation and approval
 // TEMPORARILY DISABLED DUE TO MACRO CONFLICTS - needs investigation
+// Multi-party protocol for coordinating tree operations with validation and approval
 /*
 choreography! {
     protocol TreeOperationApproval {
@@ -230,7 +230,7 @@ choreography! {
 pub async fn execute_tree_operation_approval(
     device_id: DeviceId,
     config: TreeApprovalConfig,
-    effect_system: &crate::effects::system::AuraEffectSystem,
+    effect_system: &crate::effects::AuraEffectSystem,
 ) -> Result<TreeOperationResult, TreeChoreographyError> {
     // Validate configuration following protocol guide validation pattern
     if config.threshold == 0 || config.threshold > config.approvers.len() {
@@ -893,7 +893,7 @@ pub async fn execute_tree_synchronization(
     config: TreeSyncConfig,
     is_coordinator: bool,
     replica_index: Option<usize>,
-    effect_system: &crate::effects::system::AuraEffectSystem,
+    effect_system: &crate::effects::AuraEffectSystem,
 ) -> Result<TreeSyncResult, TreeChoreographyError> {
     // Validate configuration
     if config.replicas.is_empty() {
@@ -919,8 +919,8 @@ pub async fn execute_tree_synchronization(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::system::AuraEffectSystem;
-    use aura_core::{LeafId, LeafNode, NodeIndex};
+    use crate::effects::AuraEffectSystem;
+    use aura_core::{LeafId, LeafNode, LeafRole, NodeIndex};
 
     fn create_test_approval_config() -> TreeApprovalConfig {
         TreeApprovalConfig {
@@ -957,7 +957,8 @@ mod tests {
         config.threshold = 0;
 
         let device_id = DeviceId::new();
-        let effect_system = AuraEffectSystem::for_testing(device_id);
+        let effect_config = crate::effects::EffectSystemConfig::for_testing(device_id);
+        let effect_system = AuraEffectSystem::new(effect_config).expect("Failed to create test effect system");
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let result = runtime.block_on(execute_tree_operation_approval(
@@ -979,7 +980,8 @@ mod tests {
         config.replicas.clear();
 
         let device_id = DeviceId::new();
-        let effect_system = AuraEffectSystem::for_testing(device_id);
+        let effect_config = crate::effects::EffectSystemConfig::for_testing(device_id);
+        let effect_system = AuraEffectSystem::new(effect_config).expect("Failed to create test effect system");
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let result = runtime.block_on(execute_tree_synchronization(

@@ -56,7 +56,7 @@ pub trait AuthenticationEffects: NetworkEffects + CryptoEffects + TimeEffects {}
 impl<T> AuthenticationEffects for T where T: NetworkEffects + CryptoEffects + TimeEffects {}
 
 // Choreographic authentication protocol
-aura_choreography! {
+choreography! {
     #[namespace = "g_auth"]
     protocol GAuth {
         roles: Requester, Authenticator, Witness;
@@ -198,19 +198,18 @@ The `AuraEffectSystem` composes authentication and authorization effects. Produc
 Creating a production effect system and executing authorization:
 
 ```rust
-let effects = AuraEffectSystem::for_production(device_id)?;
+let config = EffectSystemConfig::for_production(device_id)?;
+let effects = AuraEffectSystem::new(config)?;
 let result = effects.authorize_operation(request).await?;
 ```
 
 The effect system handles all composition internally. Callers invoke unified interfaces without awareness of component separation.
 
-## Implementation Status
+## System Components
 
-Fully working components include pure cryptographic identity verification in `aura-verify`, capability-based authorization in `aura-wot`, clean integration through the authorization bridge, and effect system integration with unified traits.
+The authentication system consists of cryptographic identity verification through `aura-verify`, capability-based authorization through `aura-wot`, seamless integration through the authorization bridge, and effect system integration with unified traits.
 
-Components in progress include choreographic protocol infrastructure in `aura-authenticate` with ceremony implementations pending, and advanced policies for fine-grained delegation.
-
-Planned components include complex guardian coordination ceremonies, time-based and location-based capability constraints, and delegated authority for specific operations.
+Choreographic protocol infrastructure in `aura-authenticate` provides ceremony implementations for multi-party authentication scenarios. Advanced policies support fine-grained delegation with guardian coordination ceremonies, capability constraints, and delegated authority for specific operations.
 
 ## Usage Patterns
 
@@ -279,7 +278,8 @@ This pattern integrates both layers in a single operation with no explicit compo
 Using unified effects for authentication and authorization:
 
 ```rust
-let effects = AuraEffectSystem::for_production(device_id)?;
+let config = EffectSystemConfig::for_production(device_id)?;
+let effects = AuraEffectSystem::new(config)?;
 let result = effects.authorize_operation(request).await?;
 ```
 

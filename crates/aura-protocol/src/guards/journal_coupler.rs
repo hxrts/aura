@@ -3,6 +3,8 @@
 //! This module provides the `JournalCoupler` that bridges the guard chain execution
 //! with journal CRDT operations. It ensures that protocol operations that succeed
 //! capability checks properly update the distributed journal state.
+
+#![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
 //!
 //! ## Integration Flow
 //!
@@ -18,7 +20,7 @@
 //! journal facts using join-semilattice operations.
 
 use super::ProtocolGuard;
-use crate::effects::system::AuraEffectSystem;
+use crate::effects::AuraEffectSystem;
 use crate::effects::JournalEffects;
 use aura_core::{AuraResult, Journal};
 use aura_mpst::journal_coupling::{JournalAnnotation, JournalOpType};
@@ -510,9 +512,9 @@ impl Default for JournalCouplerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{semilattice::Bottom, DeviceId};
-    use aura_mpst::journal_coupling::JournalAnnotation;
     use crate::handlers::ExecutionMode;
+    use aura_core::DeviceId;
+    use aura_mpst::journal_coupling::JournalAnnotation;
 
     #[tokio::test]
     async fn test_journal_coupler_creation() {

@@ -17,6 +17,12 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TraceId(pub Uuid);
 
+impl Default for TraceId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TraceId {
     /// Create a new trace ID
     pub fn new() -> Self {
@@ -38,6 +44,12 @@ impl std::fmt::Display for TraceId {
 /// Unique identifier for a span within a trace
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SpanId(pub Uuid);
+
+impl Default for SpanId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SpanId {
     /// Create a new span ID
@@ -592,7 +604,7 @@ mod tests {
 
     #[test]
     fn test_trace_event_creation() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let trace_id = TraceId::new();
         let span_id = SpanId::new();
 
@@ -614,7 +626,7 @@ mod tests {
 
     #[test]
     fn test_trace_event_formatting() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let trace_id = TraceId::new();
         let span_id = SpanId::new();
 
@@ -638,7 +650,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_trace_storage() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let mut storage = TraceStorage::new(device_id, 100);
 
         let trace_id = TraceId::new();
@@ -659,7 +671,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tracing_middleware() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let middleware = TracingMiddleware::new(device_id).await.unwrap();
 
         // Start an operation

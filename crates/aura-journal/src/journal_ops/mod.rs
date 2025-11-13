@@ -5,8 +5,8 @@
 //! Phase 2 adds policy-aware derivation and DKD integration.
 //! Phase 3 adds threshold unwrapping with M-of-N secret reconstruction.
 
-use crate::journal::{EdgeId, EdgeKind, KeyEdge, KeyNode, NodeId, NodeKind};
-use aura_core::{AuraError, Hash32};
+use crate::journal::{KeyEdge, KeyNode, NodeKind};
+use aura_core::AuraError;
 
 // Public modules
 pub mod graph;
@@ -33,6 +33,7 @@ pub use views::*;
 // Use KeyJournalThresholdChoreography, KeyJournalShareContributionChoreography, etc.
 
 /// KeyJournal Interface
+#[derive(Default)]
 pub struct KeyJournal {
     /// Current journal state containing nodes and edges
     state: JournalState,
@@ -41,9 +42,7 @@ pub struct KeyJournal {
 impl KeyJournal {
     /// Create a new KeyJournal instance
     pub fn new() -> Self {
-        Self {
-            state: JournalState::new(),
-        }
+        Self::default()
     }
 
     /// Get immutable reference to the journal state
@@ -132,22 +131,35 @@ pub struct JournalStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::{NodeKind, NodePolicy};
+    use crate::journal::{EdgeKind, NodeKind, NodePolicy};
 
     #[test]
     fn test_journal() {
         let mut journal = KeyJournal::new();
 
         // Test adding nodes
-        let node1 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Device, NodePolicy::Any);
-        let node2 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Guardian, NodePolicy::Any);
+        let node1 = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            NodeKind::Device,
+            NodePolicy::Any,
+        );
+        let node2 = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            NodeKind::Guardian,
+            NodePolicy::Any,
+        );
 
         journal.add_node(node1.clone()).unwrap();
         journal.add_node(node2.clone()).unwrap();
 
         // Test adding edge
         #[allow(clippy::disallowed_methods)]
-        let edge = KeyEdge::with_id(EdgeId::new_v4(), node1.id, node2.id, EdgeKind::Contains);
+        let edge = KeyEdge::with_id(
+            uuid::Uuid::from_bytes([0u8; 16]),
+            node1.id,
+            node2.id,
+            EdgeKind::Contains,
+        );
         journal.add_edge(edge).unwrap();
 
         // Test statistics
@@ -162,16 +174,33 @@ mod tests {
     fn test_node_validation() {
         let mut journal = KeyJournal::new();
 
-        let node1 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Device, NodePolicy::Any);
-        let node2 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Guardian, NodePolicy::Any);
-        let node3 = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Device, NodePolicy::Any);
+        let node1 = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            NodeKind::Device,
+            NodePolicy::Any,
+        );
+        let node2 = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            NodeKind::Guardian,
+            NodePolicy::Any,
+        );
+        let node3 = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            NodeKind::Device,
+            NodePolicy::Any,
+        );
 
         journal.add_node(node1.clone()).unwrap();
         journal.add_node(node2.clone()).unwrap();
 
         // Try to add edge from non-existent node (should fail)
         #[allow(clippy::disallowed_methods)]
-        let edge = KeyEdge::with_id(EdgeId::new_v4(), node3.id, node1.id, EdgeKind::Contains);
+        let edge = KeyEdge::with_id(
+            uuid::Uuid::from_bytes([0u8; 16]),
+            node3.id,
+            node1.id,
+            EdgeKind::Contains,
+        );
         let result = journal.add_edge(edge);
         assert!(result.is_err());
     }

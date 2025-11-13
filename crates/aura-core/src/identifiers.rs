@@ -3,6 +3,7 @@
 //! This module provides the fundamental identifier types that uniquely identify
 //! various entities and concepts within the Aura system.
 
+use crate::hash;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -528,19 +529,19 @@ impl RelayId {
 
     /// Create from two device IDs (deterministic)
     pub fn from_devices(device_a: &DeviceId, device_b: &DeviceId) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"AURA_RELAY_ID");
+        let mut h = hash::hasher();
+        h.update(b"AURA_RELAY_ID");
 
         // Ensure deterministic ordering
         if device_a < device_b {
-            hasher.update(device_a.0.as_bytes());
-            hasher.update(device_b.0.as_bytes());
+            h.update(device_a.0.as_bytes());
+            h.update(device_b.0.as_bytes());
         } else {
-            hasher.update(device_b.0.as_bytes());
-            hasher.update(device_a.0.as_bytes());
+            h.update(device_b.0.as_bytes());
+            h.update(device_a.0.as_bytes());
         }
 
-        Self(*hasher.finalize().as_bytes())
+        Self(h.finalize())
     }
 
     /// Get the raw bytes
@@ -576,19 +577,19 @@ impl GroupId {
 
     /// Create from group members and threshold (deterministic)
     pub fn from_threshold_config(members: &[DeviceId], threshold: u16) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"AURA_GROUP_ID");
-        hasher.update(&threshold.to_le_bytes());
+        let mut h = hash::hasher();
+        h.update(b"AURA_GROUP_ID");
+        h.update(&threshold.to_le_bytes());
 
         // Sort members for deterministic ordering
         let mut sorted_members = members.to_vec();
         sorted_members.sort();
 
         for member in sorted_members {
-            hasher.update(member.0.as_bytes());
+            h.update(member.0.as_bytes());
         }
 
-        Self(*hasher.finalize().as_bytes())
+        Self(h.finalize())
     }
 
     /// Get the raw bytes
@@ -702,23 +703,23 @@ impl MessageContext {
 
     /// Get a unique identifier for this context (for routing/indexing)
     pub fn context_hash(&self) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
+        let mut h = hash::hasher();
         match self {
             MessageContext::Relay(relay_id) => {
-                hasher.update(b"RELAY");
-                hasher.update(relay_id.as_bytes());
+                h.update(b"RELAY");
+                h.update(relay_id.as_bytes());
             }
             MessageContext::Group(group_id) => {
-                hasher.update(b"GROUP");
-                hasher.update(group_id.as_bytes());
+                h.update(b"GROUP");
+                h.update(group_id.as_bytes());
             }
             MessageContext::DkdContext(dkd_id) => {
-                hasher.update(b"DKD");
-                hasher.update(dkd_id.app_label.as_bytes());
-                hasher.update(&dkd_id.fingerprint);
+                h.update(b"DKD");
+                h.update(dkd_id.app_label.as_bytes());
+                h.update(&dkd_id.fingerprint);
             }
         }
-        *hasher.finalize().as_bytes()
+        h.finalize()
     }
 }
 

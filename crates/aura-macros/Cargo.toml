@@ -11,14 +11,14 @@ proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "2.0", features = ["full", "extra-traits"] }
 
-# Aura dependencies (only core types, avoid circular deps)
-aura-core = { path = "../aura-core" }
+# Rumpsteak-aura dependencies for proper delegation
+rumpsteak-aura-macros = { path = "../../ext/rumpsteak-aura/macros" }
+rumpsteak-aura-choreography = { path = "../../ext/rumpsteak-aura/choreography" }
 
-# rumpsteak-aura integration
-rumpsteak-aura = "0.3.0"
-
-# Utility dependencies
-thiserror = "1.0"
-serde_json = "1.0"
+# Serialization for extensions
 serde = { version = "1.0", features = ["derive"] }
-uuid = { version = "1.0", features = ["v4"] }
+
+[dev-dependencies]
+# For examples to access generated ExtensionRegistry calls
+aura-mpst = { path = "../aura-mpst" }
+

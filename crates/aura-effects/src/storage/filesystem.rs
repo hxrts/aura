@@ -172,16 +172,16 @@ impl FilesystemStorageHandler {
 
     /// Convert key to secure file path with proper escaping
     fn key_to_path(&self, key: &str) -> PathBuf {
-        // Use BLAKE3 hash of key to ensure consistent, safe filenames
-        let hash = blake3::hash(key.as_bytes());
-        let filename = format!("{}.dat", hash.to_hex());
+        // Use hash trait to ensure consistent, safe filenames
+        let hash = aura_core::hash::hash(key.as_bytes());
+        let filename = format!("{}.dat", hex::encode(hash));
         self.base_path.join(filename)
     }
 
     /// Get metadata file path for a given key
     fn key_to_metadata_path(&self, key: &str) -> PathBuf {
-        let hash = blake3::hash(key.as_bytes());
-        let filename = format!("{}.meta", hash.to_hex());
+        let hash = aura_core::hash::hash(key.as_bytes());
+        let filename = format!("{}.meta", hex::encode(hash));
         self.base_path.join(filename)
     }
 
@@ -196,7 +196,7 @@ impl FilesystemStorageHandler {
 
     /// Calculate BLAKE3 hash for integrity verification
     fn calculate_hash(&self, data: &[u8]) -> String {
-        blake3::hash(data).to_hex().to_string()
+        hex::encode(aura_core::hash::hash(data))
     }
 
     /// Check if storage quota would be exceeded

@@ -1,9 +1,7 @@
 //! Rich visualization for recovery state in CLI.
 
 use aura_recovery::types::RecoveryEvidence;
-use aura_recovery::{RecoverySessionState, RecoverySessionStatus};
 use std::fmt::Write;
-use std::time::SystemTime;
 
 /// Format recovery evidence for CLI display
 pub fn format_recovery_evidence(evidence: &RecoveryEvidence) -> String {
@@ -113,98 +111,20 @@ pub fn format_recovery_evidence(evidence: &RecoveryEvidence) -> String {
     output
 }
 
+/* TODO: Re-enable when RecoverySessionState and RecoverySessionStatus are available
 /// Format recovery session state for CLI display
 pub fn format_session_state(session: &RecoverySessionState) -> String {
-    let mut output = String::new();
-
-    let status_symbol = match &session.status {
-        RecoverySessionStatus::Pending => "⏳",
-        RecoverySessionStatus::InDisputeWindow => "⚠️ ",
-        RecoverySessionStatus::Completed => "✅",
-        RecoverySessionStatus::Cancelled { .. } => "❌",
-        RecoverySessionStatus::Failed { .. } => "💥",
-    };
-
-    let status_text = match &session.status {
-        RecoverySessionStatus::Pending => "Pending Guardian Approvals".to_string(),
-        RecoverySessionStatus::InDisputeWindow => "In Dispute Window".to_string(),
-        RecoverySessionStatus::Completed => "Completed Successfully".to_string(),
-        RecoverySessionStatus::Cancelled { reason } => format!("Cancelled: {}", reason),
-        RecoverySessionStatus::Failed { error } => format!("Failed: {}", error),
-    };
-
-    writeln!(
-        &mut output,
-        "┌─────────────────────────────────────────────────────┐"
-    )
-    .unwrap();
-    writeln!(
-        &mut output,
-        "│ {} Recovery Session                                │",
-        status_symbol
-    )
-    .unwrap();
-    writeln!(
-        &mut output,
-        "├─────────────────────────────────────────────────────┤"
-    )
-    .unwrap();
-    writeln!(&mut output, "│ Status: {}", format_field(&status_text, 42)).unwrap();
-    writeln!(
-        &mut output,
-        "│ Device: {}",
-        format_field(
-            &session.requesting_device.to_string()
-                [..16.min(session.requesting_device.to_string().len())],
-            42
-        )
-    )
-    .unwrap();
-    writeln!(
-        &mut output,
-        "│ Created: {}",
-        format_field(&format_timestamp(session.created_at), 41)
-    )
-    .unwrap();
-    writeln!(
-        &mut output,
-        "│ Updated: {}",
-        format_field(&format_timestamp(session.updated_at), 41)
-    )
-    .unwrap();
-
-    writeln!(
-        &mut output,
-        "└─────────────────────────────────────────────────────┘"
-    )
-    .unwrap();
-
-    output
+    // Implementation commented out until types are available
+    "Recovery session formatting not yet implemented".to_string()
 }
+*/
 
+/* TODO: Re-enable when RecoverySessionState is available
 /// Format multiple recovery sessions as a list
 pub fn format_session_list(sessions: &[RecoverySessionState]) -> String {
-    if sessions.is_empty() {
-        return "No active recovery sessions found.".to_string();
-    }
-
-    let mut output = String::new();
-    writeln!(
-        &mut output,
-        "\n📋 Active Recovery Sessions ({}):",
-        sessions.len()
-    )
-    .unwrap();
-    writeln!(&mut output).unwrap();
-
-    for (idx, session) in sessions.iter().enumerate() {
-        writeln!(&mut output, "Session {}:", idx + 1).unwrap();
-        output.push_str(&format_session_state(session));
-        writeln!(&mut output).unwrap();
-    }
-
-    output
+    "Session list formatting not yet implemented".to_string()
 }
+*/
 
 /// Format evidence list with summary stats
 pub fn format_evidence_list(evidence_list: &[RecoveryEvidence]) -> String {
@@ -247,11 +167,10 @@ pub fn format_evidence_list(evidence_list: &[RecoveryEvidence]) -> String {
     output
 }
 
-/// Format a dashboard view with all recovery information
+/// Format a dashboard view with all recovery information  
 pub fn format_recovery_dashboard(
-    sessions: &[RecoverySessionState],
+    _pending_count: usize,
     evidence_list: &[RecoveryEvidence],
-    pending_count: usize,
     total_disputes: usize,
 ) -> String {
     let mut output = String::new();
@@ -273,18 +192,6 @@ pub fn format_recovery_dashboard(
     .unwrap();
     writeln!(
         &mut output,
-        "║ Active Sessions:    {}",
-        format_field(&sessions.len().to_string(), 39)
-    )
-    .unwrap();
-    writeln!(
-        &mut output,
-        "║ Pending Approvals:  {}",
-        format_field(&pending_count.to_string(), 39)
-    )
-    .unwrap();
-    writeln!(
-        &mut output,
         "║ Total Disputes:     {}",
         format_field(&total_disputes.to_string(), 39)
     )
@@ -301,10 +208,6 @@ pub fn format_recovery_dashboard(
     )
     .unwrap();
     writeln!(&mut output).unwrap();
-
-    if !sessions.is_empty() {
-        output.push_str(&format_session_list(sessions));
-    }
 
     if !evidence_list.is_empty() && evidence_list.len() <= 3 {
         output.push_str(&format_evidence_list(evidence_list));
@@ -356,6 +259,7 @@ fn format_timestamp(ts: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::SystemTime;
 
     #[test]
     fn test_format_field() {

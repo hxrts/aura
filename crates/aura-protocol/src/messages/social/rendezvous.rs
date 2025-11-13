@@ -169,7 +169,7 @@ impl AuthenticationPayload {
         let mut data = Vec::new();
         data.extend_from_slice(k_psk);
         data.extend_from_slice(device_static_pub);
-        *blake3::hash(&data).as_bytes()
+        aura_core::hash::hash(&data)
     }
 }
 
@@ -339,7 +339,7 @@ impl HandshakeTranscript {
         data.extend_from_slice(&self.transport_descriptor);
         data.extend_from_slice(&self.offer_counter.to_le_bytes());
         data.extend_from_slice(&self.answer_counter.to_le_bytes());
-        *blake3::hash(&data).as_bytes()
+        aura_core::hash::hash(&data)
     }
 }
 

@@ -11,7 +11,7 @@ repository.workspace = true
 aura-core = { path = "../aura-core" }
 aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../aura-journal" }
-aura-mpst = { path = "../aura-mpst" }
+# NOTE: aura-mpst removed - MPST types should come through aura-protocol (Layer 4)
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

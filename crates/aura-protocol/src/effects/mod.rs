@@ -54,7 +54,8 @@ pub mod random;
 pub mod semilattice;
 pub mod storage;
 pub mod sync;
-pub mod system;
+pub mod system; // New stateless AuraEffectSystem (previously system_v2)
+pub mod system_traits; // SystemEffects trait and SystemError
 pub mod time;
 pub mod tree;
 pub mod tree_coordination;
@@ -100,10 +101,18 @@ pub use tree_coordination::{
 // Re-export unified error system
 pub use aura_core::{AuraError, AuraResult};
 
-// Re-export unified effect system
-pub use system::{
-    AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats, SystemEffects, SystemError,
-};
+// SystemEffects trait and SystemError now in system_traits module
+pub use system_traits::{SystemEffects, SystemError};
+
+// Stateless effect system components
+pub mod executor;
+pub mod handler_adapters;
+pub mod services;
+
+pub use executor::{EffectExecutor, EffectExecutorBuilder};
+pub use services::{BudgetKey, ContextManager, FlowBudgetManager, ReceiptChain, ReceiptManager};
+// Stateless effect system
+pub use system::{AuraEffectSystem, EffectSystemConfig};
 
 /// Composite trait that combines all effect traits
 ///

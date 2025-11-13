@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_builder_pattern() {
-        let account_id = aura_core::AccountId(uuid::Uuid::new_v4());
+        let account_id = aura_core::AccountId(uuid::Uuid::from_bytes([0u8; 16]));
 
         let state = Arc::new(RwLock::new(AccountState::new(
             account_id,
@@ -459,7 +459,7 @@ mod tests {
         let now = aura_core::time::current_unix_timestamp();
         let context = super::JournalContext::new(
             account_id,
-            aura_core::DeviceId(uuid::Uuid::new_v4()),
+            aura_core::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             "test".to_string(),
             now,
         );

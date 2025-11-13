@@ -5,9 +5,9 @@
 
 use crate::{AuraError, AuraResult};
 use aura_core::{AccountId, DeviceId};
-use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation};
+use aura_protocol::AuraEffectSystem;
 use aura_verify::session::{SessionScope, SessionTicket};
-use aura_verify::{Ed25519Signature, IdentityProof, VerifiedIdentity};
+use aura_verify::VerifiedIdentity;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
@@ -115,7 +115,7 @@ impl SessionRole {
 }
 
 /// Session establishment choreography state
-#[derive(Debug)]
+#[allow(dead_code)]
 pub struct SessionEstablishmentState {
     /// Current request being processed
     current_request: Option<SessionEstablishmentRequest>,
@@ -125,6 +125,12 @@ pub struct SessionEstablishmentState {
     approvals: HashMap<String, Vec<(DeviceId, bool, Option<String>)>>,
     /// Established sessions
     established_sessions: HashMap<String, SessionTicket>,
+}
+
+impl Default for SessionEstablishmentState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SessionEstablishmentState {
@@ -153,7 +159,7 @@ impl SessionEstablishmentState {
     ) {
         self.approvals
             .entry(session_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push((device_id, approved, reason));
     }
 
@@ -183,23 +189,22 @@ impl SessionEstablishmentState {
 }
 
 /// Session establishment choreography
-#[derive(Debug)]
 pub struct SessionEstablishmentChoreography {
     /// Local device role
     role: SessionRole,
     /// Choreography state
     state: Mutex<SessionEstablishmentState>,
-    /// MPST runtime
-    runtime: AuraRuntime,
+    /// Effect system
+    effect_system: AuraEffectSystem,
 }
 
 impl SessionEstablishmentChoreography {
     /// Create new session establishment choreography
-    pub fn new(role: SessionRole, runtime: AuraRuntime) -> Self {
+    pub fn new(role: SessionRole, effect_system: AuraEffectSystem) -> Self {
         Self {
             role,
             state: Mutex::new(SessionEstablishmentState::new()),
-            runtime,
+            effect_system,
         }
     }
 
@@ -207,16 +212,15 @@ impl SessionEstablishmentChoreography {
     pub async fn execute(
         &self,
         request: SessionEstablishmentRequest,
-        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<SessionEstablishmentResponse> {
         let mut state = self.state.lock().await;
         state.current_request = Some(request.clone());
         drop(state);
 
         match self.role {
-            SessionRole::Requester => self.execute_requester(request, effect_system).await,
-            SessionRole::Approver(_) => self.execute_approver(effect_system).await,
-            SessionRole::Coordinator => self.execute_coordinator(effect_system).await,
+            SessionRole::Requester => self.execute_requester(request).await,
+            SessionRole::Approver(_) => self.execute_approver().await,
+            SessionRole::Coordinator => self.execute_coordinator().await,
         }
     }
 
@@ -225,32 +229,17 @@ impl SessionEstablishmentChoreography {
     async fn execute_requester(
         &self,
         request: SessionEstablishmentRequest,
-        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<SessionEstablishmentResponse> {
         tracing::info!(
             "Executing session establishment as requester for device: {}",
             request.device_id
         );
 
-        // Apply capability guard
-        let session_cap = aura_core::Cap::with_permissions(vec![
-            "session:establish".to_string(),
-            "network:send".to_string(),
-            "network:receive".to_string(),
-        ]);
-        let guard = CapabilityGuard::new(session_cap.clone());
-
-        // For MVP, grant session permissions to authenticated devices
-        let device_capabilities = session_cap; // Placeholder
-        guard.enforce(&device_capabilities).map_err(|e| {
-            AuraError::invalid(format!(
-                "Insufficient capabilities for session establishment: {}",
-                e
-            ))
-        })?;
+        // TODO: Implement capability-based authorization with new effect system
+        // This will be implemented with aura-wot capability evaluation
 
         // Generate session ID
-        let _session_id = uuid::Uuid::new_v4().to_string();
+        let _session_id = uuid::Uuid::from_bytes([0u8; 16]).to_string();
 
         // Session establishment would involve:
         // 1. Sending session request to approvers using AuraHandlerAdapter
@@ -263,10 +252,8 @@ impl SessionEstablishmentChoreography {
             "Session establishment requires multi-party coordination - placeholder implementation"
         );
 
-        // Apply journal annotation
-        let journal_annotation =
-            JournalAnnotation::add_facts("Session establishment request".to_string());
-        tracing::info!("Applied journal annotation: {:?}", journal_annotation);
+        // TODO: Implement journal state tracking with new effect system
+        // This will use AuraEffectSystem's journal capabilities
 
         Ok(SessionEstablishmentResponse {
             session_ticket: None,
@@ -279,7 +266,6 @@ impl SessionEstablishmentChoreography {
     /// Execute as session approver
     async fn execute_approver(
         &self,
-        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<SessionEstablishmentResponse> {
         tracing::info!("Executing session establishment as approver");
 
@@ -297,7 +283,6 @@ impl SessionEstablishmentChoreography {
     /// Execute as coordinator
     async fn execute_coordinator(
         &self,
-        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<SessionEstablishmentResponse> {
         tracing::info!("Executing session establishment as coordinator");
 
@@ -317,19 +302,18 @@ impl SessionEstablishmentChoreography {
 }
 
 /// Session establishment coordinator
-#[derive(Debug)]
 pub struct SessionEstablishmentCoordinator {
-    /// Local runtime
-    runtime: AuraRuntime,
+    /// Local effect system
+    effect_system: AuraEffectSystem,
     /// Current choreography
     choreography: Option<SessionEstablishmentChoreography>,
 }
 
 impl SessionEstablishmentCoordinator {
     /// Create new coordinator
-    pub fn new(runtime: AuraRuntime) -> Self {
+    pub fn new(effect_system: AuraEffectSystem) -> Self {
         Self {
-            runtime,
+            effect_system,
             choreography: None,
         }
     }
@@ -338,7 +322,6 @@ impl SessionEstablishmentCoordinator {
     pub async fn establish_session(
         &mut self,
         request: SessionEstablishmentRequest,
-        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<SessionEstablishmentResponse> {
         tracing::info!(
             "Starting session establishment for device: {}",
@@ -347,10 +330,10 @@ impl SessionEstablishmentCoordinator {
 
         // Create choreography with requester role
         let choreography =
-            SessionEstablishmentChoreography::new(SessionRole::Requester, self.runtime.clone());
+            SessionEstablishmentChoreography::new(SessionRole::Requester, self.effect_system.clone());
 
-        // Execute the choreography with effect system
-        let result = choreography.execute(request, effect_system).await;
+        // Execute the choreography
+        let result = choreography.execute(request).await;
 
         // Store choreography for potential follow-up operations
         self.choreography = Some(choreography);
@@ -358,9 +341,9 @@ impl SessionEstablishmentCoordinator {
         result
     }
 
-    /// Get the current runtime
-    pub fn runtime(&self) -> &AuraRuntime {
-        &self.runtime
+    /// Get the current effect system
+    pub fn effect_system(&self) -> &AuraEffectSystem {
+        &self.effect_system
     }
 
     /// Check if a choreography is currently active
@@ -373,7 +356,11 @@ impl SessionEstablishmentCoordinator {
 mod tests {
     use super::*;
     use aura_core::{AccountId, Cap, DeviceId, Journal};
-    use aura_verify::session::{SessionScope, SessionTicket};
+    use aura_protocol::ExecutionMode;
+    use aura_verify::{
+        session::{SessionScope, SessionTicket},
+        Ed25519Signature, IdentityProof,
+    };
     use uuid::Uuid;
 
     #[tokio::test]
@@ -406,9 +393,9 @@ mod tests {
     #[tokio::test]
     async fn test_session_coordinator() {
         let device_id = DeviceId::new();
-        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+        let effect_system = AuraEffectSystem::new(device_id, aura_protocol::handlers::ExecutionMode::Testing);
 
-        let mut coordinator = SessionEstablishmentCoordinator::new(runtime);
+        let mut coordinator = SessionEstablishmentCoordinator::new(effect_system);
         assert!(!coordinator.has_active_choreography());
 
         let request = SessionEstablishmentRequest {

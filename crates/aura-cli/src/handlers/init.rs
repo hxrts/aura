@@ -14,10 +14,12 @@ pub async fn handle_init(
     output: &PathBuf,
 ) -> Result<()> {
     // Log initialization start
-    effects.log_info(&format!(
-        "Initializing {}-of-{} threshold account",
-        threshold, num_devices
-    ));
+    effects
+        .log_info(&format!(
+            "Initializing {}-of-{} threshold account",
+            threshold, num_devices
+        ))
+        .await;
 
     let _ = effects
         .log_info(&format!("Output directory: {}", output.display()))

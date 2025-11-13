@@ -1119,7 +1119,7 @@ mod tests {
     #[test]
     fn test_load_balancing_strategies() {
         // Test that all load balancing strategies are properly defined
-        let strategies = vec![
+        let strategies = [
             LoadBalancingStrategy::RoundRobin,
             LoadBalancingStrategy::PerformanceWeighted,
             LoadBalancingStrategy::Random,

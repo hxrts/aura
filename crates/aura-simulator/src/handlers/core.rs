@@ -1,7 +1,7 @@
 //! Core simulator handler implementation
 
 use crate::middleware::{
-    Result, SimulationOutcome, SimulatorContext, SimulatorError, SimulatorHandler,
+    Result, SimulatorContext, SimulatorHandler,
     SimulatorOperation,
 };
 use serde_json::{json, Value};
@@ -141,6 +141,34 @@ impl SimulatorHandler for CoreSimulatorHandler {
                 "outcome": format!("{:?}", outcome),
                 "metrics": metrics,
                 "status": "finalized"
+            })),
+
+            // Additional operations for testkit integration
+            SimulatorOperation::ExecuteEffect { effect_type, operation_name, params } => Ok(json!({
+                "effect_type": effect_type,
+                "operation_name": operation_name,
+                "params": params,
+                "status": "delegated_to_middleware"
+            })),
+
+            SimulatorOperation::SetupDevices { count, threshold } => Ok(json!({
+                "device_count": count,
+                "threshold": threshold,
+                "status": "delegated_to_middleware"
+            })),
+
+            SimulatorOperation::InitializeChoreography { protocol } => Ok(json!({
+                "protocol": protocol,
+                "status": "delegated_to_middleware"
+            })),
+
+            SimulatorOperation::CollectMetrics => Ok(json!({
+                "handler_metrics": {
+                    "scenario_count": self.scenarios.len(),
+                    "checkpoint_count": self.checkpoints.len(),
+                    "current_state": format!("{:?}", self.current_state)
+                },
+                "status": "collected"
             })),
         }
     }

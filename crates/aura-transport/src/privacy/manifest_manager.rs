@@ -8,6 +8,7 @@ use super::{
     relationship_scope::{CapabilityViewManager, RelationshipScope, ScopedCapabilityView},
 };
 use crate::peers::PeerCapabilities;
+use aura_core::hash::hash;
 use aura_core::identifiers::{AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -42,6 +43,7 @@ struct ManifestCacheKey {
 #[derive(Debug, Clone)]
 struct CachedManifest {
     manifest: DeviceManifest,
+    #[allow(dead_code)]
     created_at: u64,
     expires_at: u64,
 }
@@ -240,15 +242,15 @@ impl ManifestManager {
         let mut categories = Vec::new();
 
         // Protocol support
-        let mut protocols = Vec::new();
-        protocols.push("aura-core".to_string());
-        protocols.push("frost".to_string());
-        protocols.push("dkd".to_string());
+        let protocols = vec![
+            "aura-core".to_string(),
+            "frost".to_string(),
+            "dkd".to_string(),
+        ];
         categories.push(("protocols".to_string(), protocols));
 
         // Transport support
-        let mut transports = Vec::new();
-        transports.push("tcp".to_string());
+        let transports = vec!["tcp".to_string()];
         // TODO: Add other transport types based on actual configuration
         categories.push(("transports".to_string(), transports));
 
@@ -282,7 +284,7 @@ impl ManifestManager {
     /// Hash local capabilities for cache keying
     fn hash_local_capabilities(&self) -> [u8; 32] {
         let serialized = bincode::serialize(&self.local_capabilities).unwrap_or_default();
-        *blake3::hash(&serialized).as_bytes()
+        hash(&serialized)
     }
 
     /// Get cached manifest if valid
@@ -390,8 +392,11 @@ impl ManifestManager {
 /// Manifest generation errors
 #[derive(Debug)]
 pub enum ManifestError {
+    /// Failed to acquire manifest lock
     LockError,
+    /// Serialization of manifest data failed
     SerializationError,
+    /// Signature verification or generation failed
     SignatureError,
 }
 

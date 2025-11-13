@@ -1,3 +1,7 @@
+//! Content Addressing Tests
+//!
+//! Tests for content-based addressing using hash32 and content identifiers.
+
 use aura_core::{ChunkId, ContentId, ContentSize, Hash32};
 
 #[test]

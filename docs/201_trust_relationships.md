@@ -254,7 +254,7 @@ Trust relationship ceremonies use choreographic programming for deadlock-free co
 pub trait RelationshipFormationEffects: NetworkEffects + CryptoEffects + StorageEffects {}
 impl<T> RelationshipFormationEffects for T where T: NetworkEffects + CryptoEffects + StorageEffects {}
 
-aura_choreography! {
+choreography! {
     #[namespace = "relationship_formation"]
     protocol RelationshipFormation {
         roles: Initiator, Responder;

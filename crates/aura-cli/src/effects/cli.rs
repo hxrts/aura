@@ -9,10 +9,12 @@ use std::path::PathBuf;
 
 /// CLI effect handler that composes core effects
 pub struct CliEffectHandler<E> {
+    /// The wrapped effect implementation
     inner: E,
 }
 
 impl<E> CliEffectHandler<E> {
+    /// Create a new CLI effect handler
     pub fn new(inner: E) -> Self {
         Self { inner }
     }
@@ -28,15 +30,15 @@ where
         + Sync,
 {
     async fn log_info(&self, message: &str) {
-        self.inner.log_info(&format!("INFO: {}", message));
+        let _ = self.inner.log_info(&format!("INFO: {}", message)).await;
     }
 
     async fn log_warning(&self, message: &str) {
-        self.inner.log_warn(&format!("WARN: {}", message));
+        let _ = self.inner.log_warn(&format!("WARN: {}", message)).await;
     }
 
     async fn log_error(&self, message: &str) {
-        self.inner.log_error(&format!("ERROR: {}", message));
+        let _ = self.inner.log_error(&format!("ERROR: {}", message)).await;
     }
 
     async fn create_dir_all(&self, path: &PathBuf) -> Result<()> {

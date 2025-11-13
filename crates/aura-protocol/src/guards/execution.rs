@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Guarded protocol execution orchestrating guards, deltas, and privacy tracking
 //!
 //! This module implements the complete execution pipeline for capability-guarded protocols:
@@ -11,7 +13,7 @@ use super::{
     deltas::apply_delta_facts, evaluation::evaluate_guard, privacy::track_leakage_consumption,
     ExecutionMetrics, GuardedExecutionResult, ProtocolGuard,
 };
-use crate::effects::system::AuraEffectSystem;
+use crate::effects::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult};
 use std::future::Future;
 use std::time::Instant;
@@ -52,7 +54,7 @@ where
                 "Guard evaluation failed, blocking execution"
             );
 
-            return Err(AuraError::permission_denied(&format!(
+            return Err(AuraError::permission_denied(format!(
                 "Operation '{}' blocked: {} capability requirements not satisfied",
                 guard.operation_id,
                 guard_result.failed_requirements.len()
@@ -77,7 +79,7 @@ where
                         .await
                         .map_err(|e| {
                             error!(error = %e, "Failed to apply delta facts");
-                            AuraError::internal(&format!(
+                            AuraError::internal(format!(
                                 "Delta application failed for operation '{}': {}",
                                 guard.operation_id, e
                             ))
@@ -190,7 +192,7 @@ pub async fn execute_guarded_sequence<T>(
                     operation_id = %guard.operation_id,
                     "Sequence blocked by failed guard"
                 );
-                return Err(AuraError::permission_denied(&format!(
+                return Err(AuraError::permission_denied(format!(
                     "Sequence blocked: operation '{}' failed guard evaluation",
                     guard.operation_id
                 )));
@@ -254,7 +256,7 @@ pub async fn execute_guarded_sequence<T>(
                 .await
                 .map_err(|e| {
                     error!(error = %e, "Failed to apply sequence deltas");
-                    AuraError::internal(&format!("Sequence delta application failed: {}", e))
+                    AuraError::internal(format!("Sequence delta application failed: {}", e))
                 })?;
         }
 

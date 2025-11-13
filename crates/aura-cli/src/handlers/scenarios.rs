@@ -453,7 +453,7 @@ fn generate_report_from_results(
                     if let Some(error) = &result.error {
                         report.push_str(&format!("  Error: {}\n", error));
                     }
-                    report.push_str("\n");
+                    report.push('\n');
                 }
             }
 

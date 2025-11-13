@@ -17,39 +17,58 @@ use uuid::Uuid;
 pub enum SyncMessage {
     /// Request summary from peer
     SummaryRequest {
+        /// Device requesting the summary
         requesting_peer: DeviceId,
+        /// Local operation log summary
         local_summary: OpLogSummary,
+        /// Unique identifier for this request
         request_id: Uuid,
     },
     /// Response with peer summary
     SummaryResponse {
+        /// Device responding with summary
         responding_peer: DeviceId,
+        /// Peer's operation log summary
         peer_summary: OpLogSummary,
+        /// Corresponding request identifier
         request_id: Uuid,
     },
     /// Request specific operations
     OperationRequest {
+        /// Device requesting operations
         requesting_peer: DeviceId,
+        /// Content IDs of requested operations
         requested_cids: BTreeSet<Hash32>,
+        /// Unique identifier for this request
         request_id: Uuid,
     },
     /// Response with operations
     OperationResponse {
+        /// Device responding with operations
         responding_peer: DeviceId,
+        /// Operations being transferred
         operations: Vec<AttestedOp>,
+        /// Corresponding request identifier
         request_id: Uuid,
+        /// Whether this is the final batch of operations
         is_final: bool,
     },
     /// Sync completion notification
     SyncComplete {
+        /// Peer that completed sync
         peer: DeviceId,
+        /// Number of operations transferred
         operations_transferred: usize,
+        /// Request identifier for completion notification
         request_id: Uuid,
     },
     /// Error response
     SyncError {
+        /// Peer reporting error
         peer: DeviceId,
+        /// Error description
         error_message: String,
+        /// Request identifier that caused error
         request_id: Uuid,
     },
 }
@@ -226,6 +245,7 @@ pub struct SyncMetrics {
 
 /// State of an active synchronization session
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ActiveSync {
     /// Peer being synchronized with
     peer_id: DeviceId,
@@ -237,6 +257,7 @@ struct ActiveSync {
 
 /// States of a sync session
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 enum SyncSessionState {
     /// Exchanging summaries
     ExchangingSummaries,
@@ -789,7 +810,7 @@ impl OpLogSynchronizer {
 mod tests {
     use super::*;
     use crate::sync::PeerMetrics;
-    use aura_core::identifiers::{AccountId, DeviceId};
+    use aura_core::identifiers::DeviceId;
     fn create_test_peer(peer_id: DeviceId) -> PeerInfo {
         PeerInfo {
             device_id: peer_id,
@@ -809,7 +830,7 @@ mod tests {
     fn test_synchronizer_creation() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
         assert_eq!(synchronizer.local_oplog().len(), 0);
@@ -820,10 +841,10 @@ mod tests {
     fn test_peer_management() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let mut synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
-        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let peer_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let peer_info = create_test_peer(peer_id);
 
         synchronizer.add_peer(peer_info);
@@ -838,10 +859,10 @@ mod tests {
     async fn test_sync_with_nonexistent_peer() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let mut synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
-        let nonexistent_peer = DeviceId(uuid::Uuid::new_v4());
+        let nonexistent_peer = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let result = synchronizer.sync_with_peer(nonexistent_peer).await;
 
         assert!(result.is_err());
@@ -855,11 +876,11 @@ mod tests {
     fn test_peers_needing_sync() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let mut synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
-        let peer1 = DeviceId(uuid::Uuid::new_v4());
-        let peer2 = DeviceId(uuid::Uuid::new_v4());
+        let peer1 = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let peer2 = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         synchronizer.add_peer(create_test_peer(peer1));
         synchronizer.add_peer(create_test_peer(peer2));
@@ -874,7 +895,7 @@ mod tests {
     fn test_sync_statistics() {
         let oplog = OpLog::new();
         let config = SyncConfiguration::default();
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let synchronizer = OpLogSynchronizer::new(device_id, oplog, config);
 
         let stats = synchronizer.get_statistics();

@@ -16,10 +16,13 @@ aura-journal = { path = "../aura-journal" }
 # aura-transport = { path = "../aura-transport" }  # Temporarily disabled due to coordination dependencies
 aura-crypto = { path = "../aura-crypto" }
 aura-core = { path = "../aura-core" }
-aura-protocol = { path = "../aura-protocol" }
+# NOTE: aura-protocol removed to break circular dependency (aura-store → aura-protocol → aura-effects)
+# Storage orchestration belongs in Layer 4 or higher (aura-protocol, aura-agent)
+# This crate provides: pure storage types, content addressing, capability-based access control
+# Choreographic search protocols using storage types belong in Layer 5 feature crates
 
 # Storage
-redb = { workspace = true }
+# redb removed - not used, only MemoryStorage implementation exists
 
 # Serialization
 serde = { workspace = true }
@@ -45,5 +48,5 @@ blake3 = { workspace = true }
 chacha20poly1305 = { workspace = true }
 
 [dev-dependencies]
-tokio-test = { workspace = true }
+# tokio-test = { workspace = true } # removed - unused
 tempfile = { workspace = true }

@@ -3,32 +3,29 @@
 //! Factory functions for creating test AccountState instances.
 //! Consolidates the account creation pattern found in 18 test files.
 
+use aura_core::hash::hash;
 use aura_core::{AccountId, DeviceId};
-use aura_core::effects::{RandomEffects, TimeEffects};
-use crate::Effects;
 use aura_journal::semilattice::ModernAccountState as AccountState;
 use aura_journal::{DeviceMetadata, DeviceType};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use uuid::Uuid;
 
-/// Helper function to create test device metadata with effects
-async fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
-    let device_key_bytes = effects.random_bytes_32().await;
-    let device_signing_key = SigningKey::from_bytes(&device_key_bytes);
-    let device_public_key = device_signing_key.verifying_key();
+/// Helper function to create test device metadata with seed
+fn test_device_with_seed(seed: u64) -> DeviceMetadata {
+    let (_, device_public_key) = crate::test_key_pair(seed);
 
-    // Generate deterministic UUID from random bytes
-    let uuid_bytes = effects.random_bytes(16).await;
-    let uuid_array: [u8; 16] = uuid_bytes.try_into().unwrap();
-    let uuid = Uuid::from_bytes(uuid_array);
+    // Generate deterministic UUID from seed
+    let hash_input = format!("device-{}", seed);
+    let hash_bytes = hash(hash_input.as_bytes());
+    let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
 
     DeviceMetadata {
         device_id: DeviceId(uuid),
         device_name: "Test Device".to_string(),
         device_type: DeviceType::Native,
         public_key: device_public_key,
-        added_at: effects.current_timestamp_millis().await,
-        last_seen: effects.current_timestamp_millis().await,
+        added_at: 1000, // Default test timestamp
+        last_seen: 1000,
         dkd_commitment_proofs: Default::default(),
         next_nonce: 0,
         key_share_epoch: 0,
@@ -36,39 +33,37 @@ async fn test_device_with_effects(effects: &Effects) -> DeviceMetadata {
     }
 }
 
-/// Create a test account with given effects
+/// Create a test account with seed
 ///
 /// This is the standard pattern for creating test accounts, found in many test files.
 /// Creates a complete AccountState with a group public key and initial device.
 ///
 /// # Arguments
-/// * `effects` - Effects instance for deterministic generation
+/// * `seed` - Seed for deterministic generation
 ///
 /// # Example
 /// ```rust
-/// use aura_testkit::{Effects, test_account_with_effects};
+/// use aura_testkit::test_account_with_seed;
 ///
-/// let effects = Effects::deterministic(42, 1000);
-/// let account = test_account_with_effects(&effects).await;
+/// let account = test_account_with_seed(42);
 /// ```
-pub async fn test_account_with_effects(effects: &Effects) -> AccountState {
-    let key_bytes = effects.random_bytes_32().await;
-    let signing_key = SigningKey::from_bytes(&key_bytes);
-    let group_public_key = signing_key.verifying_key();
+pub fn test_account_with_seed_sync(seed: u64) -> AccountState {
+    let (_, group_public_key) = crate::test_key_pair(seed);
+    let device_metadata = test_device_with_seed(seed + 1);
 
-    let device_metadata = test_device_with_effects(effects).await;
+    // Generate deterministic account ID
+    let hash_input = format!("account-{}", seed);
+    let hash_bytes = hash(hash_input.as_bytes());
+    let account_id = AccountId(Uuid::from_bytes(hash_bytes[..16].try_into().unwrap()));
 
-    let mut state = AccountState::new(AccountId(Uuid::new_v4()), group_public_key);
-
-    // Add the initial device
+    let mut state = AccountState::new(account_id, group_public_key);
     state.add_device(device_metadata);
-
     state
 }
 
-/// Create a test account with seed
+/// Create a test account with seed (async version for compatibility)
 ///
-/// Convenience function that creates effects and account in one call.
+/// Convenience function that creates account deterministically.
 ///
 /// # Arguments
 /// * `seed` - Random seed for deterministic generation
@@ -80,8 +75,7 @@ pub async fn test_account_with_effects(effects: &Effects) -> AccountState {
 /// let account = test_account_with_seed(42).await;
 /// ```
 pub async fn test_account_with_seed(seed: u64) -> AccountState {
-    let effects = Effects::deterministic(seed, 1000);
-    test_account_with_effects(&effects).await
+    test_account_with_seed_sync(seed)
 }
 
 /// Create a test account with custom threshold
@@ -89,25 +83,23 @@ pub async fn test_account_with_seed(seed: u64) -> AccountState {
 /// For testing different threshold configurations.
 ///
 /// # Arguments
-/// * `effects` - Effects instance for deterministic generation
+/// * `seed` - Seed for deterministic generation
 /// * `threshold` - M-of-N threshold value
 /// * `total` - Total number of participants
-pub async fn test_account_with_threshold(effects: &Effects, threshold: u16, total: u16) -> AccountState {
-    let key_bytes = effects.random_bytes_32().await;
-    let signing_key = SigningKey::from_bytes(&key_bytes);
-    let group_public_key = signing_key.verifying_key();
+pub async fn test_account_with_threshold(seed: u64, threshold: u16, total: u16) -> AccountState {
+    let (_, group_public_key) = crate::test_key_pair(seed);
 
-    let device_metadata = test_device_with_effects(effects).await;
+    // Generate deterministic account ID
+    let hash_input = format!("threshold-account-{}-{}-{}", seed, threshold, total);
+    let hash_bytes = hash(hash_input.as_bytes());
+    let account_id = AccountId(Uuid::from_bytes(hash_bytes[..16].try_into().unwrap()));
 
-    let mut state = AccountState::new(AccountId(Uuid::new_v4()), group_public_key);
+    let mut state = AccountState::new(account_id, group_public_key);
 
-    // Add the initial device
-    state.add_device(device_metadata);
-
-    // Add remaining devices to match total
-    for _ in 1..total {
-        let additional_device = test_device_with_effects(effects).await;
-        state.add_device(additional_device);
+    // Add devices to match total
+    for i in 0..total {
+        let device_metadata = test_device_with_seed(seed + i as u64);
+        state.add_device(device_metadata);
     }
 
     state
@@ -119,13 +111,10 @@ pub async fn test_account_with_threshold(effects: &Effects, threshold: u16, tota
 ///
 /// # Arguments
 /// * `account_id` - Specific account ID to use
-/// * `effects` - Effects instance for other random generation
-pub async fn test_account_with_id(account_id: AccountId, effects: &Effects) -> AccountState {
-    let key_bytes = effects.random_bytes_32().await;
-    let signing_key = SigningKey::from_bytes(&key_bytes);
-    let group_public_key = signing_key.verifying_key();
-
-    let device_metadata = test_device_with_effects(effects).await;
+/// * `seed` - Seed for other deterministic generation
+pub async fn test_account_with_id(account_id: AccountId, seed: u64) -> AccountState {
+    let (_, group_public_key) = crate::test_key_pair(seed);
+    let device_metadata = test_device_with_seed(seed + 1);
 
     let mut state = AccountState::new(account_id, group_public_key);
     state.add_device(device_metadata);
@@ -138,14 +127,19 @@ pub async fn test_account_with_id(account_id: AccountId, effects: &Effects) -> A
 ///
 /// # Arguments
 /// * `group_public_key` - Specific group public key to use
-/// * `effects` - Effects instance for other random generation
+/// * `seed` - Seed for other deterministic generation
 pub async fn test_account_with_group_key(
     group_public_key: VerifyingKey,
-    effects: &Effects,
+    seed: u64,
 ) -> AccountState {
-    let device_metadata = test_device_with_effects(effects).await;
+    let device_metadata = test_device_with_seed(seed);
 
-    let mut state = AccountState::new(AccountId(Uuid::new_v4()), group_public_key);
+    // Generate deterministic account ID
+    let hash_input = format!("custom-group-{}", seed);
+    let hash_bytes = hash(hash_input.as_bytes());
+    let account_id = AccountId(Uuid::from_bytes(hash_bytes[..16].try_into().unwrap()));
+
+    let mut state = AccountState::new(account_id, group_public_key);
     state.add_device(device_metadata);
     state
 }

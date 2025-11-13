@@ -593,7 +593,7 @@ mod tests {
 
     #[test]
     fn test_sync_message_properties() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let summary = OpLogSummary {
             version: 1,
             operation_count: 0,
@@ -612,8 +612,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_sync_state_properties() {
-        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let peer_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         let idle = SyncState::Idle;
         assert!(!idle.is_active());
@@ -622,7 +623,7 @@ mod tests {
 
         let waiting = SyncState::WaitingForResponse {
             peer_id,
-            request_time: std::time::Instant::now(),
+            request_time: std::time::Instant::now(), // Note: disallowed method, but needed for test state
         };
         assert!(waiting.is_active());
         assert!(!waiting.is_terminal());
@@ -631,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_protocol_creation() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let oplog = OpLog::new();
         let protocol = SyncProtocol::new(device_id, oplog);
 
@@ -641,8 +642,8 @@ mod tests {
 
     #[test]
     fn test_start_sync() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let peer_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let oplog = OpLog::new();
         let mut protocol = SyncProtocol::new(device_id, oplog);
 
@@ -655,8 +656,8 @@ mod tests {
 
     #[test]
     fn test_protocol_reset() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let peer_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let oplog = OpLog::new();
         let mut protocol = SyncProtocol::new(device_id, oplog);
 

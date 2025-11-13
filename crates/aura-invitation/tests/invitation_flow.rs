@@ -1,9 +1,9 @@
 use aura_core::{AccountId, Cap, DeviceId, Top};
-use aura_protocol::effects::AuraEffectSystem;
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
     invitation_acceptance::InvitationAcceptanceCoordinator,
 };
+use aura_protocol::effects::AuraEffectSystem;
 use uuid::Uuid;
 // Note: For testing, use mock handlers from aura-effects
 
@@ -21,7 +21,7 @@ fn sample_request(invitee: DeviceId) -> DeviceInvitationRequest {
 #[tokio::test]
 async fn invitation_lifecycle() {
     let effects = AuraEffectSystem::for_testing(DeviceId(Uuid::new_v4()));
-    let mut coordinator = DeviceInvitationCoordinator::new(effects.clone());
+    let coordinator = DeviceInvitationCoordinator::new(effects.clone());
     let request = sample_request(DeviceId(Uuid::new_v4()));
     let response = coordinator
         .invite_device(request.clone())

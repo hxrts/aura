@@ -172,6 +172,23 @@ impl LeakageBudget {
     }
 }
 
+/// Policy for handling undefined budgets
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UndefinedBudgetPolicy {
+    /// Allow unlimited access (legacy behavior, less secure)
+    Allow,
+    /// Deny access (secure default)
+    Deny,
+    /// Use a default budget with specified limit
+    DefaultBudget(u64),
+}
+
+impl Default for UndefinedBudgetPolicy {
+    fn default() -> Self {
+        Self::Deny // Secure by default
+    }
+}
+
 /// Leakage tracker for privacy contract enforcement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeakageTracker {
@@ -181,16 +198,34 @@ pub struct LeakageTracker {
     events: Vec<LeakageEvent>,
     /// Maximum events to keep in memory
     max_events: usize,
+    /// Policy for handling undefined budgets
+    undefined_budget_policy: UndefinedBudgetPolicy,
 }
 
 impl LeakageTracker {
-    /// Create a new leakage tracker
+    /// Create a new leakage tracker with secure defaults
     pub fn new() -> Self {
         Self {
             budgets: HashMap::new(),
             events: Vec::new(),
             max_events: 1000, // Default limit
+            undefined_budget_policy: UndefinedBudgetPolicy::default(),
         }
+    }
+
+    /// Create a new leakage tracker with specified policy for undefined budgets
+    pub fn with_undefined_policy(policy: UndefinedBudgetPolicy) -> Self {
+        Self {
+            budgets: HashMap::new(),
+            events: Vec::new(),
+            max_events: 1000,
+            undefined_budget_policy: policy,
+        }
+    }
+
+    /// Create a legacy-compatible tracker (allows undefined budgets)
+    pub fn legacy_permissive() -> Self {
+        Self::with_undefined_policy(UndefinedBudgetPolicy::Allow)
     }
 
     /// Add a budget for an observer and leak type
@@ -251,7 +286,36 @@ impl LeakageTracker {
     pub fn check_leakage(&self, leak_type: &LeakageType, cost: u64, observer: DeviceId) -> bool {
         match self.get_budget(observer, leak_type) {
             Some(budget) => budget.can_afford(cost),
-            None => true, // No budget means unlimited (TODO fix - For now)
+            None => {
+                // No budget defined - apply configured policy
+                match &self.undefined_budget_policy {
+                    UndefinedBudgetPolicy::Allow => {
+                        tracing::warn!(
+                            "No leakage budget defined for {} {} observer - allowing (permissive mode)",
+                            leak_type,
+                            observer
+                        );
+                        true
+                    }
+                    UndefinedBudgetPolicy::Deny => {
+                        tracing::warn!(
+                            "No leakage budget defined for {} {} observer - denying operation",
+                            leak_type,
+                            observer
+                        );
+                        false
+                    }
+                    UndefinedBudgetPolicy::DefaultBudget(limit) => {
+                        tracing::info!(
+                            "No leakage budget defined for {} {} observer - using default budget of {}",
+                            leak_type,
+                            observer,
+                            limit
+                        );
+                        cost <= *limit
+                    }
+                }
+            }
         }
     }
 
@@ -342,7 +406,6 @@ impl PrivacyContract {
 mod tests {
     use super::*;
     use aura_core::DeviceId;
-    use uuid::Uuid;
 
     #[test]
     fn test_leakage_budget() {

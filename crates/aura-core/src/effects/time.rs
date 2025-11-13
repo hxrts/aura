@@ -70,6 +70,18 @@ pub enum TimeError {
         /// Handle that was not found
         handle: String,
     },
+    /// Serialization of effect parameters failed
+    #[error("Time operation serialization failed: {reason}")]
+    SerializationFailed {
+        /// Details for the serialization failure
+        reason: String,
+    },
+    /// Generic operation failure wrapper
+    #[error("Time operation failed: {reason}")]
+    OperationFailed {
+        /// Error details
+        reason: String,
+    },
 }
 
 /// Handle for timeout operations

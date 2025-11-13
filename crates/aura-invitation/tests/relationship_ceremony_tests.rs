@@ -1,11 +1,11 @@
 //! Integration tests for bidirectional relationship key establishment ceremony
 
 use aura_core::{AccountId, ContextId, DeviceId};
-use aura_protocol::effects::AuraEffectSystem;
 use aura_invitation::relationship_formation::{
     execute_relationship_formation, RelationshipFormationConfig, RelationshipFormationError,
     RelationshipKeys,
 };
+use aura_protocol::effects::AuraEffectSystem;
 use uuid::Uuid;
 // Note: For testing, use mock handlers from aura-effects
 
@@ -43,7 +43,10 @@ async fn test_successful_relationship_formation() {
     match result {
         Ok(formation_result) => {
             assert!(formation_result.success);
-            assert_ne!(formation_result.context_id, ContextId(Uuid::new_v4())); // Should be derived
+            assert_ne!(
+                formation_result.context_id,
+                ContextId(Uuid::new_v4().to_string())
+            ); // Should be derived
             assert_ne!(formation_result.relationship_keys.encryption_key, [0u8; 32]); // Should be generated
             assert_ne!(formation_result.relationship_keys.mac_key, [0u8; 32]); // Should be generated
             assert!(!formation_result
@@ -94,7 +97,7 @@ async fn test_relationship_key_properties() {
     // Test that identical inputs produce identical keys
     let private_key = [42u8; 32];
     let peer_public_key = [24u8; 32];
-    let context_id = ContextId(Uuid::new_v4());
+    let context_id = ContextId(Uuid::new_v4().to_string());
 
     let keys1 = aura_invitation::relationship_formation::derive_relationship_keys(
         &private_key,
@@ -143,7 +146,7 @@ async fn test_bidirectional_key_symmetry() {
 
     let alice_private = [1u8; 32];
     let bob_private = [2u8; 32];
-    let context_id = ContextId(Uuid::new_v4());
+    let context_id = ContextId(Uuid::new_v4().to_string());
 
     // Derive public keys (simplified)
     let alice_public =
@@ -159,7 +162,7 @@ async fn test_bidirectional_key_symmetry() {
     // Alice derives keys using her private key and Bob's public key
     let alice_keys = aura_invitation::relationship_formation::derive_relationship_keys(
         &alice_private,
-        &bob_public.try_into().unwrap(),
+        &bob_public,
         &context_id,
         &effect_system,
     )
@@ -169,7 +172,7 @@ async fn test_bidirectional_key_symmetry() {
     // Bob derives keys using his private key and Alice's public key
     let bob_keys = aura_invitation::relationship_formation::derive_relationship_keys(
         &bob_private,
-        &alice_public.try_into().unwrap(),
+        &alice_public,
         &context_id,
         &effect_system,
     )
@@ -190,8 +193,8 @@ async fn test_validation_proof_system() {
     let effect_system = AuraEffectSystem::for_testing(alice_device);
 
     let relationship_keys = RelationshipKeys {
-        encryption_key: [100u8; 32],
-        mac_key: [200u8; 32],
+        encryption_key: [100u8; 32].to_vec(),
+        mac_key: [200u8; 32].to_vec(),
         derivation_context: vec![1, 2, 3, 4, 5],
     };
 
@@ -226,13 +229,13 @@ async fn test_validation_proof_system() {
 
     // Create validation structures
     let alice_validation = aura_invitation::relationship_formation::RelationshipValidation {
-        context_id: ContextId(Uuid::new_v4()),
+        context_id: ContextId(Uuid::new_v4().to_string()),
         validation_proof: alice_proof.try_into().unwrap(),
         key_hash: key_hash.clone().try_into().unwrap(),
     };
 
     let bob_validation = aura_invitation::relationship_formation::RelationshipValidation {
-        context_id: ContextId(Uuid::new_v4()),
+        context_id: ContextId(Uuid::new_v4().to_string()),
         validation_proof: bob_proof.try_into().unwrap(),
         key_hash: key_hash.try_into().unwrap(),
     };
@@ -279,10 +282,10 @@ async fn test_trust_record_system() {
     let bob_device = DeviceId::new();
     let effect_system = AuraEffectSystem::for_testing(alice_device);
 
-    let context_id = ContextId(Uuid::new_v4());
+    let context_id = ContextId(Uuid::new_v4().to_string());
     let relationship_keys = RelationshipKeys {
-        encryption_key: [50u8; 32],
-        mac_key: [60u8; 32],
+        encryption_key: [50u8; 32].to_vec(),
+        mac_key: [60u8; 32].to_vec(),
         derivation_context: vec![7, 8, 9],
     };
 

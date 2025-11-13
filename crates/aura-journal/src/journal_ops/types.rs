@@ -55,12 +55,8 @@ impl KeyJournal {
         self.nodes.insert(node_id, node);
 
         // Initialize edge indices
-        self.incoming_edges
-            .entry(node_id)
-            .or_insert_with(BTreeSet::new);
-        self.outgoing_edges
-            .entry(node_id)
-            .or_insert_with(BTreeSet::new);
+        self.incoming_edges.entry(node_id).or_default();
+        self.outgoing_edges.entry(node_id).or_default();
 
         Ok(())
     }
@@ -236,7 +232,7 @@ pub struct JournalState {
 
     /// Capability token bindings
     /// Map: capability token ID -> granted resource
-    pub capability_bindings: BTreeMap<String, ResourceRef>,
+    pub capability_bindings: BTreeMap<String, crate::journal::ResourceRef>,
 
     /// Last modification timestamp for conflict resolution
     pub last_modified: u64,
@@ -294,38 +290,7 @@ pub struct ContributedShare {
     pub timestamp: u64,
 }
 
-/// Resource reference for capability bindings
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceRef {
-    /// Resource type (e.g., "journal://node/{id}")
-    pub resource_type: String,
-
-    /// Resource identifier
-    pub resource_id: String,
-
-    /// Optional scope/context
-    pub scope: Option<String>,
-}
-
-impl ResourceRef {
-    /// Create a journal node resource reference
-    pub fn journal_node(node_id: NodeId) -> Self {
-        Self {
-            resource_type: "journal://node".to_string(),
-            resource_id: node_id.to_string(),
-            scope: None,
-        }
-    }
-
-    /// Create a journal recovery resource reference
-    pub fn journal_recovery(node_id: NodeId, epoch: u64) -> Self {
-        Self {
-            resource_type: "journal://recovery".to_string(),
-            resource_id: node_id.to_string(),
-            scope: Some(format!("epoch/{}", epoch)),
-        }
-    }
-}
+// ResourceRef is defined in journal.rs as an enum - use that instead
 
 #[cfg(test)]
 mod tests {
@@ -343,7 +308,7 @@ mod tests {
     #[test]
     fn test_node_addition() {
         let mut journal = KeyJournal::new();
-        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let node = KeyNode::new(node_id, NodeKind::Device, NodePolicy::Any);
 
         assert!(journal.add_node(node).is_ok());
@@ -356,8 +321,8 @@ mod tests {
         let mut journal = KeyJournal::new();
 
         // Add two nodes
-        let parent_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
-        let child_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let parent_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let child_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let parent = KeyNode::new(
             parent_id,
             NodeKind::Identity,
@@ -385,17 +350,21 @@ mod tests {
     #[test]
     fn test_invalid_edge() {
         let mut journal = KeyJournal::new();
-        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         // Try to add edge to non-existent node
-        let edge = KeyEdge::new(node_id, aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), EdgeKind::Contains);
+        let edge = KeyEdge::new(
+            node_id,
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            EdgeKind::Contains,
+        );
         assert!(journal.add_edge(edge).is_err());
     }
 
     #[test]
     fn test_self_referential_edge() {
         let mut journal = KeyJournal::new();
-        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let node = KeyNode::new(node_id, NodeKind::Device, NodePolicy::Any);
 
         journal.add_node(node).unwrap();

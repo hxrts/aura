@@ -8,7 +8,9 @@ use std::path::PathBuf;
 pub enum ConfigSource {
     /// Configuration from file
     File {
+        /// Path to the configuration file
         path: PathBuf,
+        /// Priority level for this configuration source
         priority: ConfigPriority,
     },
     /// Configuration from environment variables

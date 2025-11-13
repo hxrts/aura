@@ -230,7 +230,7 @@ pub enum JournalOpData {
 }
 
 /// Metrics collected during operation execution
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct JournalOpMetrics {
     /// Time taken to execute the operation (milliseconds)
     pub duration_ms: u64,
@@ -251,18 +251,7 @@ pub struct JournalOpMetrics {
     pub threshold_required: bool,
 }
 
-impl Default for JournalOpMetrics {
-    fn default() -> Self {
-        Self {
-            duration_ms: 0,
-            nodes_affected: 0,
-            edges_affected: 0,
-            data_size_bytes: 0,
-            network_required: false,
-            threshold_required: false,
-        }
-    }
-}
+// Note: derive(Default) cannot be used because some fields need custom defaults
 
 /// Automerge operation mapping utilities
 pub struct AutomergeOperations;
@@ -473,7 +462,11 @@ mod tests {
 
     #[test]
     fn test_journal_op_type() {
-        let node = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Device, NodePolicy::Any);
+        let node = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            NodeKind::Device,
+            NodePolicy::Any,
+        );
         let op = JournalOp::AddNode { node };
 
         assert_eq!(op.op_type(), "add_node");
@@ -494,7 +487,11 @@ mod tests {
 
     #[test]
     fn test_automerge_mapping() {
-        let node = KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), NodeKind::Device, NodePolicy::Any);
+        let node = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            NodeKind::Device,
+            NodePolicy::Any,
+        );
         let op = JournalOp::AddNode { node: node.clone() };
 
         let automerge_ops = AutomergeOperations::map_to_automerge(&op);
@@ -512,8 +509,8 @@ mod tests {
 
     #[test]
     fn test_edge_operations() {
-        let from_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
-        let to_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let from_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let to_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let edge = KeyEdge::new(from_id, to_id, EdgeKind::Contains);
         let op = JournalOp::AddEdge { edge: edge.clone() };
 

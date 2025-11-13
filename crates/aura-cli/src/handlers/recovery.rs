@@ -46,10 +46,12 @@ async fn start_recovery(
     dispute_hours: u64,
     justification: Option<&str>,
 ) -> Result<()> {
-    effects.log_info(&format!(
-        "Starting {} recovery for account: {}",
-        priority, account
-    ));
+    let _ = effects
+        .log_info(&format!(
+            "Starting {} recovery for account: {}",
+            priority, account
+        ))
+        .await;
     let _ = effects.log_info(&format!("Guardians: {}", guardians)).await;
     let _ = effects.log_info(&format!("Threshold: {}", threshold)).await;
     let _ = effects
@@ -69,10 +71,12 @@ async fn approve_recovery(
     effects: &AuraEffectSystem,
     request_file: &std::path::Path,
 ) -> Result<()> {
-    effects.log_info(&format!(
-        "Approving recovery from: {}",
-        request_file.display()
-    ));
+    let _ = effects
+        .log_info(&format!(
+            "Approving recovery from: {}",
+            request_file.display()
+        ))
+        .await;
     println!("Recovery approval not yet implemented");
     // TODO: Integrate with aura-recovery protocol
     Ok(())

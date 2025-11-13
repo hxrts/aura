@@ -51,7 +51,7 @@ use crate::choreography::protocols::anti_entropy::{
 };
 use aura_core::{
     semilattice::{
-        Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, JoinSemilattice, MvState, OpWithCtx, Top,
+        Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,
     },
     CausalContext, DeviceId, SessionId, VectorClock,
 };
@@ -518,8 +518,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::semilattice::Bottom;
-    use std::collections::HashSet;
+    use aura_core::semilattice::{Bottom, JoinSemilattice};
 
     // Test types for CvRDT
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -539,13 +538,125 @@ mod tests {
 
     impl CvState for TestCounter {}
 
+    // Dummy types for unused type parameters
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+    struct DummyCmState;
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+    struct DummyOp;
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+    struct DummyId;
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+    struct DummyDeltaState;
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+    struct DummyDelta;
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+    struct DummyMvState;
+
+    // Implement required traits for DummyCmState
+    impl CmApply<DummyOp> for DummyCmState {
+        fn apply(&mut self, _op: DummyOp) {}
+    }
+
+    impl Dedup<DummyId> for DummyCmState {
+        fn seen(&self, _id: &DummyId) -> bool {
+            false
+        }
+        fn mark_seen(&mut self, _id: DummyId) {}
+    }
+
+    // Implement required traits for DummyOp
+    impl CausalOp for DummyOp {
+        type Id = DummyId;
+        type Ctx = CausalContext;
+
+        fn id(&self) -> Self::Id {
+            DummyId
+        }
+
+        fn ctx(&self) -> &Self::Ctx {
+            use std::sync::LazyLock;
+            static DUMMY_CTX: LazyLock<CausalContext> =
+                LazyLock::new(|| CausalContext::new(DeviceId::new()));
+            &DUMMY_CTX
+        }
+    }
+
+    // Implement required traits for DummyDeltaState
+    impl JoinSemilattice for DummyDeltaState {
+        fn join(&self, _other: &Self) -> Self {
+            DummyDeltaState
+        }
+    }
+
+    impl Bottom for DummyDeltaState {
+        fn bottom() -> Self {
+            DummyDeltaState
+        }
+    }
+
+    impl CvState for DummyDeltaState {}
+
+    impl DeltaState for DummyDeltaState {
+        type Delta = DummyDelta;
+
+        fn apply_delta(&self, _delta: &Self::Delta) -> Self {
+            DummyDeltaState
+        }
+    }
+
+    // Implement Delta trait for DummyDelta
+    impl Delta for DummyDelta {
+        fn join_delta(&self, _other: &Self) -> Self {
+            DummyDelta
+        }
+    }
+
+    impl JoinSemilattice for DummyDelta {
+        fn join(&self, _other: &Self) -> Self {
+            DummyDelta
+        }
+    }
+
+    impl Bottom for DummyDelta {
+        fn bottom() -> Self {
+            DummyDelta
+        }
+    }
+
+    // Implement required traits for DummyMvState
+    impl MvState for DummyMvState {}
+
+    impl Top for DummyMvState {
+        fn top() -> Self {
+            DummyMvState
+        }
+    }
+
+    // MvState requires MeetSemiLattice
+    impl aura_core::semilattice::MeetSemiLattice for DummyMvState {
+        fn meet(&self, _other: &Self) -> Self {
+            DummyMvState
+        }
+    }
+
     // === Builder Pattern Tests ===
 
     #[test]
     fn test_builder_with_cv() {
         let device_id = DeviceId::new();
-        let coordinator: CrdtCoordinator<TestCounter, (), (), (), (), ()> =
-            CrdtCoordinator::with_cv(device_id);
+        let coordinator: CrdtCoordinator<
+            TestCounter,
+            DummyCmState,
+            DummyDeltaState,
+            DummyMvState,
+            DummyOp,
+            DummyId,
+        > = CrdtCoordinator::with_cv(device_id);
 
         assert_eq!(coordinator.device_id(), device_id);
         assert!(coordinator.has_handler(CrdtType::Convergent));
@@ -558,8 +669,14 @@ mod tests {
     fn test_builder_with_cv_state() {
         let device_id = DeviceId::new();
         let initial_state = TestCounter(42);
-        let coordinator: CrdtCoordinator<TestCounter, (), (), (), (), ()> =
-            CrdtCoordinator::with_cv_state(device_id, initial_state.clone());
+        let coordinator: CrdtCoordinator<
+            TestCounter,
+            DummyCmState,
+            DummyDeltaState,
+            DummyMvState,
+            DummyOp,
+            DummyId,
+        > = CrdtCoordinator::with_cv_state(device_id, initial_state.clone());
 
         assert_eq!(coordinator.device_id(), device_id);
         assert!(coordinator.has_handler(CrdtType::Convergent));
@@ -568,8 +685,15 @@ mod tests {
     #[test]
     fn test_builder_chaining() {
         let device_id = DeviceId::new();
-        let coordinator = CrdtCoordinator::<TestCounter, (), (), (), (), ()>::new(device_id)
-            .with_cv_handler(CvHandler::new());
+        let coordinator = CrdtCoordinator::<
+            TestCounter,
+            DummyCmState,
+            DummyDeltaState,
+            DummyMvState,
+            DummyOp,
+            DummyId,
+        >::new(device_id)
+        .with_cv_handler(CvHandler::new());
 
         assert_eq!(coordinator.device_id(), device_id);
         assert!(coordinator.has_handler(CrdtType::Convergent));
@@ -578,8 +702,14 @@ mod tests {
     #[tokio::test]
     async fn test_sync_request_creation() {
         let device_id = DeviceId::new();
-        let coordinator: CrdtCoordinator<TestCounter, (), (), (), (), ()> =
-            CrdtCoordinator::with_cv(device_id);
+        let coordinator: CrdtCoordinator<
+            TestCounter,
+            DummyCmState,
+            DummyDeltaState,
+            DummyMvState,
+            DummyOp,
+            DummyId,
+        > = CrdtCoordinator::with_cv(device_id);
         let session_id = SessionId::new();
 
         let request = coordinator
@@ -593,8 +723,14 @@ mod tests {
     #[tokio::test]
     async fn test_cv_sync_request_handling() {
         let device_id = DeviceId::new();
-        let mut coordinator: CrdtCoordinator<TestCounter, (), (), (), (), ()> =
-            CrdtCoordinator::with_cv_state(device_id, TestCounter(42));
+        let mut coordinator: CrdtCoordinator<
+            TestCounter,
+            DummyCmState,
+            DummyDeltaState,
+            DummyMvState,
+            DummyOp,
+            DummyId,
+        > = CrdtCoordinator::with_cv_state(device_id, TestCounter(42));
         let session_id = SessionId::new();
 
         let request = CrdtSyncRequest {
@@ -613,8 +749,14 @@ mod tests {
     #[tokio::test]
     async fn test_cv_sync_response_handling() {
         let device_id = DeviceId::new();
-        let mut coordinator: CrdtCoordinator<TestCounter, (), (), (), (), ()> =
-            CrdtCoordinator::with_cv_state(device_id, TestCounter(10));
+        let mut coordinator: CrdtCoordinator<
+            TestCounter,
+            DummyCmState,
+            DummyDeltaState,
+            DummyMvState,
+            DummyOp,
+            DummyId,
+        > = CrdtCoordinator::with_cv_state(device_id, TestCounter(10));
         let session_id = SessionId::new();
 
         // Create a response with a higher counter value
@@ -638,8 +780,14 @@ mod tests {
     #[test]
     fn test_has_handler() {
         let device_id = DeviceId::new();
-        let coordinator: CrdtCoordinator<TestCounter, (), (), (), (), ()> =
-            CrdtCoordinator::with_cv(device_id);
+        let coordinator: CrdtCoordinator<
+            TestCounter,
+            DummyCmState,
+            DummyDeltaState,
+            DummyMvState,
+            DummyOp,
+            DummyId,
+        > = CrdtCoordinator::with_cv(device_id);
 
         assert!(coordinator.has_handler(CrdtType::Convergent));
         assert!(!coordinator.has_handler(CrdtType::Commutative));

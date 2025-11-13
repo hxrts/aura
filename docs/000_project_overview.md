@@ -41,7 +41,7 @@ The first pillar is algebraic state management. The Journal is a single CRDT tha
 
 The second pillar is protocol specification and safety. Multi-party session types (MPST) specify distributed protocols from a global viewpoint. Automatic projection to local roles provides deadlock freedom and compile-time safety. Choreographic programming ensures that complex multi-party coordination is verifiable before deployment.
 
-The third pillar is effect system composition. Effects are capabilities that code can request. The system separates effect definitions (`aura-core`) from their implementations (`aura-effects`). This enables mock and real handlers, deterministic testing, and clean architectural boundaries. Orchestration layers compose effects into protocols without circular dependencies.
+The third pillar is stateless effect system composition. Effects are capabilities that code can request without shared mutable state. The system separates effect definitions (`aura-core`) from their stateless implementations (`aura-effects`) through isolated state services. This eliminates deadlocks, enables deterministic testing, and maintains clean architectural boundaries. The orchestration layer composes effects into protocols through deadlock-free coordination patterns.
 
 These three pillars combine into an 8-layer architecture from interface definitions through user-facing applications. See [System Architecture](002_system_architecture.md) for the complete layer breakdown, [Theoretical Model](001_theoretical_model.md) for mathematical foundations, and [Crate Wiring](999_crate_wiring.md) for dependency details.
 

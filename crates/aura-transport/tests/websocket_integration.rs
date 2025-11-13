@@ -1,5 +1,11 @@
+#![allow(clippy::expect_used)]
+//! WebSocket Transport Integration Tests
+//!
+//! Tests for WebSocket transport functionality including connection,
+//! message passing, error handling, and reconnection scenarios.
+
 use aura_core::{AuraError, DeviceId};
-use aura_transport::{WebSocketConfig, WebSocketConnection, WebSocketTransport};
+use aura_transport::{WebSocketConfig, WebSocketTransport};
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -18,8 +24,8 @@ async fn test_websocket_transport_basic() {
         ..WebSocketConfig::default()
     };
 
-    let transport1 = WebSocketTransport::new(device1.clone(), config1);
-    let transport2 = WebSocketTransport::new(device2.clone(), config2);
+    let transport1 = WebSocketTransport::new(device1, config1);
+    let transport2 = WebSocketTransport::new(device2, config2);
 
     // Start server on transport1
     let mut server1 = transport1
@@ -48,7 +54,7 @@ async fn test_websocket_transport_basic() {
     // Test sending message from client to server
     let test_message = b"Hello from client";
     client_conn
-        .send(device1.clone(), test_message)
+        .send(device1, test_message)
         .await
         .expect("Failed to send message");
 
@@ -65,7 +71,7 @@ async fn test_websocket_transport_basic() {
     // Test sending message from server to client
     let response_message = b"Hello from server";
     server_conn
-        .send(device2.clone(), response_message)
+        .send(device2, response_message)
         .await
         .expect("Failed to send response");
 
@@ -93,7 +99,7 @@ async fn test_websocket_message_size_limit() {
         ..WebSocketConfig::default()
     };
 
-    let transport = WebSocketTransport::new(device_id.clone(), config);
+    let transport = WebSocketTransport::new(device_id, config);
     let mut server = transport
         .start_server()
         .await
@@ -115,14 +121,14 @@ async fn test_websocket_message_size_limit() {
 
     // Try to send a message that exceeds the size limit
     let large_message = vec![0u8; 200]; // Larger than the 100 byte limit
-    let result = client_conn.send(device_id.clone(), &large_message).await;
+    let result = client_conn.send(device_id, &large_message).await;
 
     assert!(result.is_err(), "Should fail to send oversized message");
 
     // Send a message within the size limit
     let small_message = vec![0u8; 50];
     client_conn
-        .send(device_id.clone(), &small_message)
+        .send(device_id, &small_message)
         .await
         .expect("Should succeed with small message");
 
@@ -146,7 +152,7 @@ async fn test_websocket_connection_lifecycle() {
         ..WebSocketConfig::default()
     };
 
-    let transport = WebSocketTransport::new(device_id.clone(), config);
+    let transport = WebSocketTransport::new(device_id, config);
 
     // Test that transport is created successfully
     assert_eq!(transport.device_id(), device_id);
@@ -179,8 +185,8 @@ async fn test_websocket_envelope_format() {
     let device2 = DeviceId::from("receiver");
 
     let envelope = WebSocketEnvelope {
-        from: device1.clone(),
-        to: device2.clone(),
+        from: device1,
+        to: device2,
         payload: b"test payload".to_vec(),
         sequence: 42,
         timestamp: 1234567890,
@@ -212,7 +218,7 @@ async fn test_websocket_concurrent_connections() {
         ..WebSocketConfig::default()
     };
 
-    let transport = WebSocketTransport::new(server_device.clone(), config);
+    let transport = WebSocketTransport::new(server_device, config);
     let mut server = transport
         .start_server()
         .await
@@ -227,7 +233,7 @@ async fn test_websocket_concurrent_connections() {
     let client_tasks = (0..3)
         .map(|i| {
             let device_id = DeviceId::from(format!("client_{}", i).as_str());
-            let transport = WebSocketTransport::new(device_id.clone(), WebSocketConfig::default());
+            let transport = WebSocketTransport::new(device_id, WebSocketConfig::default());
             let url = url.to_string();
 
             tokio::spawn(async move {

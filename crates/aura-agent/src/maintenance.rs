@@ -8,14 +8,14 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use aura_core::{
-    from_slice, hash_canonical,
+    hash_canonical,
     maintenance::{AdminReplaced, MaintenanceEvent},
     serialization::to_vec,
     tree::{Epoch as TreeEpoch, LeafId, NodeIndex, Policy, Snapshot},
     AccountId, AuraError, DeviceId, Hash32,
 };
 use aura_protocol::effects::{
-    AuraEffectSystem, ConsoleEffects, LedgerEffects, StorageEffects, TimeEffects, TreeEffects,
+    AuraEffectSystem, ConsoleEffects, LedgerEffects, StorageEffects, TreeEffects,
 };
 use aura_sync::{SnapshotManager, WriterFence};
 use serde::{Deserialize, Serialize};
@@ -335,12 +335,14 @@ impl MaintenanceController {
         }
 
         drop(fence_guard);
-        effects.log_info(&format!(
-            "Snapshot {} committed at epoch {} (digest {:02x?})",
-            proposal_id,
-            snapshot.epoch,
-            &state_digest[..4]
-        ));
+        effects
+            .log_info(&format!(
+                "Snapshot {} committed at epoch {} (digest {:02x?})",
+                proposal_id,
+                snapshot.epoch,
+                &state_digest[..4]
+            ))
+            .await;
 
         Ok(SnapshotOutcome {
             proposal_id,
@@ -379,10 +381,12 @@ impl MaintenanceController {
             );
         }
 
-        effects.log_info(&format!(
+        effects
+            .log_info(&format!(
             "Admin replacement stub recorded for account {} (new admin {}, activation epoch {})",
             account_id, new_admin, activation_epoch
-        ));
+        ))
+            .await;
         Ok(())
     }
 
@@ -460,10 +464,10 @@ impl MaintenanceController {
             .unwrap_or_default();
         let mut deleted_count = 0u32;
         for key in keys {
-            if !key.ends_with(&keep.to_string()) {
-                if StorageEffects::remove(effects, &key).await.is_ok() {
-                    deleted_count += 1;
-                }
+            if !key.ends_with(&keep.to_string())
+                && StorageEffects::remove(effects, &key).await.is_ok()
+            {
+                deleted_count += 1;
             }
         }
         Ok(deleted_count)
@@ -484,11 +488,9 @@ impl MaintenanceController {
             .unwrap_or_default();
         for key in keys {
             if let Some(epoch) = Self::parse_epoch_suffix(&key) {
-                if epoch < snapshot_epoch {
-                    if StorageEffects::remove(effects, &key).await.is_ok() {
-                        deleted_items += 1;
-                        estimated_freed_bytes += 64; // Epoch marker size estimate
-                    }
+                if epoch < snapshot_epoch && StorageEffects::remove(effects, &key).await.is_ok() {
+                    deleted_items += 1;
+                    estimated_freed_bytes += 64; // Epoch marker size estimate
                 }
             }
         }

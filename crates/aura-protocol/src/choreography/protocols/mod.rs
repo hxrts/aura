@@ -18,24 +18,15 @@
 //! ensures eventual consistency across replicas while minimizing network overhead
 //! through incremental synchronization.
 //!
-//! ### Threshold Cryptography
+//! ### Coordination Primitives Only
 //!
-//! The frost module contains legacy FROST threshold signature choreographies that
-//! have been superseded by the comprehensive aura-frost crate. New implementations
-//! should use aura_frost::threshold_signing::FrostChoreography instead. The legacy
-//! choreography implements the standard FROST protocol with a coordinator role that
-//! aggregates signatures and multiple signer roles that contribute partial signatures.
-//! The protocol proceeds through initialization, commitment exchange, signature share
-//! generation, and aggregation phases.
-//!
-//! The threshold_ceremony module implements privacy-preserving threshold signing
-//! ceremonies for tree operations. This protocol coordinates FROST signing without
-//! revealing signer identities in the resulting attested operation. The ceremony
-//! proceeds through four phases (initialization with sign requests, nonce commitment
-//! exchange, partial signature generation, and attested result distribution). The
-//! coordinator aggregates partial signatures while observers receive results without
-//! participating in signing. Parent binding prevents replay attacks by tying each
-//! signature to its tree context.
+//! This layer (aura-protocol) contains only coordination primitives and infrastructure
+//! protocols. Domain-specific threshold cryptography protocols are implemented in the
+//! aura-frost crate (Layer 5) according to the clean architecture principles. The
+//! aura-frost crate contains complete threshold signature choreographies including
+//! FROST key generation, threshold signing ceremonies, and key resharing protocols.
+//! Those domain-specific protocols use the coordination infrastructure from this
+//! layer but implement their business logic in the appropriate feature layer.
 //!
 //! ### Tree Operations
 //!
@@ -92,7 +83,7 @@ pub mod anti_entropy;
 // pub mod frost; // REMOVED: Superseded by aura-frost crate
 pub mod ota;
 pub mod snapshot;
-pub mod threshold_ceremony;
+// pub mod threshold_ceremony; // MOVED: Now implemented in aura-frost crate
 pub mod tree_coordination;
 
 // Re-export specific protocol types to avoid macro-generated conflicts

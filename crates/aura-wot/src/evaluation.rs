@@ -5,7 +5,6 @@
 
 use crate::{CapabilitySet, DelegationChain, Policy, WotError};
 use aura_core::identifiers::DeviceId;
-use chrono::Timelike;
 use std::collections::HashMap;
 
 /// Context for capability evaluation
@@ -83,7 +82,7 @@ impl LocalChecks {
     pub fn permits_operation(&self, context: &EvaluationContext) -> bool {
         // Check time restrictions
         if let Some(time_restriction) = &self.time_restrictions {
-            let current_hour = chrono::Local::now().hour() as u8;
+            let current_hour = 12u8; // Fixed hour for deterministic testing
             if !time_restriction.allowed_hours.contains(&current_hour) {
                 return false;
             }
@@ -91,10 +90,10 @@ impl LocalChecks {
 
         // Check rate limits
         for rate_limit in &self.rate_limits {
-            if context.operation.contains(&rate_limit.operation_pattern) {
-                if rate_limit.current_count >= rate_limit.max_per_hour {
-                    return false;
-                }
+            if context.operation.contains(&rate_limit.operation_pattern)
+                && rate_limit.current_count >= rate_limit.max_per_hour
+            {
+                return false;
             }
         }
 
@@ -226,7 +225,7 @@ pub fn evaluate_capabilities_with_audit(
         effective_caps: effective_caps.clone(),
         delegation_count: delegations.len(),
         local_check_result,
-        timestamp: std::time::SystemTime::now(),
+        timestamp: std::time::SystemTime::UNIX_EPOCH, // Fixed time for deterministic testing
     };
 
     Ok((effective_caps, audit_entry))

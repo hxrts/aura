@@ -3,9 +3,8 @@
 //! This module provides standardized helpers for creating and managing test ledgers
 //! (CRDT-based account ledgers) across the Aura test suite.
 
+use aura_core::hash::hash;
 use aura_core::{AccountId, DeviceId};
-use aura_core::effects::{RandomEffects, TimeEffects};
-use crate::Effects;
 use aura_journal::semilattice::ModernAccountState as AccountState;
 use aura_journal::{DeviceMetadata, DeviceType};
 use ed25519_dalek::SigningKey;
@@ -48,18 +47,15 @@ pub struct LedgerTestFixture {
 impl LedgerTestFixture {
     /// Create a new ledger test fixture with a specific account ID
     pub async fn new(account_id: AccountId) -> Self {
-        // Create a minimal AccountState for testing
-        let effects = Effects::for_test("ledger_test");
-        let key_bytes = effects.random_bytes_32().await;
-        let signing_key = SigningKey::from_bytes(&key_bytes);
-        let group_public_key = signing_key.verifying_key();
+        // Create a minimal AccountState for testing using deterministic approach
+        let (_, group_public_key) = crate::test_key_pair(42);
 
-        // Generate deterministic UUID from random bytes
-        let uuid_bytes = effects.random_bytes(16).await;
-        let uuid_array: [u8; 16] = uuid_bytes.try_into().unwrap();
-        let uuid = Uuid::from_bytes(uuid_array);
+        // Generate deterministic device UUID
+        let hash_input = format!("ledger-device-{:?}", account_id);
+        let hash_bytes = hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
 
-        let timestamp = effects.current_timestamp_millis().await;
+        let timestamp = 1000; // Default test timestamp
         let device_metadata = DeviceMetadata {
             device_id: DeviceId(uuid),
             device_name: "Test Device".to_string(),
@@ -89,8 +85,8 @@ impl LedgerTestFixture {
     /// Create a random ledger fixture
     pub async fn random() -> Self {
         let hash_input = "ledger-fixture-random";
-        let hash_bytes = blake3::hash(hash_input.as_bytes());
-        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let hash_bytes = hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         let account_id = AccountId(uuid);
         Self::new(account_id).await
     }
@@ -116,12 +112,9 @@ impl LedgerTestFixture {
         device_id: DeviceId,
         device_type: DeviceType,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let effects = Effects::for_test("add_device");
-        let key_bytes = effects.random_bytes_32().await;
-        let signing_key = SigningKey::from_bytes(&key_bytes);
-        let public_key = signing_key.verifying_key();
+        let (_, public_key) = crate::test_key_pair(42);
+        let timestamp = 1000; // Default test timestamp
 
-        let timestamp = effects.current_timestamp_millis().await;
         let _metadata = DeviceMetadata {
             device_id,
             device_name: format!("Device {:?}", device_id),
@@ -202,8 +195,8 @@ impl LedgerBuilder {
     pub async fn build(self) -> Result<LedgerTestFixture, Box<dyn std::error::Error>> {
         let account_id = self.account_id.unwrap_or_else(|| {
             let hash_input = "ledger-builder-account";
-            let hash_bytes = blake3::hash(hash_input.as_bytes());
-            let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+            let hash_bytes = hash(hash_input.as_bytes());
+            let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
             AccountId(uuid)
         });
 
@@ -212,8 +205,8 @@ impl LedgerBuilder {
         // Add devices to the ledger
         for i in 0..self.device_count {
             let hash_input = format!("ledger-builder-device-{}", i);
-            let hash_bytes = blake3::hash(hash_input.as_bytes());
-            let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+            let hash_bytes = hash(hash_input.as_bytes());
+            let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
             let device_id = DeviceId(uuid);
             let device_type = match i {
                 0 => DeviceType::Native,
@@ -274,8 +267,8 @@ pub mod ledger_helpers {
     pub async fn test_ledger_pair(
     ) -> Result<(LedgerTestFixture, LedgerTestFixture), Box<dyn std::error::Error>> {
         let hash_input = "ledger-pair";
-        let hash_bytes = blake3::hash(hash_input.as_bytes());
-        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let hash_bytes = hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         let account_id = AccountId(uuid);
         let ledger1 = LedgerBuilder::new()
             .with_account_id(account_id)
@@ -293,8 +286,8 @@ pub mod ledger_helpers {
     ) -> Result<(LedgerTestFixture, LedgerTestFixture, LedgerTestFixture), Box<dyn std::error::Error>>
     {
         let hash_input = "ledger-trio";
-        let hash_bytes = blake3::hash(hash_input.as_bytes());
-        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let hash_bytes = hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         let account_id = AccountId(uuid);
         let _ledger = LedgerBuilder::new()
             .with_account_id(account_id)

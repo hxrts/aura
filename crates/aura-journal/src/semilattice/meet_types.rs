@@ -105,8 +105,7 @@ impl CapabilitySet {
 
     /// Check if capability set has expired
     pub fn is_expired(&self, current_time: u64) -> bool {
-        self.expiry_time
-            .map_or(false, |expiry| current_time > expiry)
+        self.expiry_time.is_some_and(|expiry| current_time > expiry)
     }
 
     /// Check if capability allows specific resource access
@@ -196,11 +195,7 @@ impl TimeWindow {
 
     /// Get duration of the window in seconds
     pub fn duration(&self) -> u64 {
-        if self.end >= self.start {
-            self.end - self.start
-        } else {
-            0
-        }
+        self.end.saturating_sub(self.start)
     }
 
     /// Check if this window overlaps with another

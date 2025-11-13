@@ -66,6 +66,9 @@ impl MemorySessionHandler {
             .unwrap_or(0)
     }
 
+    /// Get current timestamp in milliseconds
+    /// TODO: Refactor to use TimeEffects from the effect system
+    #[allow(clippy::disallowed_methods)]
     fn current_timestamp(&self) -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

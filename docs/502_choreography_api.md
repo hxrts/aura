@@ -19,7 +19,7 @@ pub trait MyProtocolEffects: ConsoleEffects + CryptoEffects + NetworkEffects + T
 impl<T> MyProtocolEffects for T where T: ConsoleEffects + CryptoEffects + NetworkEffects + TimeEffects + JournalEffects {}
 
 /// Simple two-party request-response choreography
-aura_choreography! {
+choreography! {
     #[namespace = "my_protocol"]
     protocol RequestResponse {
         roles: Client, Server;
@@ -181,7 +181,7 @@ where
 {}
 
 /// Multi-party threshold signing choreography
-aura_choreography! {
+choreography! {
     #[namespace = "threshold_signing"]
     protocol ThresholdSigning {
         roles: Coordinator, Signer1, Signer2, Signer3;
@@ -439,7 +439,7 @@ mod tests {
     
     impl CryptoEffects for TestEffectHandler {
         async fn hash(&self, input: &[u8]) -> Vec<u8> {
-            blake3::hash(input).as_bytes().to_vec()
+            aura_core::hash::hash(input).to_vec()
         }
         
         async fn random_bytes(&self, len: usize) -> Vec<u8> {
@@ -447,7 +447,7 @@ mod tests {
         }
         
         async fn ed25519_sign(&self, _key: &[u8], message: &[u8]) -> Result<Vec<u8>, aura_core::AuraError> {
-            Ok(blake3::hash(message).as_bytes().to_vec())
+            Ok(aura_core::hash::hash(message).to_vec())
         }
         
         async fn ed25519_verify(&self, _public_key: &[u8], _message: &[u8], _signature: &[u8]) -> Result<bool, aura_core::AuraError> {

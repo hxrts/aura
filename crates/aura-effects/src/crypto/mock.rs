@@ -4,6 +4,7 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{CryptoEffects, CryptoError, RandomEffects};
+use aura_core::hash::hash;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -19,8 +20,6 @@ pub struct MockCryptoHandler {
 
 #[derive(Default)]
 struct MockResponses {
-    /// Pre-configured hash values for specific inputs
-    hashes: HashMap<Vec<u8>, [u8; 32]>,
     /// Pre-configured signatures for specific data
     signatures: HashMap<Vec<u8>, Vec<u8>>,
     /// Pre-configured verification results
@@ -35,11 +34,6 @@ impl MockCryptoHandler {
             counter: Arc::new(Mutex::new(0)),
             responses: Arc::new(Mutex::new(MockResponses::default())),
         }
-    }
-
-    /// Set a pre-configured hash result for specific input
-    pub fn set_hash_result(&self, input: Vec<u8>, hash: [u8; 32]) {
-        self.responses.lock().unwrap().hashes.insert(input, hash);
     }
 
     /// Set a pre-configured signature for specific data
@@ -125,25 +119,7 @@ impl RandomEffects for MockCryptoHandler {
 // Then implement CryptoEffects (which inherits from RandomEffects)
 #[async_trait]
 impl CryptoEffects for MockCryptoHandler {
-    async fn hash(&self, data: &[u8]) -> [u8; 32] {
-        // Check for pre-configured response
-        if let Some(hash) = self.responses.lock().unwrap().hashes.get(data) {
-            return *hash;
-        }
-
-        // Generate deterministic hash-like value using SHA256-like mixing
-        let mut hash = [0u8; 32];
-        for (i, &byte) in data.iter().enumerate() {
-            hash[i % 32] ^= byte.wrapping_add(i as u8);
-        }
-
-        // Mix with seed for determinism
-        for (i, h) in hash.iter_mut().enumerate() {
-            *h = h.wrapping_add((self.seed >> (i % 8)) as u8);
-        }
-
-        hash
-    }
+    // Note: Hashing is NOT an effect - use aura_core::hash::hash() instead
 
     async fn ed25519_sign(&self, data: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // Check for pre-configured response
@@ -194,9 +170,9 @@ impl CryptoEffects for MockCryptoHandler {
         let mut combined = Vec::new();
         combined.extend_from_slice(b"pubkey_derive");
         combined.extend_from_slice(private_key);
-        let hash = self.hash(&combined).await;
+        let hash_result = hash(&combined);
 
-        Ok(hash.to_vec())
+        Ok(hash_result.to_vec())
     }
 
     fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
@@ -224,24 +200,15 @@ impl CryptoEffects for MockCryptoHandler {
             .copied()
             .collect();
 
-        let hash = self.hash(&combined).await;
+        let hash_result = hash(&combined);
         let mut output = vec![0u8; output_len];
 
         // Expand the hash to fill the output length
         for (i, byte) in output.iter_mut().enumerate() {
-            *byte = hash[i % 32] ^ (i as u8);
+            *byte = hash_result[i % 32] ^ (i as u8);
         }
 
         Ok(output)
-    }
-
-    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
-        // Mock HMAC using deterministic approach
-        let mut combined = Vec::new();
-        combined.extend_from_slice(key);
-        combined.extend_from_slice(data);
-        combined.extend_from_slice(b"HMAC");
-        self.hash(&combined).await
     }
 
     async fn derive_key(

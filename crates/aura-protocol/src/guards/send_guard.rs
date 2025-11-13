@@ -4,7 +4,9 @@
 //! and docs/101_auth_authz.md, providing the CapGuard → FlowGuard → JournalCoupler sequence
 //! that enforces both authorization and budget constraints at every protocol send site.
 
-use crate::effects::system::AuraEffectSystem;
+#![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
+
+use crate::effects::AuraEffectSystem;
 use crate::guards::{flow::FlowGuard, ProtocolGuard};
 use aura_core::{relationships::ContextId, AuraError, AuraResult, DeviceId, Receipt};
 use aura_wot::{Capability, EffectiveCapabilitySet};
@@ -266,7 +268,7 @@ impl SendGuardChain {
             Ok(result.receipt)
         } else {
             Err(AuraError::permission_denied(
-                &result
+                result
                     .denial_reason
                     .unwrap_or_else(|| "Send authorization failed for unknown reason".to_string()),
             ))
@@ -313,8 +315,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_guard_chain_creation() {
-        let capability = Capability::from_string("message:send".to_string());
-        let context = ContextId::new(AccountId::from_bytes([1u8; 32]), 1);
+        let capability = Capability::Execute {
+            operation: "message:send".to_string(),
+        };
+        let context = ContextId::new(AccountId::from_bytes([1u8; 32]).to_string());
         let peer = DeviceId::from_bytes([2u8; 32]);
         let cost = 100;
 
@@ -330,8 +334,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_send_guard_convenience() {
-        let capability = Capability::from_string("message:send".to_string());
-        let context = ContextId::new(AccountId::from_bytes([1u8; 32]), 1);
+        let capability = Capability::Execute {
+            operation: "message:send".to_string(),
+        };
+        let context = ContextId::new(AccountId::from_bytes([1u8; 32]).to_string());
         let peer = DeviceId::from_bytes([2u8; 32]);
         let cost = 50;
 
@@ -345,8 +351,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_denial_reason_formatting() {
-        let capability = Capability::from_string("message:send".to_string());
-        let context = ContextId::new(AccountId::from_bytes([1u8; 32]), 1);
+        let capability = Capability::Execute {
+            operation: "message:send".to_string(),
+        };
+        let context = ContextId::new(AccountId::from_bytes([1u8; 32]).to_string());
         let peer = DeviceId::from_bytes([2u8; 32]);
         let guard = SendGuardChain::new(capability.clone(), context, peer, 100);
 

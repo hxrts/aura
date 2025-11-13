@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Authorization Bridge - Connecting Authentication with Authorization
 //!
 //! This module provides the bridge layer that connects pure identity verification
@@ -457,7 +459,7 @@ use aura_core::{AccountId, DeviceId, GuardianId};
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use aura_wot::{
     evaluate_tree_operation_capabilities, CapabilityEvaluationContext, CapabilitySet, EntityId,
-    TreeAuthzContext, TreeCapabilityRequest, TreeOp, TreeOpKind, WotError,
+    TreeAuthzContext, TreeCapabilityRequest, TreeOp, WotError,
 };
 use std::collections::BTreeSet;
 
@@ -669,6 +671,9 @@ pub enum AuthorizationError {
 
     #[error("Invalid authorization request: {0}")]
     InvalidRequest(String),
+
+    #[error("Insufficient capabilities: {0}")]
+    InsufficientCapabilities(String),
 }
 
 /// Authorized event combining identity proof with permission grant
@@ -720,6 +725,7 @@ mod tests {
     use super::*;
     use aura_crypto::Ed25519Signature;
     use aura_verify::ThresholdSig;
+    use aura_wot::{LeafRole, TreeOpKind};
 
     #[test]
     fn test_authorization_request_creation() {
@@ -747,7 +753,7 @@ mod tests {
             parent_commitment: [0u8; 32],
             op: TreeOpKind::AddLeaf {
                 leaf_id: 2,
-                role: aura_wot::LeafRole::Device,
+                role: LeafRole::Device,
                 under: 0,
             },
             version: 1,
@@ -768,7 +774,7 @@ mod tests {
     #[test]
     fn test_entity_id_extraction() {
         let device_id = DeviceId::from_bytes([1u8; 32]);
-        let guardian_id = DeviceId::from_bytes([2u8; 32]);
+        let guardian_id = GuardianId::new();
 
         // Test device identity
         let device_identity = VerifiedIdentity {

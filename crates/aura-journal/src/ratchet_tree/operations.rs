@@ -290,9 +290,7 @@ impl TreeOperationProcessor {
 
     /// Compute hash for operation deduplication
     fn compute_operation_hash(&self, attested: &AttestedOp) -> Hash32 {
-        use blake3::Hasher;
-
-        let mut hasher = Hasher::new();
+        let mut hasher = aura_core::hash::hasher();
 
         // Hash operation content
         hasher.update(&attested.op.parent_epoch.to_le_bytes());
@@ -325,10 +323,7 @@ impl TreeOperationProcessor {
             }
         }
 
-        let hash = hasher.finalize();
-        let mut result = [0u8; 32];
-        result.copy_from_slice(hash.as_bytes());
-        Hash32(result)
+        Hash32(hasher.finalize())
     }
 }
 
@@ -495,7 +490,11 @@ mod tests {
     use aura_core::{LeafId, LeafNode, LeafRole, TreeOp, TreeOpKind};
 
     fn create_test_leaf(id: u32) -> LeafNode {
-        LeafNode::new_device(LeafId(id), aura_core::DeviceId(uuid::Uuid::new_v4()), vec![id as u8; 32])
+        LeafNode::new_device(
+            LeafId(id),
+            aura_core::DeviceId(uuid::Uuid::from_bytes([9u8; 16])),
+            vec![id as u8; 32],
+        )
     }
 
     async fn create_test_operation(leaf_id: u32, parent_epoch: u64) -> AttestedOp {

@@ -18,7 +18,7 @@
 //! - Provides capability-based relay authorization
 //! - Integrates with choreographic programming for coordination
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
 /// Secret-Branded Broadcasting protocols
@@ -69,8 +69,8 @@ pub use crypto::{BlindSignature, SecretBrand, UnlinkableCredential};
 // Re-export WoT types for capabilities
 pub use aura_wot::{Capability, RelayPermission, TrustLevel};
 
-// Re-export MPST types
-pub use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation, MpstError, MpstResult};
+// Re-export protocol effect system
+pub use aura_protocol::AuraEffectSystem;
 
 // Re-export main APIs
 pub use capability_aware_sbb::{

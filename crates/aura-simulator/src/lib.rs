@@ -86,15 +86,21 @@ pub mod context;
 // Scenario definitions
 pub mod scenario;
 
+// Testkit integration bridge
+pub mod testkit_bridge;
+
 // Re-export core middleware types for external usage
 pub use middleware::{
     ByzantineStrategy, ChaosCoordinationMiddleware, ChaosStrategy, FaultSimulationMiddleware,
-    FaultType, LogLevel, NetworkConfig, PropertyCheckingMiddleware, PropertyViolationType, Result,
+    FaultType, LogLevel, NetworkConfig, PerformanceMetrics, PropertyCheckingMiddleware, PropertyViolationType, Result,
     ScenarioInjectionMiddleware, SimulationOutcome, SimulatorConfig, SimulatorContext,
     SimulatorError, SimulatorHandler, SimulatorMiddleware, SimulatorMiddlewareStack,
-    SimulatorOperation, SimulatorStackBuilder, StateInspectionMiddleware, StateQuery, TimeConfig,
-    TimeControlAction, TimeControlMiddleware,
+    SimulatorOperation, SimulatorStackBuilder, StateInspectionMiddleware, StateQuery, StatelessEffectsMiddleware,
+    TimeConfig, TimeControlAction, TimeControlMiddleware,
 };
+
+// Re-export testkit bridge
+pub use testkit_bridge::{TestkitSimulatorBridge, MiddlewareConfig};
 
 // Re-export handler implementations
 pub use middleware::handler::{CoreSimulatorHandler, NoOpSimulatorHandler};

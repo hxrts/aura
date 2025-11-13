@@ -175,7 +175,7 @@ impl JournalMap {
     pub fn current_root_commitment(&self) -> Option<Commitment> {
         self.latest_epoch()
             .and_then(|epoch| self.ops.get(&epoch))
-            .and_then(|op| get_root_commitment(op))
+            .and_then(get_root_commitment)
     }
 
     // === Mutation Methods ===
@@ -254,6 +254,7 @@ impl JournalMap {
         if self.tree_cache.is_none() {
             self.tree_cache = Some(RatchetTree::new());
         }
+        #[allow(clippy::unwrap_used)]
         Ok(self.tree_cache.as_ref().unwrap())
     }
 
@@ -396,7 +397,7 @@ mod tests {
     #[test]
     fn test_intent_observed_remove_semantics() {
         use crate::ledger::intent::{Intent, Priority};
-        use aura_core::tree::{LeafNode, LeafRole, TreeOpKind};
+        use aura_core::tree::{LeafNode, TreeOpKind};
 
         let mut journal1 = JournalMap::new();
         let mut journal2 = JournalMap::new();
@@ -405,7 +406,7 @@ mod tests {
             TreeOpKind::AddLeaf {
                 leaf: LeafNode::new_device(
                     aura_core::tree::LeafId(0),
-                    aura_core::DeviceId(uuid::Uuid::new_v4()),
+                    aura_core::DeviceId(uuid::Uuid::from_bytes([3u8; 16])),
                     vec![0u8; 32],
                 ),
                 under: NodeIndex(0),
@@ -413,7 +414,7 @@ mod tests {
             vec![],
             aura_core::Hash32([0u8; 32]),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([4u8; 16])),
             1000,
         );
 

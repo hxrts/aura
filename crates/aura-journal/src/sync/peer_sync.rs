@@ -382,10 +382,11 @@ impl PeerSyncManager {
 
         // Check if peer can sync now
         if !peer_state.can_sync_now() {
-            return Err(PeerSyncError::BackoffActive {
-                peer_id,
-                retry_at: peer_state.backoff_until.unwrap(),
-            });
+            #[allow(clippy::expect_used)]
+            let retry_at = peer_state
+                .backoff_until
+                .expect("backoff_until must be Some when can_sync_now is false");
+            return Err(PeerSyncError::BackoffActive { peer_id, retry_at });
         }
 
         // Check retry limit
@@ -527,7 +528,7 @@ impl PeerSyncManager {
 mod tests {
     use super::*;
     use crate::sync::{PeerInfo, PeerMetrics};
-    use aura_core::identifiers::{AccountId, DeviceId};
+    use aura_core::identifiers::DeviceId;
     fn create_test_peer_info(peer_id: DeviceId) -> PeerInfo {
         PeerInfo {
             device_id: peer_id,
@@ -545,7 +546,7 @@ mod tests {
 
     #[test]
     fn test_peer_sync_state_creation() {
-        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let peer_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let peer_info = create_test_peer_info(peer_id);
         let state = PeerSyncState::new(peer_info);
 
@@ -557,7 +558,7 @@ mod tests {
 
     #[test]
     fn test_backoff_calculation() {
-        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let peer_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let peer_info = create_test_peer_info(peer_id);
         let mut state = PeerSyncState::new(peer_info);
 
@@ -590,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_sync_priority_calculation() {
-        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let peer_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let peer_info = create_test_peer_info(peer_id);
         let mut state = PeerSyncState::new(peer_info);
 
@@ -619,7 +620,7 @@ mod tests {
         let mut manager =
             PeerSyncManager::new(3, Duration::from_millis(100), Duration::from_secs(30), 0.1);
 
-        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let peer_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let peer_info = create_test_peer_info(peer_id);
 
         // Add peer

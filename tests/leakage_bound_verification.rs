@@ -17,43 +17,43 @@ use tokio;
 async fn test_comprehensive_leakage_bounds() {
     // Test 1: External leakage bounds (ℓ_ext)
     test_external_leakage_bounds().await.unwrap();
-    
-    // Test 2: Neighbor leakage bounds (ℓ_ngh)  
+
+    // Test 2: Neighbor leakage bounds (ℓ_ngh)
     test_neighbor_leakage_bounds().await.unwrap();
-    
+
     // Test 3: Group leakage bounds (ℓ_grp)
     test_group_leakage_bounds().await.unwrap();
-    
+
     // Test 4: DKD context isolation leakage
     test_dkd_context_isolation_leakage().await.unwrap();
-    
+
     // Test 5: Protocol-specific leakage bounds
     test_protocol_specific_leakage_bounds().await.unwrap();
-    
+
     // Test 6: Cumulative leakage tracking
     test_cumulative_leakage_tracking().await.unwrap();
-    
+
     // Test 7: Leakage budget enforcement
     test_leakage_budget_enforcement().await.unwrap();
-    
+
     println!("✓ All leakage bound verification tests passed");
 }
 
 /// Test external leakage bounds (ℓ_ext = 0 for DKD isolation)
 async fn test_external_leakage_bounds() -> aura_core::AuraResult<()> {
     let mut leakage_tracker = LeakageTracker::new();
-    
+
     // Create DKD-isolated contexts - external leakage should be zero
     let dkd_contexts = vec![
         create_dkd_context("search_query", SbbPrivacyLevel::FullPrivacy).await?,
         create_dkd_context("recovery_protocol", SbbPrivacyLevel::FullPrivacy).await?,
         create_dkd_context("tree_operation", SbbPrivacyLevel::FullPrivacy).await?,
     ];
-    
+
     for context in &dkd_contexts {
         leakage_tracker.register_context(context.clone()).await?;
     }
-    
+
     // Execute various operations within DKD contexts
     let operations = vec![
         // Search operations
@@ -67,7 +67,7 @@ async fn test_external_leakage_bounds() -> aura_core::AuraResult<()> {
                 ("result_count".to_string(), "10".to_string()),
             ]),
         },
-        
+
         // Recovery operations
         LeakageOperation {
             operation_type: "guardian_recovery".to_string(),
@@ -79,7 +79,7 @@ async fn test_external_leakage_bounds() -> aura_core::AuraResult<()> {
                 ("guardians".to_string(), "3".to_string()),
             ]),
         },
-        
+
         // Tree operations
         LeakageOperation {
             operation_type: "tree_consensus".to_string(),
@@ -92,15 +92,15 @@ async fn test_external_leakage_bounds() -> aura_core::AuraResult<()> {
             ]),
         },
     ];
-    
+
     // Execute operations and track leakage
     for operation in operations {
         let leakage = leakage_tracker.execute_operation_with_tracking(operation).await?;
-        
+
         // Verify external leakage is zero for DKD-isolated operations
         verify_external_leakage_bound(&leakage, 0.0)?;
     }
-    
+
     println!("✓ External leakage bounds (ℓ_ext = 0) verified for DKD isolation");
     Ok(())
 }
@@ -108,7 +108,7 @@ async fn test_external_leakage_bounds() -> aura_core::AuraResult<()> {
 /// Test neighbor leakage bounds (ℓ_ngh = log(n) or similar bounds)
 async fn test_neighbor_leakage_bounds() -> aura_core::AuraResult<()> {
     let mut leakage_tracker = LeakageTracker::new();
-    
+
     // Test different neighbor leakage scenarios
     let test_scenarios = vec![
         // Search result leakage: ℓ_ngh = log(|results|)
@@ -119,7 +119,7 @@ async fn test_neighbor_leakage_bounds() -> aura_core::AuraResult<()> {
             expected_bound: (25.0_f64).log2(), // log(|results|)
             bound_description: "log(|results|)".to_string(),
         },
-        
+
         // Tree operation leakage: ℓ_ngh = log(|participants|)
         NeighborLeakageScenario {
             operation_type: "tree_operation".to_string(),
@@ -128,7 +128,7 @@ async fn test_neighbor_leakage_bounds() -> aura_core::AuraResult<()> {
             expected_bound: (8.0_f64).log2(), // log(|participants|)
             bound_description: "log(|participants|)".to_string(),
         },
-        
+
         // GC operation leakage: ℓ_ngh = log(|quorum|)
         NeighborLeakageScenario {
             operation_type: "garbage_collection".to_string(),
@@ -138,15 +138,15 @@ async fn test_neighbor_leakage_bounds() -> aura_core::AuraResult<()> {
             bound_description: "log(|quorum|)".to_string(),
         },
     ];
-    
+
     for scenario in test_scenarios {
         let context = create_neighbor_aware_context(
             &scenario.operation_type,
             scenario.participant_count,
         ).await?;
-        
+
         leakage_tracker.register_context(context.clone()).await?;
-        
+
         let operation = LeakageOperation {
             operation_type: scenario.operation_type.clone(),
             context_id: context.context_id,
@@ -157,9 +157,9 @@ async fn test_neighbor_leakage_bounds() -> aura_core::AuraResult<()> {
                 ("result_count".to_string(), scenario.result_count.to_string()),
             ]),
         };
-        
+
         let leakage = leakage_tracker.execute_operation_with_tracking(operation).await?;
-        
+
         // Verify neighbor leakage is within bounds
         verify_neighbor_leakage_bound(
             &leakage,
@@ -167,7 +167,7 @@ async fn test_neighbor_leakage_bounds() -> aura_core::AuraResult<()> {
             &scenario.bound_description,
         )?;
     }
-    
+
     println!("✓ Neighbor leakage bounds (ℓ_ngh = log(n)) verified");
     Ok(())
 }
@@ -175,7 +175,7 @@ async fn test_neighbor_leakage_bounds() -> aura_core::AuraResult<()> {
 /// Test group leakage bounds (ℓ_grp = full within authorized group)
 async fn test_group_leakage_bounds() -> aura_core::AuraResult<()> {
     let mut leakage_tracker = LeakageTracker::new();
-    
+
     // Test different group leakage policies
     let group_scenarios = vec![
         // Guardian group: full information sharing within group
@@ -185,7 +185,7 @@ async fn test_group_leakage_bounds() -> aura_core::AuraResult<()> {
             leakage_policy: GroupLeakagePolicy::Full,
             expected_leakage: 1.0, // Full information sharing
         },
-        
+
         // Device-to-device group: limited information sharing
         GroupLeakageScenario {
             group_type: "device_group".to_string(),
@@ -193,7 +193,7 @@ async fn test_group_leakage_bounds() -> aura_core::AuraResult<()> {
             leakage_policy: GroupLeakagePolicy::Limited(0.5),
             expected_leakage: 0.5, // Limited sharing
         },
-        
+
         // Anonymous group: no information sharing
         GroupLeakageScenario {
             group_type: "anonymous_group".to_string(),
@@ -202,16 +202,16 @@ async fn test_group_leakage_bounds() -> aura_core::AuraResult<()> {
             expected_leakage: 0.0, // No group sharing
         },
     ];
-    
+
     for scenario in group_scenarios {
         let context = create_group_context(
             &scenario.group_type,
             scenario.group_size,
             scenario.leakage_policy.clone(),
         ).await?;
-        
+
         leakage_tracker.register_context(context.clone()).await?;
-        
+
         let operation = LeakageOperation {
             operation_type: format!("{}_operation", scenario.group_type),
             context_id: context.context_id,
@@ -222,13 +222,13 @@ async fn test_group_leakage_bounds() -> aura_core::AuraResult<()> {
                 ("group_size".to_string(), scenario.group_size.to_string()),
             ]),
         };
-        
+
         let leakage = leakage_tracker.execute_operation_with_tracking(operation).await?;
-        
+
         // Verify group leakage matches policy
         verify_group_leakage_bound(&leakage, scenario.expected_leakage, &scenario.group_type)?;
     }
-    
+
     println!("✓ Group leakage bounds (ℓ_grp = full/limited/none) verified");
     Ok(())
 }
@@ -236,28 +236,28 @@ async fn test_group_leakage_bounds() -> aura_core::AuraResult<()> {
 /// Test DKD context isolation prevents leakage between contexts
 async fn test_dkd_context_isolation_leakage() -> aura_core::AuraResult<()> {
     let mut leakage_tracker = LeakageTracker::new();
-    
+
     // Create isolated DKD contexts
     let context1 = create_dkd_context("context_1", SbbPrivacyLevel::FullPrivacy).await?;
     let context2 = create_dkd_context("context_2", SbbPrivacyLevel::FullPrivacy).await?;
     let context3 = create_dkd_context("context_3", SbbPrivacyLevel::FullPrivacy).await?;
-    
+
     leakage_tracker.register_context(context1.clone()).await?;
     leakage_tracker.register_context(context2.clone()).await?;
     leakage_tracker.register_context(context3.clone()).await?;
-    
+
     // Execute operations in each context
     let operations = vec![
         (context1.context_id, "search_query_1"),
-        (context2.context_id, "recovery_protocol_1"), 
+        (context2.context_id, "recovery_protocol_1"),
         (context3.context_id, "tree_operation_1"),
         (context1.context_id, "search_query_2"),
         (context2.context_id, "recovery_protocol_2"),
         (context3.context_id, "tree_operation_2"),
     ];
-    
+
     let mut context_leakages = HashMap::new();
-    
+
     for (context_id, operation_name) in operations {
         let operation = LeakageOperation {
             operation_type: operation_name.to_string(),
@@ -266,14 +266,14 @@ async fn test_dkd_context_isolation_leakage() -> aura_core::AuraResult<()> {
             privacy_level: "dkd_isolated".to_string(),
             operation_metadata: HashMap::new(),
         };
-        
+
         let leakage = leakage_tracker.execute_operation_with_tracking(operation).await?;
         context_leakages.entry(context_id).or_insert_with(Vec::new).push(leakage);
     }
-    
+
     // Verify cross-context isolation
     verify_context_isolation(&context_leakages)?;
-    
+
     println!("✓ DKD context isolation leakage bounds verified");
     Ok(())
 }
@@ -281,7 +281,7 @@ async fn test_dkd_context_isolation_leakage() -> aura_core::AuraResult<()> {
 /// Test protocol-specific leakage bounds
 async fn test_protocol_specific_leakage_bounds() -> aura_core::AuraResult<()> {
     let mut leakage_tracker = LeakageTracker::new();
-    
+
     // Test specific protocol leakage bounds from the formal model
     let protocol_tests = vec![
         // G_search protocol: ℓ_ext=0, ℓ_ngh=log(|results|), ℓ_grp=full
@@ -296,7 +296,7 @@ async fn test_protocol_specific_leakage_bounds() -> aura_core::AuraResult<()> {
                 ("privacy_context".to_string(), "dkd_isolated".to_string()),
             ]),
         },
-        
+
         // G_recovery protocol: ℓ_ext=0, ℓ_ngh=log(m), ℓ_grp=full
         ProtocolLeakageTest {
             protocol_name: "G_recovery".to_string(),
@@ -309,7 +309,7 @@ async fn test_protocol_specific_leakage_bounds() -> aura_core::AuraResult<()> {
                 ("privacy_context".to_string(), "group_isolated".to_string()),
             ]),
         },
-        
+
         // G_tree_op protocol: ℓ_ext=0, ℓ_ngh=log(k), ℓ_grp=full
         ProtocolLeakageTest {
             protocol_name: "G_tree_op".to_string(),
@@ -322,7 +322,7 @@ async fn test_protocol_specific_leakage_bounds() -> aura_core::AuraResult<()> {
                 ("threshold".to_string(), "3".to_string()),
             ]),
         },
-        
+
         // G_gc protocol: ℓ_ext=0, ℓ_ngh=log(k), ℓ_grp=full
         ProtocolLeakageTest {
             protocol_name: "G_gc".to_string(),
@@ -335,11 +335,11 @@ async fn test_protocol_specific_leakage_bounds() -> aura_core::AuraResult<()> {
             ]),
         },
     ];
-    
+
     for test in protocol_tests {
         let context = create_protocol_context(&test.protocol_name).await?;
         leakage_tracker.register_context(context.clone()).await?;
-        
+
         let operation = LeakageOperation {
             operation_type: test.protocol_name.clone(),
             context_id: context.context_id,
@@ -347,9 +347,9 @@ async fn test_protocol_specific_leakage_bounds() -> aura_core::AuraResult<()> {
             privacy_level: "protocol_specified".to_string(),
             operation_metadata: test.operation_params,
         };
-        
+
         let leakage = leakage_tracker.execute_operation_with_tracking(operation).await?;
-        
+
         // Verify protocol-specific bounds
         verify_protocol_leakage_bounds(
             &leakage,
@@ -359,7 +359,7 @@ async fn test_protocol_specific_leakage_bounds() -> aura_core::AuraResult<()> {
             test.expected_group,
         )?;
     }
-    
+
     println!("✓ Protocol-specific leakage bounds verified");
     Ok(())
 }
@@ -367,11 +367,11 @@ async fn test_protocol_specific_leakage_bounds() -> aura_core::AuraResult<()> {
 /// Test cumulative leakage tracking across operations
 async fn test_cumulative_leakage_tracking() -> aura_core::AuraResult<()> {
     let mut leakage_tracker = LeakageTracker::new();
-    
+
     // Create context with cumulative tracking
     let context = create_cumulative_tracking_context().await?;
     leakage_tracker.register_context(context.clone()).await?;
-    
+
     // Execute sequence of operations
     let operation_sequence = vec![
         ("search_1", 0.1, 0.3, 0.2),
@@ -380,11 +380,11 @@ async fn test_cumulative_leakage_tracking() -> aura_core::AuraResult<()> {
         ("recovery_1", 0.0, 0.5, 1.0),
         ("search_3", 0.1, 0.3, 0.0),
     ];
-    
+
     let mut cumulative_external = 0.0;
     let mut cumulative_neighbor = 0.0;
     let mut cumulative_group = 0.0;
-    
+
     for (op_name, ext_leak, ngh_leak, grp_leak) in operation_sequence {
         let operation = LeakageOperation {
             operation_type: op_name.to_string(),
@@ -397,14 +397,14 @@ async fn test_cumulative_leakage_tracking() -> aura_core::AuraResult<()> {
                 ("expected_grp_leak".to_string(), grp_leak.to_string()),
             ]),
         };
-        
+
         let leakage = leakage_tracker.execute_operation_with_tracking(operation).await?;
-        
+
         // Update cumulative totals
         cumulative_external += ext_leak;
         cumulative_neighbor = cumulative_neighbor.max(ngh_leak); // Max for neighbor leakage
         cumulative_group = cumulative_group.max(grp_leak); // Max for group leakage
-        
+
         // Verify cumulative leakage tracking
         let tracked_cumulative = leakage_tracker.get_cumulative_leakage(&context.context_id).await?;
         verify_cumulative_leakage_tracking(
@@ -414,7 +414,7 @@ async fn test_cumulative_leakage_tracking() -> aura_core::AuraResult<()> {
             cumulative_group,
         )?;
     }
-    
+
     println!("✓ Cumulative leakage tracking verified");
     Ok(())
 }
@@ -422,24 +422,24 @@ async fn test_cumulative_leakage_tracking() -> aura_core::AuraResult<()> {
 /// Test leakage budget enforcement
 async fn test_leakage_budget_enforcement() -> aura_core::AuraResult<()> {
     let mut leakage_tracker = LeakageTracker::new();
-    
+
     // Create context with strict leakage budget
     let budget = LeakageBudget {
         external: 0.5,  // Max 0.5 external leakage
         neighbor: 2.0,  // Max 2.0 neighbor leakage
         group: 1.0,     // Max 1.0 group leakage
     };
-    
+
     let context = create_budgeted_context(budget.clone()).await?;
     leakage_tracker.register_context(context.clone()).await?;
-    
+
     // Test operations within budget
     let within_budget_ops = vec![
         ("small_op_1", 0.1, 0.3, 0.2),
         ("small_op_2", 0.2, 0.4, 0.3),
         ("small_op_3", 0.1, 0.5, 0.1),
     ];
-    
+
     for (op_name, ext_leak, ngh_leak, grp_leak) in within_budget_ops {
         let operation = LeakageOperation {
             operation_type: op_name.to_string(),
@@ -448,12 +448,12 @@ async fn test_leakage_budget_enforcement() -> aura_core::AuraResult<()> {
             privacy_level: "budget_controlled".to_string(),
             operation_metadata: HashMap::new(),
         };
-        
+
         // Should succeed - within budget
         let result = leakage_tracker.execute_operation_with_tracking(operation).await;
         assert!(result.is_ok(), "Operation within budget should succeed");
     }
-    
+
     // Test operation that would exceed budget
     let exceed_budget_op = LeakageOperation {
         operation_type: "large_operation".to_string(),
@@ -464,15 +464,15 @@ async fn test_leakage_budget_enforcement() -> aura_core::AuraResult<()> {
             ("would_exceed_external".to_string(), "1.0".to_string()), // Would exceed 0.5 limit
         ]),
     };
-    
+
     // Should fail - exceeds budget
     let result = leakage_tracker.execute_operation_with_tracking(exceed_budget_op).await;
     assert!(result.is_err(), "Operation exceeding budget should fail");
-    
+
     if let Err(err) = result {
         assert!(err.to_string().contains("budget"), "Error should mention budget violation");
     }
-    
+
     println!("✓ Leakage budget enforcement verified");
     Ok(())
 }
@@ -574,7 +574,7 @@ async fn create_group_context(
         GroupLeakagePolicy::Limited(limit) => format!("limited_{}", limit),
         GroupLeakagePolicy::None => "none".to_string(),
     };
-    
+
     Ok(PrivacyContext {
         context_id: generate_context_id(&format!("group_{}_{}", group_type, group_size)),
         context_type: "group_bounded".to_string(),
@@ -627,15 +627,12 @@ fn create_test_devices(count: usize) -> Vec<DeviceId> {
 }
 
 fn generate_context_id(name: &str) -> ContextId {
-    use blake3::Hasher;
-    let mut hasher = Hasher::new();
-    hasher.update(b"leakage_test_context");
-    hasher.update(name.as_bytes());
-    hasher.update(&SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos().to_le_bytes());
-    let hash = hasher.finalize();
-    let mut context_id = [0u8; 32];
-    context_id.copy_from_slice(hash.as_bytes());
-    context_id
+    use aura_core::hash::hasher;
+    let mut h = hasher();
+    h.update(b"leakage_test_context");
+    h.update(name.as_bytes());
+    h.update(&SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos().to_le_bytes());
+    h.finalize()
 }
 
 // Verification functions
@@ -726,7 +723,7 @@ fn verify_cumulative_leakage_tracking(
     expected_group: f64,
 ) -> aura_core::AuraResult<()> {
     let tolerance = 1e-6;
-    
+
     if (tracked.total_external - expected_external).abs() > tolerance {
         return Err(aura_core::AuraError::privacy_violation(format!(
             "Cumulative external leakage tracking incorrect: {} vs {} (expected)",
@@ -734,7 +731,7 @@ fn verify_cumulative_leakage_tracking(
             expected_external
         )));
     }
-    
+
     if (tracked.max_neighbor - expected_neighbor).abs() > tolerance {
         return Err(aura_core::AuraError::privacy_violation(format!(
             "Cumulative neighbor leakage tracking incorrect: {} vs {} (expected)",
@@ -742,7 +739,7 @@ fn verify_cumulative_leakage_tracking(
             expected_neighbor
         )));
     }
-    
+
     if (tracked.max_group - expected_group).abs() > tolerance {
         return Err(aura_core::AuraError::privacy_violation(format!(
             "Cumulative group leakage tracking incorrect: {} vs {} (expected)",
@@ -750,7 +747,7 @@ fn verify_cumulative_leakage_tracking(
             expected_group
         )));
     }
-    
+
     Ok(())
 }
 
@@ -784,7 +781,7 @@ impl LeakageTracker {
             cumulative_tracking: HashMap::new(),
         }
     }
-    
+
     async fn register_context(&mut self, context: PrivacyContext) -> aura_core::AuraResult<()> {
         self.cumulative_tracking.insert(context.context_id, CumulativeLeakage {
             total_external: 0.0,
@@ -794,37 +791,37 @@ impl LeakageTracker {
         self.contexts.insert(context.context_id, context);
         Ok(())
     }
-    
+
     async fn execute_operation_with_tracking(
         &mut self,
         operation: LeakageOperation,
     ) -> aura_core::AuraResult<LeakageResult> {
         // Simulate leakage calculation based on operation
         let leakage = calculate_operation_leakage(&operation)?;
-        
+
         // Check budget constraints
         if let Some(context) = self.contexts.get(&operation.context_id) {
             if context.context_type == "budget_enforced" {
                 self.check_budget_constraints(&operation, &leakage)?;
             }
         }
-        
+
         // Update cumulative tracking
         if let Some(cumulative) = self.cumulative_tracking.get_mut(&operation.context_id) {
             cumulative.total_external += leakage.external_leakage;
             cumulative.max_neighbor = cumulative.max_neighbor.max(leakage.neighbor_leakage);
             cumulative.max_group = cumulative.max_group.max(leakage.group_leakage);
         }
-        
+
         Ok(leakage)
     }
-    
+
     async fn get_cumulative_leakage(&self, context_id: &ContextId) -> aura_core::AuraResult<CumulativeLeakage> {
         self.cumulative_tracking.get(context_id)
             .cloned()
             .ok_or_else(|| aura_core::AuraError::not_found("Context not found"))
     }
-    
+
     fn check_budget_constraints(
         &self,
         operation: &LeakageOperation,
@@ -880,7 +877,7 @@ fn calculate_operation_leakage(operation: &LeakageOperation) -> aura_core::AuraR
         },
         _ => (0.0, 1.0, 0.5),
     };
-    
+
     Ok(LeakageResult {
         external_leakage: external,
         neighbor_leakage: neighbor,

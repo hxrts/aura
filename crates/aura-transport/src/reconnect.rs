@@ -79,6 +79,7 @@ pub struct ReconnectCoordinator {
 
 /// Result of a reconnection attempt
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub enum ReconnectResult {
     /// Reconnection was successful
     Success {
@@ -362,7 +363,9 @@ impl ReconnectCoordinator {
         // - TLS handshake with device identity verification
         // - SecureChannel activation
 
-        let mock_peer_addr: SocketAddr = "192.168.1.100:8080".parse().unwrap();
+        let mock_peer_addr: SocketAddr = "192.168.1.100:8080"
+            .parse()
+            .map_err(|_| AuraError::network("Invalid mock peer address".to_string()))?;
 
         Ok(ReconnectResult::Success {
             channel_key: attempt.channel_key.clone(),
@@ -499,7 +502,7 @@ mod tests {
         let coordinator = ReconnectCoordinator::with_defaults(registry, Epoch::new(1));
 
         let context = ContextId::new("test_context");
-        let peer = DeviceId(uuid::Uuid::new_v4());
+        let peer = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let channel_key = ChannelKey::new(context, peer);
         let epoch = Epoch::new(2);
         let budget = FlowBudget::new(1000, epoch);
@@ -523,7 +526,7 @@ mod tests {
         let coordinator = ReconnectCoordinator::with_defaults(registry, Epoch::new(5));
 
         let context = ContextId::new("test_context");
-        let peer = DeviceId(uuid::Uuid::new_v4());
+        let peer = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let channel_key = ChannelKey::new(context, peer);
         let old_epoch = Epoch::new(3); // Earlier than current epoch
         let budget = FlowBudget::new(1000, old_epoch);

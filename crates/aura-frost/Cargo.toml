@@ -11,9 +11,9 @@ repository.workspace = true
 aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
 aura-crypto = { path = "../aura-crypto" }
+aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
-rumpsteak-aura = { workspace = true }
-rumpsteak-aura-choreography = { workspace = true }
+aura-protocol = { path = "../aura-protocol" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,6 +25,7 @@ tokio = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
 frost-ed25519 = { workspace = true }
+rumpsteak-aura-choreography = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-use super::context::AuraContext;
+use super::context_immutable::AuraContext;
 use super::{AuraHandlerError, EffectType, ExecutionMode};
 use aura_core::LocalSessionType;
 
@@ -18,18 +18,18 @@ use aura_core::LocalSessionType;
 pub trait AuraHandler: Send + Sync {
     /// Execute an effect with serialized parameters and return serialized result
     async fn execute_effect(
-        &mut self,
+        &self,
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        ctx: &mut AuraContext,
+        ctx: &AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError>;
 
     /// Execute a session type
     async fn execute_session(
-        &mut self,
+        &self,
         session: LocalSessionType,
-        ctx: &mut AuraContext,
+        ctx: &AuraContext,
     ) -> Result<(), AuraHandlerError>;
 
     /// Check if this handler supports a specific effect type
@@ -87,7 +87,7 @@ impl HandlerUtils {
         effect_type: EffectType,
         operation: &str,
         parameters: impl serde::Serialize,
-        ctx: &mut AuraContext,
+        ctx: &AuraContext,
     ) -> Result<T, AuraHandlerError>
     where
         T: serde::de::DeserializeOwned + Send + Sync,

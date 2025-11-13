@@ -3,6 +3,8 @@
 //! Implements a GSet (Grow-Only Set) CRDT for tracking discovered peers
 //! in the tree synchronization network. PeerView monotonically grows as
 //! new peers are discovered through anti-entropy or gossip.
+
+#![allow(clippy::disallowed_methods)] // TODO: Replace direct UUID calls with effect system
 //!
 //! ## Design Principles
 //!

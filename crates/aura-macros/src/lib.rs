@@ -1,19 +1,21 @@
+#![allow(clippy::type_complexity)]
+
 //! Aura Choreography Proc Macros
 //!
-//! This crate provides the `aura_choreography!` macro that enhances
+//! This crate provides the `choreography!` macro that enhances
 //! rumpsteak-aura choreographies with Aura-specific guard chain and
-//! journal coupling integration.
+//! journal coupling integration through a typed extension system.
 //!
-//! The macro is built as a wrapper around rumpsteak-aura's proven
-//! `choreography!` infrastructure, focusing on Aura-specific concerns
+//! The macro is built as a composable layer on top of rumpsteak-aura's proven
+//! choreographic infrastructure, focusing on Aura-specific concerns
 //! like capability guards, flow management, and journal integration.
 //!
 //! # Example
 //!
 //! ```ignore
-//! use aura_macros::aura_choreography;
+//! use aura_macros::choreography;
 //!
-//! aura_choreography! {
+//! choreography! {
 //!     #[namespace = "threshold_ceremony"]
 //!     protocol ThresholdCeremony {
 //!         roles: Coordinator, Signers;
@@ -34,48 +36,75 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::Result;
 
-mod annotations;
-mod codegen;
+mod extensions;
 mod parsing;
-mod wrapper;
+mod rumpsteak_wrapper;
 
-use wrapper::AuraChoreographyWrapper;
+use rumpsteak_wrapper::RumpsteakAuraWrapper;
 
-/// Aura choreography macro that wraps rumpsteak-aura with Aura-specific enhancements
+/// Aura choreography macro that enhances rumpsteak-aura with Aura-specific capabilities
 ///
-/// This macro takes a choreography specification with Aura-specific annotations
-/// and generates both standard rumpsteak-aura session types and Aura integration code
-/// including guard chains, flow management, and journal coupling.
+/// This is Aura's primary choreography macro that extends rumpsteak-aura's choreographic
+/// programming with capability guards, flow cost management, and journal coupling through
+/// a typed extension system.
 ///
 /// # Supported Annotations
 ///
-/// - `@guard_capability = "capability_name"` - Required capability for the operation
-/// - `@flow_cost = <number>` - Flow cost for the communication
-/// - `@journal_facts = "description"` - Journal facts to add
-/// - `@journal_merge = true` - Enable journal merge operation
+/// - `guard_capability = "capability_name"` - Required capability for the operation
+/// - `flow_cost = <number>` - Flow cost for the communication
+/// - `journal_facts = "description"` - Journal facts to add
+/// - `journal_merge = true` - Enable journal merge operation
 ///
 /// # Generated Code
 ///
 /// The macro generates:
 /// - Standard rumpsteak-aura session types and role definitions
+/// - Typed extension effects for Aura-specific functionality
 /// - Guard profiles for each annotated message type
 /// - Role-specific execution functions with guard integration
 /// - Journal coupling code for fact management
-/// - Helper functions for AuraHandlerAdapter setup
+/// - Helper functions for AuraHandler setup
+///
+/// # Example
+///
+/// ```ignore
+/// use aura_macros::choreography;
+///
+/// choreography! {
+///     #[namespace = "threshold_ceremony"]
+///     protocol ThresholdCeremony {
+///         roles: Coordinator, Signers;
+///
+///         Coordinator[guard_capability = "coordinate_signing",
+///                    flow_cost = 200,
+///                    journal_facts = "threshold_initiated"]
+///         -> Signers: SignRequest;
+///     }
+/// }
+/// ```
 #[proc_macro]
-pub fn aura_choreography(input: TokenStream) -> TokenStream {
+pub fn choreography(input: TokenStream) -> TokenStream {
     match aura_choreography_impl(input) {
         Ok(output) => output,
         Err(err) => err.to_compile_error().into(),
     }
 }
 
+/// Legacy alias for the choreography macro
+///
+/// This alias maintains backward compatibility for existing code that uses
+/// the `choreography!` name. New code should prefer `choreography!`.
+#[proc_macro]
+pub fn aura_choreography(input: TokenStream) -> TokenStream {
+    choreography(input)
+}
+
 fn aura_choreography_impl(input: TokenStream) -> Result<TokenStream> {
     let protocol_input = TokenStream2::from(input);
 
-    // Use the new wrapper approach that delegates to rumpsteak-aura
-    // while adding Aura-specific enhancements
-    let wrapper = AuraChoreographyWrapper::new(protocol_input)?;
+    // Use the new rumpsteak-aura direct wrapper approach
+    // This leverages rumpsteak-aura's parser directly while adding Aura extensions
+    let wrapper = RumpsteakAuraWrapper::new(protocol_input)?;
     let output = wrapper.generate()?;
 
     Ok(output.into())
@@ -83,53 +112,85 @@ fn aura_choreography_impl(input: TokenStream) -> Result<TokenStream> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parsing::AuraProtocolParser;
-    use crate::wrapper::AuraChoreographyWrapper;
+    use crate::rumpsteak_wrapper::RumpsteakAuraWrapper;
     use quote::quote;
 
     #[test]
-    fn test_basic_protocol_parsing() {
+    fn test_wrapper_creation_success() {
         let input = quote! {
             #[namespace = "test"]
-            protocol TestProtocol {
+            choreography TestProtocol {
                 roles: Alice, Bob;
-
-                Alice[guard_capability = "send_message",
-                      flow_cost = 100]
-                -> Bob: Message(String);
+                Alice -> Bob: Message;
             }
         };
 
-        let result = AuraProtocolParser::parse(input);
-        match result {
-            Ok(protocol) => {
-                assert_eq!(protocol.name, "TestProtocol");
-                assert_eq!(protocol.namespace, Some("test".to_string()));
-            }
-            Err(e) => {
-                eprintln!("Parsing error: {}", e);
-                panic!("Basic protocol parsing should succeed");
-            }
-        }
+        let wrapper = RumpsteakAuraWrapper::new(input);
+        assert!(wrapper.is_ok(), "Wrapper should be created successfully");
     }
 
     #[test]
-    fn test_aura_choreography_wrapper() {
+    fn test_aura_extension_parsing() {
         let input = quote! {
-            #[namespace = "test_macro"]
-            protocol TestMacro {
+            choreography TestMacro {
                 roles: Alice, Bob;
-
-                Alice[guard_capability = "send",
-                      flow_cost = 50]
-                -> Bob: TestMessage(u32);
+                Alice[guard_capability = "send", flow_cost = 50] -> Bob: TestMessage;
             }
         };
 
-        let wrapper = AuraChoreographyWrapper::new(input);
-        assert!(wrapper.is_ok(), "Wrapper should be created successfully");
+        let wrapper = RumpsteakAuraWrapper::new(input);
+        assert!(wrapper.is_ok(), "Wrapper should parse Aura annotations");
+    }
 
-        let result = wrapper.unwrap().generate();
-        assert!(result.is_ok(), "Wrapper should generate valid code");
+    #[test]
+    fn test_journal_annotation_parsing() {
+        let input = quote! {
+            choreography JournalTest {
+                roles: Client, Server;
+                Client[journal_facts = "request_logged"] -> Server: Request;
+            }
+        };
+
+        let wrapper = RumpsteakAuraWrapper::new(input);
+        assert!(
+            wrapper.is_ok(),
+            "Wrapper should parse journal_facts annotation"
+        );
+    }
+
+    #[test]
+    fn test_parsing_integration() {
+        // Test that the wrapper can be created and generate code
+        let input = quote! {
+            choreography Simple {
+                roles: A, B;
+                A -> B: Msg;
+            }
+        };
+
+        let wrapper = RumpsteakAuraWrapper::new(input);
+        assert!(wrapper.is_ok(), "Wrapper creation should succeed");
+
+        // Test code generation (without executing proc-macro)
+        let wrapper = wrapper.unwrap();
+        let result = wrapper.generate();
+        assert!(result.is_ok(), "Code generation should succeed");
+    }
+
+    #[test]
+    fn test_multiple_annotations() {
+        let input = quote! {
+            choreography MultiAnnotation {
+                roles: Sender, Receiver;
+                Sender[guard_capability = "send", flow_cost = 100, journal_facts = "sent"]
+                -> Receiver: ComplexMessage;
+            }
+        };
+
+        let wrapper = RumpsteakAuraWrapper::new(input);
+        assert!(
+            wrapper.is_ok(),
+            "Wrapper should handle multiple annotations"
+        );
     }
 }

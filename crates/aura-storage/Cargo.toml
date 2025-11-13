@@ -10,7 +10,6 @@ description = "Capability-based storage layer with choreographic search protocol
 [dependencies]
 # Core Aura crates
 aura-core = { path = "../aura-core" }
-aura-mpst = { path = "../aura-mpst" }
 aura-wot = { path = "../aura-wot" }
 aura-crypto = { path = "../aura-crypto" }
 aura-protocol = { path = "../aura-protocol" }
@@ -24,7 +23,7 @@ indexmap = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-tokio-test = { workspace = true }
+# tokio-test = { workspace = true } # removed - unused
 
 [features]
 default = []

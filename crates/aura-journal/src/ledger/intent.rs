@@ -13,7 +13,7 @@ use std::fmt;
 // This module uses a placeholder until intent system is migrated to new tree types
 use aura_core::tree::TreeOpKind as TreeOperation;
 
-// Timestamp type (Unix milliseconds)
+/// Timestamp type (Unix milliseconds) for tracking intent creation and expiration times
 pub type Timestamp = u64;
 
 /// Unique identifier for an intent
@@ -24,7 +24,7 @@ impl IntentId {
     /// Create a new random intent ID
     #[allow(clippy::disallowed_methods)]
     pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4())
+        Self(uuid::Uuid::from_bytes([0u8; 16]))
     }
 
     /// Create from a UUID
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn test_intent_creation() {
-        use aura_core::tree::{LeafNode, LeafRole};
+        use aura_core::tree::LeafNode;
 
         let op = TreeOperation::AddLeaf {
             leaf: LeafNode::new_device(
@@ -322,7 +322,7 @@ mod tests {
             vec![NodeIndex(0)],
             Hash32([0u8; 32]),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 
@@ -341,7 +341,7 @@ mod tests {
             vec![NodeIndex(0), NodeIndex(1)],
             Hash32([1u8; 32]),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 
@@ -350,7 +350,7 @@ mod tests {
             vec![NodeIndex(1), NodeIndex(2)],
             Hash32([2u8; 32]), // Different snapshot
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 
@@ -371,7 +371,7 @@ mod tests {
             vec![NodeIndex(0), NodeIndex(1)],
             Hash32(snapshot),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 
@@ -380,7 +380,7 @@ mod tests {
             vec![NodeIndex(1), NodeIndex(2)],
             Hash32(snapshot), // Same snapshot
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 
@@ -397,7 +397,7 @@ mod tests {
             vec![],
             Hash32([1u8; 32]),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 
@@ -415,7 +415,7 @@ mod tests {
             vec![],
             Hash32([0u8; 32]),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 
@@ -438,7 +438,7 @@ mod tests {
             vec![NodeIndex(0)],
             Hash32(snapshot),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 
@@ -460,7 +460,7 @@ mod tests {
             vec![NodeIndex(0)],
             Hash32(snapshot2),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 
@@ -480,7 +480,7 @@ mod tests {
             vec![NodeIndex(0)],
             Hash32(snapshot),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             1000,
         );
 

@@ -3,11 +3,10 @@
 //! Provides telemetry and metrics collection for agent operations, enabling
 //! monitoring, performance analysis, and operational insights.
 
-use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
-use uuid;
+use aura_core::{identifiers::DeviceId, AuraResult as Result};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 /// Metrics for a specific operation
@@ -309,7 +308,7 @@ impl MetricsMiddleware {
         // Export in a simple format - could be enhanced for Prometheus, etc.
         let mut export = String::new();
 
-        export.push_str(&format!("# Agent Metrics Export\n"));
+        export.push_str("# Agent Metrics Export\n");
         export.push_str(&format!("# Device: {}\n", summary.device_id));
         export.push_str(&format!(
             "# Generated: {}\n",
@@ -318,7 +317,7 @@ impl MetricsMiddleware {
                 .map(|d| d.as_secs())
                 .unwrap_or(0)
         ));
-        export.push_str(&format!("\n"));
+        export.push('\n');
 
         export.push_str(&format!(
             "aura_agent_uptime_seconds {}\n",
@@ -351,7 +350,7 @@ impl MetricsMiddleware {
 
         // Per-operation metrics
         for (op_name, op_metrics) in &metrics.operations {
-            let clean_name = op_name.replace(' ', "_").replace('-', "_");
+            let clean_name = op_name.replace([' ', '-'], "_");
             export.push_str(&format!(
                 "aura_agent_operation_success_total{{operation=\"{}\"}} {}\n",
                 clean_name, op_metrics.success_count
@@ -443,7 +442,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_metrics() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let mut metrics = AgentMetrics::new(device_id);
 
         metrics.record_operation("test_op", Duration::from_millis(100), true);
@@ -463,7 +462,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_middleware() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let middleware = MetricsMiddleware::new(device_id).await.unwrap();
 
         middleware
@@ -485,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_metrics_summary_report() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let summary = MetricsSummary {
             device_id,
             uptime: Duration::from_secs(3600), // 1 hour

@@ -169,7 +169,7 @@ pub trait JournalCoupling {
     /// Apply all journal annotations
     async fn apply_all_annotations(
         &self,
-        effects: &(impl JournalEffects + Sync),
+        effects: &impl JournalEffects,
         journal: &Journal,
     ) -> AuraResult<Journal> {
         let mut current = journal.clone();
@@ -222,13 +222,13 @@ impl JournalCouplingParser {
         if inner.starts_with("facts:") {
             let desc = inner
                 .strip_prefix("facts:")
-                .expect("already checked with starts_with")
+                .unwrap_or("") // safe due to starts_with check above
                 .trim();
             Ok(JournalAnnotation::add_facts(desc))
         } else if inner.starts_with("caps:") {
             let desc = inner
                 .strip_prefix("caps:")
-                .expect("already checked with starts_with")
+                .unwrap_or("") // safe due to starts_with check above
                 .trim();
             Ok(JournalAnnotation::refine_caps(desc))
         } else if inner == "merge" {
@@ -236,7 +236,7 @@ impl JournalCouplingParser {
         } else if inner.starts_with("Δ") {
             let desc = inner
                 .strip_prefix("Δ")
-                .expect("already checked with starts_with")
+                .unwrap_or("") // safe due to starts_with check above
                 .trim();
             Ok(JournalAnnotation::add_facts(format!("Delta: {}", desc)))
         } else {

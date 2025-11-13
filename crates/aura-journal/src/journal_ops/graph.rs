@@ -199,18 +199,16 @@ impl JournalGraph {
             visited.insert(node_id);
 
             // Add node to graph
-            if !node_indices.contains_key(&node_id) {
-                let idx = graph.add_node(node_id);
-                node_indices.insert(node_id, idx);
-            }
+            node_indices
+                .entry(node_id)
+                .or_insert_with(|| graph.add_node(node_id));
 
             // Add children
             let children = journal.get_children(&node_id);
             for child_id in children {
-                if !node_indices.contains_key(&child_id) {
-                    let idx = graph.add_node(child_id);
-                    node_indices.insert(child_id, idx);
-                }
+                node_indices
+                    .entry(child_id)
+                    .or_insert_with(|| graph.add_node(child_id));
 
                 // Add edge from child to parent (reverse for topological sort)
                 if let (Some(&child_idx), Some(&parent_idx)) =
@@ -295,18 +293,13 @@ impl JournalGraph {
         let mut depth = 0;
         let mut current = node_id;
 
-        loop {
-            if let Some(parent) = journal.get_parent(&current) {
-                depth += 1;
-                current = parent;
+        while let Some(parent) = journal.get_parent(&current) {
+            depth += 1;
+            current = parent;
 
-                // Prevent infinite loops (shouldn't happen with valid journal)
-                if depth > 100 {
-                    return None;
-                }
-            } else {
-                // Reached root
-                break;
+            // Prevent infinite loops (shouldn't happen with valid journal)
+            if depth > 100 {
+                return None;
             }
         }
 
@@ -343,9 +336,9 @@ mod tests {
         let mut journal = KeyJournal::new();
 
         // Create identity with 2 devices
-        let identity_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
-        let device1_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
-        let device2_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let identity_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let device1_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let device2_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         let identity = KeyNode::new(
             identity_id,
@@ -376,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_cycle_detection() {
-        let mut journal = create_test_journal();
+        let journal = create_test_journal();
 
         // Get existing nodes
         let identity_id = JournalGraph::find_roots(&journal)[0];
@@ -394,8 +387,8 @@ mod tests {
         let journal = create_test_journal();
 
         // Create a new disconnected node
-        let new_node_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
-        let new_device_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let new_node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let new_device_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         let edge = KeyEdge::new(new_node_id, new_device_id, EdgeKind::Contains);
 

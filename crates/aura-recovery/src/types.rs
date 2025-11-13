@@ -1,4 +1,4 @@
-//! Shared recovery types used across choreography implementations.
+//! Shared types for guardian operations.
 
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId, TrustLevel};
 use aura_crypto::frost::ThresholdSignature;
@@ -133,4 +133,36 @@ pub struct RecoveryDispute {
     pub reason: String,
     /// Timestamp when the dispute was filed.
     pub filed_at: u64,
+}
+
+/// Generic request for guardian operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryRequest {
+    /// Device making the request
+    pub requesting_device: DeviceId,
+    /// Account being operated on
+    pub account_id: AccountId,
+    /// Recovery context and justification
+    pub context: aura_authenticate::guardian_auth::RecoveryContext,
+    /// Required threshold of guardian approvals
+    pub threshold: usize,
+    /// Available guardians for the operation
+    pub guardians: GuardianSet,
+}
+
+/// Generic response for guardian operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryResponse {
+    /// Whether the operation succeeded
+    pub success: bool,
+    /// Error message if failed
+    pub error: Option<String>,
+    /// Recovered key material (for key recovery operations)
+    pub key_material: Option<Vec<u8>>,
+    /// Guardian shares collected
+    pub guardian_shares: Vec<RecoveryShare>,
+    /// Evidence of the operation
+    pub evidence: RecoveryEvidence,
+    /// Threshold signature
+    pub signature: ThresholdSignature,
 }

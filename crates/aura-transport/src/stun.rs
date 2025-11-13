@@ -5,7 +5,7 @@
 
 use aura_core::AuraError;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tracing;
@@ -57,6 +57,7 @@ pub struct StunResult {
 /// STUN message types (RFC 5389)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
+#[allow(missing_docs)]
 pub enum StunMessageType {
     BindingRequest = 0x0001,
     BindingResponse = 0x0101,
@@ -66,6 +67,7 @@ pub enum StunMessageType {
 /// STUN attribute types (RFC 5389)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
+#[allow(missing_docs)]
 pub enum StunAttributeType {
     MappedAddress = 0x0001,
     Username = 0x0006,
@@ -82,6 +84,7 @@ pub enum StunAttributeType {
 
 /// STUN message header (20 bytes)
 #[derive(Debug)]
+#[allow(dead_code)]
 struct StunMessageHeader {
     message_type: u16,
     message_length: u16,
@@ -91,6 +94,7 @@ struct StunMessageHeader {
 
 /// STUN attribute
 #[derive(Debug)]
+#[allow(dead_code)]
 struct StunAttribute {
     attr_type: u16,
     length: u16,
@@ -227,10 +231,10 @@ impl StunClient {
 
     /// Create local UDP socket for STUN requests
     async fn create_local_socket(&self) -> Result<UdpSocket, AuraError> {
-        let bind_addr = self
-            .config
-            .local_bind_addr
-            .unwrap_or_else(|| "0.0.0.0:0".parse().unwrap());
+        let default_addr = "0.0.0.0:0"
+            .parse()
+            .map_err(|_| AuraError::network("Invalid default bind address".to_string()))?;
+        let bind_addr = self.config.local_bind_addr.unwrap_or(default_addr);
 
         UdpSocket::bind(bind_addr)
             .await
@@ -327,7 +331,13 @@ impl StunClient {
             }
 
             // Check transaction ID
-            let received_transaction_id: [u8; 12] = buffer[8..20].try_into().unwrap();
+            let received_transaction_id: [u8; 12] = match buffer[8..20].try_into() {
+                Ok(id) => id,
+                Err(_) => {
+                    tracing::debug!("Received STUN packet with invalid transaction ID length");
+                    continue;
+                }
+            };
             if received_transaction_id != expected_transaction_id {
                 tracing::debug!("Received STUN packet with mismatched transaction ID");
                 continue;
@@ -516,7 +526,7 @@ mod tests {
         assert_eq!(config.primary_server, "stun.l.google.com:19302");
         assert_eq!(config.timeout_ms, 3000);
         assert_eq!(config.retry_attempts, 3);
-        assert!(config.fallback_servers.len() > 0);
+        assert!(!config.fallback_servers.is_empty());
     }
 
     #[test]

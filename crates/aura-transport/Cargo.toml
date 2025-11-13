@@ -24,12 +24,11 @@ aura-crypto = { path = "../aura-crypto" }
 
 # Networking
 reqwest = { workspace = true }
-snow = { workspace = true }
+# snow = { workspace = true } # removed - unused
 async-trait = { workspace = true }
 tokio-tungstenite = { workspace = true }
 
-# Choreographic programming
-rumpsteak-aura = { workspace = true }
+# Legacy choreographic programming dependency removed - using effect system
 
 # Cryptography provided through aura-crypto
 ed25519-dalek = { workspace = true }
@@ -58,4 +57,4 @@ hex = { workspace = true }
 fastrand = { workspace = true }
 
 [dev-dependencies]
-tokio-test = { workspace = true }
+# tokio-test = { workspace = true } # removed - unused

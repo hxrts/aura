@@ -607,7 +607,7 @@ impl TraceConverter {
             quint_trace,
             conversion_metrics: ConversionPerformanceMetrics {
                 conversion_time_ms: conversion_time,
-                memory_usage_bytes: 0, // Would be calculated in real implementation
+                memory_usage_bytes: states_to_process.len() * 1000 + quint_events.len() * 500, // Simple estimation
                 compression_ratio: 1.0,
                 states_processed: states_to_process.len(),
                 events_processed: quint_events.len(),
@@ -952,6 +952,67 @@ impl ConversionStatistics {
             total_states_converted: 0,
             total_events_converted: 0,
         }
+    }
+    
+    /// Calculate approximate memory usage of a Quint trace
+    /// 
+    /// Estimates memory consumption by analyzing the serialized size of the trace
+    /// data structures and their constituent elements.
+    pub fn calculate_memory_usage(quint_trace: &QuintTrace) -> u64 {
+        let mut total_bytes = 0u64;
+        
+        // Calculate base structure size
+        total_bytes += std::mem::size_of::<QuintTrace>() as u64;
+        
+        // Calculate trace ID string size
+        // total_bytes += quint_trace.id.len() as u64; // TODO: Fix when QuintTrace has id field
+        
+        // Calculate metadata size
+        total_bytes += std::mem::size_of_val(&quint_trace.metadata) as u64;
+        total_bytes += quint_trace.metadata.source.len() as u64;
+        
+        // Calculate states size
+        for state in &quint_trace.states {
+            total_bytes += std::mem::size_of_val(state) as u64;
+            total_bytes += 8; // For the step number (u64)
+            
+            // Calculate state variables size
+            for (key, value) in &state.variables {
+                total_bytes += key.len() as u64;
+                total_bytes += match value {
+                    super::types::QuintValue::String(s) => s.len() as u64,
+                    super::types::QuintValue::Int(_) => 8,
+                    super::types::QuintValue::Bool(_) => 1,
+                    super::types::QuintValue::List(arr) => arr.len() as u64 * 8,
+                    super::types::QuintValue::Map(obj) => obj.len() as u64 * 16,
+                    super::types::QuintValue::Record(obj) => obj.len() as u64 * 16,
+                    super::types::QuintValue::Set(set) => set.len() as u64 * 8,
+                };
+            }
+        }
+        
+        // Calculate events size
+        for event in &quint_trace.events {
+            total_bytes += std::mem::size_of_val(event) as u64;
+            total_bytes += event.event_id.len() as u64;
+            total_bytes += event.event_type.len() as u64;
+            
+            // Calculate event parameters size
+            for (key, value) in &event.parameters {
+                total_bytes += key.len() as u64;
+                total_bytes += match value {
+                    super::types::QuintValue::String(s) => s.len() as u64,
+                    super::types::QuintValue::Int(_) => 8,
+                    super::types::QuintValue::Bool(_) => 1,
+                    super::types::QuintValue::List(arr) => arr.len() as u64 * 8,
+                    super::types::QuintValue::Map(obj) => obj.len() as u64 * 16,
+                    super::types::QuintValue::Record(obj) => obj.len() as u64 * 16,
+                    super::types::QuintValue::Set(set) => set.len() as u64 * 8,
+                };
+            }
+        }
+        
+        total_bytes
     }
 }
 

@@ -18,6 +18,7 @@ aura-journal = { path = "../aura-journal" }
 aura-transport = { path = "../aura-transport" }
 aura-crypto = { path = "../aura-crypto" }
 aura-protocol = { path = "../aura-protocol" }
+aura-testkit = { path = "../aura-testkit" }
 # app-console-types = { path = "../app-console-types" }
 quint_api = { path = "../aura-quint-api", package = "aura-quint-api" }
 
@@ -54,5 +55,5 @@ glob = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
-tokio-test = { workspace = true }
+# tokio-test = { workspace = true } # removed - unused
 tempfile = { workspace = true }

@@ -3,8 +3,8 @@
 //! Tests basic Deterministic Key Derivation concepts using only aura-core
 //! and standard Rust libraries.
 
+use aura_core::hash::hasher;
 use aura_core::{AccountId, DeviceId, SessionId};
-use sha2::{Digest, Sha256};
 
 /// Test basic DKD key derivation simulation
 #[tokio::test]
@@ -204,28 +204,28 @@ fn simulate_dkd_derivation(
     app_id: &str,
     context: &str,
 ) -> Vec<u8> {
-    let mut hasher = Sha256::new();
+    let mut h = hasher();
 
     // Include all relevant parameters in the derivation
-    hasher.update(b"AURA_DKD_V1:");
-    hasher.update(account_id.to_string().as_bytes());
-    hasher.update(b":");
-    hasher.update(session_id.uuid().as_bytes());
-    hasher.update(b":");
-    hasher.update(app_id.as_bytes());
-    hasher.update(b":");
-    hasher.update(context.as_bytes());
+    h.update(b"AURA_DKD_V1:");
+    h.update(account_id.to_string().as_bytes());
+    h.update(b":");
+    h.update(session_id.uuid().as_bytes());
+    h.update(b":");
+    h.update(app_id.as_bytes());
+    h.update(b":");
+    h.update(context.as_bytes());
 
     // Include participants in sorted order for determinism
     let mut sorted_participants = participants.to_vec();
     sorted_participants.sort();
 
     for participant in &sorted_participants {
-        hasher.update(b":");
-        hasher.update(participant.0.as_bytes());
+        h.update(b":");
+        h.update(participant.0.as_bytes());
     }
 
-    hasher.finalize().to_vec()
+    h.finalize().to_vec()
 }
 
 /// Simulate threshold-based DKD where we include info about the full participant set
@@ -238,35 +238,35 @@ fn simulate_threshold_dkd(
     app_id: &str,
     context: &str,
 ) -> Vec<u8> {
-    let mut hasher = Sha256::new();
+    let mut h = hasher();
 
     // Include base parameters
-    hasher.update(b"AURA_THRESHOLD_DKD_V1:");
-    hasher.update(account_id.to_string().as_bytes());
-    hasher.update(b":");
-    hasher.update(session_id.uuid().as_bytes());
-    hasher.update(b":");
-    hasher.update(app_id.as_bytes());
-    hasher.update(b":");
-    hasher.update(context.as_bytes());
+    h.update(b"AURA_THRESHOLD_DKD_V1:");
+    h.update(account_id.to_string().as_bytes());
+    h.update(b":");
+    h.update(session_id.uuid().as_bytes());
+    h.update(b":");
+    h.update(app_id.as_bytes());
+    h.update(b":");
+    h.update(context.as_bytes());
 
     // Include full participant set (for context)
-    hasher.update(b":full_set:");
+    h.update(b":full_set:");
     let mut sorted_all = all_participants.to_vec();
     sorted_all.sort();
     for participant in &sorted_all {
-        hasher.update(participant.0.as_bytes());
-        hasher.update(b",");
+        h.update(participant.0.as_bytes());
+        h.update(b",");
     }
 
     // Include active participant subset
-    hasher.update(b":active_set:");
+    h.update(b":active_set:");
     let mut sorted_active = active_participants.to_vec();
     sorted_active.sort();
     for participant in &sorted_active {
-        hasher.update(participant.0.as_bytes());
-        hasher.update(b",");
+        h.update(participant.0.as_bytes());
+        h.update(b",");
     }
 
-    hasher.finalize().to_vec()
+    h.finalize().to_vec()
 }

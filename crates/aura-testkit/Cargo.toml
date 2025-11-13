@@ -22,6 +22,7 @@ aura-protocol = { path = "../aura-protocol" }
 # Async runtime
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
 
 # Cryptography provided through aura-crypto
 ed25519-dalek = { workspace = true }
@@ -40,4 +41,4 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 # For testing the test utilities themselves
-tokio-test = { workspace = true }
+# tokio-test = { workspace = true } # removed - unused

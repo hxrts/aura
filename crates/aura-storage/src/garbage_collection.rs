@@ -5,7 +5,7 @@
 
 use aura_core::{AuraResult, ChunkId, DeviceId, Hash32};
 use aura_crypto::frost::ThresholdSignature;
-use aura_mpst::{CapabilityGuard, JournalAnnotation};
+use crate::access_control::StorageCapabilityGuard;
 use aura_protocol::effects::{AuraEffectSystem, NetworkEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -121,7 +121,7 @@ pub enum GcRole {
 }
 
 /// G_gc choreography implementation
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GcChoreography {
     /// Current device role
     role: GcRole,
@@ -225,7 +225,7 @@ impl GcChoreography {
         proposal: GcProposal,
     ) -> AuraResult<Option<GcSnapshot>> {
         // 1. Capability guard: need(gc_propose) ≤ caps_Proposer
-        let guard = CapabilityGuard::new(
+        let guard = StorageCapabilityGuard::new(
             aura_core::Cap::default(), // Would use actual proposer capabilities
         );
         let capabilities = aura_core::Cap::default(); // TODO: Use actual capabilities
@@ -308,7 +308,7 @@ impl GcChoreography {
             // 7. Create committed snapshot
             let snapshot = GcSnapshot {
                 snapshot_id: self.compute_snapshot_id(&proposal, &approvals)?,
-                root_commit: proposal.root_commit.clone(),
+                root_commit: proposal.root_commit,
                 watermarks: proposal.watermarks.clone(),
                 epoch: current_epoch,
                 timestamp: self.get_current_timestamp(),
@@ -331,21 +331,18 @@ impl GcChoreography {
                     .map_err(|e| aura_core::AuraError::network(e.to_string()))?;
             }
 
-            // 9. Journal integration - apply delta facts
-            let journal_annotation = JournalAnnotation::add_facts(format!(
+            // 9. Journal integration - record GC facts through effect system
+            let _gc_facts = format!(
                 "GcSnapshot(root={:?}, watermarks={:?}, sig={:?})",
                 snapshot.root_commit, snapshot.watermarks, threshold_signature
-            ));
-            // TODO: Apply journal delta through effect system
-            // self.effects.apply_journal_delta(&journal_annotation).await?;
-            // For now, skip journal application
+            );
+            // TODO: Apply journal delta through effect system when available
+            // self.effects.record_state_change(&gc_facts).await?;
 
-            // 10. Capability refinement based on GC policy
-            let capability_annotation =
-                JournalAnnotation::add_facts("CapabilityUpdate(gc_policy_applied)".to_string());
-            // TODO: Apply journal delta through effect system
-            // self.effects.apply_journal_delta(&capability_annotation).await?;
-            // For now, skip journal application
+            // 10. Capability refinement based on GC policy  
+            let _capability_facts = "CapabilityUpdate(gc_policy_applied)".to_string();
+            // TODO: Apply capability updates through effect system when available
+            // self.effects.update_capabilities(&capability_facts).await?;
 
             Ok(Some(snapshot))
         } else {
@@ -388,7 +385,7 @@ impl GcChoreography {
             // 3. Make approval decision
             if safety_check.is_ok() && invariants_check.is_ok() {
                 // Check approval capability guard
-                let guard = CapabilityGuard::new(
+                let guard = StorageCapabilityGuard::new(
                     aura_core::Cap::default(), // Would use actual quorum capabilities
                 );
 
@@ -474,14 +471,13 @@ impl GcChoreography {
                     participating_members: _,
                 } = commit_msg?
                 {
-                    // Apply journal delta locally
-                    let journal_annotation = JournalAnnotation::add_facts(format!(
+                    // Record snapshot locally through effect system
+                    let _snapshot_facts = format!(
                         "GcSnapshot(root={:?}, watermarks={:?})",
                         snapshot.root_commit, snapshot.watermarks
-                    ));
-                    // TODO: Apply journal delta through effect system
-                    // self.effects.apply_journal_delta(&journal_annotation).await?;
-                    // For now, skip journal application
+                    );
+                    // TODO: Apply journal delta through effect system when available
+                    // self.effects.record_state_change(&snapshot_facts).await?;
 
                     return Ok(Some(snapshot));
                 }
@@ -611,6 +607,12 @@ impl GcChoreography {
     ) -> AuraResult<HashSet<ChunkId>> {
         // Determine which chunks can safely be collected based on watermarks
         Ok(HashSet::new()) // Placeholder
+    }
+}
+
+impl Default for LocalStorageState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

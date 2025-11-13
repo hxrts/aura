@@ -110,7 +110,7 @@ impl PolicyMeet {
         for policy in policies {
             lattice
                 .entry(policy.node.0)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(policy.clone());
         }
 

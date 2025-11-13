@@ -13,10 +13,12 @@ pub async fn handle_node(
     daemon: bool,
     config_path: &PathBuf,
 ) -> Result<()> {
-    effects.log_info(&format!(
-        "Starting node on port {} (daemon: {})",
-        port, daemon
-    ));
+    let _ = effects
+        .log_info(&format!(
+            "Starting node on port {} (daemon: {})",
+            port, daemon
+        ))
+        .await;
 
     let _ = effects
         .log_info(&format!("Config: {}", config_path.display()))
@@ -83,10 +85,12 @@ async fn run_daemon_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
     // Simulate some startup delay
     simulate_startup_delay(effects).await;
 
-    effects.log_info(&format!(
-        "Node daemon started successfully on port {}",
-        port
-    ));
+    let _ = effects
+        .log_info(&format!(
+            "Node daemon started successfully on port {}",
+            port
+        ))
+        .await;
 
     // TODO fix - In a real implementation, this would start the actual node service
     let _ = effects
@@ -98,10 +102,12 @@ async fn run_daemon_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
 
 /// Run node in interactive mode through effects
 async fn run_interactive_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
-    effects.log_info(&format!(
-        "Node started in interactive mode on port {}. Press Ctrl+C to stop.",
-        port
-    ));
+    let _ = effects
+        .log_info(&format!(
+            "Node started in interactive mode on port {}. Press Ctrl+C to stop.",
+            port
+        ))
+        .await;
 
     let start_time = effects.current_epoch().await;
     let _ = effects

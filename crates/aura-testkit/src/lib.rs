@@ -19,20 +19,22 @@
 //! ```rust,no_run
 //! use aura_testkit::*;
 //!
-//! #[test]
-//! fn my_test() {
-//!     let effects = test_effects_deterministic(42, 1000);
-//!     let account = test_account_with_effects(&effects);
+//! #[tokio::test]
+//! async fn my_test() {
+//!     let account = test_account_with_seed(42).await;
+//!     let device_id = DeviceId::new();
+//!     let fixture = ProtocolTestFixture::for_unit_tests(device_id).await.unwrap();
 //!     // ... test logic
 //! }
 //! ```
 
 pub mod account;
 pub mod assertions;
+pub mod choreography;
 pub mod clean_fixtures;
 pub mod config;
 pub mod device;
-pub mod effects;
+pub mod effects_integration;
 pub mod factories;
 pub mod fixtures;
 pub mod keys;
@@ -45,12 +47,20 @@ pub mod transport;
 // Re-export commonly used items
 pub use account::*;
 pub use assertions::*;
+pub use choreography::{
+    test_device_pair, test_device_trio, test_threshold_group, ChoreographyTestHarness,
+    CoordinatedSession, MockChoreographyTransport, MockSessionCoordinator, PerformanceSnapshot,
+    SimulatorCompatibleContext, TestError, TransportError,
+};
 pub use clean_fixtures::TestFixtures;
 pub use config::*;
 pub use device::{DeviceSetBuilder, DeviceTestFixture};
-pub use effects::*;
+pub use effects_integration::{MockHandlerConfig, TestEffectsBuilder, TestExecutionMode};
 pub use factories::*;
-pub use fixtures::*;
+pub use fixtures::{
+    AccountTestFixture, CryptoTestFixture, ProtocolTestFixture, StatelessFixtureConfig,
+    StatelessFixtureError,
+};
 pub use keys::KeyTestFixture;
 pub use ledger::*;
 pub use mocks::*;
@@ -59,7 +69,6 @@ pub use transport::*;
 
 // Re-export commonly used external types for convenience
 pub use aura_core::{AccountId, DeviceId};
-use aura_core::effects::{RandomEffects, TimeEffects};
 pub use aura_journal::semilattice::ModernAccountState as AccountState;
 pub use aura_journal::{DeviceMetadata, DeviceType};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
@@ -69,59 +78,15 @@ pub use uuid::Uuid;
 // Re-export FROST key generation helper
 pub use keys::helpers::test_frost_key_shares;
 
-/// Quick test account with deterministic seed
-///
-/// This is the most common pattern - creates a complete test account
-/// with deterministic Effects for reproducible tests.
-pub async fn quick_test_account(seed: u64) -> AccountState {
-    let effects = test_effects_deterministic(seed, 1000);
-    test_account_with_effects(&effects).await
-}
-
-/// Quick test device with deterministic ID
-///
-/// Creates a test device with a predictable ID for easy testing.
-pub async fn quick_test_device(id: u16) -> DeviceMetadata {
-    let effects = test_effects_deterministic(id as u64, 1000);
-    test_device_with_id(id, &effects).await
-}
-
 /// Create a test key pair with deterministic seed
 ///
 /// Returns a tuple of (SigningKey, VerifyingKey) for testing.
-/// Uses a simple deterministic approach since this is called from constructors.
-pub fn test_key_pair(effects: &Effects) -> (SigningKey, VerifyingKey) {
-    // For synchronous constructors, use a deterministic seed based on the effects
-    let key_bytes = [42u8; 32]; // Simple deterministic key for testing
+/// Uses a simple deterministic approach for basic testing.
+pub fn test_key_pair(seed: u64) -> (SigningKey, VerifyingKey) {
+    // Use deterministic key generation based on seed
+    let mut key_bytes = [0u8; 32];
+    key_bytes[..8].copy_from_slice(&seed.to_le_bytes());
     let signing_key = SigningKey::from_bytes(&key_bytes);
     let verifying_key = signing_key.verifying_key();
     (signing_key, verifying_key)
-}
-
-/// Create test device metadata with a specific ID
-///
-/// Helper function for creating test devices with predictable IDs.
-pub async fn test_device_with_id(id: u16, effects: &Effects) -> DeviceMetadata {
-    let device_key_bytes = effects.random_bytes_32().await;
-    let device_signing_key = SigningKey::from_bytes(&device_key_bytes);
-    let device_public_key = device_signing_key.verifying_key();
-
-    // Use deterministic UUID based on the ID
-    let uuid_bytes = format!("device-{:04}", id);
-    let hash_bytes = blake3::hash(uuid_bytes.as_bytes());
-    let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
-
-    let timestamp = effects.current_timestamp_millis().await;
-    DeviceMetadata {
-        device_id: DeviceId(uuid),
-        device_name: format!("Test Device {}", id),
-        device_type: DeviceType::Native,
-        public_key: device_public_key,
-        added_at: timestamp,
-        last_seen: timestamp,
-        dkd_commitment_proofs: Default::default(),
-        next_nonce: 0,
-        key_share_epoch: 0,
-        used_nonces: Default::default(),
-    }
 }

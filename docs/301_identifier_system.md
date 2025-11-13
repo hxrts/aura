@@ -287,13 +287,13 @@ impl RelayId {
             (device_b, device_a)
         };
         
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"aura.relay_context:");
-        hasher.update(first.as_bytes());
-        hasher.update(second.as_bytes());
+        use aura_core::hash::hasher;
+        let mut h = hasher();
+        h.update(b"aura.relay_context:");
+        h.update(first.as_bytes());
+        h.update(second.as_bytes());
         
-        let hash = hasher.finalize();
-        RelayId(*hash.as_bytes())
+        RelayId(h.finalize())
     }
     
     pub fn participants(&self) -> Result<(DeviceId, DeviceId), IdentifierError> {
@@ -317,17 +317,17 @@ impl GroupId {
         let mut sorted_members = members.to_vec();
         sorted_members.sort_by_key(|id| id.as_bytes());
         
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"aura.group_context:");
+        use aura_core::hash::hasher;
+        let mut h = hasher();
+        h.update(b"aura.group_context:");
         
         for member in &sorted_members {
-            hasher.update(member.as_bytes());
+            h.update(member.as_bytes());
         }
         
-        hasher.update(&bincode::serialize(group_policy).unwrap());
+        h.update(&bincode::serialize(group_policy).unwrap());
         
-        let hash = hasher.finalize();
-        GroupId(*hash.as_bytes())
+        GroupId(h.finalize())
     }
     
     pub fn is_member(&self, device_id: DeviceId, group_config: &GroupConfig) -> bool {
@@ -360,13 +360,13 @@ impl DkdContextId {
     pub fn new(application_label: impl Into<String>, context_data: &[u8]) -> Self {
         let application_label = application_label.into();
         
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"aura.dkd_context:");
-        hasher.update(application_label.as_bytes());
-        hasher.update(context_data);
+        let mut h = aura_core::hash::hasher();
+        h.update(b"aura.dkd_context:");
+        h.update(application_label.as_bytes());
+        h.update(context_data);
         
-        let hash = hasher.finalize();
-        let fingerprint = hash.as_bytes()[0..16].try_into().unwrap();
+        let hash = h.finalize();
+        let fingerprint = hash[0..16].try_into().unwrap();
         
         DkdContextId {
             application_label,
@@ -410,8 +410,7 @@ pub struct Hash32([u8; 32]);
 
 impl Hash32 {
     pub fn hash_data(data: &[u8]) -> Self {
-        let hash = blake3::hash(data);
-        Hash32(*hash.as_bytes())
+        Hash32(aura_core::hash::hash(data))
     }
     
     pub fn hash_structured<T: Serialize>(data: &T) -> Result<Self, IdentifierError> {
@@ -421,8 +420,7 @@ impl Hash32 {
     }
     
     pub fn verify_data(&self, data: &[u8]) -> bool {
-        let computed_hash = blake3::hash(data);
-        self.0 == *computed_hash.as_bytes()
+        self.0 == aura_core::hash::hash(data)
     }
     
     pub fn to_hex(&self) -> String {

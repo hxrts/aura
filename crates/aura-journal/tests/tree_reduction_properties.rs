@@ -14,9 +14,7 @@
 //!
 //! See docs/123_ratchet_tree.md - Deterministic Reduction section
 
-use aura_core::tree::{
-    AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
-};
+use aura_core::tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
 use aura_journal::ratchet_tree::reduce;
 use aura_journal::semilattice::{JoinSemilattice, OpLog};
 use proptest::prelude::*;
@@ -209,7 +207,7 @@ mod unit_tests {
         let ops: Vec<AttestedOp> = oplog.list_ops().into_iter().cloned().collect();
         let state = reduce(&ops).unwrap();
 
-        assert!(state.leaves.len() >= 1 || state.epoch >= 1);
+        assert!(!state.leaves.is_empty() || state.epoch >= 1);
     }
 
     #[test]
@@ -239,7 +237,7 @@ mod unit_tests {
         let state = reduce(&ops).unwrap();
 
         // State should reflect both operations
-        assert!(state.leaves.len() >= 1);
+        assert!(!state.leaves.is_empty());
     }
 
     #[test]
@@ -273,7 +271,7 @@ mod unit_tests {
         let state = reduce(&ops).unwrap();
 
         // OpLog deduplicates, so state should be as if added once
-        assert!(state.leaves.len() >= 1);
+        assert!(!state.leaves.is_empty());
     }
 
     #[test]

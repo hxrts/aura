@@ -512,8 +512,7 @@
 use crate::errors::{AuraError, Result as AgentResult};
 use aura_core::{AccountId, DeviceId, GuardianId};
 use aura_protocol::authorization_bridge::{
-    evaluate_authorization, AuthorizationContext, AuthorizationError, AuthorizationRequest,
-    AuthorizedEvent,
+    evaluate_authorization, AuthorizationContext, AuthorizationRequest,
 };
 use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};
 use aura_wot::{CapabilitySet, TreeAuthzContext, TreeOp, TreeOpKind};

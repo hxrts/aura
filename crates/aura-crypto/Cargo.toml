@@ -21,7 +21,7 @@ zeroize = { workspace = true }
 ed25519-dalek = { workspace = true }
 hkdf = { workspace = true }
 sha2 = { workspace = true }
-hpke = { workspace = true }
+# hpke = { workspace = true } # removed - unused
 frost-core = { workspace = true }
 frost-ed25519 = { workspace = true }
 chacha20poly1305 = { workspace = true }
@@ -45,6 +45,7 @@ tokio = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
-tokio-test = { workspace = true }
+# tokio-test = { workspace = true } # removed - unused
 proptest = { workspace = true }
 serde_json = { workspace = true }
+aura-testkit = { path = "../aura-testkit" }

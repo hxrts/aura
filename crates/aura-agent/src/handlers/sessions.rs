@@ -6,20 +6,19 @@
 //! **Phase 5 Update**: Now integrated with authorization operations system.
 
 use crate::{
-    effects::{SessionData, SessionUpdate},
+    effects::SessionData,
     errors::{AuraError, Result},
     operations::*,
 };
 use aura_core::{AccountId, DeviceId};
 use aura_protocol::effects::{
-    AuraEffectSystem, ChoreographicEffects, ChoreographicRole, ConsoleEffects, LedgerEffects,
-    SessionManagementEffects, SessionType, TimeEffects,
+    AuraEffectSystem, ChoreographicRole, ConsoleEffects, EffectSystemConfig, LedgerEffects,
+    SessionManagementEffects, SessionType,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 /// Session handle for managing active sessions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,7 +198,7 @@ impl SessionOperations {
             epoch: timestamp / 1000, // Convert to epoch seconds
             start_time: timestamp,
             participants: roles.clone(),
-            my_role: my_role.clone(),
+            my_role,
             session_type: session_type.clone(),
             metadata: Default::default(),
         };
@@ -232,8 +231,8 @@ impl SessionOperations {
         let effects = self.effects.read().await;
 
         // Convert string to SessionId by parsing the UUID part
-        let session_id_typed = if session_id.starts_with("session-") {
-            let uuid_str = &session_id[8..]; // Remove "session-" prefix
+        let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
+            // Remove "session-" prefix
             match uuid::Uuid::parse_str(uuid_str) {
                 Ok(uuid) => aura_core::identifiers::SessionId::from_uuid(uuid),
                 Err(_) => aura_core::identifiers::SessionId::new(), // Create new if parsing fails
@@ -330,8 +329,8 @@ impl SessionOperations {
 
         // Convert string to SessionId and end the session
         // Convert string to SessionId by parsing the UUID part
-        let session_id_typed = if session_id.starts_with("session-") {
-            let uuid_str = &session_id[8..]; // Remove "session-" prefix
+        let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
+            // Remove "session-" prefix
             match uuid::Uuid::parse_str(uuid_str) {
                 Ok(uuid) => aura_core::identifiers::SessionId::from_uuid(uuid),
                 Err(_) => aura_core::identifiers::SessionId::new(), // Create new if parsing fails
@@ -450,13 +449,12 @@ impl SessionOperations {
 
         // Find and end expired sessions
         for session_info in session_infos {
-            if session_info.created_at < cutoff_time {
-                if SessionManagementEffects::end_session(&*effects, session_info.session_id)
+            if session_info.created_at < cutoff_time
+                && SessionManagementEffects::end_session(&*effects, session_info.session_id)
                     .await
                     .is_ok()
-                {
-                    cleaned_sessions.push(session_info.session_id.to_string());
-                }
+            {
+                cleaned_sessions.push(session_info.session_id.to_string());
             }
         }
 
@@ -513,58 +511,9 @@ impl SessionOperations {
         Ok(handle)
     }
 
-    /// Create recovery session
-    pub async fn create_recovery_session(
-        &self,
-        guardian_devices: Vec<DeviceId>,
-        recovery_threshold: usize,
-    ) -> Result<SessionHandle> {
-        let effects = self.effects.read().await;
-
-        if guardian_devices.len() < recovery_threshold {
-            return Err(AuraError::invalid(
-                "Not enough guardians for recovery threshold",
-            ));
-        }
-
-        let mut participants = guardian_devices.clone();
-        if !participants.contains(&self.device_id) {
-            participants.push(self.device_id);
-        }
-
-        let mut handle = self
-            .create_session(SessionType::Recovery, participants)
-            .await?;
-
-        // Add recovery metadata
-        handle.metadata.insert(
-            "recovery_threshold".to_string(),
-            serde_json::Value::Number(recovery_threshold.into()),
-        );
-        handle.metadata.insert(
-            "guardian_count".to_string(),
-            serde_json::Value::Number(guardian_devices.len().into()),
-        );
-        handle.metadata.insert(
-            "target_device".to_string(),
-            serde_json::Value::String(self.device_id.to_string()),
-        );
-
-        // Update session with metadata
-        self.update_session_metadata(&handle.session_id, handle.metadata.clone())
-            .await?;
-
-        let _ = effects
-            .log_info(&format!(
-                "Created recovery session {}/{} guardians for {}",
-                recovery_threshold,
-                guardian_devices.len(),
-                handle.session_id
-            ))
-            .await;
-
-        Ok(handle)
-    }
+    // Note: Recovery sessions have been removed in favor of the simplified
+    // aura-recovery crate which handles guardian recovery operations directly.
+    // Use the RecoveryOperations handler instead of session-based recovery.
 
     /// Create key rotation session
     pub async fn create_key_rotation_session(&self) -> Result<SessionHandle> {
@@ -627,12 +576,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_creation() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let account_id = AccountId(uuid::Uuid::new_v4());
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let account_id = AccountId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = EffectSystemConfig::for_testing(device_id);
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::new(config).unwrap()));
         let sessions = SessionOperations::new(effects, device_id, account_id);
 
-        let participants = vec![device_id, DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())];
+        let participants = vec![
+            device_id,
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+        ];
         let handle = sessions
             .create_session(SessionType::Coordination, participants.clone())
             .await
@@ -645,12 +599,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_threshold_session() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let account_id = AccountId(uuid::Uuid::new_v4());
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let account_id = AccountId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = EffectSystemConfig::for_testing(device_id);
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::new(config).unwrap()));
         let sessions = SessionOperations::new(effects, device_id, account_id);
 
-        let participants = vec![device_id, DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())];
+        let participants = vec![
+            device_id,
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+        ];
         let handle = sessions
             .create_threshold_session(participants, 2)
             .await
@@ -663,55 +622,54 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_recovery_session() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let account_id = AccountId(uuid::Uuid::new_v4());
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
-        let sessions = SessionOperations::new(effects, device_id, account_id);
-
-        let guardians = vec![DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4()), DeviceId(uuid::Uuid::new_v4())];
-        let handle = sessions
-            .create_recovery_session(guardians, 2)
-            .await
-            .unwrap();
-
-        assert!(handle.metadata.contains_key("recovery_threshold"));
-        assert!(handle.metadata.contains_key("target_device"));
-        assert_eq!(
-            handle.metadata["recovery_threshold"],
-            serde_json::Value::Number(2.into())
-        );
-    }
+    // Note: Recovery session test removed - recovery operations are now handled
+    // by the RecoveryOperations handler using the simplified aura-recovery crate.
+    // See /Users/hxrts/projects/aura/crates/aura-agent/src/handlers/recovery.rs
 
     #[tokio::test]
     async fn test_session_stats() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let account_id = AccountId(uuid::Uuid::new_v4());
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
-        let sessions = SessionOperations::new(effects, device_id, account_id);
+        use aura_testkit::{test_device_trio, ChoreographyTestHarness};
 
-        // Create a few test sessions
-        let participants = vec![device_id];
-        let _ = sessions
-            .create_session(SessionType::Coordination, participants.clone())
-            .await
-            .unwrap();
-        let _ = sessions
-            .create_session(SessionType::Recovery, participants)
-            .await
-            .unwrap();
+        // Create a multi-device test harness with 3 devices
+        let harness = test_device_trio();
 
-        let stats = sessions.get_session_stats().await.unwrap();
-        assert!(stats.active_sessions >= 2); // May have more from other tests
-        assert!(stats.last_cleanup > 0);
+        // Create a few coordinated sessions
+        let session1 = harness
+            .create_coordinated_session("coordination")
+            .await
+            .expect("Should create first session");
+
+        let session2 = harness
+            .create_coordinated_session("threshold_operation")
+            .await
+            .expect("Should create second session");
+
+        // Verify both sessions are active
+        let status1 = session1
+            .status()
+            .await
+            .expect("Should get session 1 status");
+        let status2 = session2
+            .status()
+            .await
+            .expect("Should get session 2 status");
+
+        assert_eq!(status1.session_type, "coordination");
+        assert_eq!(status2.session_type, "threshold_operation");
+        assert_eq!(status1.participants.len(), 3);
+        assert_eq!(status2.participants.len(), 3);
+
+        // Clean up
+        session1.end().await.expect("Should end session 1");
+        session2.end().await.expect("Should end session 2");
     }
 
     #[tokio::test]
     async fn test_session_metadata_update() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let account_id = AccountId(uuid::Uuid::new_v4());
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let account_id = AccountId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = EffectSystemConfig::for_testing(device_id);
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::new(config).unwrap()));
         let sessions = SessionOperations::new(effects, device_id, account_id);
 
         let participants = vec![device_id];

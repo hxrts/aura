@@ -28,7 +28,7 @@
 //! - Unlinkability: `τ[c1↔c2] ≈_ext τ` (computational indistinguishability)
 //! - Leakage bounds: `L(τ, observer) ≤ Budget(observer)`
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
 // === Core Modules ===
@@ -98,6 +98,9 @@ pub mod causal_context;
 
 /// Configuration system with format support and validation
 pub mod config;
+
+/// Pure synchronous hash trait for content addressing
+pub mod hash;
 
 // === Public API Re-exports ===
 

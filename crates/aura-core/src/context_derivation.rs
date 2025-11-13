@@ -4,8 +4,8 @@
 //! RID (pairwise relay contexts) and GID (group threshold contexts)
 //! as specified in the formal model.
 
+use crate::hash;
 use crate::identifiers::{DeviceId, DkdContextId, GroupId, MessageContext, RelayId};
-use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
@@ -263,16 +263,16 @@ impl DkdContextDerivation {
             });
         }
 
-        let mut hasher = Hasher::new();
-        hasher.update(b"AURA_DKD_CONTEXT");
-        hasher.update(app_label.as_bytes());
-        hasher.update(master_key);
+        let mut h = hash::hasher();
+        h.update(b"AURA_DKD_CONTEXT");
+        h.update(app_label.as_bytes());
+        h.update(master_key);
 
         if let Some(context) = additional_context {
-            hasher.update(context);
+            h.update(context);
         }
 
-        let fingerprint = *hasher.finalize().as_bytes();
+        let fingerprint = h.finalize();
         Ok(DkdContextId::new(app_label, fingerprint))
     }
 

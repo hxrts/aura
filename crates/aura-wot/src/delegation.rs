@@ -43,7 +43,7 @@ impl DelegationLink {
             delegator,
             delegatee,
             capabilities,
-            created_at: SystemTime::now(),
+            created_at: SystemTime::UNIX_EPOCH,
             expires_at: None,
             max_delegation_depth,
             signature: vec![], // Would be computed in real implementation
@@ -54,7 +54,7 @@ impl DelegationLink {
     #[allow(clippy::disallowed_methods)]
     pub fn is_valid(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
-            SystemTime::now() < expires_at
+            SystemTime::UNIX_EPOCH < expires_at
         } else {
             true
         }

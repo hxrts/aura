@@ -29,7 +29,7 @@ futures = { workspace = true }
 tracing = { workspace = true }
 
 # Cryptographic hashing
-blake3 = { workspace = true }
+sha2 = { workspace = true }
 
 # Randomness
 rand = { workspace = true }
@@ -60,6 +60,5 @@ json-debug = []
 default = []
 
 [dev-dependencies]
-# For testing DKD functionality
-sha2 = { workspace = true }
+# For testing
 proptest = { workspace = true }

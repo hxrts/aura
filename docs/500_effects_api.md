@@ -222,68 +222,51 @@ Sealed supertraits provide clean type signatures and better error messages. They
 
 ## Handler Registration
 
-### Effect Registry
+### Stateless Effect System
 
-Central registry for effect handler management and composition:
-
-```rust
-use aura_effects::{
-    RealCryptoHandler, TcpNetworkHandler, FilesystemStorageHandler,
-    MockCryptoHandler, MockNetworkHandler, MemoryStorageHandler,
-};
-
-pub struct ProductionHandler {
-    crypto: RealCryptoHandler,
-    network: TcpNetworkHandler,
-    storage: FilesystemStorageHandler,
-}
-
-impl ProductionHandler {
-    pub fn new(device_id: aura_core::DeviceId, config: &Config) -> Result<Self, HandlerError> {
-        Ok(Self {
-            crypto: RealCryptoHandler::new()?,
-            network: TcpNetworkHandler::new(config.listen_address)?,
-            storage: FilesystemStorageHandler::new(&config.data_path)?,
-        })
-    }
-}
-
-impl CryptoEffects for ProductionHandler {
-    async fn hash(&self, input: &[u8]) -> Result<[u8; 32], aura_core::AuraError> {
-        self.crypto.hash(input).await
-    }
-}
-```
-
-Production handlers use real infrastructure implementations. The composition pattern enables testing with different handler combinations.
-
-### Testing Handlers
-
-Use mock handlers for deterministic testing:
+Unified effect system with stateless handler composition:
 
 ```rust
-pub struct TestHandler {
-    crypto: MockCryptoHandler,
-    network: MockNetworkHandler,
-    storage: MemoryStorageHandler,
-}
+use aura_protocol::AuraEffectSystem;
+use aura_protocol::effects::EffectSystemConfig;
+use aura_core::DeviceId;
 
-impl TestHandler {
-    pub fn new() -> Self {
-        Self {
-            crypto: MockCryptoHandler::new(),
-            network: MockNetworkHandler::new(),
-            storage: MemoryStorageHandler::new(),
-        }
-    }
-    
-    pub fn set_crypto_failure(&self, operation: &str) {
-        self.crypto.set_failure(operation);
-    }
-}
+// Production configuration
+let device_id = DeviceId::new();
+let config = EffectSystemConfig::for_production(device_id)
+    .expect("Failed to create production configuration");
+let effect_system = AuraEffectSystem::new(config)
+    .expect("Failed to initialize effect system");
+
+// All effect operations go through the unified system
+let hash = effect_system.hash(b"data").await?;
+effect_system.store("key", b"value".to_vec()).await?;
+effect_system.send_to_peer(peer_id, message).await?;
 ```
 
-Testing handlers provide controlled environments for unit tests. Mock handlers eliminate external dependencies and enable fast test execution.
+The stateless effect system eliminates shared mutable state and provides deadlock-free coordination through isolated state services. All handlers are context-free and operate without device-specific state.
+
+### Testing Configuration
+
+Use testing configuration for deterministic tests:
+
+```rust
+use aura_protocol::effects::EffectSystemConfig;
+
+// Testing configuration with mock handlers
+let device_id = DeviceId::new();
+let config = EffectSystemConfig::for_testing(device_id);
+let effect_system = AuraEffectSystem::new(config)
+    .expect("Failed to initialize test effect system");
+
+// Testing operations are deterministic and isolated
+let test_data = b"test data";
+let hash1 = effect_system.hash(test_data).await?;
+let hash2 = effect_system.hash(test_data).await?;
+assert_eq!(hash1, hash2); // Deterministic in testing mode
+```
+
+Testing configuration provides mock handlers that eliminate external dependencies and enable deterministic test execution. All state services use in-memory implementations for fast test cycles.
 
 ## Common Patterns
 

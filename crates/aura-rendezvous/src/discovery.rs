@@ -4,9 +4,9 @@
 //! points and unlinkable credentials for anonymous peer finding.
 
 use crate::UnlinkableCredential;
+use aura_core::hash;
 use aura_core::{AuraResult, DeviceId, RelationshipId};
 use aura_wot::{Capability, TrustLevel};
-use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -363,43 +363,35 @@ impl DiscoveryService {
 
     /// Derive location hash from relationship context
     fn derive_location_hash(relationship_context: &[u8]) -> AuraResult<LocationHash> {
-        let mut hasher = Hasher::new();
-        hasher.update(b"aura-discovery-location");
-        hasher.update(relationship_context);
+        use aura_core::hash::hasher;
 
-        let hash = hasher.finalize();
-        let mut location_hash = [0u8; 32];
-        location_hash.copy_from_slice(hash.as_bytes());
-
-        Ok(location_hash)
+        let mut h = hasher();
+        h.update(b"aura-discovery-location");
+        h.update(relationship_context);
+        Ok(h.finalize())
     }
 
     /// Generate rendezvous identifier
     fn generate_rendezvous_id(location_hash: &LocationHash) -> AuraResult<RendezvousId> {
-        let mut hasher = Hasher::new();
-        hasher.update(b"aura-rendezvous-id");
-        hasher.update(location_hash);
-        hasher.update(&1234567890u64.to_le_bytes()); // Add timestamp for uniqueness
+        use aura_core::hash::hasher;
 
-        let hash = hasher.finalize();
-        let mut rendezvous_id = [0u8; 32];
-        rendezvous_id.copy_from_slice(hash.as_bytes());
-
-        Ok(rendezvous_id)
+        let mut h = hasher();
+        h.update(b"aura-rendezvous-id");
+        h.update(location_hash);
+        h.update(&1234567890u64.to_le_bytes()); // Add timestamp for uniqueness
+        Ok(h.finalize())
     }
 
     /// Generate peer token for advertisement
     fn generate_peer_token(advertisement: &PeerAdvertisement) -> AuraResult<PeerToken> {
-        let mut hasher = Hasher::new();
-        hasher.update(b"aura-peer-token");
-        hasher.update(advertisement.authorization_proof.to_bytes());
-        hasher.update(&advertisement.expires_at.to_le_bytes());
+        use aura_core::hash::hasher;
 
-        let hash = hasher.finalize();
-        let mut peer_token = [0u8; 32];
-        peer_token.copy_from_slice(hash.as_bytes());
+        let mut h = hasher();
+        h.update(b"aura-peer-token");
+        h.update(advertisement.authorization_proof.to_bytes());
+        h.update(&advertisement.expires_at.to_le_bytes());
 
-        Ok(peer_token)
+        Ok(h.finalize())
     }
 
     /// Check advertisement policy compliance
@@ -696,7 +688,7 @@ mod tests {
 
     #[test]
     fn test_discovery_capabilities() {
-        let capabilities = vec![
+        let capabilities = [
             DiscoveryCapability::MessageRelay,
             DiscoveryCapability::StorageProvider,
             DiscoveryCapability::ThresholdParticipant,

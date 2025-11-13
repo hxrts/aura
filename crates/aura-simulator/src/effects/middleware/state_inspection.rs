@@ -6,7 +6,8 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::time::SystemTime;
+use std::sync::Mutex;
+use std::time::{SystemTime, Instant};
 
 use aura_protocol::handlers::{
     AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
@@ -36,6 +37,8 @@ pub struct StateSnapshot {
     pub state_data: HashMap<String, serde_json::Value>,
     /// Additional metadata attached to this snapshot
     pub metadata: HashMap<String, serde_json::Value>,
+    /// When the snapshot was captured
+    pub captured_at: SystemTime,
 }
 
 /// State diff result
@@ -53,8 +56,8 @@ pub struct StateDiffResult {
 pub struct StateInspectionMiddleware {
     device_id: DeviceId,
     execution_mode: ExecutionMode,
-    snapshots: VecDeque<StateSnapshot>,
-    snapshot_counter: u64,
+    snapshots: Mutex<VecDeque<StateSnapshot>>,
+    snapshot_counter: Mutex<u64>,
     max_snapshots: usize,
 }
 
@@ -64,8 +67,8 @@ impl StateInspectionMiddleware {
         Self {
             device_id,
             execution_mode: ExecutionMode::Simulation { seed: 0 },
-            snapshots: VecDeque::new(),
-            snapshot_counter: 0,
+            snapshots: Mutex::new(VecDeque::new()),
+            snapshot_counter: Mutex::new(0),
             max_snapshots: 100,
         }
     }
@@ -75,8 +78,8 @@ impl StateInspectionMiddleware {
         Self {
             device_id,
             execution_mode: ExecutionMode::Simulation { seed },
-            snapshots: VecDeque::new(),
-            snapshot_counter: 0,
+            snapshots: Mutex::new(VecDeque::new()),
+            snapshot_counter: Mutex::new(0),
             max_snapshots: 100,
         }
     }
@@ -87,13 +90,14 @@ impl StateInspectionMiddleware {
     }
 
     /// Generate snapshot ID
-    fn generate_snapshot_id(&mut self) -> String {
-        self.snapshot_counter += 1;
-        format!("snapshot_{}_{}", self.device_id, self.snapshot_counter)
+    fn generate_snapshot_id(&self) -> String {
+        let mut counter = self.snapshot_counter.lock().unwrap();
+        *counter += 1;
+        format!("snapshot_{}_{}", self.device_id, *counter)
     }
 
     /// Extract state from context
-    fn extract_state_from_context(&self, ctx: &AuraContext) -> HashMap<String, serde_json::Value> {
+    fn extract_state_from_context(&self, ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> HashMap<String, serde_json::Value> {
         let mut state = HashMap::new();
 
         // Add basic context info
@@ -111,31 +115,34 @@ impl StateInspectionMiddleware {
         // Add timestamp
         state.insert(
             "timestamp".to_string(),
-            serde_json::json!(SystemTime::now()),
+            serde_json::json!(SystemTime::UNIX_EPOCH),
         );
 
         state
     }
 
     /// Capture state snapshot
-    fn capture_snapshot(&mut self, ctx: &AuraContext, custom_id: Option<String>) -> StateSnapshot {
+    fn capture_snapshot(&self, ctx: &aura_protocol::handlers::context_immutable::AuraContext, custom_id: Option<String>) -> StateSnapshot {
         let snapshot_id = custom_id.unwrap_or_else(|| self.generate_snapshot_id());
         let state_data = self.extract_state_from_context(ctx);
 
         let snapshot = StateSnapshot {
             id: snapshot_id,
-            timestamp: SystemTime::now(),
+            timestamp: SystemTime::UNIX_EPOCH,
             device_id: self.device_id,
             state_data,
             metadata: HashMap::new(),
+            captured_at: SystemTime::now(),
         };
 
         // Add snapshot to history
-        self.snapshots.push_back(snapshot.clone());
+        if let Ok(mut snapshots) = self.snapshots.lock() {
+            snapshots.push_back(snapshot.clone());
 
-        // Trim snapshot history if needed
-        while self.snapshots.len() > self.max_snapshots {
-            self.snapshots.pop_front();
+            // Trim snapshot history if needed
+            while snapshots.len() > self.max_snapshots {
+                snapshots.pop_front();
+            }
         }
 
         snapshot
@@ -147,16 +154,18 @@ impl StateInspectionMiddleware {
         snapshot_a: &str,
         snapshot_b: &str,
     ) -> Result<StateDiffResult, AuraHandlerError> {
-        let snap_a = self
-            .snapshots
+        let snapshots = self.snapshots.lock().map_err(|e| AuraHandlerError::ContextError {
+            message: format!("Failed to lock snapshots: {}", e),
+        })?;
+        
+        let snap_a = snapshots
             .iter()
             .find(|s| s.id == snapshot_a)
             .ok_or_else(|| AuraHandlerError::ContextError {
                 message: "Snapshot not found".to_string(),
             })?;
 
-        let snap_b = self
-            .snapshots
+        let snap_b = snapshots
             .iter()
             .find(|s| s.id == snapshot_b)
             .ok_or_else(|| AuraHandlerError::ContextError {
@@ -191,19 +200,19 @@ impl StateInspectionMiddleware {
     }
 
     /// Get snapshots
-    pub fn snapshots(&self) -> &VecDeque<StateSnapshot> {
-        &self.snapshots
+    pub fn snapshots(&self) -> Vec<StateSnapshot> {
+        self.snapshots.lock().unwrap().clone().into()
     }
 }
 
 #[async_trait]
 impl AuraHandler for StateInspectionMiddleware {
     async fn execute_effect(
-        &mut self,
+        &self,
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        ctx: &mut AuraContext,
+        ctx: &aura_protocol::handlers::context_immutable::AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError> {
         if !self.handles_effect(effect_type) {
             return Err(AuraHandlerError::UnsupportedEffect { effect_type });
@@ -251,15 +260,15 @@ impl AuraHandler for StateInspectionMiddleware {
             }
             "list_snapshots" => {
                 let snapshot_ids: Vec<String> =
-                    self.snapshots.iter().map(|s| s.id.clone()).collect();
+                    self.snapshots.lock().unwrap().iter().map(|s| s.id.clone()).collect();
                 serde_json::to_vec(&snapshot_ids).map_err(|_| AuraHandlerError::ContextError {
                     message: "Failed to serialize snapshot list".to_string(),
                 })
             }
             "clear_snapshots" => {
-                let count = self.snapshots.len();
-                self.snapshots.clear();
-                self.snapshot_counter = 0;
+                let count = self.snapshots.lock().unwrap().len();
+                self.snapshots.lock().unwrap().clear();
+                *self.snapshot_counter.lock().unwrap() = 0;
 
                 serde_json::to_vec(&count).map_err(|_| AuraHandlerError::ContextError {
                     message: "Failed to serialize clear count".to_string(),
@@ -273,9 +282,9 @@ impl AuraHandler for StateInspectionMiddleware {
     }
 
     async fn execute_session(
-        &mut self,
+        &self,
         _session: LocalSessionType,
-        _ctx: &mut AuraContext,
+        _ctx: &aura_protocol::handlers::context_immutable::AuraContext,
     ) -> Result<(), AuraHandlerError> {
         // State inspection doesn't handle sessions directly
         Ok(())

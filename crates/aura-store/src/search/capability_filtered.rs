@@ -10,7 +10,6 @@ use aura_core::{
     identifiers::{AccountId, DeviceId},
     journal::Cap,
 };
-use blake3::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -191,6 +190,12 @@ pub struct SizeBuckets {
     pub very_large: usize,
 }
 
+impl Default for SizeBuckets {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SizeBuckets {
     pub fn new() -> Self {
         Self {
@@ -296,7 +301,8 @@ impl CapabilityFilteredSearchEngine {
         query: CapabilityFilteredQuery,
         current_time: u64,
     ) -> Result<FilteredSearchResult, SearchError> {
-        let start_time = std::time::Instant::now();
+        // Note: Timing tracking should be done via effects, not system time
+        // For now using a dummy value - this is a test implementation
 
         // Step 1: Execute raw search to get potential matches
         let raw_matches = self.execute_raw_search(&query.query).await?;
@@ -333,7 +339,7 @@ impl CapabilityFilteredSearchEngine {
 
         // Step 5: Create execution metadata
         let metadata = SearchMetadata {
-            execution_time_ms: start_time.elapsed().as_millis() as u64,
+            execution_time_ms: 0,
             participating_nodes: 1, // Single node TODO fix - For now
             search_depth: 1,
             is_complete: true,
@@ -538,11 +544,11 @@ impl CapabilityFilteredSearchEngine {
         }
 
         // Hash all matching CIDs for verification
-        let mut hasher = Hasher::new();
+        let mut hasher = aura_core::hash::hasher();
         for content in authorized_content {
             hasher.update(content.content_id.to_hex().as_bytes());
         }
-        let matches_hash = *hasher.finalize().as_bytes();
+        let matches_hash = hasher.finalize();
 
         Ok(SearchAggregate {
             total_matches,
@@ -561,19 +567,21 @@ impl CapabilityFilteredSearchEngine {
         filtered_count: usize,
     ) -> Result<FilterProof, SearchError> {
         // Hash the filtering algorithm
-        let algorithm_hash = *blake3::hash(b"capability-filtered-search-v1").as_bytes();
+        let algorithm_hash = aura_core::hash::hash(b"capability-filtered-search-v1");
 
         // Hash requester capabilities
         let capabilities_serialized = bincode::serialize(requester_capabilities)
             .map_err(|_| SearchError::SerializationError)?;
-        let capabilities_hash = *blake3::hash(&capabilities_serialized).as_bytes();
+        let capabilities_hash = aura_core::hash::hash(&capabilities_serialized);
 
         // Create Merkle tree root of checked content
         let mut content_hashes = Vec::new();
         for content in authorized_content {
-            content_hashes.push(blake3::hash(content.content_id.to_hex().as_bytes()));
+            content_hashes.push(aura_core::hash::hash(
+                content.content_id.to_hex().as_bytes(),
+            ));
         }
-        let checked_content_root = *self.compute_merkle_root(content_hashes).as_bytes();
+        let checked_content_root = self.compute_merkle_root(content_hashes);
 
         // TODO: Generate actual cryptographic signature
         let signature = vec![0u8; 64]; // Placeholder
@@ -588,9 +596,9 @@ impl CapabilityFilteredSearchEngine {
     }
 
     /// Compute Merkle tree root (TODO fix - Simplified implementation)
-    fn compute_merkle_root(&self, mut hashes: Vec<Hash>) -> Hash {
+    fn compute_merkle_root(&self, mut hashes: Vec<[u8; 32]>) -> [u8; 32] {
         if hashes.is_empty() {
-            return blake3::hash(b"");
+            return aura_core::hash::hash(b"");
         }
 
         while hashes.len() > 1 {
@@ -598,9 +606,9 @@ impl CapabilityFilteredSearchEngine {
 
             for chunk in hashes.chunks(2) {
                 let combined = if chunk.len() == 2 {
-                    let mut hasher = Hasher::new();
-                    hasher.update(chunk[0].as_bytes());
-                    hasher.update(chunk[1].as_bytes());
+                    let mut hasher = aura_core::hash::hasher();
+                    hasher.update(&chunk[0]);
+                    hasher.update(&chunk[1]);
                     hasher.finalize()
                 } else {
                     chunk[0]

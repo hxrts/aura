@@ -154,9 +154,7 @@ impl OpLog {
 
     /// Compute the content ID (CID) of an operation
     fn compute_operation_cid(&self, op: &AttestedOp) -> Hash32 {
-        use blake3::Hasher;
-
-        let mut hasher = Hasher::new();
+        let mut hasher = aura_core::hash::hasher();
 
         // Hash the TreeOp
         hasher.update(&op.op.parent_epoch.to_le_bytes());
@@ -167,10 +165,7 @@ impl OpLog {
         hasher.update(&op.agg_sig);
         hasher.update(&op.signer_count.to_le_bytes());
 
-        let hash = hasher.finalize();
-        let mut result = [0u8; 32];
-        result.copy_from_slice(hash.as_bytes());
-        Hash32(result)
+        Hash32(hasher.finalize())
     }
 
     /// Get an operation by its hash (CID)
@@ -398,8 +393,8 @@ impl Default for DeviceRegistry {
 mod tests {
     use super::*;
     use crate::ledger::intent::{Intent, Priority};
-    use aura_core::tree::{LeafNode, LeafRole, TreeOpKind as TreeOperation};
-    use aura_core::{NodeIndex, TreeCommitment};
+    use aura_core::tree::{LeafNode, TreeOpKind as TreeOperation};
+    use aura_core::NodeIndex;
 
     #[test]
     fn test_intent_pool_join_semantics() {
@@ -410,7 +405,7 @@ mod tests {
             TreeOperation::AddLeaf {
                 leaf: LeafNode::new_device(
                     aura_core::tree::LeafId(0),
-                    aura_core::DeviceId(uuid::Uuid::new_v4()),
+                    aura_core::DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
                     vec![0u8; 32],
                 ),
                 under: NodeIndex(0),
@@ -418,7 +413,7 @@ mod tests {
             vec![],
             aura_core::Hash32([0u8; 32]),
             Priority::default_priority(),
-            DeviceId(uuid::Uuid::new_v4()),
+            DeviceId(uuid::Uuid::from_bytes([2u8; 16])),
             1000,
         );
 

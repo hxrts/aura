@@ -80,7 +80,8 @@ pub use aura_core::{
 pub async fn create_production_agent(device_id: DeviceId) -> AgentResult<AuraAgent> {
     use aura_protocol::effects::AuraEffectSystem;
 
-    let core_effects = AuraEffectSystem::for_production(device_id);
+    let config = aura_protocol::effects::EffectSystemConfig::for_production(device_id)?;
+    let core_effects = AuraEffectSystem::new(config)?;
 
     Ok(AuraAgent::new(core_effects, device_id))
 }
@@ -100,6 +101,7 @@ pub fn create_testing_agent(device_id: DeviceId) -> AuraAgent {
 pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AuraAgent {
     use aura_protocol::effects::AuraEffectSystem;
 
-    let core_effects = AuraEffectSystem::for_simulation(device_id, seed);
+    let config = aura_protocol::effects::EffectSystemConfig::for_simulation(device_id, seed);
+    let core_effects = AuraEffectSystem::new(config).expect("Failed to create simulation effect system");
     AuraAgent::new(core_effects, device_id)
 }

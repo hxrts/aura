@@ -45,7 +45,7 @@ impl CacheEpochFloors {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{maintenance::CacheInvalidated, tree::Epoch as TreeEpoch};
+    use aura_core::maintenance::CacheInvalidated;
 
     #[test]
     fn cache_floor_monotonic() {

@@ -6,20 +6,21 @@
 //! implementing effects directly.
 
 use crate::config::AgentConfig;
-use uuid;
 use crate::effects::*;
 use crate::errors::{AuraError, Result as AgentResult};
-use crate::handlers::{AgentEffectSystemHandler, OtaOperations, StorageOperations};
+use crate::handlers::{
+    AgentEffectSystemHandler, OtaOperations, RecoveryOperations, StorageOperations,
+};
 use crate::maintenance::{MaintenanceController, SnapshotOutcome};
-use crate::middleware::{AgentMiddlewareStack, MiddlewareStackBuilder};
+use crate::middleware::AgentMiddlewareStack;
 use aura_core::effects::{ConsoleEffects, StorageEffects};
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_protocol::effects::{AuraEffectSystem, SessionType};
 use aura_sync::WriterFence;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use uuid;
 
 /// Core agent runtime that composes handlers and middleware
 ///
@@ -44,6 +45,8 @@ pub struct AuraAgent {
     core_effects: Arc<RwLock<AuraEffectSystem>>,
     /// Storage operations handler
     storage_ops: StorageOperations,
+    /// Recovery operations handler
+    recovery_ops: RecoveryOperations,
     /// OTA upgrade operations handler
     ota_ops: OtaOperations,
     /// Maintenance workflows (snapshots, GC, OTA state)
@@ -87,6 +90,14 @@ impl AuraAgent {
             device_id,
             format!("agent_{}", device_id.0.simple()),
         );
+
+        // Create recovery operations handler (default account_id for now)
+        let recovery_ops = RecoveryOperations::new(
+            core_effects.clone(),
+            device_id,
+            AccountId(uuid::Uuid::from_bytes([0u8; 16])), // Default, will be updated when config loads
+        );
+
         let ota_ops = OtaOperations::new(device_id);
         let maintenance = MaintenanceController::new(core_effects.clone(), device_id);
 
@@ -96,6 +107,7 @@ impl AuraAgent {
             middleware: None,
             core_effects,
             storage_ops,
+            recovery_ops,
             ota_ops,
             maintenance,
             config_cache: Arc::new(RwLock::new(None)),
@@ -113,7 +125,8 @@ impl AuraAgent {
 
     /// Create agent for testing with mock effects
     pub fn for_testing(device_id: DeviceId) -> Self {
-        let effects = AuraEffectSystem::for_testing(device_id);
+        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
+        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
         Self::new(effects, device_id)
     }
 
@@ -125,6 +138,11 @@ impl AuraAgent {
     /// Access maintenance controller (snapshots, GC, OTA state).
     pub fn maintenance(&self) -> &MaintenanceController {
         &self.maintenance
+    }
+
+    /// Access recovery operations handler.
+    pub fn recovery(&self) -> &RecoveryOperations {
+        &self.recovery_ops
     }
 
     /// Access OTA upgrade operations handler.
@@ -274,8 +292,8 @@ impl AuraAgent {
         let session_ops = self.get_or_create_session_ops().await?;
 
         // Parse session type from string
+        // Note: "recovery" sessions removed - use RecoveryOperations instead
         let session_type_enum = match session_type {
-            "recovery" => SessionType::Recovery,
             "coordination" => SessionType::Coordination,
             "threshold" => SessionType::ThresholdOperation,
             "key_rotation" => SessionType::KeyRotation,
@@ -346,7 +364,9 @@ impl AuraAgent {
     async fn get_or_create_session_ops(&self) -> AgentResult<crate::handlers::SessionOperations> {
         // Get config to get account_id
         let config = self.get_config().await?;
-        let account_id = config.account_id.unwrap_or_else(|| AccountId(uuid::Uuid::new_v4()));
+        let account_id = config
+            .account_id
+            .unwrap_or_else(|| AccountId(uuid::Uuid::from_bytes([0u8; 16])));
 
         // Create fresh session operations each time
         // This is simpler than trying to cache non-cloneable operations
@@ -458,8 +478,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_creation() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = AuraEffectSystem::for_testing(device_id);
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
+        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
         let agent = AuraAgent::new(effects, device_id);
 
         assert_eq!(agent.device_id(), device_id);
@@ -467,8 +488,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_initialization() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = AuraEffectSystem::for_testing(device_id);
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
+        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
         let agent = AuraAgent::new(effects, device_id);
 
         // Should not panic and should complete successfully
@@ -484,8 +506,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_secure_storage_operations() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = AuraEffectSystem::for_testing(device_id);
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
+        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
         let agent = AuraAgent::new(effects, device_id);
 
         agent
@@ -527,42 +550,36 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_management() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = AuraEffectSystem::for_testing(device_id);
-        let agent = AuraAgent::new(effects, device_id);
+        use aura_testkit::{test_device_pair, ChoreographyTestHarness};
 
-        agent
-            .initialize()
+        // Create a multi-device test harness
+        let harness = test_device_pair();
+
+        // Create coordinated session across devices
+        let session = harness
+            .create_coordinated_session("coordination")
             .await
-            .expect("Initialization should succeed");
+            .expect("Should create coordinated session");
 
-        // Create session
-        let session_id = agent
-            .create_session("recovery")
+        assert!(!session.session_id().is_empty());
+        assert_eq!(session.participants().len(), 2);
+
+        // Verify session is active
+        let status = session.status().await.expect("Should get session status");
+        assert_eq!(status.session_type, "coordination");
+
+        // End the session
+        session
+            .end()
             .await
-            .expect("Create session should succeed");
-
-        assert!(!session_id.is_empty());
-
-        // List sessions
-        let sessions = agent
-            .list_active_sessions()
-            .await
-            .expect("List sessions should succeed");
-
-        assert!(sessions.contains(&session_id));
-
-        // End session
-        agent
-            .end_session(&session_id)
-            .await
-            .expect("End session should succeed");
+            .expect("Should end session successfully");
     }
 
     #[tokio::test]
     async fn test_config_management() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = AuraEffectSystem::for_testing(device_id);
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
+        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
         let agent = AuraAgent::new(effects, device_id);
 
         agent

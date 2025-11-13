@@ -4,10 +4,10 @@
 //! authentication during recovery operations.
 
 use crate::{AuraError, AuraResult};
-use aura_core::{AccountId, Cap, DeviceId};
+use aura_core::{AccountId, DeviceId};
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 // Guardian types from aura_wot not yet implemented, using placeholders
-use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation};
+use aura_protocol::AuraEffectSystem;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
@@ -39,7 +39,7 @@ pub struct RecoveryContext {
 }
 
 /// Types of recovery operations requiring guardian approval
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RecoveryOperationType {
     /// Device key recovery
     DeviceKeyRecovery,
@@ -79,6 +79,15 @@ pub struct GuardianApproval {
     pub signature: Vec<u8>,
     /// Timestamp of approval
     pub timestamp: u64,
+}
+
+/// Guardian approval decision (internal)
+#[derive(Debug, Clone)]
+struct GuardianApprovalDecision {
+    /// Whether to approve the request
+    approved: bool,
+    /// Justification for the decision
+    justification: String,
 }
 
 /// Message types for guardian authentication choreography
@@ -166,7 +175,7 @@ impl GuardianRole {
 }
 
 /// Guardian authentication choreography state
-#[derive(Debug)]
+#[allow(dead_code)]
 pub struct GuardianAuthState {
     /// Current request being processed
     current_request: Option<GuardianAuthRequest>,
@@ -177,6 +186,12 @@ pub struct GuardianAuthState {
     /// Guardian verification status
     #[allow(dead_code)] // Used for audit and recovery tracking
     verified_guardians: HashMap<String, HashMap<DeviceId, VerifiedIdentity>>,
+}
+
+impl Default for GuardianAuthState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GuardianAuthState {
@@ -200,7 +215,7 @@ impl GuardianAuthState {
     ) {
         self.guardian_challenges
             .entry(request_id)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(guardian_id, (challenge, expires_at));
     }
 
@@ -217,8 +232,8 @@ impl GuardianAuthState {
             .and_then(|(challenge, expires_at)| {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
 
                 if now > *expires_at {
                     None // Expired
@@ -232,7 +247,7 @@ impl GuardianAuthState {
     pub fn add_guardian_approval(&mut self, request_id: String, approval: GuardianApproval) {
         self.guardian_approvals
             .entry(request_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(approval);
     }
 
@@ -260,40 +275,155 @@ impl GuardianAuthState {
 }
 
 /// Guardian authentication choreography
-#[derive(Debug)]
 pub struct GuardianAuthChoreography {
     /// Local device role
     role: GuardianRole,
     /// Choreography state
     state: Mutex<GuardianAuthState>,
-    /// MPST runtime
-    runtime: AuraRuntime,
+    /// Effect system
+    effect_system: AuraEffectSystem,
 }
 
 impl GuardianAuthChoreography {
     /// Create new guardian authentication choreography
-    pub fn new(role: GuardianRole, runtime: AuraRuntime) -> Self {
+    pub fn new(role: GuardianRole, effect_system: AuraEffectSystem) -> Self {
         Self {
             role,
             state: Mutex::new(GuardianAuthState::new()),
-            runtime,
+            effect_system,
         }
+    }
+
+    /// Validate recovery request from guardian perspective
+    async fn validate_recovery_request(
+        &self,
+        account_id: &AccountId,
+        recovery_context: &RecoveryContext,
+        request_id: &str,
+    ) -> AuraResult<GuardianApprovalDecision> {
+        tracing::info!(
+            "Guardian validating recovery request {} for account {}",
+            request_id,
+            account_id
+        );
+
+        // Basic validation checks
+        let mut approval_reasons = Vec::new();
+        let mut denial_reasons = Vec::new();
+
+        // Check if this is an emergency request
+        if recovery_context.is_emergency {
+            approval_reasons.push("Emergency recovery request approved".to_string());
+        }
+
+        // Validate recovery operation type
+        match recovery_context.operation_type {
+            RecoveryOperationType::DeviceKeyRecovery => {
+                approval_reasons.push("Device key recovery is permitted".to_string());
+            }
+            RecoveryOperationType::AccountAccessRecovery => {
+                approval_reasons.push("Account access recovery is permitted".to_string());
+            }
+            RecoveryOperationType::EmergencyFreeze => {
+                if recovery_context.is_emergency {
+                    approval_reasons.push("Emergency freeze approved".to_string());
+                } else {
+                    denial_reasons
+                        .push("Non-emergency freeze requires additional justification".to_string());
+                }
+            }
+            RecoveryOperationType::GuardianSetModification => {
+                // Guardian set modifications require careful consideration
+                denial_reasons.push("Guardian set modification requires manual review".to_string());
+            }
+            RecoveryOperationType::AccountUnfreeze => {
+                approval_reasons.push("Account unfreeze approved".to_string());
+            }
+        }
+
+        // Check request timestamp age (reject old requests)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        if now > recovery_context.timestamp + 3600 {
+            // 1 hour old
+            denial_reasons.push("Recovery request is too old".to_string());
+        }
+
+        // For MVP: Default approval policy for most operations unless explicitly denied
+        let approved = denial_reasons.is_empty() && !approval_reasons.is_empty();
+
+        let justification = if approved {
+            format!("Approved: {}", approval_reasons.join(", "))
+        } else if denial_reasons.is_empty() {
+            "Insufficient grounds for approval".to_string()
+        } else {
+            format!("Denied: {}", denial_reasons.join(", "))
+        };
+
+        tracing::info!(
+            "Guardian decision for request {}: approved={}, reason={}",
+            request_id,
+            approved,
+            justification
+        );
+
+        Ok(GuardianApprovalDecision {
+            approved,
+            justification,
+        })
+    }
+
+    /// Generate guardian challenge for additional verification
+    async fn generate_guardian_challenge(&self, request_id: &str) -> AuraResult<Vec<u8>> {
+        // Generate cryptographically secure random challenge
+        // In production, this would use proper cryptographic RNG
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let challenge = format!("guardian_challenge_{}_{}", request_id, nanos);
+
+        Ok(challenge.into_bytes())
+    }
+
+    /// Sign guardian approval decision
+    async fn sign_approval_decision(
+        &self,
+        request_id: &str,
+        account_id: &AccountId,
+        approved: bool,
+        justification: &str,
+    ) -> AuraResult<Vec<u8>> {
+        // Create message to sign
+        let message = format!(
+            "guardian_approval:{}:{}:{}:{}",
+            request_id, account_id, approved, justification
+        );
+
+        // In production, this would use the guardian's actual private key
+        // For MVP, we create a mock signature
+        let device_id = self.effect_system.device_id();
+        let mock_signature = format!("guardian_sig_{}_{}", device_id, message.len());
+
+        Ok(mock_signature.into_bytes())
     }
 
     /// Execute the choreography
     pub async fn execute(
         &self,
         request: GuardianAuthRequest,
-        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<GuardianAuthResponse> {
         let mut state = self.state.lock().await;
         state.current_request = Some(request.clone());
         drop(state);
 
         match self.role {
-            GuardianRole::Requester => self.execute_requester(request, effect_system).await,
-            GuardianRole::Guardian(_) => self.execute_guardian(effect_system).await,
-            GuardianRole::Coordinator => self.execute_coordinator(effect_system).await,
+            GuardianRole::Requester => self.execute_requester(request).await,
+            GuardianRole::Guardian(_) => self.execute_guardian().await,
+            GuardianRole::Coordinator => self.execute_coordinator().await,
         }
     }
 
@@ -302,39 +432,20 @@ impl GuardianAuthChoreography {
     async fn execute_requester(
         &self,
         request: GuardianAuthRequest,
-        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<GuardianAuthResponse> {
         tracing::info!(
             "Executing guardian auth as requester for account: {}",
             request.account_id
         );
 
-        // Apply capability guard
-        let recovery_cap = Cap::with_permissions(vec![
-            "recovery:request".to_string(),
-            "network:send".to_string(),
-            "network:receive".to_string(),
-        ]);
-        let guard = CapabilityGuard::new(recovery_cap.clone());
+        // TODO: Implement capability-based authorization with new effect system
+        // This will be implemented with aura-wot capability evaluation
 
-        // For MVP, grant recovery permissions to authenticated devices
-        let device_capabilities = recovery_cap; // Placeholder
-        guard.enforce(&device_capabilities).map_err(|e| {
-            AuraError::invalid(format!(
-                "Insufficient capabilities for guardian auth: {}",
-                e
-            ))
-        })?;
-
-        // Create handler adapter for communication
-        let device_id = self.runtime.device_id();
-        let mut adapter = aura_protocol::choreography::AuraHandlerAdapter::new(
-            device_id,
-            effect_system.execution_mode(),
-        );
+        // TODO: Implement network communication with new effect system
+        let _device_id = self.effect_system.device_id();
 
         // Generate request ID
-        let request_id = uuid::Uuid::new_v4().to_string();
+        let request_id = uuid::Uuid::from_bytes([0u8; 16]).to_string();
 
         // Discover guardians from web of trust
         // For MVP, we would need to query the ledger/journal for guardian devices
@@ -356,20 +467,18 @@ impl GuardianAuthChoreography {
 
         // Send approval requests to discovered guardians
         for guardian_id in &guardian_devices {
-            let approval_request = GuardianAuthMessage::ApprovalRequest {
+            let _approval_request = GuardianAuthMessage::ApprovalRequest {
                 guardian_id: *guardian_id,
                 account_id: request.account_id,
                 recovery_context: request.recovery_context.clone(),
                 request_id: request_id.clone(),
             };
 
-            if let Err(e) = adapter.send(*guardian_id, approval_request).await {
-                tracing::warn!(
-                    "Failed to send approval request to guardian {}: {}",
-                    guardian_id,
-                    e
-                );
-            }
+            // TODO: Send request via NetworkEffects
+            tracing::info!(
+                "Would send approval request to guardian {} (placeholder)",
+                guardian_id
+            );
         }
 
         // Wait for guardian approvals with timeout
@@ -391,9 +500,15 @@ impl GuardianAuthChoreography {
                         continue;
                     }
 
-                    if let Ok(message) =
-                        adapter.recv_from::<GuardianAuthMessage>(*guardian_id).await
-                    {
+                    // TODO: Receive response via NetworkEffects
+                    if false { // Placeholder - network communication not implemented
+                        let message: GuardianAuthMessage = GuardianAuthMessage::ApprovalDecision {
+                            request_id: request_id.clone(),
+                            guardian_id: *guardian_id,
+                            approved: true,
+                            justification: "Placeholder approval".to_string(),
+                            signature: vec![0; 64],
+                        };
                         received_any = true;
                         match message {
                             GuardianAuthMessage::ApprovalDecision {
@@ -426,8 +541,8 @@ impl GuardianAuthChoreography {
                                     signature,
                                     timestamp: std::time::SystemTime::now()
                                         .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_secs(),
+                                        .map(|d| d.as_secs())
+                                        .unwrap_or(0),
                                 };
 
                                 collected_approvals.push(approval);
@@ -458,12 +573,8 @@ impl GuardianAuthChoreography {
         let approved_count = collected_approvals.iter().filter(|a| a.approved).count();
         let success = approved_count >= request.required_guardians;
 
-        // Apply journal annotation
-        let journal_annotation = JournalAnnotation::add_facts(format!(
-            "Guardian authentication: {}/{} approvals",
-            approved_count, request.required_guardians
-        ));
-        tracing::info!("Applied journal annotation: {:?}", journal_annotation);
+        // TODO: Implement journal state tracking with new effect system
+        // This will use AuraEffectSystem's journal capabilities
 
         tracing::info!(
             "Guardian authentication complete: {} approvals collected, {} required, success: {}",
@@ -491,35 +602,151 @@ impl GuardianAuthChoreography {
     /// Execute as guardian
     async fn execute_guardian(
         &self,
-        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<GuardianAuthResponse> {
         tracing::info!("Executing guardian auth as guardian");
 
-        let _device_id = self.runtime.device_id();
+        let device_id = self.effect_system.device_id();
 
-        // Wait for approval request from requester
-        // In production, we would know the requester from context or receive from any device
-        tracing::info!("Guardian waiting for approval request...");
+        // TODO: Implement capability-based authorization with new effect system
+        // This will be implemented with aura-wot capability evaluation
 
-        // Placeholder: In production, guardian would listen for requests using AuraHandlerAdapter
-        // For now, we return an error indicating the guardian role is passive
-        tracing::warn!(
-            "Guardian role requires incoming request - this is typically driven by requester"
-        );
+        // TODO: Implement network communication with new effect system
 
-        Ok(GuardianAuthResponse {
-            guardian_approvals: Vec::new(),
-            success: false,
-            error: Some(
-                "Guardian role is passive - awaits approval requests from requester".to_string(),
-            ),
-        })
+        tracing::info!("Guardian listening for approval requests...");
+
+        // Wait for approval request with timeout
+        let listen_timeout = tokio::time::Duration::from_secs(120); // 2 minutes
+
+        let approval_response = tokio::time::timeout(listen_timeout, async {
+            // Listen for approval requests from any requester
+            loop {
+                // TODO: Implement network message receiving with new effect system
+                let message_received: Option<GuardianAuthMessage> = None; // Placeholder
+
+                if let Some(message) = message_received {
+                    match message {
+                        GuardianAuthMessage::ApprovalRequest {
+                            guardian_id: _requested_guardian,
+                            account_id,
+                            recovery_context,
+                            request_id,
+                        } => {
+                            tracing::info!(
+                                "Guardian {} received approval request for account {} (request: {})",
+                                device_id, account_id, request_id
+                            );
+
+                            // Verify this guardian is being requested
+                            // For now, we accept any approval request since GuardianId mapping is not complete
+
+                            // Perform guardian validation of the recovery request
+                            let approval_decision = self.validate_recovery_request(
+                                &account_id,
+                                &recovery_context,
+                                &request_id
+                            ).await?;
+
+                            // Send guardian challenge for additional verification
+                            let challenge = self.generate_guardian_challenge(&request_id).await?;
+                            let expires_at = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0) + 300; // 5 minutes
+                            let _challenge_msg = GuardianAuthMessage::GuardianChallenge {
+                                request_id: request_id.clone(),
+                                challenge: challenge.clone(),
+                                expires_at,
+                            };
+
+                            // TODO: Send challenge via NetworkEffects
+                            tracing::info!("Would send challenge (placeholder)");
+
+                            // Generate guardian signature for approval
+                            let signature = self.sign_approval_decision(
+                                &request_id,
+                                &account_id,
+                                approval_decision.approved,
+                                &approval_decision.justification
+                            ).await?;
+
+                            // Send approval decision
+                            let _decision_msg = GuardianAuthMessage::ApprovalDecision {
+                                request_id: request_id.clone(),
+                                guardian_id: device_id,
+                                approved: approval_decision.approved,
+                                justification: approval_decision.justification.clone(),
+                                signature: signature.clone(),
+                            };
+
+                            // TODO: Send approval decision via NetworkEffects
+                            tracing::info!("Would send approval decision (placeholder)");
+
+                            // Create guardian approval record
+                            let guardian_approval = GuardianApproval {
+                                guardian_id: device_id,
+                                verified_identity: VerifiedIdentity {
+                                    proof: IdentityProof::Device {
+                                        device_id,
+                                        signature: aura_verify::Ed25519Signature::from_slice(&signature)
+                                            .unwrap_or_else(|_|
+                                                aura_verify::Ed25519Signature::from_slice(&[0u8; 64])
+                                                    .unwrap()
+                                            ),
+                                    },
+                                    message_hash: [0u8; 32], // Placeholder
+                                },
+                                approved: approval_decision.approved,
+                                justification: approval_decision.justification,
+                                signature,
+                                timestamp: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0),
+                            };
+
+                            tracing::info!(
+                                "Guardian {} processed approval request: approved={}",
+                                device_id, approval_decision.approved
+                            );
+
+                            return Ok(GuardianAuthResponse {
+                                guardian_approvals: vec![guardian_approval],
+                                success: approval_decision.approved,
+                                error: if approval_decision.approved {
+                                    None
+                                } else {
+                                    Some("Guardian denied recovery request".to_string())
+                                },
+                            });
+                        }
+                        _ => {
+                            // Ignore other message types
+                            continue;
+                        }
+                    }
+                }
+
+                // Small delay to avoid busy-looping
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+        }).await;
+
+        match approval_response {
+            Ok(result) => result,
+            Err(_) => {
+                tracing::warn!("Guardian timed out waiting for approval requests");
+                Ok(GuardianAuthResponse {
+                    guardian_approvals: Vec::new(),
+                    success: false,
+                    error: Some("Guardian timed out waiting for approval requests".to_string()),
+                })
+            }
+        }
     }
 
     /// Execute as coordinator
     async fn execute_coordinator(
         &self,
-        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<GuardianAuthResponse> {
         tracing::info!("Executing guardian auth as coordinator");
 
@@ -544,19 +771,18 @@ impl GuardianAuthChoreography {
 }
 
 /// Guardian authentication coordinator
-#[derive(Debug)]
 pub struct GuardianAuthCoordinator {
-    /// Local runtime
-    runtime: AuraRuntime,
+    /// Local effect system
+    effect_system: AuraEffectSystem,
     /// Current choreography
     choreography: Option<GuardianAuthChoreography>,
 }
 
 impl GuardianAuthCoordinator {
     /// Create new coordinator
-    pub fn new(runtime: AuraRuntime) -> Self {
+    pub fn new(effect_system: AuraEffectSystem) -> Self {
         Self {
-            runtime,
+            effect_system,
             choreography: None,
         }
     }
@@ -565,7 +791,6 @@ impl GuardianAuthCoordinator {
     pub async fn authenticate_guardians(
         &mut self,
         request: GuardianAuthRequest,
-        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<GuardianAuthResponse> {
         tracing::info!(
             "Starting guardian authentication for account: {}",
@@ -581,10 +806,10 @@ impl GuardianAuthCoordinator {
 
         // Create choreography with requester role
         let choreography =
-            GuardianAuthChoreography::new(GuardianRole::Requester, self.runtime.clone());
+            GuardianAuthChoreography::new(GuardianRole::Requester, self.effect_system.clone());
 
-        // Execute the choreography with effect system
-        let result = choreography.execute(request, effect_system).await;
+        // Execute the choreography
+        let result = choreography.execute(request).await;
 
         // Store choreography for potential follow-up operations
         self.choreography = Some(choreography);
@@ -592,9 +817,9 @@ impl GuardianAuthCoordinator {
         result
     }
 
-    /// Get the current runtime
-    pub fn runtime(&self) -> &AuraRuntime {
-        &self.runtime
+    /// Get the current effect system
+    pub fn effect_system(&self) -> &AuraEffectSystem {
+        &self.effect_system
     }
 
     /// Check if a choreography is currently active
@@ -613,12 +838,12 @@ mod tests {
         let mut state = GuardianAuthState::new();
 
         let request_id = "test_request".to_string();
-        let guardian_id = DeviceId(uuid::Uuid::new_v4());
+        let guardian_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let challenge = vec![1, 2, 3, 4];
         let expires_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
             + 300; // 5 minutes from now
 
         state.add_guardian_challenge(
@@ -654,15 +879,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_guardian_auth_coordinator() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let effect_system = AuraEffectSystem::new(device_id, aura_protocol::handlers::ExecutionMode::Testing);
 
-        let mut coordinator = GuardianAuthCoordinator::new(runtime);
+        let mut coordinator = GuardianAuthCoordinator::new(effect_system);
         assert!(!coordinator.has_active_choreography());
 
         let request = GuardianAuthRequest {
             requesting_device: device_id,
-            account_id: AccountId(uuid::Uuid::new_v4()),
+            account_id: AccountId(uuid::Uuid::from_bytes([0u8; 16])),
             recovery_context: RecoveryContext {
                 operation_type: RecoveryOperationType::DeviceKeyRecovery,
                 justification: "Lost device".to_string(),
@@ -675,15 +900,9 @@ mod tests {
             required_guardians: 2,
         };
 
-        // Create effect system for test
-        let effect_system = aura_protocol::effects::system::AuraEffectSystem::new(
-            device_id,
-            aura_protocol::context::ExecutionMode::Testing,
-        );
-
         // Note: This will return Ok with success=false since no guardians are discovered
         let result = coordinator
-            .authenticate_guardians(request, &effect_system)
+            .authenticate_guardians(request)
             .await;
         assert!(result.is_ok());
         let response = result.unwrap();

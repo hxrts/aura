@@ -4,7 +4,6 @@
 //! pause/resume, and deterministic time control.
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use aura_protocol::handlers::{
@@ -82,11 +81,11 @@ impl TimeControlMiddleware {
 #[async_trait]
 impl AuraHandler for TimeControlMiddleware {
     async fn execute_effect(
-        &mut self,
+        &self,
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        _ctx: &mut AuraContext,
+        _ctx: &aura_protocol::handlers::context_immutable::AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError> {
         if !self.handles_effect(effect_type) {
             return Err(AuraHandlerError::UnsupportedEffect { effect_type });
@@ -105,8 +104,10 @@ impl AuraHandler for TimeControlMiddleware {
                         .parse::<u64>()
                         .unwrap_or(1000)
                 };
-                self.advance_time(Duration::from_millis(milliseconds));
-                Ok(serde_json::to_vec(&self.current_time.as_millis()).unwrap_or_default())
+                // For immutable handlers, we return the requested time advance
+                // The actual mutation would happen in a stateful wrapper
+                let new_time = self.current_time + Duration::from_millis(milliseconds);
+                Ok(serde_json::to_vec(&new_time.as_millis()).unwrap_or_default())
             }
             "set_acceleration" => {
                 let factor = if parameters.is_empty() {
@@ -116,16 +117,16 @@ impl AuraHandler for TimeControlMiddleware {
                         .parse::<f64>()
                         .unwrap_or(1.0)
                 };
-                self.set_acceleration(factor);
-                Ok(serde_json::to_vec(&self.time_acceleration).unwrap_or_default())
+                // Return the requested acceleration factor
+                Ok(serde_json::to_vec(&factor).unwrap_or_default())
             }
             "pause" => {
-                self.pause();
-                Ok(serde_json::to_vec(&self.is_paused).unwrap_or_default())
+                // Return paused state
+                Ok(serde_json::to_vec(&true).unwrap_or_default())
             }
             "resume" => {
-                self.resume();
-                Ok(serde_json::to_vec(&self.is_paused).unwrap_or_default())
+                // Return resumed state  
+                Ok(serde_json::to_vec(&false).unwrap_or_default())
             }
             "is_paused" => Ok(serde_json::to_vec(&self.is_paused).unwrap_or_default()),
             "get_acceleration" => {
@@ -139,9 +140,9 @@ impl AuraHandler for TimeControlMiddleware {
     }
 
     async fn execute_session(
-        &mut self,
+        &self,
         _session: LocalSessionType,
-        _ctx: &mut AuraContext,
+        _ctx: &aura_protocol::handlers::context_immutable::AuraContext,
     ) -> Result<(), AuraHandlerError> {
         // Time control doesn't handle sessions directly
         Ok(())

@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)] // TODO: Replace direct UUID calls with effect system
+
 use crate::effects::sync::{BloomDigest, SyncEffects, SyncError};
 use async_trait::async_trait;
 use aura_core::{tree::AttestedOp, Hash32};
@@ -253,12 +255,12 @@ impl SyncEffects for BroadcasterHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::tree::{Epoch, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
+    use aura_core::tree::{LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
 
     fn create_test_op(commitment: Hash32) -> AttestedOp {
         AttestedOp {
             op: TreeOp {
-                parent_commitment: commitment,
+                parent_commitment: commitment.0,
                 parent_epoch: 1,
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode {
@@ -367,10 +369,15 @@ mod tests {
         handler.add_op(op.clone()).await;
 
         let peer_id = Uuid::new_v4();
-        let retrieved = handler.lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32])).await;
+        let retrieved = handler
+            .lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32]))
+            .await;
 
         assert!(retrieved.is_ok());
-        assert_eq!(retrieved.unwrap().op.parent_commitment, aura_core::Hash32([1u8; 32]).0);
+        assert_eq!(
+            retrieved.unwrap().op.parent_commitment,
+            aura_core::Hash32([1u8; 32]).0
+        );
     }
 
     #[tokio::test]
@@ -385,7 +392,9 @@ mod tests {
         handler.add_op(op).await;
 
         let peer_id = Uuid::new_v4();
-        let result = handler.lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32])).await;
+        let result = handler
+            .lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32]))
+            .await;
 
         assert!(matches!(result, Err(SyncError::OperationNotFound)));
     }

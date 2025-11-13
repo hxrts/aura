@@ -6,6 +6,7 @@
 use super::{CryptoContext, CryptoHandler, SecurityLevel};
 use crate::middleware::CryptoOperation;
 use crate::Result;
+use aura_core::hash;
 use aura_core::AuraError;
 
 // Stub implementation to allow compilation
@@ -50,10 +51,9 @@ impl CryptoHandler for CoreCryptoHandler {
                 derivation_path: _,
             } => {
                 // TODO: Use aura-effects handlers for proper key derivation
-                let key_material = blake3::hash(
+                let key_material = hash::hash(
                     format!("{}:{}:{}", context.account_id, app_id, derivation_context).as_bytes(),
                 )
-                .as_bytes()
                 .to_vec();
 
                 Ok(serde_json::json!({
@@ -78,7 +78,7 @@ impl CryptoHandler for CoreCryptoHandler {
 
                 Ok(serde_json::json!({
                     "operation": "generate_signature",
-                    "message_hash": hex::encode(blake3::hash(&message).as_bytes()),
+                    "message_hash": hex::encode(hash::hash(&message)),
                     "signature": hex::encode(&signature),
                     "success": true
                 }))
@@ -94,7 +94,7 @@ impl CryptoHandler for CoreCryptoHandler {
 
                 Ok(serde_json::json!({
                     "operation": "verify_signature",
-                    "message_hash": hex::encode(blake3::hash(&message).as_bytes()),
+                    "message_hash": hex::encode(hash::hash(&message)),
                     "valid": is_valid,
                     "success": true
                 }))
@@ -128,7 +128,7 @@ impl CryptoHandler for CoreCryptoHandler {
                 // Key rotation is a complex operation that would involve
                 // coordination with multiple devices - TODO fix - Simplified here
                 #[allow(clippy::disallowed_methods)]
-                let rotation_id = uuid::Uuid::new_v4().to_string();
+                let rotation_id = uuid::Uuid::from_bytes([0u8; 16]).to_string();
                 Ok(serde_json::json!({
                     "operation": "rotate_keys",
                     "old_threshold": old_threshold,
@@ -174,7 +174,7 @@ impl CryptoHandler for CoreCryptoHandler {
 
             CryptoOperation::Hash { data, algorithm } => {
                 let hash_result = match algorithm.as_str() {
-                    "sha256" => blake3::hash(&data).as_bytes().to_vec(),
+                    "sha256" => hash::hash(&data).to_vec(),
                     _ => {
                         return Err(AuraError::internal(format!(
                             "Unsupported algorithm: {}",

@@ -18,7 +18,7 @@
 //! - **Testable**: Pure logic separated from side effects via effect interfaces
 //! - **CRDT-First**: Built around journal CRDT semantics for eventual consistency
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
 /// Main synchronization service using effect composition

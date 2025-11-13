@@ -7,10 +7,9 @@
 use aura_core::identifiers::DeviceId;
 use aura_protocol::handlers::{
     erased::AuraHandlerFactory, AuraContext, AuraHandler, AuraHandlerError, CompositeHandler,
-    EffectRegistry, EffectType, ExecutionMode, RegistrableHandler, UnifiedAuraHandlerBridge,
-    UnifiedHandlerBridgeFactory,
+    EffectRegistry, EffectType, ExecutionMode, RegistrableHandler,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// Test that all effect types have corresponding implementations
@@ -88,7 +87,7 @@ async fn test_effect_registry_validation() {
     let device_id = Uuid::new_v4();
 
     // Create a composite handler to register
-    let composite_handler = CompositeHandler::for_testing(device_id.into());
+    let composite_handler = CompositeHandler::for_testing(device_id);
 
     // Convert CompositeHandler to a type that implements RegistrableHandler
     // This demonstrates the pattern of wrapping handlers for registry use
@@ -355,7 +354,7 @@ fn test_handler_coverage_metrics() {
 /// Test registry capability validation
 #[test]
 fn test_registry_capability_validation() {
-    let mut registry = EffectRegistry::new(ExecutionMode::Testing);
+    let registry = EffectRegistry::new(ExecutionMode::Testing);
 
     // Initially empty
     let capabilities = registry.capability_summary();

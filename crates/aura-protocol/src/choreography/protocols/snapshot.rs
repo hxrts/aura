@@ -661,7 +661,7 @@ async fn quorum_member_session(
 /// Execute snapshot choreography as proposer
 pub async fn execute_as_proposer(
     config: SnapshotConfig,
-    effect_system: &crate::effects::system::AuraEffectSystem,
+    effect_system: &crate::effects::AuraEffectSystem,
 ) -> Result<SnapshotResult, ChoreographyError> {
     // Validate configuration
     if config.quorum.is_empty() {
@@ -680,8 +680,7 @@ pub async fn execute_as_proposer(
     }
 
     // Create handler and adapter
-    let mut adapter =
-        AuraHandlerAdapter::new(config.proposer.into(), effect_system.execution_mode());
+    let mut adapter = AuraHandlerAdapter::new(config.proposer, effect_system.execution_mode());
 
     // Execute proposer session
     proposer_session(&mut adapter, &config.quorum, &config)
@@ -693,12 +692,12 @@ pub async fn execute_as_proposer(
 pub async fn execute_as_quorum_member(
     config: SnapshotConfig,
     proposal_id: ProposalId,
-    effect_system: &crate::effects::system::AuraEffectSystem,
+    effect_system: &crate::effects::AuraEffectSystem,
 ) -> Result<SnapshotResult, ChoreographyError> {
     let member_id = DeviceId::new(); // TODO: Get from config
 
     // Create handler and adapter
-    let mut adapter = AuraHandlerAdapter::new(member_id.into(), effect_system.execution_mode());
+    let mut adapter = AuraHandlerAdapter::new(member_id, effect_system.execution_mode());
 
     // Execute quorum member session
     quorum_member_session(&mut adapter, config.proposer)
@@ -709,7 +708,7 @@ pub async fn execute_as_quorum_member(
 /// Apply received snapshot commit (for backward compatibility)
 pub async fn apply_snapshot_commit(
     snapshot: Snapshot,
-    effect_system: &crate::effects::system::AuraEffectSystem,
+    effect_system: &crate::effects::AuraEffectSystem,
 ) -> Result<SnapshotResult, ChoreographyError> {
     use crate::effects::ConsoleEffects;
 
@@ -762,8 +761,8 @@ pub async fn apply_snapshot_commit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::system::AuraEffectSystem;
-    use aura_core::tree::{Epoch, LeafId};
+    use crate::effects::AuraEffectSystem;
+    use aura_core::tree::LeafId;
     use std::collections::BTreeMap;
 
     fn create_test_config() -> SnapshotConfig {
@@ -796,7 +795,8 @@ mod tests {
     #[tokio::test]
     async fn test_execute_as_proposer() {
         let device_id = DeviceId::new();
-        let effect_system = AuraEffectSystem::for_testing(device_id);
+        let config = crate::effects::EffectSystemConfig::for_testing(device_id);
+        let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
         let config = create_test_config();
 
         let result = execute_as_proposer(config, &effect_system).await;
@@ -806,7 +806,8 @@ mod tests {
     #[tokio::test]
     async fn test_execute_as_quorum_member() {
         let device_id = DeviceId::new();
-        let effect_system = AuraEffectSystem::for_testing(device_id);
+        let config = crate::effects::EffectSystemConfig::for_testing(device_id);
+        let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
         let config = create_test_config();
         let proposal_id = ProposalId::new_random();
 
@@ -817,7 +818,8 @@ mod tests {
     #[tokio::test]
     async fn test_apply_snapshot_commit() {
         let device_id = DeviceId::new();
-        let effect_system = AuraEffectSystem::for_testing(device_id);
+        let config = crate::effects::EffectSystemConfig::for_testing(device_id);
+        let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
         let snapshot = create_test_snapshot();
 
         let result = apply_snapshot_commit(snapshot, &effect_system).await;

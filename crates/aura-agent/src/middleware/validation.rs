@@ -7,7 +7,6 @@ use aura_core::{
     identifiers::{AccountId, DeviceId, SessionId},
     AuraError, AuraResult as Result,
 };
-use uuid;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -69,8 +68,8 @@ impl ValidationMiddleware {
     /// Validate an operation before execution
     pub async fn validate_operation(&self, operation_name: &str) -> Result<()> {
         for rule in &self.rules {
-            if self.rule_applies_to_operation(&rule, operation_name) {
-                self.apply_validation_rule(&rule, operation_name).await?;
+            if self.rule_applies_to_operation(rule, operation_name) {
+                self.apply_validation_rule(rule, operation_name).await?;
             }
         }
         Ok(())
@@ -453,8 +452,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_device_id_validation() {
-        let device1 = DeviceId(uuid::Uuid::new_v4());
-        let device2 = DeviceId(uuid::Uuid::new_v4());
+        use aura_testkit::test_device_pair;
+
+        // Use choreography test harness to get proper device coordination
+        let harness = test_device_pair();
+        let device_ids = harness.device_ids();
+        let device1 = device_ids[0];
+        let device2 = device_ids[1];
 
         let rules = vec![ValidationRuleBuilder::device_id_rule(
             "strict_device".to_string(),
@@ -470,7 +474,7 @@ mod tests {
             .await
             .is_err());
 
-        // Should allow device2
+        // Should allow device2 from device1
         assert!(middleware
             .validate_device_id(device2, device1)
             .await
@@ -479,10 +483,10 @@ mod tests {
 
     #[test]
     fn test_input_validator() {
-        let account_id = AccountId(uuid::Uuid::new_v4());
+        let account_id = AccountId(uuid::Uuid::from_bytes([0u8; 16]));
         assert!(InputValidator::validate_account_id(&account_id).is_ok());
 
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         assert!(InputValidator::validate_device_id_format(&device_id).is_ok());
 
         // Test string validation

@@ -47,7 +47,7 @@ pub struct Pong {
     pub timestamp: u64,
 }
 
-aura_choreography! {
+choreography! {
     #[namespace = "hello_world"]
     protocol HelloWorld {
         roles: Alice, Bob;
@@ -147,12 +147,21 @@ This command shows recent journal entries created by protocol execution. Each en
 Create a test script for the hello world protocol:
 
 ```rust
+use aura_protocol::{AuraEffectSystem, effects::EffectSystemConfig};
+
 #[tokio::test]
 async fn test_hello_world_protocol() {
     let alice_device = aura_core::DeviceId::new();
     let bob_device = aura_core::DeviceId::new();
     
-    let (alice_effects, bob_effects) = create_test_handlers(alice_device, bob_device);
+    // Create stateless effect systems for testing
+    let alice_config = EffectSystemConfig::for_testing(alice_device);
+    let alice_effects = AuraEffectSystem::new(alice_config)
+        .expect("Failed to create Alice effect system");
+        
+    let bob_config = EffectSystemConfig::for_testing(bob_device);
+    let bob_effects = AuraEffectSystem::new(bob_config)
+        .expect("Failed to create Bob effect system");
     
     let ping_message = "Hello Bob!".to_string();
     
@@ -169,7 +178,7 @@ async fn test_hello_world_protocol() {
 }
 ```
 
-This test creates mock handlers for Alice and Bob. The test runs both sessions concurrently and verifies successful message exchange.
+This test creates stateless effect systems for Alice and Bob using testing configuration. The systems are context-free and provide deterministic behavior for testing protocol logic.
 
 Run the test:
 

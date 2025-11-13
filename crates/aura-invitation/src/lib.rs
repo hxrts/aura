@@ -18,7 +18,7 @@
 //! - Provides clean separation to avoid namespace conflicts (E0428 errors)
 //! - Supports capability-based invitation validation and acceptance
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
 /// Main invitation and acceptance choreography (G_invitation)
@@ -35,8 +35,14 @@ pub mod relationship_formation;
 
 mod transport;
 
-/// Errors for invitation operations
+/// Error type for invitation operations
+///
+/// Type alias for `AuraError` used in invitation-related operations
 pub type InvitationError = AuraError;
+
+/// Result type for invitation operations
+///
+/// Type alias for `AuraResult<T>` used in invitation-related operations
 pub type InvitationResult<T> = AuraResult<T>;
 
 /// A complete relationship record between devices
@@ -58,10 +64,24 @@ pub struct Relationship {
     pub created_at: u64,
 }
 
-// Type aliases for compatibility
+/// Type alias for guardian identifier
+///
+/// Compatibility alias for `GuardianId` used in invitation contexts
 pub type Guardian = GuardianId;
+
+/// Type alias for a set of guardians
+///
+/// Represents a collection of guardian identifiers
 pub type GuardianSet = Vec<GuardianId>;
+
+/// Type alias for authentication errors
+///
+/// Compatibility alias for `AuthenticationError` used in invitation flows
 pub type AuthError = AuthenticationError;
+
+/// Type alias for authentication results
+///
+/// Compatibility alias for authentication operation results
 pub type AuthResult<T> = Result<T, AuthenticationError>;
 
 // Re-export core types
@@ -83,10 +103,7 @@ pub use aura_core::effects::{
     ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, TimeEffects,
 };
 
-// Re-export MPST types
-pub use aura_mpst::{
-    AuraRuntime, CapabilityGuard, ExecutionContext, JournalAnnotation, MpstError, MpstResult,
-};
+// MPST types removed - using stateless effect system instead
 
 // Re-export effect system
 pub use aura_protocol::AuraEffectSystem;

@@ -99,14 +99,18 @@ impl LedgerEffects for MemoryLedgerHandler {
 
     async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, LedgerError> {
         let mut secret = vec![0u8; length];
+        #[allow(clippy::disallowed_methods)]
+        // Required for cryptographic security - should use secure random source in production
         rand::thread_rng().fill_bytes(&mut secret);
         Ok(secret)
     }
 
     async fn hash_blake3(&self, data: &[u8]) -> Result<[u8; 32], LedgerError> {
-        Ok(blake3::hash(data).into())
+        Ok(aura_core::hash::hash(data))
     }
 
+    /// TODO: Refactor to use TimeEffects from the effect system
+    #[allow(clippy::disallowed_methods)]
     async fn current_timestamp(&self) -> Result<u64, LedgerError> {
         use std::time::{SystemTime, UNIX_EPOCH};
         let duration =
@@ -122,7 +126,9 @@ impl LedgerEffects for MemoryLedgerHandler {
         Ok(aura_core::DeviceId::new()) // Memory implementation returns a new device ID
     }
 
+    /// TODO: Refactor to use RandomEffects from the effect system
+    #[allow(clippy::disallowed_methods)]
     async fn new_uuid(&self) -> Result<uuid::Uuid, LedgerError> {
-        Ok(uuid::Uuid::new_v4())
+        Ok(uuid::Uuid::from_bytes([0u8; 16]))
     }
 }

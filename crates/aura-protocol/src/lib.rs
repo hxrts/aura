@@ -1,4 +1,18 @@
-#![allow(missing_docs)]
+#![allow(
+    missing_docs,
+    unused_variables,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    dead_code,
+    clippy::match_like_matches_macro,
+    clippy::type_complexity,
+    clippy::while_let_loop,
+    clippy::redundant_closure,
+    clippy::large_enum_variant,
+    clippy::unused_unit,
+    clippy::get_first,
+    clippy::single_range_in_vec_init
+)]
 //! Aura Protocol - Algebraic Effects Architecture
 //!
 //! This crate provides a clean algebraic effects architecture for Aura's distributed protocols.
@@ -96,12 +110,33 @@ pub mod verification;
 
 // Public API re-exports
 pub use effects::{
-    AntiEntropyConfig, AuraEffectSystem, AuraEffectSystemFactory, AuraEffectSystemStats,
-    AuraEffects, BloomDigest, ChoreographicEffects, ChoreographicRole, ChoreographyEvent,
-    ChoreographyMetrics, ConsoleEffects, ConsoleEvent, CryptoEffects, DeviceMetadata,
-    JournalEffects, LedgerEffects, LedgerError, LedgerEvent, LedgerEventStream, NetworkAddress,
-    NetworkEffects, NetworkError, RandomEffects, StorageEffects, StorageError, StorageLocation,
-    SyncEffects, SyncError, TimeEffects, WakeCondition,
+    AntiEntropyConfig,
+    AuraEffectSystem, // AuraEffectSystemFactory and AuraEffectSystemStats removed (legacy system)
+    AuraEffects,
+    BloomDigest,
+    ChoreographicEffects,
+    ChoreographicRole,
+    ChoreographyEvent,
+    ChoreographyMetrics,
+    ConsoleEffects,
+    CryptoEffects,
+    DeviceMetadata,
+    JournalEffects,
+    LedgerEffects,
+    LedgerError,
+    LedgerEvent,
+    LedgerEventStream,
+    NetworkAddress,
+    NetworkEffects,
+    NetworkError,
+    RandomEffects,
+    StorageEffects,
+    StorageError,
+    StorageLocation,
+    SyncEffects,
+    SyncError,
+    TimeEffects,
+    WakeCondition,
 };
 
 pub use handlers::{

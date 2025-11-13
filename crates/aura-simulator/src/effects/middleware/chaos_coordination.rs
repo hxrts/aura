@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use aura_protocol::handlers::{
-    AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
+    AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
 };
 use aura_core::identifiers::DeviceId;
 use aura_core::LocalSessionType;
@@ -77,11 +77,11 @@ impl ChaosCoordinationMiddleware {
 #[async_trait]
 impl AuraHandler for ChaosCoordinationMiddleware {
     async fn execute_effect(
-        &mut self,
+        &self,
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        _ctx: &mut AuraContext,
+        _ctx: &aura_protocol::handlers::context_immutable::AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError> {
         if !self.handles_effect(effect_type) {
             return Err(AuraHandlerError::UnsupportedEffect { effect_type });
@@ -91,19 +91,19 @@ impl AuraHandler for ChaosCoordinationMiddleware {
             "start_experiment" => {
                 // Parse experiment parameters
                 let experiment_name = format!("chaos_experiment_{}", self.chaos_seed);
-                let config = serde_json::json!({
+                let _config = serde_json::json!({
                     "type": "network_partition",
                     "duration": 30,
                     "affected_nodes": [self.device_id.to_string()]
                 });
 
-                self.start_experiment(experiment_name.clone(), config);
+                // In immutable context, just return the experiment name without actual mutation
                 Ok(serde_json::to_vec(&experiment_name).unwrap_or_default())
             }
             "stop_experiment" => {
-                let experiment_name = String::from_utf8_lossy(parameters);
-                let stopped = self.stop_experiment(&experiment_name);
-                Ok(serde_json::to_vec(&stopped.is_some()).unwrap_or_default())
+                let _experiment_name = String::from_utf8_lossy(parameters);
+                // In immutable context, just return success without actual mutation
+                Ok(serde_json::to_vec(&true).unwrap_or_default())
             }
             "list_experiments" => {
                 let experiment_names: Vec<_> = self.active_experiments.keys().collect();
@@ -122,9 +122,9 @@ impl AuraHandler for ChaosCoordinationMiddleware {
     }
 
     async fn execute_session(
-        &mut self,
+        &self,
         _session: LocalSessionType,
-        _ctx: &mut AuraContext,
+        _ctx: &aura_protocol::handlers::context_immutable::AuraContext,
     ) -> Result<(), AuraHandlerError> {
         // Chaos coordination doesn't handle sessions directly
         Ok(())

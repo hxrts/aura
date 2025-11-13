@@ -6,12 +6,9 @@
 //! **Phase 5 Update**: Now integrated with authorization operations system.
 
 use crate::{errors::Result, operations::*};
-use uuid;
 use aura_core::AuraError;
 use aura_core::DeviceId;
-use aura_protocol::effects::{
-    AuraEffectSystem, ConsoleEffects, DeviceStorageEffects, StorageEffects, TimeEffects,
-};
+use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -284,11 +281,13 @@ impl StorageOperations {
             }
         }
 
-        effects.log_debug(&format!(
-            "Listed {} keys in namespace {}",
-            storage_keys.len(),
-            self.namespace
-        ));
+        let _ = effects
+            .log_debug(&format!(
+                "Listed {} keys in namespace {}",
+                storage_keys.len(),
+                self.namespace
+            ))
+            .await;
         Ok(storage_keys)
     }
 
@@ -331,16 +330,24 @@ impl StorageOperations {
         }
 
         let effects = self.effects.read().await;
-        effects.log_info(&format!(
-            "Cleared {} keys from namespace {}",
-            count, self.namespace
-        ));
+        effects
+            .log_info(&format!(
+                "Cleared {} keys from namespace {}",
+                count, self.namespace
+            ))
+            .await;
         Ok(count)
     }
 
     /// Check if key exists
     pub async fn key_exists(&self, key: &str) -> Result<bool> {
-        let full_key = format!("{}:{}", self.namespace, key);
+        // If the key already starts with the namespace prefix, use it directly
+        // Otherwise, add the namespace prefix
+        let full_key = if key.starts_with(&format!("{}:", self.namespace)) {
+            key.to_string()
+        } else {
+            format!("{}:{}", self.namespace, key)
+        };
 
         let effects = self.effects.read().await;
         let data = effects
@@ -386,11 +393,13 @@ impl StorageOperations {
         }
 
         let effects = self.effects.read().await;
-        effects.log_info(&format!(
-            "Backed up {} keys from namespace {}",
-            backup.len(),
-            self.namespace
-        ));
+        effects
+            .log_info(&format!(
+                "Backed up {} keys from namespace {}",
+                backup.len(),
+                self.namespace
+            ))
+            .await;
         Ok(backup)
     }
 
@@ -405,10 +414,12 @@ impl StorageOperations {
         }
 
         let effects = self.effects.read().await;
-        effects.log_info(&format!(
-            "Restored {} keys to namespace {}",
-            restored, self.namespace
-        ));
+        effects
+            .log_info(&format!(
+                "Restored {} keys to namespace {}",
+                restored, self.namespace
+            ))
+            .await;
         Ok(restored)
     }
 
@@ -459,8 +470,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_storage_operations() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::new(config).unwrap()));
         let storage = StorageOperations::new(effects, device_id, "test".to_string());
 
         // Store data
@@ -495,8 +507,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_backup_restore() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::new(config).unwrap()));
         let storage = StorageOperations::new(effects, device_id, "backup_test".to_string());
 
         // Store some test data

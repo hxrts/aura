@@ -1,0 +1,454 @@
+//! Guardian Membership Change Choreography
+//!
+//! Adding and removing guardians from the guardian set.
+//! This choreography handles proposals, voting, and implementation of membership changes.
+
+use crate::{
+    types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
+    RecoveryResult,
+};
+use aura_authenticate::guardian_auth::RecoveryContext;
+use aura_core::{identifiers::GuardianId, AccountId, AuraError, DeviceId};
+use aura_crypto::frost::ThresholdSignature;
+// aura_choreography removed - using stateless effects instead
+use aura_protocol::AuraEffectSystem;
+use serde::{Deserialize, Serialize};
+
+/// Type of membership change
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MembershipChange {
+    /// Add new guardian to the set
+    AddGuardian {
+        /// Profile of the guardian to add
+        guardian: GuardianProfile,
+    },
+    /// Remove guardian from the set
+    RemoveGuardian {
+        /// Identifier of the guardian to remove
+        guardian_id: GuardianId,
+    },
+    /// Update guardian information
+    UpdateGuardian {
+        /// Identifier of the guardian to update
+        guardian_id: GuardianId,
+        /// New profile information for the guardian
+        new_profile: GuardianProfile,
+    },
+}
+
+/// Guardian membership change proposal
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MembershipProposal {
+    /// Unique identifier for this membership change
+    pub change_id: String,
+    /// Account affected by the membership change
+    pub account_id: AccountId,
+    /// Device proposing the membership change
+    pub proposing_device: DeviceId,
+    /// The specific membership change being proposed
+    pub change: MembershipChange,
+    /// New threshold to set after the change (optional)
+    pub new_threshold: Option<usize>,
+    /// Recovery context and justification for the change
+    pub context: RecoveryContext,
+}
+
+/// Guardian vote on membership change
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuardianVote {
+    /// Unique identifier for the membership change being voted on
+    pub change_id: String,
+    /// Guardian identifier of the voting party
+    pub guardian_id: GuardianId,
+    /// Whether the guardian approves the change
+    pub approved: bool,
+    /// Cryptographic signature on the vote
+    pub vote_signature: Vec<u8>,
+    /// Human-readable rationale for the vote
+    pub rationale: String,
+    /// Timestamp when the vote was cast
+    pub timestamp: u64,
+}
+
+/// Membership change completion notification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangeCompletion {
+    /// Unique identifier for the membership change
+    pub change_id: String,
+    /// Whether the membership change was successful
+    pub success: bool,
+    /// The guardian set after the change
+    pub new_guardian_set: GuardianSet,
+    /// New threshold after the change
+    pub new_threshold: usize,
+    /// Serialized evidence of the membership change
+    pub change_evidence: Vec<u8>,
+}
+
+// TODO: Reimplement this choreographic sequence with proper aura-mpst runtime
+// The choreography defines a 3-phase guardian membership change protocol:
+// Phase 1: ChangeInitiator -> All Guardians (MembershipProposal)
+// Phase 2: All Guardians -> ChangeInitiator (GuardianVote)
+// Phase 3: ChangeInitiator -> All Guardians (ChangeCompletion)
+//
+// Original choreography preserved for reference:
+/*
+choreography! {
+    #[namespace = "guardian_membership_change"]
+    protocol GuardianMembershipChange {
+        roles: ChangeInitiator, Guardian1, Guardian2, Guardian3;
+
+        // Phase 1: Membership change proposal to all guardians
+        ChangeInitiator[guard_capability = "initiate_membership_change",
+                        flow_cost = 350,
+                        journal_facts = "membership_change_proposed",
+                        leakage_budget = [1, 0, 0]]
+        -> Guardian1: MembershipProposal(super::MembershipProposal);
+
+        ChangeInitiator[guard_capability = "initiate_membership_change",
+                        flow_cost = 350]
+        -> Guardian2: MembershipProposal(super::MembershipProposal);
+
+        ChangeInitiator[guard_capability = "initiate_membership_change",
+                        flow_cost = 350]
+        -> Guardian3: MembershipProposal(super::MembershipProposal);
+
+        // Phase 2: Guardian votes back to change initiator
+        Guardian1[guard_capability = "vote_membership_change,verify_membership_proposal",
+                   flow_cost = 220,
+                   journal_facts = "membership_vote_cast",
+                   leakage_budget = [0, 1, 0]]
+        -> ChangeInitiator: GuardianVote(super::GuardianVote);
+
+        Guardian2[guard_capability = "vote_membership_change,verify_membership_proposal",
+                   flow_cost = 220,
+                   journal_facts = "membership_vote_cast"]
+        -> ChangeInitiator: GuardianVote(super::GuardianVote);
+
+        Guardian3[guard_capability = "vote_membership_change,verify_membership_proposal",
+                   flow_cost = 220,
+                   journal_facts = "membership_vote_cast"]
+        -> ChangeInitiator: GuardianVote(super::GuardianVote);
+
+        // Phase 3: Change completion broadcast to all guardians
+        ChangeInitiator[guard_capability = "complete_membership_change",
+                        flow_cost = 180,
+                        journal_facts = "membership_change_completed",
+                        journal_merge = true]
+        -> Guardian1: ChangeCompletion(super::ChangeCompletion);
+
+        ChangeInitiator[guard_capability = "complete_membership_change",
+                        flow_cost = 180,
+                        journal_merge = true]
+        -> Guardian2: ChangeCompletion(super::ChangeCompletion);
+
+        ChangeInitiator[guard_capability = "complete_membership_change",
+                        flow_cost = 180,
+                        journal_merge = true]
+        -> Guardian3: ChangeCompletion(super::ChangeCompletion);
+    }
+}
+*/
+
+/// Guardian membership coordinator
+pub struct GuardianMembershipCoordinator {
+    _effect_system: AuraEffectSystem,
+}
+
+/// Extended request for membership changes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MembershipChangeRequest {
+    /// Base request information
+    pub base: RecoveryRequest,
+    /// The change to make
+    pub change: MembershipChange,
+    /// New threshold after the change (optional)
+    pub new_threshold: Option<usize>,
+}
+
+impl GuardianMembershipCoordinator {
+    /// Create new coordinator
+    pub fn new(effect_system: AuraEffectSystem) -> Self {
+        Self {
+            _effect_system: effect_system,
+        }
+    }
+
+    /// Execute membership change as change initiator
+    pub async fn execute_membership_change(
+        &self,
+        request: MembershipChangeRequest,
+    ) -> RecoveryResult<RecoveryResponse> {
+        let change_id = self.generate_change_id(&request);
+
+        // Convert generic request to choreography-specific proposal
+        let proposal = MembershipProposal {
+            change_id: change_id.clone(),
+            account_id: request.base.account_id,
+            proposing_device: request.base.requesting_device,
+            change: request.change.clone(),
+            new_threshold: request.new_threshold,
+            context: request.base.context.clone(),
+        };
+
+        // Execute using the generated choreography in the guardian_membership_change module
+        let result = self.simulate_membership_change(proposal).await;
+
+        match result {
+            Ok(votes) => {
+                // Count approval votes
+                let approvals: Vec<_> = votes.into_iter().filter(|v| v.approved).collect();
+
+                // Check if we have enough approvals
+                if approvals.len() < request.base.threshold {
+                    return Ok(RecoveryResponse {
+                        success: false,
+                        error: Some(format!(
+                            "Insufficient guardian approvals for membership change: got {}, need {}",
+                            approvals.len(),
+                            request.base.threshold
+                        )),
+                        key_material: None,
+                        guardian_shares: Vec::new(),
+                        evidence: self.create_failed_evidence(&request),
+                        signature: self.create_empty_signature(),
+                    });
+                }
+
+                // Apply the membership change
+                let new_guardian_set =
+                    self.apply_membership_change(&request.base.guardians, &request.change)?;
+                let final_threshold = request.new_threshold.unwrap_or(request.base.threshold);
+
+                // Validate the new configuration
+                if new_guardian_set.len() < final_threshold {
+                    return Ok(RecoveryResponse {
+                        success: false,
+                        error: Some(format!(
+                            "Invalid configuration: {} guardians cannot satisfy threshold of {}",
+                            new_guardian_set.len(),
+                            final_threshold
+                        )),
+                        key_material: None,
+                        guardian_shares: Vec::new(),
+                        evidence: self.create_failed_evidence(&request),
+                        signature: self.create_empty_signature(),
+                    });
+                }
+
+                // Convert votes to shares for compatibility
+                let shares = approvals
+                    .into_iter()
+                    .map(|vote| {
+                        RecoveryShare {
+                            guardian: GuardianProfile {
+                                guardian_id: vote.guardian_id,
+                                device_id: DeviceId::new(), // Placeholder
+                                label: "Guardian".to_string(),
+                                trust_level: aura_core::TrustLevel::High,
+                                cooldown_secs: 900,
+                            },
+                            share: vote.rationale.into_bytes(),
+                            partial_signature: vote.vote_signature,
+                            issued_at: vote.timestamp,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                // Create evidence and signature
+                let evidence = self.create_evidence(&request, &shares);
+                let signature = self.aggregate_signature(&shares);
+
+                // Send completion notifications
+                let _completion = ChangeCompletion {
+                    change_id: change_id.clone(),
+                    success: true,
+                    new_guardian_set: new_guardian_set.clone(),
+                    new_threshold: final_threshold,
+                    change_evidence: serde_json::to_vec(&evidence).unwrap_or_default(),
+                };
+
+                // Broadcast completion (would be handled by choreography in real implementation)
+
+                Ok(RecoveryResponse {
+                    success: true,
+                    error: None,
+                    key_material: None, // Membership changes don't produce key material
+                    guardian_shares: shares,
+                    evidence,
+                    signature,
+                })
+            }
+            Err(e) => Ok(RecoveryResponse {
+                success: false,
+                error: Some(format!("Membership change choreography failed: {}", e)),
+                key_material: None,
+                guardian_shares: Vec::new(),
+                evidence: self.create_failed_evidence(&request),
+                signature: self.create_empty_signature(),
+            }),
+        }
+    }
+
+    /// Execute as guardian (vote on membership change)
+    pub async fn vote_as_guardian(
+        &self,
+        proposal: MembershipProposal,
+        approved: bool,
+    ) -> RecoveryResult<GuardianVote> {
+        // For now, simulate guardian voting
+        // In real implementation, this would run the guardian side of the choreography
+        let rationale = if approved {
+            "Change approved after review".to_string()
+        } else {
+            "Change denied due to security concerns".to_string()
+        };
+
+        Ok(GuardianVote {
+            guardian_id: GuardianId::new(), // Would be actual guardian ID
+            change_id: proposal.change_id,
+            approved,
+            vote_signature: vec![1; 64], // Placeholder signature
+            rationale,
+            timestamp: 0, // Placeholder timestamp
+        })
+    }
+
+    /// Simulate membership change execution
+    async fn simulate_membership_change(
+        &self,
+        _proposal: MembershipProposal,
+    ) -> RecoveryResult<Vec<GuardianVote>> {
+        // Simulate multiple guardian votes
+        Ok(vec![
+            GuardianVote {
+                guardian_id: GuardianId::new(),
+                change_id: "change_123".to_string(),
+                approved: true,
+                vote_signature: vec![1; 64],
+                rationale: "Approved - change looks valid".to_string(),
+                timestamp: 0,
+            },
+            GuardianVote {
+                guardian_id: GuardianId::new(),
+                change_id: "change_123".to_string(),
+                approved: true,
+                vote_signature: vec![2; 64],
+                rationale: "Approved - meets security requirements".to_string(),
+                timestamp: 0,
+            },
+        ])
+    }
+
+    /// Generate unique change ID
+    fn generate_change_id(&self, request: &MembershipChangeRequest) -> String {
+        format!(
+            "membership_{}_{}",
+            request.base.account_id, request.base.requesting_device
+        )
+    }
+
+    fn aggregate_signature(&self, shares: &[RecoveryShare]) -> ThresholdSignature {
+        let mut combined_signature = Vec::new();
+        for share in shares {
+            combined_signature.extend_from_slice(&share.partial_signature);
+        }
+
+        let signature_bytes = if combined_signature.len() >= 64 {
+            combined_signature[..64].to_vec()
+        } else {
+            let mut padded = combined_signature;
+            padded.resize(64, 0);
+            padded
+        };
+
+        let signers: Vec<u16> = shares
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| idx as u16)
+            .collect();
+
+        ThresholdSignature::new(signature_bytes, signers)
+    }
+
+    fn apply_membership_change(
+        &self,
+        current_set: &GuardianSet,
+        change: &MembershipChange,
+    ) -> RecoveryResult<GuardianSet> {
+        let mut guardians = current_set.clone().into_vec();
+
+        match change {
+            MembershipChange::AddGuardian { guardian } => {
+                // Check if guardian already exists
+                if guardians
+                    .iter()
+                    .any(|g| g.guardian_id == guardian.guardian_id)
+                {
+                    return Err(AuraError::invalid("Guardian already exists in set"));
+                }
+                guardians.push(guardian.clone());
+            }
+            MembershipChange::RemoveGuardian { guardian_id } => {
+                guardians.retain(|g| g.guardian_id != *guardian_id);
+                if guardians.is_empty() {
+                    return Err(AuraError::invalid("Cannot remove last guardian"));
+                }
+            }
+            MembershipChange::UpdateGuardian {
+                guardian_id,
+                new_profile,
+            } => {
+                if let Some(guardian) = guardians.iter_mut().find(|g| g.guardian_id == *guardian_id)
+                {
+                    *guardian = new_profile.clone();
+                } else {
+                    return Err(AuraError::invalid("Guardian not found in set"));
+                }
+            }
+        }
+
+        Ok(GuardianSet::new(guardians))
+    }
+
+    fn create_evidence(
+        &self,
+        _request: &MembershipChangeRequest,
+        _shares: &[RecoveryShare],
+    ) -> crate::types::RecoveryEvidence {
+        // Placeholder implementation
+        crate::types::RecoveryEvidence {
+            account_id: AccountId::new(),
+            recovering_device: DeviceId::new(),
+            guardians: Vec::new(),
+            issued_at: 0,
+            cooldown_expires_at: 0,
+            dispute_window_ends_at: 0,
+            guardian_profiles: Vec::new(),
+            disputes: Vec::new(),
+            threshold_signature: None,
+        }
+    }
+
+    fn create_failed_evidence(
+        &self,
+        _request: &MembershipChangeRequest,
+    ) -> crate::types::RecoveryEvidence {
+        // Placeholder implementation
+        crate::types::RecoveryEvidence {
+            account_id: AccountId::new(),
+            recovering_device: DeviceId::new(),
+            guardians: Vec::new(),
+            issued_at: 0,
+            cooldown_expires_at: 0,
+            dispute_window_ends_at: 0,
+            guardian_profiles: Vec::new(),
+            disputes: Vec::new(),
+            threshold_signature: None,
+        }
+    }
+
+    fn create_empty_signature(&self) -> ThresholdSignature {
+        ThresholdSignature::new(vec![0; 64], vec![])
+    }
+}

@@ -55,29 +55,52 @@ pub enum StorageError {
     PermissionDenied(String),
     /// Encryption failed
     #[error("Encryption failed: {reason}")]
-    EncryptionFailed { reason: String },
+    EncryptionFailed {
+        /// Reason for encryption failure
+        reason: String,
+    },
     /// Decryption failed
     #[error("Decryption failed: {reason}")]
-    DecryptionFailed { reason: String },
+    DecryptionFailed {
+        /// Reason for decryption failure
+        reason: String,
+    },
     /// Integrity check failed
     #[error("Integrity check failed for key {key}: expected {expected}, got {actual}")]
     IntegrityCheckFailed {
+        /// The key that failed integrity check
         key: String,
+        /// Expected integrity hash
         expected: String,
+        /// Actual integrity hash
         actual: String,
     },
     /// Invalid key format
     #[error("Invalid key: {reason}")]
-    InvalidKey { reason: String },
+    InvalidKey {
+        /// Reason why the key format is invalid
+        reason: String,
+    },
     /// Storage space exhausted
     #[error("Storage space exhausted: {available} available, {required} required")]
-    SpaceExhausted { available: u64, required: u64 },
+    SpaceExhausted {
+        /// Available storage space in bytes
+        available: u64,
+        /// Required storage space in bytes
+        required: u64,
+    },
     /// Configuration error
     #[error("Configuration error: {reason}")]
-    ConfigurationError { reason: String },
+    ConfigurationError {
+        /// Reason for configuration error
+        reason: String,
+    },
     /// Data corruption detected
     #[error("Data corruption detected: {details}")]
-    CorruptionDetected { details: String },
+    CorruptionDetected {
+        /// Details about the detected corruption
+        details: String,
+    },
 }
 
 /// Storage statistics

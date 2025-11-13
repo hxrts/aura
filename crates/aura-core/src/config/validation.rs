@@ -10,22 +10,37 @@ pub type ValidationResult = Result<(), ValidationError>;
 #[derive(Debug, Clone)]
 pub enum ValidationError {
     /// Value is required but missing
-    Required { field: String },
+    Required {
+        /// Name of the required field
+        field: String,
+    },
     /// Value is out of acceptable range
     OutOfRange {
+        /// Name of the field with out-of-range value
         field: String,
+        /// Minimum acceptable value (if any)
         min: Option<f64>,
+        /// Maximum acceptable value (if any)
         max: Option<f64>,
+        /// The actual value that was out of range
         actual: f64,
     },
     /// Value format is invalid
     InvalidFormat {
+        /// Name of the field with invalid format
         field: String,
+        /// Expected format description
         expected: String,
+        /// The actual value received
         actual: String,
     },
     /// Custom validation failed
-    Custom { field: String, message: String },
+    Custom {
+        /// Name of the field that failed custom validation
+        field: String,
+        /// Custom error message
+        message: String,
+    },
 }
 
 impl fmt::Display for ValidationError {
@@ -284,6 +299,7 @@ impl Default for ConfigValidator {
 
 /// Validation rule trait for custom validation logic
 pub trait ValidationRule<T> {
+    /// Validate a value according to this rule
     fn validate(&self, value: &T) -> ValidationResult;
 }
 
@@ -293,8 +309,11 @@ pub mod rules {
 
     /// Rule that validates a value is within a numeric range
     pub struct Range<T> {
+        /// Minimum acceptable value (inclusive)
         pub min: Option<T>,
+        /// Maximum acceptable value (inclusive)
         pub max: Option<T>,
+        /// Name of the field being validated
         pub field_name: String,
     }
 
@@ -302,6 +321,7 @@ pub mod rules {
     where
         T: PartialOrd + Copy + Into<f64>,
     {
+        /// Create a new range validator for the given field
         pub fn new(field_name: &str) -> Self {
             Self {
                 min: None,
@@ -310,11 +330,13 @@ pub mod rules {
             }
         }
 
+        /// Set the minimum value for this range validator
         pub fn min(mut self, min: T) -> Self {
             self.min = Some(min);
             self
         }
 
+        /// Set the maximum value for this range validator
         pub fn max(mut self, max: T) -> Self {
             self.max = Some(max);
             self
@@ -355,11 +377,14 @@ pub mod rules {
 
     /// Rule that validates a string matches a pattern
     pub struct Pattern {
+        /// The pattern to match against
         pub pattern: String,
+        /// Name of the field being validated
         pub field_name: String,
     }
 
     impl Pattern {
+        /// Create a new pattern validator for the given field and pattern
         pub fn new(field_name: &str, pattern: &str) -> Self {
             Self {
                 pattern: pattern.to_string(),

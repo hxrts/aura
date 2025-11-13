@@ -132,8 +132,6 @@ enum Commands {
     Version,
 }
 
-/// Scenarios directory
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -142,15 +140,18 @@ async fn main() -> Result<()> {
     let device_id = DeviceId::new();
 
     // Initialize effect system based on environment
-    let effect_system = if std::env::var("AURA_CLI_TEST").is_ok() {
-        AuraEffectSystem::for_testing(device_id)
+    let config = if std::env::var("AURA_CLI_TEST").is_ok() {
+        aura_protocol::effects::EffectSystemConfig::for_testing(device_id)
     } else {
-        AuraEffectSystem::for_production(device_id)
+        aura_protocol::effects::EffectSystemConfig::for_production(device_id)
+            .expect("Failed to create production configuration")
     };
+    let effect_system = AuraEffectSystem::new(config)
+        .expect("Failed to initialize effect system");
 
     // Initialize logging through effects
     let log_level = if cli.verbose { "debug" } else { "info" };
-    effect_system.log_info(&format!(
+    let _ = effect_system.log_info(&format!(
         "Initializing Aura CLI with log level: {}",
         log_level
     ));
@@ -206,6 +207,7 @@ async fn main() -> Result<()> {
     }
 }
 
+/// Resolve the configuration file path from command line arguments
 async fn resolve_config_path(
     cmd_config: &Option<PathBuf>,
     global_config: &Option<PathBuf>,

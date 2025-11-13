@@ -4,9 +4,9 @@
 //! envelope encryption. It extends the existing DKD system to create deterministic
 //! relationship keys that Alice and Bob can derive independently.
 
+use aura_core::hash::hasher;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_crypto::{derive_encryption_key, IdentityKeyContext, KeyDerivationSpec};
-use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -59,15 +59,15 @@ impl RelationshipContext {
 
     /// Build relationship identifier for key derivation
     fn build_relationship_id(&self) -> Vec<u8> {
-        let mut hasher = Hasher::new();
-        hasher.update(b"aura-sbb-relationship-v1");
-        hasher.update(self.device_a.0.as_bytes());
-        hasher.update(self.device_b.0.as_bytes());
-        hasher.update(self.app_context.as_bytes());
-        hasher.update(&self.epoch.to_le_bytes());
+        let mut h = hasher();
+        h.update(b"aura-sbb-relationship-v1");
+        h.update(self.device_a.0.as_bytes());
+        h.update(self.device_b.0.as_bytes());
+        h.update(self.app_context.as_bytes());
+        h.update(&self.epoch.to_le_bytes());
 
-        let hash = hasher.finalize();
-        hash.as_bytes().to_vec()
+        let hash = h.finalize();
+        hash.to_vec()
     }
 }
 
@@ -177,14 +177,12 @@ impl RelationshipKeyManager {
 /// Generate deterministic root key from device ID for testing
 /// In production, this would come from the distributed DKD protocol
 pub fn derive_test_root_key(device_id: DeviceId) -> [u8; 32] {
-    let mut hasher = Hasher::new();
-    hasher.update(b"aura-test-root-key-v1");
-    hasher.update(device_id.0.as_bytes());
+    use aura_core::hash::hasher;
 
-    let hash = hasher.finalize();
-    let mut key = [0u8; 32];
-    key.copy_from_slice(hash.as_bytes());
-    key
+    let mut h = hasher();
+    h.update(b"aura-test-root-key-v1");
+    h.update(device_id.0.as_bytes());
+    h.finalize()
 }
 
 #[cfg(test)]

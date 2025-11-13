@@ -51,21 +51,21 @@ once_cell = { workspace = true }
 
 # Platform-specific secure storage
 [target.'cfg(target_os = "macos")'.dependencies]
-security-framework = { workspace = true }
-core-foundation = { workspace = true }
+# security-framework = { workspace = true } # removed - unused
+# core-foundation = { workspace = true } # removed - unused
 
 [target.'cfg(target_os = "ios")'.dependencies]
-security-framework = { workspace = true }
-core-foundation = { workspace = true }
+# security-framework = { workspace = true } # removed - unused
+# core-foundation = { workspace = true } # removed - unused
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { workspace = true }
+# windows = { workspace = true } # removed - unused
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyutils = { workspace = true }
+# keyutils = { workspace = true } # removed - unused
 
 [target.'cfg(target_os = "android")'.dependencies]
-jni = { workspace = true }
+# jni = { workspace = true } # removed - unused
 
 
 [features]
@@ -76,7 +76,8 @@ default = []
 real-android-keystore = []  # Enable real Android Keystore implementation
 
 [dev-dependencies]
-tokio-test = { workspace = true }
+# tokio-test = { workspace = true } # removed - unused
+aura-testkit = { path = "../aura-testkit" }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 futures = { workspace = true }

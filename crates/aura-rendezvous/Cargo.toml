@@ -10,7 +10,6 @@ description = "Secret-Branded Broadcasting (SBB) and rendezvous protocols for Au
 [dependencies]
 # Core Aura crates
 aura-core = { path = "../aura-core" }
-aura-mpst = { path = "../aura-mpst" }
 aura-crypto = { path = "../aura-crypto" }
 aura-wot = { path = "../aura-wot" }
 aura-transport = { path = "../aura-transport" }
@@ -35,7 +34,7 @@ hex = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-tokio-test = { workspace = true }
+# tokio-test = { workspace = true } # removed - unused
 tracing-subscriber = { workspace = true }
 rand = { workspace = true }
 

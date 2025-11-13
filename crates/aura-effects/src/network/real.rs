@@ -7,15 +7,15 @@
 //! - Connection health monitoring
 //! - Message buffering and ordering
 
-use aura_core::effects::{NetworkEffects, NetworkError, PeerEventStream};
 use async_trait::async_trait;
+use aura_core::effects::{NetworkEffects, NetworkError, PeerEventStream};
 use aura_core::{DeviceId, Receipt};
 use aura_transport::{NetworkMessage, NetworkTransport};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, RwLock, Mutex};
-use tokio::time::{timeout, sleep};
+use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -97,7 +97,7 @@ impl RateLimiter {
 
     fn check_and_record(&mut self) -> bool {
         let now = Instant::now();
-        
+
         // Remove old messages outside the window
         while let Some(&front_time) = self.messages.front() {
             if now.duration_since(front_time) > self.window {
@@ -106,7 +106,7 @@ impl RateLimiter {
                 break;
             }
         }
-        
+
         // Check if we're within rate limit
         if self.messages.len() >= self.max_messages {
             false
@@ -135,11 +135,9 @@ impl RealNetworkHandler {
     /// Create a new real network handler with custom configuration
     pub fn with_config(transport: Arc<NetworkTransport>, config: NetworkConfig) -> Self {
         let device_id = DeviceId::from(transport.device_id().0.to_string());
-        let global_rate_limiter = RateLimiter::new(
-            config.rate_limit_max_messages,
-            config.rate_limit_window,
-        );
-        
+        let global_rate_limiter =
+            RateLimiter::new(config.rate_limit_max_messages, config.rate_limit_window);
+
         Self {
             device_id,
             transport,
@@ -157,15 +155,18 @@ impl RealNetworkHandler {
             self.config.rate_limit_window,
         );
 
-        peer_states.insert(uuid, PeerConnectionState {
+        peer_states.insert(
             uuid,
-            device_id,
-            circuit_breaker: CircuitBreakerState::Closed,
-            failure_count: 0,
-            last_failure: None,
-            message_buffer: VecDeque::new(),
-            rate_limiter,
-        });
+            PeerConnectionState {
+                uuid,
+                device_id,
+                circuit_breaker: CircuitBreakerState::Closed,
+                failure_count: 0,
+                last_failure: None,
+                message_buffer: VecDeque::new(),
+                rate_limiter,
+            },
+        );
 
         debug!("Registered peer {} with device_id {:?}", uuid, device_id);
     }
@@ -173,7 +174,7 @@ impl RealNetworkHandler {
     /// Check if a peer's circuit breaker allows operations
     async fn check_circuit_breaker(&self, peer_uuid: Uuid) -> Result<(), NetworkError> {
         let peer_states = self.peer_states.read().await;
-        
+
         if let Some(state) = peer_states.get(&peer_uuid) {
             match &state.circuit_breaker {
                 CircuitBreakerState::Closed => Ok(()),
@@ -181,7 +182,8 @@ impl RealNetworkHandler {
                     if opened_at.elapsed() >= self.config.circuit_breaker_recovery_timeout {
                         // Circuit breaker should transition to half-open
                         drop(peer_states);
-                        self.set_circuit_breaker_state(peer_uuid, CircuitBreakerState::HalfOpen).await;
+                        self.set_circuit_breaker_state(peer_uuid, CircuitBreakerState::HalfOpen)
+                            .await;
                         Ok(())
                     } else {
                         Err(NetworkError::CircuitBreakerOpen {
@@ -212,7 +214,7 @@ impl RealNetworkHandler {
     /// Record a failure for a peer and potentially open the circuit breaker
     async fn record_failure(&self, peer_uuid: Uuid, error: &str) {
         let mut peer_states = self.peer_states.write().await;
-        
+
         if let Some(peer_state) = peer_states.get_mut(&peer_uuid) {
             peer_state.failure_count += 1;
             peer_state.last_failure = Some(Instant::now());
@@ -226,7 +228,10 @@ impl RealNetworkHandler {
                 peer_state.circuit_breaker = CircuitBreakerState::Open {
                     opened_at: Instant::now(),
                 };
-                error!("Circuit breaker opened for peer {} after {} failures", peer_uuid, peer_state.failure_count);
+                error!(
+                    "Circuit breaker opened for peer {} after {} failures",
+                    peer_uuid, peer_state.failure_count
+                );
             }
         }
     }
@@ -234,7 +239,7 @@ impl RealNetworkHandler {
     /// Record a success for a peer and potentially close the circuit breaker
     async fn record_success(&self, peer_uuid: Uuid) {
         let mut peer_states = self.peer_states.write().await;
-        
+
         if let Some(peer_state) = peer_states.get_mut(&peer_uuid) {
             peer_state.failure_count = 0;
             peer_state.last_failure = None;
@@ -242,7 +247,10 @@ impl RealNetworkHandler {
             match peer_state.circuit_breaker {
                 CircuitBreakerState::HalfOpen => {
                     peer_state.circuit_breaker = CircuitBreakerState::Closed;
-                    info!("Circuit breaker closed for peer {} after successful test", peer_uuid);
+                    info!(
+                        "Circuit breaker closed for peer {} after successful test",
+                        peer_uuid
+                    );
                 }
                 _ => {}
             }
@@ -301,14 +309,16 @@ impl RealNetworkHandler {
     ) -> Result<(), NetworkError> {
         // Check circuit breaker first
         self.check_circuit_breaker(peer_uuid).await?;
-        
+
         // Check rate limiting
         self.check_rate_limit(peer_uuid).await?;
 
-        let device_id = self.get_device_id(peer_uuid).await
-            .ok_or_else(|| NetworkError::PeerUnreachable {
-                peer_id: peer_uuid.to_string(),
-            })?;
+        let device_id =
+            self.get_device_id(peer_uuid)
+                .await
+                .ok_or_else(|| NetworkError::PeerUnreachable {
+                    peer_id: peer_uuid.to_string(),
+                })?;
 
         let mut last_error = String::new();
         let mut delay = self.config.initial_retry_delay;
@@ -317,25 +327,33 @@ impl RealNetworkHandler {
             let result = timeout(
                 self.config.operation_timeout,
                 self.transport.send_with_receipt(
-                    device_id, 
-                    message.clone(), 
-                    "data".to_string(), 
-                    receipt.clone()
-                )
-            ).await;
+                    device_id,
+                    message.clone(),
+                    "data".to_string(),
+                    receipt.clone(),
+                ),
+            )
+            .await;
 
             match result {
                 Ok(Ok(())) => {
                     // Success - record it and return
                     self.record_success(peer_uuid).await;
-                    debug!("Successfully sent message to peer {} after {} attempts", peer_uuid, attempt + 1);
+                    debug!(
+                        "Successfully sent message to peer {} after {} attempts",
+                        peer_uuid,
+                        attempt + 1
+                    );
                     return Ok(());
                 }
                 Ok(Err(transport_error)) => {
                     last_error = format!("Transport error: {}", transport_error);
                 }
                 Err(_timeout) => {
-                    last_error = format!("Timeout after {}ms", self.config.operation_timeout.as_millis());
+                    last_error = format!(
+                        "Timeout after {}ms",
+                        self.config.operation_timeout.as_millis()
+                    );
                 }
             }
 
@@ -348,11 +366,16 @@ impl RealNetworkHandler {
             }
 
             // Wait before retry with exponential backoff
-            warn!("Send attempt {} failed for peer {}: {}. Retrying in {:?}...", 
-                  attempt + 1, peer_uuid, last_error, delay);
-            
+            warn!(
+                "Send attempt {} failed for peer {}: {}. Retrying in {:?}...",
+                attempt + 1,
+                peer_uuid,
+                last_error,
+                delay
+            );
+
             sleep(delay).await;
-            
+
             // Increase delay for next attempt (exponential backoff)
             delay = std::cmp::min(delay * 2, self.config.max_retry_delay);
 
@@ -363,8 +386,12 @@ impl RealNetworkHandler {
         }
 
         // All retries exhausted
-        error!("Failed to send message to peer {} after {} attempts. Last error: {}", 
-               peer_uuid, self.config.max_retries + 1, last_error);
+        error!(
+            "Failed to send message to peer {} after {} attempts. Last error: {}",
+            peer_uuid,
+            self.config.max_retries + 1,
+            last_error
+        );
 
         Err(NetworkError::RetriesExhausted {
             attempts: self.config.max_retries + 1,
@@ -376,13 +403,16 @@ impl RealNetworkHandler {
     pub async fn receive_verified(&self) -> Result<(Uuid, Vec<u8>, Option<Receipt>), NetworkError> {
         let result = timeout(
             self.config.operation_timeout,
-            self.transport.receive_verified()
-        ).await;
+            self.transport.receive_verified(),
+        )
+        .await;
 
         let message = match result {
             Ok(Ok(message)) => message,
             Ok(Err(transport_error)) => {
-                return Err(NetworkError::ReceiveFailed(transport_error.to_string()));
+                return Err(NetworkError::ReceiveFailed {
+                    reason: transport_error.to_string(),
+                });
             }
             Err(_timeout) => {
                 return Err(NetworkError::Timeout {
@@ -395,7 +425,8 @@ impl RealNetworkHandler {
         // Look up the peer UUID for this device ID
         let peer_uuid = {
             let peer_states = self.peer_states.read().await;
-            peer_states.iter()
+            peer_states
+                .iter()
                 .find(|(_, state)| state.device_id == message.from)
                 .map(|(uuid, _)| *uuid)
         };
@@ -406,7 +437,10 @@ impl RealNetworkHandler {
         } else {
             // Auto-register unknown peers
             let uuid = Uuid::new_v4();
-            info!("Auto-registering new peer {} with device_id {:?}", uuid, message.from);
+            info!(
+                "Auto-registering new peer {} with device_id {:?}",
+                uuid, message.from
+            );
             self.register_peer(uuid, message.from).await;
             Ok((uuid, message.payload, message.receipt))
         }
@@ -415,12 +449,15 @@ impl RealNetworkHandler {
     /// Add a message to the buffer for a peer
     async fn buffer_message(&self, peer_uuid: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         let mut peer_states = self.peer_states.write().await;
-        
+
         if let Some(peer_state) = peer_states.get_mut(&peer_uuid) {
             if peer_state.message_buffer.len() >= self.config.max_message_buffer_size {
                 // Remove oldest message to make room
                 peer_state.message_buffer.pop_front();
-                warn!("Message buffer full for peer {}, dropped oldest message", peer_uuid);
+                warn!(
+                    "Message buffer full for peer {}, dropped oldest message",
+                    peer_uuid
+                );
             }
             peer_state.message_buffer.push_back(message);
             Ok(())
@@ -465,15 +502,20 @@ impl NetworkEffects for RealNetworkHandler {
             }
         }
 
-        debug!("Broadcast completed: {}/{} successful", successful_sends, connected_peers.len());
+        debug!(
+            "Broadcast completed: {}/{} successful",
+            successful_sends,
+            connected_peers.len()
+        );
 
         // If more than half failed, consider it a network partition
         if successful_sends * 2 < connected_peers.len() {
-            let error_details = errors.iter()
+            let error_details = errors
+                .iter()
                 .map(|(peer_id, error)| format!("{}:{}", peer_id, error))
                 .collect::<Vec<_>>()
                 .join(", ");
-            
+
             return Err(NetworkError::NetworkPartition {
                 details: format!("Broadcast failed to majority of peers: {}", error_details),
             });
@@ -506,7 +548,8 @@ impl NetworkEffects for RealNetworkHandler {
             if attempts >= MAX_RECEIVE_ATTEMPTS {
                 return Err(NetworkError::Timeout {
                     operation: "receive_from".to_string(),
-                    timeout_ms: self.config.operation_timeout.as_millis() as u64 * MAX_RECEIVE_ATTEMPTS as u64,
+                    timeout_ms: self.config.operation_timeout.as_millis() as u64
+                        * MAX_RECEIVE_ATTEMPTS as u64,
                 });
             }
 
@@ -527,11 +570,12 @@ impl NetworkEffects for RealNetworkHandler {
     async fn connected_peers(&self) -> Vec<Uuid> {
         let transport_peers = self.transport.connected_peers().await;
         let peer_states = self.peer_states.read().await;
-        
+
         transport_peers
             .into_iter()
             .filter_map(|device_id| {
-                peer_states.iter()
+                peer_states
+                    .iter()
                     .find(|(_, state)| state.device_id == device_id)
                     .map(|(uuid, _)| *uuid)
             })
@@ -554,14 +598,14 @@ impl NetworkEffects for RealNetworkHandler {
 
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
         let (sender, receiver) = mpsc::unbounded_channel();
-        
+
         // TODO: Implement proper peer event subscription from transport layer
         // For now, we create a mock stream that would be replaced with real transport events
         // Real implementation would:
         // 1. Subscribe to transport layer connection events
         // 2. Map DeviceId events to UUID events
         // 3. Forward events through the channel
-        
+
         tokio::spawn(async move {
             // This is a placeholder - in a real implementation, this would:
             // - Monitor transport layer for connection/disconnection events

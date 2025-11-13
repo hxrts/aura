@@ -70,7 +70,7 @@ pub use journal_coupler::{
 };
 pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
-use crate::effects::system::AuraEffectSystem;
+use crate::effects::AuraEffectSystem;
 use aura_core::AuraResult;
 use aura_wot::Capability;
 use std::future::Future;

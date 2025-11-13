@@ -4,14 +4,17 @@
 //! effect traits into a type-erased AuraHandler. This enables dynamic composition
 //! and runtime flexibility while maintaining type safety through the effect system.
 
+#![allow(clippy::disallowed_methods)] // TODO: Replace direct UUID calls with effect system
+
 use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use super::context::AuraContext;
+use super::context_immutable::AuraContext;
 use super::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 use crate::effects::*;
+use aura_core::hash::hash;
 use aura_core::LocalSessionType;
 
 /// Type-erased bridge for dynamic handler composition
@@ -143,11 +146,11 @@ impl UnifiedAuraHandlerBridge {
 #[async_trait]
 impl AuraHandler for UnifiedAuraHandlerBridge {
     async fn execute_effect(
-        &mut self,
+        &self,
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        _ctx: &mut AuraContext,
+        _ctx: &AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError> {
         // Check if effect type is supported
         if !self.supports_effect(effect_type) {
@@ -204,9 +207,9 @@ impl AuraHandler for UnifiedAuraHandlerBridge {
     }
 
     async fn execute_session(
-        &mut self,
+        &self,
         _session: LocalSessionType,
-        _ctx: &mut AuraContext,
+        _ctx: &AuraContext,
     ) -> Result<(), AuraHandlerError> {
         // Session execution would typically use choreographic effects
         // For now, provide a basic implementation that delegates to choreographic effects
@@ -366,7 +369,7 @@ impl UnifiedAuraHandlerBridge {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
-                let result = effects.hash(&data).await;
+                let result = hash(&data);
                 Ok(bincode::serialize(&result).unwrap_or_default())
             }
             "random_bytes" => {
@@ -683,15 +686,15 @@ impl UnifiedHandlerBridgeFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handlers::CompositeHandler;
+    use crate::effects::AuraEffectSystem;
     use aura_core::identifiers::DeviceId;
     use uuid::Uuid;
 
     #[tokio::test]
     async fn test_unified_bridge_creation() {
         let device_id = DeviceId::from(Uuid::new_v4());
-        let composite = CompositeHandler::for_testing(device_id.into());
-        let bridge = UnifiedAuraHandlerBridge::new(composite, ExecutionMode::Testing);
+        let effect_system = AuraEffectSystem::for_testing(device_id);
+        let bridge = UnifiedAuraHandlerBridge::new(effect_system, ExecutionMode::Testing);
 
         assert_eq!(bridge.execution_mode(), ExecutionMode::Testing);
         assert!(bridge.supports_effect(EffectType::Network));
@@ -703,8 +706,8 @@ mod tests {
     #[tokio::test]
     async fn test_unified_bridge_effect_execution() {
         let device_id = DeviceId::from(Uuid::new_v4());
-        let composite = CompositeHandler::for_testing(device_id.into());
-        let mut bridge = UnifiedAuraHandlerBridge::new(composite, ExecutionMode::Testing);
+        let effect_system = AuraEffectSystem::for_testing(device_id);
+        let mut bridge = UnifiedAuraHandlerBridge::new(effect_system, ExecutionMode::Testing);
         let mut ctx = AuraContext::for_testing(device_id);
 
         // Test system effect execution
@@ -725,8 +728,8 @@ mod tests {
     #[tokio::test]
     async fn test_unified_bridge_typed_execution() {
         let device_id = DeviceId::from(Uuid::new_v4());
-        let composite = CompositeHandler::for_testing(device_id.into());
-        let bridge = UnifiedAuraHandlerBridge::new(composite, ExecutionMode::Testing);
+        let effect_system = AuraEffectSystem::for_testing(device_id);
+        let mut bridge = UnifiedAuraHandlerBridge::new(effect_system, ExecutionMode::Testing);
         let mut ctx = AuraContext::for_testing(device_id);
 
         // Test typed effect execution

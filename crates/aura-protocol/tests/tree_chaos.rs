@@ -8,9 +8,9 @@
 //! - State corruption detection
 
 use aura_core::tree::{
-    AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
+    AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
 };
-use aura_core::{DeviceId, Hash32};
+use aura_core::DeviceId;
 use std::collections::BTreeMap;
 
 // ============================================================================
@@ -64,7 +64,7 @@ fn create_test_op(epoch: u64, leaf_id: u32, op_type: &str) -> AttestedOp {
 
 #[test]
 fn test_malicious_signature_rejected() {
-    let mut valid_op = create_test_op(1, 10, "add_leaf");
+    let valid_op = create_test_op(1, 10, "add_leaf");
 
     // Create malicious operation with invalid signature
     let mut malicious_op = valid_op.clone();
@@ -307,7 +307,7 @@ fn test_state_corruption_detected() {
     // Real implementation: validate_invariants() in application.rs
 
     // Simulated invariant check
-    let mut node_indices = vec![NodeIndex(1), NodeIndex(2), NodeIndex(1)]; // Duplicate!
+    let mut node_indices = [NodeIndex(1), NodeIndex(2), NodeIndex(1)]; // Duplicate!
     node_indices.sort();
 
     let has_duplicates = node_indices.windows(2).any(|window| window[0] == window[1]);

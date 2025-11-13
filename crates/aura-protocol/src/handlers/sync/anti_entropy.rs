@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)] // TODO: Replace direct UUID calls with effect system
+
 use crate::effects::sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
 use async_trait::async_trait;
 use aura_core::{tree::AttestedOp, Hash32};
@@ -235,7 +237,7 @@ impl SyncEffects for AntiEntropyHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::tree::{Epoch, TreeOp, TreeOpKind};
+    use aura_core::tree::{TreeOp, TreeOpKind};
 
     fn create_test_op(commitment: Hash32) -> AttestedOp {
         AttestedOp {

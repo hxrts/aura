@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::type_complexity,
+    clippy::while_let_loop
+)]
+
 //! Aura Effects - Standard Effect Handler Implementations
 //!
 //! This crate provides the **Implementation Layer** of the Aura architecture,
@@ -32,10 +39,10 @@
 //!
 //! # What Belongs Here
 //!
-//! ✅ Basic effect implementations (RealCryptoHandler, MockCryptoHandler)
-//! ✅ Storage backends (FilesystemStorageHandler, InMemoryStorageHandler)
-//! ✅ Network transports (TcpNetworkHandler, MockNetworkHandler)
-//! ✅ Time providers (RealTimeHandler, SimulatedTimeHandler)
+//! Basic effect implementations (RealCryptoHandler, MockCryptoHandler)
+//! Storage backends (FilesystemStorageHandler, InMemoryStorageHandler)
+//! Network transports (TcpNetworkHandler, MockNetworkHandler)
+//! Time providers (RealTimeHandler, SimulatedTimeHandler)
 //!
 //! # What Does NOT Belong Here
 //!

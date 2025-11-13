@@ -5,9 +5,10 @@
 
 use crate::effects::{
     agent::{AuthMethod, AuthenticationEffects, AuthenticationResult, BiometricType, HealthStatus},
-    AuraEffectSystem, ConsoleEffects, CryptoEffects, StorageEffects, TimeEffects,
+    AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects,
 };
 use async_trait::async_trait;
+use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -20,25 +21,13 @@ pub struct AuthenticationHandler {
 }
 
 /// Internal authentication state
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct AuthState {
     authenticated: bool,
     session_token: Option<Vec<u8>>,
     auth_method: Option<AuthMethod>,
     authenticated_at: Option<u64>,
     expires_at: Option<u64>,
-}
-
-impl Default for AuthState {
-    fn default() -> Self {
-        Self {
-            authenticated: false,
-            session_token: None,
-            auth_method: None,
-            authenticated_at: None,
-            expires_at: None,
-        }
-    }
 }
 
 impl AuthenticationHandler {
@@ -83,7 +72,7 @@ impl AuthenticationHandler {
 
         // Test basic crypto operations
         let test_data = b"health_check_data";
-        let _hash_result = effects.hash(test_data).await;
+        let _hash_result = hash(test_data);
 
         // Test storage access
         let storage_result = effects.stats().await;
@@ -308,7 +297,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         // TODO fix - For now, we perform a basic validation
 
         // Hash the capability and compare with stored value (TODO fix - Simplified)
-        let capability_hash = effects.hash(capability).await;
+        let capability_hash = hash(capability);
 
         // TODO fix - In a real implementation, we would compare this hash with stored capability hashes
         // For testing, we'll return true if the hash is not all zeros
@@ -338,7 +327,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         // Generate device attestation (simulated)
         // In real implementation would use platform attestation APIs
         let device_id_bytes = self.device_id.to_string().as_bytes().to_vec();
-        let attestation_data = effects.hash(&device_id_bytes).await;
+        let attestation_data = hash(&device_id_bytes);
         let attestation = attestation_data.to_vec();
 
         // TODO fix - In a real implementation, this would be a proper device attestation

@@ -5,8 +5,8 @@
 //! duplicate detection, and capability enforcement.
 
 use crate::envelope_encryption::EncryptedEnvelope;
+use aura_core::hash::hasher;
 use aura_core::{AuraResult, DeviceId};
-use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -141,17 +141,17 @@ impl SbbEnvelope {
 
     /// Compute content-addressed ID for encrypted envelope
     fn compute_encrypted_envelope_id(encrypted_payload: &EncryptedEnvelope) -> EnvelopeId {
-        let mut hasher = Hasher::new();
-        hasher.update(b"aura-sbb-encrypted-envelope-v1");
-        hasher.update(&encrypted_payload.nonce);
-        hasher.update(&encrypted_payload.ciphertext);
+        let mut h = hasher();
+        h.update(b"aura-sbb-encrypted-envelope-v1");
+        h.update(&encrypted_payload.nonce);
+        h.update(&encrypted_payload.ciphertext);
         if let Some(hint) = &encrypted_payload.key_hint {
-            hasher.update(hint);
+            h.update(hint);
         }
 
-        let hash = hasher.finalize();
+        let hash = h.finalize();
         let mut id = [0u8; 32];
-        id.copy_from_slice(hash.as_bytes());
+        id.copy_from_slice(&hash);
         id
     }
 }
@@ -221,16 +221,12 @@ impl RendezvousEnvelope {
         }
     }
 
-    /// Compute content-addressed envelope ID using Blake3
+    /// Compute content-addressed envelope ID using SHA-256
     fn compute_envelope_id(payload: &[u8]) -> EnvelopeId {
-        let mut hasher = Hasher::new();
-        hasher.update(b"aura-sbb-envelope-v1");
-        hasher.update(payload);
-        let hash = hasher.finalize();
-
-        let mut id = [0u8; 32];
-        id.copy_from_slice(hash.as_bytes());
-        id
+        let mut h = hasher();
+        h.update(b"aura-sbb-envelope-v1");
+        h.update(payload);
+        h.finalize()
     }
 
     /// Decrement TTL for next hop

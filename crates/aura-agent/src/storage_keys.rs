@@ -4,7 +4,6 @@
 //! All storage keys follow a consistent format: `{type}:{identifier}`.
 
 use aura_core::DeviceId;
-use uuid;
 
 /// FROST key share storage key
 pub fn frost_keys(device_id: DeviceId) -> String {
@@ -61,7 +60,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_frost_keys() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let key = frost_keys(device_id);
         assert!(key.starts_with("frost_keys:"));
         assert!(key.contains(&device_id.0.to_string()));

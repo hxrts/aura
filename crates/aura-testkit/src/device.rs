@@ -3,6 +3,7 @@
 //! This module provides standardized helpers for creating and managing test devices
 //! across the Aura test suite.
 
+use aura_core::hash::hash;
 use aura_core::DeviceId;
 use uuid::Uuid;
 
@@ -19,8 +20,8 @@ impl DeviceTestFixture {
     pub fn new(index: usize) -> Self {
         // Deterministic UUID based on index
         let hash_input = format!("device-fixture-{}", index);
-        let hash_bytes = blake3::hash(hash_input.as_bytes());
-        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let hash_bytes = hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         let device_id = DeviceId(uuid);
         Self {
             device_id,
@@ -43,8 +44,8 @@ impl DeviceTestFixture {
     pub fn with_label(index: usize, label: String) -> Self {
         // Deterministic UUID based on index
         let hash_input = format!("device-fixture-{}", index);
-        let hash_bytes = blake3::hash(hash_input.as_bytes());
-        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let hash_bytes = hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         let device_id = DeviceId(uuid);
         Self {
             device_id,
@@ -117,14 +118,14 @@ impl DeviceSetBuilder {
                 let device_id = if let Some(seed) = self.base_seed {
                     // Deterministic generation from seed
                     let hash_input = format!("{}-{}", seed, i);
-                    let hash_bytes = blake3::hash(hash_input.as_bytes());
-                    let uuid_bytes: [u8; 16] = hash_bytes.as_bytes()[..16].try_into().unwrap();
+                    let hash_bytes = hash(hash_input.as_bytes());
+                    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
                     DeviceId(Uuid::from_bytes(uuid_bytes))
                 } else {
                     // Deterministic generation based on index
                     let hash_input = format!("device-set-{}", i);
-                    let hash_bytes = blake3::hash(hash_input.as_bytes());
-                    let uuid_bytes: [u8; 16] = hash_bytes.as_bytes()[..16].try_into().unwrap();
+                    let hash_bytes = hash(hash_input.as_bytes());
+                    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
                     DeviceId(Uuid::from_bytes(uuid_bytes))
                 };
 

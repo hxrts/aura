@@ -89,7 +89,7 @@ impl GuardianInvitationCoordinator {
 
         if accepted {
             // Create GuardianId (which is just a Uuid wrapper)
-            let guardian = GuardianId(uuid::Uuid::new_v4());
+            let guardian = GuardianId(uuid::Uuid::nil());
 
             Ok(GuardianInvitationResponse {
                 guardian_relationship: Some(guardian),

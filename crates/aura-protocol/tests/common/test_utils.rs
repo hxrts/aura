@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use aura_core::effects::*;
+use aura_core::hash;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -60,10 +61,10 @@ impl MockNetworkTransport {
 impl NetworkEffects for MockNetworkTransport {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         if !self.connected_peers.lock().unwrap().contains(&peer_id) {
-            return Err(NetworkError::SendFailed(format!(
-                "Peer not connected: {}",
-                peer_id
-            )));
+            return Err(NetworkError::SendFailed {
+                peer_id: Some(peer_id),
+                reason: format!("Peer not connected: {}", peer_id),
+            });
         }
 
         self.messages.lock().unwrap().push((peer_id, message));
@@ -243,10 +244,7 @@ impl aura_core::RandomEffects for MockCrypto {
 #[async_trait]
 impl aura_core::CryptoEffects for MockCrypto {
     async fn hash(&self, data: &[u8]) -> [u8; 32] {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        hasher.finalize().into()
+        hash::hash(data)
     }
 
     async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {

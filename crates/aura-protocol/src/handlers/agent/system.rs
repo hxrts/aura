@@ -15,8 +15,9 @@ use crate::effects::{
         DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
         SessionManagementEffects, SessionMessage, SessionStatus, SessionType,
     },
-    AuraEffectSystem, ConsoleEffects, CryptoEffects, StorageEffects, TimeEffects,
+    AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects,
 };
+use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraResult as Result};
 
 /// Unified agent effect system that implements all agent-specific effects
@@ -43,7 +44,10 @@ impl AgentEffectSystemHandler {
 
     /// Create agent effect system for testing
     pub fn for_testing(device_id: DeviceId) -> Self {
-        let core_effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+        let config = crate::effects::EffectSystemConfig::for_testing(device_id);
+        let core_effects = Arc::new(RwLock::new(
+            AuraEffectSystem::new(config).expect("Failed to create test effect system")
+        ));
         Self::new(device_id, core_effects)
     }
 
@@ -238,8 +242,8 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
         }
 
         // Encrypt the backup data
-        let encrypted_credentials = effects.hash(&backup_data).await.to_vec();
-        let backup_hash = effects.hash(&encrypted_credentials).await;
+        let encrypted_credentials = hash(&backup_data).to_vec();
+        let backup_hash = hash(&encrypted_credentials);
 
         Ok(CredentialBackup {
             device_id: self.device_id,
@@ -253,7 +257,7 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
     async fn restore_credentials(&self, backup: &CredentialBackup) -> Result<()> {
         // Verify backup integrity
         let effects = self.core_effects.read().await;
-        let computed_hash = effects.hash(&backup.encrypted_credentials).await;
+        let computed_hash = hash(&backup.encrypted_credentials);
 
         if computed_hash != backup.backup_hash {
             return Err(aura_core::AuraError::invalid(

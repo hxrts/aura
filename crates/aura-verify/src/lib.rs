@@ -1,20 +1,37 @@
-//! Aura Authentication
+//! Aura Identity Verification
 //!
-//! Layer 2 of the Aura security model: Identity verification and proof of who signed something.
+//! **Layer 2: Specification - WHO (Authentication)**
 //!
-//! This crate handles proving WHO signed something (identity verification):
-//! - "This signature proves DeviceId X signed this message"
-//! - "This threshold signature proves M-of-N devices signed this"
-//! - "This guardian signature proves GuardianId Y signed this"
+//! Complete identity verification system combining cryptographic signature verification
+//! with organizational device lifecycle management.
 //!
-//! Authentication is stateless - it verifies signatures against public keys without
-//! requiring knowledge of permissions, capabilities, or policies.
+//! # Architecture
+//!
+//! Core Layer 2 domain crate. Implements `aura-core` traits for identity concepts.
+//! Used by `aura-authenticate` (Layer 5) and other layers needing signature verification.
+//! No effect handlers - pure domain logic and cryptographic verification.
+//!
+//! # Core Modules
+//!
+//! - **Cryptographic Verification**: Signature verification (device, guardian, threshold)
+//! - **Device Registry**: Device lifecycle management (active, suspended, revoked)
+//! - **Session Management**: Session ticket validation
+//!
+//! # Core Types
+//!
+//! - **IdentityProof**: WHO signed something (Device, Guardian, or Threshold)
+//! - **KeyMaterial**: Public keys for verification (device, guardian, group)
+//! - **VerifiedIdentity**: Successful verification result with proof and message hash
+//! - **IdentityVerifier**: Device registry and lifecycle management
+//! - **DeviceInfo**: Device registration with status tracking
+//! - **AuthenticationError**: Signature validation failures
 
 #![allow(missing_docs)]
 
 pub mod device;
 pub mod event_validation;
 pub mod guardian;
+pub mod registry;
 pub mod session;
 pub mod threshold;
 
@@ -31,12 +48,13 @@ pub use event_validation::{
     IdentityValidator,
 };
 
-// New identity verification function (defined below)
+use aura_core::hash::hash;
 
 // Re-export domain types
 pub use aura_core::relationships::*;
 
-// IdentityProof and ThresholdSig are defined in this module and exported by default
+// Re-export registry types (from merged aura-identity)
+pub use registry::{DeviceInfo, DeviceStatus, IdentityVerifier, VerificationResult};
 
 // Convenience functions
 pub use device::verify_signature;
@@ -78,8 +96,6 @@ pub struct KeyMaterial {
     /// Group public keys for threshold verification indexed by AccountId
     group_keys: std::collections::HashMap<aura_core::AccountId, aura_crypto::Ed25519VerifyingKey>,
 }
-
-// Re-export types for convenience
 
 impl KeyMaterial {
     /// Create new key material store
@@ -207,7 +223,7 @@ pub fn verify_identity_proof(
     message: &[u8],
     key_material: &KeyMaterial,
 ) -> Result<VerifiedIdentity> {
-    let message_hash = *blake3::hash(message).as_bytes();
+    let message_hash = hash(message);
 
     match proof {
         IdentityProof::Device {

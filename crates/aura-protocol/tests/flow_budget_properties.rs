@@ -6,18 +6,32 @@
 //! - Anti-replay protection: Receipt nonces prevent duplicate operations
 
 use aura_core::{
-    flow::{FlowBudget, Receipt},
-    identifiers::DeviceId,
-    relationships::ContextId,
-    session_epochs::Epoch,
-    Hash32,
+    flow::FlowBudget, identifiers::DeviceId, relationships::ContextId, session_epochs::Epoch,
 };
 use aura_protocol::effects::system::AuraEffectSystem;
-use aura_protocol::handlers::ExecutionMode;
+use aura_protocol::guards::FlowBudgetEffects;
 use proptest::prelude::*;
 
+/// Wrapper for FlowBudget to implement Arbitrary (avoids orphan rule)
+#[derive(Debug, Clone)]
+struct TestFlowBudget(FlowBudget);
+
+impl From<TestFlowBudget> for FlowBudget {
+    fn from(wrapper: TestFlowBudget) -> Self {
+        wrapper.0
+    }
+}
+
+impl std::ops::Deref for TestFlowBudget {
+    type Target = FlowBudget;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Generate arbitrary FlowBudget for property testing
-impl Arbitrary for FlowBudget {
+impl Arbitrary for TestFlowBudget {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
@@ -31,7 +45,7 @@ impl Arbitrary for FlowBudget {
                 let epoch = Epoch::new(epoch_val);
                 let mut budget = FlowBudget::new(limit, epoch);
                 budget.spent = spent.min(limit); // Ensure spent <= limit for valid budgets
-                budget
+                TestFlowBudget(budget)
             })
             .boxed()
     }
@@ -44,9 +58,9 @@ proptest! {
     /// (a ∨ b) ∨ c = a ∨ (b ∨ c)
     #[test]
     fn flow_budget_join_associative(
-        a in any::<FlowBudget>(),
-        b in any::<FlowBudget>(),
-        c in any::<FlowBudget>()
+        a in any::<TestFlowBudget>(),
+        b in any::<TestFlowBudget>(),
+        c in any::<TestFlowBudget>()
     ) {
         use aura_core::semilattice::JoinSemilattice;
 
@@ -62,8 +76,8 @@ proptest! {
     /// a ∨ b = b ∨ a
     #[test]
     fn flow_budget_join_commutative(
-        a in any::<FlowBudget>(),
-        b in any::<FlowBudget>()
+        a in any::<TestFlowBudget>(),
+        b in any::<TestFlowBudget>()
     ) {
         use aura_core::semilattice::JoinSemilattice;
 
@@ -78,12 +92,12 @@ proptest! {
     /// For any FlowBudget a:
     /// a ∨ a = a
     #[test]
-    fn flow_budget_join_idempotent(a in any::<FlowBudget>()) {
+    fn flow_budget_join_idempotent(a in any::<TestFlowBudget>()) {
         use aura_core::semilattice::JoinSemilattice;
 
         let result = a.join(&a);
 
-        prop_assert_eq!(result, a);
+        prop_assert_eq!(result, *a);
     }
 
     /// Property: FlowBudget merge maintains CRDT invariants
@@ -155,21 +169,20 @@ proptest! {
 mod integration_tests {
     use super::*;
     use aura_core::semilattice::JoinSemilattice;
-    use tokio;
 
     #[tokio::test]
     async fn test_no_observable_without_charge_invariant() {
         // Test that all observable events (receipts) come from successful charges
-        let device1 = DeviceId::from("device1".to_string());
-        let device2 = DeviceId::from("device2".to_string());
+        let device1 = DeviceId::from("device1");
+        let device2 = DeviceId::from("device2");
         let context = ContextId::from("test_context".to_string());
 
-        let system = AuraEffectSystem::for_testing(device1.clone());
+        let system = AuraEffectSystem::for_testing(device1);
 
         // Seed initial budget
         let initial_budget = FlowBudget::new(100, Epoch::initial());
         system
-            .seed_flow_budget(context.clone(), device2.clone(), initial_budget)
+            .seed_flow_budget(context.clone(), device2, initial_budget)
             .await;
 
         // Charge within budget should produce receipt
@@ -192,9 +205,9 @@ mod integration_tests {
     #[tokio::test]
     async fn test_convergence_bounds() {
         // Test that distributed FlowBudget updates converge to consistent state
-        let device1 = DeviceId::from("device1".to_string());
-        let device2 = DeviceId::from("device2".to_string());
-        let context = ContextId::from("test_context".to_string());
+        let _device1 = DeviceId::from("device1");
+        let _device2 = DeviceId::from("device2");
+        let _context = ContextId::from("test_context".to_string());
 
         // Simulate two replicas with different FlowBudget states
         let budget_replica1 = FlowBudget {
@@ -232,16 +245,16 @@ mod integration_tests {
     #[tokio::test]
     async fn test_receipt_nonce_monotonicity() {
         // Test that receipt nonces are strictly increasing per (context, device, epoch)
-        let device1 = DeviceId::from("device1".to_string());
-        let device2 = DeviceId::from("device2".to_string());
+        let device1 = DeviceId::from("device1");
+        let device2 = DeviceId::from("device2");
         let context = ContextId::from("test_context".to_string());
 
-        let system = AuraEffectSystem::for_testing(device1.clone());
+        let system = AuraEffectSystem::for_testing(device1);
 
         // Seed large budget
         let initial_budget = FlowBudget::new(1000, Epoch::initial());
         system
-            .seed_flow_budget(context.clone(), device2.clone(), initial_budget)
+            .seed_flow_budget(context.clone(), device2, initial_budget)
             .await;
 
         // Generate multiple receipts
@@ -290,21 +303,21 @@ mod integration_tests {
     #[tokio::test]
     async fn test_deterministic_budget_computation() {
         // Test that budget computation is deterministic across different execution orders
-        let device1 = DeviceId::from("device1".to_string());
-        let device2 = DeviceId::from("device2".to_string());
+        let device1 = DeviceId::from("device1");
+        let device2 = DeviceId::from("device2");
         let context = ContextId::from("test_context".to_string());
 
         // Create multiple systems (simulating different devices)
-        let system1 = AuraEffectSystem::for_testing(device1.clone());
-        let system2 = AuraEffectSystem::for_testing(device1.clone());
+        let system1 = AuraEffectSystem::for_testing(device1);
+        let system2 = AuraEffectSystem::for_testing(device1);
 
         // Seed same initial state in both systems
         let initial_budget = FlowBudget::new(200, Epoch::new(10));
         system1
-            .seed_flow_budget(context.clone(), device2.clone(), initial_budget)
+            .seed_flow_budget(context.clone(), device2, initial_budget)
             .await;
         system2
-            .seed_flow_budget(context.clone(), device2.clone(), initial_budget)
+            .seed_flow_budget(context.clone(), device2, initial_budget)
             .await;
 
         // Both systems should compute identical budget

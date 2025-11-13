@@ -62,7 +62,7 @@ FlowBudget { limit: u64, spent: u64, epoch: Epoch }
 
 **Guard Chain** - Mandatory order of checks for transport effects: `CapGuard` → `FlowGuard` → `JournalCoupler`. Named invariants: Charge‑Before‑Send; No‑Observable‑Without‑Charge; Deterministic‑Replenishment.
 
-**Choreography** - Global protocol specification written with `aura_choreography!`. Source of truth for distributed protocol intent.
+**Choreography** - Global protocol specification written with `choreography!`. Source of truth for distributed protocol intent.
 
 **Projection** - Compilation step from a choreography to per‑role local session types (MPST). Denoted π(G, ρ).
 
@@ -96,7 +96,7 @@ FlowBudget { limit: u64, spent: u64, epoch: Epoch }
 
 ### Choreographic Programming Stack
 
-**Choreographies** - Global protocol specifications written using `aura_choreography!` macro. Describe distributed protocols from bird's-eye view.
+**Choreographies** - Global protocol specifications written using `choreography!` macro. Describe distributed protocols from bird's-eye view.
 - Example: [`crates/aura-protocol/src/choreography/protocols/frost.rs`](../crates/aura-protocol/src/choreography/protocols/frost.rs)
 - Status: Currently used as documentation/specification, not executable
 - Purpose: Global view of multi-party protocols

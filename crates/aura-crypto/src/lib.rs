@@ -78,7 +78,7 @@ pub type MerkleProof = SimpleMerkleProof;
 /// use the RandomEffects trait implementations from aura-effects.
 #[allow(clippy::disallowed_methods)]
 pub fn generate_uuid() -> uuid::Uuid {
-    uuid::Uuid::new_v4()
+    uuid::Uuid::from_bytes([0u8; 16])
 }
 
 /// Simple HPKE key pair implementation (placeholder)

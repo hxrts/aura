@@ -645,7 +645,7 @@ fn capability_permits(capability: &Capability, operation: &str) -> bool {
                 // Parse operation parameters if provided: "relay:bytes_needed:streams_needed"
                 if let Some(params) = operation.strip_prefix("relay:") {
                     let parts: Vec<&str> = params.split(':').collect();
-                    if parts.len() >= 1 {
+                    if !parts.is_empty() {
                         // Check byte limit
                         if let Ok(bytes_needed) = parts[0].parse::<u64>() {
                             if bytes_needed > *max_bytes_per_period {
@@ -665,6 +665,20 @@ fn capability_permits(capability: &Capability, operation: &str) -> bool {
                 true
             }
         }
+    }
+}
+
+// === Semilattice Implementations ===
+
+impl MeetSemiLattice for CapabilitySet {
+    fn meet(&self, other: &Self) -> Self {
+        self.meet(other)
+    }
+}
+
+impl Top for CapabilitySet {
+    fn top() -> Self {
+        Self::all()
     }
 }
 
@@ -777,19 +791,5 @@ mod tests {
 
         let default_relay_set = CapabilitySet::from_permissions(&["relay"]);
         assert!(default_relay_set.permits("relay:1000000:5"));
-    }
-}
-
-// === Semilattice Implementations ===
-
-impl MeetSemiLattice for CapabilitySet {
-    fn meet(&self, other: &Self) -> Self {
-        self.meet(other)
-    }
-}
-
-impl Top for CapabilitySet {
-    fn top() -> Self {
-        Self::all()
     }
 }

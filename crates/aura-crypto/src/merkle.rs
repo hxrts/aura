@@ -1,9 +1,9 @@
 //! Merkle tree utilities for cryptographic operations
 //!
-//! Simple merkle tree utilities using the effects system for hashing.
+//! Simple merkle tree utilities using pure synchronous hashing.
 
 use crate::Result;
-use aura_core::effects::CryptoEffects;
+use aura_core::hash::hash;
 
 /// Merkle proof structure containing sibling path and directions
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -47,14 +47,12 @@ impl Default for SimpleMerkleProof {
 /// # Arguments
 /// * `leaves` - All leaf values in the tree
 /// * `leaf_index` - Index of the leaf to generate a proof for
-/// * `effects` - Effects object for hashing operations
 ///
 /// # Returns
 /// A Merkle proof for the specified leaf
-pub async fn generate_merkle_proof(
+pub fn generate_merkle_proof(
     leaves: &[Vec<u8>],
     leaf_index: usize,
-    effects: &impl CryptoEffects,
 ) -> Result<SimpleMerkleProof> {
     if leaves.is_empty() || leaf_index >= leaves.len() {
         return Ok(SimpleMerkleProof::new());
@@ -64,7 +62,7 @@ pub async fn generate_merkle_proof(
 
     // Hash all leaves to create the bottom level
     for leaf in leaves {
-        current_level.push(effects.hash(leaf).await);
+        current_level.push(hash(leaf));
     }
 
     let mut sibling_path = Vec::new();
@@ -93,7 +91,7 @@ pub async fn generate_merkle_proof(
                 let mut combined = Vec::new();
                 combined.extend_from_slice(left);
                 combined.extend_from_slice(right);
-                next_level.push(effects.hash(&combined).await);
+                next_level.push(hash(&combined));
             } else {
                 // Odd node - promote to next level
                 next_level.push(current_level[i]);
@@ -115,11 +113,10 @@ pub async fn generate_merkle_proof(
 ///
 /// # Arguments
 /// * `leaves` - List of leaf values
-/// * `effects` - Effects object for hashing operations
 ///
 /// # Returns
 /// The computed Merkle root hash
-pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects) -> [u8; 32] {
+pub fn build_merkle_root(leaves: &[Vec<u8>]) -> [u8; 32] {
     if leaves.is_empty() {
         return [0u8; 32];
     }
@@ -128,7 +125,7 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
 
     // Hash all leaves to create the bottom level
     for leaf in leaves {
-        current_level.push(effects.hash(leaf).await);
+        current_level.push(hash(leaf));
     }
 
     // Build tree bottom-up until we reach the root
@@ -145,7 +142,7 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
                 let mut combined = Vec::new();
                 combined.extend_from_slice(left);
                 combined.extend_from_slice(right);
-                next_level.push(effects.hash(&combined).await);
+                next_level.push(hash(&combined));
             } else {
                 // Odd node - promote to next level unchanged
                 next_level.push(current_level[i]);
@@ -164,18 +161,16 @@ pub async fn build_merkle_root(leaves: &[Vec<u8>], effects: &impl CryptoEffects)
 /// * `proof` - The merkle proof to verify
 /// * `root` - The expected root hash to verify against
 /// * `leaf_value` - The original leaf value being verified
-/// * `effects` - Effects object for hashing operations
 ///
 /// # Returns
 /// `true` if the proof is valid, `false` otherwise
-pub async fn verify_merkle_proof(
+pub fn verify_merkle_proof(
     proof: &SimpleMerkleProof,
     root: &[u8; 32],
     leaf_value: &[u8],
-    effects: &impl CryptoEffects,
 ) -> bool {
     // Start with the leaf hash
-    let mut current_hash = effects.hash(leaf_value).await;
+    let mut current_hash = hash(leaf_value);
 
     // If no siblings, tree has only one leaf
     if proof.sibling_path.is_empty() {
@@ -200,7 +195,7 @@ pub async fn verify_merkle_proof(
         }
 
         // Hash the combined value to get parent hash
-        current_hash = effects.hash(&combined).await;
+        current_hash = hash(&combined);
 
         // Move to parent level
         index /= 2;
@@ -214,23 +209,21 @@ pub async fn verify_merkle_proof(
 ///
 /// # Arguments
 /// * `commitments` - List of commitment values to build tree from
-/// * `effects` - Effects object for hashing operations
 ///
 /// # Returns
 /// A tuple containing (root_hash, proof_for_first_commitment)
-pub async fn build_commitment_tree(
+pub fn build_commitment_tree(
     commitments: &[Vec<u8>],
-    effects: &impl CryptoEffects,
 ) -> Result<(Option<[u8; 32]>, SimpleMerkleProof)> {
     if commitments.is_empty() {
         return Ok((None, SimpleMerkleProof::new()));
     }
 
     // Build the merkle root
-    let root = build_merkle_root(commitments, effects).await;
+    let root = build_merkle_root(commitments);
 
     // Generate proof for the first commitment (index 0)
-    let proof = generate_merkle_proof(commitments, 0, effects).await?;
+    let proof = generate_merkle_proof(commitments, 0)?;
 
     Ok((Some(root), proof))
 }

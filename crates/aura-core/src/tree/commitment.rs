@@ -24,7 +24,7 @@
 //! See [`docs/123_ratchet_tree.md`](../../../docs/123_ratchet_tree.md) - Commitments section.
 
 use super::{Epoch, NodeIndex, Policy, TreeCommitment, TreeHash32};
-use blake3::Hasher;
+use crate::hash;
 
 /// Domain separation tag for branch commitments
 const BRANCH_TAG: &[u8] = b"BRANCH";
@@ -82,19 +82,16 @@ pub fn commit_branch(
 ) -> TreeHash32 {
     let policy_hash = policy_hash(policy);
 
-    let mut hasher = Hasher::new();
-    hasher.update(BRANCH_TAG);
-    hasher.update(&COMMITMENT_VERSION.to_le_bytes());
-    hasher.update(&node_index.0.to_le_bytes());
-    hasher.update(&epoch.to_le_bytes());
-    hasher.update(&policy_hash);
-    hasher.update(left_commitment);
-    hasher.update(right_commitment);
+    let mut h = hash::hasher();
+    h.update(BRANCH_TAG);
+    h.update(&COMMITMENT_VERSION.to_le_bytes());
+    h.update(&node_index.0.to_le_bytes());
+    h.update(&epoch.to_le_bytes());
+    h.update(&policy_hash);
+    h.update(left_commitment);
+    h.update(right_commitment);
 
-    let hash = hasher.finalize();
-    let mut result = [0u8; 32];
-    result.copy_from_slice(hash.as_bytes());
-    result
+    h.finalize()
 }
 
 /// Compute a cryptographic commitment to a leaf node.
@@ -129,19 +126,16 @@ pub fn commit_branch(
 /// assert_eq!(commitment.len(), 32);
 /// ```
 pub fn commit_leaf(leaf_id: super::LeafId, epoch: Epoch, public_key: &[u8]) -> TreeHash32 {
-    let pubkey_hash = blake3::hash(public_key);
+    let pubkey_hash = hash::hash(public_key);
 
-    let mut hasher = Hasher::new();
-    hasher.update(LEAF_TAG);
-    hasher.update(&COMMITMENT_VERSION.to_le_bytes());
-    hasher.update(&leaf_id.0.to_le_bytes());
-    hasher.update(&epoch.to_le_bytes());
-    hasher.update(pubkey_hash.as_bytes());
+    let mut h = hash::hasher();
+    h.update(LEAF_TAG);
+    h.update(&COMMITMENT_VERSION.to_le_bytes());
+    h.update(&leaf_id.0.to_le_bytes());
+    h.update(&epoch.to_le_bytes());
+    h.update(&pubkey_hash);
 
-    let hash = hasher.finalize();
-    let mut result = [0u8; 32];
-    result.copy_from_slice(hash.as_bytes());
-    result
+    h.finalize()
 }
 
 /// Compute a hash of a policy for use in commitments.
@@ -189,10 +183,7 @@ pub fn policy_hash(policy: &Policy) -> TreeHash32 {
         }
     }
 
-    let hash = blake3::hash(&bytes);
-    let mut result = [0u8; 32];
-    result.copy_from_slice(hash.as_bytes());
-    result
+    hash::hash(&bytes)
 }
 
 /// Compute the root commitment for an entire tree.

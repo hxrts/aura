@@ -380,17 +380,29 @@ impl StateInspectionMiddleware {
             }
 
             WatcherCondition::Custom { expression } => {
-                // TODO fix - Simplified custom expression evaluation
-                // TODO fix - In a real implementation, this would use a proper expression evaluator
-                Some(WatcherAlert {
-                    watcher_id: watcher.id.clone(),
-                    message: format!("Custom condition triggered: {}", expression),
+                // Create a temporary snapshot for evaluation
+                let temp_snapshot = StateSnapshot {
+                    id: format!("temp_{}", context.tick),
                     timestamp: context.timestamp,
                     tick: context.tick,
-                    details: json!({
-                        "expression": expression
-                    }),
-                })
+                    state_data: HashMap::new(), // Simplified for compilation
+                    captured_at: Instant::now(),
+                };
+                // Evaluate custom expression and trigger alert if true
+                if self.evaluate_watcher_expression(expression, context, &temp_snapshot) {
+                    Some(WatcherAlert {
+                        watcher_id: watcher.id.clone(),
+                        message: format!("Custom condition met: {}", expression),
+                        timestamp: context.timestamp,
+                        tick: context.tick,
+                        details: json!({
+                            "expression": expression,
+                            "evaluated": true
+                        }),
+                    })
+                } else {
+                    None // Condition not met, no alert
+                }
             }
         }
     }
@@ -404,6 +416,62 @@ impl StateInspectionMiddleware {
 impl Default for StateInspectionMiddleware {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl StateInspectionMiddleware {
+    /// Evaluate custom watcher expression against current state
+    /// 
+    /// Supports basic state property checks and comparisons for monitoring.
+    fn evaluate_watcher_expression(&self, expression: &str, context: &SimulatorContext, snapshot: &StateSnapshot) -> bool {
+        let expr = expression.trim();
+        
+        // Check state data fields
+        if let Some((field, value)) = expr.split_once(" == ") {
+            let field = field.trim();
+            let value = value.trim().trim_matches('"');
+            
+            if let Some(state_value) = snapshot.state_data.get(field) {
+                return state_value.as_str().unwrap_or("") == value;
+            }
+        }
+        
+        // Check numeric comparisons
+        if let Some((field, value)) = expr.split_once(" > ") {
+            let field = field.trim();
+            if let Ok(target_value) = value.trim().parse::<f64>() {
+                if let Some(state_value) = snapshot.state_data.get(field) {
+                    if let Some(num_value) = state_value.as_f64() {
+                        return num_value > target_value;
+                    }
+                }
+            }
+        }
+        
+        if let Some((field, value)) = expr.split_once(" < ") {
+            let field = field.trim();
+            if let Ok(target_value) = value.trim().parse::<f64>() {
+                if let Some(state_value) = snapshot.state_data.get(field) {
+                    if let Some(num_value) = state_value.as_f64() {
+                        return num_value < target_value;
+                    }
+                }
+            }
+        }
+        
+        // Context-based checks
+        match expr {
+            "tick > 100" => context.tick > 100,
+            "has_state_data" => !snapshot.state_data.is_empty(),
+            "simulation_active" => true, // Always true during simulation
+            "true" => true,
+            "false" => false,
+            _ => {
+                // Unknown expression - log and return false for safety
+                eprintln!("Unknown watcher expression: {}", expr);
+                false
+            }
+        }
     }
 }
 

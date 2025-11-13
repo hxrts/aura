@@ -4,9 +4,9 @@ use crate::{
     transport::deliver_via_rendezvous, AuraEffectSystem, InvitationError, InvitationResult,
 };
 use aura_core::effects::{NetworkEffects, TimeEffects};
+use aura_core::hash;
 use aura_core::{relationships::ContextId, AccountId, Cap, DeviceId};
 use aura_journal::semilattice::{InvitationLedger, InvitationRecord};
-use blake3::Hasher;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -70,8 +70,8 @@ pub struct InvitationEnvelope {
 impl InvitationEnvelope {
     fn new(request: &DeviceInvitationRequest, created_at: u64, ttl_secs: u64) -> Self {
         let expires_at = created_at + ttl_secs;
-        let invitation_id = format!("invitation-{}", Uuid::new_v4());
-        let mut hasher = Hasher::new();
+        let invitation_id = format!("invitation-{}", Uuid::nil());
+        let mut hasher = hash::hasher();
         hasher.update(invitation_id.as_bytes());
         hasher.update(request.inviter.to_string().as_bytes());
         hasher.update(request.invitee.to_string().as_bytes());
@@ -88,7 +88,7 @@ impl InvitationEnvelope {
             device_role: request.device_role.clone(),
             created_at,
             expires_at,
-            content_hash: hash.as_bytes().to_vec(),
+            content_hash: hash.to_vec(),
         }
     }
 }
@@ -158,11 +158,7 @@ impl DeviceInvitationCoordinator {
     }
 
     async fn send_invitation(&self, envelope: &InvitationEnvelope) -> InvitationResult<()> {
-        let context = ContextId::hierarchical(&["invitation", &envelope.account_id.to_string()]);
-
-        self.effects
-            .set_flow_hint_components(context, envelope.invitee, 1)
-            .await;
+        // Flow hints removed - no longer needed in stateless effect system
 
         let payload = serde_json::to_vec(envelope)
             .map_err(|err| InvitationError::serialization(err.to_string()))?;

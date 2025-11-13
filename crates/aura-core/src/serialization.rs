@@ -9,6 +9,7 @@
 //! - Forward/backward compatibility (semantic versioning support)
 //! - Efficient binary encoding
 
+use crate::hash;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -42,7 +43,7 @@ pub fn from_slice<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
 /// Serialize to DAG-CBOR and return the canonical hash
 pub fn hash_canonical<T: Serialize>(value: &T) -> Result<[u8; 32]> {
     let bytes = to_vec(value)?;
-    Ok(blake3::hash(&bytes).into())
+    Ok(hash::hash(&bytes))
 }
 
 /// Version information for semantic versioning support
@@ -113,7 +114,10 @@ impl<T> VersionedMessage<T> {
     }
 }
 
-// Optional JSON export for debugging (feature-gated)
+/// Optional JSON export for debugging (feature-gated)
+///
+/// Provides JSON serialization utilities for debugging purposes only.
+/// These functions are not intended for wire protocol use.
 #[cfg(feature = "json-debug")]
 pub mod json_debug {
     use super::*;

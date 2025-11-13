@@ -109,6 +109,7 @@ impl Default for GuardianPolicy {
 // SessionId is now imported from aura-core
 // Extensions for journal-specific functionality
 /// Provides effects-based session ID generation for journal operations
+#[allow(dead_code)]
 pub trait SessionIdExt {
     async fn new_with_effects(effects: &dyn aura_core::effects::CryptoEffects) -> Self;
 }
@@ -142,6 +143,7 @@ impl SessionIdExt for SessionId {
 /// Prevents concurrent execution of the same operation type across devices.
 /// Core to distributed locking protocol documented in 500_distributed_*.md specs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct OperationLock {
     /// Type of operation being locked
     pub operation_type: OperationType,
@@ -276,6 +278,7 @@ impl Session {
 /// Represents one participant's contribution to a threshold signature.
 /// Actively used in FROST crypto implementation across aura-crypto and aura-protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct SignatureShare {
     /// ID of the participant who created this share
     pub participant_id: ParticipantId,
@@ -290,6 +293,7 @@ pub struct SignatureShare {
 /// Caches presence tickets for efficient session participation.
 /// Part of session management documented in 001_identity_spec.md.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct PresenceTicketCache {
     /// Device holding this ticket
     pub device_id: DeviceId,
@@ -312,6 +316,7 @@ pub struct PresenceTicketCache {
 /// Integrated with error handling system (StorageQuotaExceeded).
 /// Referenced in group storage documentation as foundational infrastructure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct StorageQuota {
     /// Device this quota applies to
     pub device_id: DeviceId,
@@ -330,6 +335,7 @@ pub struct StorageQuota {
 /// Specifies parameters for deriving encryption keys for storage blobs.
 /// Extensively used in crypto tests and core security infrastructure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct KeyDerivationSpec {
     /// Context string for key derivation (e.g., blob ID, device ID)
     pub context: String,

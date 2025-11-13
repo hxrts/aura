@@ -9,10 +9,9 @@
 //! Run with: cargo test --test tree_scalability --release -- --nocapture
 
 use aura_core::tree::{
-    snapshot::Snapshot, AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp,
-    TreeOpKind,
+    snapshot::Snapshot, AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
 };
-use aura_core::{DeviceId, Hash32};
+use aura_core::{DeviceId, Hash32, JoinSemilattice};
 use aura_journal::ratchet_tree::{compaction::compact, reduction::reduce};
 use aura_journal::semilattice::OpLog;
 use aura_protocol::sync::PeerView;
@@ -32,6 +31,7 @@ fn create_add_leaf_op(epoch: u64, leaf_id: u32) -> AttestedOp {
             op: TreeOpKind::AddLeaf {
                 leaf: LeafNode {
                     leaf_id: LeafId(leaf_id),
+                    device_id: DeviceId::new(),
                     role: LeafRole::Device,
                     public_key: vec![0u8; 32],
                     meta: vec![],
@@ -73,7 +73,7 @@ fn test_tree_with_100_devices() {
 
     // Reduce to TreeState
     let reduce_start = Instant::now();
-    let ops: Vec<&AttestedOp> = oplog.list_ops();
+    let ops: Vec<AttestedOp> = oplog.to_operations_vec();
     let state = reduce(&ops).expect("Reduction should succeed");
     let reduce_time = reduce_start.elapsed();
 
@@ -93,7 +93,7 @@ fn test_tree_with_100_devices() {
         "Reduction should take < 500ms"
     );
 
-    println!("✅ Test passed: Tree handles 100 devices efficiently");
+    println!("Test passed: Tree handles 100 devices efficiently");
 }
 
 // ============================================================================
@@ -121,8 +121,8 @@ fn test_oplog_with_10000_operations() {
     let contains_start = Instant::now();
     let test_op = create_add_leaf_op(50, 500);
     let cid = compute_cid(&test_op);
-    oplog.add(test_op.clone());
-    let contains_result = oplog.contains(&cid);
+    oplog.add_operation(test_op.clone());
+    let contains_result = oplog.contains_operation(&cid);
     let contains_time = contains_start.elapsed();
 
     println!("Contains check time: {:?}", contains_time);
@@ -148,7 +148,7 @@ fn test_oplog_with_10000_operations() {
     );
     assert!(join_time.as_millis() < 500, "Join should take < 500ms");
 
-    println!("✅ Test passed: OpLog handles 10,000 operations efficiently");
+    println!("Test passed: OpLog handles 10,000 operations efficiently");
 }
 
 // ============================================================================
@@ -171,7 +171,7 @@ fn test_anti_entropy_with_50_peers() {
 
     let creation_time = start.elapsed();
     println!("PeerView creation time: {:?}", creation_time);
-    println!("PeerView size: {} peers", view.size());
+    println!("PeerView size: {} peers", view.len());
 
     // Test PeerView operations
     let contains_start = Instant::now();
@@ -189,11 +189,11 @@ fn test_anti_entropy_with_50_peers() {
     let join_time = join_start.elapsed();
 
     println!("Join time: {:?}", join_time);
-    assert_eq!(joined.size(), 50, "Join should preserve peer count");
+    assert_eq!(joined.len(), 50, "Join should preserve peer count");
 
     // Test peer iteration
     let iter_start = Instant::now();
-    let peer_count = view.peers().count();
+    let peer_count = view.iter().count();
     let iter_time = iter_start.elapsed();
 
     println!("Iteration time: {:?}", iter_time);
@@ -211,7 +211,7 @@ fn test_anti_entropy_with_50_peers() {
     assert!(join_time.as_micros() < 1000, "Join should take < 1ms");
     assert!(iter_time.as_micros() < 500, "Iteration should take < 500µs");
 
-    println!("✅ Test passed: Anti-entropy scales to 50 peers");
+    println!("Test passed: Anti-entropy scales to 50 peers");
 }
 
 // ============================================================================
@@ -238,7 +238,7 @@ fn test_memory_bounded_with_gc() {
     let snapshot = Snapshot {
         epoch: 500,
         commitment: [0x50; 32],
-        roster: (0..100).map(|i| LeafId(i)).collect(),
+        roster: (0..100).map(LeafId).collect(),
         policies: BTreeMap::new(),
         state_cid: Some([0x01; 32]),
         timestamp: 5000,
@@ -268,7 +268,7 @@ fn test_memory_bounded_with_gc() {
     let ops_after_snapshot = oplog
         .list_ops()
         .iter()
-        .filter(|op| op.op.parent_epoch.0 > 500)
+        .filter(|op| op.op.parent_epoch > 500)
         .count();
 
     assert_eq!(
@@ -283,7 +283,7 @@ fn test_memory_bounded_with_gc() {
         "Compaction should take < 100ms"
     );
 
-    println!("✅ Test passed: Memory stays bounded with GC");
+    println!("Test passed: Memory stays bounded with GC");
     println!(
         "   Operations reduced from {} to {}",
         oplog.len(),
@@ -325,20 +325,20 @@ fn test_combined_load() {
 
     // Perform reduction
     let reduce_start = Instant::now();
-    let ops: Vec<&AttestedOp> = oplog.list_ops();
+    let ops: Vec<AttestedOp> = oplog.to_operations_vec();
     let state = reduce(&ops).expect("Reduction should succeed");
     let reduce_time = reduce_start.elapsed();
 
     println!("Reduction time: {:?}", reduce_time);
     println!("Final tree size: {} leaves", state.list_leaf_ids().len());
     println!("OpLog size: {} operations", oplog.len());
-    println!("PeerView size: {} peers", view.size());
+    println!("PeerView size: {} peers", view.len());
 
     // Performance expectations
     assert!(setup_time.as_secs() < 5, "Setup should take < 5s");
     assert!(reduce_time.as_millis() < 1000, "Reduction should take < 1s");
 
-    println!("✅ Test passed: System handles combined load");
+    println!("Test passed: System handles combined load");
 }
 
 // ============================================================================
@@ -346,12 +346,12 @@ fn test_combined_load() {
 // ============================================================================
 
 fn compute_cid(op: &AttestedOp) -> Hash32 {
-    use blake3::Hasher;
-    let mut hasher = Hasher::new();
-    hasher.update(b"ATTESTED_OP");
-    hasher.update(&op.op.parent_epoch.to_le_bytes());
-    hasher.update(&op.op.parent_commitment);
-    hasher.update(&[op.op.version]);
-    hasher.update(&(op.signer_count as u64).to_le_bytes());
-    *hasher.finalize().as_bytes()
+    use aura_core::hash::hasher;
+    let mut h = hasher();
+    h.update(b"ATTESTED_OP");
+    h.update(&op.op.parent_epoch.to_le_bytes());
+    h.update(&op.op.parent_commitment);
+    h.update(&[op.op.version as u8]);
+    h.update(&(op.signer_count as u64).to_le_bytes());
+    Hash32(h.finalize())
 }

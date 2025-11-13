@@ -97,7 +97,10 @@ impl NetworkEffects for MockNetworkHandler {
         // Check if send should fail (drop guard immediately)
         let should_fail = *self.should_fail_send.lock().unwrap();
         if should_fail {
-            return Err(NetworkError::SendFailed("Mock network failure".to_string()));
+            return Err(NetworkError::SendFailed {
+                peer_id: Some(peer_id),
+                reason: "Mock network failure".to_string(),
+            });
         }
 
         // Check if peer is connected (drop guard immediately)
@@ -127,9 +130,10 @@ impl NetworkEffects for MockNetworkHandler {
         // Check if broadcast should fail (drop guard immediately)
         let should_fail = *self.should_fail_broadcast.lock().unwrap();
         if should_fail {
-            return Err(NetworkError::SendFailed(
-                "Mock broadcast failure".to_string(),
-            ));
+            return Err(NetworkError::SendFailed {
+                peer_id: None,
+                reason: "Mock broadcast failure".to_string(),
+            });
         }
 
         // Get delay and connected peer count (drop guards immediately)
@@ -219,8 +223,8 @@ mod tests {
     #[tokio::test]
     async fn test_mock_network_basic_operations() {
         let handler = MockNetworkHandler::new();
-        let peer1 = Uuid::new_v4();
-        let peer2 = Uuid::new_v4();
+        let peer1 = uuid::Uuid::from_bytes([1u8; 16]);
+        let peer2 = uuid::Uuid::from_bytes([2u8; 16]);
 
         // Initially no peers connected
         assert_eq!(handler.connected_peers().await.len(), 0);
@@ -245,7 +249,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_network_messaging() {
         let handler = MockNetworkHandler::new();
-        let peer1 = Uuid::new_v4();
+        let peer1 = uuid::Uuid::from_bytes([0u8; 16]);
         let message = b"test message".to_vec();
 
         // Add peer
@@ -268,7 +272,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_network_failure_simulation() {
         let handler = MockNetworkHandler::new();
-        let peer1 = Uuid::new_v4();
+        let peer1 = uuid::Uuid::from_bytes([0u8; 16]);
         let message = b"test message".to_vec();
 
         handler.add_peer(peer1);
@@ -290,7 +294,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_network_peer_events() {
         let handler = MockNetworkHandler::new();
-        let peer1 = Uuid::new_v4();
+        let peer1 = uuid::Uuid::from_bytes([0u8; 16]);
 
         // Subscribe to events
         let mut event_stream = handler.subscribe_to_peer_events().await.unwrap();
@@ -321,8 +325,8 @@ mod tests {
     #[tokio::test]
     async fn test_mock_network_receive_from_specific_peer() {
         let handler = MockNetworkHandler::new();
-        let peer1 = Uuid::new_v4();
-        let peer2 = Uuid::new_v4();
+        let peer1 = uuid::Uuid::from_bytes([0u8; 16]);
+        let peer2 = uuid::Uuid::from_bytes([0u8; 16]);
         let message1 = b"message from peer1".to_vec();
         let message2 = b"message from peer2".to_vec();
 

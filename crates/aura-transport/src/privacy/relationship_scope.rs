@@ -3,8 +3,8 @@
 //! Implements DKD-derived relationship contexts that determine what
 //! capability information can be revealed to different peers.
 
+use aura_core::hash::hasher;
 use aura_core::identifiers::DeviceId;
-use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -116,19 +116,25 @@ pub struct ScopedCapabilityView {
 /// Capability information scoped to a relationship level
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScopedCapabilities {
-    /// Basic capability flags (always visible)
+    /// Storage capability available for this relationship
     pub has_storage: bool,
+    /// Relay capability available for this relationship
     pub has_relay: bool,
+    /// Compute capability available for this relationship
     pub has_compute: bool,
+    /// Communication capability available for this relationship
     pub has_communication: bool,
 
     /// Category-level details (Acquaintance+)
     pub storage_category: Option<StorageCategory>,
+    /// Relay service category details for this relationship
     pub relay_category: Option<RelayCategory>,
+    /// Compute service category details for this relationship
     pub compute_category: Option<ComputeCategory>,
 
     /// Approximate metrics (Trusted+)
     pub performance_bucket: Option<PerformanceBucket>,
+    /// Capacity bucket indicating storage capacity level
     pub capacity_bucket: Option<CapacityBucket>,
 
     /// Exact metrics (Intimate only)
@@ -357,12 +363,12 @@ impl CapabilityViewManager {
 
     /// Hash capabilities for verification
     fn hash_capabilities(&self, capabilities: &PeerCapabilities) -> [u8; 32] {
-        let mut hasher = Hasher::new();
-        hasher.update(capabilities.storage_available.to_string().as_bytes());
-        hasher.update(&capabilities.storage_capacity_bytes.to_le_bytes());
-        hasher.update(capabilities.relay_available.to_string().as_bytes());
-        hasher.update(capabilities.communication_available.to_string().as_bytes());
-        *hasher.finalize().as_bytes()
+        let mut h = hasher();
+        h.update(capabilities.storage_available.to_string().as_bytes());
+        h.update(&capabilities.storage_capacity_bytes.to_le_bytes());
+        h.update(capabilities.relay_available.to_string().as_bytes());
+        h.update(capabilities.communication_available.to_string().as_bytes());
+        h.finalize()
     }
 }
 
@@ -373,8 +379,8 @@ mod tests {
 
     #[test]
     fn test_relationship_scope_derivation() {
-        let local = DeviceId(uuid::Uuid::new_v4());
-        let remote = DeviceId(uuid::Uuid::new_v4());
+        let local = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let remote = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         assert_eq!(
             RelationshipScope::from_dkd_strength(local, remote, 10, 0.9),
@@ -422,9 +428,9 @@ mod tests {
 
     #[test]
     fn test_scoped_capability_view_creation() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let mut manager = CapabilityViewManager::new(device_id);
-        let peer_id = DeviceId(uuid::Uuid::new_v4());
+        let peer_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         let capabilities = PeerCapabilities::full_service_peer(5_000_000_000); // 5GB
 
@@ -447,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_storage_categorization() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let manager = CapabilityViewManager::new(device_id);
 
         assert!(matches!(

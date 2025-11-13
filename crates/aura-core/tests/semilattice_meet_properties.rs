@@ -8,7 +8,7 @@ mod tests {
     use aura_core::semilattice::{MeetSemiLattice, MvState, Top};
     use proptest::collection;
     use proptest::prelude::*;
-    use proptest::{prop_oneof, proptest};
+    use proptest::proptest;
     use std::collections::BTreeSet;
 
     // === Test Strategies ===

@@ -16,7 +16,7 @@ use tracing;
 pub struct WebSocketEnvelope {
     /// Source device ID
     pub from: DeviceId,
-    /// Destination device ID  
+    /// Destination device ID
     pub to: DeviceId,
     /// CBOR-encoded message payload
     pub payload: Vec<u8>,
@@ -54,6 +54,7 @@ impl Default for WebSocketConfig {
 pub struct WebSocketTransport {
     device_id: DeviceId,
     config: WebSocketConfig,
+    #[allow(dead_code)]
     sequence_counter: u64,
 }
 
@@ -130,6 +131,7 @@ impl WebSocketTransport {
     }
 
     /// Get next sequence number
+    #[allow(dead_code)]
     fn next_sequence(&mut self) -> u64 {
         self.sequence_counter += 1;
         self.sequence_counter
@@ -308,7 +310,7 @@ impl WebSocketConnection {
     /// Check if connection is still alive
     pub async fn is_alive(&mut self) -> bool {
         // Send a ping and wait for response (simple liveness check)
-        if let Err(_) = self.stream.send(Message::Ping(vec![])).await {
+        if self.stream.send(Message::Ping(vec![])).await.is_err() {
             return false;
         }
         true
@@ -378,7 +380,7 @@ mod tests {
     async fn test_websocket_transport_creation() {
         let device_id = DeviceId::from("test_device");
         let config = WebSocketConfig::default();
-        let transport = WebSocketTransport::new(device_id.clone(), config);
+        let transport = WebSocketTransport::new(device_id, config);
 
         assert_eq!(transport.device_id(), device_id);
         assert_eq!(transport.config().port, 8081);

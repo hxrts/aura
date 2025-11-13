@@ -6,6 +6,7 @@
 //! The capability tokens implement threshold authentication and delegation
 //! on top of the meet-semilattice capability framework.
 
+use aura_core::hash;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::Hash;
@@ -36,9 +37,9 @@ impl CapabilityId {
         }
     }
 
-    /// Create from blake3 hash
-    pub fn from_blake3_hash(hash: &blake3::Hash) -> Self {
-        Self(*hash.as_bytes())
+    /// Create from hash bytes
+    pub fn from_hash(hash_bytes: &[u8; 32]) -> Self {
+        Self(*hash_bytes)
     }
 
     /// Get the raw bytes
@@ -66,8 +67,7 @@ impl CapabilityId {
     /// Generate a random capability ID
     #[allow(clippy::disallowed_methods)]
     pub fn random() -> Self {
-        let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(blake3::hash(uuid::Uuid::new_v4().as_bytes()).as_bytes());
+        let bytes = hash::hash(uuid::Uuid::from_bytes([0u8; 16]).as_bytes());
         Self(bytes)
     }
 
@@ -77,25 +77,25 @@ impl CapabilityId {
         subject_id: &[u8],
         scope_data: &[u8],
     ) -> Self {
-        let mut hasher = blake3::Hasher::new();
+        let mut h = hash::hasher();
 
         if let Some(parent) = parent_id {
-            hasher.update(&parent.0);
+            h.update(&parent.0);
         }
 
-        hasher.update(subject_id);
-        hasher.update(scope_data);
+        h.update(subject_id);
+        h.update(scope_data);
 
-        Self(hasher.finalize().into())
+        Self(h.finalize())
     }
 
     /// Generate a capability ID from device and timestamp
     pub fn from_device_and_timestamp(device_id: aura_core::DeviceId, timestamp: u64) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(device_id.0.as_bytes());
-        hasher.update(&timestamp.to_le_bytes());
-        hasher.update(b"capability");
-        Self(hasher.finalize().into())
+        let mut h = hash::hasher();
+        h.update(device_id.0.as_bytes());
+        h.update(&timestamp.to_le_bytes());
+        h.update(b"capability");
+        Self(h.finalize())
     }
 }
 
@@ -111,11 +111,8 @@ impl From<[u8; 32]> for CapabilityId {
     }
 }
 
-impl From<blake3::Hash> for CapabilityId {
-    fn from(hash: blake3::Hash) -> Self {
-        Self::from_blake3_hash(&hash)
-    }
-}
+// Note: From<[u8; 32]> implementation is above, using direct constructor
+// This avoids duplicate implementation conflict
 
 impl From<CapabilityId> for [u8; 32] {
     fn from(capability_id: CapabilityId) -> Self {
@@ -265,7 +262,7 @@ impl CapabilityToken {
         threshold_signature: Vec<u8>,
         nonce: [u8; 32],
     ) -> Self {
-        let token_id = CapabilityId::from_blake3_hash(&blake3::hash(&nonce));
+        let token_id = CapabilityId::from_hash(&hash::hash(&nonce));
 
         Self {
             token_id,
@@ -365,17 +362,17 @@ impl CapabilityToken {
         };
 
         // Generate new nonce for delegated token
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(&self.nonce);
-        hasher.update(delegator_device_id.0.as_bytes());
-        hasher.update(&current_time.to_le_bytes());
-        let new_nonce: [u8; 32] = hasher.finalize().into();
+        let mut h = hash::hasher();
+        h.update(&self.nonce);
+        h.update(delegator_device_id.0.as_bytes());
+        h.update(&current_time.to_le_bytes());
+        let new_nonce = h.finalize();
 
         let mut delegation_chain = self.delegation_chain.clone();
         delegation_chain.push(proof);
 
         Ok(Self {
-            token_id: CapabilityId::from_blake3_hash(&blake3::hash(&new_nonce)),
+            token_id: CapabilityId::from_hash(&hash::hash(&new_nonce)),
             issuer: self.issuer,
             permissions: delegated_permissions,
             resources: delegated_resources,
@@ -442,15 +439,15 @@ impl CapabilityToken {
     /// Serialize token for signing (excludes signature field)
     pub fn serialize_for_signature(&self) -> Vec<u8> {
         // Serialize all fields except threshold_signature
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(self.token_id.as_bytes());
-        hasher.update(self.issuer.0.as_bytes());
-        hasher.update(&self.issued_at.to_le_bytes());
+        let mut h = hash::hasher();
+        h.update(self.token_id.as_bytes());
+        h.update(self.issuer.0.as_bytes());
+        h.update(&self.issued_at.to_le_bytes());
         if let Some(expires_at) = self.expires_at {
-            hasher.update(&expires_at.to_le_bytes());
+            h.update(&expires_at.to_le_bytes());
         }
-        hasher.update(&self.nonce);
-        hasher.finalize().as_bytes().to_vec()
+        h.update(&self.nonce);
+        h.finalize().to_vec()
     }
 }
 

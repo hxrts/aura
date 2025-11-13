@@ -12,14 +12,19 @@ use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OperationId(pub Uuid);
 
+impl Default for OperationId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OperationId {
-    /// Create a new random operation ID
+    /// Create a new zero operation ID
     ///
-    /// Note: This uses system randomness. For testable code, use `from_bytes` with
-    /// bytes from a RandomEffects handler instead.
-    #[allow(clippy::disallowed_methods)] // Low-level ID type, callers should use from_bytes for testing
+    /// Returns an operation ID with all zeros. For actual operation IDs, use
+    /// `from_bytes` with bytes from a RandomEffects handler.
     pub fn new() -> Self {
-        Self(Uuid::new_v4())
+        Self(Uuid::nil())
     }
 
     /// Create an operation ID from random bytes (for use with effects)
@@ -209,9 +214,10 @@ impl Operation {
     /// Identical operations will always produce the same ID.
     pub fn id(&self) -> OperationId {
         let serialized = serde_json::to_string(self).unwrap_or_default();
-        let hash = blake3::hash(serialized.as_bytes());
-        let bytes = hash.as_bytes();
-        let uuid_bytes: [u8; 16] = bytes[..16].try_into().unwrap();
+        let hash = aura_core::hash::hash(serialized.as_bytes());
+        // hash returns a 32-byte array, so [..16] is always valid
+        #[allow(clippy::expect_used)]
+        let uuid_bytes: [u8; 16] = hash[..16].try_into().expect("hash is always 32 bytes");
         OperationId(Uuid::from_bytes(uuid_bytes))
     }
 
@@ -245,14 +251,14 @@ impl Operation {
     /// such as updates and epoch increments. Returns false for operations
     /// that should only be applied once, such as adding or removing entities.
     pub fn is_idempotent(&self) -> bool {
-        match self {
-            Self::IncrementEpoch { .. } => true,
-            Self::UpdateProtocolState { .. } => true,
-            Self::UpdateDeviceMetadata { .. } => true,
-            Self::UpdateGuardianMetadata { .. } => true,
-            Self::UpdateSession { .. } => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Self::IncrementEpoch { .. }
+                | Self::UpdateProtocolState { .. }
+                | Self::UpdateDeviceMetadata { .. }
+                | Self::UpdateGuardianMetadata { .. }
+                | Self::UpdateSession { .. }
+        )
     }
 
     /// Check if this operation conflicts with another operation
@@ -372,7 +378,7 @@ mod tests {
     #[test]
     fn test_operation_conflicts() {
         // Use fixed test data instead of effects-based generation
-        let device_id = DeviceId(Uuid::new_v4());
+        let device_id = DeviceId(Uuid::from_bytes([13u8; 16]));
 
         let add_op = Operation::AddDevice {
             device: DeviceMetadata {

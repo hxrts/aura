@@ -3,7 +3,6 @@
 //! Factory functions for creating test protocol contexts and related structures.
 //! This addresses the complex protocol setup patterns found in test files.
 
-use crate::Effects;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -86,16 +85,12 @@ pub struct TestParticipant {
 /// Create test context parameters
 ///
 /// This consolidates the parameter setup patterns found in protocol tests.
-///
-/// # Arguments
-/// * `effects` - Effects instance for deterministic generation
-pub fn test_context_params(effects: &Effects) -> TestContextParams {
+pub fn test_context_params() -> TestContextParams {
     TestContextParams {
         session_id: test_session_id(),
         device_id: test_device_id(),
         participants: test_device_ids(3),
         threshold: Some(2),
-        effects: effects.clone(),
         metadata: test_context_metadata(),
     }
 }
@@ -110,8 +105,6 @@ pub struct TestContextParams {
     pub participants: Vec<Uuid>,
     /// Threshold for operations
     pub threshold: Option<u16>,
-    /// Effects instance for deterministic generation
-    pub effects: Effects,
     /// Additional metadata
     pub metadata: BTreeMap<String, String>,
 }

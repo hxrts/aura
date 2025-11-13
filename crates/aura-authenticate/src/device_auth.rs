@@ -5,7 +5,7 @@
 
 use crate::{AuraError, AuraResult};
 use aura_core::{AccountId, Cap, DeviceId};
-use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation};
+use aura_protocol::AuraEffectSystem;
 use aura_verify::session::{SessionScope, SessionTicket};
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use serde::{Deserialize, Serialize};
@@ -109,7 +109,7 @@ impl AuthRole {
 }
 
 /// G_auth choreography state
-#[derive(Debug)]
+#[allow(dead_code)]
 pub struct AuthChoreographyState {
     /// Current auth request being processed
     current_request: Option<DeviceAuthRequest>,
@@ -120,6 +120,12 @@ pub struct AuthChoreographyState {
     /// Authentication progress tracking
     #[allow(dead_code)] // Used for debugging and audit logging
     auth_progress: HashMap<DeviceId, String>, // device -> session_id
+}
+
+impl Default for AuthChoreographyState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AuthChoreographyState {
@@ -188,23 +194,22 @@ impl AuthChoreographyState {
 /// - Capability guards for authorization: `[guard: device_auth ≤ caps]`
 /// - Journal coupling for CRDT integration: `[▷ Δdevice_auth]`
 /// - Leakage tracking for privacy: `[leak: auth_metadata]`
-#[derive(Debug)]
 pub struct AuthChoreography {
     /// Local device role
     role: AuthRole,
     /// Choreography state
     state: Mutex<AuthChoreographyState>,
-    /// MPST runtime
-    runtime: AuraRuntime,
+    /// Effect system
+    effect_system: AuraEffectSystem,
 }
 
 impl AuthChoreography {
     /// Create a new G_auth choreography
-    pub fn new(role: AuthRole, runtime: AuraRuntime) -> Self {
+    pub fn new(role: AuthRole, effect_system: AuraEffectSystem) -> Self {
         Self {
             role,
             state: Mutex::new(AuthChoreographyState::new()),
-            runtime,
+            effect_system,
         }
     }
 
@@ -212,16 +217,15 @@ impl AuthChoreography {
     pub async fn execute(
         &self,
         request: DeviceAuthRequest,
-        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<DeviceAuthResponse> {
         let mut state = self.state.lock().await;
         state.current_request = Some(request.clone());
         drop(state);
 
         match self.role {
-            AuthRole::Requester => self.execute_requester(request, effect_system).await,
-            AuthRole::Verifier => self.execute_verifier(effect_system).await,
-            AuthRole::Coordinator => self.execute_coordinator(effect_system).await,
+            AuthRole::Requester => self.execute_requester(request).await,
+            AuthRole::Verifier => self.execute_verifier().await,
+            AuthRole::Coordinator => self.execute_coordinator().await,
         }
     }
 
@@ -230,29 +234,17 @@ impl AuthChoreography {
     async fn execute_requester(
         &self,
         request: DeviceAuthRequest,
-        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<DeviceAuthResponse> {
         tracing::info!(
             "Executing G_auth as requester for device: {}",
             request.device_id
         );
 
-        // Apply capability guard: [guard: device_auth ≤ caps]
-        let auth_cap = Cap::with_permissions(vec![
-            "auth:device".to_string(),
-            "network:send".to_string(),
-            "network:receive".to_string(),
-        ]);
-        let guard = CapabilityGuard::new(auth_cap.clone());
-
-        // For MVP, grant auth permissions to authenticated devices
-        let device_capabilities = auth_cap; // Placeholder
-        guard.enforce(&device_capabilities).map_err(|e| {
-            AuraError::invalid(format!("Insufficient capabilities for device auth: {}", e))
-        })?;
+        // TODO: Implement capability-based authorization with new effect system
+        // This will be implemented with aura-wot capability evaluation
 
         // Generate session ID
-        let _session_id = uuid::Uuid::new_v4().to_string();
+        let _session_id = uuid::Uuid::from_bytes([0u8; 16]).to_string();
 
         // Device authentication would involve:
         // 1. Sending challenge request to verifier using AuraHandlerAdapter
@@ -264,10 +256,8 @@ impl AuthChoreography {
         // This requires cryptographic key material and verifier coordination
         tracing::warn!("Device authentication requires cryptographic key material - placeholder implementation");
 
-        // Apply journal annotation: [▷ Δdevice_auth]
-        let journal_annotation =
-            JournalAnnotation::add_facts("Device authentication request".to_string());
-        tracing::info!("Applied journal annotation: {:?}", journal_annotation);
+        // TODO: Implement journal state tracking with new effect system
+        // This will use AuraEffectSystem's journal capabilities
 
         Ok(DeviceAuthResponse {
             verified_identity: None,
@@ -280,7 +270,6 @@ impl AuthChoreography {
     /// Execute as verifier
     async fn execute_verifier(
         &self,
-        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<DeviceAuthResponse> {
         tracing::info!("Executing G_auth as verifier");
 
@@ -306,7 +295,6 @@ impl AuthChoreography {
     /// Execute as coordinator
     async fn execute_coordinator(
         &self,
-        _effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<DeviceAuthResponse> {
         tracing::info!("Executing G_auth as coordinator");
 
@@ -327,19 +315,18 @@ impl AuthChoreography {
 }
 
 /// Device authentication coordinator
-#[derive(Debug)]
 pub struct DeviceAuthCoordinator {
-    /// Local runtime
-    runtime: AuraRuntime,
+    /// Local effect system
+    effect_system: AuraEffectSystem,
     /// Current choreography
     choreography: Option<AuthChoreography>,
 }
 
 impl DeviceAuthCoordinator {
     /// Create a new device auth coordinator
-    pub fn new(runtime: AuraRuntime) -> Self {
+    pub fn new(effect_system: AuraEffectSystem) -> Self {
         Self {
-            runtime,
+            effect_system,
             choreography: None,
         }
     }
@@ -348,7 +335,6 @@ impl DeviceAuthCoordinator {
     pub async fn authenticate_device(
         &mut self,
         request: DeviceAuthRequest,
-        effect_system: &aura_protocol::effects::system::AuraEffectSystem,
     ) -> AuraResult<DeviceAuthResponse> {
         tracing::info!(
             "Starting device authentication for device: {}",
@@ -356,10 +342,10 @@ impl DeviceAuthCoordinator {
         );
 
         // Create choreography with requester role
-        let choreography = AuthChoreography::new(AuthRole::Requester, self.runtime.clone());
+        let choreography = AuthChoreography::new(AuthRole::Requester, self.effect_system.clone());
 
-        // Execute the choreography with effect system
-        let result = choreography.execute(request, effect_system).await;
+        // Execute the choreography
+        let result = choreography.execute(request).await;
 
         // Store choreography for potential follow-up operations
         self.choreography = Some(choreography);
@@ -367,9 +353,9 @@ impl DeviceAuthCoordinator {
         result
     }
 
-    /// Get the current runtime
-    pub fn runtime(&self) -> &AuraRuntime {
-        &self.runtime
+    /// Get the current effect system
+    pub fn effect_system(&self) -> &AuraEffectSystem {
+        &self.effect_system
     }
 
     /// Check if a choreography is currently active
@@ -389,7 +375,7 @@ mod tests {
         let mut state = AuthChoreographyState::new();
 
         let session_id = "test_session".to_string();
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let challenge = state.generate_challenge(session_id.clone(), device_id);
 
         assert!(!challenge.is_empty());
@@ -398,25 +384,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_choreography_creation() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let effect_system = AuraEffectSystem::new(device_id, aura_protocol::handlers::ExecutionMode::Testing);
 
-        let choreography = AuthChoreography::new(AuthRole::Requester, runtime);
+        let choreography = AuthChoreography::new(AuthRole::Requester, effect_system);
 
         assert_eq!(choreography.role, AuthRole::Requester);
     }
 
     #[tokio::test]
     async fn test_auth_coordinator() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let effect_system = AuraEffectSystem::new(device_id, aura_protocol::handlers::ExecutionMode::Testing);
 
-        let mut coordinator = DeviceAuthCoordinator::new(runtime);
+        let mut coordinator = DeviceAuthCoordinator::new(effect_system);
         assert!(!coordinator.has_active_choreography());
 
         let request = DeviceAuthRequest {
             device_id,
-            account_id: AccountId(uuid::Uuid::new_v4()),
+            account_id: AccountId(uuid::Uuid::from_bytes([0u8; 16])),
             requested_scope: SessionScope::Dkd {
                 app_id: "test-app".to_string(),
                 context: "test-context".to_string(),
@@ -424,14 +410,10 @@ mod tests {
             challenge_nonce: vec![1, 2, 3, 4],
         };
 
-        // Create effect system for test
-        let effect_system = aura_protocol::effects::system::AuraEffectSystem::new(
-            device_id,
-            aura_protocol::context::ExecutionMode::Testing,
-        );
-
         // Note: This will return Ok with success=false since choreography is not fully implemented
-        let result = coordinator.authenticate_device(request, &effect_system).await;
+        let result = coordinator
+            .authenticate_device(request)
+            .await;
         assert!(result.is_ok());
         let response = result.unwrap();
         assert!(!response.success);

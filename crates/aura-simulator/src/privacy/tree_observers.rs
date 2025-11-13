@@ -9,7 +9,7 @@
 //!
 //! Each observer tracks accumulated leakage across different privacy dimensions.
 
-use aura_core::tree::{AttestedOp, Epoch, LeafId, TreeHash32};
+use aura_core::tree::{AttestedOp, Epoch, LeafId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, SystemTime};
@@ -218,6 +218,12 @@ pub struct ExternalObserver {
     leakage: PrivacyLeakage,
 }
 
+impl Default for ExternalObserver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExternalObserver {
     pub fn new() -> Self {
         Self {
@@ -292,6 +298,12 @@ pub struct NeighborObserver {
     routing_graph: BTreeMap<LeafId, BTreeSet<LeafId>>, // sender -> receivers
 }
 
+impl Default for NeighborObserver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NeighborObserver {
     pub fn new() -> Self {
         Self {
@@ -338,7 +350,7 @@ impl NeighborObserver {
         if let (Some(s), Some(r)) = (sender, receiver) {
             self.routing_graph
                 .entry(s)
-                .or_insert_with(BTreeSet::new)
+                .or_default()
                 .insert(r);
         }
 
@@ -404,6 +416,12 @@ pub struct InGroupObserver {
     leakage: PrivacyLeakage,
     signer_counts: Vec<u16>,
     ceremony_participants: BTreeMap<String, usize>, // phase -> count
+}
+
+impl Default for InGroupObserver {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl InGroupObserver {
@@ -615,7 +633,7 @@ mod tests {
     #[test]
     fn test_external_observer_timing_entropy() {
         let mut observer = ExternalObserver::new();
-        let now = SystemTime::now();
+        let now = SystemTime::UNIX_EPOCH;
 
         // Observe traffic with varying delays to create different timing buckets
         let intervals = [50, 150, 200, 100, 300, 75, 250, 125, 175, 225]; // Varied intervals
@@ -638,7 +656,7 @@ mod tests {
     #[test]
     fn test_neighbor_observer_routing_graph() {
         let mut observer = NeighborObserver::new();
-        let now = SystemTime::now();
+        let now = SystemTime::UNIX_EPOCH;
 
         let sender = LeafId(1);
         let receivers = vec![LeafId(2), LeafId(3), LeafId(4)];
@@ -664,7 +682,7 @@ mod tests {
     #[test]
     fn test_ingroup_observer_signer_count() {
         let mut observer = InGroupObserver::new();
-        let now = SystemTime::now();
+        let now = SystemTime::UNIX_EPOCH;
 
         observer.observe_operation(now, 1, "AddLeaf".to_string(), 5);
         observer.observe_operation(now + Duration::from_secs(1), 1, "RemoveLeaf".to_string(), 3);

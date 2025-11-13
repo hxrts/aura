@@ -45,10 +45,20 @@ impl ChoreographicEffects for MemoryChoreographicHandler {
         role: ChoreographicRole,
         message: Vec<u8>,
     ) -> Result<(), ChoreographyError> {
-        let mut queue = self.message_queue.lock().unwrap();
-        queue.entry(role).or_insert_with(Vec::new).push(message);
+        let mut queue =
+            self.message_queue
+                .lock()
+                .map_err(|_| ChoreographyError::InternalError {
+                    message: "Message queue lock poisoned".into(),
+                })?;
+        queue.entry(role).or_default().push(message);
 
-        let mut metrics = self.metrics.lock().unwrap();
+        let mut metrics = self
+            .metrics
+            .lock()
+            .map_err(|_| ChoreographyError::InternalError {
+                message: "Metrics lock poisoned".into(),
+            })?;
         metrics.messages_sent += 1;
 
         Ok(())
@@ -58,10 +68,20 @@ impl ChoreographicEffects for MemoryChoreographicHandler {
         &self,
         role: ChoreographicRole,
     ) -> Result<Vec<u8>, ChoreographyError> {
-        let mut queue = self.message_queue.lock().unwrap();
+        let mut queue =
+            self.message_queue
+                .lock()
+                .map_err(|_| ChoreographyError::InternalError {
+                    message: "Message queue lock poisoned".into(),
+                })?;
         if let Some(messages) = queue.get_mut(&role) {
             if let Some(message) = messages.pop() {
-                let mut metrics = self.metrics.lock().unwrap();
+                let mut metrics =
+                    self.metrics
+                        .lock()
+                        .map_err(|_| ChoreographyError::InternalError {
+                            message: "Metrics lock poisoned".into(),
+                        })?;
                 metrics.messages_received += 1;
                 return Ok(message);
             }
@@ -74,7 +94,13 @@ impl ChoreographicEffects for MemoryChoreographicHandler {
     }
 
     async fn broadcast_bytes(&self, message: Vec<u8>) -> Result<(), ChoreographyError> {
-        let roles = self.active_roles.lock().unwrap().clone();
+        let roles = self
+            .active_roles
+            .lock()
+            .map_err(|_| ChoreographyError::InternalError {
+                message: "Active roles lock poisoned".into(),
+            })?
+            .clone();
         for role in roles {
             if role.device_id != self.device_id {
                 self.send_to_role_bytes(role, message.clone()).await?;
@@ -91,11 +117,17 @@ impl ChoreographicEffects for MemoryChoreographicHandler {
     }
 
     fn all_roles(&self) -> Vec<ChoreographicRole> {
-        self.active_roles.lock().unwrap().clone()
+        self.active_roles
+            .lock()
+            .expect("Active roles lock should not be poisoned")
+            .clone()
     }
 
     async fn is_role_active(&self, role: ChoreographicRole) -> bool {
-        self.active_roles.lock().unwrap().contains(&role)
+        self.active_roles
+            .lock()
+            .expect("Active roles lock should not be poisoned")
+            .contains(&role)
     }
 
     async fn start_session(
@@ -103,13 +135,28 @@ impl ChoreographicEffects for MemoryChoreographicHandler {
         _session_id: Uuid,
         roles: Vec<ChoreographicRole>,
     ) -> Result<(), ChoreographyError> {
-        *self.active_roles.lock().unwrap() = roles;
+        *self
+            .active_roles
+            .lock()
+            .map_err(|_| ChoreographyError::InternalError {
+                message: "Active roles lock poisoned".into(),
+            })? = roles;
         Ok(())
     }
 
     async fn end_session(&self) -> Result<(), ChoreographyError> {
-        self.active_roles.lock().unwrap().clear();
-        self.message_queue.lock().unwrap().clear();
+        self.active_roles
+            .lock()
+            .map_err(|_| ChoreographyError::InternalError {
+                message: "Active roles lock poisoned".into(),
+            })?
+            .clear();
+        self.message_queue
+            .lock()
+            .map_err(|_| ChoreographyError::InternalError {
+                message: "Message queue lock poisoned".into(),
+            })?
+            .clear();
         Ok(())
     }
 
@@ -123,6 +170,9 @@ impl ChoreographicEffects for MemoryChoreographicHandler {
     }
 
     async fn get_metrics(&self) -> ChoreographyMetrics {
-        self.metrics.lock().unwrap().clone()
+        self.metrics
+            .lock()
+            .expect("Metrics lock should not be poisoned")
+            .clone()
     }
 }

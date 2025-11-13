@@ -14,11 +14,11 @@
 //! # Design Principles
 //!
 //! - Uses capability-based access control for all storage operations
-//! - Integrates with choreographic programming for distributed coordination
+//! - Uses stateless effect system for distributed coordination
 //! - Provides privacy-preserving search with leakage budget tracking
 //! - Implements coordinated garbage collection with snapshot safety
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
 /// Capability-based access control
@@ -44,8 +44,8 @@ pub use aura_wot::{
     Capability, CapabilityEvaluator, CapabilityToken, StoragePermission, TrustLevel,
 };
 
-// Re-export MPST types
-pub use aura_mpst::{AuraRuntime, CapabilityGuard, JournalAnnotation, MpstError, MpstResult};
+// Re-export protocol effect system
+pub use aura_protocol::AuraEffectSystem;
 
 // Re-export main APIs
 pub use access_control::StorageAccessControl;

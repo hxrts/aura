@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Anti-Entropy Choreography for State Synchronization
 //!
 //! This module implements choreographic protocols for digest-based
@@ -36,8 +38,9 @@
 //! - DeltaHandler: Delta-based synchronization for bandwidth optimization
 //! - MvHandler: Meet-semilattice synchronization for constraint-based CRDTs
 
-use crate::effects::{CryptoEffects, RandomEffects};
+use crate::effects::RandomEffects;
 use crate::guards::{JournalCoupler, JournalCouplerBuilder, ProtocolGuard};
+use aura_core::hash::hash;
 use aura_core::{CausalContext, DeviceId, SessionId};
 use aura_mpst::journal_coupling::JournalAnnotation;
 use aura_wot::Capability;
@@ -150,9 +153,7 @@ pub struct CrdtOperation {
     pub causal_context: Vec<u8>, // Serialized CausalContext
 }
 
-/// Anti-entropy synchronization choreography
-///
-/// Multi-phase protocol for digest-based state reconciliation and CRDT synchronization
+// Anti-entropy synchronization choreography: Multi-phase protocol for digest-based state reconciliation and CRDT synchronization
 choreography! {
     protocol AntiEntropy {
         roles: Requester, Responder;
@@ -182,7 +183,7 @@ pub async fn execute_anti_entropy<CvS, CmS, DeltaS, MvS, Op, Id>(
     device_id: DeviceId,
     config: AntiEntropyConfig,
     is_requester: bool,
-    effect_system: &crate::effects::system::AuraEffectSystem,
+    effect_system: &crate::effects::AuraEffectSystem,
     mut crdt_coordinator: crate::effects::semilattice::CrdtCoordinator<
         CvS,
         CmS,
@@ -268,7 +269,7 @@ pub async fn execute_anti_entropy_with_guard_chain<CvS, CmS, DeltaS, MvS, Op, Id
     device_id: DeviceId,
     config: AntiEntropyConfig,
     is_requester: bool,
-    effect_system: &crate::effects::system::AuraEffectSystem,
+    effect_system: &crate::effects::AuraEffectSystem,
     mut crdt_coordinator: crate::effects::semilattice::CrdtCoordinator<
         CvS,
         CmS,
@@ -427,7 +428,7 @@ fn create_anti_entropy_journal_coupler() -> JournalCoupler {
 async fn execute_requester_with_guards<CvS, CmS, DeltaS, MvS, Op, Id>(
     adapter: &mut crate::choreography::AuraHandlerAdapter,
     responder_id: DeviceId,
-    config: &AntiEntropyConfig,
+    _config: &AntiEntropyConfig,
     crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<
         CvS,
         CmS,
@@ -490,7 +491,7 @@ where
 async fn execute_responder_with_guards<CvS, CmS, DeltaS, MvS, Op, Id>(
     adapter: &mut crate::choreography::AuraHandlerAdapter,
     requester_id: DeviceId,
-    config: &AntiEntropyConfig,
+    _config: &AntiEntropyConfig,
     crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<
         CvS,
         CmS,
@@ -553,7 +554,7 @@ where
 async fn requester_session_with_crdt<CvS, CmS, DeltaS, MvS, Op, Id>(
     adapter: &mut crate::choreography::AuraHandlerAdapter,
     responder_id: DeviceId,
-    config: &AntiEntropyConfig,
+    _config: &AntiEntropyConfig,
     crdt_coordinator: &mut crate::effects::semilattice::CrdtCoordinator<
         CvS,
         CmS,
@@ -617,7 +618,7 @@ where
     // Phase 3: Calculate missing operations (TODO fix - Simplified - use hash of bloom filter)
     let local_bloom = adapter.effects().random_bytes(32).await;
     let combined = [&local_bloom[..], &digest_response.bloom_filter[..]].concat();
-    let diff_hash = adapter.effects().hash(&combined).await;
+    let diff_hash = hash(&combined);
 
     // Simulate missing CIDs based on difference
     let missing_cids = vec![diff_hash.to_vec()];

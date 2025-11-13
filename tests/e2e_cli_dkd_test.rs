@@ -106,7 +106,8 @@ impl MultiAgentTestHarness {
 
         for device_id in &device_ids {
             // Create effect system for testing with deterministic seed
-            let effect_system = AuraEffectSystem::for_testing(*device_id);
+            let config = aura_protocol::effects::EffectSystemConfig::for_testing(*device_id);
+            let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
             let cli_handler = create_test_cli_handler(*device_id);
 
             effect_systems.insert(*device_id, effect_system);
@@ -147,7 +148,7 @@ impl MultiAgentTestHarness {
         let choreography_results = self.execute_choreography().await?;
 
         // Step 4: Validate results and properties
-        println!("✅ Step 4: Validate results and properties");
+        println!("Step 4: Validate results and properties");
         let validation_results = self.validate_results(&choreography_results).await?;
 
         // Step 5: Generate final test report
@@ -222,7 +223,7 @@ impl MultiAgentTestHarness {
         }
 
         if self.config.verbose {
-            println!("  ✅ Scenario validation passed");
+            println!("  Scenario validation passed");
             println!("    - Name: {}", name);
             println!("    - Participants: {}", participants);
             println!("    - Threshold: {}", threshold);
@@ -262,7 +263,7 @@ impl MultiAgentTestHarness {
         }
 
         if self.config.verbose {
-            println!("  ✅ All simulator contexts initialized");
+            println!("  All simulator contexts initialized");
         }
 
         Ok(())
@@ -310,7 +311,7 @@ impl MultiAgentTestHarness {
                 }
 
                 if self.config.verbose {
-                    println!("  ✅ All agents completed choreography successfully");
+                    println!("  All agents completed choreography successfully");
                     for (device_id, result) in &choreography_results {
                         println!("    - Device {}: session={}, success={}, time={}ms",
                             device_id, result.session_id, result.success, result.execution_time_ms);
@@ -355,7 +356,8 @@ impl MultiAgentTestHarness {
         };
 
         // Create effect system for this agent
-        let mut effect_system = AuraEffectSystem::for_testing(device_id);
+        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
+        let mut effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
 
         if config.verbose {
             println!("    🔄 Agent {} executing DKD choreography...", device_id);
@@ -367,7 +369,7 @@ impl MultiAgentTestHarness {
         if config.verbose {
             match &result {
                 Ok(dkd_result) => {
-                    println!("    ✅ Agent {} completed successfully (session={}, keys={})",
+                    println!("    Agent {} completed successfully (session={}, keys={})",
                         device_id, dkd_result.session_id, dkd_result.derived_keys.len());
                 },
                 Err(e) => {
@@ -433,7 +435,7 @@ impl MultiAgentTestHarness {
 
             if self.config.verbose {
                 if validation.derived_keys_match {
-                    println!("    ✅ All derived keys match across agents");
+                    println!("    All derived keys match across agents");
                     for (device_id, key) in &first_result.derived_keys {
                         println!("      - Device {}: {}", device_id, hex::encode(&key[..8])); // Show first 8 bytes
                     }
@@ -452,7 +454,7 @@ impl MultiAgentTestHarness {
 
         if self.config.verbose {
             if validation.execution_time_reasonable {
-                println!("    ✅ Execution times reasonable (max: {}ms)", max_time);
+                println!("    Execution times reasonable (max: {}ms)", max_time);
             } else {
                 println!("    ⚠️  Execution time may be too long (max: {}ms)", max_time);
             }
@@ -470,7 +472,7 @@ impl MultiAgentTestHarness {
             println!("    - Derivation deterministic: {}", if validation.derivation_deterministic { "✅" } else { "❌" });
             println!("    - Session consistency: {}", if validation.session_consistency { "✅" } else { "❌" });
             println!("    - Derivation completes: {}", if validation.derivation_completes { "✅" } else { "❌" });
-            println!("    - Overall: {}", if overall_success { "✅ PASS" } else { "❌ FAIL" });
+            println!("    - Overall: {}", if overall_success { "PASS" } else { "❌ FAIL" });
         }
 
         Ok(validation)
@@ -482,7 +484,7 @@ impl MultiAgentTestHarness {
         // In a full implementation, this would re-execute the DKD with the same parameters
         // and verify the keys are identical
         if self.config.verbose {
-            println!("    ✅ Deterministic derivation verified (placeholder)");
+            println!("    Deterministic derivation verified (placeholder)");
         }
         Ok(true)
     }
@@ -661,7 +663,7 @@ async fn test_e2e_cli_dkd_integration() {
             println!();
             println!("📈 Final Test Results");
             println!("====================");
-            println!("✅ Success: {}", results.success);
+            println!("Success: {}", results.success);
             println!("👥 Participants: {}", results.participants);
             println!("⏱️  Total Execution Time: {}ms", results.total_execution_time_ms);
             println!("🔑 Derived Keys: {}", results.choreography_results.len());
@@ -676,7 +678,7 @@ async fn test_e2e_cli_dkd_integration() {
             assert!(results.validation_results.derivation_completes,
                 "Not all participants completed derivation");
 
-            println!("✅ All property validations passed");
+            println!("All property validations passed");
         },
         Err(e) => {
             panic!("E2E test failed with error: {}", e);

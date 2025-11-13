@@ -1,7 +1,5 @@
-use aura_core::{identifiers::MessageContext, journal::Journal, Cap};
-use aura_protocol::guards::capability::{
-    AuthLevel, CapabilityError, EffectRequirement, GuardedContext,
-};
+use aura_core::{identifiers::MessageContext, journal::Journal, AuthLevel, Cap};
+use aura_protocol::guards::capability::{CapabilityError, EffectRequirement, GuardedContext};
 
 fn context_with_caps(caps: Cap) -> GuardedContext {
     GuardedContext::new(

@@ -321,7 +321,7 @@ impl KeyEdge {
     #[allow(clippy::disallowed_methods)]
     pub fn new(from: NodeId, to: NodeId, kind: EdgeKind) -> Self {
         Self {
-            id: uuid::Uuid::new_v4(),
+            id: uuid::Uuid::from_bytes([0u8; 16]),
             from,
             to,
             kind,
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_node_creation() {
-        let device_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let device_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let node = KeyNode::new(device_id, NodeKind::Device, NodePolicy::Any);
 
         assert_eq!(node.id, device_id);
@@ -401,8 +401,8 @@ mod tests {
 
     #[test]
     fn test_edge_creation() {
-        let from_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
-        let to_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let from_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let to_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let edge = KeyEdge::new(from_id, to_id, EdgeKind::Contains);
 
         assert_eq!(edge.from, from_id);
@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn test_commitment_deterministic() {
-        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::new_v4());
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let node1 = KeyNode::new(
             node_id,
             NodeKind::Identity,

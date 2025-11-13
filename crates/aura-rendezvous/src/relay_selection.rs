@@ -4,7 +4,6 @@
 //! Clean, minimal implementation following "zero legacy code" principle.
 
 use aura_core::{AuraError, DeviceId};
-use uuid::Uuid;
 use aura_wot::{CapabilitySet, TrustLevel};
 use serde::{Deserialize, Serialize};
 
@@ -126,7 +125,7 @@ impl RelaySelector {
         };
 
         Ok(RelaySelectionResult {
-            relay_node: selected_candidate.device_id.clone(),
+            relay_node: selected_candidate.device_id,
             relay_type: selected_candidate.relay_type.clone(),
             trust_level: selected_candidate.trust_level,
             capabilities: selected_candidate.capabilities.clone(),

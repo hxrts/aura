@@ -513,7 +513,7 @@ pub struct SimulationConfig {
 impl Default for AuraHandlerConfig {
     fn default() -> Self {
         #[allow(clippy::disallowed_methods)]
-        let device_id = DeviceId::from(uuid::Uuid::new_v4());
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([0u8; 16]));
         Self {
             device_id,
             execution_mode: ExecutionMode::Testing,
@@ -1138,7 +1138,7 @@ mod tests {
 
     #[test]
     fn test_config_creation() {
-        let device_id = DeviceId::from(uuid::Uuid::new_v4());
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([0u8; 16]));
 
         let testing_config = AuraHandlerConfig::for_testing(device_id);
         assert_eq!(testing_config.execution_mode, ExecutionMode::Testing);
@@ -1161,7 +1161,7 @@ mod tests {
 
     #[test]
     fn test_config_validation() {
-        let device_id = DeviceId::from(uuid::Uuid::new_v4());
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([0u8; 16]));
         let mut config = AuraHandlerConfig::for_testing(device_id);
 
         // Valid config should pass
@@ -1193,7 +1193,7 @@ mod tests {
 
     #[test]
     fn test_builder_pattern() {
-        let device_id = DeviceId::from(uuid::Uuid::new_v4());
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([0u8; 16]));
 
         let config = AuraHandlerBuilder::new(device_id)
             .execution_mode(ExecutionMode::Testing)

@@ -310,7 +310,7 @@ mod tests {
 
     impl DeltaProduce<TestCounter> for TestDelta {
         fn delta_from(old: &TestCounter, new: &TestCounter) -> Self {
-            TestDelta(if new.0 > old.0 { new.0 - old.0 } else { 0 })
+            TestDelta(new.0.saturating_sub(old.0))
         }
     }
 

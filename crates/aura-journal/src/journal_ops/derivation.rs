@@ -4,8 +4,8 @@
 //! Uses petgraph for graph traversal and Blake3 for commitment hashing.
 
 use crate::journal::*;
+use aura_core::hash::{hash, hasher};
 use aura_core::AuraError;
-use blake3::Hasher;
 use std::collections::{BTreeMap, HashSet};
 
 /// Derivation effects trait for external dependency injection
@@ -31,7 +31,7 @@ pub struct SimpleDerivationEffects;
 #[async_trait::async_trait]
 impl DerivationEffects for SimpleDerivationEffects {
     async fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], AuraError> {
-        Ok(*blake3::hash(data).as_bytes())
+        Ok(hash(data))
     }
 
     async fn get_node_children(
@@ -79,10 +79,10 @@ impl DerivationEngine {
         _nodes: &BTreeMap<NodeId, KeyNode>,
         _edges: &BTreeMap<EdgeId, KeyEdge>,
     ) -> Result<NodeCommitment, AuraError> {
-        let mut hasher = Hasher::new();
+        let mut h = hasher();
 
         // Add tag
-        hasher.update(b"NODE");
+        h.update(b"NODE");
 
         // Add kind (single byte encoding per specification)
         let kind_byte = match node.kind {
@@ -91,7 +91,7 @@ impl DerivationEngine {
             NodeKind::Group => 0x03u8,
             NodeKind::Guardian => 0x04u8,
         };
-        hasher.update(&[kind_byte]);
+        h.update(&[kind_byte]);
 
         // Add policy (canonical encoding per specification)
         let policy_bytes = match &node.policy {
@@ -99,19 +99,19 @@ impl DerivationEngine {
             NodePolicy::Any => vec![0x02u8],
             NodePolicy::Threshold { m, n } => vec![0x03u8, *m, *n],
         };
-        hasher.update(&policy_bytes);
+        h.update(&policy_bytes);
 
         // Add epoch (little-endian u64)
-        hasher.update(&node.epoch.to_le_bytes());
+        h.update(&node.epoch.to_le_bytes());
 
         // Add sorted child commitments
         let mut sorted_commitments = child_commitments.to_vec();
         sorted_commitments.sort_by(|a, b| a.0.cmp(&b.0));
         for commitment in sorted_commitments {
-            hasher.update(&commitment.0);
+            h.update(&commitment.0);
         }
 
-        let hash = self.effects.hash_data(hasher.finalize().as_bytes()).await?;
+        let hash = self.effects.hash_data(&h.finalize()).await?;
         Ok(NodeCommitment(hash))
     }
 
@@ -212,7 +212,7 @@ mod tests {
 
     fn create_test_node(kind: NodeKind, policy: NodePolicy) -> KeyNode {
         KeyNode::new(
-            aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()),
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             kind,
             policy,
         )
@@ -329,9 +329,19 @@ mod tests {
         // Create a cycle: node1 -> node2 -> node1
         let mut edges = BTreeMap::new();
         #[allow(clippy::disallowed_methods)]
-        let edge1 = KeyEdge::with_id(EdgeId::new_v4(), node1.id, node2.id, EdgeKind::Contains);
+        let edge1 = KeyEdge::with_id(
+            uuid::Uuid::from_bytes([0u8; 16]),
+            node1.id,
+            node2.id,
+            EdgeKind::Contains,
+        );
         #[allow(clippy::disallowed_methods)]
-        let edge2 = KeyEdge::with_id(EdgeId::new_v4(), node2.id, node1.id, EdgeKind::Contains);
+        let edge2 = KeyEdge::with_id(
+            uuid::Uuid::from_bytes([0u8; 16]),
+            node2.id,
+            node1.id,
+            EdgeKind::Contains,
+        );
         edges.insert(edge1.id, edge1);
         edges.insert(edge2.id, edge2);
 

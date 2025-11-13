@@ -1,102 +1,57 @@
-//! Aura Recovery Choreographies
+//! Aura Guardian Recovery Choreographies
 //!
-//! This crate provides choreographic protocols for guardian-based recovery
-//! operations in the Aura threshold identity platform.
+//! This crate provides three essential choreographic protocols for guardian-based
+//! threshold identity management in Aura.
 //!
-//! # Architecture
+//! # Core Choreographies
 //!
-//! This crate implements recovery choreographies:
-//! - `G_recovery` - Main guardian recovery choreography
-//! - `key_recovery` - Device key recovery protocols
-//! - `account_recovery` - Account access recovery
-//! - `emergency_recovery` - Emergency freeze/unfreeze operations
+//! 1. **Guardian Setup** - Initial establishment of guardian relationships
+//! 2. **Guardian Membership** - Adding/removing guardians from the set
+//! 3. **Guardian Key Recovery** - Emergency key recovery with guardian approval
 //!
 //! # Design Principles
 //!
-//! - Uses choreographic programming for distributed recovery coordination
-//! - Integrates with guardian authentication and threshold signatures
-//! - Provides clean separation to avoid namespace conflicts (E0428 errors)
-//! - Works with capability-based access control and privacy budgets
+//! - Simple, focused choreographies for specific use cases
+//! - Emergency-only recovery (no priority levels)
+//! - Clean integration with threshold signatures and authentication
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
-/// Main guardian recovery choreography (G_recovery)
-pub mod guardian_recovery;
+/// Guardian setup choreography for initial relationship establishment
+pub mod guardian_setup;
 
-/// Device key recovery protocols
-pub mod key_recovery;
+/// Guardian membership change choreography for adding/removing guardians
+pub mod guardian_membership;
 
-/// Account access recovery protocols
-pub mod account_recovery;
+/// Guardian key recovery choreography for emergency key recovery
+pub mod guardian_key_recovery;
 
-/// Emergency operations (freeze/unfreeze)
-pub mod emergency_recovery;
-
-/// G_recovery choreography implementation
-pub mod choreography_impl;
-
-/// Shared recovery data structures
+/// Shared types for guardian operations
 pub mod types;
 
-/// Dispute escalation tooling for contested recoveries
-pub mod dispute_escalation;
+// Core error types
+pub use aura_core::{AuraError, AuraResult};
 
-/// Ledger persistence for recovery state and evidence
-pub mod recovery_ledger;
-
-/// Errors for recovery operations
+/// Recovery-specific error type
 pub type RecoveryError = AuraError;
+
+/// Recovery-specific result type
 pub type RecoveryResult<T> = AuraResult<T>;
 
-// Re-export core types
-pub use aura_core::{AccountId, AuraError, AuraResult, Cap, DeviceId, Journal};
+// Re-export essential types
+pub use types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse};
 
-// Re-export verification types
-pub use aura_authenticate::AuthenticationResult;
-pub use aura_verify::session::{SessionScope, SessionTicket};
-pub use aura_verify::{AuthenticationError, IdentityProof, VerifiedIdentity};
-
-// Re-export auth choreography types
+// Re-export auth types
 pub use aura_authenticate::guardian_auth::{
     GuardianAuthCoordinator, GuardianAuthRequest, GuardianAuthResponse, RecoveryContext,
     RecoveryOperationType,
 };
-pub type AuthError = AuthenticationError;
-pub type AuthResult<T> = Result<T, AuthenticationError>;
 
-// Re-export MPST types
-pub use aura_mpst::{
-    AuraRuntime, CapabilityGuard, ExecutionContext, JournalAnnotation, MpstError, MpstResult,
-};
+// Re-export choreography coordinators
+pub use guardian_key_recovery::GuardianKeyRecoveryCoordinator;
+pub use guardian_membership::GuardianMembershipCoordinator;
+pub use guardian_setup::GuardianSetupCoordinator;
 
-// Re-export WoT types
-pub use aura_wot::{CapabilitySet, TreePolicy as TrustPolicy};
-
-// Re-export recovery domain types
-pub use types::{
-    GuardianProfile as Guardian, GuardianSet, RecoveryDispute, RecoveryEvidence, RecoveryShare,
-};
-
-// Re-export guardian recovery types
-pub use guardian_recovery::{
-    GuardianRecoveryCoordinator, GuardianRecoveryResponse, PolicyValidationResult, PolicyViolation,
-    PolicyWarning, RecoveryPolicyConfig, RecoveryPolicyEnforcer, RecoveryStatus,
-};
-
-// Re-export choreography implementations
-pub use choreography_impl::{
-    RecoveryChoreography, RecoveryMessage, RecoveryRole, RecoverySessionMetrics,
-    RecoverySessionResult,
-};
-
-// Re-export dispute escalation tooling
-pub use dispute_escalation::{
-    DisputeEscalationManager, EscalationAction, EscalationEvaluation, EscalationLevel,
-    EscalationNotice, EscalationPolicy,
-};
-
-// Re-export recovery ledger persistence
-pub use recovery_ledger::{RecoveryLedger, RecoverySessionState, RecoverySessionStatus};
-
-// Error re-exports removed - use aura_core::AuraError directly
+// Re-export membership change types
+pub use guardian_membership::{MembershipChange, MembershipChangeRequest};

@@ -146,6 +146,12 @@ pub struct ChunkRequest {
     pub capabilities: Vec<Capability>,
 }
 
+impl Default for ContentStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContentStore {
     /// Create new content store
     pub fn new() -> Self {
@@ -491,6 +497,12 @@ impl ContentStore {
         }
 
         false
+    }
+}
+
+impl Default for ChunkStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

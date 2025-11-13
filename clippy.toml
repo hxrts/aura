@@ -1,8 +1,8 @@
-# Clippy configuration for Aura - Enforces effects system usage
+# Clippy configuration for Aura - Enforces effects system and hash trait usage
 # See: https://doc.rust-lang.org/clippy/configuration.html
 
 # Enforce effects system for deterministic testing
-# Ban direct usage of time, randomness, and UUID generation
+# Ban direct usage of time, randomness, UUID generation, and direct hashing
 
 # Ban direct time access patterns
 disallowed-methods = [
@@ -25,14 +25,29 @@ disallowed-methods = [
     # Other non-deterministic functions
     "std::process::id",
     "std::thread::current",
+
+    # Hashing - CENTRALIZED TRAIT STRATEGY
+    # All hashing MUST go through aura_core::hash::{hash, hasher}
+    # This ensures a single source of truth for the hash algorithm
+    # Rationale: Allows algorithm swapping without code changes (e.g., Blake3 -> SHA-256)
+    "blake3::hash",
+    "sha2::digest::Digest::finalize",
+    "sha256::digest",
 ]
 
-# Ban direct types that bypass effects
+# Ban direct types that bypass effects or centralized hashing
 disallowed-types = [
     # These should be accessed through effects
     "rand::rngs::OsRng",
     "rand::rngs::ThreadRng",
     "getrandom::Error",
+
+    # Hashing types - CENTRALIZED TRAIT STRATEGY
+    # Direct hasher instantiation MUST go through aura_core::hash::hasher()
+    # This ensures consistent algorithm usage across the codebase
+    "blake3::Hasher",
+    "sha2::Sha256",
+    "sha256::Hasher",
 ]
 
 # Performance and correctness
@@ -41,3 +56,29 @@ type-complexity-threshold = 250
 
 # Security-focused lints
 allow-unwrap-in-tests = true
+
+# ============================================================================
+# HASH TRAIT ENFORCEMENT NOTES
+# ============================================================================
+#
+# The centralized hash trait strategy enforces the following:
+#
+# 1. ALL hashing must use aura_core::hash::{hash, hasher}
+# 2. NO direct calls to blake3::hash(), sha2::*, or other hash algorithms
+# 3. NO direct instantiation of Sha256, Blake3Hasher, or similar types
+#
+# This enables:
+# - Single source of truth for hash algorithm (ALGORITHM constant)
+# - Zero-cost algorithm swapping (change one constant, entire codebase follows)
+# - Consistent cryptographic properties across all subsystems
+# - Easy testing and mocking of hash implementations
+#
+# To change the hash algorithm globally:
+# 1. Implement HashAlgorithm trait for new algorithm
+# 2. Change ALGORITHM constant in aura-core/src/hash.rs
+# 3. All code automatically uses new algorithm (no changes needed elsewhere)
+#
+# Exceptions:
+# - aura-core/src/hash.rs: This module implements the trait, not subject to ban
+# - aura-core/src/hash.rs tests: Test against algorithm implementations directly
+# ============================================================================

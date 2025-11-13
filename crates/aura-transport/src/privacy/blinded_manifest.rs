@@ -4,7 +4,7 @@
 //! feature buckets and hashes are revealed publicly, with full details
 //! revealed lazily in trusted contexts.
 
-use blake3::Hasher;
+use aura_core::hash::{hash, hasher};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -96,21 +96,21 @@ impl BlindedManifest {
         feature_categories: Vec<(String, Vec<String>)>, // (category, features)
     ) -> Self {
         // Hash the detailed capabilities for verification
-        let capability_hash = *blake3::hash(detailed_capabilities).as_bytes();
+        let capability_hash = hash(detailed_capabilities);
 
         // Create feature buckets with hashed feature lists
         let feature_buckets: Vec<FeatureBucket> = feature_categories
             .into_iter()
             .map(|(category, features)| {
-                let mut hasher = Hasher::new();
-                hasher.update(category.as_bytes());
+                let mut h = hasher();
+                h.update(category.as_bytes());
                 for feature in &features {
-                    hasher.update(feature.as_bytes());
+                    h.update(feature.as_bytes());
                 }
 
                 FeatureBucket {
                     category,
-                    features_hash: *hasher.finalize().as_bytes(),
+                    features_hash: h.finalize(),
                     feature_count_bucket: FeatureCountBucket::from_count(features.len()),
                 }
             })
@@ -143,7 +143,7 @@ impl BlindedManifest {
 
     /// Verify that revealed capabilities match the blinded manifest
     pub fn verify_reveal(&self, revealed_capabilities: &[u8]) -> bool {
-        blake3::hash(revealed_capabilities) == self.capability_hash
+        hash(revealed_capabilities) == self.capability_hash
     }
 
     /// Check if this manifest supports a specific capability bucket

@@ -4,8 +4,10 @@
 //! as specified in the formal model. It provides observer models for external,
 //! neighbor, and in-group adversaries with appropriate privacy guarantees.
 
+#![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
+
 use super::LeakageBudget;
-use crate::effects::system::AuraEffectSystem;
+use crate::effects::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use tracing::{debug, info, warn};
 
@@ -92,7 +94,7 @@ impl PrivacyBudgetTracker {
                 "Operation would exceed privacy budget"
             );
 
-            return Err(AuraError::permission_denied(&format!(
+            return Err(AuraError::permission_denied(format!(
                 "Operation '{}' would exceed privacy budget",
                 operation_id
             )));
@@ -211,7 +213,7 @@ pub async fn track_leakage_consumption(
 
     // Check if we can afford this operation
     if !tracker.can_afford_operation(leakage_budget) {
-        return Err(AuraError::permission_denied(&format!(
+        return Err(AuraError::permission_denied(format!(
             "Operation '{}' would exceed privacy budget limits",
             operation_id
         )));
@@ -288,13 +290,14 @@ async fn load_privacy_tracker(
 ) -> AuraResult<PrivacyBudgetTracker> {
     let storage_key = format!("privacy_budget_{}", device_id);
 
-    let storage_result = effect_system.storage_get(&storage_key).await;
+    use aura_core::effects::StorageEffects;
+    let storage_result = effect_system.retrieve(&storage_key).await;
 
     match storage_result {
         Ok(Some(data)) => {
             // Deserialize existing tracker state
             let state: PrivacyBudgetState = serde_json::from_slice(&data).map_err(|e| {
-                AuraError::invalid(&format!("Failed to deserialize privacy state: {}", e))
+                AuraError::invalid(format!("Failed to deserialize privacy state: {}", e))
             })?;
 
             Ok(PrivacyBudgetTracker { device_id, state })
@@ -329,9 +332,14 @@ async fn save_privacy_tracker(
     let storage_key = format!("privacy_budget_{}", tracker.device_id);
 
     let serialized = serde_json::to_vec(&tracker.state)
-        .map_err(|e| AuraError::invalid(&format!("Failed to serialize privacy state: {}", e)))?;
+        .map_err(|e| AuraError::invalid(format!("Failed to serialize privacy state: {}", e)))?;
 
-    effect_system.storage_put(&storage_key, &serialized).await?;
+    // Use StorageEffects trait method
+    use aura_core::effects::StorageEffects;
+    effect_system
+        .store(&storage_key, serialized)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to store privacy state: {}", e)))?;
 
     Ok(())
 }

@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use thiserror::Error;
 
-use super::context::AuraContext;
+use super::context_immutable::AuraContext;
 use super::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 use aura_core::LocalSessionType;
 
@@ -100,11 +100,11 @@ pub trait RegistrableHandler: Send + Sync {
     /// after the effect has been dispatched to the correct handler.
     /// Returns serialized result bytes.
     async fn execute_operation_bytes(
-        &mut self,
+        &self,
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        ctx: &mut AuraContext,
+        ctx: &AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError>;
 
     /// Get the list of operations supported by this handler for a given effect type
@@ -266,14 +266,14 @@ impl EffectRegistry {
 #[async_trait]
 impl AuraHandler for EffectRegistry {
     async fn execute_effect(
-        &mut self,
+        &self,
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        ctx: &mut AuraContext,
+        ctx: &AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError> {
         // Route to the appropriate registered handler
-        if let Some(handler) = self.handlers.get_mut(&effect_type) {
+        if let Some(handler) = self.handlers.get(&effect_type) {
             handler
                 .execute_operation_bytes(effect_type, operation, parameters, ctx)
                 .await
@@ -283,9 +283,9 @@ impl AuraHandler for EffectRegistry {
     }
 
     async fn execute_session(
-        &mut self,
+        &self,
         _session: LocalSessionType,
-        _ctx: &mut AuraContext,
+        _ctx: &AuraContext,
     ) -> Result<(), AuraHandlerError> {
         // TODO fix - Simplified stub - session execution would normally route to choreographic handlers
         Ok(())

@@ -3,10 +3,11 @@
 //! Simple hole-punching for QUIC connections through NATs using simultaneous open.
 //! Clean, minimal implementation following the "zero legacy code" principle.
 
+use aura_core::hash::hash;
 use aura_core::{AuraError, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tracing;
@@ -65,16 +66,24 @@ pub struct PunchSession {
 pub enum PunchResult {
     /// Punch successful, NAT mapping created
     Success {
+        /// Local socket address after NAT punch
         local_addr: SocketAddr,
+        /// Peer socket address after NAT punch
         peer_addr: SocketAddr,
+        /// Nonce received from peer during handshake
         received_nonce: [u8; 32],
+        /// Duration the session is expected to last
         session_duration: Duration,
     },
     /// Punch failed or timed out
     Failed {
+        /// Reason why the punch failed
         reason: String,
+        /// Total duration of the punch attempt
         duration: Duration,
+        /// Number of packets sent during the attempt
         packets_sent: u32,
+        /// Number of packets received during the attempt
         packets_received: u32,
     },
 }
@@ -151,9 +160,9 @@ impl PunchPacket {
         data.extend_from_slice(ephemeral_pub);
         data.extend_from_slice(&timestamp.to_le_bytes());
 
-        let hash = blake3::hash(&data);
+        let digest = hash(&data);
         let mut mac = [0u8; 16];
-        mac.copy_from_slice(&hash.as_bytes()[..16]);
+        mac.copy_from_slice(&digest[..16]);
         mac
     }
 }
@@ -336,11 +345,10 @@ fn generate_random_bytes() -> [u8; 32] {
 }
 
 /// Get current timestamp as seconds since UNIX epoch
-/// Returns a constant value for testability. In production,
-/// this should come from TimeEffects.
+/// In production, this should come from TimeEffects.
 fn current_timestamp() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    std::time::SystemTime::UNIX_EPOCH
+        .elapsed()
         .unwrap_or_default()
         .as_secs()
 }
@@ -419,7 +427,7 @@ mod tests {
         let bind_addr = "127.0.0.1:0".parse().unwrap();
         let config = PunchConfig::default();
 
-        let session = PunchSession::new(device_id.clone(), bind_addr, config)
+        let session = PunchSession::new(device_id, bind_addr, config)
             .await
             .unwrap();
 

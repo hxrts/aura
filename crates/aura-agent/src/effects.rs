@@ -33,13 +33,9 @@ pub use aura_protocol::effects::{
 pub use aura_protocol::effects::AuraEffectSystem;
 
 // Agent-specific session types
-use aura_core::{
-    identifiers::{AccountId, DeviceId},
-    AuraResult,
-};
+use aura_core::identifiers::{AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use uuid::Uuid;
 
 /// Session data for agent operations
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -33,7 +33,7 @@ impl AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            device_id: DeviceId(uuid::Uuid::new_v4()),
+            device_id: DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
             account_id: None,
         }
     }

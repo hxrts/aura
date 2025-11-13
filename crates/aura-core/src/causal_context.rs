@@ -3,6 +3,7 @@
 //! This module provides vector clock and causal dependency tracking
 //! for implementing proper causal ordering in CmRDT handlers.
 
+use crate::hash;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -190,18 +191,17 @@ impl OperationId {
     /// Get the UUID representation of this operation ID
     pub fn uuid(&self) -> uuid::Uuid {
         // Create a deterministic UUID from actor ID and sequence using hash
-        use blake3::Hasher;
-        let mut hasher = Hasher::new();
+        let mut h = hash::hasher();
 
         // Add actor UUID bytes
-        hasher.update(self.actor.0.as_bytes());
+        h.update(self.actor.0.as_bytes());
         // Add sequence bytes
-        hasher.update(&self.sequence.to_be_bytes());
+        h.update(&self.sequence.to_be_bytes());
 
         // Take first 16 bytes of hash as UUID
-        let hash = hasher.finalize();
+        let hash_bytes = h.finalize();
         let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&hash.as_bytes()[0..16]);
+        uuid_bytes.copy_from_slice(&hash_bytes[0..16]);
         uuid::Uuid::from_bytes(uuid_bytes)
     }
 

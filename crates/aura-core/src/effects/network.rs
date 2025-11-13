@@ -4,6 +4,7 @@
 //! Implementations are provided by aura-protocol handlers using aura-transport.
 
 use async_trait::async_trait;
+use std::error::Error;
 use uuid::Uuid;
 
 /// Network address for peer communication
@@ -40,20 +41,48 @@ impl From<String> for NetworkAddress {
 #[derive(Debug, thiserror::Error)]
 pub enum NetworkError {
     /// Failed to send a message to the destination
-    #[error("Failed to send message: {0}")]
-    SendFailed(String),
+    #[error("Failed to send message to {peer_id:?}: {reason}")]
+    SendFailed {
+        /// Optional peer the send targeted
+        peer_id: Option<Uuid>,
+        /// Reason for the failure
+        reason: String,
+    },
     /// Failed to receive a message from the source
-    #[error("Failed to receive message: {0}")]
-    ReceiveFailed(String),
+    #[error("Failed to receive message: {reason}")]
+    ReceiveFailed {
+        /// Reason for the failure
+        reason: String,
+    },
     /// No message is available to receive
     #[error("No message available")]
     NoMessage,
+    /// Broadcast operation failed
+    #[error("Broadcast failed: {reason}")]
+    BroadcastFailed {
+        /// Reason for broadcast failure
+        reason: String,
+    },
     /// Failed to establish a connection
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
     /// Operation is not implemented
     #[error("Not implemented")]
     NotImplemented,
+    /// Serialization failed while preparing a network payload
+    #[error("Serialization failed: {source}")]
+    SerializationFailed {
+        /// Underlying serialization error
+        #[source]
+        source: Box<dyn Error + Send + Sync>,
+    },
+    /// Deserialization failed while decoding a payload
+    #[error("Deserialization failed: {source}")]
+    DeserializationFailed {
+        /// Underlying deserialization error
+        #[source]
+        source: Box<dyn Error + Send + Sync>,
+    },
     /// Operation timed out
     #[error("Operation '{operation}' timed out after {timeout_ms}ms")]
     OperationTimeout {
@@ -101,6 +130,12 @@ pub enum NetworkError {
         limit: usize,
         /// Time window in milliseconds
         window_ms: u64,
+    },
+    /// Subscription to peer events failed
+    #[error("Subscription failed: {reason}")]
+    SubscriptionFailed {
+        /// Reason for failure
+        reason: String,
     },
 }
 

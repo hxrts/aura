@@ -231,6 +231,7 @@ impl ViewHandler {
     }
 
     /// Recursive helper for collecting nodes
+    #[allow(clippy::only_used_in_recursion)]
     fn collect_nodes_recursive<'a>(
         &'a self,
         node_id: NodeId,
@@ -255,7 +256,7 @@ impl ViewHandler {
             })?;
 
             // If this node matches the target kind, add it
-            if std::mem::discriminant(&node.kind) == std::mem::discriminant(&target_kind) {
+            if std::mem::discriminant(&node.kind) == std::mem::discriminant(target_kind) {
                 result.push(node.clone());
             }
 
@@ -296,7 +297,9 @@ impl ViewHandler {
                             .collect_nodes_by_kind(root_id, NodeKind::Guardian, nodes, edges)
                             .await?;
                         // For MVP, use the identity's policy for recovery
-                        let identity_node = nodes.get(&root_id).unwrap();
+                        let identity_node = nodes
+                            .get(&root_id)
+                            .ok_or_else(|| AuraError::not_found("Identity node not found"))?;
                         return Ok((guardians, Some(identity_node.policy.clone())));
                     }
                 }
@@ -407,7 +410,11 @@ mod tests {
     use crate::journal::{NodeKind, NodePolicy};
 
     fn create_test_node(kind: NodeKind, policy: NodePolicy) -> KeyNode {
-        KeyNode::new(aura_core::identifiers::DeviceId(uuid::Uuid::new_v4()), kind, policy)
+        KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            kind,
+            policy,
+        )
     }
 
     /// Test-specific ViewEffects that owns its data for lifetime compatibility
@@ -458,7 +465,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_view_materialization() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         // Create identity with devices
         let identity = create_test_node(NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 3 });
@@ -499,7 +506,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_with_guardians() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         // Create identity with devices and guardians
         let identity = create_test_node(NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 4 });
@@ -544,7 +551,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_view_materialization() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
 
         // Create group with member references
         let group = create_test_node(NodeKind::Group, NodePolicy::Threshold { m: 2, n: 3 });
@@ -567,11 +574,29 @@ mod tests {
 
         let mut edges = BTreeMap::new();
         #[allow(clippy::disallowed_methods)]
-        let edge1 = KeyEdge::with_id(EdgeId::new_v4(), group.id, member1_id, EdgeKind::Contains);
         #[allow(clippy::disallowed_methods)]
-        let edge2 = KeyEdge::with_id(EdgeId::new_v4(), group.id, member2_id, EdgeKind::Contains);
+        let edge1 = KeyEdge::with_id(
+            uuid::Uuid::from_bytes([0u8; 16]),
+            group.id,
+            member1_id,
+            EdgeKind::Contains,
+        );
         #[allow(clippy::disallowed_methods)]
-        let edge3 = KeyEdge::with_id(EdgeId::new_v4(), group.id, member3_id, EdgeKind::Contains);
+        #[allow(clippy::disallowed_methods)]
+        let edge2 = KeyEdge::with_id(
+            uuid::Uuid::from_bytes([0u8; 16]),
+            group.id,
+            member2_id,
+            EdgeKind::Contains,
+        );
+        #[allow(clippy::disallowed_methods)]
+        #[allow(clippy::disallowed_methods)]
+        let edge3 = KeyEdge::with_id(
+            uuid::Uuid::from_bytes([0u8; 16]),
+            group.id,
+            member3_id,
+            EdgeKind::Contains,
+        );
         edges.insert(edge1.id, edge1);
         edges.insert(edge2.id, edge2);
         edges.insert(edge3.id, edge3);
@@ -590,6 +615,6 @@ mod tests {
             view.messaging_policy,
             NodePolicy::Threshold { m: 2, n: 3 }
         ));
-        assert_eq!(view.has_messaging_key, false); // No messaging key set in test
+        assert!(!view.has_messaging_key); // No messaging key set in test
     }
 }

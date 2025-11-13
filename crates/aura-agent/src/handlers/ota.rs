@@ -5,10 +5,10 @@
 
 use crate::errors::Result as AgentResult;
 use aura_core::{
-    maintenance::{MaintenanceEvent, UpgradeKind, UpgradeProposal},
+    maintenance::{UpgradeKind, UpgradeProposal},
     DeviceId, Epoch,
 };
-use aura_protocol::choreography::protocols::ota::{OtaError, UpgradeConfig, UpgradeOrchestrator};
+use aura_protocol::choreography::protocols::ota::{UpgradeConfig, UpgradeOrchestrator};
 use aura_protocol::choreography::AuraHandlerAdapter;
 use serde_json;
 use std::collections::HashMap;
@@ -87,7 +87,7 @@ impl OtaOperations {
         }
 
         // Create upgrade configuration
-        let coordinator = participants.get(0).copied().unwrap_or(self.device_id);
+        let coordinator = participants.first().copied().unwrap_or(self.device_id);
         let config = UpgradeConfig {
             coordinator,
             participants,
@@ -146,7 +146,7 @@ impl OtaOperations {
                     state.error = Some(e.to_string());
                 }
 
-                Err(aura_core::AuraError::coordination_failed(e.to_string()).into())
+                Err(aura_core::AuraError::coordination_failed(e.to_string()))
             }
         }
     }
@@ -174,18 +174,16 @@ impl OtaOperations {
                 state.adoptions += 1;
                 Ok(())
             } else {
-                Err(aura_core::AuraError::internal(&format!(
+                Err(aura_core::AuraError::internal(format!(
                     "Cannot opt in to upgrade in status: {:?}",
                     state.status
-                ))
-                .into())
+                )))
             }
         } else {
             Err(aura_core::AuraError::not_found(format!(
                 "Upgrade proposal not found: {}",
                 proposal_id
-            ))
-            .into())
+            )))
         }
     }
 
@@ -202,8 +200,7 @@ impl OtaOperations {
             Err(aura_core::AuraError::not_found(format!(
                 "Upgrade proposal not found: {}",
                 proposal_id
-            ))
-            .into())
+            )))
         }
     }
 
@@ -219,8 +216,7 @@ impl OtaOperations {
             Err(aura_core::AuraError::not_found(format!(
                 "Upgrade proposal not found: {}",
                 proposal_id
-            ))
-            .into())
+            )))
         }
     }
 
@@ -233,12 +229,12 @@ impl OtaOperations {
 
         // Serialize event to journal fact
         let event_json = serde_json::to_string(&event)
-            .map_err(|e| aura_core::AuraError::internal(&format!("Serialization failed: {}", e)))?;
+            .map_err(|e| aura_core::AuraError::internal(format!("Serialization failed: {}", e)))?;
 
         // Create journal delta with maintenance event fact
         let mut delta_journal = aura_core::Journal::default();
         delta_journal.facts.insert(
-            format!("maintenance_event_{}", uuid::Uuid::new_v4()),
+            format!("maintenance_event_{}", uuid::Uuid::from_bytes([0u8; 16])),
             aura_core::FactValue::String(event_json),
         );
 
@@ -260,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn ota_operations_tracks_proposals() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let ops = OtaOperations::new(device_id);
 
         // Should start with no upgrades
@@ -270,7 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn ota_operations_opt_in() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let ops = OtaOperations::new(device_id);
         let proposal_id = Uuid::new_v4();
 

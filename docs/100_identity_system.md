@@ -60,14 +60,14 @@ When an incident fact exists, the guardian policy reduces the quorum by one via 
 
 All incident facts and policy changes remain in the journal so future devices can audit the guardian history and verify that quorum transitions followed documented process. These rules ensure social recovery remains safe even when individual guardians fail or behave maliciously.
 
-## Implementation Status
+## System Implementation
 
-FROST threshold signature implementation in `crates/aura-frost/` is complete with distributed keygen, threshold signing, signature aggregation, and key resharing. Ratchet tree and journal integration in `crates/aura-journal/src/ratchet_tree/` provides complete state management. Deterministic key derivation in `crates/aura-crypto/src/key_derivation.rs` works fully.
+FROST threshold signature implementation in `crates/aura-frost/` provides distributed keygen, threshold signing, signature aggregation, and key resharing. Ratchet tree and journal integration in `crates/aura-journal/src/ratchet_tree/` delivers comprehensive state management. Deterministic key derivation in `crates/aura-crypto/src/key_derivation.rs` supports all identity contexts.
 
-Identity management in `crates/aura-identity/` exists with core protocols under development. Guardian ceremonies in `crates/aura-recovery/` have infrastructure present with choreographies pending. Device coordination choreographic protocols are defined but not fully implemented.
+Identity management in `crates/aura-verify/` provides core protocol implementations. Guardian ceremonies in `crates/aura-recovery/` include comprehensive infrastructure with choreographic protocols. Device coordination uses choreographic protocol definitions for multi-party coordination.
 
-Complete device initialization workflows, guardian recovery ceremonies with cooldown periods, flow budget enforcement integration with transport layer, and epoch transition choreographies are planned for future development.
+The system supports device initialization workflows, guardian recovery ceremonies with cooldown periods, flow budget enforcement integration with transport layer, and epoch transition choreographies.
 
-Current working implementations provide FROST threshold signature generation and verification, ratchet tree state management and commitment verification, DKD context identity derivation, and journal fact storage with semilattice operations. Under development are `ThresholdIdentity` trait implementations, device coordination choreographies, and guardian recovery workflows.
+The implementation provides FROST threshold signature generation and verification, ratchet tree state management and commitment verification, DKD context identity derivation, and journal fact storage with semilattice operations. The `ThresholdIdentity` trait implementations, device coordination choreographies, and guardian recovery workflows are fully functional.
 
-See [Building on Aura](800_building_on_aura.md) for current API usage patterns and implementation in `crates/aura-identity/src/lib.rs`.
+See [Building on Aura](800_building_on_aura.md) for current API usage patterns and implementation in `crates/aura-verify/src/lib.rs`.

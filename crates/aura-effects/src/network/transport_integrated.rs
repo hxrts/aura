@@ -4,8 +4,8 @@
 //! full networking capabilities including peer discovery, circuit breaking,
 //! rate limiting, and monitoring.
 
-use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use async_trait::async_trait;
+use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_transport::{
     middleware::{
@@ -52,13 +52,15 @@ impl NetworkMessage {
     }
 
     pub fn serialize(&self) -> Result<Vec<u8>, NetworkError> {
-        serde_json::to_vec(self)
-            .map_err(|e| NetworkError::SendFailed(format!("Serialization failed: {}", e)))
+        serde_json::to_vec(self).map_err(|e| NetworkError::SerializationFailed {
+            source: Box::new(e),
+        })
     }
 
     pub fn deserialize(data: &[u8]) -> Result<Self, NetworkError> {
-        serde_json::from_slice(data)
-            .map_err(|e| NetworkError::ReceiveFailed(format!("Deserialization failed: {}", e)))
+        serde_json::from_slice(data).map_err(|e| NetworkError::DeserializationFailed {
+            source: Box::new(e),
+        })
     }
 }
 
@@ -410,9 +412,9 @@ impl NetworkEffects for TransportIntegratedHandler {
         );
 
         if failed_sends > 0 && successful_sends == 0 {
-            Err(NetworkError::SendFailed(
-                "Broadcast failed to all peers".to_string(),
-            ))
+            Err(NetworkError::BroadcastFailed {
+                reason: "Broadcast failed to all peers".to_string(),
+            })
         } else {
             Ok(())
         }

@@ -28,7 +28,7 @@ impl Policy {
             default_capabilities: CapabilitySet::empty(),
             name: "default".to_string(),
             version: 1,
-            created_at: std::time::SystemTime::now(),
+            created_at: std::time::SystemTime::UNIX_EPOCH,
         }
     }
 
@@ -39,7 +39,7 @@ impl Policy {
             default_capabilities: CapabilitySet::empty(),
             name,
             version: 1,
-            created_at: std::time::SystemTime::now(),
+            created_at: std::time::SystemTime::UNIX_EPOCH,
         }
     }
 
@@ -106,7 +106,7 @@ impl Policy {
             default_capabilities: self.default_capabilities.meet(&other.default_capabilities),
             name: format!("{}_meet_{}", self.name, other.name),
             version: std::cmp::max(self.version, other.version) + 1,
-            created_at: std::time::SystemTime::now(),
+            created_at: std::time::SystemTime::UNIX_EPOCH,
         }
     }
 }

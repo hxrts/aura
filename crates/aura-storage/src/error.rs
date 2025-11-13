@@ -10,30 +10,57 @@ use std::fmt;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StorageError {
     /// Content not found
-    ContentNotFound { content_id: String },
+    ContentNotFound {
+        /// The identifier of the content that was not found
+        content_id: String,
+    },
     /// Chunk not found
-    ChunkNotFound { chunk_id: String },
+    ChunkNotFound {
+        /// The identifier of the chunk that was not found
+        chunk_id: String,
+    },
     /// Storage quota exceeded
-    QuotaExceeded { requested: u64, available: u64 },
+    QuotaExceeded {
+        /// The number of bytes requested for storage
+        requested: u64,
+        /// The number of bytes available in storage
+        available: u64,
+    },
     /// Content corruption detected
     ContentCorruption {
+        /// The expected hash value for the content
         expected_hash: String,
+        /// The actual hash value computed for the content
         actual_hash: String,
     },
     /// Invalid content type
     InvalidContentType {
+        /// The content type that was provided
         content_type: String,
+        /// The list of allowed content types
         allowed_types: Vec<String>,
     },
     /// Capability verification failed
     CapabilityVerificationFailed {
+        /// The required capability that was missing
         required: String,
+        /// The list of available capabilities
         available: Vec<String>,
     },
     /// Encryption/decryption failed
-    CryptographicFailure { operation: String, reason: String },
+    CryptographicFailure {
+        /// The name of the cryptographic operation that failed
+        operation: String,
+        /// The reason for the failure
+        reason: String,
+    },
     /// Compression/decompression failed
-    CompressionFailure { algorithm: String, reason: String },
+    CompressionFailure {
+        /// The compression algorithm that failed
+        algorithm: String,
+        /// The reason for the failure
+        reason: String,
+    },
 }
 
 impl fmt::Display for StorageError {

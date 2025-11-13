@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 /// Tree topology structure for tracking parent-child relationships
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TreeTopology {
     /// Parent pointers: node -> parent node
     parent_pointers: BTreeMap<NodeIndex, NodeIndex>,
@@ -34,12 +34,7 @@ pub struct TreeTopology {
 impl TreeTopology {
     /// Creates a new empty tree topology
     pub fn new() -> Self {
-        Self {
-            parent_pointers: BTreeMap::new(),
-            children_pointers: BTreeMap::new(),
-            leaf_parents: BTreeMap::new(),
-            root_node: None,
-        }
+        Self::default()
     }
 
     /// Add a leaf under a branch node
@@ -439,7 +434,6 @@ pub enum TreeStateError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::LeafRole;
 
     #[test]
     fn test_empty_tree() {
@@ -454,7 +448,11 @@ mod tests {
     fn test_add_leaf() {
         let mut state = TreeState::new();
 
-        let leaf = LeafNode::new_device(LeafId(1), aura_core::DeviceId(uuid::Uuid::new_v4()), vec![0u8; 32]);
+        let leaf = LeafNode::new_device(
+            LeafId(1),
+            aura_core::DeviceId(uuid::Uuid::from_bytes([11u8; 16])),
+            vec![0u8; 32],
+        );
 
         state.add_leaf(leaf.clone());
 
@@ -466,7 +464,11 @@ mod tests {
     fn test_remove_leaf() {
         let mut state = TreeState::new();
 
-        let leaf = LeafNode::new_device(LeafId(1), aura_core::DeviceId(uuid::Uuid::new_v4()), vec![0u8; 32]);
+        let leaf = LeafNode::new_device(
+            LeafId(1),
+            aura_core::DeviceId(uuid::Uuid::from_bytes([12u8; 16])),
+            vec![0u8; 32],
+        );
 
         state.add_leaf(leaf.clone());
         assert_eq!(state.num_leaves(), 1);

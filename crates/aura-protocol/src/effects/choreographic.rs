@@ -149,6 +149,13 @@ pub enum ChoreographyError {
         /// The underlying transport error
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+
+    /// Internal system error
+    #[error("Internal error: {message}")]
+    InternalError {
+        /// Error message
+        message: String,
+    },
 }
 
 /// Choreography events for debugging and visualization

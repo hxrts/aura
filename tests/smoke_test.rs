@@ -306,7 +306,7 @@ fn run_smoke_tests(scenarios_dir: &Path) -> (usize, usize, usize) {
         match load_scenario(scenario_path) {
             Ok(scenario) => match execute_scenario(&scenario, scenario_path) {
                 Ok(SmokeTestResult::Success) => {
-                    println!("  ✅ PASSED\n");
+                    println!("  PASSED\n");
                     passed += 1;
                 }
                 Ok(SmokeTestResult::Failed { reason }) => {
@@ -345,7 +345,7 @@ fn smoke_test_all_scenarios() {
     println!("======================");
     println!("📊 Smoke Test Summary");
     println!("======================");
-    println!("  ✅ Passed:  {}", passed);
+    println!("  Passed:  {}", passed);
     println!("  ❌ Failed:  {}", failed);
     println!("  ⏭️  Skipped: {}", skipped);
     println!("  📝 Total:   {}", passed + failed + skipped);
@@ -379,7 +379,7 @@ fn smoke_test_dkd_basic() {
 
     match result {
         SmokeTestResult::Success => {
-            println!("✅ DKD basic scenario validation passed");
+            println!("DKD basic scenario validation passed");
         }
         SmokeTestResult::Failed { reason } => {
             panic!("DKD basic scenario failed: {}", reason);
@@ -409,7 +409,7 @@ fn smoke_test_crdt_convergence() {
 
     match result {
         SmokeTestResult::Success => {
-            println!("✅ CRDT convergence scenario validation passed");
+            println!("CRDT convergence scenario validation passed");
         }
         SmokeTestResult::Failed { reason } => {
             panic!("CRDT convergence scenario failed: {}", reason);
@@ -440,7 +440,7 @@ fn smoke_test_threshold_key_generation() {
 
     match result {
         SmokeTestResult::Success => {
-            println!("✅ Threshold key generation scenario validation passed");
+            println!("Threshold key generation scenario validation passed");
         }
         SmokeTestResult::Failed { reason } => {
             panic!("Threshold key generation scenario failed: {}", reason);

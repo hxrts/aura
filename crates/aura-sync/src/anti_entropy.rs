@@ -6,9 +6,10 @@
 
 use std::collections::HashSet;
 
+use aura_core::hash;
+use blake3::Hasher;
 use aura_core::Journal;
 use aura_core::{AttestedOp, AuraError, AuraResult};
-use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 
 /// Unique fingerprint for an attested operation (BLAKE3 hash).
@@ -59,6 +60,8 @@ pub struct AntiEntropyRequest {
     pub from_index: usize,
     /// Maximum operations to send in this batch.
     pub max_ops: usize,
+    /// Specific operation fingerprints that are missing (for targeted requests)
+    pub missing_operations: Vec<OperationFingerprint>,
 }
 
 /// Result of merging a batch of operations into the local log.
@@ -97,11 +100,11 @@ impl AntiEntropyChoreography {
         let fact_hash = hash_serialized(&journal.facts)?;
         let caps_hash = hash_serialized(&journal.caps)?;
 
-        let mut hasher = Hasher::new();
+        let mut h = hash::hasher();
         let mut last_epoch: Option<u64> = None;
 
         for op in operations {
-            hasher.update(&fingerprint(op)?);
+            h.update(&fingerprint(op)?);
             let epoch = op.op.parent_epoch;
             last_epoch = Some(match last_epoch {
                 Some(existing) => existing.max(epoch),
@@ -109,7 +112,7 @@ impl AntiEntropyChoreography {
             });
         }
 
-        let operation_hash = finalize_hash(hasher);
+        let operation_hash = h.finalize();
 
         Ok(JournalDigest {
             operation_count: operations.len(),
@@ -145,11 +148,13 @@ impl AntiEntropyChoreography {
                 Some(AntiEntropyRequest {
                     from_index: local.operation_count,
                     max_ops: remaining.min(self.batch_size),
+                    missing_operations: Vec::new(), // TODO: Add specific fingerprints
                 })
             }
             DigestStatus::Diverged => Some(AntiEntropyRequest {
                 from_index: 0,
                 max_ops: self.batch_size,
+                missing_operations: Vec::new(), // TODO: Add specific fingerprints
             }),
             _ => None,
         }
@@ -199,21 +204,40 @@ impl Default for AntiEntropyChoreography {
 fn hash_serialized<T: Serialize>(value: &T) -> AuraResult<[u8; 32]> {
     let bytes =
         bincode::serialize(value).map_err(|err| AuraError::serialization(err.to_string()))?;
-    let hash = blake3::hash(&bytes);
-    let mut out = [0u8; 32];
-    out.copy_from_slice(hash.as_bytes());
-    Ok(out)
+    Ok(hash::hash(&bytes))
 }
 
 fn finalize_hash(hasher: Hasher) -> [u8; 32] {
-    let hash = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(hash.as_bytes());
-    out
+    hasher.finalize().into()
 }
 
 fn fingerprint(op: &AttestedOp) -> AuraResult<OperationFingerprint> {
     hash_serialized(op)
+}
+
+/// Build reconciliation request by comparing local and peer digests
+pub fn build_reconciliation_request(
+    local: &JournalDigest,
+    peer: &JournalDigest,
+) -> AuraResult<AntiEntropyRequest> {
+    let choreography = AntiEntropyChoreography::new(128); // Default batch size
+    match choreography.next_request(local, peer) {
+        Some(request) => Ok(request),
+        None => {
+            // No sync needed - create empty request
+            Ok(AntiEntropyRequest {
+                from_index: 0,
+                max_ops: 0,
+                missing_operations: Vec::new(),
+            })
+        }
+    }
+}
+
+/// Compute digest from journal state and operations
+pub fn compute_digest(journal: &Journal, operations: &[AttestedOp]) -> AuraResult<JournalDigest> {
+    let choreography = AntiEntropyChoreography::new(128);
+    choreography.compute_digest(journal, operations)
 }
 
 #[cfg(test)]
@@ -285,7 +309,7 @@ mod tests {
 
         let request = engine.next_request(&digest_local, &digest_remote).unwrap();
         assert_eq!(5, request.from_index);
-        assert_eq!(7.min(10), request.max_ops);
+        assert_eq!(7, request.max_ops);
     }
 
     #[test]

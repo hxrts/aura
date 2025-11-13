@@ -4,7 +4,7 @@
 //! and Aura's effect system, enabling implementation-agnostic choreographic execution.
 
 use crate::{
-    effects::system::AuraEffectSystem,
+    effects::AuraEffectSystem,
     guards::{FlowHint, LeakageBudget, ProtocolGuard},
     handlers::{AuraHandlerError, ExecutionMode},
 };
@@ -48,7 +48,17 @@ pub struct AuraHandlerAdapter {
 impl AuraHandlerAdapter {
     /// Create a new adapter for the specified execution mode
     pub fn new(device_id: DeviceId, mode: ExecutionMode) -> Self {
-        let effect_system = AuraEffectSystem::new(device_id, mode);
+        use crate::effects::EffectSystemConfig;
+
+        let config = match mode {
+            ExecutionMode::Testing => EffectSystemConfig::for_testing(device_id),
+            ExecutionMode::Production => EffectSystemConfig::for_production(device_id).expect("Failed to create production config"),
+            ExecutionMode::Simulation { seed } => {
+                EffectSystemConfig::for_simulation(device_id, seed)
+            }
+        };
+
+        let effect_system = AuraEffectSystem::new(config).expect("Failed to create effect system");
         Self::from_effect_system(effect_system)
     }
 
@@ -139,8 +149,7 @@ impl AuraHandlerAdapter {
         let flow_context = self.ensure_flow_context(&target_device);
         let flow_cost = guard_profile.flow_cost.max(1);
         self.effect_system
-            .set_flow_hint(FlowHint::new(flow_context, target_device, flow_cost))
-            .await;
+            .set_flow_hint(FlowHint::new(flow_context, target_device, flow_cost));
 
         // TODO: Apply guard constraints properly
         // For now, execute the operation directly to avoid lifetime issues

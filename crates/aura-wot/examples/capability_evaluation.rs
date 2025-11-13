@@ -200,8 +200,7 @@ fn check_execute_permission(caps: &CapabilitySet, operation: &str) -> bool {
 
 /// Simple pattern matching for resource permissions
 fn resource_matches(resource: &str, pattern: &str) -> bool {
-    if pattern.ends_with('*') {
-        let prefix = &pattern[..pattern.len() - 1];
+    if let Some(prefix) = pattern.strip_suffix('*') {
         resource.starts_with(prefix)
     } else {
         resource == pattern

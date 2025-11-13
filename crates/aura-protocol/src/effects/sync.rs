@@ -96,6 +96,10 @@ pub enum SyncError {
     /// Back pressure - too many pending operations
     #[error("Back pressure active - too many pending operations")]
     BackPressure,
+
+    /// Time-related error (e.g., system clock issues)
+    #[error("Time error occurred")]
+    TimeError,
 }
 
 /// Sync effect traits for anti-entropy and broadcast operations

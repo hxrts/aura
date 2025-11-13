@@ -179,9 +179,13 @@ fn merge_json_values(target: &mut serde_json::Value, source: &serde_json::Value)
 /// (This would normally be provided by a proc macro)
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ExampleConfig {
+    /// Server hostname or IP address
     pub host: String,
+    /// Server port number
     pub port: u16,
+    /// Enable debug logging
     pub debug: bool,
+    /// Connection timeout in seconds
     pub timeout_seconds: u64,
 }
 

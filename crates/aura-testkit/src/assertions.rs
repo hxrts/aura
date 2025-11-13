@@ -184,21 +184,21 @@ pub fn assert_crypto_property_key(key: &ed25519_dalek::VerifyingKey) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_assert_device_count_macro() {
-        let fixture = crate::fixtures::AccountTestFixture::new();
+    #[tokio::test]
+    async fn test_assert_device_count_macro() {
+        let fixture = crate::fixtures::AccountTestFixture::new().await;
         assert_device_count!(fixture.account_state, fixture.all_devices.len());
     }
 
-    #[test]
-    fn test_assert_has_devices_macro() {
-        let fixture = crate::fixtures::AccountTestFixture::with_devices(3, 2);
+    #[tokio::test]
+    async fn test_assert_has_devices_macro() {
+        let fixture = crate::fixtures::AccountTestFixture::with_devices(3, 2).await;
         assert_has_devices!(fixture.account_state);
     }
 
-    #[test]
-    fn test_assert_account_valid() {
-        let fixture = crate::fixtures::AccountTestFixture::new();
+    #[tokio::test]
+    async fn test_assert_account_valid() {
+        let fixture = crate::fixtures::AccountTestFixture::new().await;
         assert_account_valid(&fixture.account_state);
     }
 }

@@ -192,7 +192,7 @@ impl ExecutionContext {
     pub fn new(protocol_name: impl Into<String>, participants: Vec<DeviceId>) -> Self {
         Self {
             protocol_name: protocol_name.into(),
-            session_id: uuid::Uuid::new_v4(),
+            session_id: uuid::Uuid::from_bytes([0u8; 16]),
             participants,
             metadata: HashMap::new(),
         }
@@ -281,7 +281,7 @@ impl ProtocolRequirements {
     pub fn validate(&self, runtime: &AuraRuntime, context: &ExecutionContext) -> MpstResult<()> {
         // Check participant count
         if context.participants.len() < self.min_participants {
-            return Err(MpstError::protocol_analysis_error(format!(
+            return Err(MpstError::capability_guard_failed(format!(
                 "Not enough participants: {} < {}",
                 context.participants.len(),
                 self.min_participants
@@ -290,7 +290,7 @@ impl ProtocolRequirements {
 
         if let Some(max) = self.max_participants {
             if context.participants.len() > max {
-                return Err(MpstError::protocol_analysis_error(format!(
+                return Err(MpstError::capability_guard_failed(format!(
                     "Too many participants: {} > {}",
                     context.participants.len(),
                     max
@@ -321,7 +321,7 @@ impl Default for ProtocolRequirements {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{DeviceId, Top};
+    use aura_core::DeviceId;
 
     #[test]
     fn test_aura_runtime_creation() {

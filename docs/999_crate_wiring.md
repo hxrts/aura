@@ -13,7 +13,6 @@ crates/
 ├── aura-crypto          Crypto primitives (FROST, HPKE, key derivation, middleware)
 ├── aura-effects         Standard effect handler implementations (the standard library)
 ├── aura-frost           FROST threshold signatures and key resharing (TEMPORARILY EXCLUDED)
-├── aura-identity        Device identity, key derivation, principal management
 ├── aura-invitation      Invitation and acceptance choreographies
 ├── aura-journal         CRDT-based authenticated ledger for account state
 ├── aura-mpst            Multi-party session types and choreographic specifications
@@ -47,7 +46,6 @@ graph TD
 
     %% Type System & Protocol Specs
     mpst[aura-mpst]
-    identity[aura-identity]
 
     %% Protocol Infrastructure
     journal[aura-journal]
@@ -199,7 +197,6 @@ graph TD
 
 ### Type System & Specification Layer (Light Purple)
 - **aura-mpst**: Multiparty session types and choreographic protocol specifications
-- **aura-identity**: Device identity, key derivation, and principal management
 
 ### Protocol Infrastructure Layer (Green)
 - **aura-journal**: CRDT-based authenticated ledger for account state
@@ -650,79 +647,65 @@ The capability system intentionally uses **multiple architectural layers**, each
 
 ---
 
-## Implementation Status Tracking
+## System Architecture Summary
 
-### Foundation Layer ✅ **COMPLETE**
-- **aura-core**: ✅ 100% - Core types, effects, semilattice, identifiers, config system complete
-- **aura-crypto**: ✅ 100% - FROST, DKD, key derivation, middleware, composable stacks complete
-- **aura-transport**: ✅ 100% - P2P communication, middleware architecture, network address unified
+### Foundation Layer
+- **aura-core**: Core types, effects, semilattice operations, identifiers, and configuration system
+- **aura-crypto**: FROST threshold cryptography, deterministic key derivation, middleware, and composable security stacks
+- **aura-transport**: P2P communication layer with middleware architecture and unified network addressing
 
-### Effect System ✅ **COMPLETE**
-- **aura-protocol**: ✅ 100% - Effect system, handlers, guard chain, authorization bridge, capability soundness verification complete
-- **aura-mpst**: ✅ 95% - MPST infrastructure, guards, journal coupling complete; runtime polish needed
-- **aura-journal**: ✅ 100% - CRDT implementation, semilattice handlers, ratchet tree compaction complete
+### Effect System
+- **aura-protocol**: Unified stateless effect system with handlers, guard chains, authorization bridges, and capability soundness verification
+- **aura-mpst**: Multi-party session types infrastructure with choreographic guards and journal coupling
+- **aura-journal**: CRDT-based authenticated ledger with semilattice handlers and ratchet tree compaction
 
-### Security & Privacy ✅ **COMPLETE**
-- **aura-verify**: ✅ 95% - Identity verification, signature verification complete; integration tests needed
-- **aura-authenticate**: ✅ 90% - Choreographic auth framework, device/threshold/guardian authentication complete
-- **aura-wot**: ✅ 95% - Capability system, policy evaluation, meet-semilattice operations complete; advanced delegation edge cases remaining
+### Security & Privacy
+- **aura-verify**: Identity verification and signature verification framework
+- **aura-authenticate**: Choreographic authentication framework supporting device, threshold, and guardian authentication
+- **aura-wot**: Capability-based authorization system with policy evaluation and meet-semilattice operations
 
-### Application Layer ✅ **95% COMPLETE**
-- **aura-agent**: ✅ 95% - Agent runtime, handlers, maintenance, OTA orchestration complete; edge case handling in progress
-- **aura-cli**: ✅ 100% - CLI interface, recovery visualization with box-drawing, scenario framework complete
-- **aura-rendezvous**: ✅ 100% - SBB flooding, relationship encryption, capability-aware routing complete
-- **aura-invitation**: ✅ 85% - Choreography, relationship formation, acceptance flow implementation; integration testing partial
-- **aura-recovery**: ✅ 95% - Guardian recovery choreography, dispute escalation (4-level), recovery ledger, visualization complete
+### Application Layer
+- **aura-agent**: Agent runtime with handlers, maintenance orchestration, and over-the-air update management
+- **aura-cli**: Command-line interface with recovery visualization and scenario framework
+- **aura-rendezvous**: Social Bulletin Board with flooding protocols, relationship encryption, and capability-aware routing
+- **aura-invitation**: Relationship formation choreographies with invitation and acceptance flows
+- **aura-recovery**: Guardian-based recovery system with multi-level dispute escalation and audit trails
 
-### Advanced Features ✅ **90% COMPLETE**
-- **aura-store**: ✅ 95% - Low-level encrypted storage, capability-based access, content processing complete
-- **aura-storage**: ✅ 85% - Content management, search, garbage collection framework complete; search optimization partial
-- **aura-sync**: ✅ 85% - Anti-entropy protocols, peer management, reconciliation complete; peer discovery integration partial
-- **aura-frost**: ✅ 95% - Threshold signatures, key resharing, tree integration complete
-- **aura-identity**: ✅ 90% - Identity management, key derivation, verification complete; tree operations refinement partial
+### Advanced Features
+- **aura-store**: Low-level encrypted storage with capability-based access control and content processing
+- **aura-storage**: High-level content management with search capabilities and garbage collection
+- **aura-sync**: Anti-entropy synchronization protocols with peer management and reconciliation
+- **aura-frost**: Threshold signatures and key resharing operations (temporarily excluded)
 
-### Development Tools ✅ **COMPLETE**
-- **aura-simulator**: ✅ 100% - Deterministic simulation, chaos testing, property verification, middleware system complete
-- **aura-testkit**: ✅ 100% - Testing utilities, fixtures, scenario framework, integration test patterns complete
-- **aura-quint-api**: ✅ 85% - Quint integration, property verification complete; expanded specs needed
+### Development Tools
+- **aura-simulator**: Deterministic protocol simulation with chaos testing and property verification
+- **aura-testkit**: Testing utilities, fixtures, and scenario framework with integration patterns
+- **aura-quint-api**: Quint formal verification integration for protocol property checking
 
-### **Overall Project Status: ~95% FEATURE COMPLETE**
+## System Features
 
-### Recent Completion (2024-11-11)
+### Maintenance & OTA
+- Garbage collection with statistics tracking and device state cleanup
+- Over-the-air updates with soft/hard fork detection and epoch fence enforcement
+- Snapshot coordination and blob cleanup operations
+- Cache invalidation integration
 
-**Maintenance & OTA**:
-- ✅ GC event emission with statistics tracking (items deleted, bytes freed)
-- ✅ Device state cleanup with cache invalidation integration
-- ✅ OTA soft/hard fork detection with epoch fence enforcement
-- ✅ Snapshot coordination and blob cleanup
+### Guardian Recovery
+- Four-level dispute escalation system (Low, Medium, High, Critical)
+- Persistent recovery ledger for audit trails
+- Escalation policies with auto-cancel logic
+- CLI visualization with recovery status dashboard
 
-**Guardian Recovery**:
-- ✅ 4-level dispute escalation system (Low, Medium, High, Critical)
-- ✅ Recovery ledger for persistent audit trails
-- ✅ Escalation policies and auto-cancel logic
-- ✅ CLI visualization with recovery status dashboard
+### Testing Framework
+- Comprehensive integration test suite
+- Multi-device coordination testing
+- Property-based testing across core systems
+- Deterministic simulation with chaos injection
 
-**Integration Testing**:
-- ✅ 11 comprehensive OTA integration tests
-- ✅ Multi-device upgrade coordination testing
-- ✅ Full OTA maintenance cycle testing
-- ✅ Cache invalidation and epoch fence testing
+## Technical Notes
 
-### Remaining Work to 1.0
-
-**High Priority** (polish & refinement):
-1. **Integration Testing**: End-to-end 20-friend scenario validation
-2. **Documentation**: OTA upgrade procedures, troubleshooting guides
-3. **Edge Cases**: Timeout handling in recovery, network partition resilience
-
-**Blocked Dependencies**: None - all critical path items are complete
-
-## Known Issues & Notes
-
-1. **Active Workspace**: 22 crates in workspace as of 2024-11-11 (excluding temporarily excluded `aura-frost`)
-2. **Build Status**: All workspace crates compile successfully; no blockers to 1.0 release
-3. **Test Coverage**: Comprehensive property-based testing across core systems; integration test coverage >85%
-4. **Documentation Alignment**: Synchronized with actual implementation status (updated 2024-11-11)
-5. **Deprecated Crates**: `app-console`, `app-wasm`, `app-analysis-client` referenced in some docs but not in active workspace - planning to add Web UI in post-1.0 phase
-6. **Dependency Graph**: Includes all 22 active crates; diagram is current as of latest refactoring
-7. **Temporarily Excluded**: `aura-frost` is temporarily excluded from workspace build due to frost-ed25519 API compatibility issues
+1. **Active Workspace**: 22 crates providing full platform functionality
+2. **Architecture**: Stateless effect system eliminating deadlock potential through isolated state services
+3. **Security Model**: Threshold cryptography with M-of-N guarantees and capability-based access control
+4. **Consistency**: CRDT-based eventual consistency with semilattice operations
+5. **Communication**: Choreographic protocols with session type safety and deadlock freedom

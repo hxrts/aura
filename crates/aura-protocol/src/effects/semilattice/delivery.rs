@@ -176,7 +176,7 @@ impl CausalContext {
             other
                 .vector_clock
                 .get(device)
-                .map_or(false, |&other_clock| clock < other_clock)
+                .is_some_and(|&other_clock| clock < other_clock)
         })
     }
 

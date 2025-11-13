@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 //! Property Tests: Key Derivation Properties
 //!
 //! Tests fundamental properties that must hold for key derivation.
@@ -5,11 +7,11 @@
 //!
 //! Reference: work/pre_ssb_storage_tests.md - Category 4.2
 
-use blake3;
 use proptest::prelude::*;
 use std::collections::HashSet;
 
 // Use types from aura-crypto
+use aura_core::hash;
 use aura_crypto::{IdentityKeyContext, PermissionKeyContext};
 
 /// Types of derived cryptographic keys
@@ -236,9 +238,9 @@ proptest! {
         );
 
         // Rotate identity seed
-        let rotated_identity_seed = blake3::hash(&seed_identity);
+        let rotated_identity_seed = hash::hash(&seed_identity);
         let identity_key_v2 = derive_identity_key(
-            rotated_identity_seed.as_bytes(),
+            &rotated_identity_seed,
             &identity_context,
             DerivedKeyType::BoxKey,
         );
@@ -260,9 +262,9 @@ proptest! {
         );
 
         // Rotate permission seed
-        let rotated_permission_seed = blake3::hash(&seed_permission);
+        let rotated_permission_seed = hash::hash(&seed_permission);
         let permission_key_v2 = derive_permission_key(
-            rotated_permission_seed.as_bytes(),
+            &rotated_permission_seed,
             &permission_context,
             DerivedKeyType::EncryptionKey,
         );

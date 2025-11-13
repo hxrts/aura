@@ -15,8 +15,8 @@
 //! Any failure in these steps rejects the operation entirely.
 
 use super::{reduction::ReductionError, TreeState};
+use aura_core::hash;
 use aura_core::{commit_leaf, AttestedOp, Hash32, LeafId, NodeIndex, Policy, TreeOp, TreeOpKind};
-use blake3::Hasher;
 // Removed unused BTreeMap import
 
 /// Errors that can occur during tree operation application
@@ -221,6 +221,7 @@ fn verify_aggregate_signature(attested: &AttestedOp, state: &TreeState) -> Appli
 }
 
 /// Extract group public key from tree state for a specific node
+#[allow(dead_code)]
 fn extract_group_public_key(state: &TreeState, node_id: &NodeIndex) -> ApplicationResult<Vec<u8>> {
     // Look up the node in the tree state
     // TreeState doesn't have a nodes field, using branches instead
@@ -237,27 +238,25 @@ fn extract_group_public_key(state: &TreeState, node_id: &NodeIndex) -> Applicati
 
 /// Compute binding message for FROST signature verification
 fn compute_binding_message(attested: &AttestedOp, state: &TreeState) -> ApplicationResult<Vec<u8>> {
-    use sha2::{Digest, Sha256};
-
-    let mut hasher = Sha256::new();
+    let mut h = hash::hasher();
 
     // Add domain separator
-    hasher.update(b"TREE_OP_SIG");
+    h.update(b"TREE_OP_SIG");
 
     // Add node ID
     // Hash the operation details directly from the TreeOp
-    hasher.update(&attested.op.parent_epoch.to_le_bytes());
-    hasher.update(&attested.op.parent_commitment);
-    hasher.update(&attested.op.version.to_le_bytes());
+    h.update(&attested.op.parent_epoch.to_le_bytes());
+    h.update(&attested.op.parent_commitment);
+    h.update(&attested.op.version.to_le_bytes());
 
     // Add current epoch
-    hasher.update(&state.epoch.to_be_bytes());
+    h.update(&state.epoch.to_be_bytes());
 
     // Serialize and hash the operation kind
     let op_bytes = serialize_tree_op_for_verification(&attested.op);
-    hasher.update(&op_bytes);
+    h.update(&op_bytes);
 
-    Ok(hasher.finalize().to_vec())
+    Ok(h.finalize().to_vec())
 }
 
 /// Serialize a TreeOp for verification purposes
@@ -475,25 +474,23 @@ fn recompute_commitments(
     // TODO fix - Simplified implementation: recompute root commitment from all state
     // Full implementation would recompute only affected path
 
-    let mut hasher = Hasher::new();
-    hasher.update(&state.current_epoch().to_le_bytes());
+    let mut h = hash::hasher();
+    h.update(&state.current_epoch().to_le_bytes());
 
     // Hash all leaf commitments
     for (leaf_id, leaf_commitment) in state.iter_leaf_commitments() {
-        hasher.update(&leaf_id.0.to_le_bytes());
-        hasher.update(leaf_commitment);
+        h.update(&leaf_id.0.to_le_bytes());
+        h.update(leaf_commitment);
     }
 
     // Hash all branch commitments
     for branch in state.iter_branches() {
-        hasher.update(&branch.node.0.to_le_bytes());
-        hasher.update(&branch.commitment);
-        hasher.update(&aura_core::policy_hash(&branch.policy));
+        h.update(&branch.node.0.to_le_bytes());
+        h.update(&branch.commitment);
+        h.update(&aura_core::policy_hash(&branch.policy));
     }
 
-    let hash = hasher.finalize();
-    let mut root_commitment = [0u8; 32];
-    root_commitment.copy_from_slice(hash.as_bytes());
+    let root_commitment = h.finalize();
     state.set_root_commitment(root_commitment);
 
     Ok(())
@@ -621,7 +618,7 @@ mod tests {
         assert!(!requires_epoch_update(&TreeOpKind::AddLeaf {
             leaf: LeafNode::new_device(
                 LeafId(1),
-                aura_core::DeviceId(uuid::Uuid::new_v4()),
+                aura_core::DeviceId(uuid::Uuid::from_bytes([6u8; 16])),
                 vec![0u8; 32]
             ),
             under: NodeIndex(0)
@@ -631,7 +628,7 @@ mod tests {
     #[test]
     fn test_apply_operation_add_leaf() {
         let mut state = TreeState::new();
-        let device_id = aura_core::DeviceId(uuid::Uuid::new_v4());
+        let device_id = aura_core::DeviceId(uuid::Uuid::from_bytes([7u8; 16]));
         let leaf = LeafNode::new_device(LeafId(1), device_id, vec![0u8; 32]);
 
         let op = TreeOp {

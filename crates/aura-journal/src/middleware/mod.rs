@@ -68,8 +68,8 @@ impl JournalContext {
     ) -> Self {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         Self::new(account_id, device_id, operation_type, timestamp)
     }
 

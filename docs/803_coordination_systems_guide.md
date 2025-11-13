@@ -433,40 +433,74 @@ pub fn evaluate_privacy_cost(
 
 Privacy costs depend on message content, timing patterns, and recipient relationships. Different context types have different leakage sensitivities. Budget enforcement prevents excessive information disclosure.
 
-## Session Types and Basic Choreography
+## Session Types and Choreographic Programming
 
-Session types provide compile-time guarantees about protocol communication patterns. Choreographic programming specifies protocols from global perspectives with automatic projection to local implementations.
+Choreographic programming enables writing distributed protocols from a global perspective. Automatic projection generates local session types for each participant. This ensures protocol compliance and prevents communication errors.
 
-### Session Type Basics
+### Rumpsteak-Aura Integration
 
-Session types track protocol state transitions:
+Aura uses rumpsteak-aura for choreographic protocol implementation. The framework provides DSL parsing, projection, and effect-based execution. Protocol definitions compile to type-safe Rust implementations.
 
 ```rust
-use aura_mpst::{SessionType, Send, Receive, End};
+use rumpsteak_aura_choreography::compiler::parser::parse_choreography_str;
 
-// Client session: Send request, receive response, end
-type ClientSession = Send<RequestData, Receive<ResponseData, End>>;
+let protocol_dsl = r#"
+    choreography PingPong {
+        roles: Alice, Bob;
+        Alice -> Bob: Ping;
+        Bob -> Alice: Pong;
+    }
+"#;
 
-// Server session: Receive request, send response, end
-type ServerSession = Receive<RequestData, Send<ResponseData, End>>;
+let choreography = parse_choreography_str(protocol_dsl)?;
 ```
 
-Session types encode communication protocols in the type system. Type checking prevents protocol violations like sending when expecting to receive. Session progression ensures protocol completion.
+The parser generates AST representation for projection and code generation. String-based definition supports runtime protocol construction and analysis.
 
-### Basic Choreography
+### Session Types from Choreographies
 
-Define simple choreographies using the macro system:
+Projection transforms global protocols into local session types:
+
+```rust
+use rumpsteak_aura_choreography::compiler::projection::project;
+
+for role in &choreography.roles {
+    let local_type = project(&choreography, role)?;
+    println!("Local type for {}: {:?}", role.name, local_type);
+}
+```
+
+Alice's projected type shows send then receive. Bob's projected type shows receive then send. Each role gets their specific protocol view.
+
+### Effect-Based Execution
+
+Protocols execute using the effect system with configurable handlers:
+
+```rust
+use rumpsteak_aura_choreography::effects::*;
+
+let program = Program::new()
+    .send(Role::Bob, Message("hello"))
+    .recv::<Response>(Role::Bob)
+    .end();
+
+let mut handler = InMemoryHandler::new(Role::Alice);
+let mut endpoint = ();
+let result = interpret(&mut handler, &mut endpoint, program).await?;
+```
+
+The effect interpreter executes protocol operations through handler methods. Different handlers provide testing capabilities and production transports.
+
+### Aura Choreography Extensions
+
+Aura extends rumpsteak-aura with domain-specific annotations for security and performance:
 
 ```rust
 use aura_macros::aura_choreography;
 
-/// Sealed supertrait for request-response effects
-pub trait RequestResponseEffects: NetworkEffects + TimeEffects + JournalEffects {}
-impl<T> RequestResponseEffects for T where T: NetworkEffects + TimeEffects + JournalEffects {}
-
-aura_choreography! {
-    #[namespace = "request_response"]
-    protocol RequestResponse {
+choreography! {
+    #[namespace = "secure_request"]
+    protocol SecureRequest {
         roles: Client, Server;
 
         Client[guard_capability = "send_request", flow_cost = 50]
@@ -478,29 +512,30 @@ aura_choreography! {
 }
 ```
 
-Choreographies specify global protocol behavior. Annotations control security (guard capabilities), performance (flow costs), and state management (journal facts). The macro generates type-safe implementations.
+Annotations provide guard capabilities for authorization. Flow costs control privacy budget usage. Journal facts enable state tracking across protocol execution.
 
-### Protocol Execution
+### Protocol Composition
 
-Execute choreographic protocols using effect handlers:
+Choreographies compose through effect programs:
 
 ```rust
-pub async fn execute_request_protocol<E: RequestResponseEffects>(
-    effects: &E,
-    request: RequestData,
-    server_device: aura_core::DeviceId,
-) -> Result<ResponseData, ProtocolError> {
-    let request_bytes = serde_json::to_vec(&request)?;
-    effects.send_to_peer(server_device.into(), request_bytes).await?;
+use aura_protocol::choreography::protocols::anti_entropy::execute_anti_entropy;
+use aura_protocol::choreography::protocols::threshold_ceremony::execute_threshold_ceremony;
 
-    let (peer_id, response_bytes) = effects.receive().await?;
-    let response: ResponseData = serde_json::from_slice(&response_bytes)?;
-
-    Ok(response)
-}
+let composed_protocol = Program::new()
+    .ext(ValidateCapability {
+        capability: "coordinate".into(),
+        role: Coordinator
+    })
+    .then(anti_entropy_program)
+    .then(threshold_ceremony_program)
+    .ext(LogEvent {
+        event: "protocols_complete".into()
+    })
+    .end();
 ```
 
-Protocol execution uses effect handlers for infrastructure access. Serialization handles message encoding. Error handling manages communication failures and timeouts.
+Protocol composition enables building complex distributed operations. Extensions provide cross-cutting concerns like validation and logging.
 
 ## Integration Patterns
 

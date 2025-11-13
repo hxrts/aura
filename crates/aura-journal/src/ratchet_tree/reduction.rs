@@ -24,11 +24,11 @@
 //! - Commitment chain ensures integrity
 
 use super::state::{TreeState, TreeStateError};
+use aura_core::hash;
 use aura_core::{
     tree::{commit_leaf, AttestedOp, Epoch, NodeIndex, Policy, TreeHash32, TreeOp, TreeOpKind},
     Hash32,
 };
-use blake3::Hasher;
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
@@ -73,8 +73,8 @@ pub fn reduce(ops: &[AttestedOp]) -> Result<TreeState, ReductionError> {
 ///
 /// Each operation references its parent by (epoch, commitment).
 /// This builds the dependency graph for topological sorting.
-fn build_dag(ops: &[AttestedOp]) -> Result<DAG, ReductionError> {
-    let mut dag = DAG::new();
+fn build_dag(ops: &[AttestedOp]) -> Result<Dag<'_>, ReductionError> {
+    let mut dag = Dag::new();
 
     for op in ops {
         let op_hash = hash_op(op);
@@ -91,7 +91,7 @@ fn build_dag(ops: &[AttestedOp]) -> Result<DAG, ReductionError> {
 /// When multiple operations share the same parent (concurrent), we use
 /// H(op) as a deterministic tie-breaker (maximum hash wins).
 fn topological_sort_with_tiebreak<'a>(
-    _dag: &DAG<'a>,
+    _dag: &Dag<'a>,
     ops: &'a [AttestedOp],
 ) -> Result<Vec<&'a AttestedOp>, ReductionError> {
     let mut sorted = Vec::new();
@@ -322,7 +322,7 @@ fn compute_branch_commitment(
     }
 
     // Collect commitments from leaves under this branch
-    for (leaf_id, _leaf_node) in &state.leaves {
+    for leaf_id in state.leaves.keys() {
         if state.get_leaf_parent(*leaf_id) == Some(node) {
             if let Some(leaf_commitment) = state.get_leaf_commitment(leaf_id) {
                 child_commitments.push(*leaf_commitment);
@@ -337,7 +337,7 @@ fn compute_branch_commitment(
     // TODO fix - For now, use a TODO fix - Simplified approach since we need the exact signature
     let policy_hash = aura_core::policy_hash(policy);
 
-    let mut hasher = Hasher::new();
+    let mut hasher = hash::hasher();
     hasher.update(b"BRANCH");
     hasher.update(&1u16.to_le_bytes()); // version
     hasher.update(&node.0.to_le_bytes());
@@ -349,15 +349,12 @@ fn compute_branch_commitment(
         hasher.update(commitment);
     }
 
-    let hash = hasher.finalize();
-    let mut result = [0u8; 32];
-    result.copy_from_slice(hash.as_bytes());
-    Ok(aura_core::Hash32(result))
+    Ok(aura_core::Hash32(hasher.finalize()))
 }
 
 /// Simple root commitment computation (fallback)
 fn recompute_root_commitment_simple(state: &mut TreeState) {
-    let mut hasher = Hasher::new();
+    let mut hasher = hash::hasher();
 
     // Include epoch to ensure commitments change on epoch rotation
     hasher.update(&state.current_epoch().to_le_bytes());
@@ -375,11 +372,7 @@ fn recompute_root_commitment_simple(state: &mut TreeState) {
         hasher.update(&aura_core::policy_hash(&branch.policy));
     }
 
-    let hash = hasher.finalize();
-    let mut root_commitment = [0u8; 32];
-    root_commitment.copy_from_slice(hash.as_bytes());
-
-    state.set_root_commitment(root_commitment);
+    state.set_root_commitment(hasher.finalize());
 }
 
 /// Recompute root commitment from current tree structure
@@ -430,7 +423,7 @@ fn verify_parent_binding(op: &TreeOp, state: &TreeState) -> Result<(), Reduction
 ///
 /// Uses BLAKE3 to produce a deterministic hash of the entire operation.
 fn hash_op(op: &AttestedOp) -> TreeHash32 {
-    let mut hasher = Hasher::new();
+    let mut hasher = hash::hasher();
 
     // Hash the operation fields
     hasher.update(&op.op.parent_epoch.to_le_bytes());
@@ -463,19 +456,16 @@ fn hash_op(op: &AttestedOp) -> TreeHash32 {
         }
     }
 
-    let hash = hasher.finalize();
-    let mut result = [0u8; 32];
-    result.copy_from_slice(hash.as_bytes());
-    result
+    hasher.finalize()
 }
 
-/// Directed Acyclic Graph for operation ordering
-struct DAG<'a> {
+/// Directed acyclic graph for operation ordering
+struct Dag<'a> {
     /// Edges: parent_key -> (op_hash, operation)
     edges: BTreeMap<(Epoch, TreeHash32), Vec<(TreeHash32, &'a AttestedOp)>>,
 }
 
-impl<'a> DAG<'a> {
+impl<'a> Dag<'a> {
     fn new() -> Self {
         Self {
             edges: BTreeMap::new(),
@@ -535,14 +525,9 @@ fn compute_path_to_root(state: &TreeState, node: NodeIndex) -> Vec<NodeIndex> {
     let mut current = node;
 
     // Walk up the tree until we reach the root
-    loop {
-        match state.get_parent(current) {
-            Some(parent) => {
-                path.push(parent);
-                current = parent;
-            }
-            None => break, // Reached root or orphan node
-        }
+    while let Some(parent) = state.get_parent(current) {
+        path.push(parent);
+        current = parent;
     }
 
     path
@@ -561,10 +546,10 @@ fn get_tree_level(state: &TreeState, node: NodeIndex) -> u32 {
         }
         level += 1;
         // Move to first child to continue traversal
-        current = *children
-            .iter()
-            .next()
-            .expect("Children set should not be empty");
+        match children.iter().next() {
+            Some(&child) => current = child,
+            None => break, // This shouldn't happen given the is_empty check, but be safe
+        }
         if level > 100 {
             break; // Prevent infinite loops
         }
@@ -577,7 +562,7 @@ fn get_tree_level(state: &TreeState, node: NodeIndex) -> u32 {
 mod tests {
     use super::*;
     use aura_core::tree::LeafNode;
-    use aura_core::{LeafId, LeafRole, NodeIndex, Policy, TreeOp};
+    use aura_core::{LeafId, NodeIndex, TreeOp};
 
     fn create_test_op(parent_epoch: Epoch, leaf_id: u32) -> AttestedOp {
         AttestedOp {
@@ -587,7 +572,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode::new_device(
                         LeafId(leaf_id),
-                        aura_core::DeviceId(uuid::Uuid::new_v4()),
+                        aura_core::DeviceId(uuid::Uuid::from_bytes([10u8; 16])),
                         vec![leaf_id as u8; 32],
                     ),
                     under: NodeIndex(0),

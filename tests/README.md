@@ -50,7 +50,7 @@ just test
 **Individual Test Cases:**
 
 - `smoke_test_all_scenarios()` - Runs validation on all scenario files
-- `smoke_test_dkd_basic()` - Tests DKD basic scenario specifically  
+- `smoke_test_dkd_basic()` - Tests DKD basic scenario specifically
 - `smoke_test_crdt_convergence()` - Tests CRDT convergence scenario
 - `smoke_test_threshold_key_generation()` - Tests threshold key generation scenario
 
@@ -78,14 +78,14 @@ Testing: core_protocols/dkd_basic.toml
       derivation_deterministic: Safety
       no_key_leakage: Safety
       derivation_completes: Liveness
-  ✅ PASSED
+  PASSED
 
 ...
 
 ======================
 📊 Smoke Test Summary
 ======================
-  ✅ Passed:  20
+  Passed:  20
   ❌ Failed:  0
   ⏭️  Skipped: 2
   📝 Total:   22

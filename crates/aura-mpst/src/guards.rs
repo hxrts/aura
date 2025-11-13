@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 //! Capability Guard System
 //!
 //! This module provides capability-based authorization guards for choreographic protocols.
@@ -119,7 +121,7 @@ impl GuardSyntax {
 
         let remainder = trimmed
             .strip_prefix("guard:")
-            .expect("already checked with starts_with")
+            .unwrap_or("") // safe due to starts_with check above
             .trim();
 
         // Allow inline descriptions after `//`
@@ -142,7 +144,7 @@ impl GuardSyntax {
 
         let requirement_block = &after_need[..close_idx];
         let mut permissions = Vec::new();
-        for token in requirement_block.split(|c| c == ',' || c == '|' || c == '&') {
+        for token in requirement_block.split(|c| [',', '|', '&'].contains(&c)) {
             let token = token.trim();
             if !token.is_empty() {
                 permissions.push(token.to_string());
@@ -157,11 +159,9 @@ impl GuardSyntax {
 
         let mut comparator_section = after_need[close_idx + 1..].trim_start();
         // Accept either unicode ≤ or ASCII <= / =<
-        let consumed = if comparator_section.starts_with('≤') {
-            Some('≤'.len_utf8())
-        } else if comparator_section.starts_with("<=") {
-            Some(2)
-        } else if comparator_section.starts_with("=<") {
+        let consumed = if comparator_section.starts_with("≤") {
+            Some("≤".len())
+        } else if comparator_section.starts_with("<=") || comparator_section.starts_with("=<") {
             Some(2)
         } else {
             None

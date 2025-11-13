@@ -1,12 +1,14 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Guard evaluation logic integrating with aura-wot capability system
 //!
 //! This module implements the `need(σ) ≤ C` checking required by the formal model.
 //! It bridges the protocol layer with the capability calculus implemented in aura-wot.
 
 use super::ProtocolGuard;
-use crate::effects::system::AuraEffectSystem;
+use crate::effects::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult, DeviceId};
-use aura_wot::{Capability, CapabilityEvaluator, EffectSystemInterface, EffectiveCapabilitySet};
+use aura_wot::{Capability, CapabilityEvaluator, EffectiveCapabilitySet};
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
@@ -70,7 +72,7 @@ impl GuardEvaluator {
             .compute_effective_capabilities(effect_system)
             .await
             .map_err(|e| {
-                AuraError::permission_denied(&format!("Failed to compute capabilities: {}", e))
+                AuraError::permission_denied(format!("Failed to compute capabilities: {}", e))
             })?;
         let capability_time = capability_start.elapsed();
 
@@ -152,7 +154,7 @@ impl GuardEvaluator {
             .compute_effective_capabilities(effect_system)
             .await
             .map_err(|e| {
-                AuraError::permission_denied(&format!("Failed to compute capabilities: {}", e))
+                AuraError::permission_denied(format!("Failed to compute capabilities: {}", e))
             })?;
 
         let mut results = Vec::new();

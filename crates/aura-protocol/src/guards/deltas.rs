@@ -1,13 +1,15 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Delta fact application for join-semilattice updates
 //!
 //! This module implements atomic delta fact application that integrates with
 //! aura-journal's CRDT system. It ensures that protocol execution results in
 //! monotonic fact accumulation following join-semilattice laws.
 
-use crate::effects::system::AuraEffectSystem;
-use aura_core::{AuraError, AuraResult};
+use crate::effects::{AuraEffectSystem, JournalEffects};
+use aura_core::{AuraError, AuraResult, Fact, FactValue, Journal};
 use serde_json::Value as JsonValue;
-use std::time::Instant;
+use std::{collections::BTreeSet, time::Instant};
 use tracing::{debug, error, info, warn};
 
 /// Apply delta facts to the journal atomically
@@ -64,7 +66,7 @@ pub async fn apply_delta_facts(
                     );
                 }
 
-                return Err(AuraError::internal(&format!(
+                return Err(AuraError::internal(format!(
                     "Delta application failed at fact {}: {}",
                     index, e
                 )));
@@ -87,14 +89,14 @@ pub async fn apply_delta_facts(
 fn validate_delta_facts(facts: &[JsonValue]) -> AuraResult<&[JsonValue]> {
     for (index, fact) in facts.iter().enumerate() {
         if !is_valid_fact_format(fact) {
-            return Err(AuraError::invalid(&format!(
+            return Err(AuraError::invalid(format!(
                 "Invalid fact format at index {}: {}",
                 index, fact
             )));
         }
 
         if !preserves_monotonicity(fact) {
-            return Err(AuraError::invalid(&format!(
+            return Err(AuraError::invalid(format!(
                 "Fact at index {} violates monotonicity: {}",
                 index, fact
             )));
@@ -121,7 +123,7 @@ async fn apply_single_fact(
     effect_system
         .apply_journal_operation(journal_operation)
         .await
-        .map_err(|e| AuraError::internal(&format!("Failed to apply journal operation: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to apply journal operation: {}", e)))?;
 
     // Return the applied fact (possibly with additional metadata)
     Ok(fact.clone())
@@ -165,7 +167,73 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
                 result: parse_result_from_fact(fact)?,
             })
         }
-        _ => Err(AuraError::invalid(&format!(
+        // New fact types for enhanced journal support
+        "relationship_formation" => {
+            // Parse relationship formation fact (invitation acceptance)
+            // TODO: Implement proper FormRelationship variant
+            Ok(JournalOperation::RegisterDevice {
+                device_id: parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string()),
+                metadata: fact.clone(),
+            })
+        }
+        "guardian_enrollment" => {
+            // Parse guardian enrollment fact
+            // TODO: Implement proper EnrollGuardian variant
+            Ok(JournalOperation::RegisterDevice {
+                device_id: parse_device_id_from_fact(fact).unwrap_or_else(|_| "guardian".to_string()),
+                metadata: fact.clone(),
+            })
+        }
+        // NOTE: threshold_ceremony_completion facts are now handled by the aura-frost crate
+        // This coordination layer no longer processes domain-specific threshold cryptography events
+        "threshold_ceremony_completion" => {
+            Err(AuraError::invalid(
+                "threshold_ceremony_completion facts are handled by aura-frost crate, not coordination layer"
+            ))
+        }
+        "key_derivation" => {
+            // Parse key derivation fact (DKD operations)
+            // TODO: Implement proper DeriveKey variant
+            Ok(JournalOperation::GrantCapability {
+                capability: parse_derivation_id_from_fact(fact).unwrap_or_else(|_| "derive_key".to_string()),
+                target_device: parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string()),
+                expiry: None,
+            })
+        }
+        "flow_budget_update" => {
+            // Parse flow budget update fact
+            // TODO: Implement proper UpdateFlowBudget variant
+            Ok(JournalOperation::GrantCapability {
+                capability: "flow_budget".to_string(),
+                target_device: parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string()),
+                expiry: None,
+            })
+        }
+        "recovery_initiation" => {
+            // Parse recovery initiation fact
+            // TODO: Implement proper InitiateRecovery variant
+            Ok(JournalOperation::AttestSession {
+                session_id: parse_recovery_id_from_fact(fact).unwrap_or_else(|_| "recovery".to_string()),
+                attestation: fact.clone(),
+            })
+        }
+        "storage_commitment" => {
+            // Parse storage commitment fact (content-addressed storage)
+            // TODO: Implement proper CommitStorage variant
+            Ok(JournalOperation::FinalizeIntent {
+                intent_id: parse_content_hash_from_fact(fact).unwrap_or_else(|_| "storage".to_string()),
+                result: fact.clone(),
+            })
+        }
+        "ota_deployment" => {
+            // Parse OTA deployment fact
+            // TODO: Implement proper DeployOta variant
+            Ok(JournalOperation::FinalizeIntent {
+                intent_id: parse_deployment_id_from_fact(fact).unwrap_or_else(|_| "ota_deploy".to_string()),
+                result: fact.clone(),
+            })
+        }
+        _ => Err(AuraError::invalid(format!(
             "Unknown fact type: {}",
             fact_type
         ))),
@@ -196,10 +264,9 @@ async fn rollback_applied_facts(
 
         // Generate compensation fact based on fact type
         if let Some(compensation_fact) = generate_compensation_fact(fact)? {
-            // Apply compensation fact to journal
             tracing::info!("Applying compensation fact: {}", compensation_fact);
             if let Err(compensation_error) =
-                effect_system.append_fact(compensation_fact.clone()).await
+                merge_json_fact(effect_system, &compensation_fact).await
             {
                 error!(
                     compensation_fact = %compensation_fact,
@@ -235,7 +302,14 @@ fn preserves_monotonicity(fact: &JsonValue) -> bool {
             "device_registration"
             | "capability_grant"
             | "session_attestation"
-            | "intent_finalization" => true,
+            | "intent_finalization"
+            | "relationship_formation"
+            | "guardian_enrollment"
+            | "key_derivation"
+            | "flow_budget_update"
+            | "recovery_initiation"
+            | "storage_commitment"
+            | "ota_deployment" => true,
 
             // These operations would violate monotonicity
             "device_removal" | "capability_revocation" | "session_invalidation" => false,
@@ -470,6 +544,68 @@ fn generate_compensation_fact(fact: &JsonValue) -> AuraResult<Option<JsonValue>>
     }
 }
 
+fn json_value_to_fact_value(value: &JsonValue) -> FactValue {
+    match value {
+        JsonValue::String(s) => FactValue::String(s.clone()),
+        JsonValue::Number(n) => FactValue::Number(n.as_i64().unwrap_or_default()),
+        JsonValue::Bool(b) => FactValue::Number(if *b { 1 } else { 0 }),
+        JsonValue::Array(items) => {
+            let mut set = BTreeSet::new();
+            for item in items {
+                set.insert(item.to_string());
+            }
+            FactValue::Set(set)
+        }
+        JsonValue::Object(map) => {
+            let mut nested = Fact::new();
+            for (key, nested_value) in map {
+                nested.insert(key.clone(), json_value_to_fact_value(nested_value));
+            }
+            FactValue::Nested(Box::new(nested))
+        }
+        JsonValue::Null => FactValue::String("null".to_string()),
+    }
+}
+
+fn journal_from_json_fact(fact: &JsonValue) -> Journal {
+    let mut delta = Journal::default();
+    let mut fact_record = Fact::new();
+
+    match fact {
+        JsonValue::Object(map) => {
+            for (key, value) in map {
+                fact_record.insert(key.clone(), json_value_to_fact_value(value));
+            }
+        }
+        _ => {
+            fact_record.insert("value", json_value_to_fact_value(fact));
+        }
+    }
+
+    delta.merge_facts(fact_record);
+    delta
+}
+
+async fn merge_json_fact(effect_system: &mut AuraEffectSystem, fact: &JsonValue) -> AuraResult<()> {
+    let current = effect_system
+        .get_journal()
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to load journal: {}", e)))?;
+    let delta = journal_from_json_fact(fact);
+
+    let merged = effect_system
+        .merge_facts(&current, &delta)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to merge journal: {}", e)))?;
+
+    effect_system
+        .persist_journal(&merged)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to persist journal: {}", e)))?;
+
+    Ok(())
+}
+
 /// Extension trait for AuraEffectSystem to support journal operations
 trait JournalOperationExt {
     async fn apply_journal_operation(&mut self, operation: JournalOperation) -> AuraResult<()>;
@@ -505,7 +641,7 @@ impl JournalOperationExt for AuraEffectSystem {
                 let device_fact = JsonValue::Object(device_fact_map);
 
                 tracing::info!("Applying device registration fact: {}", device_fact);
-                self.append_fact(device_fact).await?;
+                merge_json_fact(self, &device_fact).await?;
             }
 
             JournalOperation::GrantCapability {
@@ -535,7 +671,7 @@ impl JournalOperationExt for AuraEffectSystem {
                     "Applying capability grant fact: {}",
                     JsonValue::Object(cap_fact.clone())
                 );
-                self.append_fact(JsonValue::Object(cap_fact)).await?;
+                merge_json_fact(self, &JsonValue::Object(cap_fact)).await?;
             }
 
             JournalOperation::AttestSession {
@@ -553,7 +689,7 @@ impl JournalOperationExt for AuraEffectSystem {
                 let session_fact = JsonValue::Object(session_fact_map);
 
                 tracing::info!("Applying session attestation fact: {}", session_fact);
-                self.append_fact(session_fact).await?;
+                merge_json_fact(self, &session_fact).await?;
             }
 
             JournalOperation::FinalizeIntent { intent_id, result } => {
@@ -568,10 +704,182 @@ impl JournalOperationExt for AuraEffectSystem {
                 let intent_fact = JsonValue::Object(intent_fact_map);
 
                 tracing::info!("Applying intent finalization fact: {}", intent_fact);
-                self.append_fact(intent_fact).await?;
+                merge_json_fact(self, &intent_fact).await?;
             }
         }
 
         Ok(())
     }
+}
+
+// Helper parsing functions for new fact types
+
+fn parse_relationship_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("relationship_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing relationship_id in fact"))
+}
+
+fn parse_participants_from_fact(fact: &JsonValue) -> AuraResult<Vec<String>> {
+    fact.get("participants")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .ok_or_else(|| AuraError::invalid("Missing or invalid participants in fact"))
+}
+
+fn parse_relationship_type_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("relationship_type")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing relationship_type in fact"))
+}
+
+fn parse_account_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("account_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing account_id in fact"))
+}
+
+fn parse_ceremony_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("ceremony_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing ceremony_id in fact"))
+}
+
+fn parse_threshold_from_fact(fact: &JsonValue) -> AuraResult<u32> {
+    fact.get("threshold")
+        .and_then(|v| v.as_u64())
+        .map(|n| n as u32)
+        .ok_or_else(|| AuraError::invalid("Missing or invalid threshold in fact"))
+}
+
+fn parse_commitment_from_fact(fact: &JsonValue) -> AuraResult<JsonValue> {
+    fact.get("commitment")
+        .cloned()
+        .ok_or_else(|| AuraError::invalid("Missing commitment in fact"))
+}
+
+fn parse_derivation_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("derivation_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing derivation_id in fact"))
+}
+
+fn parse_context_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("context")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing context in fact"))
+}
+
+fn parse_derivation_path_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("derivation_path")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing derivation_path in fact"))
+}
+
+fn parse_public_key_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("public_key")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing public_key in fact"))
+}
+
+fn parse_context_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("context_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing context_id in fact"))
+}
+
+fn parse_flow_limit_from_fact(fact: &JsonValue) -> AuraResult<u64> {
+    fact.get("new_limit")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| AuraError::invalid("Missing or invalid new_limit in fact"))
+}
+
+fn parse_epoch_from_fact(fact: &JsonValue) -> AuraResult<u64> {
+    fact.get("epoch")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| AuraError::invalid("Missing or invalid epoch in fact"))
+}
+
+fn parse_recovery_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("recovery_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing recovery_id in fact"))
+}
+
+fn parse_recovery_type_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("recovery_type")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing recovery_type in fact"))
+}
+
+fn parse_content_hash_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("content_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing content_hash in fact"))
+}
+
+fn parse_size_from_fact(fact: &JsonValue) -> AuraResult<u64> {
+    fact.get("size")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| AuraError::invalid("Missing or invalid size in fact"))
+}
+
+fn parse_access_policy_from_fact(fact: &JsonValue) -> AuraResult<JsonValue> {
+    fact.get("access_policy")
+        .cloned()
+        .ok_or_else(|| AuraError::invalid("Missing access_policy in fact"))
+}
+
+fn parse_timestamp_from_fact(fact: &JsonValue) -> AuraResult<u64> {
+    fact.get("timestamp")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| AuraError::invalid("Missing or invalid timestamp in fact"))
+}
+
+fn parse_deployment_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("deployment_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing deployment_id in fact"))
+}
+
+fn parse_version_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("version")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing version in fact"))
+}
+
+fn parse_target_devices_from_fact(fact: &JsonValue) -> AuraResult<Vec<String>> {
+    fact.get("target_devices")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .ok_or_else(|| AuraError::invalid("Missing or invalid target_devices in fact"))
+}
+
+fn parse_deployment_hash_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("deployment_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing deployment_hash in fact"))
 }

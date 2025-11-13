@@ -791,9 +791,9 @@ test-quint-pipeline:
     echo ""
 
     echo "5. Pipeline verification complete!"
-    echo "   ✅ Quint to JSON conversion: Working"
-    echo "   ✅ JSON structure validation: Working"
-    echo "   ✅ Simulator integration points: Ready"
+    echo "   Quint to JSON conversion: Working"
+    echo "   JSON structure validation: Working"
+    echo "   Simulator integration points: Ready"
     echo ""
     echo "Available commands for the pipeline:"
     echo "   just quint-parse <input.qnt> <output.json>  - Convert any Quint spec to JSON"

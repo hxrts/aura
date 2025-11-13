@@ -28,6 +28,7 @@ use thiserror::Error;
 
 pub mod composite;
 pub mod context;
+pub mod context_immutable;
 pub mod erased;
 pub mod factory;
 pub mod registry;
@@ -369,11 +370,27 @@ pub use context::{
     AgentContext, AuraContext, ChoreographicContext, MiddlewareContext, PlatformInfo,
     SimulationContext,
 };
+
+// Re-export immutable context types with namespace prefix to avoid conflicts
+pub mod immutable {
+    pub use super::context_immutable::{
+        AgentContext, AuraContext, AuthenticationState, ChoreographicContext,
+        FaultInjectionSettings, MetricsContext, MiddlewareContext, PlatformInfo,
+        PropertyCheckingConfig, RetryContext, SessionMetadata, SimulationContext, TracingContext,
+    };
+}
 pub use erased::{AuraHandler, BoxedHandler, HandlerUtils};
 pub use factory::{AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, FactoryError};
 // Unified CompositeHandler replaces old MiddlewareStack
 pub use registry::{EffectRegistry, RegistrableHandler, RegistryError};
 pub use unified_bridge::{UnifiedAuraHandlerBridge, UnifiedHandlerBridgeFactory};
+
+// Convert AuraHandlerError to AuraError for ? operator
+impl From<AuraHandlerError> for aura_core::AuraError {
+    fn from(err: AuraHandlerError) -> Self {
+        aura_core::AuraError::internal(format!("Handler error: {}", err))
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -439,9 +456,14 @@ mod tests {
 // Additional handler modules (others already declared above)
 pub mod agent;
 pub mod choreographic;
+pub mod guardian;
 pub mod journal;
 pub mod ledger;
+pub mod mock;
 pub mod sync;
 pub mod system;
 pub mod time;
 pub mod tree;
+
+// Export mock handler for testing
+pub use mock::MockHandler;

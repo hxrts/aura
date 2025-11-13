@@ -3,8 +3,8 @@
 //! Provides WebSocket-based network communication for browser compatibility
 //! and firewall-friendly fallback. Integrates with aura-transport WebSocket implementation.
 
-use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use async_trait::async_trait;
+use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use aura_core::DeviceId;
 use aura_transport::{
     WebSocketConfig, WebSocketConnection, WebSocketEnvelope, WebSocketServer, WebSocketTransport,
@@ -163,8 +163,9 @@ impl NetworkEffects for WebSocketNetworkHandler {
         connection
             .send(target_device_id, &message)
             .await
-            .map_err(|e| {
-                NetworkError::SendFailed(format!("Failed to send WebSocket message: {}", e))
+            .map_err(|e| NetworkError::SendFailed {
+                peer_id: Some(peer_id),
+                reason: format!("Failed to send WebSocket message: {}", e),
             })?;
 
         tracing::debug!(
@@ -251,9 +252,12 @@ impl NetworkEffects for WebSocketNetworkHandler {
             NetworkError::ConnectionFailed(format!("Peer not connected: {}", peer_id))
         })?;
 
-        let envelope = connection.receive().await.map_err(|e| {
-            NetworkError::ReceiveFailed(format!("Failed to receive WebSocket message: {}", e))
-        })?;
+        let envelope = connection
+            .receive()
+            .await
+            .map_err(|e| NetworkError::ReceiveFailed {
+                reason: format!("Failed to receive WebSocket message: {}", e),
+            })?;
 
         tracing::debug!(
             peer_id = %peer_id,

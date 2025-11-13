@@ -63,7 +63,7 @@ impl Policy {
     ///
     /// let p3 = Policy::Threshold { m: 2, n: 3 };
     /// let p4 = Policy::Threshold { m: 3, n: 3 };
-    /// assert_eq!(p3.meet(&p4), p4); // 3-of-3 is stricter than 2-of-3
+    /// assert_eq!(p3.meet(&p4), Policy::All); // 3-of-3 threshold normalizes to All
     /// ```
     pub fn meet(&self, other: &Self) -> Self {
         use Policy::*;
@@ -82,9 +82,11 @@ impl Policy {
             (Threshold { m: m1, n: n1 }, Threshold { m: m2, n: n2 }) => {
                 if n1 == n2 {
                     // Same n: higher m is stricter
-                    Threshold {
-                        m: (*m1).max(*m2),
-                        n: *n1,
+                    let max_m = (*m1).max(*m2);
+                    if max_m >= *n1 {
+                        All // Normalize n-of-n to All
+                    } else {
+                        Threshold { m: max_m, n: *n1 }
                     }
                 } else {
                     // Different n values: cannot meaningfully compare, take stricter approximation
@@ -98,7 +100,7 @@ impl Policy {
                         let cross1 = (*m1 as u64) * (*n2 as u64);
                         let cross2 = (*m2 as u64) * (*n1 as u64);
 
-                        match cross1.cmp(&cross2) {
+                        let result = match cross1.cmp(&cross2) {
                             std::cmp::Ordering::Greater => Threshold { m: *m1, n: *n1 },
                             std::cmp::Ordering::Less => Threshold { m: *m2, n: *n2 },
                             std::cmp::Ordering::Equal => {
@@ -111,6 +113,17 @@ impl Policy {
                                     std::cmp::Ordering::Greater => Threshold { m: *m2, n: *n2 },
                                 }
                             }
+                        };
+
+                        // Normalize result if it's All-equivalent
+                        if let Threshold { m, n } = result {
+                            if m >= n {
+                                All
+                            } else {
+                                result
+                            }
+                        } else {
+                            result
                         }
                     }
                 }
@@ -265,7 +278,7 @@ mod tests {
     fn test_threshold_meet_same_n() {
         let p1 = Policy::Threshold { m: 2, n: 3 };
         let p2 = Policy::Threshold { m: 3, n: 3 };
-        assert_eq!(p1.meet(&p2), p2); // Higher m is stricter
+        assert_eq!(p1.meet(&p2), Policy::All); // 3-of-3 threshold normalizes to All
     }
 
     #[test]

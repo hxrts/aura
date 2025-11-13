@@ -2,7 +2,7 @@
 
 use crate::InvitationAction;
 use anyhow::{anyhow, Context, Result};
-use aura_core::{AccountId, Cap, DeviceId, Top};
+use aura_core::{AccountId, Cap, DeviceId};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
     invitation_acceptance::InvitationAcceptanceCoordinator,
@@ -28,12 +28,14 @@ pub async fn handle_invitation(
                 .await
                 .context("failed to create invitation")?;
 
-            effects.log_info(&format!(
-                "Invitation {} sent to {} (expires at {}).",
-                response.invitation.invitation_id,
-                response.invitation.invitee,
-                response.invitation.expires_at
-            ));
+            let _ = effects
+                .log_info(&format!(
+                    "Invitation {} sent to {} (expires at {}).",
+                    response.invitation.invitation_id,
+                    response.invitation.invitee,
+                    response.invitation.expires_at
+                ))
+                .await;
             Ok(())
         }
         InvitationAction::Accept { envelope } => {
@@ -48,10 +50,12 @@ pub async fn handle_invitation(
                 .await
                 .context("failed to accept invitation")?;
 
-            effects.log_info(&format!(
-                "Accepted invitation {} at {}.",
-                acceptance.invitation_id, acceptance.accepted_at
-            ));
+            let _ = effects
+                .log_info(&format!(
+                    "Accepted invitation {} at {}.",
+                    acceptance.invitation_id, acceptance.accepted_at
+                ))
+                .await;
             Ok(())
         }
     }

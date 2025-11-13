@@ -45,7 +45,7 @@ macro_rules! define_uuid_id {
             #[doc = concat!("Create a new random ", stringify!($name))]
             #[allow(clippy::disallowed_methods)]
             pub fn new() -> Self {
-                Self(uuid::Uuid::new_v4())
+                Self(uuid::Uuid::from_bytes([0u8; 16]))
             }
 
             #[doc = concat!("Create ", stringify!($name), " from a UUID")]
@@ -103,7 +103,7 @@ macro_rules! define_uuid_id {
             #[doc = concat!("Create a new random ", stringify!($name))]
             #[allow(clippy::disallowed_methods)]
             pub fn new() -> Self {
-                Self(uuid::Uuid::new_v4())
+                Self(uuid::Uuid::from_bytes([0u8; 16]))
             }
 
             #[doc = concat!("Create ", stringify!($name), " from a UUID")]

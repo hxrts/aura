@@ -1,6 +1,6 @@
 //! Content addressing types
 //!
-//! Unified content identifier system using Blake3 hashing.
+//! Unified content identifier system using cryptographic hashing.
 //!
 //! # Type Hierarchy
 //!
@@ -11,7 +11,9 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Raw 32-byte Blake3 cryptographic hash
+use crate::hash;
+
+/// Raw 32-byte cryptographic hash
 ///
 /// This is the foundation for all content addressing. Use higher-level types
 /// (ContentId, ChunkId) in application code.
@@ -24,9 +26,9 @@ impl Hash32 {
         Self(bytes)
     }
 
-    /// Hash arbitrary bytes using Blake3
+    /// Hash arbitrary bytes using the system hash algorithm
     pub fn from_bytes(data: &[u8]) -> Self {
-        Self(*blake3::hash(data).as_bytes())
+        Self(hash::hash(data))
     }
 
     /// Hash a serializable value using canonical DAG-CBOR encoding
@@ -82,7 +84,7 @@ impl From<[u8; 32]> for Hash32 {
 ///
 /// # Use Cases
 /// - Journal entries, ledger records
-/// - User files and documents  
+/// - User files and documents
 /// - Encrypted payloads
 /// - CRDT state snapshots
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

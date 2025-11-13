@@ -3,11 +3,13 @@
 //! These tests verify end-to-end execution of:
 //! - Anti-entropy convergence between peers
 //! - Broadcast delivery to all neighbors
-//! - Threshold ceremony execution
 //! - Snapshot ceremony coordination
 //! - Concurrent operation resolution
 //! - Network partition healing
+//!
+//! Note: Threshold ceremony tests are now in the aura-frost crate
 
+use aura_core::semilattice::semantic_traits::JoinSemilattice;
 use aura_core::tree::{
     AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
 };
@@ -15,10 +17,10 @@ use aura_core::{DeviceId, Hash32};
 use aura_protocol::{
     // choreography::protocols::{
     //     anti_entropy::perform_sync, broadcast::announce_new_operation,
-    //     threshold_ceremony::execute_ceremony,
     // },
+    // Note: threshold_ceremony protocols moved to aura-frost crate
     effects::{sync::SyncEffects, tree::TreeEffects},
-    // handlers::sync::{anti_entropy::AntiEntropyHandler, broadcaster::BroadcasterHandler},
+    handlers::sync::{broadcaster::BroadcastConfig, AntiEntropyHandler, BroadcasterHandler},
     sync::{IntentState, PeerView},
 };
 use std::collections::BTreeMap;
@@ -38,6 +40,7 @@ fn create_test_op(epoch: u64, leaf_id: u32, op_type: &str) -> AttestedOp {
         "add_leaf" => TreeOpKind::AddLeaf {
             leaf: LeafNode {
                 leaf_id: LeafId(leaf_id),
+                device_id: DeviceId::new(),
                 role: LeafRole::Device,
                 public_key: vec![0u8; 32],
                 meta: vec![],
@@ -72,14 +75,14 @@ fn create_test_op(epoch: u64, leaf_id: u32, op_type: &str) -> AttestedOp {
 
 /// Computes a deterministic CID for an operation.
 fn compute_cid(op: &AttestedOp) -> Hash32 {
-    use blake3::Hasher;
-    let mut hasher = Hasher::new();
+    use aura_core::hash;
+    let mut hasher = hash::hasher();
     hasher.update(b"ATTESTED_OP");
     hasher.update(&op.op.parent_epoch.to_le_bytes());
     hasher.update(&op.op.parent_commitment);
-    hasher.update(&[op.op.version]);
+    hasher.update(&[op.op.version as u8]);
     hasher.update(&(op.signer_count as u64).to_le_bytes());
-    *hasher.finalize().as_bytes()
+    Hash32(hasher.finalize())
 }
 
 /// Test peer with in-memory OpLog storage.
@@ -97,8 +100,8 @@ impl TestPeer {
 
         Self {
             id,
-            anti_entropy: AntiEntropyHandler::new(oplog.clone()),
-            broadcaster: BroadcasterHandler::new(oplog.clone()),
+            anti_entropy: AntiEntropyHandler::new(Default::default()), // TODO fix - Need proper AntiEntropyConfig
+            broadcaster: BroadcasterHandler::new(BroadcastConfig::default()),
             oplog,
         }
     }
@@ -375,11 +378,11 @@ async fn test_peer_view_converges() {
     // Merged view should contain both peer2 and peer3
     assert!(merged.contains(&peer2_id), "Should contain peer2");
     assert!(merged.contains(&peer3_id), "Should contain peer3");
-    assert_eq!(merged.size(), 2, "Should have 2 peers");
+    assert_eq!(merged.len(), 2, "Should have 2 peers");
 
     // Join is idempotent
     let merged2 = merged.join(&merged);
-    assert_eq!(merged2.size(), 2, "Idempotent join preserves size");
+    assert_eq!(merged2.len(), 2, "Idempotent join preserves size");
 }
 
 // ============================================================================
@@ -479,13 +482,15 @@ async fn test_snapshot_coordination_concept() {
     let partial1 = Partial {
         proposal_id,
         signer: LeafId(2),
-        partial_sig: vec![0u8; 32],
+        signature: vec![0u8; 32],
+        timestamp: 5000,
     };
 
     let partial2 = Partial {
         proposal_id,
         signer: LeafId(3),
-        partial_sig: vec![1u8; 32],
+        signature: vec![1u8; 32],
+        timestamp: 5000,
     };
 
     // Coordinator aggregates partials into snapshot

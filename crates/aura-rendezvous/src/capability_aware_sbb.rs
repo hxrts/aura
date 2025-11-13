@@ -385,8 +385,7 @@ impl TrustStatistics {
             return 0.0;
         }
 
-        let weighted_sum = (self.none_count * 0)
-            + (self.low_count * 1)
+        let weighted_sum = self.low_count
             + (self.medium_count * 2)
             + (self.high_count * 3)
             + (self.full_count * 4);
@@ -494,7 +493,7 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
         peer: DeviceId,
     ) -> AuraResult<()> {
         // Extract envelope ID before moving envelope
-        let envelope_id = envelope.id.clone();
+        let envelope_id = envelope.id;
 
         // Create SBB message for transport layer
         let sbb_message = crate::messaging::SbbMessageType::RendezvousFlood {
@@ -526,7 +525,7 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
         // self.transport_sender.send_to_peer(peer, sbb_message).await
         tracing::debug!(
             peer_id = %peer.0,
-            envelope_id = %hex::encode(&envelope_id),
+            envelope_id = %hex::encode(envelope_id),
             "Forwarded SBB envelope to peer"
         );
 

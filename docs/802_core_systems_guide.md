@@ -8,42 +8,29 @@ Aura's effect system separates application logic from infrastructure implementat
 
 The effect system follows a clean layered architecture. Interface traits in `aura-core` define capabilities. Standard implementations in `aura-effects` provide basic handlers. Coordination primitives in `aura-protocol` handle multi-party operations.
 
-### Effect Composition
+### Stateless Effect System
 
-Create effect handlers by combining basic implementations:
+The effect system uses a unified stateless architecture that eliminates shared mutable state:
 
 ```rust
-use aura_effects::{RealCryptoHandler, TcpNetworkHandler, FilesystemStorageHandler};
-use aura_core::effects::{CryptoEffects, NetworkEffects, StorageEffects};
+use aura_protocol::{AuraEffectSystem, effects::EffectSystemConfig};
+use aura_core::DeviceId;
 
-pub struct ProductionHandler {
-    crypto: RealCryptoHandler,
-    network: TcpNetworkHandler,
-    storage: FilesystemStorageHandler,
-}
+// Create a stateless effect system for production
+let device_id = DeviceId::new();
+let config = EffectSystemConfig::for_production(device_id)
+    .expect("Failed to create production configuration");
+let effect_system = AuraEffectSystem::new(config)
+    .expect("Failed to initialize effect system");
 
-impl ProductionHandler {
-    pub fn new(device_id: aura_core::DeviceId, config: &Config) -> Result<Self, HandlerError> {
-        Ok(Self {
-            crypto: RealCryptoHandler::new()?,
-            network: TcpNetworkHandler::new(config.listen_address)?,
-            storage: FilesystemStorageHandler::new(&config.data_path)?,
-        })
-    }
-}
-
-impl CryptoEffects for ProductionHandler {
-    async fn hash(&self, input: &[u8]) -> Result<[u8; 32], aura_core::AuraError> {
-        self.crypto.hash(input).await
-    }
-
-    async fn ed25519_sign(&self, message: &[u8], private_key: &[u8]) -> Result<Vec<u8>, aura_core::AuraError> {
-        self.crypto.ed25519_sign(message, private_key).await
-    }
-}
+// All effect operations go through the unified system
+let data = b"hello world";
+let hash = effect_system.hash(data).await?;
+effect_system.store("key", data.to_vec()).await?;
+effect_system.send_to_peer(peer_id, message).await?;
 ```
 
-Production handlers use real infrastructure implementations. The composition pattern enables testing with different handler combinations. Each effect trait defines a specific capability boundary.
+The stateless architecture provides deadlock freedom through isolated state services. All handlers are context-free and operate without device-specific shared state. Configuration determines whether to use production or testing implementations.
 
 Use sealed supertraits to define protocol-specific effect interfaces:
 
@@ -71,35 +58,32 @@ pub async fn execute_data_sync<E: DataSyncEffects>(
 
 Sealed supertraits provide clean type signatures and better error messages. They enable protocol-specific extensions while maintaining flexibility.
 
-### Testing Handlers
+### Testing Configuration
 
-Use mock handlers for deterministic testing:
+Use testing configuration for deterministic test execution:
 
 ```rust
-use aura_effects::{MockCryptoHandler, MockNetworkHandler, MemoryStorageHandler};
+use aura_protocol::{AuraEffectSystem, effects::EffectSystemConfig};
 
-pub struct TestHandler {
-    crypto: MockCryptoHandler,
-    network: MockNetworkHandler,
-    storage: MemoryStorageHandler,
-}
+// Create a stateless effect system for testing
+let device_id = DeviceId::new();
+let config = EffectSystemConfig::for_testing(device_id);
+let effect_system = AuraEffectSystem::new(config)
+    .expect("Failed to initialize test effect system");
 
-impl TestHandler {
-    pub fn new() -> Self {
-        Self {
-            crypto: MockCryptoHandler::new(),
-            network: MockNetworkHandler::new(),
-            storage: MemoryStorageHandler::new(),
-        }
-    }
-    
-    pub fn set_crypto_failure(&self, operation: &str) {
-        self.crypto.set_failure(operation);
-    }
-}
+// Testing operations are deterministic and isolated
+let test_data = b"test data";
+let hash1 = effect_system.hash(test_data).await?;
+let hash2 = effect_system.hash(test_data).await?;
+assert_eq!(hash1, hash2); // Deterministic in testing mode
+
+// Test error injection through configuration
+let failing_config = EffectSystemConfig::for_testing(device_id)
+    .with_crypto_failures(vec!["ed25519_sign"]);
+let failing_system = AuraEffectSystem::new(failing_config)?;
 ```
 
-Testing handlers provide controlled environments for unit tests. Mock handlers eliminate external dependencies and enable fast test execution. They support failure injection for testing error paths.
+Testing configuration provides mock implementations that eliminate external dependencies and enable deterministic test execution. Error injection capabilities support comprehensive testing of failure scenarios.
 
 
 ## Identity System

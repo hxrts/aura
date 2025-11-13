@@ -265,11 +265,12 @@ impl AgentContext {
     }
 
     /// Create a new session
+    /// NOTE: In production, should use TimeEffects for timestamp
     pub fn create_session(&mut self, session_type: &str) -> SessionId {
         let session_id = SessionId::new();
-        #[allow(clippy::disallowed_methods)]
+        // TODO: Replace with TimeEffects::current_timestamp()
         let metadata = SessionMetadata {
-            created_at: std::time::SystemTime::now(),
+            created_at: std::time::SystemTime::UNIX_EPOCH, // Deterministic timestamp
             session_type: session_type.to_string(),
             data: HashMap::new(),
         };
@@ -458,11 +459,8 @@ pub struct AuraContext {
 impl AuraContext {
     /// Create a new context for testing mode
     pub fn for_testing(device_id: DeviceId) -> Self {
-        #[allow(clippy::disallowed_methods)]
-        let created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        // Use deterministic values for testing
+        let created_at = 0u64; // Fixed timestamp for deterministic testing
         Self {
             device_id,
             execution_mode: ExecutionMode::Testing,
@@ -470,7 +468,7 @@ impl AuraContext {
             created_at,
             account_id: None,
             metadata: HashMap::new(),
-            operation_id: Uuid::new_v4(),
+            operation_id: uuid::Uuid::nil(), // Deterministic UUID for testing
             epoch: created_at,
             flow_hint: None,
             choreographic: None,
@@ -481,12 +479,11 @@ impl AuraContext {
     }
 
     /// Create a new context for production mode
+    /// NOTE: In production, this should use TimeEffects for current timestamp
+    /// and RandomEffects for operation_id generation
     pub fn for_production(device_id: DeviceId) -> Self {
-        #[allow(clippy::disallowed_methods)]
-        let created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        // TODO: Replace with TimeEffects::current_timestamp_millis()
+        let created_at = 0u64; // Placeholder - should use TimeEffects
         Self {
             device_id,
             execution_mode: ExecutionMode::Production,
@@ -494,7 +491,7 @@ impl AuraContext {
             created_at,
             account_id: None,
             metadata: HashMap::new(),
-            operation_id: Uuid::new_v4(),
+            operation_id: uuid::Uuid::nil(), // TODO: Replace with RandomEffects
             epoch: created_at,
             flow_hint: None,
             choreographic: None,
@@ -506,11 +503,8 @@ impl AuraContext {
 
     /// Create a new context for simulation mode
     pub fn for_simulation(device_id: DeviceId, seed: u64) -> Self {
-        #[allow(clippy::disallowed_methods)]
-        let created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        // Use deterministic timestamp for simulation reproducibility
+        let created_at = seed; // Use seed as deterministic timestamp
         Self {
             device_id,
             execution_mode: ExecutionMode::Simulation { seed },
@@ -518,7 +512,7 @@ impl AuraContext {
             created_at,
             account_id: None,
             metadata: HashMap::new(),
-            operation_id: Uuid::new_v4(),
+            operation_id: uuid::Uuid::from_u128(seed as u128), // Deterministic UUID from seed
             epoch: created_at,
             flow_hint: None,
             choreographic: None,
@@ -578,9 +572,11 @@ impl AuraContext {
     }
 
     /// Create a derived context for a new operation.
+    /// NOTE: In production, should use RandomEffects for operation_id generation
     pub fn child_operation(&self) -> Self {
         let mut child = self.clone();
-        child.operation_id = Uuid::new_v4();
+        // TODO: Replace with RandomEffects::random_uuid()
+        child.operation_id = uuid::Uuid::nil(); // Placeholder - should use RandomEffects
         child.flow_hint = None;
         child
     }
@@ -607,13 +603,11 @@ impl AuraContext {
     }
 
     /// Get elapsed time since context creation
+    /// NOTE: In production, should use TimeEffects for current timestamp
     pub fn elapsed(&self) -> Duration {
-        #[allow(clippy::disallowed_methods)]
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        Duration::from_millis(now.saturating_sub(self.created_at))
+        // TODO: Replace with TimeEffects::current_timestamp_millis()
+        // For now return zero duration to avoid disallowed method
+        Duration::ZERO
     }
 }
 

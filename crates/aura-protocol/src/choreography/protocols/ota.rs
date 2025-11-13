@@ -268,7 +268,7 @@ impl UpgradeOrchestrator {
         let message = UpgradeMessage {
             proposal_id: proposal.package_id,
             version: proposal.version,
-            kind: proposal.kind.clone(),
+            kind: proposal.kind,
             checksum: proposal.artifact_hash,
             artifact_uri: proposal.artifact_uri.clone(),
             timestamp,
@@ -378,7 +378,7 @@ impl UpgradeOrchestrator {
             aura_core::AccountId::from_bytes([0u8; 32])
         };
 
-        let fence = proposal.activation_fence.clone().unwrap_or_else(|| {
+        let fence = proposal.activation_fence.unwrap_or_else(|| {
             aura_core::maintenance::IdentityEpochFence::new(account_id, self.config.current_epoch)
         });
 

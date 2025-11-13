@@ -3,8 +3,9 @@
 //! Effect-based implementation of distributed key derivation testing.
 
 use anyhow::Result;
+use aura_core::hash;
 use aura_protocol::{
-    AuraEffectSystem, ConsoleEffects, CryptoEffects, RandomEffects, StorageEffects,
+    AuraEffectSystem, ConsoleEffects, RandomEffects, StorageEffects,
 };
 use std::path::PathBuf;
 
@@ -79,12 +80,12 @@ async fn perform_dkd_test(
 
     // Step 3: Perform key derivation through crypto effects
     let _ = effects.log_info("Step 3: Performing key derivation").await;
-    let derived_key = effects.hash(&derivation_input).await;
+    let derived_key = hash::hash(&derivation_input);
 
     // Step 4: Generate commitment through crypto effects
     let _ = effects.log_info("Step 4: Generating commitment").await;
     let commitment_data = [&randomness[..], &derived_key[..]].concat();
-    let commitment = effects.hash(&commitment_data).await;
+    let commitment = hash::hash(&commitment_data);
 
     // Step 5: Simulate threshold operations
     let _ = effects
@@ -118,15 +119,15 @@ async fn create_derivation_input(
     let mut input = Vec::new();
 
     // Add app_id
-    let app_id_hash = effects.hash(app_id.as_bytes()).await;
+    let app_id_hash = hash::hash(app_id.as_bytes());
     input.extend_from_slice(&app_id_hash);
 
     // Add context
-    let context_hash = effects.hash(context.as_bytes()).await;
+    let context_hash = hash::hash(context.as_bytes());
     input.extend_from_slice(&context_hash);
 
     // Add device_id
-    let device_id_hash = effects.hash(device_id.as_bytes()).await;
+    let device_id_hash = hash::hash(device_id.as_bytes());
     input.extend_from_slice(&device_id_hash);
 
     let _ = effects
@@ -157,13 +158,13 @@ async fn simulate_threshold_operations(
 
         // Create device-specific input
         let device_input = format!("device_{}_key_share", i);
-        let device_hash = effects.hash(device_input.as_bytes()).await;
+        let device_hash = hash::hash(device_input.as_bytes());
 
         // Combine with derived key (simulating threshold cryptography)
         let mut combined = Vec::new();
         combined.extend_from_slice(derived_key);
         combined.extend_from_slice(&device_hash);
-        let _share_result = effects.hash(&combined).await;
+        let _share_result = hash::hash(&combined);
 
         let _ = effects
             .log_info(&format!("Device {} share computed", i))

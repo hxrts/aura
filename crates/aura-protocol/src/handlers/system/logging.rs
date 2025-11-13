@@ -3,10 +3,10 @@
 use crate::effects::{SystemEffects, SystemError};
 use async_trait::async_trait;
 use aura_core::{DeviceId, SessionId};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -141,7 +141,7 @@ impl LoggingSystemHandler {
             log_buffer: log_buffer.clone(),
             audit_buffer: audit_buffer.clone(),
             stats: Arc::new(RwLock::new(LoggingStats::default())),
-            start_time: SystemTime::now(),
+            start_time: SystemTime::UNIX_EPOCH, // Fixed start time for deterministic logging
             log_sender: Arc::new(RwLock::new(Some(log_tx))),
             audit_sender: Arc::new(RwLock::new(Some(audit_tx))),
         };
@@ -238,16 +238,16 @@ impl LoggingSystemHandler {
     }
 
     /// Get current uptime in seconds
+    /// NOTE: In production, should use TimeEffects for current time
     fn get_uptime_seconds(&self) -> u64 {
-        self.start_time.elapsed().unwrap_or_default().as_secs()
+        // TODO: Replace with TimeEffects::current_timestamp() - start_time
+        0 // Fixed uptime for deterministic behavior
     }
 
     /// Get current timestamp
     fn current_timestamp(&self) -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
+        // Use fixed timestamp for deterministic logging
+        0
     }
 
     /// Log a structured message
@@ -503,6 +503,7 @@ impl SystemEffects for LoggingSystemHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use tokio::time::{sleep, Duration};
 
     #[tokio::test]

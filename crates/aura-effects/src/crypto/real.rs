@@ -66,23 +66,7 @@ impl RandomEffects for RealCryptoHandler {
 // Then implement CryptoEffects (which inherits from RandomEffects)
 #[async_trait]
 impl CryptoEffects for RealCryptoHandler {
-    // ====== Hash Functions ======
-
-    async fn hash(&self, data: &[u8]) -> [u8; 32] {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        hasher.finalize().into()
-    }
-
-    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
-        use hmac::{Hmac, Mac};
-        type HmacSha256 = Hmac<Sha256>;
-
-        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
-        mac.update(data);
-        mac.finalize().into_bytes().into()
-    }
+    // Note: Hashing is NOT an effect - use aura_core::hash::hash() instead
 
     // ====== Key Derivation ======
 
@@ -171,7 +155,7 @@ impl CryptoEffects for RealCryptoHandler {
         let mut key_bytes = [0u8; 32];
         key_bytes.copy_from_slice(public_key);
         let verifying_key = VerifyingKey::from_bytes(&key_bytes).map_err(|e| {
-            aura_core::AuraError::invalid(&format!("Invalid Ed25519 public key: {}", e))
+            aura_core::AuraError::invalid(format!("Invalid Ed25519 public key: {}", e))
         })?;
 
         match verifying_key.verify_strict(message, &signature) {
@@ -271,9 +255,9 @@ impl CryptoEffects for RealCryptoHandler {
         _key: &[u8; 32],
         _nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        Err(aura_core::AuraError::internal(format!(
-            "Not implemented: ChaCha20 encryption not implemented yet"
-        )))
+        Err(aura_core::AuraError::internal(
+            "Not implemented: ChaCha20 encryption not implemented yet".to_string(),
+        ))
     }
 
     async fn chacha20_decrypt(
@@ -282,9 +266,9 @@ impl CryptoEffects for RealCryptoHandler {
         _key: &[u8; 32],
         _nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        Err(aura_core::AuraError::internal(format!(
-            "Not implemented: ChaCha20 decryption not implemented yet"
-        )))
+        Err(aura_core::AuraError::internal(
+            "Not implemented: ChaCha20 decryption not implemented yet".to_string(),
+        ))
     }
 
     async fn aes_gcm_encrypt(
@@ -293,9 +277,9 @@ impl CryptoEffects for RealCryptoHandler {
         _key: &[u8; 32],
         _nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        Err(aura_core::AuraError::internal(format!(
-            "Not implemented: AES-GCM encryption not implemented yet"
-        )))
+        Err(aura_core::AuraError::internal(
+            "Not implemented: AES-GCM encryption not implemented yet".to_string(),
+        ))
     }
 
     async fn aes_gcm_decrypt(
@@ -304,9 +288,9 @@ impl CryptoEffects for RealCryptoHandler {
         _key: &[u8; 32],
         _nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        Err(aura_core::AuraError::internal(format!(
-            "Not implemented: AES-GCM decryption not implemented yet"
-        )))
+        Err(aura_core::AuraError::internal(
+            "Not implemented: AES-GCM decryption not implemented yet".to_string(),
+        ))
     }
 
     // ====== Key Rotation & Resharing ======

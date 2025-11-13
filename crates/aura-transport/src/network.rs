@@ -8,7 +8,8 @@
 
 use crate::secure_channel::SecureChannelRegistry;
 use aura_core::{
-    flow::FlowBudget, relationships::ContextId, session_epochs::Epoch, AuraError, DeviceId, Receipt,
+    flow::FlowBudget, hash, relationships::ContextId, session_epochs::Epoch, AuraError, DeviceId,
+    Receipt,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -92,6 +93,13 @@ pub struct PeerConnection {
 ///
 /// **REFACTORED**: Connection management now delegated to SecureChannelRegistry
 /// to eliminate duplicate channel caches and enforce unified channel semantics.
+type NonceCache = HashMap<(String, DeviceId, u64), HashSet<u64>>;
+
+/// Network transport layer managing secure channels, message routing, and transport protocols.
+///
+/// This struct provides a unified interface for network communication in the Aura system,
+/// coordinating between WebSocket connections, secure channels, and message handling.
+/// It maintains connection state, handles reconnection logic, and manages transport-level security.
 #[derive(Debug)]
 pub struct NetworkTransport {
     device_id: DeviceId,
@@ -103,7 +111,7 @@ pub struct NetworkTransport {
     sequence_counter: Arc<Mutex<u64>>,
     /// Anti-replay protection: track seen receipt nonces per (context, peer, epoch)
     /// This remains at transport level for now but could be moved to SecureChannel
-    seen_nonces: Arc<RwLock<HashMap<(String, DeviceId, u64), HashSet<u64>>>>,
+    seen_nonces: Arc<RwLock<NonceCache>>,
 }
 
 impl NetworkTransport {
@@ -409,11 +417,11 @@ impl NetworkTransport {
             nonce_set.insert(receipt.nonce);
 
             // Cryptographic verification of receipt signature
-            self.verify_receipt_signature(&receipt, &message.from)
+            self.verify_receipt_signature(receipt, &message.from)
                 .await?;
 
             // Verify receipt chain hash
-            self.verify_receipt_chain_hash(&receipt, &message.from)
+            self.verify_receipt_chain_hash(receipt, &message.from)
                 .await?;
 
             tracing::debug!(
@@ -507,6 +515,7 @@ impl NetworkTransport {
     }
 
     /// Send a framed message
+    #[allow(dead_code)]
     async fn send_message(
         stream: &mut TcpStream,
         message: &NetworkMessage,
@@ -628,30 +637,23 @@ impl NetworkTransport {
         tracing::debug!("Looking up public key for device: {}", device_id);
 
         // Placeholder: use device ID hash as public key
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(device_id.0.as_bytes());
-        let hash = hasher.finalize();
+        let digest = hash::hash(device_id.0.as_bytes());
 
-        let mut public_key = [0u8; 32];
-        public_key.copy_from_slice(&hash[..32]);
-        Ok(public_key)
+        Ok(digest)
     }
 
     /// Compute receipt commitment for signature verification
     fn compute_receipt_commitment(&self, receipt: &Receipt) -> Result<Vec<u8>, AuraError> {
-        use sha2::{Digest, Sha256};
-
-        let mut hasher = Sha256::new();
+        let mut h = hash::hasher();
 
         // Add receipt fields to commitment
-        hasher.update(b"MESSAGE_RECEIPT");
-        hasher.update(receipt.nonce.to_be_bytes());
-        hasher.update(receipt.cost.to_be_bytes());
-        hasher.update(receipt.epoch.value().to_be_bytes());
-        hasher.update(&receipt.prev);
+        h.update(b"MESSAGE_RECEIPT");
+        h.update(&receipt.nonce.to_be_bytes());
+        h.update(&receipt.cost.to_be_bytes());
+        h.update(&receipt.epoch.value().to_be_bytes());
+        h.update(&receipt.prev.0);
 
-        Ok(hasher.finalize().to_vec())
+        Ok(h.finalize().to_vec())
     }
 
     /// Verify Ed25519 signature
@@ -694,21 +696,16 @@ impl NetworkTransport {
 
     /// Compute hash of receipt for chain linkage
     fn compute_receipt_hash(&self, receipt: &Receipt) -> Result<[u8; 32], AuraError> {
-        use sha2::{Digest, Sha256};
-
-        let mut hasher = Sha256::new();
+        let mut h = hash::hasher();
 
         // Add all receipt fields to hash
-        hasher.update(receipt.nonce.to_be_bytes());
-        hasher.update(receipt.cost.to_be_bytes());
-        hasher.update(receipt.epoch.value().to_be_bytes());
-        hasher.update(&receipt.prev);
-        hasher.update(&receipt.sig);
+        h.update(&receipt.nonce.to_be_bytes());
+        h.update(&receipt.cost.to_be_bytes());
+        h.update(&receipt.epoch.value().to_be_bytes());
+        h.update(&receipt.prev.0);
+        h.update(&receipt.sig);
 
-        let hash = hasher.finalize();
-        let mut result = [0u8; 32];
-        result.copy_from_slice(&hash[..32]);
-        Ok(result)
+        Ok(h.finalize())
     }
 
     /// Update stored receipt hash for device

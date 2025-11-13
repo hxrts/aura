@@ -1,4 +1,9 @@
 //! Enhanced time handler for production use with advanced scheduling capabilities
+//!
+//! TODO: Refactor to use TimeEffects and RandomEffects from the effect system instead of direct
+//! calls to SystemTime::now(), Instant::now(), and Uuid::new_v4().
+
+#![allow(clippy::disallowed_methods)]
 
 use crate::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 use async_trait::async_trait;

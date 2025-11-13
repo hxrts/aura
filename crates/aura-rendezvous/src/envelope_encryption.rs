@@ -6,6 +6,7 @@
 
 use crate::relationship_keys::{RelationshipKey, RelationshipKeyManager};
 use crate::sbb::RendezvousEnvelope;
+use aura_core::hash::hash;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit},
@@ -41,7 +42,7 @@ pub struct EnvelopeEncryption {
 /// Envelope padding strategy
 #[derive(Debug, Clone)]
 pub enum PaddingStrategy {
-    /// Pad to next power-of-2 size >= MIN_PADDED_SIZE  
+    /// Pad to next power-of-2 size >= MIN_PADDED_SIZE
     PowerOfTwo,
     /// Pad to fixed size blocks
     FixedBlocks { block_size: usize },
@@ -203,14 +204,14 @@ impl EnvelopeEncryption {
     fn apply_padding(&self, mut data: Vec<u8>, strategy: PaddingStrategy) -> AuraResult<Vec<u8>> {
         // Calculate target size for the final ciphertext (including ChaCha20Poly1305 16-byte tag)
         let auth_tag_size = 16;
-        
+
         let target_ciphertext_size = match strategy {
             PaddingStrategy::PowerOfTwo => {
                 let min_size = MIN_PADDED_SIZE.max(data.len() + 1 + auth_tag_size);
                 min_size.next_power_of_two()
             }
             PaddingStrategy::FixedBlocks { block_size } => {
-                let blocks_needed = (data.len() + 1 + auth_tag_size + block_size - 1) / block_size;
+                let blocks_needed = (data.len() + 1 + auth_tag_size).div_ceil(block_size);
                 blocks_needed * block_size
             }
             PaddingStrategy::ExactSize { size } => {
@@ -227,7 +228,7 @@ impl EnvelopeEncryption {
 
         // Target plaintext size = target ciphertext size - auth tag size
         let target_plaintext_size = target_ciphertext_size - auth_tag_size;
-        
+
         if target_plaintext_size < data.len() + 1 {
             return Err(AuraError::crypto("Invalid padding calculation".to_string()));
         }
@@ -237,10 +238,10 @@ impl EnvelopeEncryption {
             // If padding would be too large, use smaller target size
             let smaller_target = data.len() + 1 + 255;
             let padding_length = 255;
-            
+
             // Add padding length byte
             data.push(padding_length as u8);
-            
+
             // Add random padding bytes
             let mut padding = vec![0u8; padding_length];
             OsRng.fill_bytes(&mut padding);
@@ -283,9 +284,9 @@ impl EnvelopeEncryption {
     /// Generate 4-byte key hint for efficient recipient key selection
     fn generate_key_hint(&self, key: &RelationshipKey) -> [u8; 4] {
         let mut hint = [0u8; 4];
-        // Use Blake3 hash of key for hint generation
-        let hash = blake3::hash(key);
-        hint.copy_from_slice(&hash.as_bytes()[..4]);
+        // Use centralized hash for key hint generation
+        let h = hash(key);
+        hint.copy_from_slice(&h[..4]);
         hint
     }
 

@@ -123,7 +123,12 @@ impl NetworkEffects for MemoryNetworkHandler {
         })?;
 
         target_state.push_message(self.device_id, message);
+
+        // Automatically establish bidirectional connection for testing convenience
+        // In a real network, this would require explicit connection establishment
         target_state.send_event(PeerEvent::Connected(self.device_id));
+        self.state.send_event(PeerEvent::Connected(peer_id));
+
         Ok(())
     }
 

@@ -5,7 +5,7 @@
 //! context-aware key derivation for identity and permission keys with proper
 //! separation and collision resistance.
 
-use sha2::{Digest, Sha256};
+use aura_core::hash;
 
 /// Context for identity key derivation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -178,9 +178,7 @@ pub fn derive_key_material(
     extract_input.extend_from_slice(root_key);
     extract_input.extend_from_slice(&context_bytes);
 
-    let mut hasher = Sha256::new();
-    hasher.update(&extract_input);
-    let prk = hasher.finalize();
+    let prk = hash::hash(&extract_input);
 
     // Expand: Generate output material using HKDF-like expansion
     let mut output = Vec::with_capacity(output_length);
@@ -192,9 +190,7 @@ pub fn derive_key_material(
         expand_input.extend_from_slice(&context_bytes);
         expand_input.push(i as u8 + 1); // HKDF counter (1-indexed)
 
-        let mut block_hasher = Sha256::new();
-        block_hasher.update(&expand_input);
-        let block = block_hasher.finalize();
+        let block = hash::hash(&expand_input);
         output.extend_from_slice(&block);
     }
 

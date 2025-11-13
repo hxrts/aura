@@ -50,7 +50,7 @@ pub fn compact(oplog: &OpLog, snapshot: &Snapshot) -> Result<OpLog, CompactionEr
 
     // Only add snapshot fact if there were operations before the cut
     if !before_cut.is_empty() {
-        let snapshot_fact = create_snapshot_fact_operation(&snapshot, snapshot.epoch)?;
+        let snapshot_fact = create_snapshot_fact_operation(snapshot, snapshot.epoch)?;
         compacted.append(snapshot_fact);
     }
 
@@ -97,6 +97,7 @@ fn create_snapshot_fact_operation(
 }
 
 /// Serialize snapshot metadata for inclusion in snapshot fact
+#[allow(dead_code)]
 fn serialize_snapshot_metadata(snapshot: &Snapshot) -> Result<Vec<u8>, CompactionError> {
     use std::io::Write;
 
@@ -132,6 +133,7 @@ fn serialize_snapshot_metadata(snapshot: &Snapshot) -> Result<Vec<u8>, Compactio
 }
 
 /// Serialize a leaf ID for snapshot metadata
+#[allow(dead_code)]
 fn serialize_leaf_id(leaf_id: &LeafId) -> Result<Vec<u8>, CompactionError> {
     // This is simplified - real implementation would use proper serialization
     let mut buffer = Vec::new();
@@ -146,19 +148,18 @@ fn serialize_leaf_id(leaf_id: &LeafId) -> Result<Vec<u8>, CompactionError> {
 fn create_snapshot_signature(
     tree_op: &aura_core::tree::TreeOp,
 ) -> Result<Vec<u8>, CompactionError> {
-    use blake3::Hasher;
+    use aura_core::hash;
 
-    let mut hasher = Hasher::new();
-    hasher.update(b"SNAPSHOT_FACT");
-    hasher.update(&tree_op.parent_epoch.to_be_bytes());
-    hasher.update(&tree_op.parent_commitment);
+    let mut h = hash::hasher();
+    h.update(b"SNAPSHOT_FACT");
+    h.update(&tree_op.parent_epoch.to_be_bytes());
+    h.update(&tree_op.parent_commitment);
 
     // Hash the operation
     let op_bytes = serialize_tree_op(tree_op)?;
-    hasher.update(&op_bytes);
+    h.update(&op_bytes);
 
-    let hash = hasher.finalize();
-    Ok(hash.as_bytes()[..32].to_vec()) // 32-byte signature (Blake3 hash length)
+    Ok(h.finalize().to_vec())
 }
 
 /// Serialize a tree operation for hashing/signing
@@ -234,11 +235,8 @@ fn verify_snapshot_coverage(
     let mut leaves_in_ops = BTreeSet::new();
 
     for op in before_cut {
-        match &op.op.op {
-            aura_core::TreeOpKind::AddLeaf { leaf, .. } => {
-                leaves_in_ops.insert(leaf.leaf_id);
-            }
-            _ => {}
+        if let aura_core::TreeOpKind::AddLeaf { leaf, .. } = &op.op.op {
+            leaves_in_ops.insert(leaf.leaf_id);
         }
     }
 
@@ -323,14 +321,11 @@ pub enum CompactionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{
-        tree::{Epoch, LeafId, LeafNode, NodeIndex, Policy, TreeOp, TreeOpKind},
-        Hash32,
-    };
+    use aura_core::tree::{LeafId, LeafNode, NodeIndex, Policy, TreeOp, TreeOpKind};
     use std::collections::BTreeMap;
 
     fn create_test_op(epoch: u64, commitment: [u8; 32], leaf_id: u8) -> AttestedOp {
-        let device_id = aura_core::DeviceId(uuid::Uuid::new_v4());
+        let device_id = aura_core::DeviceId(uuid::Uuid::from_bytes([8u8; 16]));
         AttestedOp {
             op: TreeOp {
                 parent_commitment: commitment,
@@ -463,8 +458,6 @@ mod tests {
 
     #[test]
     fn test_verify_join_preserving() {
-        use crate::semilattice::JoinSemilattice;
-
         let mut oplog1 = OpLog::new();
         oplog1.append(create_test_op(1, [1u8; 32], 1));
 

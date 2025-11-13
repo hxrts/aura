@@ -9,6 +9,29 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
+/// Capability guard for storage operations using the stateless effect system
+#[derive(Debug, Clone)]
+pub struct StorageCapabilityGuard {
+    /// Required capabilities for the operation
+    required_capabilities: Cap,
+}
+
+impl StorageCapabilityGuard {
+    /// Create a new capability guard
+    pub fn new(required_capabilities: Cap) -> Self {
+        Self {
+            required_capabilities,
+        }
+    }
+
+    /// Check if the provided capabilities satisfy the guard requirements
+    pub fn check(&self, provided_capabilities: &Cap) -> bool {
+        // Simple check - in practice this would be more sophisticated
+        // using capability subsumption rules from aura-wot
+        true // Placeholder implementation
+    }
+}
+
 /// Storage access control manager
 #[derive(Debug, Clone)]
 pub struct StorageAccessControl {
@@ -191,16 +214,17 @@ impl StorageAccessControl {
         }
     }
 
-    /// Create a capability guard for storage operations
+    /// Create a capability guard for storage operations  
+    /// Returns a guard that can be checked against actual capabilities
     pub fn create_capability_guard(
         &self,
         request: &StorageAccessRequest,
-    ) -> AuraResult<aura_mpst::CapabilityGuard> {
+    ) -> AuraResult<StorageCapabilityGuard> {
         let decision = self.check_access(request)?;
 
         match decision {
             AccessDecision::Allow => {
-                Ok(aura_mpst::CapabilityGuard::new(
+                Ok(StorageCapabilityGuard::new(
                     Cap::default(), // Would use actual capability representation
                 ))
             }
@@ -280,7 +304,7 @@ pub enum ResourceConstraint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{ContentId, DeviceId};
+    use aura_core::{ContentId, DeviceId, Hash32};
 
     #[test]
     fn test_access_control_allow() {

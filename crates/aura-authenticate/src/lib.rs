@@ -1,50 +1,54 @@
 //! Aura Authentication Choreographies
 //!
-//! This crate provides choreographic protocols for distributed authentication
-//! across devices in the Aura threshold identity platform.
+//! **Layer 5: Feature/Protocol Implementation**
+//!
+//! Complete end-to-end authentication protocols using stateless effect composition.
+//! Provides three main authentication coordinators: device authentication,
+//! session establishment, and guardian authentication for recovery operations.
 //!
 //! # Architecture
 //!
-//! This crate implements authentication choreographies:
-//! - `G_auth` - Main device authentication choreography
-//! - `session_establishment` - Distributed session ticket creation
-//! - `guardian_auth` - Multi-guardian authentication for recovery
+//! Sits in Layer 5 of Aura's 8-layer architecture. Depends on `aura-core`, `aura-verify`,
+//! `aura-effects`, and `aura-protocol`. Used by runtime layers (`aura-agent`) and UI layers.
+//!
+//! # Coordinators
+//!
+//! - **Device Authentication**: Challenge-response protocol with capability verification
+//!   and journal state management for device authentication
+//! - **Session Establishment**: Distributed session ticket creation with time-limited
+//!   capabilities and defined scopes (DKD, storage, etc.)
+//! - **Guardian Authentication**: M-of-N guardian approval coordinator for sensitive
+//!   recovery operations
 //!
 //! # Design Principles
 //!
-//! - Uses choreographic programming for distributed auth coordination
-//! - Integrates with aura-verify for identity verification
-//! - Provides clean separation to avoid namespace conflicts (E0428 errors)
-//! - Works with threshold signatures and guardian approval workflows
+//! - **Effect Composition**: Stateless effect handlers for predictable execution
+//! - **Capability Verification**: Effect-based capability checking and enforcement
+//! - **Journal Integration**: CRDT state management through effect system
+//! - **Privacy Enforcement**: Effect-level privacy controls and audit trails
+//! - **Composable**: Reusable authentication building blocks for applications
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
-/// Main authentication choreography (G_auth)
+/// Device authentication coordinator
 pub mod device_auth;
 
-/// Session establishment protocols
+/// Session establishment coordinator
 pub mod session_establishment;
 
-/// Guardian authentication for recovery operations
+/// Guardian authentication coordinator for recovery operations
 pub mod guardian_auth;
 
-/// Errors for authentication operations
-// errors module removed - use aura_core::AuraError directly
-
-// Re-export core types
+// Re-export core types from aura-core (Layer 1)
 pub use aura_core::{AccountId, AuraError, AuraResult, Cap, DeviceId, Journal};
 
-// Re-export verification types
+// Re-export verification types from aura-verify (Layer 2)
 pub use aura_verify::session::{SessionScope, SessionTicket};
 pub use aura_verify::{
     AuthenticationError, IdentityProof, KeyMaterial, Result as AuthenticationResult,
     VerifiedIdentity,
 };
 
-// Re-export MPST types
-pub use aura_mpst::{
-    AuraRuntime, CapabilityGuard, ExecutionContext, JournalAnnotation, MpstError, MpstResult,
-};
-
-// Error re-exports removed - use aura_core::AuraError directly
+// Re-export effect system types
+pub use aura_protocol::AuraEffectSystem;

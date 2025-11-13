@@ -8,10 +8,12 @@ use std::path::PathBuf;
 
 /// Handle status display through effects
 pub async fn handle_status(effects: &AuraEffectSystem, config_path: &PathBuf) -> Result<()> {
-    effects.log_info(&format!(
-        "Account status for config: {}",
-        config_path.display()
-    ));
+    let _ = effects
+        .log_info(&format!(
+            "Account status for config: {}",
+            config_path.display()
+        ))
+        .await;
 
     // Check if config exists through storage effects
     let config_exists = effects
@@ -20,7 +22,9 @@ pub async fn handle_status(effects: &AuraEffectSystem, config_path: &PathBuf) ->
         .unwrap_or(false);
 
     if !config_exists {
-        effects.log_error(&format!("Config file not found: {}", config_path.display()));
+        let _ = effects
+            .log_error(&format!("Config file not found: {}", config_path.display()))
+            .await;
         return Err(anyhow::anyhow!(
             "Config file not found: {}",
             config_path.display()
@@ -74,7 +78,7 @@ async fn display_status_info(effects: &AuraEffectSystem, config: &DeviceConfig) 
     let _ = effects
         .log_info(&format!("Device ID: {}", config.device_id))
         .await;
-    let _ = effects.log_info(&format!("Status: Active")).await;
+    let _ = effects.log_info(&"Status: Active".to_string()).await;
     let _ = effects
         .log_info(&format!("Total Devices: {}", config.total_devices))
         .await;

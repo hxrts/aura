@@ -3,9 +3,9 @@
 //! Implements safe protocol upgrades with soft/hard fork handling,
 //! opt-in policies, and identity epoch fences for distributed maintenance.
 
-use aura_core::{AccountId, AuraError, AuraResult, DeviceId};
+use aura_core::{AuraError, AuraResult, DeviceId};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
@@ -181,7 +181,8 @@ impl OtaOrchestrator {
         if should_auto_adopt {
             info!("Auto-adopting upgrade based on policy: {:?}", policy);
             drop(proposals); // Release lock before calling adopt
-            self.opt_in_to_upgrade(proposal.id, DeviceId(uuid::Uuid::new_v4())).await?;
+            self.opt_in_to_upgrade(proposal.id, DeviceId(uuid::Uuid::from_bytes([0u8; 16])))
+                .await?;
         }
 
         Ok(())
@@ -550,7 +551,7 @@ mod tests {
             checksum: [0u8; 32],
             signature: vec![0u8; 64], // Non-empty signature for validation
             proposed_at: SystemTime::now(),
-            proposed_by: DeviceId(uuid::Uuid::new_v4()),
+            proposed_by: DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
         };
 
         orchestrator.submit_proposal(proposal).await.unwrap();

@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Meet-based CRDT effect handler enforcing meet semi-lattice laws
 //!
 //! This module provides effect handlers for meet semi-lattices that enable
@@ -130,7 +132,7 @@ impl<S: MvState + Top> MvHandler<S> {
     /// Generate consistency proof for current state
     pub fn generate_consistency_proof(&self, participant: DeviceId) -> ConsistencyProof {
         let state_bytes = bincode::serialize(&self.state).unwrap_or_else(|_| Vec::new());
-        let constraint_hash: [u8; 32] = blake3::hash(&state_bytes).into();
+        let constraint_hash: [u8; 32] = aura_core::hash::hash(&state_bytes);
 
         ConsistencyProof::new(constraint_hash, participant, current_timestamp())
     }
@@ -145,7 +147,7 @@ impl<S: MvState + Top> MvHandler<S> {
 
         let our_hash: [u8; 32] = {
             let state_bytes = bincode::serialize(&self.state).unwrap_or_else(|_| Vec::new());
-            blake3::hash(&state_bytes).into()
+            aura_core::hash::hash(&state_bytes)
         };
 
         self.consistency_proofs
@@ -198,7 +200,7 @@ impl<S: MvState + Top> MultiConstraintHandler<S> {
 
     /// Get or create handler for a specific scope
     pub fn get_or_create_handler(&mut self, scope: ConstraintScope) -> &mut MvHandler<S> {
-        self.handlers.entry(scope).or_insert_with(MvHandler::new)
+        self.handlers.entry(scope).or_default()
     }
 
     /// Apply constraint to specific scope
@@ -317,7 +319,7 @@ mod tests {
         assert!(handler.satisfies_constraint(&read_write));
 
         // Now apply a constraint to make state more restrictive
-        let mut handler2 = MvHandler::with_state(read_write.clone());
+        let handler2 = MvHandler::with_state(read_write.clone());
         // State: {"read", "write"} (more restrictive)
 
         // State {"read", "write"} satisfies constraint {"read", "write"}
@@ -329,7 +331,7 @@ mod tests {
         assert!(!handler2.satisfies_constraint(&read_only));
 
         // A less restrictive state should satisfy more restrictive constraints
-        let mut handler3 = MvHandler::with_state(read_only.clone());
+        let handler3 = MvHandler::with_state(read_only.clone());
         // State: {"read"}
 
         // State {"read"} satisfies constraint {"read"}

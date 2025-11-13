@@ -4,9 +4,8 @@
 
 use anyhow::{Context, Result};
 use aura_core::maintenance::{UpgradeKind, UpgradeProposal};
-use aura_core::{DeviceId, Hash32, SemanticVersion};
+use aura_core::{Hash32, SemanticVersion};
 use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::OtaAction;
@@ -47,10 +46,12 @@ async fn propose_upgrade(
     download_url: &str,
     description: &str,
 ) -> Result<()> {
-    effects.log_info(&format!(
-        "Proposing {} upgrade to version {}: {}",
-        upgrade_type, to_version, description
-    ));
+    let _ = effects
+        .log_info(&format!(
+            "Proposing {} upgrade to version {}: {}",
+            upgrade_type, to_version, description
+        ))
+        .await;
 
     let kind = match upgrade_type {
         "soft" => UpgradeKind::SoftFork,
@@ -86,10 +87,12 @@ async fn propose_upgrade(
 
     proposal.validate().context("Invalid upgrade proposal")?;
 
-    effects.log_info(&format!(
-        "Created upgrade proposal with ID: {}",
-        proposal.package_id
-    ));
+    let _ = effects
+        .log_info(&format!(
+            "Created upgrade proposal with ID: {}",
+            proposal.package_id
+        ))
+        .await;
     println!("Upgrade proposal created successfully");
     println!("Package ID: {}", proposal.package_id);
     println!("Version: {}", proposal.version);

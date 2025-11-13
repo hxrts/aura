@@ -143,7 +143,7 @@ pub struct LeakageBudget {
 }
 
 /// G_search choreography implementation
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SearchChoreography {
     /// Current device role
     role: SearchRole,
@@ -564,6 +564,7 @@ impl SearchChoreography {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::Hash32;
     use aura_wot::CapabilityEvaluator;
 
     #[test]
@@ -602,7 +603,7 @@ mod tests {
                 required_capabilities: vec![],
             },
             SearchResult {
-                content_id: ContentId::new(Hash32([0u8; 32])),
+                content_id: ContentId::new(Hash32([1u8; 32])),
                 owner: None,
                 score: 0.7,
                 snippet: None,

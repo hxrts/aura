@@ -3,11 +3,8 @@
 //! This module provides standardized helpers for creating and managing test keys
 //! and cryptographic material across the Aura test suite.
 
-use aura_core::DeviceId;
-use aura_core::effects::RandomEffects;
-use crate::Effects;
+use aura_core::{hash, DeviceId};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use sha2::{Digest, Sha256};
 
 /// Key test fixture for consistent test key generation
 #[derive(Debug, Clone)]
@@ -24,9 +21,8 @@ impl KeyTestFixture {
         let verifying_key = signing_key.verifying_key();
 
         // Generate key ID from the public key
-        let mut hasher = Sha256::new();
-        hasher.update(verifying_key.as_bytes());
-        let key_id = format!("key_{:x}", hasher.finalize());
+        let digest = hash::hash(verifying_key.as_bytes());
+        let key_id = format!("key_{:02x?}", &digest[0..8]);
 
         Self {
             signing_key,
@@ -37,31 +33,15 @@ impl KeyTestFixture {
 
     /// Create a key fixture from a seed string
     pub fn from_seed_string(seed: &str) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(seed.as_bytes());
-        let digest = hasher.finalize();
+        let digest = hash::hash(seed.as_bytes());
 
-        let seed_bytes: [u8; 32] = digest[..32].try_into().unwrap_or([0u8; 32]);
-        Self::from_seed(&seed_bytes)
+        Self::from_seed(&digest)
     }
 
-    /// Create a random key fixture
-    pub async fn random() -> Self {
-        // Use deterministic key generation from fixed seed
-        let effects = Effects::for_test("key_fixture_random");
-        let key_bytes = effects.random_bytes_32().await;
-        let signing_key = SigningKey::from_bytes(&key_bytes);
-        let verifying_key = signing_key.verifying_key();
-
-        let mut hasher = Sha256::new();
-        hasher.update(verifying_key.as_bytes());
-        let key_id = format!("key_{:x}", hasher.finalize());
-
-        Self {
-            signing_key,
-            verifying_key,
-            key_id,
-        }
+    /// Create a random key fixture (deterministic for testing)
+    pub fn random() -> Self {
+        // Use deterministic key generation from fixed seed for test reproducibility
+        Self::from_seed_string("key_fixture_random_seed")
     }
 
     /// Get the signing key
@@ -251,11 +231,11 @@ pub mod helpers {
     /// Create FROST key shares for threshold signature testing
     ///
     /// Returns key shares and public key package for the given threshold and total.
-    /// Uses the provided effects for deterministic key generation.
-    pub async fn test_frost_key_shares(
+    /// Uses deterministic seed for reproducible testing.
+    pub fn test_frost_key_shares(
         threshold: u16,
         total: u16,
-        effects: &Effects,
+        seed: u64,
     ) -> (
         std::collections::BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::KeyPackage>,
         frost_ed25519::keys::PublicKeyPackage,
@@ -263,46 +243,38 @@ pub mod helpers {
         use rand::CryptoRng;
         use std::collections::BTreeMap;
 
-        // Use a deterministic RNG from effects - it implements CryptoRng for testing
-        let mut rng = {
-            // Create a seed from the effects
-            let seed = effects.random_bytes(8).await;
-            let seed_array: [u8; 8] = seed.try_into().unwrap();
-            let seed_u64 = u64::from_le_bytes(seed_array);
+        // Create a deterministic RNG that also implements CryptoRng
+        struct TestRng {
+            state: u64,
+        }
 
-            // Create a deterministic RNG that also implements CryptoRng
-            struct TestRng {
-                state: u64,
+        impl rand::RngCore for TestRng {
+            fn next_u32(&mut self) -> u32 {
+                self.state = self.state.wrapping_mul(1103515245).wrapping_add(12345);
+                (self.state / 65536) as u32
             }
 
-            impl rand::RngCore for TestRng {
-                fn next_u32(&mut self) -> u32 {
-                    self.state = self.state.wrapping_mul(1103515245).wrapping_add(12345);
-                    (self.state / 65536) as u32
-                }
+            fn next_u64(&mut self) -> u64 {
+                let high = self.next_u32() as u64;
+                let low = self.next_u32() as u64;
+                (high << 32) | low
+            }
 
-                fn next_u64(&mut self) -> u64 {
-                    let high = self.next_u32() as u64;
-                    let low = self.next_u32() as u64;
-                    (high << 32) | low
-                }
-
-                fn fill_bytes(&mut self, dest: &mut [u8]) {
-                    for byte in dest.iter_mut() {
-                        *byte = (self.next_u32() % 256) as u8;
-                    }
-                }
-
-                fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
-                    self.fill_bytes(dest);
-                    Ok(())
+            fn fill_bytes(&mut self, dest: &mut [u8]) {
+                for byte in dest.iter_mut() {
+                    *byte = (self.next_u32() % 256) as u8;
                 }
             }
 
-            impl CryptoRng for TestRng {}
+            fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+                self.fill_bytes(dest);
+                Ok(())
+            }
+        }
 
-            TestRng { state: seed_u64 }
-        };
+        impl CryptoRng for TestRng {}
+
+        let mut rng = TestRng { state: seed };
 
         // Generate key shares using FROST DKG
         let (secret_shares, pubkey_package) = frost_ed25519::keys::generate_with_dealer(

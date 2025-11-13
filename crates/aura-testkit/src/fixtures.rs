@@ -3,26 +3,27 @@
 //! This module provides comprehensive fixtures that combine the lower-level
 //! test utilities into reusable, semantic test setup objects. These fixtures
 //! eliminate boilerplate test setup across the codebase.
+//!
+//! Enhanced for stateless effect system architecture (work/021.md).
 
-use crate::{test_account_with_threshold, test_effects_deterministic};
+use crate::{test_account_with_threshold, TestEffectsBuilder, TestExecutionMode};
 use aura_core::{AccountId, DeviceId};
-use crate::Effects;
 use aura_journal::semilattice::ModernAccountState as AccountState;
 
 /// High-level fixture for protocol testing scenarios
 ///
 /// Provides a complete, configured testing environment for protocol implementation
-/// testing, including effects, accounts, devices, and participant setup.
+/// testing, including accounts, devices, and participant setup.
 #[derive(Clone)]
 pub struct ProtocolTestFixture {
-    /// Deterministic effects for reproducible test execution
-    pub effects: Effects,
     /// Test account with pre-configured devices
     pub account_state: AccountState,
     /// Primary device ID for the test
     pub device_id: DeviceId,
     /// All device IDs in the test scenario
     pub all_device_ids: Vec<DeviceId>,
+    /// Random seed used for deterministic generation
+    pub seed: u64,
 }
 
 impl ProtocolTestFixture {
@@ -38,10 +39,9 @@ impl ProtocolTestFixture {
     /// # Arguments
     /// * `threshold` - Minimum number of devices required for operations (M in M-of-N)
     /// * `total_devices` - Total number of devices (N in M-of-N)
-    /// * `seed` - Random seed for deterministic effects
+    /// * `seed` - Random seed for deterministic generation
     pub async fn with_config(threshold: u16, total_devices: u16, seed: u64) -> Self {
-        let effects = test_effects_deterministic(seed, 1000);
-        let account_state = test_account_with_threshold(&effects, threshold, total_devices).await;
+        let account_state = test_account_with_threshold(seed, threshold, total_devices).await;
         let device_id = account_state
             .device_registry
             .devices
@@ -57,16 +57,16 @@ impl ProtocolTestFixture {
             .collect();
 
         Self {
-            effects,
             account_state,
             device_id,
             all_device_ids,
+            seed,
         }
     }
 
-    /// Get the effects for this fixture
-    pub fn effects(&self) -> &Effects {
-        &self.effects
+    /// Get the random seed for this fixture
+    pub fn seed(&self) -> u64 {
+        self.seed
     }
 
     /// Get the account state for this fixture
@@ -89,14 +89,74 @@ impl ProtocolTestFixture {
         &self.all_device_ids
     }
 
-    /// Advance simulated time by N seconds
-    pub fn advance_time(&self, seconds: u64) -> aura_crypto::Result<()> {
-        self.effects.advance_time(seconds)
+    /// Get deterministic key pair for this fixture
+    pub fn key_pair(&self) -> (ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey) {
+        crate::test_key_pair(self.seed)
     }
 
-    /// Get current simulated timestamp
-    pub fn current_time(&self) -> aura_crypto::Result<u64> {
-        self.effects.now()
+    /// Create protocol test fixture using stateless effects (new API)
+    ///
+    /// This uses the new stateless effect system architecture and is the
+    /// recommended approach for new tests.
+    pub async fn with_stateless_effects(
+        threshold: u16,
+        total_devices: u16,
+        execution_mode: TestExecutionMode,
+        seed: u64,
+    ) -> Result<Self, StatelessFixtureError> {
+        // For now, use the existing API until the stateless system is complete
+        // This will be replaced with the actual stateless implementation
+        let fixture = Self::with_config(threshold, total_devices, seed).await;
+
+        // TODO: Replace with actual stateless effect system when available
+        // let primary_device = fixture.device_id;
+        // let effects_builder = match execution_mode {
+        //     TestExecutionMode::UnitTest => TestEffectsBuilder::for_unit_tests(primary_device),
+        //     TestExecutionMode::Integration => TestEffectsBuilder::for_integration_tests(primary_device),
+        //     TestExecutionMode::Simulation => TestEffectsBuilder::for_simulation(primary_device),
+        // };
+        // let stateless_effects = effects_builder.with_seed(seed).build()?;
+
+        Ok(fixture)
+    }
+
+    /// Create fixture from effects builder (new API)
+    ///
+    /// This method will be the primary way to create fixtures once the
+    /// stateless effect system is fully implemented.
+    pub async fn from_effects_builder(
+        effects_builder: TestEffectsBuilder,
+        threshold: u16,
+        total_devices: u16,
+    ) -> Result<Self, StatelessFixtureError> {
+        // For now, create using traditional method
+        let device_id = effects_builder.device_id();
+        let seed = effects_builder.seed();
+        let fixture = Self::with_config(threshold, total_devices, seed).await;
+
+        // TODO: Replace with actual stateless effect system integration
+        // let stateless_effects = effects_builder.build()?;
+        // let account_state = create_account_with_stateless_effects(&stateless_effects, threshold, total_devices).await?;
+
+        Ok(fixture)
+    }
+
+    /// Create fixture for unit testing (convenience method)
+    pub async fn for_unit_tests(device_id: DeviceId) -> Result<Self, StatelessFixtureError> {
+        let effects_builder = TestEffectsBuilder::for_unit_tests(device_id);
+        Self::from_effects_builder(effects_builder, 2, 3).await
+    }
+
+    /// Create fixture for integration testing (convenience method)  
+    pub async fn for_integration_tests(device_id: DeviceId) -> Result<Self, StatelessFixtureError> {
+        let effects_builder = TestEffectsBuilder::for_integration_tests(device_id);
+        Self::from_effects_builder(effects_builder, 3, 5).await
+    }
+
+    /// Create fixture for simulation testing (convenience method)
+    pub async fn for_simulation(device_id: DeviceId) -> Result<Self, StatelessFixtureError> {
+        let effects_builder = TestEffectsBuilder::for_simulation(device_id);
+        Self::from_effects_builder(effects_builder, 3, 5).await
     }
 }
 
@@ -109,12 +169,12 @@ impl ProtocolTestFixture {
 /// FROST signatures, key derivation, encryption, and threshold operations.
 #[derive(Clone)]
 pub struct CryptoTestFixture {
-    /// Deterministic effects for reproducible crypto operations
-    pub effects: Effects,
     /// Test signing key for asymmetric operations
     pub signing_key: ed25519_dalek::SigningKey,
     /// Corresponding verification key
     pub verify_key: ed25519_dalek::VerifyingKey,
+    /// Random seed for deterministic generation
+    pub seed: u64,
 }
 
 impl CryptoTestFixture {
@@ -125,19 +185,18 @@ impl CryptoTestFixture {
 
     /// Create a crypto test fixture with specific random seed
     pub fn with_seed(seed: u64) -> Self {
-        let effects = test_effects_deterministic(seed, 1000);
-        let (signing_key, verify_key) = crate::test_key_pair(&effects);
+        let (signing_key, verify_key) = crate::test_key_pair(seed);
 
         Self {
-            effects,
             signing_key,
             verify_key,
+            seed,
         }
     }
 
-    /// Get the effects for this fixture
-    pub fn effects(&self) -> &Effects {
-        &self.effects
+    /// Get the random seed for this fixture
+    pub fn seed(&self) -> u64 {
+        self.seed
     }
 
     /// Get the signing key
@@ -163,8 +222,6 @@ impl Default for CryptoTestFixture {
 /// recovery, and state transitions.
 #[derive(Clone)]
 pub struct AccountTestFixture {
-    /// Deterministic effects for reproducible account operations
-    pub effects: Effects,
     /// The account being tested
     pub account_id: AccountId,
     /// Account state with initial configuration
@@ -173,6 +230,8 @@ pub struct AccountTestFixture {
     pub primary_device: DeviceId,
     /// All configured devices in the account
     pub all_devices: Vec<DeviceId>,
+    /// Random seed for deterministic generation
+    pub seed: u64,
 }
 
 impl AccountTestFixture {
@@ -192,8 +251,7 @@ impl AccountTestFixture {
 
     /// Create an account test fixture with specific configuration
     pub async fn with_seed(seed: u64, total_devices: u16, threshold: u16) -> Self {
-        let effects = test_effects_deterministic(seed, 1000);
-        let account_state = test_account_with_threshold(&effects, threshold, total_devices).await;
+        let account_state = test_account_with_threshold(seed, threshold, total_devices).await;
         let account_id = account_state.account_id;
         let primary_device = account_state
             .device_registry
@@ -210,17 +268,17 @@ impl AccountTestFixture {
             .collect();
 
         Self {
-            effects,
             account_id,
             account_state,
             primary_device,
             all_devices,
+            seed,
         }
     }
 
-    /// Get the effects for this fixture
-    pub fn effects(&self) -> &Effects {
-        &self.effects
+    /// Get the random seed for this fixture
+    pub fn seed(&self) -> u64 {
+        self.seed
     }
 
     /// Get the account ID
@@ -251,3 +309,174 @@ impl AccountTestFixture {
 
 // Note: Default implementation removed because async constructors cannot implement Default
 // Use AccountTestFixture::new().await instead
+
+/// Error type for stateless fixture creation
+#[derive(Debug)]
+pub enum StatelessFixtureError {
+    /// Effect system initialization failed
+    EffectSystemError(String),
+    /// Account creation failed
+    AccountCreationError(String),
+    /// Device configuration error
+    DeviceConfigError(String),
+    /// Invalid parameter
+    InvalidParameter { param: String, reason: String },
+}
+
+impl std::fmt::Display for StatelessFixtureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StatelessFixtureError::EffectSystemError(msg) => {
+                write!(f, "Effect system initialization failed: {}", msg)
+            }
+            StatelessFixtureError::AccountCreationError(msg) => {
+                write!(f, "Account creation failed: {}", msg)
+            }
+            StatelessFixtureError::DeviceConfigError(msg) => {
+                write!(f, "Device configuration error: {}", msg)
+            }
+            StatelessFixtureError::InvalidParameter { param, reason } => {
+                write!(f, "Invalid parameter '{}': {}", param, reason)
+            }
+        }
+    }
+}
+
+impl std::error::Error for StatelessFixtureError {}
+
+/// Enhanced fixture configuration for stateless architecture
+#[derive(Debug, Clone)]
+pub struct StatelessFixtureConfig {
+    /// Execution mode for the effect system
+    pub execution_mode: TestExecutionMode,
+    /// Random seed for deterministic behavior
+    pub seed: u64,
+    /// Threshold for M-of-N operations
+    pub threshold: u16,
+    /// Total number of devices
+    pub total_devices: u16,
+    /// Primary device ID (if None, will be auto-generated)
+    pub primary_device: Option<DeviceId>,
+}
+
+impl Default for StatelessFixtureConfig {
+    fn default() -> Self {
+        Self {
+            execution_mode: TestExecutionMode::UnitTest,
+            seed: 42,
+            threshold: 2,
+            total_devices: 3,
+            primary_device: None,
+        }
+    }
+}
+
+impl StatelessFixtureConfig {
+    /// Create config for unit testing
+    pub fn for_unit_tests() -> Self {
+        Self {
+            execution_mode: TestExecutionMode::UnitTest,
+            ..Default::default()
+        }
+    }
+
+    /// Create config for integration testing
+    pub fn for_integration_tests() -> Self {
+        Self {
+            execution_mode: TestExecutionMode::Integration,
+            threshold: 3,
+            total_devices: 5,
+            ..Default::default()
+        }
+    }
+
+    /// Create config for simulation
+    pub fn for_simulation() -> Self {
+        Self {
+            execution_mode: TestExecutionMode::Simulation,
+            threshold: 3,
+            total_devices: 5,
+            ..Default::default()
+        }
+    }
+}
+
+/// Enhanced factory methods using stateless architecture
+impl CryptoTestFixture {
+    /// Create crypto fixture using stateless effects (new API)
+    pub async fn with_stateless_effects(
+        execution_mode: TestExecutionMode,
+        seed: u64,
+    ) -> Result<Self, StatelessFixtureError> {
+        // For now, use existing implementation until stateless system is ready
+        let fixture = Self::with_seed(seed);
+        Ok(fixture)
+    }
+
+    /// Create crypto fixture for unit testing (convenience method)
+    pub async fn for_unit_tests() -> Result<Self, StatelessFixtureError> {
+        Self::with_stateless_effects(TestExecutionMode::UnitTest, 42).await
+    }
+
+    /// Create crypto fixture for integration testing (convenience method)
+    pub async fn for_integration_tests() -> Result<Self, StatelessFixtureError> {
+        Self::with_stateless_effects(TestExecutionMode::Integration, 42).await
+    }
+}
+
+/// Enhanced factory methods using stateless architecture
+impl AccountTestFixture {
+    /// Create account fixture using stateless effects (new API)
+    pub async fn with_stateless_effects(
+        config: StatelessFixtureConfig,
+    ) -> Result<Self, StatelessFixtureError> {
+        // For now, use existing implementation until stateless system is ready
+        let fixture = Self::with_seed(config.seed, config.total_devices, config.threshold).await;
+        Ok(fixture)
+    }
+
+    /// Create account fixture for unit testing (convenience method)
+    pub async fn for_unit_tests() -> Result<Self, StatelessFixtureError> {
+        let config = StatelessFixtureConfig::for_unit_tests();
+        Self::with_stateless_effects(config).await
+    }
+
+    /// Create account fixture for integration testing (convenience method)
+    pub async fn for_integration_tests() -> Result<Self, StatelessFixtureError> {
+        let config = StatelessFixtureConfig::for_integration_tests();
+        Self::with_stateless_effects(config).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_stateless_fixture_config() {
+        let config = StatelessFixtureConfig::for_unit_tests();
+        assert_eq!(config.execution_mode, TestExecutionMode::UnitTest);
+        assert_eq!(config.seed, 42);
+        assert_eq!(config.threshold, 2);
+        assert_eq!(config.total_devices, 3);
+    }
+
+    #[tokio::test]
+    async fn test_protocol_fixture_creation() {
+        let device_id = DeviceId::new();
+        let result = ProtocolTestFixture::for_unit_tests(device_id).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_crypto_fixture_creation() {
+        let result = CryptoTestFixture::for_unit_tests().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_account_fixture_creation() {
+        let result = AccountTestFixture::for_unit_tests().await;
+        assert!(result.is_ok());
+    }
+}

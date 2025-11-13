@@ -4,7 +4,11 @@
 //! maintaining state, device identity, execution mode, and operation tracking.
 
 use crate::guards::flow::FlowHint;
-use aura_core::{identifiers::SessionId, AccountId, DeviceId};
+use aura_core::{
+    effects::{RandomEffects, TimeEffects},
+    identifiers::SessionId,
+    AccountId, DeviceId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -57,7 +61,7 @@ impl AuraContext {
             account_id: None,
             session_id: None,
             mode: ExecutionMode::Testing,
-            operation_id: Uuid::new_v4(),
+            operation_id: Uuid::nil(), // Use nil UUID for deterministic testing
             metadata: HashMap::new(),
             epoch: 0,
             flow_hint: None,
@@ -65,30 +69,65 @@ impl AuraContext {
     }
 
     /// Create a new context for production
-    pub fn for_production(device_id: DeviceId) -> Self {
+    pub async fn for_production<R, T>(
+        device_id: DeviceId,
+        random_effects: &R,
+        time_effects: &T,
+    ) -> Self
+    where
+        R: RandomEffects,
+        T: TimeEffects,
+    {
+        // Generate UUID using random effects
+        let bytes_vec = random_effects.random_bytes(16).await;
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&bytes_vec);
+        let operation_id = Uuid::from_bytes(bytes);
+
+        // Get current time using time effects
+        let epoch = time_effects.current_timestamp().await;
+
         Self {
             device_id,
             account_id: None,
             session_id: None,
             mode: ExecutionMode::Production,
-            operation_id: Uuid::new_v4(),
+            operation_id,
             metadata: HashMap::new(),
-            epoch: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
+            epoch,
             flow_hint: None,
         }
     }
 
     /// Create a new context for simulation
     pub fn for_simulation(device_id: DeviceId, seed: u64) -> Self {
+        // Create deterministic UUID from seed for simulation
+        let uuid_bytes = [
+            (seed >> 56) as u8,
+            (seed >> 48) as u8,
+            (seed >> 40) as u8,
+            (seed >> 32) as u8,
+            (seed >> 24) as u8,
+            (seed >> 16) as u8,
+            (seed >> 8) as u8,
+            seed as u8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ];
+        let operation_id = Uuid::from_bytes(uuid_bytes);
+
         Self {
             device_id,
             account_id: None,
             session_id: None,
             mode: ExecutionMode::Simulation { seed },
-            operation_id: Uuid::new_v4(),
+            operation_id,
             metadata: HashMap::new(),
             epoch: 0,
             flow_hint: None,
@@ -96,18 +135,68 @@ impl AuraContext {
     }
 
     /// Create a child context for a new operation
-    pub fn child_operation(&self) -> Self {
+    pub async fn child_operation<R>(&self, random_effects: &R) -> Self
+    where
+        R: RandomEffects,
+    {
         let mut child = self.clone();
-        child.operation_id = Uuid::new_v4();
+
+        match &self.mode {
+            ExecutionMode::Testing => {
+                child.operation_id = Uuid::nil(); // Deterministic for testing
+            }
+            ExecutionMode::Production => {
+                // Generate UUID using random effects
+                let bytes_vec = random_effects.random_bytes(16).await;
+                let mut bytes = [0u8; 16];
+                bytes.copy_from_slice(&bytes_vec);
+                child.operation_id = Uuid::from_bytes(bytes);
+            }
+            ExecutionMode::Simulation { seed } => {
+                // Create deterministic UUID from parent operation ID and seed
+                let parent_bytes = self.operation_id.as_bytes();
+                let mut uuid_bytes = [0u8; 16];
+                for (i, &byte) in parent_bytes.iter().enumerate() {
+                    uuid_bytes[i] = byte.wrapping_add((seed >> (i * 8)) as u8);
+                }
+                child.operation_id = Uuid::from_bytes(uuid_bytes);
+            }
+        }
+
         child.flow_hint = None;
         child
     }
 
     /// Create a child context for a session
-    pub fn with_session(&self, session_id: SessionId) -> Self {
+    pub async fn with_session<R>(&self, session_id: SessionId, random_effects: &R) -> Self
+    where
+        R: RandomEffects,
+    {
         let mut child = self.clone();
         child.session_id = Some(session_id);
-        child.operation_id = Uuid::new_v4();
+
+        match &self.mode {
+            ExecutionMode::Testing => {
+                child.operation_id = Uuid::nil(); // Deterministic for testing
+            }
+            ExecutionMode::Production => {
+                // Generate UUID using random effects
+                let bytes_vec = random_effects.random_bytes(16).await;
+                let mut bytes = [0u8; 16];
+                bytes.copy_from_slice(&bytes_vec);
+                child.operation_id = Uuid::from_bytes(bytes);
+            }
+            ExecutionMode::Simulation { seed } => {
+                // Create deterministic UUID from session_id and seed
+                let session_bytes = session_id.0.as_bytes();
+                let mut uuid_bytes = [0u8; 16];
+                for (i, &byte) in session_bytes.iter().take(16).enumerate() {
+                    uuid_bytes[i] = byte.wrapping_add((seed >> (i * 8)) as u8);
+                }
+                child.operation_id = Uuid::from_bytes(uuid_bytes);
+            }
+        }
+
         child.flow_hint = None;
         child
     }

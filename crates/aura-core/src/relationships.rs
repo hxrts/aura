@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::hash;
+
 /// Relationship identifier for entity relationships
 ///
 /// Unique identifier for relationships between entities in the system.
@@ -62,17 +64,16 @@ impl RelationshipId {
     /// Generate a random relationship ID
     #[allow(clippy::disallowed_methods)]
     pub fn random() -> Self {
-        let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(blake3::hash(uuid::Uuid::new_v4().as_bytes()).as_bytes());
-        Self(bytes)
+        let id = hash::hash(uuid::Uuid::from_bytes([0u8; 16]).as_bytes());
+        Self(id)
     }
 
     /// Create deterministic relationship ID from two entity IDs
     pub fn from_entities(entity1: &[u8], entity2: &[u8]) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(entity1);
-        hasher.update(entity2);
-        Self(*hasher.finalize().as_bytes())
+        let mut h = hash::hasher();
+        h.update(entity1);
+        h.update(entity2);
+        Self(h.finalize())
     }
 }
 

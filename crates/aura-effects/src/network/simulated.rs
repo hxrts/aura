@@ -2,8 +2,8 @@
 //!
 //! Provides controllable network behavior for testing protocol resilience.
 
-use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use async_trait::async_trait;
+use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -166,9 +166,10 @@ impl NetworkEffects for SimulatedNetworkHandler {
                     Ok(())
                 } else {
                     // Message was dropped due to network conditions
-                    Err(NetworkError::SendFailed(
-                        "Message dropped due to network conditions".to_string(),
-                    ))
+                    Err(NetworkError::SendFailed {
+                        peer_id: Some(peer_id),
+                        reason: "Message dropped due to network conditions".to_string(),
+                    })
                 }
             } else {
                 Err(NetworkError::ConnectionFailed(format!(
@@ -204,9 +205,9 @@ impl NetworkEffects for SimulatedNetworkHandler {
             let (from, _, message) = queue.remove(pos).unwrap();
             Ok((from, message))
         } else {
-            Err(NetworkError::ReceiveFailed(
-                "Timeout waiting for message".to_string(),
-            ))
+            Err(NetworkError::ReceiveFailed {
+                reason: "Timeout waiting for message".to_string(),
+            })
         }
     }
 
@@ -222,9 +223,9 @@ impl NetworkEffects for SimulatedNetworkHandler {
             let (_, _, message) = queue.remove(pos).unwrap();
             Ok(message)
         } else {
-            Err(NetworkError::ReceiveFailed(
-                "Timeout waiting for message".to_string(),
-            ))
+            Err(NetworkError::ReceiveFailed {
+                reason: "Timeout waiting for message".to_string(),
+            })
         }
     }
 

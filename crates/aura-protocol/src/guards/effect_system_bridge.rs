@@ -1,9 +1,11 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Bridge between AuraEffectSystem and aura-wot capability evaluation
 //!
 //! This module implements the bridge interface that allows aura-wot to evaluate
 //! capabilities without directly depending on aura-protocol's effect system.
 
-use crate::effects::system::AuraEffectSystem;
+use crate::effects::AuraEffectSystem;
 use aura_core::DeviceId;
 use aura_wot::EffectSystemInterface;
 use std::collections::HashMap;
@@ -96,7 +98,7 @@ impl SecurityContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::system::AuraEffectSystem;
+    use crate::effects::AuraEffectSystem;
     use crate::handlers::ExecutionMode;
     use aura_core::identifiers::DeviceId;
 

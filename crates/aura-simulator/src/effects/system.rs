@@ -146,21 +146,6 @@ impl SimulationEffectSystem {
 
 #[async_trait]
 impl CryptoEffects for SimulationEffectSystem {
-    async fn hash(&self, data: &[u8]) -> [u8; 32] {
-        if let Some(FaultType::CryptoFailure) = self.should_trigger_fault("hash") {
-            // Return corrupted hash on fault
-            [0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00,
-             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
-        } else {
-            self.crypto.hash(data).await
-        }
-    }
-
-    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
-        self.crypto.hmac(key, data).await
-    }
 
     async fn hkdf_derive(
         &self,

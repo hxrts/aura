@@ -3,8 +3,7 @@
 //! These tests validate the integration between different invitation system components
 //! including device invitations, acceptance protocols, and relationship formation.
 
-use aura_core::{AccountId, Cap, DeviceId, RelationshipId, TrustLevel};
-use aura_protocol::effects::AuraEffectSystem;
+use aura_core::{AccountId, Cap, DeviceId, TrustLevel};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
     invitation_acceptance::{AcceptanceProtocolConfig, InvitationAcceptanceCoordinator},
@@ -12,11 +11,11 @@ use aura_invitation::{
         RelationshipFormationCoordinator, RelationshipFormationRequest, RelationshipType,
     },
 };
-use aura_journal::semilattice::InvitationLedger;
-use uuid::Uuid;
-// Note: For testing, use mock handlers from aura-effects
+use aura_journal::semilattice::{InvitationLedger, InvitationStatus};
+use aura_protocol::effects::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 /// Test helper to create coordinated test environment
 struct InvitationIntegrationTest {
@@ -30,9 +29,27 @@ struct InvitationIntegrationTest {
 
 impl InvitationIntegrationTest {
     fn new() -> Self {
-        let inviter_device = DeviceId(Uuid::new_v4());
-        let invitee_device = DeviceId(Uuid::new_v4());
-        let account_id = AccountId(Uuid::new_v4());
+        // Use deterministic UUIDs to avoid conflicts
+        let inviter_device = DeviceId(Uuid::from_bytes([0x01; 16]));
+        let invitee_device = DeviceId(Uuid::from_bytes([0x02; 16]));
+        let account_id = AccountId(Uuid::from_bytes([0x03; 16]));
+        let shared_ledger = Arc::new(Mutex::new(InvitationLedger::new()));
+
+        Self {
+            inviter_device,
+            invitee_device,
+            account_id,
+            inviter_effects: AuraEffectSystem::for_testing(inviter_device),
+            invitee_effects: AuraEffectSystem::for_testing(invitee_device),
+            shared_ledger,
+        }
+    }
+
+    fn new_with_seed(seed: u8) -> Self {
+        // Use deterministic UUIDs based on seed to avoid conflicts between tests
+        let inviter_device = DeviceId(Uuid::from_bytes([seed; 16]));
+        let invitee_device = DeviceId(Uuid::from_bytes([seed + 1; 16]));
+        let account_id = AccountId(Uuid::from_bytes([seed + 2; 16]));
         let shared_ledger = Arc::new(Mutex::new(InvitationLedger::new()));
 
         Self {
@@ -57,11 +74,11 @@ impl InvitationIntegrationTest {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn test_device_invitation_coordinator_integration() {
     println!("Testing device invitation coordinator integration...");
 
-    let test = InvitationIntegrationTest::new();
+    let test = InvitationIntegrationTest::new_with_seed(10);
     let request = test.create_invitation_request("tablet", Some(7200));
 
     // Create coordinator and send invitation
@@ -82,18 +99,21 @@ async fn test_device_invitation_coordinator_integration() {
 
     // Verify ledger state
     let ledger = test.shared_ledger.lock().await;
-    assert!(ledger.is_pending(&response.invitation.invitation_id));
-    assert!(!ledger.is_accepted(&response.invitation.invitation_id));
-    assert!(!ledger.is_expired(&response.invitation.invitation_id));
+    assert_eq!(
+        ledger
+            .get(&response.invitation.invitation_id)
+            .map(|r| r.status),
+        Some(InvitationStatus::Pending)
+    );
 
     println!("✓ Device invitation coordinator integration successful");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn test_invitation_acceptance_coordinator_integration() {
     println!("Testing invitation acceptance coordinator integration...");
 
-    let test = InvitationIntegrationTest::new();
+    let test = InvitationIntegrationTest::new_with_seed(20);
     let request = test.create_invitation_request("laptop", Some(3600));
 
     // Create invitation first
@@ -115,10 +135,11 @@ async fn test_invitation_acceptance_coordinator_integration() {
         protocol_timeout_secs: 120,
     };
 
-    // Create acceptance coordinator and accept invitation
-    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config(
+    // Create acceptance coordinator with shared ledger and accept invitation
+    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config_and_ledger(
         test.invitee_effects.clone(),
         acceptance_config,
+        test.shared_ledger.clone(),
     );
 
     let acceptance = acceptance_coordinator
@@ -138,17 +159,16 @@ async fn test_invitation_acceptance_coordinator_integration() {
     let ledger = test.shared_ledger.lock().await;
     let record = ledger.get(&acceptance.invitation_id);
     assert!(record.is_some());
-    assert!(matches!(record.unwrap().status, aura_journal::semilattice::InvitationStatus::Accepted));
-    assert!(!ledger.is_pending(&acceptance.invitation_id));
+    assert_eq!(record.unwrap().status, InvitationStatus::Accepted);
 
     println!("✓ Invitation acceptance coordinator integration successful");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn test_relationship_formation_coordinator_integration() {
     println!("Testing relationship formation coordinator integration...");
 
-    let test = InvitationIntegrationTest::new();
+    let test = InvitationIntegrationTest::new_with_seed(30);
 
     // Test legacy relationship formation
     let formation_request = RelationshipFormationRequest {
@@ -180,16 +200,16 @@ async fn test_relationship_formation_coordinator_integration() {
         relationship.parties,
         vec![test.inviter_device, test.invitee_device]
     );
-    assert_eq!(relationship.trust_level, TrustLevel::Maximum);
+    assert_eq!(relationship.trust_level, TrustLevel::Full);
 
     println!("✓ Relationship formation coordinator integration successful");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn test_full_invitation_to_relationship_flow() {
     println!("Testing full invitation to relationship flow integration...");
 
-    let test = InvitationIntegrationTest::new();
+    let test = InvitationIntegrationTest::new_with_seed(40);
     let request = test.create_invitation_request("guardian-device", Some(1800));
 
     // Step 1: Create invitation
@@ -211,14 +231,15 @@ async fn test_full_invitation_to_relationship_flow() {
     // Step 2: Accept invitation with relationship establishment
     let acceptance_config = AcceptanceProtocolConfig {
         auto_establish_relationship: true,
-        default_trust_level: TrustLevel::Maximum, // Guardian level trust
+        default_trust_level: TrustLevel::Full, // Guardian level trust
         require_transport_confirmation: false,
         protocol_timeout_secs: 180,
     };
 
-    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config(
+    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config_and_ledger(
         test.invitee_effects.clone(),
         acceptance_config,
+        test.shared_ledger.clone(),
     );
 
     let acceptance = acceptance_coordinator
@@ -240,7 +261,10 @@ async fn test_full_invitation_to_relationship_flow() {
     let ledger = test.shared_ledger.lock().await;
     let record = ledger.get(&acceptance.invitation_id);
     assert!(record.is_some());
-    assert!(matches!(record.unwrap().status, aura_journal::semilattice::InvitationStatus::Accepted));
+    assert!(matches!(
+        record.unwrap().status,
+        aura_journal::semilattice::InvitationStatus::Accepted
+    ));
 
     // Step 4: Test that relationship formation is also available
     let formation_request = RelationshipFormationRequest {
@@ -275,11 +299,11 @@ async fn test_full_invitation_to_relationship_flow() {
     println!("  - Additional relationship formation successful");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn test_concurrent_invitation_processing() {
     println!("Testing concurrent invitation processing integration...");
 
-    let test = InvitationIntegrationTest::new();
+    let test = InvitationIntegrationTest::new_with_seed(50);
 
     // Create multiple invitations concurrently
     let invitation_coordinator = DeviceInvitationCoordinator::with_ledger(
@@ -304,14 +328,11 @@ async fn test_concurrent_invitation_processing() {
     // Verify all invitations succeeded
     let mut envelopes = Vec::new();
     for (i, result) in invitation_results.into_iter().enumerate() {
-        let response = result.expect(&format!("Invitation {} failed", i));
+        let response = result.unwrap_or_else(|_| panic!("Invitation {} failed", i));
         assert!(response.success);
         let invitation_id = response.invitation.invitation_id.clone();
         envelopes.push(response.invitation);
-        println!(
-            "Created concurrent invitation {}: {}",
-            i, invitation_id
-        );
+        println!("Created concurrent invitation {}: {}", i, invitation_id);
     }
 
     // Accept all invitations concurrently
@@ -330,7 +351,7 @@ async fn test_concurrent_invitation_processing() {
 
     // Verify all acceptances succeeded
     for (i, result) in acceptance_results.into_iter().enumerate() {
-        let acceptance = result.expect(&format!("Acceptance {} failed", i));
+        let acceptance = result.unwrap_or_else(|_| panic!("Acceptance {} failed", i));
         assert!(acceptance.success);
         println!(
             "Accepted concurrent invitation {}: {}",
@@ -344,11 +365,11 @@ async fn test_concurrent_invitation_processing() {
     println!("✓ Concurrent invitation processing integration successful");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn test_error_handling_integration() {
     println!("Testing error handling integration across components...");
 
-    let test = InvitationIntegrationTest::new();
+    let test = InvitationIntegrationTest::new_with_seed(60);
 
     // Test invalid invitation creation
     let invalid_request = DeviceInvitationRequest {
@@ -369,7 +390,7 @@ async fn test_error_handling_integration() {
     assert!(invalid_result.is_err());
     println!("✓ Invalid invitation creation properly rejected");
 
-    // Test acceptance error handling
+    // Test acceptance error handling with expiration
     let valid_request = test.create_invitation_request("test-device", Some(1)); // Very short TTL
     let invitation_response = coordinator
         .invite_device(valid_request)

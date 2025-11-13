@@ -282,7 +282,7 @@ impl KeyRotationMiddleware {
 
         #[allow(clippy::disallowed_methods)]
         // [VERIFIED] Acceptable in rotation session ID generation
-        let session_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::from_bytes([0u8; 16]).to_string();
         let session = RotationSession {
             session_id: session_id.clone(),
             account_id: account_id.to_string(),

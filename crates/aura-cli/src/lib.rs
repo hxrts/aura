@@ -10,8 +10,6 @@
 //! - Following proper dependency injection patterns
 //! - Avoiding direct system access except in effect handlers
 
-#![allow(missing_docs)]
-
 pub mod effects;
 pub mod handlers;
 pub mod visualization;
@@ -20,23 +18,27 @@ pub mod visualization;
 pub use effects::{CliConfig, CliEffects, ConfigEffects, OutputEffects};
 pub use handlers::CliHandler;
 
-use aura_core::identifiers::DeviceId;
-use aura_protocol::AuraEffectSystem;
+// Action types are defined in this module and automatically available
+
+use aura_core::{identifiers::DeviceId, AuraError};
+use aura_protocol::{AuraEffectSystem, effects::EffectSystemConfig};
 
 /// Create a CLI handler for the given device ID
-pub fn create_cli_handler(device_id: DeviceId) -> CliHandler {
-    let effect_system = AuraEffectSystem::for_production(device_id);
-    CliHandler::new(effect_system)
+pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
+    let config = EffectSystemConfig::for_production(device_id)?;
+    let effect_system = AuraEffectSystem::new(config)?;
+    Ok(CliHandler::new(effect_system))
 }
 
 /// Create a test CLI handler for the given device ID
 pub fn create_test_cli_handler(device_id: DeviceId) -> CliHandler {
-    let effect_system = AuraEffectSystem::for_testing(device_id);
+    let config = EffectSystemConfig::for_testing(device_id);
+    let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
     CliHandler::new(effect_system)
 }
 
 /// Create a CLI handler with a generated device ID
-pub fn create_default_cli_handler() -> CliHandler {
+pub fn create_default_cli_handler() -> Result<CliHandler, AuraError> {
     let device_id = DeviceId::new();
     create_cli_handler(device_id)
 }
@@ -252,30 +254,39 @@ pub enum OtaAction {
 /// CLI error types
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
+    /// Command was not found or recognized
     #[error("Command not found: {0}")]
     CommandNotFound(String),
 
+    /// Invalid input provided by the user
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    /// Configuration-related error
     #[error("Configuration error: {0}")]
     Configuration(String),
 
+    /// File system operation error
     #[error("File system error: {0}")]
     FileSystem(String),
 
+    /// Data serialization/deserialization error
     #[error("Serialization error: {0}")]
     Serialization(String),
 
+    /// Feature not yet implemented
     #[error("Not implemented: {0}")]
     NotImplemented(String),
 
+    /// Authentication or authorization error
     #[error("Authentication error: {0}")]
     Authentication(String),
 
+    /// Network communication error
     #[error("Network error: {0}")]
     Network(String),
 
+    /// General operation failure
     #[error("Operation failed: {0}")]
     OperationFailed(String),
 }

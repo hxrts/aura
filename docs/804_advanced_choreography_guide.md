@@ -1,191 +1,396 @@
 # Advanced Choreography Guide
 
-This guide covers sophisticated choreographic programming patterns using the aura-choreography system. You will learn advanced DSL syntax, multi-party protocols, protocol composition, error handling strategies, and system layering techniques.
+This guide covers sophisticated choreographic programming patterns using rumpsteak-aura. You will learn comprehensive DSL syntax, projection patterns, effect handlers, extension systems, and composition techniques for building complex distributed protocols.
 
-## Advanced DSL Syntax
+## Comprehensive DSL Syntax
 
-The aura-choreography DSL supports rich annotations for complex protocol requirements. Advanced syntax enables fine-grained control over security, privacy, and performance characteristics.
+Rumpsteak-aura provides a rich choreographic DSL for specifying distributed protocols. The parser supports protocol definitions, role declarations, message passing, choice constructs, loops, parallel composition, and comprehensive annotation systems.
 
-### Complex Guard Capabilities
+### Protocol Namespacing
 
-Define multi-level capability requirements:
+Rumpsteak-aura supports protocol namespacing for module organization and conflict prevention:
 
 ```rust
-aura_choreography! {
+use rumpsteak_aura_choreography::compiler::parser::parse_choreography_str;
+
+let admin_protocol = r#"
     #[namespace = "admin_operations"]
-    protocol AdminOperations {
+    choreography AdminOperations {
         roles: Admin, Moderator, User;
         
-        Admin[guard_capability = "admin_access,modify_permissions,audit_logs",
-              flow_cost = 500,
-              journal_facts = "permission_granted"]
-        -> Moderator: GrantPermissions(PermissionGrant);
+        Admin -> Moderator: GrantPermissions;
+        Moderator -> User: ModerationAction;
+    }
+"#;
+
+let user_protocol = r#"
+    #[namespace = "user_management"]
+    choreography UserRegistration {
+        roles: NewUser, Validator, Admin;
         
-        Moderator[guard_capability = "moderate_content,verify_users",
-                  flow_cost = 200,
-                  journal_facts = "moderation_action"]
-        -> User: ModerationAction(ModerationDecision);
+        NewUser -> Validator: RegistrationRequest;
+        Validator -> Admin: ValidationResult;
+    }
+"#;
+
+let admin_choreo = parse_choreography_str(admin_protocol)?;
+let user_choreo = parse_choreography_str(user_protocol)?;
+```
+
+Namespaces generate separate module structures in code generation. Protocol names remain isolated within their namespace scope. Multiple choreographies can define similar role or message names without conflicts.
+
+### Message Types and Type Annotations
+
+Rumpsteak-aura supports rich message type specifications with optional type annotations:
+
+```rust
+let protocol_with_types = r#"
+    choreography TypedMessages {
+        roles: Client, Server;
+        
+        Client -> Server: Request<String>;
+        Server -> Client: Response<i32>;
+        Client -> Server: Data<Vec<String>, HashMap<String, i32>>;
+    }
+"#;
+
+let advanced_types = r#"
+    choreography AdvancedTypes {
+        roles: A, B;
+        
+        A -> B: Container<std::vec::Vec<String>>;
+        B -> A: Result<i32, CustomError>;
+        A -> B: Request<String>(payload_data);
+    }
+"#;
+```
+
+Message type annotations provide strong typing for protocol data. Generic types and nested generics are fully supported. Path types enable fully qualified type specifications.
+
+### Dynamic Role Count Support
+
+Rumpsteak-aura provides comprehensive support for protocols with variable participant counts determined at runtime:
+
+#### Runtime-Determined Participants
+
+```rust
+let threshold_protocol = r#"
+    choreography ThresholdProtocol {
+        roles: Coordinator, Signers[*];
+        
+        Coordinator -> Signers[*]: Request;
+        Signers[0..threshold] -> Coordinator: Response;
+    }
+"#;
+
+let consensus_protocol = r#"
+    choreography ConsensusProtocol {
+        roles: Leader, Followers[N];
+        
+        Leader -> Followers[*]: Proposal;
+        Followers[i] -> Leader: Vote;
+    }
+"#;
+```
+
+Wildcard syntax `[*]` indicates runtime-determined counts. Symbolic parameters `[N]` provide compile-time flexibility. Range expressions `[0..threshold]` target subsets of participants.
+
+#### Fixed-Count Dynamic Roles
+
+```rust
+let static_roles = r#"
+    choreography StaticWorkers {
+        roles: Master, Worker[3];
+        
+        Master -> Worker[0]: Task1;
+        Master -> Worker[1]: Task2;
+        Worker[0] -> Master: Result1;
+    }
+"#;
+
+```
+
+Static role arrays define exactly three worker instances. Individual workers are addressed using index notation. The protocol specifies explicit interactions with each worker instance.
+
+#### Runtime Role Binding
+
+```rust
+use rumpsteak_aura_choreography::compiler::codegen::generate_choreography_code_with_dynamic_roles;
+
+let consensus_protocol = r#"
+    choreography ConsensusProtocol {
+        roles: Leader, Followers[N];
+        
+        Leader -> Followers[*]: Proposal;
+        Followers[i] -> Leader: Vote;
+    }
+"#;
+
+let choreo = parse_choreography_str(consensus_protocol)?;
+let code = generate_choreography_code_with_dynamic_roles(&choreo, &local_types);
+
+// Runtime binding
+let mut runtime = ConsensusRuntime::new();
+runtime.bind_role_count("Followers", 5)?;
+runtime.map_followers_instances(vec!["alice", "bob", "charlie", "dave", "eve"])?;
+```
+
+Symbolic parameters `[N]` enable compile-time role count flexibility. Runtime binding maps symbolic counts to concrete participant numbers. Instance mapping assigns specific identities to role positions.
+
+### Choice Constructs and Branching
+
+Rumpsteak-aura supports rich choice constructs with guards and multi-way branching:
+
+#### Basic Choice
+
+```rust
+let negotiation_protocol = r#"
+    choreography Negotiation {
+        roles: Buyer, Seller;
+        
+        Buyer -> Seller: Offer;
+        
+        choice Seller {
+            accept: {
+                Seller -> Buyer: Accept;
+            }
+            reject: {
+                Seller -> Buyer: Reject;
+            }
+        }
+    }
+"#;
+```
+
+Choice constructs enable protocol branching based on role decisions. Each branch defines continuation behavior. Label matching ensures type-safe branch selection.
+
+#### Guarded Choice
+
+```rust
+let conditional_protocol = r#"
+    choreography ConditionalProtocol {
+        roles: Client, Server;
+        
+        choice Client {
+            buy when (balance > price): {
+                Client -> Server: Purchase;
+            }
+            cancel: {
+                Client -> Server: Cancel;
+            }
+        }
+    }
+"#;
+```
+
+Guarded choices add conditional logic to branch selection. Guard expressions use valid Rust boolean syntax. Guards enable protocol behavior based on runtime conditions.
+
+### Loop Constructs
+
+Rumpsteak-aura supports various loop patterns for iterative protocols:
+
+#### Fixed Iteration Count
+
+```rust
+let loop_protocol = r#"
+    choreography LoopProtocol {
+        roles: A, B;
+        
+        loop (count: 5) {
+            A -> B: Request;
+            B -> A: Response;
+        }
+    }
+"#;
+```
+
+Fixed count loops execute the body a specified number of times. Loop bodies can contain arbitrary protocol operations. Nested loops are supported for complex iteration patterns.
+
+#### Role-Controlled Loops
+
+```rust
+let decision_loop = r#"
+    choreography DecisionLoop {
+        roles: Client, Server;
+        
+        loop (decides: Client) {
+            Client -> Server: Request;
+            Server -> Client: Response;
+        }
+    }
+"#;
+```
+
+Role-controlled loops allow participants to decide when to continue or exit. The deciding role controls loop termination. This enables adaptive protocol behavior based on runtime conditions.
+
+## Aura-Specific Extensions
+
+Aura extends rumpsteak-aura with domain-specific annotations for security, performance, and state management. These extensions integrate with aura-mpst for runtime enforcement and verification.
+
+### Guard Capabilities
+
+Guard capabilities provide authorization control for protocol operations:
+
+```rust
+use aura_macros::aura_choreography;
+
+choreography! {
+    #[namespace = "secure_protocol"]
+    protocol SecureProtocol {
+        roles: Client, Server;
+        
+        Client[guard_capability = "send_request"]
+        -> Server: Request(RequestData);
+        
+        Server[guard_capability = "process_request"]
+        -> Client: Response(ResponseData);
     }
 }
 ```
 
-Multiple capabilities require intersection semantics where all capabilities must be present. Capability checking occurs before protocol execution begins. Failed capability checks prevent protocol initialization.
+Guard capabilities specify required permissions for protocol operations. The aura-mpst runtime validates capabilities before executing protocol steps. Failed capability checks prevent unauthorized operations.
 
-### Advanced Privacy Annotations
+### Flow Cost Control
 
-Control information leakage across different contexts:
+Flow costs control privacy budget usage and rate limiting:
 
 ```rust
-aura_choreography! {
-    #[namespace = "private_messaging"]
-    protocol PrivateMessaging {
-        roles: Sender, Relay, Recipient;
+choreography! {
+    #[namespace = "budgeted_protocol"]
+    protocol BudgetedProtocol {
+        roles: Sender, Receiver;
         
-        Sender[guard_capability = "send_message",
-               flow_cost = 100,
-               leakage_budget = [0, 0, 1]]  // Only group context leakage
-        -> Relay: ForwardMessage(EncryptedMessage);
+        Sender[flow_cost = 100]
+        -> Receiver: HighCostMessage(LargeData);
         
-        Relay[guard_capability = "relay_message",
-              flow_cost = 50,
-              leakage_budget = [0, 1, 0],  // Limited neighbor leakage
-              journal_merge = false]      // No journal state sharing
-        -> Recipient: DeliverMessage(EncryptedMessage);
+        Receiver[flow_cost = 50]
+        -> Sender: LowCostAck(AckData);
     }
 }
 ```
 
-Leakage budgets specify maximum information disclosure per context type. External leakage affects unknown parties. Neighbor leakage affects direct peers. Group leakage affects known group members.
+Flow costs specify budget consumption per protocol operation. Higher costs indicate more expensive operations in terms of privacy or resources. Budget enforcement prevents excessive resource usage.
 
-### Journal State Control
+### Journal Facts
 
-Manage distributed state updates precisely:
+Journal facts enable distributed state tracking and auditability:
 
 ```rust
-aura_choreography! {
-    #[namespace = "threshold_coordination"]
-    protocol ThresholdCoordination {
-        roles: Coordinator, Participant1, Participant2, Participant3;
+choreography! {
+    #[namespace = "auditable_protocol"]
+    protocol AuditableProtocol {
+        roles: Coordinator, Participant;
         
-        Coordinator[guard_capability = "initiate_threshold",
-                    flow_cost = 300,
-                    journal_facts = "threshold_initiated,coordinator_active"]
-        -> Participant1: ThresholdRequest(ThresholdParams);
+        Coordinator[journal_facts = "operation_initiated"]
+        -> Participant: InitiateOperation(OperationData);
         
-        Participant1[guard_capability = "participate_threshold",
-                     flow_cost = 200,
-                     journal_facts = "participation_confirmed",
-                     journal_merge = true]  // Merge participant state
-        -> Coordinator: ThresholdCommitment(CommitmentData);
-        
-        Coordinator[guard_capability = "finalize_threshold",
-                    flow_cost = 400,
-                    journal_facts = "threshold_completed",
-                    journal_merge = true]  // Global state synchronization
-        -> Participant1: ThresholdResult(FinalResult);
+        Participant[journal_facts = "operation_completed"]
+        -> Coordinator: OperationResult(ResultData);
     }
 }
 ```
 
-Journal facts record protocol events for auditability. Journal merge operations synchronize distributed state across participants. Selective merging controls which state changes propagate.
+Journal facts record protocol events in distributed state. Facts enable protocol auditing and state reconstruction. Multiple facts use comma separation for complex state tracking.
 
-## Multi-Party Protocol Patterns
+### Combined Annotations
 
-Multi-party protocols coordinate interactions between numerous participants with complex dependencies. These patterns enable sophisticated distributed applications.
-
-### Broadcast Coordination
-
-Coordinate one-to-many communication:
+Annotations combine for comprehensive protocol control:
 
 ```rust
-/// Sealed supertrait for broadcast effects
-pub trait BroadcastEffects: NetworkEffects + CryptoEffects + TimeEffects + JournalEffects {}
-impl<T> BroadcastEffects for T where T: NetworkEffects + CryptoEffects + TimeEffects + JournalEffects {}
-
-aura_choreography! {
-    #[namespace = "distributed_broadcast"]
-    protocol DistributedBroadcast {
-        roles: Broadcaster, Recipient1, Recipient2, Recipient3, Recipient4;
+choreography! {
+    #[namespace = "comprehensive_protocol"]
+    protocol ComprehensiveProtocol {
+        roles: Admin, User;
         
-        // Phase 1: Broadcast announcement
-        Broadcaster[guard_capability = "initiate_broadcast",
-                    flow_cost = 400,
-                    journal_facts = "broadcast_initiated"]
-        -> Recipient1: BroadcastAnnouncement(AnnouncementData);
-        
-        Broadcaster[guard_capability = "initiate_broadcast",
-                    flow_cost = 400]
-        -> Recipient2: BroadcastAnnouncement(AnnouncementData);
-        
-        Broadcaster[guard_capability = "initiate_broadcast",
-                    flow_cost = 400]
-        -> Recipient3: BroadcastAnnouncement(AnnouncementData);
-        
-        Broadcaster[guard_capability = "initiate_broadcast",
-                    flow_cost = 400]
-        -> Recipient4: BroadcastAnnouncement(AnnouncementData);
-        
-        // Phase 2: Acknowledgment collection
-        Recipient1[guard_capability = "acknowledge_broadcast",
-                   flow_cost = 100,
-                   journal_facts = "acknowledgment_sent"]
-        -> Broadcaster: BroadcastAck(AckData);
-        
-        Recipient2[guard_capability = "acknowledge_broadcast",
-                   flow_cost = 100,
-                   journal_facts = "acknowledgment_sent"]
-        -> Broadcaster: BroadcastAck(AckData);
-        
-        // Partial acknowledgments allowed - not all recipients required
-    }
-}
-```
-
-Broadcast protocols handle asymmetric communication patterns. Not all recipients need to acknowledge. Timeout handling manages unresponsive participants. Partial success scenarios enable graceful degradation.
-
-### Ring-Based Coordination
-
-Implement ordered message passing around participant rings:
-
-```rust
-aura_choreography! {
-    #[namespace = "ring_consensus"]
-    protocol RingConsensus {
-        roles: Node1, Node2, Node3, Node4;
-        
-        // Token circulation with state accumulation
-        Node1[guard_capability = "initiate_consensus",
-              flow_cost = 150,
-              journal_facts = "consensus_started"]
-        -> Node2: ConsensusToken(TokenData);
-        
-        Node2[guard_capability = "process_consensus",
-              flow_cost = 120,
-              journal_facts = "token_processed",
-              journal_merge = true]
-        -> Node3: ConsensusToken(TokenData);
-        
-        Node3[guard_capability = "process_consensus",
-              flow_cost = 120,
-              journal_facts = "token_processed",
-              journal_merge = true]
-        -> Node4: ConsensusToken(TokenData);
-        
-        Node4[guard_capability = "process_consensus",
-              flow_cost = 120,
-              journal_facts = "token_processed",
-              journal_merge = true]
-        -> Node1: ConsensusToken(TokenData);
-        
-        // Final decision broadcast
-        Node1[guard_capability = "finalize_consensus",
+        Admin[guard_capability = "admin_access",
               flow_cost = 200,
-              journal_facts = "consensus_finalized",
-              journal_merge = true]
-        -> Node2: ConsensusDecision(FinalDecision);
+              journal_facts = "admin_action_logged"]
+        -> User: AdminCommand(CommandData);
+        
+        User[guard_capability = "respond_to_admin",
+             flow_cost = 100,
+             journal_facts = "user_response_recorded"]
+        -> Admin: UserResponse(ResponseData);
     }
 }
 ```
+
+Combined annotations provide multi-layered protocol control. Guard capabilities ensure authorization. Flow costs control resource usage. Journal facts enable auditability.
+
+## Effect System Integration
+
+Rumpsteak-aura protocols integrate with algebraic effect systems for runtime execution. Effect programs provide composable protocol building blocks for complex distributed systems.
+
+### Effect Programs
+
+Protocols execute as effect programs using the Program abstraction:
+
+```rust
+use rumpsteak_aura_choreography::effects::*;
+
+let program = Program::new()
+    .send(Role::Server, Message("hello"))
+    .recv::<Response>(Role::Server)
+    .choose(Role::Server, Label("continue"))
+    .send(Role::Server, Message("data"))
+    .end();
+
+let mut handler = InMemoryHandler::new(Role::Client);
+let mut endpoint = ();
+let result = interpret(&mut handler, &mut endpoint, program).await?;
+```
+
+Programs compose protocol operations using a fluent builder API. Effect interpretation uses configurable handlers for different execution environments. Results contain received values and execution state.
+
+### Handler Abstraction
+
+Handlers implement the `ChoreoHandler` trait for effect interpretation:
+
+```rust
+use rumpsteak_aura_choreography::effects::handlers::*;
+
+// In-memory handler for testing
+let test_handler = InMemoryHandler::new(Role::Alice);
+
+// Recording handler for verification
+let recording_handler = RecordingHandler::new(Role::Alice);
+
+// Rumpsteak handler for production
+let production_handler = RumpsteakHandler::new();
+```
+
+Different handlers provide testing capabilities, recording for verification, and production transports. Handler selection enables flexible protocol execution environments.
+
+### Protocol Composition
+
+Effect programs enable protocol composition and reuse:
+
+```rust
+let handshake = Program::new()
+    .send(Role::Bob, Message("hello"))
+    .recv::<Message>(Role::Bob)
+    .end();
+
+let data_transfer = Program::new()
+    .send(Role::Bob, Data(vec![1, 2, 3]))
+    .recv::<Ack>(Role::Bob)
+    .end();
+
+let composed_protocol = Program::new()
+    .then(handshake)
+    .then(data_transfer)
+    .end();
+```
+
+Protocol composition uses the `then` method for sequential execution. Complex protocols build from simpler components. Composition maintains type safety and session properties.
+
+## Integration with Aura Systems
+
+Choreographic protocols integrate with broader Aura infrastructure through standardized interfaces. Protocol execution uses effect handlers from aura-effects and coordination primitives from aura-protocol. Guard capabilities integrate with the web of trust system.
+
+Choreographies compose with CRDT programming patterns for state consistency. Flow budget enforcement prevents excessive resource usage. Journal facts enable distributed auditability across protocol execution.
+
+For foundational concepts, see [Coordination Systems Guide](803_coordination_systems_guide.md). For testing approaches, see [Simulation and Testing Guide](805_simulation_and_testing_guide.md).
 
 Ring protocols ensure ordered processing across participants. Token passing accumulates state changes. Each node contributes to the final decision. Journal merging synchronizes accumulated state.
 
@@ -194,7 +399,7 @@ Ring protocols ensure ordered processing across participants. Token passing accu
 Structure protocols with coordinator hierarchies:
 
 ```rust
-aura_choreography! {
+choreography! {
     #[namespace = "hierarchical_consensus"]
     protocol HierarchicalConsensus {
         roles: TopCoordinator, SubCoordinator1, SubCoordinator2, 

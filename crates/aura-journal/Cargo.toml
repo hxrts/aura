@@ -54,13 +54,13 @@ hex = { workspace = true }
 # KeyJournal external dependencies
 petgraph = { workspace = true }
 # secret_sharing = { workspace = true }  # Removed due to yanked zeroize dependency - using MVP placeholder
-biscuit-auth = { workspace = true }
+# biscuit-auth = { workspace = true } # removed - unused
 
 [dev-dependencies]
 # Test utilities
 # aura-testkit = { path = "../aura-testkit" }  # Temporarily disabled due to aura-protocol compilation issues
 # aura-protocol = { path = "../aura-protocol" }  # Temporarily disabled due to circular dependency
 async-trait = { workspace = true }
-tokio-test = { workspace = true }
+# tokio-test = { workspace = true } # removed - unused
 rand_chacha = { workspace = true }
 proptest = { workspace = true }

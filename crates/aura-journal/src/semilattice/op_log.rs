@@ -11,12 +11,12 @@
 //! - **Content addressing**: Operations identified by Hash32 CID
 //! - **Deterministic ordering**: For reduction reproducibility
 
+use aura_core::hash;
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::{
     tree::{AttestedOp, TreeHash32},
     DeviceId, Hash32,
 };
-use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -86,8 +86,8 @@ impl OpLog {
     pub fn add_operation(&mut self, op: AttestedOp) -> Hash32 {
         let cid = compute_operation_cid(&op);
 
-        if !self.operations.contains_key(&cid) {
-            self.operations.insert(cid, op);
+        if let std::collections::btree_map::Entry::Vacant(e) = self.operations.entry(cid) {
+            e.insert(op);
             self.version += 1;
         }
 
@@ -322,53 +322,50 @@ impl PartialOrd for OpLog {
 /// - Tie-breaking in the reduction algorithm
 /// - Content addressing for synchronization
 fn compute_operation_cid(op: &AttestedOp) -> Hash32 {
-    let mut hasher = Hasher::new();
+    let mut h = hash::hasher();
 
     // Hash the TreeOp
-    hasher.update(&op.op.parent_epoch.to_le_bytes());
-    hasher.update(&op.op.parent_commitment);
-    hasher.update(&op.op.version.to_le_bytes());
+    h.update(&op.op.parent_epoch.to_le_bytes());
+    h.update(&op.op.parent_commitment);
+    h.update(&op.op.version.to_le_bytes());
 
     // Hash the operation kind
     match &op.op.op {
         aura_core::TreeOpKind::AddLeaf { leaf, under } => {
-            hasher.update(b"AddLeaf");
-            hasher.update(&leaf.leaf_id.0.to_le_bytes());
-            hasher.update(&under.0.to_le_bytes());
-            hasher.update(&leaf.public_key);
+            h.update(b"AddLeaf");
+            h.update(&leaf.leaf_id.0.to_le_bytes());
+            h.update(&under.0.to_le_bytes());
+            h.update(&leaf.public_key);
         }
         aura_core::TreeOpKind::RemoveLeaf { leaf, reason } => {
-            hasher.update(b"RemoveLeaf");
-            hasher.update(&leaf.0.to_le_bytes());
-            hasher.update(&[*reason]);
+            h.update(b"RemoveLeaf");
+            h.update(&leaf.0.to_le_bytes());
+            h.update(&[*reason]);
         }
         aura_core::TreeOpKind::ChangePolicy { node, new_policy } => {
-            hasher.update(b"ChangePolicy");
-            hasher.update(&node.0.to_le_bytes());
-            hasher.update(&aura_core::policy_hash(new_policy));
+            h.update(b"ChangePolicy");
+            h.update(&node.0.to_le_bytes());
+            h.update(&aura_core::policy_hash(new_policy));
         }
         aura_core::TreeOpKind::RotateEpoch { affected } => {
-            hasher.update(b"RotateEpoch");
+            h.update(b"RotateEpoch");
             for node in affected {
-                hasher.update(&node.0.to_le_bytes());
+                h.update(&node.0.to_le_bytes());
             }
         }
     }
 
     // Hash attestation information
-    hasher.update(&op.signer_count.to_le_bytes());
-    hasher.update(&op.agg_sig);
+    h.update(&op.signer_count.to_le_bytes());
+    h.update(&op.agg_sig);
 
-    let hash = hasher.finalize();
-    let mut result = [0u8; 32];
-    result.copy_from_slice(hash.as_bytes());
-    Hash32(result)
+    Hash32(h.finalize())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
+    use aura_core::{LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind};
 
     fn create_test_operation(leaf_id: u32, parent_epoch: u64) -> AttestedOp {
         AttestedOp {
@@ -378,7 +375,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode::new_device(
                         LeafId(leaf_id),
-                        aura_core::DeviceId(uuid::Uuid::new_v4()),
+                        aura_core::DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
                         vec![leaf_id as u8; 32],
                     ),
                     under: NodeIndex(0),
@@ -438,7 +435,7 @@ mod tests {
         assert_eq!(operations.len(), 3);
 
         // Operations should be in deterministic order (sorted by CID)
-        let mut cids: Vec<_> = operations
+        let cids: Vec<_> = operations
             .iter()
             .map(|op| compute_operation_cid(op))
             .collect();

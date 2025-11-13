@@ -123,7 +123,7 @@ impl CapabilityEvaluator {
         let cache_key = format!("{}:{}", self.device_id, operation);
 
         if let Some(cached) = self.cached_results.get(&cache_key) {
-            let current_time = SystemTime::now()
+            let current_time = SystemTime::UNIX_EPOCH
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::from_secs(0))
                 .as_secs();
@@ -144,7 +144,7 @@ impl CapabilityEvaluator {
     /// Clear expired cache entries
     #[allow(clippy::disallowed_methods)]
     pub fn cleanup_cache(&mut self) {
-        let current_time = SystemTime::now()
+        let current_time = SystemTime::UNIX_EPOCH
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_secs();

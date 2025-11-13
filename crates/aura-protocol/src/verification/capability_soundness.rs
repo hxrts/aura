@@ -3,17 +3,23 @@
 //! This module provides formal verification tools for ensuring that the capability
 //! system maintains its soundness properties throughout protocol execution.
 //!
+
+#![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
 //! Key properties verified:
 //! - **Non-interference**: Operations cannot exceed their authorized capabilities
 //! - **Monotonicity**: Capabilities can only be restricted, never expanded
 //! - **Temporal Consistency**: Time-based capabilities respect validity periods
 //! - **Context Isolation**: Capability contexts remain properly isolated
 //! - **Authorization Soundness**: All operations are properly authorized
+//!
+//! TODO: Refactor to use TimeEffects from the effect system instead of direct calls to SystemTime::now().
+
+#![allow(clippy::disallowed_methods)]
 
 use aura_core::{AuraResult, Cap, DeviceId, Fact};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -935,6 +941,7 @@ pub struct SoundnessReport {
 mod tests {
     use super::*;
     use aura_core::{identifiers::DeviceId, FactValue};
+    use std::collections::HashSet;
 
     fn create_test_capability_state() -> CapabilityState {
         let device = DeviceId::new();
@@ -961,7 +968,7 @@ mod tests {
 
         assert_eq!(result.property, SoundnessProperty::NonInterference);
         assert!(result.confidence >= 0.0);
-        assert!(result.evidence.len() > 0 || result.counterexamples.len() > 0);
+        assert!(!result.evidence.is_empty() || !result.counterexamples.is_empty());
     }
 
     #[tokio::test]

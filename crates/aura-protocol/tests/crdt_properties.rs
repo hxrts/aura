@@ -17,9 +17,7 @@
 //! - Join is idempotent: a ⊔ a = a
 //! - Bottom element exists: a ⊔ ⊥ = a
 
-use aura_core::tree::{
-    AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
-};
+use aura_core::tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
 use aura_core::DeviceId;
 use aura_journal::semilattice::{Bottom, JoinSemilattice, OpLog};
 use aura_protocol::sync::{IntentState, PeerView};
@@ -327,15 +325,17 @@ mod unit_tests {
     #[test]
     fn test_peerview_union() {
         let mut a = PeerView::new();
+        #[allow(clippy::disallowed_methods)] // Required for test
         let peer1 = Uuid::new_v4();
         a.add_peer(peer1);
 
         let mut b = PeerView::new();
+        #[allow(clippy::disallowed_methods)] // Required for test
         let peer2 = Uuid::new_v4();
         b.add_peer(peer2);
 
         let joined = a.join(&b);
-        assert!(joined.has_peer(&peer1));
-        assert!(joined.has_peer(&peer2));
+        assert!(joined.contains(&peer1));
+        assert!(joined.contains(&peer2));
     }
 }

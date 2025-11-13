@@ -4,9 +4,9 @@
 //! with consistent configuration across the Aura test suite.
 
 use crate::device::DeviceSetBuilder;
+use crate::TestEffectsBuilder;
+use aura_core::hash::hash;
 use aura_core::{AccountId, DeviceId};
-use aura_core::effects::{RandomEffects, TimeEffects};
-use crate::Effects;
 use aura_journal::semilattice::ModernAccountState as AccountState;
 use aura_journal::{DeviceMetadata, DeviceType};
 use ed25519_dalek::SigningKey;
@@ -144,25 +144,24 @@ impl AccountStateFactory {
     pub fn random() -> Self {
         // Deterministic UUID generation
         let hash_input = "random-account-factory";
-        let hash_bytes = blake3::hash(hash_input.as_bytes());
-        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let hash_bytes = hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         Self::new(AccountId(uuid))
     }
 
     /// Add a device to the account state
     pub async fn add_device(mut self, device_id: DeviceId, device_type: DeviceType) -> Self {
-        let effects = Effects::for_test("factory_device");
-        let key_bytes = effects.random_bytes_32().await;
-        let signing_key = SigningKey::from_bytes(&key_bytes);
-        let public_key = signing_key.verifying_key();
+        // Use simple deterministic approach for factory
+        let (signing_key, public_key) = crate::test_key_pair(42);
+        let timestamp = 1000; // Default test timestamp
 
         let metadata = DeviceMetadata {
             device_id,
             device_name: format!("Device {:?}", device_id),
             device_type,
             public_key,
-            added_at: effects.current_timestamp_millis().await,
-            last_seen: effects.current_timestamp_millis().await,
+            added_at: timestamp,
+            last_seen: timestamp,
             dkd_commitment_proofs: Default::default(),
             next_nonce: 0,
             key_share_epoch: 0,
@@ -189,18 +188,16 @@ impl AccountStateFactory {
             first_device.clone()
         } else {
             // Create a default device if none exists
-            let effects = Effects::for_test("factory_default_device");
-            let key_bytes = effects.random_bytes_32().await;
-            let signing_key = SigningKey::from_bytes(&key_bytes);
-            let public_key = signing_key.verifying_key();
+            let (_, public_key) = crate::test_key_pair(42);
+            let timestamp = 1000; // Default test timestamp
 
             DeviceMetadata {
                 device_id: DeviceId::new(),
                 device_name: "Default Device".to_string(),
                 device_type: DeviceType::Native,
                 public_key,
-                added_at: effects.current_timestamp().await,
-                last_seen: effects.current_timestamp().await,
+                added_at: timestamp,
+                last_seen: timestamp,
                 dkd_commitment_proofs: Default::default(),
                 next_nonce: 0,
                 key_share_epoch: 0,
@@ -237,8 +234,8 @@ impl MultiDeviceScenarioFactory {
     pub fn new(device_count: usize, threshold: u16) -> Self {
         // Deterministic UUID generation
         let hash_input = format!("scenario-factory-{}-{}", device_count, threshold);
-        let hash_bytes = blake3::hash(hash_input.as_bytes());
-        let uuid = Uuid::from_bytes(hash_bytes.as_bytes()[..16].try_into().unwrap());
+        let hash_bytes = hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         Self {
             account_id: AccountId(uuid),
             base_seed: 42,
@@ -274,7 +271,9 @@ impl MultiDeviceScenarioFactory {
             } else {
                 DeviceType::Browser
             };
-            account_builder = account_builder.add_device(device.device_id(), device_type).await;
+            account_builder = account_builder
+                .add_device(device.device_id(), device_type)
+                .await;
         }
 
         let account_state = account_builder.build().await;
@@ -336,8 +335,13 @@ pub mod helpers {
     }
 
     /// Create a complete multi-device scenario
-    pub async fn multi_device_scenario(device_count: usize, threshold: u16) -> MultiDeviceScenarioData {
-        MultiDeviceScenarioFactory::new(device_count, threshold).build().await
+    pub async fn multi_device_scenario(
+        device_count: usize,
+        threshold: u16,
+    ) -> MultiDeviceScenarioData {
+        MultiDeviceScenarioFactory::new(device_count, threshold)
+            .build()
+            .await
     }
 
     /// Create a multi-device scenario with custom account

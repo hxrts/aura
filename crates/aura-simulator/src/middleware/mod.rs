@@ -16,6 +16,7 @@ pub mod retry;
 pub mod scenario_injection;
 pub mod stack;
 pub mod state_inspection;
+pub mod stateless_effects;
 pub mod time_control;
 
 // Re-export for convenience
@@ -44,6 +45,7 @@ pub use scenario_injection::{
 pub use state_inspection::{
     StateInspectionMiddleware, StateTrigger, StateWatcher, TriggerAction, WatcherCondition,
 };
+pub use stateless_effects::{StatelessEffectsMiddleware, PerformanceMetrics};
 pub use time_control::{RealtimeSync, TimeControlMiddleware};
 
 /// Simulator execution context that flows through middleware layers
@@ -349,6 +351,9 @@ pub trait SimulatorMiddleware: Send + Sync {
 pub enum SimulatorError {
     #[error("Scenario not found: {0}")]
     ScenarioNotFound(String),
+    
+    #[error("Checkpoint not found: {0}")]
+    CheckpointNotFound(String),
 
     #[error("Invalid configuration: {0}")]
     InvalidConfiguration(String),
@@ -385,6 +390,9 @@ pub enum SimulatorError {
 
     #[error("Operation failed: {0}")]
     OperationFailed(String),
+
+    #[error("JSON serialization error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, SimulatorError>;

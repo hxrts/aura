@@ -24,10 +24,12 @@ pub mod version;
 
 /// Main CLI handler that coordinates all operations through effects
 pub struct CliHandler {
+    /// The Aura effect system instance
     effect_system: AuraEffectSystem,
 }
 
 impl CliHandler {
+    /// Create a new CLI handler with the given effect system
     pub fn new(effect_system: AuraEffectSystem) -> Self {
         Self { effect_system }
     }
@@ -99,11 +101,11 @@ impl CliHandler {
 
     /// Log error message through effects
     pub async fn log_error(&self, message: &str) {
-        self.effect_system.log_error(message);
+        let _ = self.effect_system.log_error(message).await;
     }
 
     /// Log info message through effects
     pub async fn log_info(&self, message: &str) {
-        self.effect_system.log_info(message);
+        let _ = self.effect_system.log_info(message).await;
     }
 }

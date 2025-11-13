@@ -38,8 +38,7 @@ pub use metrics::{AgentMetrics, MetricsMiddleware, OperationMetrics};
 pub use tracing::{OperationTracer, TracingMiddleware};
 pub use validation::{InputValidator, ValidationMiddleware, ValidationRule};
 
-use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
-use uuid;
+use aura_core::{identifiers::DeviceId, AuraResult as Result};
 use aura_protocol::effects::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -245,12 +244,13 @@ impl MiddlewareStackBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_protocol::effects::AuraEffectSystem;
+    use aura_protocol::effects::{AuraEffectSystem, EffectSystemConfig};
 
     #[tokio::test]
     async fn test_middleware_stack_creation() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = AuraEffectSystem::for_testing(device_id);
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = EffectSystemConfig::for_testing(device_id);
+        let effects = AuraEffectSystem::new(config).unwrap();
         let stack = AgentMiddlewareStack::new(effects, device_id);
 
         assert_eq!(stack.device_id(), device_id);
@@ -261,8 +261,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_middleware_builder() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = AuraEffectSystem::for_testing(device_id);
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = EffectSystemConfig::for_testing(device_id);
+        let effects = AuraEffectSystem::new(config).unwrap();
 
         let stack = MiddlewareStackBuilder::new(effects, device_id)
             .with_validation()
@@ -278,8 +279,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_operation_execution() {
-        let device_id = DeviceId(uuid::Uuid::new_v4());
-        let effects = AuraEffectSystem::for_testing(device_id);
+        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let config = EffectSystemConfig::for_testing(device_id);
+        let effects = AuraEffectSystem::new(config).unwrap();
         let stack = AgentMiddlewareStack::new(effects, device_id);
 
         // Test simple operation execution
