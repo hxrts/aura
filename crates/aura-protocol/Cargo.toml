@@ -12,6 +12,7 @@ workspace = true
 
 [features]
 default = []
+testing = []
 
 [dependencies]
 # Workspace crates
@@ -23,6 +24,7 @@ aura-verify = { path = "../aura-verify" }
 aura-wot = { path = "../aura-wot" }
 aura-transport = { path = "../aura-transport" }
 aura-mpst = { path = "../aura-mpst" }
+aura-macros = { path = "../aura-macros" }
 # aura-frost = { path = "../aura-frost" }  # Temporarily excluded - has FROST API issues
 
 # Curve operations
@@ -74,3 +76,16 @@ rumpsteak-aura-choreography = { workspace = true }
 [dev-dependencies]
 # tokio-test = { workspace = true } # removed - unused
 proptest = { workspace = true }
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+
+[[bench]]
+name = "effect_system"
+harness = false
+
+[[bench]]
+name = "context_propagation"
+harness = false
+
+[[bench]]
+name = "handler_performance"
+harness = false

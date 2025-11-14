@@ -116,6 +116,33 @@ jobs:
             echo "[OK] No direct UUID usage violations found"
           fi
 
+  check-documentation-links:
+    name: Check Documentation Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install markdown-link-check
+        run: npm install -g markdown-link-check
+      - name: Check markdown links
+        run: |
+          echo "Checking for broken links in documentation..."
+          find docs/ -name "*.md" -exec markdown-link-check {} \;
+      - name: Check relative links in docs directory
+        run: |
+          echo "Checking for broken relative links in docs..."
+          cd docs/
+          for file in *.md; do
+            echo "Checking $file..."
+            # Extract markdown links and check if referenced files exist
+            grep -o '\[.*\]([^)]*\.md)' "$file" | sed 's/.*(\([^)]*\)).*/\1/' | while read link; do
+              if [ ! -f "$link" ]; then
+                echo "[ERROR] Broken link in $file: $link"
+                exit 1
+              fi
+            done
+          done
+          echo "[OK] All relative documentation links are valid"
+
   build:
     name: Build Check
     runs-on: ubuntu-latest

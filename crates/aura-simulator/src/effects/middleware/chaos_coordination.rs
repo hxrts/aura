@@ -7,11 +7,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use aura_protocol::handlers::{
-    AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
-};
 use aura_core::identifiers::DeviceId;
 use aura_core::LocalSessionType;
+use aura_protocol::handlers::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 
 /// Chaos experiment configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +140,7 @@ impl AuraHandler for ChaosCoordinationMiddleware {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_protocol::handlers::context_immutable::AuraContext;
 
     #[tokio::test]
     async fn test_chaos_coordination_creation() {
@@ -169,8 +168,8 @@ mod tests {
     #[tokio::test]
     async fn test_chaos_operations() {
         let device_id = DeviceId::new();
-        let mut middleware = ChaosCoordinationMiddleware::for_simulation(device_id, 42);
-        let mut ctx = AuraContext::for_testing(device_id);
+        let middleware = ChaosCoordinationMiddleware::for_simulation(device_id, 42);
+        let ctx = AuraContext::for_testing(device_id);
 
         // Test start experiment
         let result = middleware
@@ -178,25 +177,20 @@ mod tests {
                 EffectType::ChaosCoordination,
                 "start_experiment",
                 b"test_experiment",
-                &mut ctx,
+                &ctx,
             )
             .await;
         assert!(result.is_ok());
 
         // Test list experiments
         let result = middleware
-            .execute_effect(
-                EffectType::ChaosCoordination,
-                "list_experiments",
-                b"",
-                &mut ctx,
-            )
+            .execute_effect(EffectType::ChaosCoordination, "list_experiments", b"", &ctx)
             .await;
         assert!(result.is_ok());
 
         // Test inject chaos
         let result = middleware
-            .execute_effect(EffectType::ChaosCoordination, "inject_chaos", b"", &mut ctx)
+            .execute_effect(EffectType::ChaosCoordination, "inject_chaos", b"", &ctx)
             .await;
         assert!(result.is_ok());
         let chaos_value = result.unwrap();

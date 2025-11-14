@@ -162,7 +162,7 @@ pub enum CryptoOperation {
     Hash {
         /// Data to hash
         data: Vec<u8>,
-        /// Hash algorithm (e.g., "blake3")
+        /// Hash algorithm (e.g., "sha256")
         algorithm: String,
     },
 }

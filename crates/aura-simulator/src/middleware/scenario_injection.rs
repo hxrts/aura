@@ -111,25 +111,29 @@ impl ScenarioInjectionMiddleware {
             None
         }
     }
-    
+
     /// Real scenario injection implementation
-    fn inject_scenario_real(&self, scenario: &ScenarioDefinition, context: &SimulatorContext) -> Result<Value> {
+    fn inject_scenario_real(
+        &self,
+        scenario: &ScenarioDefinition,
+        context: &SimulatorContext,
+    ) -> Result<Value> {
         if let Ok(mut state) = self.state.lock() {
             // Create active injection record
             let injection = ActiveInjection {
-                scenario_id: scenario.id.clone(),
-                injected_at_tick: context.tick,
-                injected_at_time: Instant::now(),
+                _scenario_id: scenario.id.clone(),
+                _injected_at_tick: context.tick,
+                _injected_at_time: Instant::now(),
                 actions_executed: 0,
-                total_actions: scenario.actions.len(),
-                status: InjectionStatus::Active,
-                metadata: HashMap::new(),
+                _total_actions: scenario.actions.len(),
+                _status: InjectionStatus::Active,
+                _metadata: HashMap::new(),
             };
-            
+
             state.active_injections.push(injection);
             state.total_injections += 1;
             state.last_injection_time = Some(Instant::now());
-            
+
             // Execute scenario actions
             let mut executed_actions = Vec::new();
             for action in &scenario.actions {
@@ -150,7 +154,10 @@ impl ScenarioInjectionMiddleware {
                             "executed_at_tick": context.tick
                         }));
                     }
-                    InjectionAction::AddParticipant { participant_id, role } => {
+                    InjectionAction::AddParticipant {
+                        participant_id,
+                        role,
+                    } => {
                         executed_actions.push(json!({
                             "action": "add_participant",
                             "participant_id": participant_id,
@@ -165,7 +172,10 @@ impl ScenarioInjectionMiddleware {
                             "executed_at_tick": context.tick
                         }));
                     }
-                    InjectionAction::TriggerEvent { event_type, parameters } => {
+                    InjectionAction::TriggerEvent {
+                        event_type,
+                        parameters,
+                    } => {
                         executed_actions.push(json!({
                             "action": "trigger_event",
                             "event_type": event_type,
@@ -175,12 +185,12 @@ impl ScenarioInjectionMiddleware {
                     }
                 }
             }
-            
+
             // Update injection record with executed actions count
             if let Some(injection) = state.active_injections.last_mut() {
                 injection.actions_executed = executed_actions.len();
             }
-            
+
             Ok(json!({
                 "scenario_injection": {
                     "scenario_id": scenario.id,
@@ -194,11 +204,10 @@ impl ScenarioInjectionMiddleware {
             }))
         } else {
             Err(crate::middleware::SimulatorError::OperationFailed(
-                "Failed to acquire scenario injection lock".to_string()
+                "Failed to acquire scenario injection lock".to_string(),
             ))
         }
     }
-
 }
 
 impl Default for ScenarioInjectionMiddleware {
@@ -324,22 +333,22 @@ pub enum TriggerCondition {
 /// Active injection tracking
 #[derive(Debug, Clone)]
 struct ActiveInjection {
-    scenario_id: String,
-    injected_at_tick: u64,
-    injected_at_time: Instant,
+    _scenario_id: String,
+    _injected_at_tick: u64,
+    _injected_at_time: Instant,
     actions_executed: usize,
-    total_actions: usize,
-    status: InjectionStatus,
-    metadata: HashMap<String, String>,
+    _total_actions: usize,
+    _status: InjectionStatus,
+    _metadata: HashMap<String, String>,
 }
 
 /// Status of an active injection
 #[derive(Debug, Clone)]
 enum InjectionStatus {
     Active,
-    Completed,
-    Failed,
-    Cancelled,
+    _Completed,
+    _Failed,
+    _Cancelled,
 }
 
 #[cfg(test)]
@@ -350,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_scenario_injection_creation() {
-        let middleware = ScenarioInjectionMiddleware::new()
+        let _middleware = ScenarioInjectionMiddleware::new()
             .with_randomization(true, 0.5)
             .with_max_concurrent(2);
 

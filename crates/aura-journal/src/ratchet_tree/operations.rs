@@ -497,7 +497,7 @@ mod tests {
         )
     }
 
-    async fn create_test_operation(leaf_id: u32, parent_epoch: u64) -> AttestedOp {
+    fn create_test_operation(leaf_id: u32, parent_epoch: u64) -> AttestedOp {
         let tree_op = TreeOp {
             parent_epoch,
             parent_commitment: [0u8; 32],
@@ -523,10 +523,10 @@ mod tests {
         assert_eq!(processor.operation_history().len(), 0);
     }
 
-    #[tokio::test]
-    async fn test_process_single_operation() {
+    #[test]
+    fn test_process_single_operation() {
         let mut processor = TreeOperationProcessor::new();
-        let op = create_test_operation(1, 0).await;
+        let op = create_test_operation(1, 0);
 
         let result = processor.process_operation(&op);
         assert!(result.is_ok());
@@ -537,10 +537,10 @@ mod tests {
         assert_eq!(processor.current_state().num_leaves(), 1);
     }
 
-    #[tokio::test]
-    async fn test_duplicate_operation_rejection() {
+    #[test]
+    fn test_duplicate_operation_rejection() {
         let mut processor = TreeOperationProcessor::new();
-        let op = create_test_operation(1, 0).await;
+        let op = create_test_operation(1, 0);
 
         // Process first time - should succeed
         let result1 = processor.process_operation(&op);
@@ -555,14 +555,14 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn test_batch_processing() {
+    #[test]
+    fn test_batch_processing() {
         let mut batch_processor = BatchProcessor::new(2, true);
 
         let ops = vec![
-            create_test_operation(1, 0).await,
-            create_test_operation(2, 0).await,
-            create_test_operation(3, 0).await,
+            create_test_operation(1, 0),
+            create_test_operation(2, 0),
+            create_test_operation(3, 0),
         ];
 
         let results = batch_processor.process_batched(&ops);
@@ -573,14 +573,14 @@ mod tests {
         assert!(processed.iter().all(|p| p.success));
     }
 
-    #[tokio::test]
-    async fn test_sync_from_oplog() {
+    #[test]
+    fn test_sync_from_oplog() {
         let mut processor = TreeOperationProcessor::new();
 
         let ops = vec![
-            create_test_operation(1, 0).await,
-            create_test_operation(2, 0).await,
-            create_test_operation(3, 0).await,
+            create_test_operation(1, 0),
+            create_test_operation(2, 0),
+            create_test_operation(3, 0),
         ];
 
         let result = processor.sync_from_oplog(&ops);
@@ -588,10 +588,10 @@ mod tests {
         assert_eq!(processor.current_state().num_leaves(), 1);
     }
 
-    #[tokio::test]
-    async fn test_query_interface() {
+    #[test]
+    fn test_query_interface() {
         let mut processor = TreeOperationProcessor::new();
-        let op = create_test_operation(1, 0).await;
+        let op = create_test_operation(1, 0);
 
         processor.process_operation(&op).unwrap();
 
@@ -603,12 +603,12 @@ mod tests {
         assert_eq!(device_leaves.len(), 1);
     }
 
-    #[tokio::test]
-    async fn test_processing_stats() {
+    #[test]
+    fn test_processing_stats() {
         let mut processor = TreeOperationProcessor::new();
 
-        let op1 = create_test_operation(1, 0).await;
-        let op2 = create_test_operation(2, 0).await;
+        let op1 = create_test_operation(1, 0);
+        let op2 = create_test_operation(2, 0);
 
         processor.process_operation(&op1).unwrap();
         processor.process_operation(&op2).unwrap();

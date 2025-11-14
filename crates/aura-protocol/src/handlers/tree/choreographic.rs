@@ -1,7 +1,7 @@
 //! Choreographic Tree Handler
 //!
 //! This handler replaces the old hand-coded tree coordination with
-//! choreographic implementations from aura-identity.
+//! choreographic implementations using the rumpsteak-aura framework.
 
 use crate::effects::{
     tree::{Cut, Partial, ProposalId, Snapshot},
@@ -77,7 +77,7 @@ impl TreeEffects for ChoreographicTreeEffectHandler {
             op.op.op
         );
 
-        // TODO: Implement actual verification once aura-identity is available
+        // TODO: Implement actual verification using aura-verify registry
         // For now, return true as a stub implementation
         warn!("Signature verification not implemented - returning true");
         Ok(true)

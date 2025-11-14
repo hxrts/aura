@@ -31,6 +31,9 @@
 //!     .build().await?;
 //! ```
 
+// Allow expect() for testing and development code in this crate
+#![allow(clippy::expect_used)]
+
 // Core agent runtime
 pub mod agent;
 pub mod config;
@@ -102,6 +105,7 @@ pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AuraAgent {
     use aura_protocol::effects::AuraEffectSystem;
 
     let config = aura_protocol::effects::EffectSystemConfig::for_simulation(device_id, seed);
-    let core_effects = AuraEffectSystem::new(config).expect("Failed to create simulation effect system");
+    let core_effects =
+        AuraEffectSystem::new(config).expect("Failed to create simulation effect system");
     AuraAgent::new(core_effects, device_id)
 }

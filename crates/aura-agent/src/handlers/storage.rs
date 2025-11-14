@@ -330,7 +330,7 @@ impl StorageOperations {
         }
 
         let effects = self.effects.read().await;
-        effects
+        let _ = effects
             .log_info(&format!(
                 "Cleared {} keys from namespace {}",
                 count, self.namespace
@@ -393,7 +393,7 @@ impl StorageOperations {
         }
 
         let effects = self.effects.read().await;
-        effects
+        let _ = effects
             .log_info(&format!(
                 "Backed up {} keys from namespace {}",
                 backup.len(),
@@ -414,7 +414,7 @@ impl StorageOperations {
         }
 
         let effects = self.effects.read().await;
-        effects
+        let _ = effects
             .log_info(&format!(
                 "Restored {} keys to namespace {}",
                 restored, self.namespace
@@ -467,12 +467,13 @@ mod tests {
     use super::*;
     use aura_core::DeviceId;
     use aura_protocol::effects::AuraEffectSystem;
+    use aura_macros::aura_test;
 
-    #[tokio::test]
-    async fn test_storage_operations() {
+    #[aura_test]
+    async fn test_storage_operations() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::new(config).unwrap()));
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
         let storage = StorageOperations::new(effects, device_id, "test".to_string());
 
         // Store data
@@ -500,16 +501,18 @@ mod tests {
         assert!(stats.total_size > 0);
 
         // Delete data
-        storage.delete_data("specific").await.unwrap();
-        let after_delete = storage.retrieve_data("specific").await.unwrap();
+        storage.delete_data("specific").await?;
+        let after_delete = storage.retrieve_data("specific").await?;
         assert_eq!(after_delete, None);
+        
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_backup_restore() {
+    #[aura_test]
+    async fn test_backup_restore() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::new(config).unwrap()));
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
         let storage = StorageOperations::new(effects, device_id, "backup_test".to_string());
 
         // Store some test data
@@ -533,7 +536,9 @@ mod tests {
         assert_eq!(restored, 2);
 
         // Verify restored
-        let keys_after_restore = storage.list_keys().await.unwrap();
+        let keys_after_restore = storage.list_keys().await?;
         assert_eq!(keys_after_restore.len(), 2);
+        
+        Ok(())
     }
 }

@@ -55,12 +55,25 @@ pub use aura_crypto::frost::{
 // Re-export protocol effect system
 pub use aura_protocol::AuraEffectSystem;
 
-// Re-export FROST coordinators and choreographies
-pub use distributed_keygen::{get_dkg_choreography, DkgCoordinator};
-pub use key_resharing::{get_resharing_choreography, KeyResharingCoordinator};
-pub use signature_aggregation::{get_aggregation_choreography, SignatureAggregationCoordinator};
+// Re-export FROST types and utilities
+pub use signature_aggregation::{perform_frost_aggregation, validate_aggregation_config};
 pub use threshold_signing::{
-    get_frost_choreography, FrostCoordinator, FrostSigner, ThresholdSigningConfig,
+    FrostCrypto,
+    SigningPhase,
+    ThresholdSigningConfig,
+};
+
+// Re-export message types for choreographies
+pub use distributed_keygen::{
+    DkgFailure, DkgRequest, DkgResponse, DkgSuccess, ShareCommitment, ShareRevelation,
+    VerificationResult as DkgVerificationResult,
+};
+pub use key_resharing::{
+    ResharingRequest, ResharingResponse, SharePackage,
+    VerificationResult as ResharingVerificationResult,
+};
+pub use signature_aggregation::{
+    AggregationRequest, AggregationResponse, PartialSignatureSubmission,
 };
 
 // Type aliases for this crate

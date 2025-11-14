@@ -1,13 +1,7 @@
 # Top-level workspace for Aura
 [workspace]
 resolver = "2"
-exclude = [
-    "ext/openmls",
-    "ext/quint", 
-    "ext/rmls",
-    "ext/causality",
-    "ext/zed-quint-extension",
-]
+exclude = ["ext/"]
 
 members = [
     "crates/aura-agent",
@@ -35,11 +29,6 @@ members = [
     "crates/aura-rendezvous",
     "examples/hello-crdt",
     "examples/hello-choreo",
-    "ext/rumpsteak-aura",
-    "ext/rumpsteak-aura/macros",
-    "ext/rumpsteak-aura/choreography",
-    "ext/rumpsteak-aura/fsm",
-    "ext/rumpsteak-aura/caching",
 ]
 
 
@@ -57,7 +46,6 @@ frost-core = "1.0"
 frost-ed25519 = "1.0"
 ed25519-dalek = { version = "2.0", features = ["rand_core", "serde"] }
 curve25519-dalek = "4.1"
-blake3 = "1.5"
 chrono = { version = "0.4", features = ["serde"] }
 hkdf = "0.12"
 sha2 = "0.10"
@@ -66,6 +54,7 @@ hex = "0.4"
 aes-gcm = "0.10"
 chacha20poly1305 = "0.10.1"
 zeroize = { version = "1.7", features = ["derive"] }
+blake3 = "1.5"
 
 # CRDT & serialization
 automerge = "0.5"
@@ -110,8 +99,8 @@ subtle = "2.6"
 getrandom = "0.2"
 
 # Session types & choreographic programming
-rumpsteak-aura = "0.2.3"
-rumpsteak-aura-choreography = "0.2.3"
+rumpsteak-aura = { version = "0.3.1" }
+rumpsteak-aura-choreography = { version = "0.3.1" }
 
 # Additional dependencies for cryptography
 x25519-dalek = { version = "2.0", features = ["serde", "reusable_secrets", "static_secrets"] }

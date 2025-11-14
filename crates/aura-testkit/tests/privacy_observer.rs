@@ -1,3 +1,5 @@
+//! Tests for privacy observer functionality
+
 use aura_testkit::privacy::{simulate_rendezvous_trace, traces_equivalent, PrivacyObserver};
 
 #[test]

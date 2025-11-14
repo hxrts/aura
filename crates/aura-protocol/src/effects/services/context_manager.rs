@@ -121,12 +121,11 @@ impl Default for ContextManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::relationships::ContextId;
 
     #[tokio::test]
     async fn test_context_snapshot() {
         let manager = ContextManager::new();
-        let device_id = DeviceId::from([1u8; 16]);
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
 
         // Initialize a context
         let context = manager.initialize(device_id).await.unwrap();
@@ -144,7 +143,7 @@ mod tests {
     #[tokio::test]
     async fn test_atomic_update() {
         let manager = ContextManager::new();
-        let device_id = DeviceId::from([1u8; 16]);
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
 
         // Initialize context
         manager.initialize(device_id).await.unwrap();
@@ -167,7 +166,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_not_found() {
         let manager = ContextManager::new();
-        let device_id = DeviceId::from([1u8; 16]);
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
 
         let result = manager.get_snapshot(device_id).await;
         assert!(result.is_err());
@@ -180,7 +179,7 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_access() {
         let manager = ContextManager::new();
-        let device_id = DeviceId::from([1u8; 16]);
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
 
         // Initialize context
         manager.initialize(device_id).await.unwrap();

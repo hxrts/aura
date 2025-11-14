@@ -3,6 +3,8 @@
 //! This module implements relay coordination for message routing with
 //! capability-based access control and privacy-preserving relay selection.
 
+#![allow(clippy::unwrap_used)]
+
 use aura_core::{AuraResult, DeviceId, RelationshipId};
 use aura_wot::{Capability, CapabilitySet, RelayPermission, TrustLevel};
 use serde::{Deserialize, Serialize};
@@ -57,6 +59,7 @@ pub struct StreamFlags {
 #[derive(Debug, Clone)]
 pub struct RelayCoordinator {
     /// Coordinator identity
+    #[allow(dead_code)]
     coordinator_id: DeviceId,
     /// Known relay nodes
     relay_nodes: HashMap<DeviceId, RelayNode>,
@@ -640,6 +643,7 @@ impl RelayCoordinator {
         strategy: &LoadBalancingStrategy,
         num_relays: usize,
     ) -> AuraResult<Vec<DeviceId>> {
+        #[allow(unused_assignments)]
         let mut selected = Vec::new();
 
         match strategy {
@@ -748,6 +752,7 @@ impl RelayCoordinator {
     }
 
     /// Update aggregate statistics for relay metrics
+    #[allow(dead_code)]
     fn update_aggregate_stats(&self, metrics: &mut RelayMetrics) -> AuraResult<()> {
         Self::update_aggregate_stats_static(metrics)
     }

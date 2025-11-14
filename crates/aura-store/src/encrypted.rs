@@ -4,11 +4,8 @@
 //! key derivation.
 
 use crate::{ChunkId, MemoryStorage};
-use async_trait::async_trait;
-use aura_core::effects::StorageEffects;
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// Storage handler using aura-store's pure effect interface
 ///
@@ -40,8 +37,8 @@ impl EncryptedStorageHandler {
     }
 
     /// Get information about the storage configuration
-    pub async fn stack_info(&self) -> HashMap<String, String> {
-        let storage = self.storage.read().await;
+    pub fn stack_info(&self) -> HashMap<String, String> {
+        let storage = self.storage.read().unwrap();
         let chunk_count = storage.chunks.len() as u64;
         let total_bytes: u64 = storage.chunks.values().map(|v| v.len() as u64).sum();
 
@@ -53,36 +50,35 @@ impl EncryptedStorageHandler {
     }
 }
 
-#[async_trait]
 impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
-    async fn store(
+    fn store(
         &self,
         key: &str,
         value: Vec<u8>,
     ) -> Result<(), aura_core::effects::StorageError> {
-        let mut storage = self.storage.write().await;
+        let mut storage = self.storage.write().unwrap();
         storage
             .chunks
             .insert(ChunkId::from_bytes(key.as_bytes()), value);
         Ok(())
     }
 
-    async fn retrieve(
+    fn retrieve(
         &self,
         key: &str,
     ) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
-        let storage = self.storage.read().await;
+        let storage = self.storage.read().unwrap();
         let chunk_id = ChunkId::from_bytes(key.as_bytes());
         Ok(storage.chunks.get(&chunk_id).cloned())
     }
 
-    async fn remove(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
-        let mut storage = self.storage.write().await;
+    fn remove(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
+        let mut storage = self.storage.write().unwrap();
         let chunk_id = ChunkId::from_bytes(key.as_bytes());
         Ok(storage.chunks.remove(&chunk_id).is_some())
     }
 
-    async fn list_keys(
+    fn list_keys(
         &self,
         prefix: Option<&str>,
     ) -> Result<Vec<String>, aura_core::effects::StorageError> {
@@ -92,17 +88,17 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
         ))
     }
 
-    async fn exists(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
-        let storage = self.storage.read().await;
+    fn exists(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
+        let storage = self.storage.read().unwrap();
         let chunk_id = ChunkId::from_bytes(key.as_bytes());
         Ok(storage.chunks.contains_key(&chunk_id))
     }
 
-    async fn store_batch(
+    fn store_batch(
         &self,
         pairs: HashMap<String, Vec<u8>>,
     ) -> Result<(), aura_core::effects::StorageError> {
-        let mut storage = self.storage.write().await;
+        let mut storage = self.storage.write().unwrap();
         for (key, value) in pairs {
             let chunk_id = ChunkId::from_bytes(key.as_bytes());
             storage.chunks.insert(chunk_id, value);
@@ -110,11 +106,11 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
         Ok(())
     }
 
-    async fn retrieve_batch(
+    fn retrieve_batch(
         &self,
         keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, aura_core::effects::StorageError> {
-        let storage = self.storage.read().await;
+        let storage = self.storage.read().unwrap();
         let mut result = HashMap::new();
         for key in keys {
             let chunk_id = ChunkId::from_bytes(key.as_bytes());
@@ -125,16 +121,16 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
         Ok(result)
     }
 
-    async fn clear_all(&self) -> Result<(), aura_core::effects::StorageError> {
-        let mut storage = self.storage.write().await;
+    fn clear_all(&self) -> Result<(), aura_core::effects::StorageError> {
+        let mut storage = self.storage.write().unwrap();
         storage.clear();
         Ok(())
     }
 
-    async fn stats(
+    fn stats(
         &self,
     ) -> Result<aura_core::effects::StorageStats, aura_core::effects::StorageError> {
-        let storage = self.storage.read().await;
+        let storage = self.storage.read().unwrap();
         let total_size: u64 = storage.chunks.values().map(|v| v.len() as u64).sum();
 
         Ok(aura_core::effects::StorageStats {
@@ -149,9 +145,10 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::StorageEffects;
 
-    #[tokio::test]
-    async fn test_encrypted_storage_basic_operations() {
+    #[test]
+    fn test_encrypted_storage_basic_operations() {
         // Create storage (encryption_key parameter ignored in current implementation)
         let storage = EncryptedStorageHandler::new("/tmp/test".to_string(), Some(vec![0x42; 32]));
 
@@ -160,22 +157,22 @@ mod tests {
         let value = b"test_value".to_vec();
 
         // Store
-        storage.store(key, value.clone()).await.unwrap();
+        storage.store(key, value.clone()).unwrap();
 
         // Retrieve
-        let retrieved = storage.retrieve(key).await.unwrap();
+        let retrieved = storage.retrieve(key).unwrap();
         assert_eq!(retrieved, Some(value));
 
         // Exists
-        assert!(storage.exists(key).await.unwrap());
+        assert!(storage.exists(key).unwrap());
 
         // Remove
-        assert!(storage.remove(key).await.unwrap());
-        assert!(!storage.exists(key).await.unwrap());
+        assert!(storage.remove(key).unwrap());
+        assert!(!storage.exists(key).unwrap());
     }
 
-    #[tokio::test]
-    async fn test_encrypted_storage_batch_operations() {
+    #[test]
+    fn test_encrypted_storage_batch_operations() {
         let storage = EncryptedStorageHandler::new("/tmp/test".to_string(), Some(vec![0x42; 32]));
 
         // Prepare batch data
@@ -185,11 +182,11 @@ mod tests {
         batch_data.insert("key3".to_string(), b"value3".to_vec());
 
         // Store batch
-        storage.store_batch(batch_data.clone()).await.unwrap();
+        storage.store_batch(batch_data.clone()).unwrap();
 
         // Retrieve batch
         let keys: Vec<String> = batch_data.keys().cloned().collect();
-        let retrieved = storage.retrieve_batch(&keys).await.unwrap();
+        let retrieved = storage.retrieve_batch(&keys).unwrap();
 
         assert_eq!(retrieved.len(), 3);
         for (key, expected_value) in batch_data {
@@ -197,51 +194,51 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_encrypted_storage_stats() {
+    #[test]
+    fn test_encrypted_storage_stats() {
         let storage = EncryptedStorageHandler::new("/tmp/test".to_string(), Some(vec![0x42; 32]));
 
         // Initially empty
-        let stats = storage.stats().await.unwrap();
+        let stats = storage.stats().unwrap();
         assert_eq!(stats.key_count, 0);
 
         // Add some data
-        storage.store("key1", vec![1, 2, 3]).await.unwrap();
-        storage.store("key2", vec![4, 5, 6, 7]).await.unwrap();
+        storage.store("key1", vec![1, 2, 3]).unwrap();
+        storage.store("key2", vec![4, 5, 6, 7]).unwrap();
 
-        let stats = storage.stats().await.unwrap();
+        let stats = storage.stats().unwrap();
         assert_eq!(stats.key_count, 2);
         assert_eq!(stats.total_size, 7); // 3 + 4 bytes
         assert_eq!(stats.backend_type, "memory");
     }
 
-    #[tokio::test]
-    async fn test_storage_stack_info() {
+    #[test]
+    fn test_storage_stack_info() {
         let storage = EncryptedStorageHandler::new("/tmp/test".to_string(), Some(vec![0x42; 32]));
 
-        let stack_info = storage.stack_info().await;
+        let stack_info = storage.stack_info();
         assert!(stack_info.contains_key("backend_type"));
         assert!(stack_info.contains_key("chunk_count"));
         assert!(stack_info.contains_key("total_bytes"));
     }
 
-    #[tokio::test]
-    async fn test_clear_all() {
+    #[test]
+    fn test_clear_all() {
         let storage = EncryptedStorageHandler::new("/tmp/test".to_string(), None);
 
         // Add data
-        storage.store("key1", b"value1".to_vec()).await.unwrap();
-        storage.store("key2", b"value2".to_vec()).await.unwrap();
+        storage.store("key1", b"value1".to_vec()).unwrap();
+        storage.store("key2", b"value2".to_vec()).unwrap();
 
         // Verify data exists
-        assert_eq!(storage.stats().await.unwrap().key_count, 2);
+        assert_eq!(storage.stats().unwrap().key_count, 2);
 
         // Clear all
-        storage.clear_all().await.unwrap();
+        storage.clear_all().unwrap();
 
         // Verify cleared
-        assert_eq!(storage.stats().await.unwrap().key_count, 0);
-        assert!(!storage.exists("key1").await.unwrap());
-        assert!(!storage.exists("key2").await.unwrap());
+        assert_eq!(storage.stats().unwrap().key_count, 0);
+        assert!(!storage.exists("key1").unwrap());
+        assert!(!storage.exists("key2").unwrap());
     }
 }

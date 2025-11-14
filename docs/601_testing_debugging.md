@@ -161,8 +161,9 @@ cargo test --package aura-journal -- semilattice
 
 **Basic Simulation Testing**:
 ```rust
-// Create deterministic test environment
-let effects = AuraEffectSystem::for_testing(device_id);
+// Create deterministic test environment using modern testkit pattern
+let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+let effects = fixture.effect_system();
 
 // Run protocols with controlled effects
 let result = execute_protocol(&effects).await?;

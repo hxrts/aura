@@ -50,5 +50,5 @@ pub use aura_protocol::AuraEffectSystem;
 // Re-export main APIs
 pub use access_control::StorageAccessControl;
 pub use content::{ChunkStore, ContentAddressing, ContentStore};
-pub use garbage_collection::{GcChoreography, GcProposal, GcRole};
-pub use search::{SearchChoreography, SearchQuery, SearchResults, SearchRole};
+pub use garbage_collection::{/*GarbageCollectionChoreography,*/ GcProposal, GcRole};
+pub use search::{/*DistributedSearchChoreography,*/ SearchQuery, SearchResults, SearchRole};

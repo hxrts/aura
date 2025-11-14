@@ -3,6 +3,8 @@
 //! This module wires `aura-sync` helpers (snapshot manager, writer fence)
 //! into the agent runtime so operator tooling can trigger maintenance flows.
 
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -335,7 +337,7 @@ impl MaintenanceController {
         }
 
         drop(fence_guard);
-        effects
+        let _ = effects
             .log_info(&format!(
                 "Snapshot {} committed at epoch {} (digest {:02x?})",
                 proposal_id,
@@ -381,7 +383,7 @@ impl MaintenanceController {
             );
         }
 
-        effects
+        let _ = effects
             .log_info(&format!(
             "Admin replacement stub recorded for account {} (new admin {}, activation epoch {})",
             account_id, new_admin, activation_epoch
@@ -510,10 +512,8 @@ impl MaintenanceController {
             if let Some(epoch) = Self::parse_epoch_suffix(&key) {
                 if epoch < snapshot_epoch {
                     // Estimate journal segment size (conservative estimate)
-                    if let Ok(data) = StorageEffects::retrieve(effects, &key).await {
-                        if let Some(bytes) = data {
-                            estimated_freed_bytes += bytes.len() as u64;
-                        }
+                    if let Ok(Some(bytes)) = StorageEffects::retrieve(effects, &key).await {
+                        estimated_freed_bytes += bytes.len() as u64;
                     }
                     if StorageEffects::remove(effects, &key).await.is_ok() {
                         deleted_items += 1;

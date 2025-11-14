@@ -11,7 +11,7 @@ See [Advanced Choreography Guide](804_advanced_choreography_guide.md) for detail
 ## DSL Syntax
 
 ```rust
-use aura_macros::aura_choreography;
+use aura_macros::choreography;
 use aura_core::effects::{ConsoleEffects, CryptoEffects, NetworkEffects, TimeEffects, JournalEffects};
 
 /// Sealed supertrait for protocol effects

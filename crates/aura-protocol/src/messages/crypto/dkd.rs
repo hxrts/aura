@@ -37,7 +37,7 @@ pub struct InitiateDkdSessionMessage {
 pub struct DkdPointCommitmentMessage {
     pub session_id: SessionId,
     pub device_id: DeviceId,
-    pub commitment: [u8; 32], // blake3(Point)
+    pub commitment: [u8; 32], // hash(Point)
     pub commitment_proof: Option<Vec<u8>>,
 }
 

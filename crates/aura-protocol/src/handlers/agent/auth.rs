@@ -344,53 +344,63 @@ impl AuthenticationEffects for AuthenticationHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::AuraEffectSystem;
+    use aura_testkit::*;
+    use aura_macros::aura_test;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
 
-    #[tokio::test]
-    async fn test_authentication_handler_creation() {
-        let device_id = DeviceId::new();
-        let core_effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+    #[aura_test]
+    async fn test_authentication_handler_creation() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let core_effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
         let handler = AuthenticationHandler::new(device_id, core_effects);
 
         assert_eq!(handler.device_id, device_id);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_device_authentication() {
-        let device_id = DeviceId::new();
-        let core_effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+    #[aura_test]
+    async fn test_device_authentication() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let core_effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
         let handler = AuthenticationHandler::new(device_id, core_effects);
 
-        handler.initialize().await.unwrap();
+        handler.initialize().await?;
 
-        let result = handler.authenticate_device().await.unwrap();
+        let _result = handler.authenticate_device().await?;
         // In testing mode, authentication behavior depends on the mock implementation
-        assert!(result.success || !result.success); // Should not panic
+        // Test passes if authentication doesn't panic
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_authentication_state() {
-        let device_id = DeviceId::new();
-        let core_effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+    #[aura_test]
+    async fn test_authentication_state() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let core_effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
         let handler = AuthenticationHandler::new(device_id, core_effects);
 
-        handler.initialize().await.unwrap();
+        handler.initialize().await?;
 
         // Initially not authenticated
-        let is_auth = handler.is_authenticated().await.unwrap();
+        let is_auth = handler.is_authenticated().await?;
         assert!(!is_auth);
 
         // Lock device should work regardless of state
-        handler.lock_device().await.unwrap();
+        handler.lock_device().await?;
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_biometric_operations() {
-        let device_id = DeviceId::new();
-        let core_effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+    #[aura_test]
+    async fn test_biometric_operations() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let core_effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
         let handler = AuthenticationHandler::new(device_id, core_effects);
 
-        handler.initialize().await.unwrap();
+        handler.initialize().await?;
 
         // Test biometric enrollment
         let result = handler.enroll_biometric(BiometricType::Fingerprint).await;
@@ -400,15 +410,17 @@ mod tests {
         // Test biometric removal
         let result = handler.remove_biometric(BiometricType::Fingerprint).await;
         assert!(result.is_ok() || result.is_err());
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_health_check() {
-        let device_id = DeviceId::new();
-        let core_effects = Arc::new(RwLock::new(AuraEffectSystem::for_testing(device_id)));
+    #[aura_test]
+    async fn test_health_check() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let core_effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
         let handler = AuthenticationHandler::new(device_id, core_effects);
 
-        let health = handler.health_check().await.unwrap();
+        let health = handler.health_check().await?;
         // Should return some health status
         match health {
             HealthStatus::Healthy
@@ -417,5 +429,6 @@ mod tests {
                 // All valid states
             }
         }
+        Ok(())
     }
 }

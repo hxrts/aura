@@ -7,13 +7,11 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
-use std::time::{SystemTime, Instant};
+use std::time::SystemTime;
 
-use aura_protocol::handlers::{
-    AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
-};
 use aura_core::identifiers::DeviceId;
 use aura_core::LocalSessionType;
+use aura_protocol::handlers::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 
 /// State capture parameters
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,13 +89,19 @@ impl StateInspectionMiddleware {
 
     /// Generate snapshot ID
     fn generate_snapshot_id(&self) -> String {
-        let mut counter = self.snapshot_counter.lock().unwrap();
+        let mut counter = self
+            .snapshot_counter
+            .lock()
+            .unwrap_or_else(|e| panic!("Snapshot counter lock poisoned: {}", e));
         *counter += 1;
         format!("snapshot_{}_{}", self.device_id, *counter)
     }
 
     /// Extract state from context
-    fn extract_state_from_context(&self, ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> HashMap<String, serde_json::Value> {
+    fn extract_state_from_context(
+        &self,
+        ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> HashMap<String, serde_json::Value> {
         let mut state = HashMap::new();
 
         // Add basic context info
@@ -122,7 +126,11 @@ impl StateInspectionMiddleware {
     }
 
     /// Capture state snapshot
-    fn capture_snapshot(&self, ctx: &aura_protocol::handlers::context_immutable::AuraContext, custom_id: Option<String>) -> StateSnapshot {
+    fn capture_snapshot(
+        &self,
+        ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+        custom_id: Option<String>,
+    ) -> StateSnapshot {
         let snapshot_id = custom_id.unwrap_or_else(|| self.generate_snapshot_id());
         let state_data = self.extract_state_from_context(ctx);
 
@@ -154,10 +162,13 @@ impl StateInspectionMiddleware {
         snapshot_a: &str,
         snapshot_b: &str,
     ) -> Result<StateDiffResult, AuraHandlerError> {
-        let snapshots = self.snapshots.lock().map_err(|e| AuraHandlerError::ContextError {
-            message: format!("Failed to lock snapshots: {}", e),
-        })?;
-        
+        let snapshots = self
+            .snapshots
+            .lock()
+            .map_err(|e| AuraHandlerError::ContextError {
+                message: format!("Failed to lock snapshots: {}", e),
+            })?;
+
         let snap_a = snapshots
             .iter()
             .find(|s| s.id == snapshot_a)
@@ -201,7 +212,11 @@ impl StateInspectionMiddleware {
 
     /// Get snapshots
     pub fn snapshots(&self) -> Vec<StateSnapshot> {
-        self.snapshots.lock().unwrap().clone().into()
+        self.snapshots
+            .lock()
+            .unwrap_or_else(|e| panic!("Snapshots lock poisoned: {}", e))
+            .clone()
+            .into()
     }
 }
 
@@ -259,16 +274,31 @@ impl AuraHandler for StateInspectionMiddleware {
                 })
             }
             "list_snapshots" => {
-                let snapshot_ids: Vec<String> =
-                    self.snapshots.lock().unwrap().iter().map(|s| s.id.clone()).collect();
+                let snapshot_ids: Vec<String> = self
+                    .snapshots
+                    .lock()
+                    .unwrap_or_else(|e| panic!("Snapshots lock poisoned: {}", e))
+                    .iter()
+                    .map(|s| s.id.clone())
+                    .collect();
                 serde_json::to_vec(&snapshot_ids).map_err(|_| AuraHandlerError::ContextError {
                     message: "Failed to serialize snapshot list".to_string(),
                 })
             }
             "clear_snapshots" => {
-                let count = self.snapshots.lock().unwrap().len();
-                self.snapshots.lock().unwrap().clear();
-                *self.snapshot_counter.lock().unwrap() = 0;
+                let count = self
+                    .snapshots
+                    .lock()
+                    .unwrap_or_else(|e| panic!("Snapshots lock poisoned: {}", e))
+                    .len();
+                self.snapshots
+                    .lock()
+                    .unwrap_or_else(|e| panic!("Snapshots lock poisoned: {}", e))
+                    .clear();
+                *self
+                    .snapshot_counter
+                    .lock()
+                    .unwrap_or_else(|e| panic!("Snapshot counter lock poisoned: {}", e)) = 0;
 
                 serde_json::to_vec(&count).map_err(|_| AuraHandlerError::ContextError {
                     message: "Failed to serialize clear count".to_string(),
@@ -302,6 +332,7 @@ impl AuraHandler for StateInspectionMiddleware {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_protocol::handlers::context_immutable::AuraContext;
 
     #[tokio::test]
     async fn test_state_inspection_creation() {
@@ -328,29 +359,24 @@ mod tests {
     #[tokio::test]
     async fn test_state_operations() {
         let device_id = DeviceId::new();
-        let mut middleware = StateInspectionMiddleware::for_simulation(device_id, 42);
-        let mut ctx = AuraContext::for_testing(device_id);
+        let middleware = StateInspectionMiddleware::for_simulation(device_id, 42);
+        let ctx = AuraContext::for_testing(device_id);
 
         // Test capture state
         let result = middleware
-            .execute_effect(EffectType::StateInspection, "capture_state", b"", &mut ctx)
+            .execute_effect(EffectType::StateInspection, "capture_state", b"", &ctx)
             .await;
         assert!(result.is_ok());
 
         // Test list snapshots
         let result = middleware
-            .execute_effect(EffectType::StateInspection, "list_snapshots", b"", &mut ctx)
+            .execute_effect(EffectType::StateInspection, "list_snapshots", b"", &ctx)
             .await;
         assert!(result.is_ok());
 
         // Test clear snapshots
         let result = middleware
-            .execute_effect(
-                EffectType::StateInspection,
-                "clear_snapshots",
-                b"",
-                &mut ctx,
-            )
+            .execute_effect(EffectType::StateInspection, "clear_snapshots", b"", &ctx)
             .await;
         assert!(result.is_ok());
     }

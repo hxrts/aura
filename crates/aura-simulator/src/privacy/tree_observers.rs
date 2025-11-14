@@ -241,15 +241,13 @@ impl ExternalObserver {
         };
 
         // Record timing
-        if let Some(last_event) = self.observations.last() {
-            if let ObservationEvent::NetworkTraffic {
-                timestamp: last_time,
-                ..
-            } = last_event
-            {
-                if let Ok(duration) = timestamp.duration_since(*last_time) {
-                    self.leakage.timing_observations.push(duration);
-                }
+        if let Some(ObservationEvent::NetworkTraffic {
+            timestamp: last_time,
+            ..
+        }) = self.observations.last()
+        {
+            if let Ok(duration) = timestamp.duration_since(*last_time) {
+                self.leakage.timing_observations.push(duration);
             }
         }
 
@@ -331,15 +329,13 @@ impl NeighborObserver {
         };
 
         // Record timing
-        if let Some(last_event) = self.observations.last() {
-            if let ObservationEvent::EnvelopeMetadata {
-                timestamp: last_time,
-                ..
-            } = last_event
-            {
-                if let Ok(duration) = timestamp.duration_since(*last_time) {
-                    self.leakage.timing_observations.push(duration);
-                }
+        if let Some(ObservationEvent::EnvelopeMetadata {
+            timestamp: last_time,
+            ..
+        }) = self.observations.last()
+        {
+            if let Ok(duration) = timestamp.duration_since(*last_time) {
+                self.leakage.timing_observations.push(duration);
             }
         }
 
@@ -348,10 +344,7 @@ impl NeighborObserver {
 
         // Build routing graph
         if let (Some(s), Some(r)) = (sender, receiver) {
-            self.routing_graph
-                .entry(s)
-                .or_default()
-                .insert(r);
+            self.routing_graph.entry(s).or_default().insert(r);
         }
 
         self.observations.push(event);
@@ -453,15 +446,13 @@ impl InGroupObserver {
         self.signer_counts.push(signer_count);
 
         // Record timing
-        if let Some(last_event) = self.observations.last() {
-            if let ObservationEvent::OperationCommitted {
-                timestamp: last_time,
-                ..
-            } = last_event
-            {
-                if let Ok(duration) = timestamp.duration_since(*last_time) {
-                    self.leakage.timing_observations.push(duration);
-                }
+        if let Some(ObservationEvent::OperationCommitted {
+            timestamp: last_time,
+            ..
+        }) = self.observations.last()
+        {
+            if let Ok(duration) = timestamp.duration_since(*last_time) {
+                self.leakage.timing_observations.push(duration);
             }
         }
 
@@ -695,8 +686,10 @@ mod tests {
     fn test_privacy_leakage_exceeds_budget() {
         let budget = PrivacyBudget::default();
 
-        let mut leakage = PrivacyLeakage::default();
-        leakage.timing_entropy = 5.0; // Below minimum of 8.0
+        let leakage = PrivacyLeakage {
+            timing_entropy: 5.0, // Below minimum of 8.0
+            ..PrivacyLeakage::default()
+        };
 
         assert!(leakage.exceeds_budget(&budget));
     }

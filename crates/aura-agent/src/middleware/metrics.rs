@@ -3,6 +3,9 @@
 //! Provides telemetry and metrics collection for agent operations, enabling
 //! monitoring, performance analysis, and operational insights.
 
+// Allow SystemTime::now() for metrics collection - not part of core effect system
+#![allow(clippy::disallowed_methods)]
+
 use aura_core::{identifiers::DeviceId, AuraResult as Result};
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -4,7 +4,6 @@
 //! points and unlinkable credentials for anonymous peer finding.
 
 use crate::UnlinkableCredential;
-use aura_core::hash;
 use aura_core::{AuraResult, DeviceId, RelationshipId};
 use aura_wot::{Capability, TrustLevel};
 use serde::{Deserialize, Serialize};
@@ -14,10 +13,12 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct DiscoveryService {
     /// Service identifier
+    #[allow(dead_code)]
     service_id: DeviceId,
     /// Active rendezvous points
     rendezvous_points: HashMap<RendezvousId, RendezvousPoint>,
     /// Discovery credentials by relationship
+    #[allow(dead_code)]
     discovery_credentials: HashMap<RelationshipId, UnlinkableCredential>,
     /// Query anonymization cache
     query_cache: HashMap<QueryId, CachedQuery>,
@@ -213,6 +214,7 @@ pub type QueryId = [u8; 32];
 /// Cached query for anonymization
 #[derive(Debug, Clone)]
 struct CachedQuery {
+    #[allow(dead_code)]
     original_query: DiscoveryQuery,
     anonymized_query: DiscoveryQuery,
     cache_expires_at: u64,
@@ -425,7 +427,7 @@ impl DiscoveryService {
     /// Verify advertisement authorization
     fn verify_advertisement_authorization(
         &self,
-        advertisement: &PeerAdvertisement,
+        _advertisement: &PeerAdvertisement,
     ) -> AuraResult<()> {
         // Verify the unlinkable credential proves authorization
         // This would validate the credential against known issuers
@@ -435,7 +437,7 @@ impl DiscoveryService {
     /// Check query policy compliance
     fn check_query_policy(
         &self,
-        query: &DiscoveryQuery,
+        _query: &DiscoveryQuery,
         policy: &RendezvousPolicy,
     ) -> AuraResult<bool> {
         match &policy.query_policy {
@@ -540,7 +542,7 @@ impl DiscoveryService {
     /// Find rendezvous points relevant to query
     fn find_relevant_rendezvous_points(
         &self,
-        query: &DiscoveryQuery,
+        _query: &DiscoveryQuery,
     ) -> AuraResult<Vec<RendezvousId>> {
         // TODO fix - For now, return all available rendezvous points
         // In practice, this would use location hashing and other techniques

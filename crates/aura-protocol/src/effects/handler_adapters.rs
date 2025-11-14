@@ -336,9 +336,7 @@ fn to_fixed_array<const N: usize>(
                 operation: operation.to_string(),
                 source: invalid_data_error(format!(
                     "Expected {} bytes for {} but received {}",
-                    N,
-                    field,
-                    len
+                    N, field, len
                 )),
             })
     }
@@ -1044,6 +1042,352 @@ where
     }
 
     impl_handler_meta!(Self, EffectType::Journal);
+}
+
+/// Adapter for `SystemEffects` implementations.
+pub struct SystemHandlerAdapter<T> {
+    inner: Arc<T>,
+    mode: ExecutionMode,
+}
+
+impl<T> SystemHandlerAdapter<T>
+where
+    T: crate::effects::SystemEffects + Send + Sync + 'static,
+{
+    pub fn new(inner: T, mode: ExecutionMode) -> Self {
+        Self {
+            inner: Arc::new(inner),
+            mode,
+        }
+    }
+
+    fn inner(&self) -> &T {
+        &self.inner
+    }
+}
+
+#[async_trait]
+impl<T> AuraHandler for SystemHandlerAdapter<T>
+where
+    T: crate::effects::SystemEffects + Send + Sync + 'static,
+{
+    async fn execute_effect(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+        _ctx: &AuraContext,
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "log" => {
+                let (level, component, message): (String, String, String) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                    })?;
+                
+                self.inner().log(&level, &component, &message).await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                
+                Ok(bincode::serialize(&()).unwrap_or_default())
+            }
+            "health_check" => {
+                let result = self.inner().health_check().await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(bincode::serialize(&result).unwrap_or_default())
+            }
+            "get_system_info" => {
+                let result = self.inner().get_system_info().await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(bincode::serialize(&result).unwrap_or_default())
+            }
+            _ => {
+                return Err(AuraHandlerError::UnsupportedOperation {
+                    effect_type,
+                    operation: operation.to_string(),
+                })
+            }
+        }
+    }
+
+    async fn execute_session(
+        &self,
+        _session: aura_core::LocalSessionType,
+        _ctx: &AuraContext,
+    ) -> Result<(), AuraHandlerError> {
+        Err(AuraHandlerError::UnsupportedOperation {
+            effect_type: EffectType::System,
+            operation: "session".to_string(),
+        })
+    }
+
+    impl_handler_meta!(Self, EffectType::System);
+}
+
+/// Adapter for `LedgerEffects` implementations.
+pub struct LedgerHandlerAdapter<T> {
+    inner: Arc<T>,
+    mode: ExecutionMode,
+}
+
+impl<T> LedgerHandlerAdapter<T>
+where
+    T: crate::effects::LedgerEffects + Send + Sync + 'static,
+{
+    pub fn new(inner: T, mode: ExecutionMode) -> Self {
+        Self {
+            inner: Arc::new(inner),
+            mode,
+        }
+    }
+
+    fn inner(&self) -> &T {
+        &self.inner
+    }
+}
+
+#[async_trait]
+impl<T> AuraHandler for LedgerHandlerAdapter<T>
+where
+    T: crate::effects::LedgerEffects + Send + Sync + 'static,
+{
+    async fn execute_effect(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+        _ctx: &AuraContext,
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "current_epoch" => {
+                let result = self.inner().current_epoch().await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(bincode::serialize(&result).unwrap_or_default())
+            }
+            "append_event" => {
+                let event = bincode::deserialize(parameters).map_err(|e| {
+                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                })?;
+                
+                self.inner().append_event(event).await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                
+                Ok(bincode::serialize(&()).unwrap_or_default())
+            }
+            "subscribe_to_events" => {
+                // Event streams are not supported through handler interface
+                Err(AuraHandlerError::UnsupportedOperation {
+                    effect_type,
+                    operation: operation.to_string(),
+                })
+            }
+            _ => {
+                Err(AuraHandlerError::UnsupportedOperation {
+                    effect_type,
+                    operation: operation.to_string(),
+                })
+            }
+        }
+    }
+
+    async fn execute_session(
+        &self,
+        _session: aura_core::LocalSessionType,
+        _ctx: &AuraContext,
+    ) -> Result<(), AuraHandlerError> {
+        Err(AuraHandlerError::UnsupportedOperation {
+            effect_type: EffectType::Ledger,
+            operation: "session".to_string(),
+        })
+    }
+
+    impl_handler_meta!(Self, EffectType::Ledger);
+}
+
+/// Adapter for `TreeEffects` implementations.
+pub struct TreeHandlerAdapter<T> {
+    inner: Arc<T>,
+    mode: ExecutionMode,
+}
+
+impl<T> TreeHandlerAdapter<T>
+where
+    T: crate::effects::TreeEffects + Send + Sync + 'static,
+{
+    pub fn new(inner: T, mode: ExecutionMode) -> Self {
+        Self {
+            inner: Arc::new(inner),
+            mode,
+        }
+    }
+
+    fn inner(&self) -> &T {
+        &self.inner
+    }
+}
+
+#[async_trait]
+impl<T> AuraHandler for TreeHandlerAdapter<T>
+where
+    T: crate::effects::TreeEffects + Send + Sync + 'static,
+{
+    async fn execute_effect(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+        _ctx: &AuraContext,
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "get_current_state" => {
+                let result = self.inner().get_current_state().await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(bincode::serialize(&result).unwrap_or_default())
+            }
+            "get_current_commitment" => {
+                let result = self.inner().get_current_commitment().await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(bincode::serialize(&result).unwrap_or_default())
+            }
+            _ => {
+                Err(AuraHandlerError::UnsupportedOperation {
+                    effect_type,
+                    operation: operation.to_string(),
+                })
+            }
+        }
+    }
+
+    async fn execute_session(
+        &self,
+        _session: aura_core::LocalSessionType,
+        _ctx: &AuraContext,
+    ) -> Result<(), AuraHandlerError> {
+        Err(AuraHandlerError::UnsupportedOperation {
+            effect_type: EffectType::Tree,
+            operation: "session".to_string(),
+        })
+    }
+
+    impl_handler_meta!(Self, EffectType::Tree);
+}
+
+/// Adapter for `ChoreographicEffects` implementations.
+pub struct ChoreographicHandlerAdapter<T> {
+    inner: Arc<T>,
+    mode: ExecutionMode,
+}
+
+impl<T> ChoreographicHandlerAdapter<T>
+where
+    T: crate::effects::ChoreographicEffects + Send + Sync + 'static,
+{
+    pub fn new(inner: T, mode: ExecutionMode) -> Self {
+        Self {
+            inner: Arc::new(inner),
+            mode,
+        }
+    }
+
+    fn inner(&self) -> &T {
+        &self.inner
+    }
+}
+
+#[async_trait]
+impl<T> AuraHandler for ChoreographicHandlerAdapter<T>
+where
+    T: crate::effects::ChoreographicEffects + Send + Sync + 'static,
+{
+    async fn execute_effect(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+        _ctx: &AuraContext,
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "send_to_role_bytes" => {
+                let (role, message): (crate::effects::ChoreographicRole, Vec<u8>) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                    })?;
+                
+                self.inner().send_to_role_bytes(role, message).await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                
+                Ok(bincode::serialize(&()).unwrap_or_default())
+            }
+            "broadcast_bytes" => {
+                let message: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
+                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                })?;
+                
+                self.inner().broadcast_bytes(message).await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                
+                Ok(bincode::serialize(&()).unwrap_or_default())
+            }
+            "emit_choreo_event" => {
+                let event = bincode::deserialize(parameters).map_err(|e| {
+                    AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
+                })?;
+                
+                self.inner().emit_choreo_event(event).await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                
+                Ok(bincode::serialize(&()).unwrap_or_default())
+            }
+            _ => {
+                Err(AuraHandlerError::UnsupportedOperation {
+                    effect_type,
+                    operation: operation.to_string(),
+                })
+            }
+        }
+    }
+
+    async fn execute_session(
+        &self,
+        _session: aura_core::LocalSessionType,
+        _ctx: &AuraContext,
+    ) -> Result<(), AuraHandlerError> {
+        Err(AuraHandlerError::UnsupportedOperation {
+            effect_type: EffectType::Choreographic,
+            operation: "session".to_string(),
+        })
+    }
+
+    impl_handler_meta!(Self, EffectType::Choreographic);
 }
 
 #[cfg(test)]

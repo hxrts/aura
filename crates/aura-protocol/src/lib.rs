@@ -25,8 +25,9 @@
 //! use crate::prelude::*;
 //! use uuid::Uuid;
 //!
-//! // Create unified effect system for testing
-//! let handler = AuraEffectSystem::for_testing(device_id);
+//! // Create unified effect system for testing using modern testkit pattern  
+//! let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+//! let handler = fixture.effect_system();
 //!
 //! // Use effects directly with zero overhead
 //! let random_bytes = handler.random_bytes(32).await;
@@ -104,6 +105,7 @@ pub mod handlers;
 pub mod messages;
 pub mod middleware;
 pub mod sync;
+pub mod transport;
 pub mod verification;
 
 // Unified AuraEffectSystem architecture only
@@ -153,75 +155,23 @@ pub use handlers::{
 
 pub use messages::{AuraMessage, CryptoMessage, CryptoPayload, WIRE_FORMAT_VERSION};
 
-pub use guards::{
-    apply_delta_facts, evaluate_guard, execute_guarded_operation, track_leakage_consumption,
-    ExecutionMetrics, GuardedExecutionResult, LeakageBudget, ProtocolGuard,
-};
+// Only export guards actually used by other crates
+pub use guards::{LeakageBudget, ProtocolGuard};
 
-pub use sync::{IntentState, PeerView};
+// IntentState and PeerView removed - only used in internal tests
 
-pub use authorization_bridge::{
-    authenticate_and_authorize, evaluate_authorization, AuthorizationContext, AuthorizationError,
-    AuthorizationRequest, AuthorizedEvent, PermissionGrant,
-};
+// Only export authorization types actually used by other crates
+pub use authorization_bridge::{AuthorizationContext, AuthorizationError};
 
-pub use verification::{
-    CapabilitySoundnessVerifier, CapabilityState, SoundnessProperty, SoundnessReport,
-    SoundnessVerificationResult, VerificationConfig,
-};
+// Verification module removed from public API - test-only code
+// (verification module still exists for internal tests)
+
+// Transport coordination removed from public API - never used by dependent crates
+// Decision needed: evaluate if transport/ should move to aura-transport crate
 
 // Clean API - no legacy compatibility
 
-// Convenient prelude for common imports
-pub mod prelude {
-    //! Prelude for common imports
-    //!
-    //! This module re-exports the most commonly used types and traits for convenient importing.
-
-    // Core effect traits
-    pub use crate::effects::{
-        ChoreographicEffects, ConsoleEffects, CryptoEffects, JournalEffects, LedgerEffects,
-        NetworkEffects, RandomEffects, StorageEffects, TimeEffects,
-    };
-
-    // Common error types
-    pub use crate::effects::{ChoreographyError, LedgerError, NetworkError, StorageError};
-
-    // Utility types
-    pub use crate::effects::{
-        ChoreographicRole, ChoreographyEvent, ChoreographyMetrics, ConsoleEvent, NetworkAddress,
-        StorageLocation, WakeCondition,
-    };
-
-    // Handler types
-    pub use crate::handlers::{
-        AuraHandler, AuraHandlerFactory, CompositeHandler, EffectType, ExecutionMode,
-    };
-
-    // Authorization bridge
-    pub use crate::authorization_bridge::{
-        authenticate_and_authorize, evaluate_authorization, AuthorizationContext,
-        AuthorizationRequest, AuthorizedEvent, PermissionGrant,
-    };
-
-    // Middleware types
-    pub use crate::middleware::{
-        HandlerMetadata, MiddlewareContext, MiddlewareError, MiddlewareResult, PerformanceProfile,
-    };
-
-    // Context types
-    pub use crate::handlers::AuraContext;
-
-    // External dependencies commonly used with this crate
-    pub use async_trait::async_trait;
-    pub use aura_core::{AuraError, AuraResult, DeviceId};
-    pub use uuid::Uuid;
-
-    // Common standard library types
-    pub use std::collections::HashMap;
-    pub use std::sync::Arc;
-    pub use std::time::Duration;
-}
+// Prelude module removed - zero usage across workspace
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -5,7 +5,8 @@
 //! account state updates.
 
 use aura_agent::AgentOperations;
-use aura_core::{AccountId, Cap, DeviceId, RelationshipId, TrustLevel, Top};
+use aura_core::{AccountId, Cap, DeviceId, RelationshipId, TrustLevel, Top, AuraResult};
+use aura_macros::aura_test;
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
     invitation_acceptance::{AcceptanceProtocolConfig, InvitationAcceptanceCoordinator},
@@ -16,7 +17,6 @@ use aura_journal::{
     JournalOperations,
 };
 use aura_protocol::{
-    effects::AuraEffectSystem,
     handlers::{HandlerRegistry, HandlerError},
 };
 use aura_wot::CapabilitySet;
@@ -44,7 +44,7 @@ pub struct InvitationFlowTest {
 
 impl InvitationFlowTest {
     /// Create new invitation flow test with two devices
-    pub async fn new() -> Self {
+    pub async fn new() -> aura_core::AuraResult<Self> {
         let inviter_device = DeviceId::new();
         let invitee_device = DeviceId::new();
         let account_id = AccountId::new();
@@ -55,7 +55,8 @@ impl InvitationFlowTest {
         let mut journal_ops = HashMap::new();
         
         // Set up inviter device
-        let inviter_effects = AuraEffectSystem::for_testing(inviter_device);
+        let inviter_fixture = aura_testkit::create_test_fixture_with_device_id(inviter_device).await?;
+        let inviter_effects = inviter_fixture.effects().as_ref().clone();
         let inviter_agent = AgentOperations::new(inviter_device, inviter_effects.clone()).await;
         let inviter_journal = JournalOperations::new(inviter_effects.clone());
         
@@ -64,7 +65,8 @@ impl InvitationFlowTest {
         journal_ops.insert(inviter_device, inviter_journal);
         
         // Set up invitee device
-        let invitee_effects = AuraEffectSystem::for_testing(invitee_device);
+        let invitee_fixture = aura_testkit::create_test_fixture_with_device_id(invitee_device).await?;
+        let invitee_effects = invitee_fixture.effects().as_ref().clone();
         let invitee_agent = AgentOperations::new(invitee_device, invitee_effects.clone()).await;
         let invitee_journal = JournalOperations::new(invitee_effects.clone());
         
@@ -72,7 +74,7 @@ impl InvitationFlowTest {
         agent_ops.insert(invitee_device, invitee_agent);
         journal_ops.insert(invitee_device, invitee_journal);
         
-        Self {
+        Ok(Self {
             inviter_device,
             invitee_device,
             account_id,
@@ -80,7 +82,7 @@ impl InvitationFlowTest {
             agent_ops,
             journal_ops,
             invitation_ledger,
-        }
+        })
     }
 
     /// Create device invitation request
@@ -112,11 +114,11 @@ impl InvitationFlowTest {
 }
 
 /// Test complete invitation flow from creation to acceptance
-#[tokio::test]
-async fn test_complete_invitation_flow() {
+#[aura_test]
+async fn test_complete_invitation_flow() -> AuraResult<()> {
     println!("Starting complete invitation flow test...");
     
-    let test = InvitationFlowTest::new().await;
+    let test = InvitationFlowTest::new().await?;
     let request = test.create_invitation_request("co-owner", Some(3600));
     
     println!("Step 1: Creating device invitation...");
@@ -196,11 +198,11 @@ async fn test_complete_invitation_flow() {
 }
 
 /// Test invitation expiration handling
-#[tokio::test]
-async fn test_invitation_expiration() {
+#[aura_test]
+async fn test_invitation_expiration() -> AuraResult<()> {
     println!("Starting invitation expiration test...");
     
-    let test = InvitationFlowTest::new().await;
+    let test = InvitationFlowTest::new().await?;
     let request = test.create_invitation_request("co-owner", Some(1)); // 1 second TTL
     
     // Create invitation
@@ -239,11 +241,11 @@ async fn test_invitation_expiration() {
 }
 
 /// Test multiple concurrent invitation flows
-#[tokio::test]
-async fn test_concurrent_invitations() {
+#[aura_test]
+async fn test_concurrent_invitations() -> AuraResult<()> {
     println!("Starting concurrent invitations test...");
     
-    let test = InvitationFlowTest::new().await;
+    let test = InvitationFlowTest::new().await?;
     
     // Create multiple invitations concurrently
     let mut invitation_tasks = vec![];
@@ -302,11 +304,11 @@ async fn test_concurrent_invitations() {
 }
 
 /// Test invitation with relationship formation
-#[tokio::test]
-async fn test_invitation_with_relationship_formation() {
+#[aura_test]
+async fn test_invitation_with_relationship_formation() -> AuraResult<()> {
     println!("Starting invitation with relationship formation test...");
     
-    let test = InvitationFlowTest::new().await;
+    let test = InvitationFlowTest::new().await?;
     let request = test.create_invitation_request("guardian", Some(3600));
     
     // Create invitation
@@ -354,11 +356,11 @@ async fn test_invitation_with_relationship_formation() {
 }
 
 /// Test invitation error handling
-#[tokio::test]
-async fn test_invitation_error_handling() {
+#[aura_test]
+async fn test_invitation_error_handling() -> AuraResult<()> {
     println!("Starting invitation error handling test...");
     
-    let test = InvitationFlowTest::new().await;
+    let test = InvitationFlowTest::new().await?;
     
     // Test invalid TTL
     let invalid_request = DeviceInvitationRequest {
@@ -407,11 +409,11 @@ async fn test_invitation_error_handling() {
 }
 
 /// Integration test for CLI invitation workflow
-#[tokio::test]
-async fn test_cli_invitation_workflow() {
+#[aura_test]
+async fn test_cli_invitation_workflow() -> AuraResult<()> {
     println!("Starting CLI invitation workflow test...");
     
-    let test = InvitationFlowTest::new().await;
+    let test = InvitationFlowTest::new().await?;
     
     // Simulate CLI invitation creation
     let request = test.create_invitation_request("mobile-device", Some(1800)); // 30 minutes

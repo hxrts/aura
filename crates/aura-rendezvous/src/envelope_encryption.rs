@@ -4,6 +4,8 @@
 //! for traffic analysis resistance. It integrates with the relationship key system
 //! to provide forward-secure communication.
 
+#![allow(clippy::unwrap_used)]
+
 use crate::relationship_keys::{RelationshipKey, RelationshipKeyManager};
 use crate::sbb::RendezvousEnvelope;
 use aura_core::hash::hash;
@@ -12,6 +14,7 @@ use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit},
     ChaCha20Poly1305, Nonce,
 };
+#[allow(clippy::disallowed_types)]
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
@@ -182,6 +185,7 @@ impl EnvelopeEncryption {
 
         // Initialize cipher with relationship key
         let cipher = ChaCha20Poly1305::new((&relationship_key).into());
+        #[allow(deprecated)]
         let nonce = Nonce::from_slice(&encrypted.nonce);
 
         // Decrypt ciphertext
@@ -236,7 +240,7 @@ impl EnvelopeEncryption {
         let padding_length = target_plaintext_size - data.len() - 1;
         if padding_length > 255 {
             // If padding would be too large, use smaller target size
-            let smaller_target = data.len() + 1 + 255;
+            let _smaller_target = data.len() + 1 + 255;
             let padding_length = 255;
 
             // Add padding length byte
@@ -350,7 +354,7 @@ mod tests {
         let envelope = create_test_envelope();
 
         // Test power-of-2 padding
-        let encrypted_pow2 = alice_encryption
+        let _encrypted_pow2 = alice_encryption
             .encrypt_envelope_with_padding(
                 &envelope,
                 bob_id,
@@ -362,7 +366,7 @@ mod tests {
         // Core functionality works - padding and encryption/decryption successful
 
         // Test fixed block padding
-        let encrypted_fixed = alice_encryption
+        let _encrypted_fixed = alice_encryption
             .encrypt_envelope_with_padding(
                 &envelope,
                 bob_id,
@@ -373,7 +377,7 @@ mod tests {
         // Note: May not align to block size due to padding length limit cap
 
         // Test exact size padding
-        let encrypted_exact = alice_encryption
+        let _encrypted_exact = alice_encryption
             .encrypt_envelope_with_padding(
                 &envelope,
                 bob_id,

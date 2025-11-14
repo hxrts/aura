@@ -11,9 +11,7 @@ use std::sync::Mutex;
 
 use aura_core::identifiers::DeviceId;
 use aura_core::LocalSessionType;
-use aura_protocol::handlers::{
-    AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
-};
+use aura_protocol::handlers::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 
 /// Fault injection configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +27,7 @@ pub struct FaultConfig {
 /// Fault injection middleware for simulation effect system
 pub struct FaultInjectionMiddleware {
     device_id: DeviceId,
-    fault_seed: u64,
+    _fault_seed: u64,
     execution_mode: ExecutionMode,
     active_faults: Mutex<HashMap<String, f64>>, // fault_name -> probability
 }
@@ -39,7 +37,7 @@ impl FaultInjectionMiddleware {
     pub fn new(device_id: DeviceId, fault_seed: u64) -> Self {
         Self {
             device_id,
-            fault_seed,
+            _fault_seed: fault_seed,
             execution_mode: ExecutionMode::Simulation { seed: fault_seed },
             active_faults: Mutex::new(HashMap::new()),
         }
@@ -69,7 +67,10 @@ impl FaultInjectionMiddleware {
 
     /// Get active faults
     pub fn active_faults_snapshot(&self) -> HashMap<String, f64> {
-        self.active_faults.lock().unwrap_or_else(|_| panic!("Failed to lock active faults")).clone()
+        self.active_faults
+            .lock()
+            .unwrap_or_else(|_| panic!("Failed to lock active faults"))
+            .clone()
     }
 
     /// Get the device ID
@@ -78,8 +79,8 @@ impl FaultInjectionMiddleware {
     }
 
     /// Check if a fault should trigger based on seed and probability
-    fn should_trigger_fault(&self, fault_name: &str, probability: f64) -> bool {
-        let hash_input = format!("{}{}{}", self.fault_seed, fault_name, self.device_id);
+    fn _should_trigger_fault(&self, fault_name: &str, probability: f64) -> bool {
+        let hash_input = format!("{}{}{}", self._fault_seed, fault_name, self.device_id);
         let hash = aura_core::hash::hash(hash_input.as_bytes());
         let hash_value = u64::from_le_bytes([
             hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6], hash[7],
@@ -104,35 +105,52 @@ impl AuraHandler for FaultInjectionMiddleware {
         match operation {
             "inject_message_drop" => {
                 let probability = 0.1; // 10% drop probability for simulation
-                // In immutable context, just return success without actual mutation
-                Ok(serde_json::to_vec(&json!({"fault": "message_drop", "probability": probability})).unwrap_or_default())
+                                       // In immutable context, just return success without actual mutation
+                Ok(serde_json::to_vec(
+                    &json!({"fault": "message_drop", "probability": probability}),
+                )
+                .unwrap_or_default())
             }
             "inject_message_delay" => {
                 let probability = 0.05; // 5% delay probability
-                // In immutable context, just return success without actual mutation
-                Ok(serde_json::to_vec(&json!({"fault": "message_delay", "probability": probability})).unwrap_or_default())
+                                        // In immutable context, just return success without actual mutation
+                Ok(serde_json::to_vec(
+                    &json!({"fault": "message_delay", "probability": probability}),
+                )
+                .unwrap_or_default())
             }
             "inject_byzantine_behavior" => {
                 let probability = 0.02; // 2% byzantine probability
-                // In immutable context, just return success without actual mutation
-                Ok(serde_json::to_vec(&json!({"fault": "byzantine", "probability": probability})).unwrap_or_default())
+                                        // In immutable context, just return success without actual mutation
+                Ok(
+                    serde_json::to_vec(&json!({"fault": "byzantine", "probability": probability}))
+                        .unwrap_or_default(),
+                )
             }
             "should_drop_message" => {
-                let should_drop = if let Some(&prob) = self.active_faults.lock().unwrap().get("message_drop") {
-                    // Simulate fault triggering without mutation
-                    prob > 0.0
-                } else {
-                    false
-                };
+                let should_drop = self
+                    .active_faults
+                    .lock()
+                    .map(|faults| {
+                        faults
+                            .get("message_drop")
+                            .map(|&prob| prob > 0.0)
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
                 Ok(serde_json::to_vec(&should_drop).unwrap_or_default())
             }
             "should_delay_message" => {
-                let should_delay = if let Some(&prob) = self.active_faults.lock().unwrap().get("message_delay") {
-                    // Simulate fault triggering without mutation
-                    prob > 0.0
-                } else {
-                    false
-                };
+                let should_delay = self
+                    .active_faults
+                    .lock()
+                    .map(|faults| {
+                        faults
+                            .get("message_delay")
+                            .map(|&prob| prob > 0.0)
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
                 Ok(serde_json::to_vec(&should_delay).unwrap_or_default())
             }
             "get_active_faults" => {
@@ -180,7 +198,7 @@ mod tests {
         let middleware = FaultInjectionMiddleware::for_simulation(device_id, 42);
 
         assert_eq!(middleware.device_id(), device_id);
-        assert_eq!(middleware.fault_seed, 42);
+        assert_eq!(middleware._fault_seed, 42);
         assert_eq!(
             middleware.execution_mode(),
             ExecutionMode::Simulation { seed: 42 }
@@ -200,39 +218,24 @@ mod tests {
     #[tokio::test]
     async fn test_fault_operations() {
         let device_id = DeviceId::new();
-        let mut middleware = FaultInjectionMiddleware::for_simulation(device_id, 42);
-        let mut ctx = AuraContext::for_testing(device_id);
+        let middleware = FaultInjectionMiddleware::for_simulation(device_id, 42);
+        let ctx = aura_protocol::handlers::context_immutable::AuraContext::for_testing(device_id);
 
         // Test inject message drop
         let result = middleware
-            .execute_effect(
-                EffectType::FaultInjection,
-                "inject_message_drop",
-                b"",
-                &mut ctx,
-            )
+            .execute_effect(EffectType::FaultInjection, "inject_message_drop", b"", &ctx)
             .await;
         assert!(result.is_ok());
 
         // Test should drop message
         let result = middleware
-            .execute_effect(
-                EffectType::FaultInjection,
-                "should_drop_message",
-                b"",
-                &mut ctx,
-            )
+            .execute_effect(EffectType::FaultInjection, "should_drop_message", b"", &ctx)
             .await;
         assert!(result.is_ok());
 
         // Test get active faults
         let result = middleware
-            .execute_effect(
-                EffectType::FaultInjection,
-                "get_active_faults",
-                b"",
-                &mut ctx,
-            )
+            .execute_effect(EffectType::FaultInjection, "get_active_faults", b"", &ctx)
             .await;
         assert!(result.is_ok());
     }
@@ -240,17 +243,20 @@ mod tests {
     #[test]
     fn test_fault_management() {
         let device_id = DeviceId::new();
-        let mut middleware = FaultInjectionMiddleware::for_simulation(device_id, 42);
+        let middleware = FaultInjectionMiddleware::for_simulation(device_id, 42);
 
         // Inject fault
         middleware.inject_fault("test_fault".to_string(), 0.5);
-        assert_eq!(middleware.active_faults().len(), 1);
-        assert_eq!(middleware.active_faults().get("test_fault"), Some(&0.5));
+        assert_eq!(middleware.active_faults_snapshot().len(), 1);
+        assert_eq!(
+            middleware.active_faults_snapshot().get("test_fault"),
+            Some(&0.5)
+        );
 
         // Remove fault
         let removed = middleware.remove_fault("test_fault");
         assert_eq!(removed, Some(0.5));
-        assert_eq!(middleware.active_faults().len(), 0);
+        assert_eq!(middleware.active_faults_snapshot().len(), 0);
     }
 
     #[test]
@@ -260,14 +266,14 @@ mod tests {
 
         // Test deterministic fault triggering
         // With the same seed and fault name, should always return the same result
-        let should_trigger1 = middleware.should_trigger_fault("test_fault", 0.5);
-        let should_trigger2 = middleware.should_trigger_fault("test_fault", 0.5);
+        let should_trigger1 = middleware._should_trigger_fault("test_fault", 0.5);
+        let should_trigger2 = middleware._should_trigger_fault("test_fault", 0.5);
         assert_eq!(should_trigger1, should_trigger2);
 
         // With probability 0, should never trigger
-        assert!(!middleware.should_trigger_fault("never_fault", 0.0));
+        assert!(!middleware._should_trigger_fault("never_fault", 0.0));
 
         // With probability 1, should always trigger
-        assert!(middleware.should_trigger_fault("always_fault", 1.0));
+        assert!(middleware._should_trigger_fault("always_fault", 1.0));
     }
 }

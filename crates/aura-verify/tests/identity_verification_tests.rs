@@ -10,8 +10,8 @@ use signature::Signer;
 use uuid::Uuid;
 
 /// Test that device identity verification works correctly
-#[tokio::test]
-async fn test_pure_device_identity_verification() {
+#[test]
+fn test_pure_device_identity_verification() {
     // Create test device
     let device_id = DeviceId::from_bytes([1u8; 32]);
     let signing_key = Ed25519SigningKey::from_bytes(&[2u8; 32]);
@@ -48,8 +48,8 @@ async fn test_pure_device_identity_verification() {
 }
 
 /// Test that guardian identity verification works correctly
-#[tokio::test]
-async fn test_pure_guardian_identity_verification() {
+#[test]
+fn test_pure_guardian_identity_verification() {
     // Create test guardian
     let guardian_id = GuardianId::from_uuid(Uuid::from_bytes([3u8; 16]));
     let signing_key = Ed25519SigningKey::from_bytes(&[4u8; 32]);
@@ -86,8 +86,8 @@ async fn test_pure_guardian_identity_verification() {
 }
 
 /// Test that invalid signatures are rejected
-#[tokio::test]
-async fn test_invalid_signature_rejection() {
+#[test]
+fn test_invalid_signature_rejection() {
     // Create test device
     let device_id = DeviceId::from_bytes([5u8; 32]);
     let signing_key = Ed25519SigningKey::from_bytes(&[6u8; 32]);
@@ -119,8 +119,8 @@ async fn test_invalid_signature_rejection() {
 }
 
 /// Test that unknown device keys are rejected
-#[tokio::test]
-async fn test_unknown_device_rejection() {
+#[test]
+fn test_unknown_device_rejection() {
     // Create test device
     let device_id = DeviceId::from_bytes([7u8; 32]);
     let signing_key = Ed25519SigningKey::from_bytes(&[8u8; 32]);
@@ -179,8 +179,8 @@ fn test_key_material_management() {
 // Removed test_device_capability_proof as IdentityProof::DeviceCapability doesn't exist
 
 /// Verify authentication is stateless - no state maintained between calls
-#[tokio::test]
-async fn test_stateless_authentication() {
+#[test]
+fn test_stateless_authentication() {
     // Create test setup
     let device_id = DeviceId::from_bytes([15u8; 32]);
     let signing_key = Ed25519SigningKey::from_bytes(&[16u8; 32]);

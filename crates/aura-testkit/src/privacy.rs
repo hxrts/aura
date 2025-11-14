@@ -10,8 +10,11 @@ use std::time::Duration;
 /// Minimal observable event recorded by the privacy observer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObserverEvent {
+    /// Length of the actual payload
     pub payload_len: usize,
+    /// Length of padding added
     pub pad_len: u16,
+    /// Time between message arrivals
     pub inter_arrival: Duration,
 }
 
@@ -22,14 +25,17 @@ pub struct PrivacyObserver {
 }
 
 impl PrivacyObserver {
+    /// Create a new privacy observer
     pub fn new() -> Self {
         Self { events: Vec::new() }
     }
 
+    /// Record an observed event
     pub fn observe(&mut self, event: ObserverEvent) {
         self.events.push(event);
     }
 
+    /// Get the recorded trace of events
     pub fn trace(&self) -> &[ObserverEvent] {
         &self.events
     }

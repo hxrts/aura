@@ -92,7 +92,7 @@ impl KeyDerivationSpec {
 /// Derive an encryption key using the specified context and version
 ///
 /// This function provides secure key derivation with proper context separation
-/// and collision resistance. It uses BLAKE3 for cryptographic hashing.
+/// and collision resistance.
 pub fn derive_encryption_key(root_key: &[u8], spec: &KeyDerivationSpec) -> crate::Result<[u8; 32]> {
     derive_key_material(root_key, spec, 32).map(|bytes| {
         let mut result = [0u8; 32];
@@ -104,7 +104,7 @@ pub fn derive_encryption_key(root_key: &[u8], spec: &KeyDerivationSpec) -> crate
 /// Derive key material of arbitrary length
 ///
 /// This is the core key derivation function that can produce keys of any length.
-/// It uses HKDF-like expansion with BLAKE3 for consistency across different lengths.
+/// It uses HKDF-like expansion with hash for consistency across different lengths.
 pub fn derive_key_material(
     root_key: &[u8],
     spec: &KeyDerivationSpec,

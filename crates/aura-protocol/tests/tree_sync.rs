@@ -9,9 +9,13 @@
 //!
 //! Note: Threshold ceremony tests are now in the aura-frost crate
 
+#![allow(clippy::disallowed_methods)]
+// IMPORTANT: This test file has been migrated to use for_testing_sync()
+// to avoid "cannot start a runtime from within a runtime" errors.
+
 use aura_core::semilattice::semantic_traits::JoinSemilattice;
 use aura_core::tree::{
-    AttestedOp, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
+    AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
 };
 use aura_core::{DeviceId, Hash32};
 use aura_protocol::{
@@ -19,7 +23,7 @@ use aura_protocol::{
     //     anti_entropy::perform_sync, broadcast::announce_new_operation,
     // },
     // Note: threshold_ceremony protocols moved to aura-frost crate
-    effects::{sync::SyncEffects, tree::TreeEffects},
+    effects::sync::SyncEffects,
     handlers::sync::{broadcaster::BroadcastConfig, AntiEntropyHandler, BroadcasterHandler},
     sync::{IntentState, PeerView},
 };
@@ -223,7 +227,7 @@ async fn test_broadcast_delivers_to_neighbors() {
 
     // Producer creates new operation
     let new_op = create_test_op(1, 100, "add_leaf");
-    let cid = compute_cid(&new_op);
+    let _cid = compute_cid(&new_op);
 
     producer.add_op(new_op.clone()).await;
 
@@ -342,8 +346,8 @@ async fn test_concurrent_operations_resolve_deterministically() {
     let ops2 = peer2.get_ops().await;
 
     // Order may differ, but both should contain both operations
-    let cids1: Vec<Hash32> = ops1.iter().map(|op| compute_cid(op)).collect();
-    let cids2: Vec<Hash32> = ops2.iter().map(|op| compute_cid(op)).collect();
+    let cids1: Vec<Hash32> = ops1.iter().map(compute_cid).collect();
+    let cids2: Vec<Hash32> = ops2.iter().map(compute_cid).collect();
 
     assert!(cids1.contains(&cid1), "Peer1 should have op1");
     assert!(cids1.contains(&cid2), "Peer1 should have op2");
@@ -360,7 +364,7 @@ async fn test_concurrent_operations_resolve_deterministically() {
 
 #[tokio::test]
 async fn test_peer_view_converges() {
-    let peer1_id = Uuid::new_v4();
+    let _peer1_id = Uuid::new_v4();
     let peer2_id = Uuid::new_v4();
     let peer3_id = Uuid::new_v4();
 
@@ -463,11 +467,11 @@ async fn test_snapshot_coordination_concept() {
     use aura_core::tree::snapshot::{Cut, Partial, ProposalId, Snapshot};
 
     let proposer = LeafId(1);
-    let epoch = (100);
+    let epoch = 100;
     let commitment = [0u8; 32];
 
     // Proposer creates snapshot cut
-    let cut = Cut {
+    let _cut = Cut {
         epoch,
         commitment,
         cut_cid: [1u8; 32],
@@ -479,14 +483,14 @@ async fn test_snapshot_coordination_concept() {
     let proposal_id = ProposalId([2u8; 32]);
 
     // Quorum members create partial approvals
-    let partial1 = Partial {
+    let _partial1 = Partial {
         proposal_id,
         signer: LeafId(2),
         signature: vec![0u8; 32],
         timestamp: 5000,
     };
 
-    let partial2 = Partial {
+    let _partial2 = Partial {
         proposal_id,
         signer: LeafId(3),
         signature: vec![1u8; 32],
@@ -549,8 +553,8 @@ async fn test_message_ordering_independence() {
     let ops2 = peer2.get_ops().await;
 
     // CID sets should be identical (order-independent)
-    let mut cids1: Vec<Hash32> = ops1.iter().map(|op| compute_cid(op)).collect();
-    let mut cids2: Vec<Hash32> = ops2.iter().map(|op| compute_cid(op)).collect();
+    let mut cids1: Vec<Hash32> = ops1.iter().map(compute_cid).collect();
+    let mut cids2: Vec<Hash32> = ops2.iter().map(compute_cid).collect();
 
     cids1.sort();
     cids2.sort();

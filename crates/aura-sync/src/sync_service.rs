@@ -81,6 +81,7 @@ pub struct SyncService<E> {
     /// Service statistics
     stats: Arc<Mutex<SyncStats>>,
     /// Local device identifier
+    #[allow(dead_code)]
     device_id: DeviceId,
 }
 
@@ -300,8 +301,9 @@ where
     /// Get current time from effects
     async fn current_time(&self) -> Result<u64, SyncError> {
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
+        #[allow(clippy::disallowed_methods)]
+        let now = SystemTime::now();
+        now.duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .map_err(|_| SyncError::TimeError)
     }
@@ -436,12 +438,14 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limiting() {
         let effects = Arc::new(MockSyncEffects);
-        let mut config = AntiEntropyConfig::default();
-        config.min_sync_interval_ms = 1000; // 1 second
+        let config = AntiEntropyConfig {
+            min_sync_interval_ms: 1000, // 1 second
+            ..Default::default()
+        };
         let device_id = DeviceId::new();
 
         let service = SyncService::new(effects, config, device_id);
-        let peer_id = Uuid::new_v4();
+        let peer_id = DeviceId::new().into();
 
         // First sync should succeed
         assert!(service.check_rate_limit(peer_id).await.is_ok());

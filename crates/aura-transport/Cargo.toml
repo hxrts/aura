@@ -1,4 +1,4 @@
-# Pluggable transport layer with presence ticket enforcement
+# Clean Layer 2 Transport Types and Protocol Definitions
 [package]
 name = "aura-transport"
 version.workspace = true
@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "Privacy-aware transport data types and protocol definitions (Layer 2)"
+keywords = ["transport", "privacy", "networking", "protocols"]
+categories = ["network-programming"]
 
 [lib]
 name = "aura_transport"
@@ -15,46 +18,20 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-# Workspace crates
+# Core foundation (Layer 1)
 aura-core = { path = "../aura-core" }
-aura-crypto = { path = "../aura-crypto" }
-# session_types removed during refactor - implementation moved to coordination
-# Removed circular dependency: transport no longer depends on coordination
-# aura-coordination = { path = "../coordination" }
-
-# Networking
-reqwest = { workspace = true }
-# snow = { workspace = true } # removed - unused
-async-trait = { workspace = true }
-tokio-tungstenite = { workspace = true }
-
-# Legacy choreographic programming dependency removed - using effect system
-
-# Cryptography provided through aura-crypto
-ed25519-dalek = { workspace = true }
-blake3 = { workspace = true }
-chacha20poly1305 = { workspace = true }
-sha2 = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 bincode = { workspace = true }
-toml = { workspace = true }
 
-# Async
-tokio = { workspace = true }
-futures = { workspace = true }
-
-# Utilities
+# Utilities 
 uuid = { workspace = true }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
-rand = { workspace = true }
-hex = { workspace = true }
-fastrand = { workspace = true }
 
 [dev-dependencies]
-# tokio-test = { workspace = true } # removed - unused
+# Testing only - no runtime dependencies
+proptest = { workspace = true }

@@ -138,14 +138,20 @@ pub struct FilteredMetadata {
 /// Content size buckets for privacy
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SizeBucket {
-    Tiny,      // < 1KB
-    Small,     // 1KB - 100KB
-    Medium,    // 100KB - 10MB
-    Large,     // 10MB - 1GB
-    VeryLarge, // > 1GB
+    /// Less than 1KB
+    Tiny,
+    /// 1KB - 100KB
+    Small,
+    /// 100KB - 10MB
+    Medium,
+    /// 10MB - 1GB
+    Large,
+    /// Greater than 1GB
+    VeryLarge,
 }
 
 impl SizeBucket {
+    /// Create size bucket from byte size
     pub fn from_size(size: u64) -> Self {
         match size {
             0..=1_024 => Self::Tiny,
@@ -160,14 +166,20 @@ impl SizeBucket {
 /// Time buckets for privacy
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum TimeBucket {
-    Recent,    // Last hour
-    Today,     // Last 24 hours
-    ThisWeek,  // Last week
-    ThisMonth, // Last month
-    Older,     // Older than a month
+    /// Last hour
+    Recent,
+    /// Last 24 hours
+    Today,
+    /// Last week
+    ThisWeek,
+    /// Last month
+    ThisMonth,
+    /// Older than a month
+    Older,
 }
 
 impl TimeBucket {
+    /// Create time bucket from timestamp
     pub fn from_timestamp(timestamp: u64, now: u64) -> Self {
         let age = now.saturating_sub(timestamp);
         match age {
@@ -183,10 +195,15 @@ impl TimeBucket {
 /// Size distribution across buckets
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SizeBuckets {
+    /// Count of tiny items
     pub tiny: usize,
+    /// Count of small items
     pub small: usize,
+    /// Count of medium items
     pub medium: usize,
+    /// Count of large items
     pub large: usize,
+    /// Count of very large items
     pub very_large: usize,
 }
 
@@ -197,6 +214,7 @@ impl Default for SizeBuckets {
 }
 
 impl SizeBuckets {
+    /// Create new empty size buckets
     pub fn new() -> Self {
         Self {
             tiny: 0,
@@ -207,6 +225,7 @@ impl SizeBuckets {
         }
     }
 
+    /// Add a size to the appropriate bucket
     pub fn add_size(&mut self, size: u64) {
         match SizeBucket::from_size(size) {
             SizeBucket::Tiny => self.tiny += 1,
@@ -452,7 +471,6 @@ impl CapabilityFilteredSearchEngine {
 
         let filter_stats = FilterStats {
             total_matches,
-            authorized_matches: authorized.len(),
             filtered_count,
         };
 
@@ -519,7 +537,7 @@ impl CapabilityFilteredSearchEngine {
         &self,
         authorized_content: &[AuthorizedContent],
         total_matches: usize,
-        filtered_count: usize,
+        _filtered_count: usize,
     ) -> Result<SearchAggregate, SearchError> {
         let authorized_matches = authorized_content.len();
 
@@ -625,18 +643,28 @@ impl CapabilityFilteredSearchEngine {
 
 /// Raw search match before capability filtering
 #[derive(Debug, Clone)]
-struct RawMatch {
-    content_id: ContentId,
-    score: f32,
-    match_type: MatchType,
+pub struct RawMatch {
+    /// Content identifier
+    pub content_id: ContentId,
+    /// Match relevance score
+    #[allow(dead_code)]
+    pub score: f32,
+    /// Type of match
+    #[allow(dead_code)]
+    pub match_type: MatchType,
 }
 
 /// Type of search match
 #[derive(Debug, Clone, Copy)]
-enum MatchType {
+#[allow(dead_code)]
+pub enum MatchType {
+    /// Exact hash match
     ExactHash,
+    /// Tag-based match
     TagMatch,
+    /// Content type match
     TypeMatch,
+    /// Full text search match
     FullTextMatch,
 }
 
@@ -644,17 +672,20 @@ enum MatchType {
 #[derive(Debug)]
 struct FilterStats {
     total_matches: usize,
-    authorized_matches: usize,
     filtered_count: usize,
 }
 
 /// Content metadata for filtering decisions
 #[derive(Debug, Clone)]
-struct ContentMetadata {
-    id: ContentId,
-    content_type: String,
-    size: u64,
-    owner: AccountId,
+pub struct ContentMetadata {
+    /// Content identifier
+    pub id: ContentId,
+    /// Content type
+    pub content_type: String,
+    /// Content size in bytes
+    pub size: u64,
+    /// Content owner
+    pub owner: AccountId,
     is_public: bool,
     is_shared: bool,
     created_at: u64,
@@ -665,10 +696,15 @@ struct ContentMetadata {
 /// Search error types
 #[derive(Debug)]
 pub enum SearchError {
+    /// Content store error
     ContentStoreError(String),
+    /// Capability evaluation error
     CapabilityError(String),
+    /// Search index error
     IndexError(String),
+    /// Serialization error
     SerializationError,
+    /// Invalid query error
     InvalidQuery,
 }
 
@@ -701,7 +737,9 @@ impl From<&str> for SearchError {
 /// Trait for content storage backend
 #[async_trait::async_trait]
 pub trait ContentStore: Send + Sync {
+    /// Get content by hash
     async fn get_by_hash(&self, hash: [u8; 32]) -> Result<Option<ContentMetadata>, String>;
+    /// Get content metadata by ID
     async fn get_content_metadata(&self, id: &ContentId)
         -> Result<Option<ContentMetadata>, String>;
 }
@@ -709,6 +747,7 @@ pub trait ContentStore: Send + Sync {
 /// Trait for capability evaluation
 #[async_trait::async_trait]
 pub trait CapabilityEngine: Send + Sync {
+    /// Check if requester can access content based on capabilities
     async fn check_content_access(
         &self,
         requester: &DeviceId,
@@ -716,6 +755,7 @@ pub trait CapabilityEngine: Send + Sync {
         content: &ContentMetadata,
     ) -> Result<Option<AccessLevel>, String>;
 
+    /// Generate proof of access for content
     async fn generate_access_proof(
         &self,
         requester: &DeviceId,
@@ -728,8 +768,11 @@ pub trait CapabilityEngine: Send + Sync {
 /// Trait for search indexing
 #[async_trait::async_trait]
 pub trait SearchIndex: Send + Sync {
+    /// Search for content by tags
     async fn search_by_tags(&self, tags: &[String]) -> Result<Vec<RawMatch>, SearchError>;
+    /// Search for content by type
     async fn search_by_type(&self, content_type: &str) -> Result<Vec<RawMatch>, SearchError>;
+    /// Perform full text search
     async fn full_text_search(&self, text: &str) -> Result<Vec<RawMatch>, SearchError>;
 }
 

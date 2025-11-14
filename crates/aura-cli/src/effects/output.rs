@@ -1,7 +1,7 @@
 //! Output Effect Implementations
 
 use super::OutputEffects;
-use anyhow::Result;
+use crate::effects::Result;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -36,15 +36,16 @@ where
     }
 
     async fn display_progress(&self, message: &str, progress: f64) {
-        let percentage = (progress * 100.0).min(100.0).max(0.0);
-        self.inner
+        let percentage = (progress * 100.0).clamp(0.0, 100.0);
+        let _ = self
+            .inner
             .log_info(&format!("{}: {:.1}%", message, percentage))
             .await;
     }
 
     async fn format_json(&self, data: &Value) -> Result<String> {
         serde_json::to_string_pretty(data)
-            .map_err(|e| anyhow::anyhow!("Failed to format JSON: {}", e))
+            .map_err(|e| aura_core::AuraError::invalid(format!("Failed to format JSON: {}", e)))
     }
 
     async fn format_text(&self, data: &str) -> String {

@@ -11,7 +11,11 @@ repository.workspace = true
 aura-core = { path = "../aura-core" }
 aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../aura-journal" }
-# NOTE: aura-mpst removed - MPST types should come through aura-protocol (Layer 4)
+aura-macros = { path = "../aura-macros" }
+aura-mpst = { path = "../aura-mpst" }
+
+# Choreography dependencies (required by aura-macros)
+rumpsteak-aura-choreography = "0.3.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

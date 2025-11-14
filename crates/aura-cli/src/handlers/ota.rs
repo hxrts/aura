@@ -2,9 +2,11 @@
 //!
 //! Commands for managing over-the-air upgrades using the proper effect system architecture.
 
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::{Context, Result};
-use aura_core::maintenance::{UpgradeKind, UpgradeProposal};
 use aura_core::{Hash32, SemanticVersion};
+use aura_sync::maintenance::{UpgradeKind, UpgradeProposal};
 use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects};
 use uuid::Uuid;
 

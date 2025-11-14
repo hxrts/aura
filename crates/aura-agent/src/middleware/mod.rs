@@ -24,7 +24,7 @@
 //! # Middleware Types
 //!
 //! - **Validation**: Input validation and constraint checking
-//! - **Metrics**: Operation metrics collection and telemetry  
+//! - **Metrics**: Operation metrics collection and telemetry
 //! - **Tracing**: Operation tracing and debug logging
 //! - **Retry**: Retry logic for transient failures
 //! - **Rate Limiting**: Request throttling and backpressure
@@ -115,6 +115,7 @@ impl AgentMiddlewareStack {
         }
 
         // Record metrics start if enabled
+        #[allow(clippy::disallowed_methods)] // Metrics timing requires Instant
         let start_time = if self.metrics.is_some() {
             Some(std::time::Instant::now())
         } else {

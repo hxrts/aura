@@ -119,7 +119,7 @@ impl NodePolicy {
 /// Cryptographic backend identifier (versioned to prevent compatibility issues)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CryptoBackendId {
-    /// Ed25519 with Blake3 hashing (MVP implementation)
+    /// Ed25519 with hashing (MVP implementation)
     Ed25519V1,
     // Future backends deferred to Phase 8:
     // BLS12_381V1,
@@ -136,16 +136,17 @@ impl Default for CryptoBackendId {
 /// Hash function identifier (versioned)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HashFunctionId {
-    /// Blake3 hashing (MVP implementation)
-    Blake3V1,
     // Future hash functions deferred to Phase 8:
-    // SHA256V1,
+    /// SHA256 hash function version 1
+    SHA256V1,
+    /// Blake3 hash function version 1
+    Blake3V1,
     // PoseidonV1,
 }
 
 impl Default for HashFunctionId {
     fn default() -> Self {
-        Self::Blake3V1
+        Self::SHA256V1
     }
 }
 
@@ -321,7 +322,7 @@ impl KeyEdge {
     #[allow(clippy::disallowed_methods)]
     pub fn new(from: NodeId, to: NodeId, kind: EdgeKind) -> Self {
         Self {
-            id: uuid::Uuid::from_bytes([0u8; 16]),
+            id: uuid::Uuid::new_v4(),
             from,
             to,
             kind,

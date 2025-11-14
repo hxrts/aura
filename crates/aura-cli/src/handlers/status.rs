@@ -4,10 +4,10 @@
 
 use anyhow::Result;
 use aura_protocol::{AuraEffectSystem, ConsoleEffects, StorageEffects};
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Handle status display through effects
-pub async fn handle_status(effects: &AuraEffectSystem, config_path: &PathBuf) -> Result<()> {
+pub async fn handle_status(effects: &AuraEffectSystem, config_path: &Path) -> Result<()> {
     let _ = effects
         .log_info(&format!(
             "Account status for config: {}",
@@ -52,7 +52,7 @@ pub async fn handle_status(effects: &AuraEffectSystem, config_path: &PathBuf) ->
 /// Read configuration through storage effects
 async fn read_config_through_effects(
     effects: &AuraEffectSystem,
-    config_path: &PathBuf,
+    config_path: &Path,
 ) -> Result<DeviceConfig> {
     let config_data = effects
         .retrieve(&config_path.display().to_string())
@@ -78,7 +78,7 @@ async fn display_status_info(effects: &AuraEffectSystem, config: &DeviceConfig) 
     let _ = effects
         .log_info(&format!("Device ID: {}", config.device_id))
         .await;
-    let _ = effects.log_info(&"Status: Active".to_string()).await;
+    let _ = effects.log_info("Status: Active").await;
     let _ = effects
         .log_info(&format!("Total Devices: {}", config.total_devices))
         .await;
@@ -112,19 +112,19 @@ struct DeviceConfig {
     device_id: String,
     threshold: u32,
     total_devices: u32,
-    logging: Option<LoggingConfig>,
+    _logging: Option<LoggingConfig>,
     network: Option<NetworkConfig>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct LoggingConfig {
-    level: String,
-    structured: bool,
+    _level: String,
+    _structured: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct NetworkConfig {
     default_port: u16,
-    timeout: u64,
-    max_retries: u32,
+    _timeout: u64,
+    _max_retries: u32,
 }

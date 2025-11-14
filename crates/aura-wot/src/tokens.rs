@@ -6,7 +6,7 @@
 //! The capability tokens implement threshold authentication and delegation
 //! on top of the meet-semilattice capability framework.
 
-use aura_core::hash;
+use aura_core::{hash, MeetSemiLattice};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::Hash;
@@ -67,7 +67,7 @@ impl CapabilityId {
     /// Generate a random capability ID
     #[allow(clippy::disallowed_methods)]
     pub fn random() -> Self {
-        let bytes = hash::hash(uuid::Uuid::from_bytes([0u8; 16]).as_bytes());
+        let bytes = hash::hash(uuid::Uuid::new_v4().as_bytes());
         Self(bytes)
     }
 
@@ -153,8 +153,8 @@ pub struct CapabilityToken {
     /// Account that issued this token (threshold identity)
     pub issuer: aura_core::AccountId,
 
-    /// Permissions granted by this token
-    pub permissions: Vec<aura_core::CanonicalPermission>,
+    /// Capabilities granted by this token
+    pub capabilities: aura_core::Cap,
 
     /// Optional resource restrictions (e.g., specific chunk IDs, paths)
     pub resources: Vec<String>,
@@ -196,8 +196,8 @@ pub struct DelegationProof {
     /// Parent token that delegated authority
     pub parent_token_id: CapabilityId,
 
-    /// Permissions delegated (must be subset of parent's permissions)
-    pub delegated_permissions: Vec<aura_core::CanonicalPermission>,
+    /// Capabilities delegated (meet-semilattice restriction)
+    pub delegated_capabilities: aura_core::Cap,
 
     /// Device that performed the delegation
     pub delegator_device_id: aura_core::DeviceId,
@@ -254,7 +254,7 @@ impl CapabilityToken {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         issuer: aura_core::AccountId,
-        permissions: Vec<aura_core::CanonicalPermission>,
+        capabilities: aura_core::Cap,
         resources: Vec<String>,
         issued_at: u64,
         expires_at: Option<u64>,
@@ -267,7 +267,7 @@ impl CapabilityToken {
         Self {
             token_id,
             issuer,
-            permissions,
+            capabilities,
             resources,
             issued_at,
             expires_at,
@@ -306,12 +306,9 @@ impl CapabilityToken {
         true
     }
 
-    /// Check if this capability grants a specific permission
-    pub fn has_permission(&self, permission: &aura_core::CanonicalPermission) -> bool {
-        self.permissions.contains(permission)
-            || self
-                .permissions
-                .contains(&aura_core::CanonicalPermission::Admin)
+    /// Check if this capability grants a specific capability
+    pub fn has_capability(&self, capability_name: &str) -> bool {
+        self.capabilities.allows(capability_name)
     }
 
     /// Check if this capability can access a specific resource
@@ -329,10 +326,10 @@ impl CapabilityToken {
         self.current_delegation_depth < self.max_delegation_depth
     }
 
-    /// Create a delegated token with attenuated permissions
+    /// Create a delegated token with capability restriction
     pub fn delegate(
         &self,
-        delegated_permissions: Vec<aura_core::CanonicalPermission>,
+        delegated_capabilities: aura_core::Cap,
         delegated_resources: Vec<String>,
         delegator_device_id: aura_core::DeviceId,
         delegator_signature: Vec<u8>,
@@ -342,20 +339,13 @@ impl CapabilityToken {
             return Err("Maximum delegation depth exceeded".to_string());
         }
 
-        // Verify delegated permissions are subset of current permissions
-        for perm in &delegated_permissions {
-            if !self.has_permission(perm) {
-                return Err(format!(
-                    "Cannot delegate permission {:?} not held by parent token",
-                    perm
-                ));
-            }
-        }
+        // Use meet operation to restrict capabilities (cannot amplify authority)
+        let restricted_capabilities = self.capabilities.meet(&delegated_capabilities);
 
         // Create delegation proof
         let proof = DelegationProof {
             parent_token_id: self.token_id,
-            delegated_permissions: delegated_permissions.clone(),
+            delegated_capabilities: restricted_capabilities.clone(),
             delegator_device_id,
             signature: delegator_signature,
             timestamp: current_time,
@@ -374,7 +364,7 @@ impl CapabilityToken {
         Ok(Self {
             token_id: CapabilityId::from_hash(&hash::hash(&new_nonce)),
             issuer: self.issuer,
-            permissions: delegated_permissions,
+            capabilities: restricted_capabilities,
             resources: delegated_resources,
             issued_at: current_time,
             expires_at: self.expires_at, // Inherit parent expiration
@@ -467,7 +457,9 @@ impl Hash for CapabilityToken {
     }
 }
 
+
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -478,7 +470,7 @@ mod tests {
 
         CapabilityToken::new(
             issuer,
-            vec![aura_core::CanonicalPermission::StorageRead],
+            aura_core::Cap::with_permissions(vec!["storage:read".to_string()]),
             vec!["resource1".to_string()],
             1000,
             Some(2000),
@@ -508,8 +500,9 @@ mod tests {
     fn test_capability_token_permissions() {
         let token = create_test_token();
 
-        assert!(token.has_permission(&aura_core::CanonicalPermission::StorageRead));
-        assert!(!token.has_permission(&aura_core::CanonicalPermission::StorageWrite));
+        assert!(token.has_capability("storage:read"));
+        assert!(!token.has_capability("storage:write"));
+        assert!(!token.has_capability("admin"));
     }
 
     #[test]
@@ -519,7 +512,7 @@ mod tests {
 
         let delegated = token
             .delegate(
-                vec![aura_core::CanonicalPermission::StorageRead],
+                aura_core::Cap::with_permissions(vec!["storage:read".to_string()]),
                 vec!["resource1".to_string()],
                 delegator,
                 vec![0u8; 64],
@@ -530,6 +523,10 @@ mod tests {
         assert_eq!(delegated.current_delegation_depth, 1);
         assert_eq!(delegated.delegation_chain.len(), 1);
         assert!(delegated.can_delegate());
+        
+        // Verify capabilities are properly restricted
+        assert!(delegated.has_capability("storage:read"));
+        assert!(!delegated.has_capability("storage:write"));
     }
 
     #[test]
@@ -541,8 +538,9 @@ mod tests {
         assert!(!token.can_delegate());
 
         let delegator = aura_core::DeviceId::from_bytes(*b"delegator_test_id_12345678901234");
+        
         let result = token.delegate(
-            vec![aura_core::CanonicalPermission::StorageRead],
+            aura_core::Cap::with_permissions(vec!["storage:read".to_string()]),
             vec![],
             delegator,
             vec![],

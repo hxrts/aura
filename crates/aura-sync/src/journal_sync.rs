@@ -3,9 +3,9 @@
 //! This module provides journal synchronization using the new stateless effect system,
 //! allowing composable sync operations without choreography dependencies.
 
-use crate::anti_entropy::{AntiEntropyRequest, JournalDigest};
+use crate::anti_entropy::JournalDigest;
 use aura_core::{tree::AttestedOp, AuraResult, DeviceId, Journal};
-use aura_protocol::effects::{BloomDigest, SyncEffects};
+use aura_protocol::effects::SyncEffects;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -61,11 +61,15 @@ impl JournalSyncService {
         let mut peers_synced = Vec::new();
 
         // Generate local digest
-        let local_digest = self.generate_digest(&request.local_journal, &request.local_operations)?;
+        let local_digest =
+            self.generate_digest(&request.local_journal, &request.local_operations)?;
 
         // Sync with each target peer
         for target in &request.targets {
-            match self.sync_with_peer(effects, &request, *target, &local_digest, batch_size).await {
+            match self
+                .sync_with_peer(effects, &request, *target, &local_digest, batch_size)
+                .await
+            {
                 Ok(count) => {
                     operations_synced += count;
                     peers_synced.push(*target);
@@ -96,16 +100,21 @@ impl JournalSyncService {
     ) -> AuraResult<usize> {
         // Use the high-level sync_with_peer method from SyncEffects
         let peer_uuid = Uuid::from_bytes(*peer.0.as_bytes());
-        
-        effects.sync_with_peer(peer_uuid).await
-            .map_err(|e| aura_core::AuraError::internal(format!("Failed to sync with peer: {}", e)))?;
+
+        effects.sync_with_peer(peer_uuid).await.map_err(|e| {
+            aura_core::AuraError::internal(format!("Failed to sync with peer: {}", e))
+        })?;
 
         // TODO: Return actual operation count from sync
         Ok(1) // Placeholder - actual implementation would track operations
     }
 
     /// Generate digest from local journal state
-    fn generate_digest(&self, journal: &Journal, operations: &[AttestedOp]) -> AuraResult<JournalDigest> {
+    fn generate_digest(
+        &self,
+        journal: &Journal,
+        operations: &[AttestedOp],
+    ) -> AuraResult<JournalDigest> {
         // Use anti-entropy module to generate digest
         crate::anti_entropy::compute_digest(journal, operations)
     }
@@ -134,8 +143,8 @@ mod tests {
 
     #[test]
     fn test_journal_sync_service_creation() {
-        let service = JournalSyncService::new();
-        assert!(true); // Service created successfully
+        let _service = JournalSyncService::new();
+        // Service created successfully - test passes if no panic
     }
 
     #[test]
@@ -151,7 +160,7 @@ mod tests {
 
         let serialized = serde_json::to_string(&request).unwrap();
         let deserialized: JournalSyncRequest = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(request.requester, deserialized.requester);
         assert_eq!(request.max_batch_size, deserialized.max_batch_size);
     }

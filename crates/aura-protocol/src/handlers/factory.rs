@@ -1161,7 +1161,7 @@ mod tests {
 
     #[test]
     fn test_config_validation() {
-        let device_id = DeviceId::from(uuid::Uuid::from_bytes([0u8; 16]));
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
         let mut config = AuraHandlerConfig::for_testing(device_id);
 
         // Valid config should pass
@@ -1193,7 +1193,7 @@ mod tests {
 
     #[test]
     fn test_builder_pattern() {
-        let device_id = DeviceId::from(uuid::Uuid::from_bytes([0u8; 16]));
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
 
         let config = AuraHandlerBuilder::new(device_id)
             .execution_mode(ExecutionMode::Testing)
@@ -1228,8 +1228,8 @@ mod tests {
         assert!(platform.has_storage_backend("memory"));
         assert!(platform.has_storage_backend("filesystem"));
 
-        // Should have default network interface
-        assert!(platform.has_network_interface("default"));
+        // Should have loopback network interface
+        assert!(platform.has_network_interface("loopback"));
 
         // Test storage backend selection
         let prefs = vec!["nonexistent".to_string(), "filesystem".to_string()];

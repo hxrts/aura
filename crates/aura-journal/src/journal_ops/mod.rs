@@ -139,12 +139,12 @@ mod tests {
 
         // Test adding nodes
         let node1 = KeyNode::new(
-            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
             NodeKind::Device,
             NodePolicy::Any,
         );
         let node2 = KeyNode::new(
-            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([2u8; 16])),
             NodeKind::Guardian,
             NodePolicy::Any,
         );
@@ -155,7 +155,7 @@ mod tests {
         // Test adding edge
         #[allow(clippy::disallowed_methods)]
         let edge = KeyEdge::with_id(
-            uuid::Uuid::from_bytes([0u8; 16]),
+            uuid::Uuid::from_bytes([3u8; 16]),
             node1.id,
             node2.id,
             EdgeKind::Contains,
@@ -175,17 +175,17 @@ mod tests {
         let mut journal = KeyJournal::new();
 
         let node1 = KeyNode::new(
-            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([4u8; 16])),
             NodeKind::Device,
             NodePolicy::Any,
         );
         let node2 = KeyNode::new(
-            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
             NodeKind::Guardian,
             NodePolicy::Any,
         );
         let node3 = KeyNode::new(
-            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([6u8; 16])),
             NodeKind::Device,
             NodePolicy::Any,
         );
@@ -196,7 +196,7 @@ mod tests {
         // Try to add edge from non-existent node (should fail)
         #[allow(clippy::disallowed_methods)]
         let edge = KeyEdge::with_id(
-            uuid::Uuid::from_bytes([0u8; 16]),
+            uuid::Uuid::from_bytes([7u8; 16]),
             node3.id,
             node1.id,
             EdgeKind::Contains,

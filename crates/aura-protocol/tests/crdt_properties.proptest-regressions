@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e35dd254018fe258bbb3502198f2923b4a8b9c0817427c00fdc645e5507c59d7 # shrinks to a = Attesting { timestamp: 41, collected: 1 }, b = Attesting { timestamp: 41, collected: 2 }

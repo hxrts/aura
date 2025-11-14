@@ -3,7 +3,8 @@
 //! These tests are temporarily disabled as the CapabilityId API has changed.
 //! Basic ID functionality should be tested in the source crates (aura-core, aura-wot).
 
-#[cfg(disabled_id_tests)]
+// Intentionally disabled tests - re-implement once CapabilityId API is stable
+#[allow(dead_code)]
 mod disabled_tests {
     // Tests that were disabled due to API changes:
     // - test_data_id_creation

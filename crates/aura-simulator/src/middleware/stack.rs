@@ -144,7 +144,7 @@ impl Default for SimulatorStackBuilder {
 }
 
 /// Enhanced builder methods for testkit integration
-/// 
+///
 /// These methods provide convenient ways to create simulator stacks that integrate
 /// with aura-testkit foundations using the stateless effect system architecture.
 impl SimulatorStackBuilder {
@@ -154,29 +154,30 @@ impl SimulatorStackBuilder {
         scenario_id: String,
     ) -> Result<Self> {
         use crate::testkit_bridge::TestkitSimulatorBridge;
-        
+
         let context = TestkitSimulatorBridge::fixture_to_context(&fixture, scenario_id).await?;
-        
+
         // Create middleware configuration from fixture
         let config = crate::testkit_bridge::MiddlewareConfig::for_simulation(fixture.device_id());
-        let stateless_middleware = Arc::new(
-            crate::StatelessEffectsMiddleware::new(fixture.device_id(), config)?
-        );
-        
+        let stateless_middleware = Arc::new(crate::StatelessEffectsMiddleware::new(
+            fixture.device_id(),
+            config,
+        )?);
+
         Ok(Self::new()
             .with_base_context(context)
             .with_middleware(stateless_middleware))
     }
-    
+
     /// Create stack from choreography harness using stateless effects
     pub fn from_choreography_harness(
         harness: aura_testkit::ChoreographyTestHarness,
     ) -> Result<Self> {
         use crate::testkit_bridge::TestkitSimulatorBridge;
-        
+
         TestkitSimulatorBridge::harness_to_stack(harness)
     }
-    
+
     /// Create stack from device fixtures using stateless effects
     pub async fn from_device_fixtures(
         fixtures: Vec<aura_testkit::DeviceTestFixture>,
@@ -184,84 +185,85 @@ impl SimulatorStackBuilder {
         seed: u64,
     ) -> Result<Self> {
         use crate::testkit_bridge::TestkitSimulatorBridge;
-        
-        let effect_systems = TestkitSimulatorBridge::create_simulation_effects(
-            &fixtures, 
-            seed
-        )?;
-        
+
+        let effect_systems = TestkitSimulatorBridge::create_simulation_effects(&fixtures, seed)?;
+
         let context = super::SimulatorContext::new(scenario_id, uuid::Uuid::new_v4().to_string())
             .with_seed(seed)
             .with_participants(fixtures.len(), 2); // Default 2-of-N threshold
-            
+
         let mut builder = Self::new().with_base_context(context);
-        
+
         // Add stateless effects middleware for each device
         for (device_id, _effect_system) in effect_systems {
             let config = crate::testkit_bridge::MiddlewareConfig::for_simulation(device_id);
-            let middleware = crate::StatelessEffectsMiddleware::new(device_id, config)
-                .map_err(|e| SimulatorError::OperationFailed(format!("Middleware creation failed: {}", e)))?;
+            let middleware =
+                crate::StatelessEffectsMiddleware::new(device_id, config).map_err(|e| {
+                    SimulatorError::OperationFailed(format!("Middleware creation failed: {}", e))
+                })?;
             builder = builder.with_middleware(Arc::new(middleware));
         }
-        
+
         Ok(builder)
     }
-    
+
     /// Quick setup for chaos testing using stateless effects
-    pub async fn for_chaos_testing(device_count: usize, threshold: usize) -> Result<Self> {
+    pub async fn for_chaos_testing(device_count: usize, _threshold: usize) -> Result<Self> {
         use crate::testkit_bridge::TestkitSimulatorBridge;
-        
+
         let fixtures = TestkitSimulatorBridge::create_device_fixtures(device_count, 42);
-        
-        let mut builder = Self::from_device_fixtures(fixtures, "chaos-test".to_string(), 42).await?;
-        
+
+        let mut builder =
+            Self::from_device_fixtures(fixtures, "chaos-test".to_string(), 42).await?;
+
         builder = builder
             .with_middleware(Arc::new(crate::FaultSimulationMiddleware::new()))
             .with_middleware(Arc::new(crate::ChaosCoordinationMiddleware::new()))
             .with_middleware(Arc::new(crate::PropertyCheckingMiddleware::new()));
-            
+
         Ok(builder)
     }
-    
+
     /// Quick setup for performance testing using stateless effects
     pub async fn for_performance_testing(device_count: usize) -> Result<Self> {
         use crate::testkit_bridge::TestkitSimulatorBridge;
-        
+
         let fixtures = TestkitSimulatorBridge::create_device_fixtures(device_count, 42);
-        
-        let mut builder = Self::from_device_fixtures(fixtures, "perf-test".to_string(), 42).await?;
-        
+
+        let builder = Self::from_device_fixtures(fixtures, "perf-test".to_string(), 42).await?;
+
         // Note: These middleware types need to be implemented or imported properly
         // For now, we'll return the builder without these additional middleware
         // builder = builder
         //     .with_middleware(Arc::new(crate::PerformanceMonitoringMiddleware::new()))
         //     .with_middleware(Arc::new(crate::ResourceProfilingMiddleware::new()));
-            
+
         Ok(builder)
     }
-    
+
     /// Create stack with testkit foundation and simulator orchestration
     pub async fn with_testkit_foundation(
         device_count: usize,
-        threshold: usize,
+        _threshold: usize,
         _scenario_id: String,
     ) -> Result<Self> {
-        use aura_testkit::{DeviceTestFixture, TestExecutionMode, ChoreographyTestHarness};
-        
+        use aura_testkit::{ChoreographyTestHarness, DeviceTestFixture, TestExecutionMode};
+
         // Use testkit to create clean foundation
-        let fixtures: Vec<DeviceTestFixture> = (0..device_count)
-            .map(DeviceTestFixture::new)
-            .collect();
-            
-        let harness = ChoreographyTestHarness::from_fixtures(
-            fixtures,
-            TestExecutionMode::Simulation,
-        ).await.map_err(|e| SimulatorError::OperationFailed(format!("Harness creation failed: {:?}", e)))?;
-        
+        let fixtures: Vec<DeviceTestFixture> =
+            (0..device_count).map(DeviceTestFixture::new).collect();
+
+        let harness =
+            ChoreographyTestHarness::from_fixtures(fixtures, TestExecutionMode::Simulation)
+                .await
+                .map_err(|e| {
+                    SimulatorError::OperationFailed(format!("Harness creation failed: {:?}", e))
+                })?;
+
         // Convert to simulator stack with stateless effects
         Self::from_choreography_harness(harness)
     }
-    
+
     /// Set base context (internal helper for testkit integration)
     fn with_base_context(mut self, context: super::SimulatorContext) -> Self {
         // Store context for later use - this would be enhanced once the

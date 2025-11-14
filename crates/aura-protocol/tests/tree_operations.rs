@@ -10,71 +10,73 @@ use aura_core::tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOp, T
 use aura_core::DeviceId;
 use aura_journal::ratchet_tree::{apply_verified, reduce, validate_invariants};
 use aura_journal::semilattice::OpLog;
-use aura_protocol::effects::system::AuraEffectSystem;
 use aura_protocol::effects::TreeEffects;
+use aura_testkit::{create_test_fixture, TestFixture};
+use aura_macros::aura_test;
 
-#[tokio::test]
-async fn test_add_leaf_operation() {
-    let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-    let effect_system = AuraEffectSystem::for_testing(device_id);
+#[aura_test]
+async fn test_add_leaf_operation() -> aura_core::AuraResult<()> {
+    let fixture = create_test_fixture().await?;
+    let device_id = fixture.device_id();
 
     // Get initial state
-    let initial_state = effect_system.get_current_state().await.unwrap();
-    let initial_leaves = initial_state.list_leaf_ids().len();
+    let initial_state = fixture.effects().get_current_state().await?;
+    let _initial_leaves = initial_state.list_leaf_ids().len();
 
     // Create AddLeaf operation
     let leaf = LeafNode::new_device(LeafId(100), device_id, vec![1, 2, 3]);
-    let op_kind = effect_system.add_leaf(leaf, NodeIndex(0)).await.unwrap();
+    let op_kind = fixture.effects().add_leaf(leaf, NodeIndex(0)).await?;
 
     // Verify operation kind
     assert!(matches!(op_kind, TreeOpKind::AddLeaf { .. }));
 
     // In real implementation, this would be attested via threshold ceremony
     // For testing, we verify the operation structure is correct
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_remove_leaf_operation() {
-    let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-    let effect_system = AuraEffectSystem::for_testing(device_id);
+#[aura_test]
+async fn test_remove_leaf_operation() -> aura_core::AuraResult<()> {
+    let fixture = create_test_fixture().await?;
 
     // Create RemoveLeaf operation
     let leaf_id = LeafId(1);
     let reason = 1; // Removal reason code
 
-    let op_kind = effect_system.remove_leaf(leaf_id, reason).await.unwrap();
+    let op_kind = fixture.effects().remove_leaf(leaf_id, reason).await?;
 
     // Verify operation kind
     assert!(matches!(op_kind, TreeOpKind::RemoveLeaf { .. }));
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_change_policy_operation() {
-    let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-    let effect_system = AuraEffectSystem::for_testing(device_id);
+#[aura_test]
+async fn test_change_policy_operation() -> aura_core::AuraResult<()> {
+    let fixture = create_test_fixture().await?;
 
     // Create ChangePolicy operation (Any → Threshold is valid)
     let node = NodeIndex(0);
     let new_policy = Policy::Threshold { m: 2, n: 3 };
 
-    let op_kind = effect_system.change_policy(node, new_policy).await.unwrap();
+    let op_kind = fixture.effects().change_policy(node, new_policy).await?;
 
     // Verify operation kind
     assert!(matches!(op_kind, TreeOpKind::ChangePolicy { .. }));
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_rotate_epoch_operation() {
-    let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-    let effect_system = AuraEffectSystem::for_testing(device_id);
+#[aura_test]
+async fn test_rotate_epoch_operation() -> aura_core::AuraResult<()> {
+    let fixture = create_test_fixture().await?;
 
     // Create RotateEpoch operation
     let affected = vec![NodeIndex(0), NodeIndex(1)];
 
-    let op_kind = effect_system.rotate_epoch(affected).await.unwrap();
+    let op_kind = fixture.effects().rotate_epoch(affected).await?;
 
     // Verify operation kind
     assert!(matches!(op_kind, TreeOpKind::RotateEpoch { .. }));
+    Ok(())
 }
 
 #[test]
@@ -233,37 +235,37 @@ fn test_concurrent_operations_deterministic() {
     assert_eq!(state1.root_commitment, state2.root_commitment);
 }
 
-#[tokio::test]
-async fn test_get_current_state() {
-    let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-    let effect_system = AuraEffectSystem::for_testing(device_id);
+#[aura_test]
+async fn test_get_current_state() -> aura_core::AuraResult<()> {
+    let fixture = create_test_fixture().await?;
 
-    let state = effect_system.get_current_state().await.unwrap();
+    let state = fixture.effects().get_current_state().await?;
 
     // Initial state should have epoch 0
     assert_eq!(state.epoch, 0);
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_get_current_commitment() {
-    let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-    let effect_system = AuraEffectSystem::for_testing(device_id);
+#[aura_test]
+async fn test_get_current_commitment() -> aura_core::AuraResult<()> {
+    let fixture = create_test_fixture().await?;
 
-    let commitment = effect_system.get_current_commitment().await.unwrap();
+    let commitment = fixture.effects().get_current_commitment().await?;
 
     // Commitment should be 32 bytes
     assert_eq!(commitment.0.len(), 32);
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_get_current_epoch() {
-    let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-    let effect_system = AuraEffectSystem::for_testing(device_id);
+#[aura_test]
+async fn test_get_current_epoch() -> aura_core::AuraResult<()> {
+    let fixture = create_test_fixture().await?;
 
-    let epoch = effect_system.get_current_epoch().await.unwrap();
+    let epoch = fixture.effects().get_current_epoch().await?;
 
     // Initial epoch should be 0
     assert_eq!(epoch, 0);
+    Ok(())
 }
 
 #[test]

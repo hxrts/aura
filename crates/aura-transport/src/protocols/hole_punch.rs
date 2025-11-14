@@ -1,0 +1,259 @@
+//! Hole Punching Protocol Message Types
+//!
+//! Core hole punching messages compatible with rumpsteak-aura choreographic DSL.
+//! Target: <120 lines (minimal implementation).
+
+use aura_core::DeviceId;
+use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
+use std::time::SystemTime;
+use uuid::Uuid;
+
+/// Core hole punching messages for choreographic protocols
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HolePunchMessage {
+    /// Request to coordinate hole punching between peers
+    CoordinationRequest {
+        /// Session ID for this hole punch attempt
+        session_id: Uuid,
+        /// Device initiating the hole punch
+        initiator: DeviceId,
+        /// Target device for hole punching
+        target: DeviceId,
+        /// Relay server coordinates the process
+        relay_server: SocketAddr,
+    },
+    
+    /// Punch packet sent directly between peers
+    PunchPacket {
+        /// Session ID matching coordination request
+        session_id: Uuid,
+        /// Source device
+        source: DeviceId,
+        /// Target device  
+        target: DeviceId,
+        /// Sequence number for this punch attempt
+        sequence: u32,
+        /// Timestamp when packet was sent
+        timestamp: SystemTime,
+    },
+    
+    /// Acknowledgment of successful hole punch
+    PunchAcknowledgment {
+        /// Session ID being acknowledged
+        session_id: Uuid,
+        /// Device sending acknowledgment
+        acknowledger: DeviceId,
+        /// Successfully reached peer
+        reached_peer: DeviceId,
+        /// Local endpoint that succeeded
+        local_endpoint: SocketAddr,
+        /// Remote endpoint that was reached
+        remote_endpoint: SocketAddr,
+    },
+    
+    /// Coordination response from relay
+    CoordinationResponse {
+        /// Session ID from original request
+        session_id: Uuid,
+        /// Coordination result
+        result: CoordinationResult,
+        /// Instructions for peers
+        instructions: Vec<HolePunchInstruction>,
+    },
+}
+
+/// Result of hole punch coordination
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CoordinationResult {
+    /// Coordination successful, proceed with hole punching
+    Success,
+    /// Coordination failed - cannot proceed
+    Failed {
+        /// Reason for coordination failure
+        reason: String,
+    },
+    /// Coordination pending - wait for more information
+    Pending,
+}
+
+/// Instructions for hole punch execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HolePunchInstruction {
+    /// Send punch packets to specific endpoint
+    SendPunch {
+        /// Target endpoint to send punch packets to
+        target_endpoint: SocketAddr,
+        /// Number of punch packets to send
+        packet_count: u32,
+        /// Interval between packets in milliseconds
+        interval_ms: u64,
+    },
+    
+    /// Listen for incoming punch packets
+    ListenForPunch {
+        /// Local endpoint to bind for listening
+        local_endpoint: SocketAddr,
+        /// Timeout for listening operation in milliseconds
+        timeout_ms: u64,
+    },
+    
+    /// Wait before starting punch sequence
+    Wait {
+        /// Duration to wait in milliseconds
+        duration_ms: u64,
+    },
+    
+    /// Use specific local endpoint
+    BindToEndpoint {
+        /// Specific endpoint to bind to
+        endpoint: SocketAddr,
+    },
+}
+
+impl HolePunchMessage {
+    /// Create new coordination request
+    pub fn coordination_request(
+        initiator: DeviceId,
+        target: DeviceId,
+        relay_server: SocketAddr,
+    ) -> Self {
+        Self::coordination_request_with_id(
+            Self::generate_session_id(),
+            initiator,
+            target,
+            relay_server
+        )
+    }
+    
+    /// Create coordination request with specific session ID
+    pub fn coordination_request_with_id(
+        session_id: Uuid,
+        initiator: DeviceId,
+        target: DeviceId,
+        relay_server: SocketAddr,
+    ) -> Self {
+        Self::CoordinationRequest {
+            session_id,
+            initiator,
+            target,
+            relay_server,
+        }
+    }
+    
+    /// Generate deterministic session ID
+    fn generate_session_id() -> Uuid {
+        // Use deterministic approach for session IDs
+        // In production this would use a proper deterministic algorithm
+        Uuid::nil() // Placeholder
+    }
+    
+    /// Create punch packet
+    pub fn punch_packet(
+        session_id: Uuid,
+        source: DeviceId,
+        target: DeviceId,
+        sequence: u32,
+    ) -> Self {
+        Self::punch_packet_at_time(session_id, source, target, sequence, SystemTime::UNIX_EPOCH)
+    }
+    
+    /// Create punch packet with specific timestamp
+    pub fn punch_packet_at_time(
+        session_id: Uuid,
+        source: DeviceId,
+        target: DeviceId,
+        sequence: u32,
+        timestamp: SystemTime,
+    ) -> Self {
+        Self::PunchPacket {
+            session_id,
+            source,
+            target,
+            sequence,
+            timestamp,
+        }
+    }
+    
+    /// Create acknowledgment
+    pub fn acknowledgment(
+        session_id: Uuid,
+        acknowledger: DeviceId,
+        reached_peer: DeviceId,
+        local_endpoint: SocketAddr,
+        remote_endpoint: SocketAddr,
+    ) -> Self {
+        Self::PunchAcknowledgment {
+            session_id,
+            acknowledger,
+            reached_peer,
+            local_endpoint,
+            remote_endpoint,
+        }
+    }
+    
+    /// Create successful coordination response
+    pub fn success_response(session_id: Uuid, instructions: Vec<HolePunchInstruction>) -> Self {
+        Self::CoordinationResponse {
+            session_id,
+            result: CoordinationResult::Success,
+            instructions,
+        }
+    }
+    
+    /// Create failed coordination response
+    pub fn failed_response(session_id: Uuid, reason: String) -> Self {
+        Self::CoordinationResponse {
+            session_id,
+            result: CoordinationResult::Failed { reason },
+            instructions: Vec::new(),
+        }
+    }
+    
+    /// Get session ID from any message
+    pub fn session_id(&self) -> Uuid {
+        match self {
+            Self::CoordinationRequest { session_id, .. } |
+            Self::PunchPacket { session_id, .. } |
+            Self::PunchAcknowledgment { session_id, .. } |
+            Self::CoordinationResponse { session_id, .. } => *session_id,
+        }
+    }
+    
+    /// Check if message is a coordination message
+    pub fn is_coordination(&self) -> bool {
+        matches!(self, Self::CoordinationRequest { .. } | Self::CoordinationResponse { .. })
+    }
+    
+    /// Check if message is a punch attempt
+    pub fn is_punch_attempt(&self) -> bool {
+        matches!(self, Self::PunchPacket { .. } | Self::PunchAcknowledgment { .. })
+    }
+}
+
+/// Configuration for hole punching operations
+#[derive(Debug, Clone)]
+pub struct PunchConfig {
+    /// Maximum number of punch attempts
+    pub max_attempts: u32,
+    /// Timeout for hole punch attempts
+    pub punch_timeout: std::time::Duration,
+    /// Interval between punch packets
+    pub punch_interval: std::time::Duration,
+    /// Enable symmetric NAT detection
+    pub enable_symmetric_detection: bool,
+    /// Relay servers for coordination
+    pub relay_servers: Vec<SocketAddr>,
+}
+
+impl Default for PunchConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 10,
+            punch_timeout: std::time::Duration::from_secs(5),
+            punch_interval: std::time::Duration::from_millis(200),
+            enable_symmetric_detection: true,
+            relay_servers: Vec::new(),
+        }
+    }
+}

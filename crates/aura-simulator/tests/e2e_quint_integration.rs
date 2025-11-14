@@ -6,9 +6,10 @@ use aura_simulator::{
     CoreSimulatorHandler, Duration, Result, ScenarioInjectionMiddleware, SimulatorContext,
     SimulatorOperation, SimulatorStackBuilder,
 };
+use aura_macros::aura_test;
 use std::sync::Arc;
 
-#[tokio::test(flavor = "multi_thread")]
+#[aura_test]
 async fn test_simulator_stack_basic() -> Result<()> {
     // Create a basic simulator stack
     let stack = SimulatorStackBuilder::new()
@@ -22,7 +23,7 @@ async fn test_simulator_stack_basic() -> Result<()> {
         .with_seed(42);
 
     // Execute a simple tick operation
-    let result = stack.process(
+    let _result = stack.process(
         SimulatorOperation::ExecuteTick {
             tick_number: 1,
             delta_time: Duration::from_millis(100),
@@ -36,7 +37,7 @@ async fn test_simulator_stack_basic() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[aura_test]
 async fn test_simulator_middleware_composition() -> Result<()> {
     // Test multiple middleware layers
     use aura_simulator::{FaultSimulationMiddleware, TimeControlMiddleware};
@@ -53,7 +54,7 @@ async fn test_simulator_middleware_composition() -> Result<()> {
         .with_seed(123);
 
     // Test tick execution with multiple middleware
-    let result = stack.process(
+    let _result = stack.process(
         SimulatorOperation::ExecuteTick {
             tick_number: 1,
             delta_time: Duration::from_millis(50),

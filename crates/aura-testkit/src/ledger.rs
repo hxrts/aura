@@ -7,7 +7,6 @@ use aura_core::hash::hash;
 use aura_core::{AccountId, DeviceId};
 use aura_journal::semilattice::ModernAccountState as AccountState;
 use aura_journal::{DeviceMetadata, DeviceType};
-use ed25519_dalek::SigningKey;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;

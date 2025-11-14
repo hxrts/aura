@@ -4,6 +4,8 @@
 //! principles by not depending on the effect system for basic operations
 //! like ID generation.
 
+#![allow(clippy::disallowed_methods)]
+
 use aura_core::{AccountId, DeviceId};
 use uuid::Uuid;
 

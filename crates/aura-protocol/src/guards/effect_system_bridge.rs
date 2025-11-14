@@ -98,14 +98,15 @@ impl SecurityContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::AuraEffectSystem;
-    use crate::handlers::ExecutionMode;
     use aura_core::identifiers::DeviceId;
+    use aura_testkit::*;
+    use aura_macros::aura_test;
 
-    #[test]
-    fn test_effect_system_interface() {
-        let device_id = DeviceId::new();
-        let effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    #[aura_test]
+    async fn test_effect_system_interface() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let effect_system = fixture.effects();
 
         // Test device ID retrieval
         assert_eq!(effect_system.device_id(), device_id);
@@ -117,12 +118,14 @@ mod tests {
         );
 
         assert_eq!(effect_system.get_metadata("unknown_key"), None);
+        Ok(())
     }
 
-    #[test]
-    fn test_guard_extensions() {
-        let device_id = DeviceId::new();
-        let effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    #[aura_test]
+    async fn test_guard_extensions() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let effect_system = fixture.effects();
 
         // Test operation permissions
         assert!(effect_system.can_perform_operation("send_message"));
@@ -133,5 +136,6 @@ mod tests {
         assert_eq!(context.device_id, device_id);
         assert_eq!(context.execution_mode, "Testing");
         assert!(context.allows_operation("network_send"));
+        Ok(())
     }
 }

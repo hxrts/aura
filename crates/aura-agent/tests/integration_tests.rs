@@ -9,7 +9,8 @@
 //! This ensures the crate compiles and main functionality tests pass while
 //! the integration tests are being updated.
 
-#[cfg(disabled_integration_tests)]
+// Intentionally disabled tests - refactor to use current API structure
+#[allow(dead_code)]
 mod disabled_tests {
     // Integration tests have been temporarily disabled due to API changes.
     // TODO: Refactor these tests to use the current API structure.

@@ -16,7 +16,6 @@ aura-core = { path = "../aura-core" }
 
 # Cryptography
 aes-gcm = { workspace = true }
-blake3 = { workspace = true }
 zeroize = { workspace = true }
 ed25519-dalek = { workspace = true }
 hkdf = { workspace = true }

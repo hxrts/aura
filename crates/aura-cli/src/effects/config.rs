@@ -17,6 +17,7 @@ pub struct CliConfig {
     pub format: OutputFormat,
 }
 
+/// Output format options for CLI commands
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum OutputFormat {
     /// Human-readable output

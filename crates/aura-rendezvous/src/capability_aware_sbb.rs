@@ -496,7 +496,7 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
         let envelope_id = envelope.id;
 
         // Create SBB message for transport layer
-        let sbb_message = crate::messaging::SbbMessageType::RendezvousFlood {
+        let _sbb_message = crate::messaging::SbbMessageType::RendezvousFlood {
             envelope,
             from_peer: Some(self.device_id),
         };
@@ -535,10 +535,9 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
 
 /// Get current timestamp (placeholder - would use time effects)
 fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    #[allow(clippy::disallowed_methods)]
+    let now = SystemTime::now();
+    now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
 #[cfg(test)]

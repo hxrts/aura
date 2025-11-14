@@ -28,6 +28,10 @@ impl ExecutionTrace {
         self.steps.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
+    }
+
     pub fn add_state(&mut self, state: String) {
         self.steps.push(state);
     }
@@ -546,10 +550,11 @@ impl TraceConverter {
             let quint_state = self.convert_simulation_state(sim_state.as_ref(), index as u64)?;
 
             // Apply compression if enabled
-            if self.config.compress_repeated_states && !quint_states.is_empty() {
-                let last_state = quint_states.last().unwrap();
-                if !self.states_differ_significantly(last_state, &quint_state) {
-                    continue; // Skip repeated state
+            if self.config.compress_repeated_states {
+                if let Some(last_state) = quint_states.last() {
+                    if !self.states_differ_significantly(last_state, &quint_state) {
+                        continue; // Skip repeated state
+                    }
                 }
             }
 
@@ -953,29 +958,29 @@ impl ConversionStatistics {
             total_events_converted: 0,
         }
     }
-    
+
     /// Calculate approximate memory usage of a Quint trace
-    /// 
+    ///
     /// Estimates memory consumption by analyzing the serialized size of the trace
     /// data structures and their constituent elements.
     pub fn calculate_memory_usage(quint_trace: &QuintTrace) -> u64 {
         let mut total_bytes = 0u64;
-        
+
         // Calculate base structure size
         total_bytes += std::mem::size_of::<QuintTrace>() as u64;
-        
+
         // Calculate trace ID string size
         // total_bytes += quint_trace.id.len() as u64; // TODO: Fix when QuintTrace has id field
-        
+
         // Calculate metadata size
         total_bytes += std::mem::size_of_val(&quint_trace.metadata) as u64;
         total_bytes += quint_trace.metadata.source.len() as u64;
-        
+
         // Calculate states size
         for state in &quint_trace.states {
             total_bytes += std::mem::size_of_val(state) as u64;
             total_bytes += 8; // For the step number (u64)
-            
+
             // Calculate state variables size
             for (key, value) in &state.variables {
                 total_bytes += key.len() as u64;
@@ -990,13 +995,13 @@ impl ConversionStatistics {
                 };
             }
         }
-        
+
         // Calculate events size
         for event in &quint_trace.events {
             total_bytes += std::mem::size_of_val(event) as u64;
             total_bytes += event.event_id.len() as u64;
             total_bytes += event.event_type.len() as u64;
-            
+
             // Calculate event parameters size
             for (key, value) in &event.parameters {
                 total_bytes += key.len() as u64;
@@ -1011,7 +1016,7 @@ impl ConversionStatistics {
                 };
             }
         }
-        
+
         total_bytes
     }
 }
@@ -1077,6 +1082,7 @@ mod tests {
 
     // Mock types for testing
     #[derive(Debug, Clone)]
+    #[allow(dead_code)]
     pub struct TestSimulationState {
         pub tick: u64,
         pub time: u64,
@@ -1087,6 +1093,7 @@ mod tests {
     }
 
     #[derive(Debug, Clone)]
+    #[allow(dead_code)]
     pub struct NetworkStateSnapshot {
         pub partitions: Vec<String>,
         pub message_stats: MessageDeliveryStats,
@@ -1094,6 +1101,7 @@ mod tests {
     }
 
     #[derive(Debug, Clone)]
+    #[allow(dead_code)]
     pub struct MessageDeliveryStats {
         pub messages_sent: u64,
         pub messages_delivered: u64,
@@ -1102,6 +1110,7 @@ mod tests {
     }
 
     #[derive(Debug, Clone)]
+    #[allow(dead_code)]
     pub struct NetworkFailureConditions {
         pub partitions_active: bool,
         pub failure_rate: f64,
@@ -1110,6 +1119,7 @@ mod tests {
     }
 
     #[derive(Debug, Clone)]
+    #[allow(dead_code)]
     pub struct ProtocolExecutionState {
         pub active_sessions: Vec<String>,
         pub completed_sessions: Vec<String>,
@@ -1117,6 +1127,7 @@ mod tests {
     }
 
     impl TestSimulationState {
+        #[allow(dead_code)]
         pub fn mock() -> Self {
             Self {
                 tick: 1,

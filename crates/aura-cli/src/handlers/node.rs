@@ -4,14 +4,14 @@
 
 use anyhow::Result;
 use aura_protocol::{AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects};
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Handle node operations through effects
 pub async fn handle_node(
     effects: &AuraEffectSystem,
     port: u16,
     daemon: bool,
-    config_path: &PathBuf,
+    config_path: &Path,
 ) -> Result<()> {
     let _ = effects
         .log_info(&format!(
@@ -28,9 +28,7 @@ pub async fn handle_node(
     if effects
         .retrieve(&config_path.display().to_string())
         .await
-        .map_err(|_| "not found")
-        .unwrap()
-        .is_none()
+        .map_or(true, |data| data.is_none())
     {
         let _ = effects
             .log_error(&format!("Config file not found: {}", config_path.display()))
@@ -54,7 +52,7 @@ pub async fn handle_node(
 }
 
 /// Load node configuration through storage effects
-async fn load_node_config(effects: &AuraEffectSystem, config_path: &PathBuf) -> Result<NodeConfig> {
+async fn load_node_config(effects: &AuraEffectSystem, config_path: &Path) -> Result<NodeConfig> {
     let config_data = effects
         .retrieve(&config_path.display().to_string())
         .await
@@ -162,22 +160,22 @@ async fn simulate_interactive_session(effects: &AuraEffectSystem) {
 /// Node configuration structure
 #[derive(Debug, serde::Deserialize)]
 struct NodeConfig {
-    device_id: String,
-    threshold: u32,
-    total_devices: u32,
-    logging: Option<LoggingConfig>,
-    network: Option<NetworkConfig>,
+    _device_id: String,
+    _threshold: u32,
+    _total_devices: u32,
+    _logging: Option<LoggingConfig>,
+    _network: Option<NetworkConfig>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct LoggingConfig {
-    level: String,
-    structured: bool,
+    _level: String,
+    _structured: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct NetworkConfig {
-    default_port: u16,
-    timeout: u64,
-    max_retries: u32,
+    _default_port: u16,
+    _timeout: u64,
+    _max_retries: u32,
 }

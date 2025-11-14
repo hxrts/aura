@@ -1,63 +1,72 @@
 # Testing Guide
 
-This guide covers Aura's comprehensive testing infrastructure built on the stateless effect system architecture. Testing validates protocol correctness through property-based testing, integration testing, and performance benchmarking.
+This guide covers Aura's comprehensive testing infrastructure built on the async-first effect system architecture. Testing validates protocol correctness through property-based testing, integration testing, performance benchmarking, and provides first-class async testing support with the `#[aura_test]` macro.
 
 ## Core Testing Philosophy
 
-Aura's testing approach is built on three key principles. Tests run actual protocol logic rather than simplified mocks. All randomness and timing uses deterministic seeds for reproducible results. Testing integrates with the stateless effect system for clean isolation.
+Aura's testing approach is built on four key principles:
 
-This approach provides superior validation compared to traditional integration testing. The testkit infrastructure enables comprehensive coverage without complex mocking or brittle test fixtures.
+1. **Async-Native Testing** - The `#[aura_test]` macro provides automatic effect system setup and teardown with async support
+2. **Deterministic Execution** - Time control, seeded randomness, and effect snapshots ensure reproducible test results
+3. **Protocol Fidelity** - Tests run actual protocol logic through the real effect system, not simplified mocks
+4. **WASM Compatibility** - All testing infrastructure works in both native and WebAssembly environments
+
+This approach eliminates boilerplate while providing powerful testing capabilities through automatic context propagation, scoped test isolation, and comprehensive test utilities.
 
 ## Property-Based Testing
 
 Property-based testing validates protocol correctness across diverse input spaces using the stateless effect system. Properties express invariants that must hold for all valid inputs and execution scenarios.
 
-### Protocol Properties
+### Protocol Properties with Async Testing
 
-Define fundamental properties for distributed protocols using stateless fixtures:
+Define fundamental properties using the `#[aura_test]` macro:
 
 ```rust
 use proptest::prelude::*;
-use aura_testkit::{ProtocolTestFixture, TestEffectsBuilder, TestExecutionMode};
+use aura_testkit::{aura_test, TestContext, freeze_time, advance_time_by};
 
 pub struct ConsistencyProperty;
 
 impl ProtocolProperty for ConsistencyProperty {
     async fn check_property(
         &self,
-        fixtures: &[ProtocolTestFixture],
+        ctx: &TestContext,
         execution_trace: &ExecutionTrace,
     ) -> PropertyResult {
-        // Collect final states from stateless fixtures
-        let final_states: Vec<_> = fixtures
-            .iter()
-            .map(|fixture| fixture.account_state())
-            .collect();
-
-        // Check state convergence across all devices
+        // Time is automatically controlled in tests
+        freeze_time();
+        
+        // Execute protocol with deterministic timing
+        let final_states = ctx.execute_protocol().await?;
+        
+        // Advance time for next phase
+        advance_time_by(Duration::from_secs(5));
+        
+        // Check state convergence
         let reference_state = &final_states[0];
         for state in &final_states[1..] {
             if !states_are_equivalent(reference_state, state) {
                 return PropertyResult::Violated {
                     description: "State convergence failed".to_string(),
-                    counterexample: format!("Reference: {:?}, Divergent: {:?}", reference_state, state),
+                    counterexample: format!("States diverged after {} seconds", 
+                                          ctx.elapsed().as_secs()),
                 };
             }
         }
-
-        // Check causal consistency using deterministic seeds
-        for (i, fixture) in fixtures.iter().enumerate() {
-            let device_operations = extract_operations_for_device(execution_trace, fixture.device_id());
-            if !validate_causal_ordering_stateless(&device_operations, fixture.seed()) {
-                return PropertyResult::Violated {
-                    description: "Causal consistency violated".to_string(),
-                    counterexample: format!("Device {}: {:?}", i, device_operations),
-                };
-            }
-        }
-
+        
+        // Verify through effect snapshots
+        let snapshot = ctx.effects().snapshot();
+        assert_eq!(snapshot.total_operations(), execution_trace.len());
+        
         PropertyResult::Satisfied
     }
+}
+
+#[aura_test]
+async fn test_consistency_property() {
+    let property = ConsistencyProperty;
+    let result = property.check_property(&ctx, &trace).await;
+    assert_eq!(result, PropertyResult::Satisfied);
 }
 ```
 
@@ -130,13 +139,13 @@ impl LivenessProperty {
 
 Safety properties verify that bad things never happen during execution. Liveness properties ensure that good things eventually happen within specified timeouts. Both property types are essential for protocol correctness.
 
-### Randomized Input Generation
+### Randomized Input Generation with Network Simulation
 
-Generate diverse test inputs for comprehensive coverage:
+Generate diverse test inputs with network simulation support:
 
 ```rust
 use proptest::strategy::Strategy;
-use aura_testkit::{ProtocolTestFixture, StatelessFixtureConfig, TestExecutionMode};
+use aura_testkit::{NetworkSimulator, aura_test};
 
 pub fn arbitrary_protocol_scenario() -> impl Strategy<Value = ProtocolScenario> {
     (
@@ -154,6 +163,28 @@ pub fn arbitrary_protocol_scenario() -> impl Strategy<Value = ProtocolScenario> 
     })
 }
 
+#[aura_test(timeout = "60s")]
+async fn test_protocol_under_network_conditions(scenario: ProtocolScenario) {
+    // Network simulator automatically available
+    let mut sim = NetworkSimulator::new();
+    
+    // Configure network conditions
+    sim.add_latency(scenario.network_conditions.latency);
+    sim.add_jitter(scenario.network_conditions.jitter);
+    sim.add_packet_loss(scenario.network_conditions.loss_rate);
+    
+    // Add network partitions if specified
+    if let Some(partition) = scenario.network_conditions.partition {
+        sim.add_partition(partition.group_a, partition.group_b);
+    }
+    
+    // Execute protocol with simulated network
+    let result = execute_protocol_with_simulator(&scenario, &sim).await?;
+    
+    // Verify convergence despite network conditions
+    assert!(result.converged_within(Duration::from_secs(30)));
+}
+
 pub fn arbitrary_message() -> impl Strategy<Value = ProtocolMessage> {
     prop_oneof![
         Just(ProtocolMessage::Ping),
@@ -163,37 +194,22 @@ pub fn arbitrary_message() -> impl Strategy<Value = ProtocolMessage> {
 }
 
 proptest! {
-    #[test]
-    fn protocol_maintains_consistency(scenario in arbitrary_protocol_scenario()) {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            // Create fixtures using stateless architecture
-            let mut fixtures = Vec::new();
-            for i in 0..scenario.device_count {
-                let config = StatelessFixtureConfig {
-                    execution_mode: TestExecutionMode::Simulation,
-                    seed: 42 + i as u64,
-                    threshold: 2,
-                    total_devices: scenario.device_count as u16,
-                    primary_device: None,
-                };
-                let fixture = ProtocolTestFixture::with_stateless_effects(
-                    config.threshold,
-                    config.total_devices,
-                    config.execution_mode,
-                    config.seed,
-                ).await?;
-                fixtures.push(fixture);
-            }
-
-            let trace = execute_protocol_scenario(&fixtures, &scenario).await?;
-            let consistency_property = ConsistencyProperty;
-
-            assert_eq!(
-                consistency_property.check_property(&fixtures, &trace).await?,
-                PropertyResult::Satisfied
-            );
-        });
+    #[aura_test]
+    async fn protocol_maintains_consistency(scenario in arbitrary_protocol_scenario()) {
+        // Test context automatically available
+        let consistency_property = ConsistencyProperty;
+        
+        // Execute scenario with automatic setup
+        let trace = execute_protocol_scenario(&ctx, &scenario).await?;
+        
+        // Verify property
+        let result = consistency_property.check_property(&ctx, &trace).await?;
+        assert_eq!(result, PropertyResult::Satisfied);
+        
+        // Effect snapshots for additional validation
+        let snapshot = ctx.effects().snapshot();
+        assert!(snapshot.all_operations_completed());
+        assert_eq!(snapshot.failed_operations(), 0);
     }
 }
 ```
@@ -204,46 +220,61 @@ Randomized testing explores edge cases that manual testing might miss. Property-
 
 Integration testing validates complete system behavior across multiple protocol layers. These tests verify correct interaction between authentication, authorization, storage, and network layers.
 
-### End-to-End Protocol Testing
+### End-to-End Protocol Testing with Test Fixtures
 
-Test complete protocol workflows from initialization to completion:
+Test complete protocol workflows using test fixtures:
 
 ```rust
-use aura_testkit::{ChoreographyTestHarness, ProtocolTestFixture, TestExecutionMode, StatelessFixtureConfig};
+use aura_testkit::{aura_test, TestFixture, TestContext};
 
-pub struct ThresholdSigningIntegrationTest {
-    fixtures: Vec<ProtocolTestFixture>,
-    harness: ChoreographyTestHarness,
+#[aura_test]
+async fn test_threshold_signing_workflow() {
+    // Create test fixture with pre-configured setup
+    let fixture = TestFixture::new()
+        .with_device_count(5)
+        .with_threshold(3)
+        .with_mocks()  // Use mock handlers for speed
+        .build();
+    
+    let message = b"integration test message";
+    let devices = fixture.devices();
+    
+    // Phase 1: Initialize signing session
+    let session_id = fixture.initiate_threshold_signing(
+        &devices,
+        message,
+    ).await?;
+    
+    // Phase 2: Collect partial signatures (with time control)
+    freeze_time();
+    let threshold_devices = &devices[..3];
+    let partial_signatures = fixture.collect_partial_signatures(
+        session_id,
+        threshold_devices,
+    ).await?;
+    advance_time_by(Duration::from_secs(1));
+    
+    // Phase 3: Aggregate signature
+    let final_signature = fixture.aggregate_signatures(
+        session_id,
+        partial_signatures,
+    ).await?;
+    
+    // Phase 4: Verify with effect snapshots
+    let snapshot = ctx.effects().snapshot();
+    assert_eq!(snapshot.crypto_operations(), 4); // 3 partial + 1 aggregate
+    assert_eq!(snapshot.network_messages(), 6);  // Protocol messages
+    
+    // Verify signature
+    let verification_result = fixture.verify_threshold_signature(
+        message,
+        &final_signature,
+        &devices,
+    ).await?;
+    
+    assert!(verification_result.is_valid());
+    assert_eq!(verification_result.signing_devices().len(), 3);
 }
-
-impl ThresholdSigningIntegrationTest {
-    pub async fn setup(device_count: usize, threshold: usize) -> Result<Self, TestError> {
-        // Create fixtures using stateless architecture
-        let mut fixtures = Vec::new();
-        for i in 0..device_count {
-            let config = StatelessFixtureConfig {
-                execution_mode: TestExecutionMode::Integration,
-                seed: 100 + i as u64,
-                threshold: threshold as u16,
-                total_devices: device_count as u16,
-                primary_device: None,
-            };
-            let fixture = ProtocolTestFixture::with_stateless_effects(
-                config.threshold,
-                config.total_devices,
-                config.execution_mode,
-                config.seed,
-            ).await?;
-            fixtures.push(fixture);
-        }
-
-        let harness = ChoreographyTestHarness::from_fixtures(
-            fixtures.clone(),
-            TestExecutionMode::Integration,
-        ).await?;
-
-        Ok(Self { fixtures, harness })
-    }
 
     pub async fn test_complete_signing_workflow(&self) -> Result<(), TestError> {
         let message = b"integration test message";
@@ -285,102 +316,142 @@ impl ThresholdSigningIntegrationTest {
 
 Integration tests verify complete protocol execution across all system layers. Phase-based testing validates each step of complex multi-party protocols. End-to-end verification ensures correctness of the entire workflow.
 
-### Cross-Layer Validation
+### Cross-Layer Validation with Context Propagation
 
-Test interactions between different system layers:
+Test interactions between system layers with automatic context:
 
 ```rust
-use aura_testkit::{ProtocolTestFixture, TestEffectsBuilder, TestExecutionMode};
+use aura_testkit::{aura_test, current_context, with_context};
 
-pub async fn test_capability_journal_integration() -> Result<(), IntegrationError> {
-    let device_id = aura_core::DeviceId::new();
-
-    // Create test fixture with stateless effects
-    let fixture = ProtocolTestFixture::for_integration_tests(device_id).await?;
+#[aura_test]
+async fn test_capability_journal_integration() {
+    // Context automatically available
     let initial_capabilities = create_test_capability_set();
-
-    // Build effect system for integration testing
-    let effects_builder = TestEffectsBuilder::for_integration_tests(device_id)
-        .with_seed(fixture.seed());
-    let effects = effects_builder.build()?;
-
-    // Initialize journal with capabilities using stateless approach
-    let journal_entry = effects.create_journal_entry(
-        device_id,
-        initial_capabilities.clone(),
-    ).await?;
-
+    
+    // Initialize journal with capabilities
+    let journal_entry = ctx.effects().journal()
+        .create_entry_with_context(
+            &current_context(),
+            initial_capabilities.clone(),
+        )
+        .await?;
+    
     // Perform capability-gated operation
     let operation = TreeOperation::AddMember {
         member_id: aura_core::DeviceId::new(),
         capabilities: create_restricted_capability_set(),
     };
-
-    // Verify capability checking through stateless effects
-    let capability_check = effects.validate_capability_for_operation(
-        &operation,
-        &initial_capabilities,
-    ).await?;
-
+    
+    // Context flows through validation
+    let capability_check = ctx.effects()
+        .validate_capability_for_operation(
+            &operation,
+            &initial_capabilities,
+        )
+        .await?;
+    
     assert!(capability_check.is_authorized());
-
-    // Execute operation through stateless journal effects
-    let operation_result = effects.execute_journal_operation(
-        &journal_entry,
-        operation.clone(),
-        capability_check.authorization_proof(),
-    ).await?;
-
-    // Verify operation success and journal consistency
-    assert!(operation_result.is_successful());
-    assert!(operation_result.journal_updated());
-    assert!(operation_result.contains_operation_evidence(&operation));
-
-    Ok(())
+    
+    // Execute with nested context for tracing
+    let result = with_context(ctx.child("journal_operation"), async {
+        ctx.effects().journal()
+            .execute_operation(
+                &journal_entry,
+                operation.clone(),
+                capability_check.authorization_proof(),
+            )
+            .await
+    }).await?;
+    
+    // Verify through snapshots
+    let snapshot = ctx.effects().snapshot();
+    assert_eq!(snapshot.journal_operations(), 1);
+    assert!(snapshot.operation_succeeded(&operation));
+    
+    // Context automatically includes flow budget tracking
+    assert!(ctx.flow_budget_spent() > 0);
 }
 ```
 
 Cross-layer validation tests ensure clean interfaces between system components. Capability and journal integration validates authorization and state management. Layer interactions must maintain security and consistency properties.
 
-### Recovery and Resilience Testing
+### Recovery and Resilience Testing with Fault Injection
 
-Test system recovery under various failure conditions:
+Test system recovery using built-in fault injection:
 
 ```rust
-use aura_testkit::{ProtocolTestFixture, TestEffectsBuilder, TestExecutionMode, StatelessFixtureConfig};
+use aura_testkit::{aura_test, FaultInjector, NetworkSimulator};
 
-pub struct RecoveryTestSuite {
-    baseline_fixtures: Vec<ProtocolTestFixture>,
-    recovery_scenarios: Vec<RecoveryScenario>,
-    config: StatelessFixtureConfig,
+#[aura_test(no_deterministic_time)]
+async fn test_byzantine_fault_tolerance() {
+    let device_count = 5;
+    let byzantine_count = 1; // f < n/3
+    
+    // Create devices with one Byzantine
+    let mut devices = Vec::new();
+    for i in 0..device_count {
+        if i < byzantine_count {
+            // Byzantine device with fault injection
+            let fault_injector = FaultInjector::new()
+                .corrupt_messages(0.5)  // 50% message corruption
+                .delay_messages(100..500)  // Random delays
+                .drop_messages(0.1);   // 10% message drop
+            
+            devices.push(ctx.create_byzantine_device(fault_injector).await?);
+        } else {
+            devices.push(ctx.create_honest_device().await?);
+        }
+    }
+    
+    // Execute protocol under Byzantine conditions
+    let result = execute_protocol(&devices).await;
+    
+    // Protocol should succeed despite Byzantine behavior
+    assert!(result.is_ok());
+    
+    // Verify all honest devices converged
+    let honest_states: Vec<_> = devices[byzantine_count..]
+        .iter()
+        .map(|d| d.final_state())
+        .collect();
+    
+    let reference = &honest_states[0];
+    for state in &honest_states[1..] {
+        assert_eq!(state.merkle_root(), reference.merkle_root());
+    }
+    
+    // Check Byzantine device was detected
+    let snapshot = ctx.effects().snapshot();
+    assert!(snapshot.byzantine_detections() >= 1);
 }
 
-impl RecoveryTestSuite {
-    pub async fn new(
-        device_count: usize,
-        config: StatelessFixtureConfig,
-    ) -> Result<Self, TestError> {
-        let mut fixtures = Vec::new();
-        for i in 0..device_count {
-            let device_config = StatelessFixtureConfig {
-                seed: config.seed + i as u64,
-                ..config.clone()
-            };
-            let fixture = ProtocolTestFixture::with_stateless_effects(
-                device_config.threshold,
-                device_config.total_devices,
-                device_config.execution_mode,
-                device_config.seed,
-            ).await?;
-            fixtures.push(fixture);
-        }
-
-        Ok(Self {
-            baseline_fixtures: fixtures,
-            recovery_scenarios: create_standard_recovery_scenarios(),
-            config,
-        })
-    }
+#[aura_test]
+async fn test_network_partition_recovery() {
+    let devices = ctx.create_devices(5).await?;
+    
+    // Configure network with partition
+    let mut sim = NetworkSimulator::new();
+    let partition_a = devices[..3].to_vec();
+    let partition_b = devices[3..].to_vec();
+    
+    sim.add_partition(partition_a.clone(), partition_b.clone());
+    
+    // Start protocol
+    let protocol_handle = spawn_protocol(&devices);
+    
+    // Let it run for a while with partition
+    advance_time_by(Duration::from_secs(10));
+    
+    // Heal partition
+    sim.remove_partition();
+    
+    // Protocol should complete
+    let result = protocol_handle.await?;
+    assert!(result.completed_successfully());
+    
+    // All devices should converge
+    verify_convergence(&devices).await?;
+}
 
     pub async fn test_byzantine_fault_tolerance(&self) -> Result<ResilienceReport, TestError> {
         let byzantine_device_count = self.baseline_fixtures.len() / 3; // f < n/3
@@ -436,28 +507,49 @@ Recovery testing validates system behavior under adversarial conditions. Byzanti
 
 Performance benchmarking measures protocol efficiency and scalability characteristics. Benchmarks validate performance requirements and identify optimization opportunities.
 
-### Protocol Performance Metrics
+### Protocol Performance Metrics with Async Benchmarking
 
-Measure key performance indicators for distributed protocols:
+Measure performance using async-aware benchmarking:
 
 ```rust
-use std::time::{Instant, Duration};
-use aura_testkit::{ChoreographyTestHarness, ProtocolTestFixture, TestExecutionMode, StatelessFixtureConfig};
+use aura_testkit::{aura_test, PerformanceMonitor};
 
-pub struct ProtocolBenchmark {
-    config: StatelessFixtureConfig,
-    metrics_collector: MetricsCollector,
+#[aura_test(capture)]
+async fn benchmark_threshold_signing() {
+    let monitor = PerformanceMonitor::new();
+    
+    // Benchmark different device counts
+    for device_count in [3, 5, 10, 20] {
+        let devices = ctx.create_devices(device_count).await?;
+        
+        // Measure initialization
+        let init_time = monitor.measure("initialization", async {
+            initialize_protocol(&devices).await
+        }).await?;
+        
+        // Measure signing rounds
+        let signing_time = monitor.measure("signing", async {
+            execute_threshold_signing(&devices[..3], b"test message").await
+        }).await?;
+        
+        // Measure verification
+        let verify_time = monitor.measure("verification", async {
+            verify_threshold_signature(&signature, &devices).await
+        }).await?;
+        
+        println!("Device count: {}", device_count);
+        println!("  Init: {:?}", init_time);
+        println!("  Sign: {:?}", signing_time);
+        println!("  Verify: {:?}", verify_time);
+    }
+    
+    // Generate performance report
+    let report = monitor.generate_report();
+    assert!(report.p99_latency < Duration::from_secs(1));
+    assert!(report.throughput > 100); // ops/sec
 }
 
-impl ProtocolBenchmark {
-    pub fn new(config: StatelessFixtureConfig) -> Self {
-        Self {
-            config,
-            metrics_collector: MetricsCollector::new(),
-        }
-    }
-
-    pub async fn benchmark_threshold_signing(
+    pub async fn benchmark_with_parallel_init(
         &self,
         device_counts: Vec<usize>,
         message_sizes: Vec<usize>,
@@ -471,33 +563,14 @@ impl ProtocolBenchmark {
 
                 for iteration in 0..iterations {
                     let test_message = vec![0u8; message_size];
-
-                    // Create stateless test fixtures for this iteration
-                    let mut fixtures = Vec::new();
-                    for i in 0..device_count {
-                        let iteration_config = StatelessFixtureConfig {
-                            seed: self.config.seed + (iteration * device_count + i) as u64,
-                            execution_mode: TestExecutionMode::Simulation,
-                            ..self.config.clone()
-                        };
-                        let fixture = ProtocolTestFixture::with_stateless_effects(
-                            iteration_config.threshold,
-                            device_count as u16,
-                            iteration_config.execution_mode,
-                            iteration_config.seed,
-                        ).await?;
-                        fixtures.push(fixture);
-                    }
-
-                    let start_time = Instant::now();
-
-                    // Measure setup overhead
-                    let setup_start = Instant::now();
-                    let harness = ChoreographyTestHarness::from_fixtures(
-                        fixtures.clone(),
-                        TestExecutionMode::Simulation,
-                    ).await?;
-                    let setup_duration = setup_start.elapsed();
+                    
+                    // Use parallel initialization for performance
+                    let builder = ParallelInitBuilder::new(self.config.clone())
+                        .with_device_count(device_count)
+                        .with_metrics();
+                    
+                    let (system, init_metrics) = builder.build().await?;
+                    let setup_duration = init_metrics.unwrap().total_duration;
 
                     // Measure signing latency
                     let signing_start = Instant::now();
@@ -548,49 +621,58 @@ impl ProtocolBenchmark {
 
 Performance benchmarking measures latency across different protocol phases. Parameterized testing evaluates scalability with varying device counts and message sizes. Statistical aggregation provides reliable performance characterization.
 
-### Memory and Resource Profiling
+### Memory and Resource Profiling with Allocation Tracking
 
-Profile resource usage during protocol execution:
+Profile resource usage with built-in allocation tracking:
 
 ```rust
-use std::time::Instant;
-use aura_testkit::{ProtocolTestFixture, TestEffectsBuilder, TestExecutionMode, StatelessFixtureConfig};
+use aura_testkit::{aura_test, AllocationTracker, MemoryProfiler};
 
-pub struct ResourceBenchmark {
-    profiler: ResourceProfiler,
-    config: StatelessFixtureConfig,
-}
-
-impl ResourceBenchmark {
-    pub fn new(config: StatelessFixtureConfig) -> Self {
-        Self {
-            profiler: ResourceProfiler::new(),
-            config,
+#[aura_test]
+async fn profile_journal_memory_usage() {
+    let profiler = MemoryProfiler::new();
+    let tracker = AllocationTracker::new();
+    
+    // Test with different operation counts
+    for operation_count in [100, 1000, 10000] {
+        // Take baseline snapshot
+        let baseline = profiler.snapshot();
+        
+        // Track allocations during operations
+        let _guard = tracker.track_allocations();
+        
+        // Execute journal operations
+        let journal = ctx.effects().journal();
+        for i in 0..operation_count {
+            let operation = create_test_operation(i);
+            journal.apply_operation(&operation).await?;
+            
+            // Periodic snapshots
+            if i % 1000 == 0 {
+                let snapshot = profiler.snapshot();
+                let allocations = tracker.allocations_since(&baseline);
+                
+                println!("After {} operations:", i);
+                println!("  Heap: {} MB", snapshot.heap_mb());
+                println!("  Allocations: {}", allocations.count);
+                println!("  Allocation rate: {}/op", 
+                         allocations.count / (i + 1));
+            }
         }
+        
+        // Final analysis
+        let final_snapshot = profiler.snapshot();
+        let total_allocations = tracker.allocations_since(&baseline);
+        
+        // Verify memory efficiency
+        let bytes_per_op = (final_snapshot.heap_bytes() - baseline.heap_bytes()) 
+                          / operation_count;
+        assert!(bytes_per_op < 1024); // Less than 1KB per operation
+        
+        // Check for memory leaks
+        assert!(total_allocations.leaked_bytes == 0);
     }
-
-    pub async fn profile_journal_memory_usage(
-        &self,
-        operation_counts: Vec<usize>,
-    ) -> Result<MemoryProfileReport, ProfilingError> {
-        let mut profiles = Vec::new();
-        let device_id = aura_core::DeviceId::new();
-
-        for operation_count in operation_counts {
-            let baseline_snapshot = self.profiler.take_memory_snapshot().await?;
-
-            // Create test fixture with stateless effects
-            let fixture = ProtocolTestFixture::with_stateless_effects(
-                self.config.threshold,
-                self.config.total_devices,
-                TestExecutionMode::Simulation,
-                self.config.seed,
-            ).await?;
-
-            // Build stateless effect system for journal operations
-            let effects_builder = TestEffectsBuilder::for_simulation(device_id)
-                .with_seed(fixture.seed());
-            let effects = effects_builder.build()?;
+}
 
             let population_start = Instant::now();
             let mut journal_state = fixture.account_state().clone();
@@ -644,21 +726,47 @@ Memory profiling tracks resource usage throughout protocol execution. Memory pro
 
 ## Testing Best Practices
 
-Comprehensive testing combines multiple approaches for thorough validation. Unit tests verify individual components. Integration tests validate system interactions. Property-based tests explore edge cases. Performance benchmarks ensure scalability.
+Comprehensive testing combines the `#[aura_test]` macro with specialized test utilities for thorough validation. The macro eliminates boilerplate while providing powerful features through attributes.
 
-Create robust testing suites using these patterns:
+### Using the #[aura_test] Macro
 
 ```rust
-use aura_testkit::{ProtocolTestFixture, TestExecutionMode, StatelessFixtureConfig, ChoreographyTestHarness};
+use aura_testkit::{aura_test, TestFixture, NetworkSimulator};
 
-pub struct ComprehensiveTestSuite {
-    protocol_name: String,
-    config: StatelessFixtureConfig,
-    unit_tests: Vec<UnitTestCase>,
-    integration_tests: Vec<IntegrationTestCase>,
-    property_tests: Vec<PropertyTestCase>,
-    benchmarks: Vec<BenchmarkCase>,
+// Basic async test with automatic setup
+#[aura_test]
+async fn test_basic_protocol() {
+    // Effect system automatically initialized
+    let result = execute_protocol().await?;
+    assert!(result.success);
 }
+
+// Test with custom timeout
+#[aura_test(timeout = "30s")]
+async fn test_long_running_protocol() {
+    // Test will fail if not completed within 30 seconds
+}
+
+// Test without automatic initialization
+#[aura_test(no_init)]
+async fn test_manual_setup() {
+    // Manual effect system setup required
+    let system = create_custom_effect_system().await?;
+}
+
+// Test with output capture for debugging
+#[aura_test(capture)]
+async fn test_with_debugging() {
+    println!("This output will be captured");
+    // Output only shown if test fails
+}
+
+// Test without deterministic time
+#[aura_test(no_deterministic_time)]
+async fn test_real_time_behavior() {
+    // Uses actual system time instead of controlled time
+}
+```
 
 impl ComprehensiveTestSuite {
     pub fn new(protocol_name: &str, config: StatelessFixtureConfig) -> Self {
@@ -672,123 +780,129 @@ impl ComprehensiveTestSuite {
         }
     }
 
-    pub async fn run_comprehensive_protocol_validation(
-        &mut self,
-    ) -> Result<ValidationReport, TestError> {
-        // Discover and setup test cases using stateless architecture
-        self.discover_unit_tests().await?;
-        self.create_integration_scenarios().await?;
-        self.define_property_tests().await?;
-        self.create_performance_benchmarks().await?;
+### Comprehensive Test Suites
 
-        let mut validation_report = ValidationReport::new(&self.protocol_name);
+```rust
+pub struct ComprehensiveTestSuite {
+    protocol_name: String,
+    test_fixture: TestFixture,
+}
 
-        // Run unit tests with stateless fixtures
-        for unit_test in &self.unit_tests {
-            let fixture = ProtocolTestFixture::with_stateless_effects(
-                self.config.threshold,
-                self.config.total_devices,
-                TestExecutionMode::UnitTest,
-                self.config.seed,
-            ).await?;
-
-            let result = unit_test.execute(&fixture).await?;
-            validation_report.add_unit_test_result(result);
+impl ComprehensiveTestSuite {
+    pub fn new(protocol_name: &str) -> Self {
+        Self {
+            protocol_name: protocol_name.to_string(),
+            test_fixture: TestFixture::new()
+                .with_mocks()
+                .with_deterministic_time()
+                .build(),
         }
-
-        // Run integration tests with choreography harness
-        for integration_test in &self.integration_tests {
-            let fixtures = create_multi_device_fixtures(
-                integration_test.device_count(),
-                &self.config,
-                TestExecutionMode::Integration,
-            ).await?;
-
-            let harness = ChoreographyTestHarness::from_fixtures(
-                fixtures,
-                TestExecutionMode::Integration,
-            ).await?;
-
-            let result = integration_test.execute(&harness).await?;
-            validation_report.add_integration_test_result(result);
-        }
-
-        // Run property-based tests
-        for property_test in &self.property_tests {
-            let simulation_fixtures = create_multi_device_fixtures(
-                property_test.device_count(),
-                &self.config,
-                TestExecutionMode::Simulation,
-            ).await?;
-
-            let result = property_test.execute(&simulation_fixtures).await?;
-            validation_report.add_property_test_result(result);
-        }
-
+    }
+    
+    pub async fn run_validation(&mut self) -> Result<ValidationReport> {
+        let mut report = ValidationReport::new(&self.protocol_name);
+        
+        // Run unit tests
+        report.add_section("Unit Tests", self.run_unit_tests().await?);
+        
+        // Run integration tests with network simulation
+        let mut sim = NetworkSimulator::new();
+        sim.add_latency(10..50);
+        report.add_section("Integration Tests", 
+            self.run_integration_tests(&sim).await?);
+        
+        // Run property tests
+        report.add_section("Property Tests", 
+            self.run_property_tests().await?);
+        
         // Run performance benchmarks
-        for benchmark in &self.benchmarks {
-            let benchmark_fixtures = create_multi_device_fixtures(
-                benchmark.device_count(),
-                &self.config,
-                TestExecutionMode::Simulation,
-            ).await?;
-
-            let result = benchmark.execute(&benchmark_fixtures).await?;
-            validation_report.add_benchmark_result(result);
-        }
-
-        Ok(validation_report)
-    }
-
-    async fn discover_unit_tests(&mut self) -> Result<(), TestError> {
-        self.unit_tests = discover_unit_tests(&self.protocol_name)?;
-        Ok(())
-    }
-
-    async fn create_integration_scenarios(&mut self) -> Result<(), TestError> {
-        self.integration_tests = create_integration_scenarios(&self.protocol_name)?;
-        Ok(())
-    }
-
-    async fn define_property_tests(&mut self) -> Result<(), TestError> {
-        self.property_tests = define_protocol_properties(&self.protocol_name)?;
-        Ok(())
-    }
-
-    async fn create_performance_benchmarks(&mut self) -> Result<(), TestError> {
-        self.benchmarks = create_performance_benchmarks(&self.protocol_name)?;
-        Ok(())
+        let monitor = PerformanceMonitor::new();
+        report.add_section("Performance", 
+            self.run_benchmarks(&monitor).await?);
+        
+        Ok(report)
     }
 }
 
-/// Helper function to create multiple fixtures for multi-device tests
-async fn create_multi_device_fixtures(
-    device_count: usize,
-    base_config: &StatelessFixtureConfig,
-    execution_mode: TestExecutionMode,
-) -> Result<Vec<ProtocolTestFixture>, TestError> {
-    let mut fixtures = Vec::new();
-    for i in 0..device_count {
-        let config = StatelessFixtureConfig {
-            execution_mode,
-            seed: base_config.seed + i as u64,
-            total_devices: device_count as u16,
-            ..base_config.clone()
-        };
-        let fixture = ProtocolTestFixture::with_stateless_effects(
-            config.threshold,
-            config.total_devices,
-            config.execution_mode,
-            config.seed,
-        ).await?;
-        fixtures.push(fixture);
-    }
-    Ok(fixtures)
+### Test Utilities and Helpers
+
+```rust
+// Time control utilities
+#[aura_test]
+async fn test_with_time_control() {
+    // Freeze time at current moment
+    freeze_time();
+    
+    let start = current_time();
+    execute_operation().await?;
+    
+    // Time hasn't advanced
+    assert_eq!(current_time(), start);
+    
+    // Advance time explicitly
+    advance_time_by(Duration::from_secs(10));
+    assert_eq!(current_time(), start + Duration::from_secs(10));
 }
+
+// Network simulation utilities
+#[aura_test]
+async fn test_with_network_conditions() {
+    let mut sim = NetworkSimulator::new();
+    
+    // Add various network conditions
+    sim.add_latency(50..150);        // 50-150ms latency
+    sim.add_jitter(10);              // ±10ms jitter
+    sim.add_packet_loss(0.02);       // 2% packet loss
+    sim.add_bandwidth_limit(1_000_000); // 1MB/s
+    
+    // Create partition between device groups
+    let group_a = vec![device1, device2];
+    let group_b = vec![device3, device4];
+    sim.add_partition(group_a, group_b);
+    
+    // Execute protocol under these conditions
+    let result = execute_with_simulator(&sim).await?;
+    assert!(result.completed_despite_conditions());
+}
+
+// Effect snapshot utilities
+#[aura_test]
+async fn test_with_effect_snapshots() {
+    // Take snapshot before operation
+    let before = ctx.effects().snapshot();
+    
+    // Execute operations
+    perform_protocol_operations().await?;
+    
+    // Take snapshot after
+    let after = ctx.effects().snapshot();
+    
+    // Analyze differences
+    let diff = after.diff(&before);
+    assert_eq!(diff.network_calls, 5);
+    assert_eq!(diff.crypto_operations, 3);
+    assert_eq!(diff.storage_writes, 2);
+    
+    // Verify specific operations
+    assert!(after.contains_operation("threshold_sign"));
+    assert_eq!(after.operation_count("send_message"), 5);
+}
+```
 ```
 
 Test suite composition provides systematic validation coverage. Automated test discovery reduces maintenance overhead. The stateless architecture enables clean separation between different test types.
 
-Testing provides confidence in distributed protocol correctness. Property-based testing validates fundamental invariants. Integration testing ensures system-level functionality. Performance benchmarking validates scalability requirements.
+## Summary
 
-For simulation capabilities that enable comprehensive fault injection and deterministic execution, see [Simulation Guide](806_simulation_guide.md). Learn effect system details in [Effects API](500_effects_api.md). Explore semilattice operations in [Semilattice API](501_semilattice_api.md). Review choreography syntax in [Choreography API](502_choreography_api.md).
+Aura's async-native testing infrastructure provides:
+
+- **Zero Boilerplate** - The `#[aura_test]` macro handles all setup and teardown
+- **Time Control** - Deterministic time for reproducible tests
+- **Network Simulation** - Comprehensive network condition modeling
+- **Effect Snapshots** - Detailed visibility into system behavior
+- **WASM Compatibility** - All utilities work in browser environments
+- **Performance Monitoring** - Built-in benchmarking and profiling
+
+The testing approach eliminates traditional trade-offs between test fidelity and ease of use, enabling comprehensive validation of distributed protocols with minimal effort.
+
+For simulation capabilities that enable comprehensive fault injection and deterministic execution, see [Simulation Guide](806_simulation_guide.md). Learn effect system details in [System Architecture](002_system_architecture.md). Review the async refactor progress in [Async Test Plan](../work/async_test.md).

@@ -236,20 +236,20 @@ async fn execute_threshold_keygen(
 struct ThresholdConfig {
     device_id: String,
     threshold: u32,
-    total_devices: u32,
-    logging: Option<LoggingConfig>,
-    network: Option<NetworkConfig>,
+    _total_devices: u32,
+    _logging: Option<LoggingConfig>,
+    _network: Option<NetworkConfig>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct LoggingConfig {
-    level: String,
-    structured: bool,
+    _level: String,
+    _structured: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct NetworkConfig {
-    default_port: u16,
-    timeout: u64,
-    max_retries: u32,
+    _default_port: u16,
+    _timeout: u64,
+    _max_retries: u32,
 }

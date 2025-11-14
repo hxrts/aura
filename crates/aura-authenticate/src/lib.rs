@@ -35,7 +35,7 @@
 pub mod device_auth;
 
 /// Session establishment coordinator
-pub mod session_establishment;
+pub mod session_creation;
 
 /// Guardian authentication coordinator for recovery operations
 pub mod guardian_auth;

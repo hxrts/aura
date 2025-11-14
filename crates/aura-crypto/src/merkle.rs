@@ -50,10 +50,7 @@ impl Default for SimpleMerkleProof {
 ///
 /// # Returns
 /// A Merkle proof for the specified leaf
-pub fn generate_merkle_proof(
-    leaves: &[Vec<u8>],
-    leaf_index: usize,
-) -> Result<SimpleMerkleProof> {
+pub fn generate_merkle_proof(leaves: &[Vec<u8>], leaf_index: usize) -> Result<SimpleMerkleProof> {
     if leaves.is_empty() || leaf_index >= leaves.len() {
         return Ok(SimpleMerkleProof::new());
     }
@@ -164,11 +161,7 @@ pub fn build_merkle_root(leaves: &[Vec<u8>]) -> [u8; 32] {
 ///
 /// # Returns
 /// `true` if the proof is valid, `false` otherwise
-pub fn verify_merkle_proof(
-    proof: &SimpleMerkleProof,
-    root: &[u8; 32],
-    leaf_value: &[u8],
-) -> bool {
+pub fn verify_merkle_proof(proof: &SimpleMerkleProof, root: &[u8; 32], leaf_value: &[u8]) -> bool {
     // Start with the leaf hash
     let mut current_hash = hash(leaf_value);
 

@@ -4,7 +4,7 @@ Aura's identifier system provides type-safe, privacy-preserving identification a
 
 All identifier types use `aura-core` as the single source of truth. The system provides consistent patterns for creation, display, serialization, and testing. Privacy context isolation prevents unauthorized cross-context communication.
 
-See [Web of Trust](200_web_of_trust.md) for relationship identifiers. See [Authentication vs Authorization Architecture](101_authentication_system.md) for identity verification patterns.
+See [Web of Trust](200_web_of_trust.md) for relationship identifiers. See [Authentication vs Authorization Architecture](101_auth_authz_system.md) for identity verification patterns.
 
 ---
 

@@ -60,6 +60,7 @@ impl UnifiedAuraHandlerBridge {
                     | EffectType::Random
                     | EffectType::Ledger
                     | EffectType::Journal
+                    | EffectType::Tree
                     | EffectType::Choreographic
                     | EffectType::System => true,
                     // Agent effects would require additional trait bounds
@@ -88,6 +89,7 @@ impl UnifiedAuraHandlerBridge {
                 | EffectType::Random
                 | EffectType::Ledger
                 | EffectType::Journal
+                | EffectType::Tree
                 | EffectType::Choreographic
                 | EffectType::System => true,
                 _ => false,
@@ -192,6 +194,10 @@ impl AuraHandler for UnifiedAuraHandlerBridge {
             }
             EffectType::Journal => {
                 self.execute_journal_effect(&*effects_guard, operation, parameters)
+                    .await
+            }
+            EffectType::Tree => {
+                self.execute_tree_effect(&*effects_guard, operation, parameters)
                     .await
             }
             EffectType::Choreographic => {
@@ -580,6 +586,41 @@ impl UnifiedAuraHandlerBridge {
         }
     }
 
+    /// Execute tree effects through the wrapped implementation
+    async fn execute_tree_effect(
+        &self,
+        effects: &dyn AuraEffects,
+        operation: &str,
+        parameters: &[u8],
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        match operation {
+            "get_current_state" => {
+                let result =
+                    effects
+                        .get_current_state()
+                        .await
+                        .map_err(|e| AuraHandlerError::ExecutionFailed {
+                            source: Box::new(e),
+                        })?;
+                Ok(bincode::serialize(&result).unwrap_or_default())
+            }
+            "get_current_commitment" => {
+                let result =
+                    effects
+                        .get_current_commitment()
+                        .await
+                        .map_err(|e| AuraHandlerError::ExecutionFailed {
+                            source: Box::new(e),
+                        })?;
+                Ok(bincode::serialize(&result).unwrap_or_default())
+            }
+            _ => Err(AuraHandlerError::UnsupportedOperation {
+                effect_type: EffectType::Tree,
+                operation: operation.to_string(),
+            }),
+        }
+    }
+
     /// Execute choreographic effects through the wrapped implementation
     async fn execute_choreographic_effect(
         &self,
@@ -686,14 +727,16 @@ impl UnifiedHandlerBridgeFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::AuraEffectSystem;
     use aura_core::identifiers::DeviceId;
+    use aura_testkit::*;
+    use aura_macros::aura_test;
     use uuid::Uuid;
 
-    #[tokio::test]
-    async fn test_unified_bridge_creation() {
-        let device_id = DeviceId::from(Uuid::new_v4());
-        let effect_system = AuraEffectSystem::for_testing(device_id);
+    #[aura_test]
+    async fn test_unified_bridge_creation() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let effect_system = (*fixture.effects()).clone();
         let bridge = UnifiedAuraHandlerBridge::new(effect_system, ExecutionMode::Testing);
 
         assert_eq!(bridge.execution_mode(), ExecutionMode::Testing);
@@ -701,14 +744,16 @@ mod tests {
         assert!(bridge.supports_effect(EffectType::Storage));
         assert!(bridge.supports_effect(EffectType::Crypto));
         assert!(bridge.supports_effect(EffectType::System));
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_unified_bridge_effect_execution() {
-        let device_id = DeviceId::from(Uuid::new_v4());
-        let effect_system = AuraEffectSystem::for_testing(device_id);
-        let mut bridge = UnifiedAuraHandlerBridge::new(effect_system, ExecutionMode::Testing);
-        let mut ctx = AuraContext::for_testing(device_id);
+    #[aura_test]
+    async fn test_unified_bridge_effect_execution() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let effect_system = (*fixture.effects()).clone();
+        let bridge = UnifiedAuraHandlerBridge::new(effect_system, ExecutionMode::Testing);
+        let ctx = AuraContext::for_testing(device_id);
 
         // Test system effect execution
         let params = (
@@ -719,16 +764,18 @@ mod tests {
         let param_bytes = bincode::serialize(&params).unwrap();
 
         let result = bridge
-            .execute_effect(EffectType::System, "log", &param_bytes, &mut ctx)
+            .execute_effect(EffectType::System, "log", &param_bytes, &ctx)
             .await;
 
         assert!(result.is_ok());
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_unified_bridge_typed_execution() {
-        let device_id = DeviceId::from(Uuid::new_v4());
-        let effect_system = AuraEffectSystem::for_testing(device_id);
+    #[aura_test]
+    async fn test_unified_bridge_typed_execution() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let effect_system = (*fixture.effects()).clone();
         let mut bridge = UnifiedAuraHandlerBridge::new(effect_system, ExecutionMode::Testing);
         let mut ctx = AuraContext::for_testing(device_id);
 
@@ -743,5 +790,6 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+        Ok(())
     }
 }

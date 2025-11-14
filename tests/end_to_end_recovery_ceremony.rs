@@ -5,8 +5,8 @@
 
 use aura_agent::handlers::recovery::RecoveryOperations;
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
-use aura_core::{AccountId, DeviceId};
-use aura_protocol::effects::AuraEffectSystem;
+use aura_core::{AccountId, DeviceId, AuraResult};
+use aura_macros::aura_test;
 use aura_recovery::{
     guardian_recovery::{
         guardian_from_device, GuardianRecoveryRequest, RecoveryPriority,
@@ -32,7 +32,7 @@ struct SystemRecoveryTest {
 }
 
 impl SystemRecoveryTest {
-    async fn new(num_guardians: usize) -> Self {
+    async fn new(num_guardians: usize) -> aura_core::AuraResult<Self> {
         let recovering_device = DeviceId::new();
         let guardian_devices: Vec<DeviceId> = (0..num_guardians)
             .map(|_| DeviceId::new())
@@ -42,27 +42,29 @@ impl SystemRecoveryTest {
         let mut recovery_handlers = HashMap::new();
         
         // Create recovery handler for recovering device
+        let recovering_fixture = aura_testkit::create_test_fixture_with_device_id(recovering_device).await?;
         let recovering_effects = Arc::new(RwLock::new(
-            AuraEffectSystem::for_testing(recovering_device)
+            recovering_fixture.effects().as_ref().clone()
         ));
         let recovering_ops = RecoveryOperations::new(recovering_effects, recovering_device);
         recovery_handlers.insert(recovering_device, recovering_ops);
         
         // Create recovery handlers for each guardian
         for guardian_device in &guardian_devices {
+            let guardian_fixture = aura_testkit::create_test_fixture_with_device_id(*guardian_device).await?;
             let guardian_effects = Arc::new(RwLock::new(
-                AuraEffectSystem::for_testing(*guardian_device)
+                guardian_fixture.effects().as_ref().clone()
             ));
             let guardian_ops = RecoveryOperations::new(guardian_effects, *guardian_device);
             recovery_handlers.insert(*guardian_device, guardian_ops);
         }
         
-        Self {
+        Ok(Self {
             recovering_device,
             guardian_devices,
             recovery_handlers,
             account_id,
-        }
+        })
     }
     
     fn create_guardian_set(&self) -> GuardianSet {
@@ -99,9 +101,9 @@ impl SystemRecoveryTest {
     }
 }
 
-#[tokio::test]
-async fn test_complete_recovery_ceremony_2_of_3() {
-    let test = SystemRecoveryTest::new(3).await;
+#[aura_test]
+async fn test_complete_recovery_ceremony_2_of_3() -> AuraResult<()> {
+    let test = SystemRecoveryTest::new(3).await?;
     let request = test.create_recovery_request(2, RecoveryPriority::Normal);
     
     println!("Starting complete recovery ceremony test (2-of-3)...");
@@ -163,9 +165,9 @@ async fn test_complete_recovery_ceremony_2_of_3() {
     println!("Complete recovery ceremony test passed!");
 }
 
-#[tokio::test]
-async fn test_complete_ceremony_with_guardian_approval_validation() {
-    let test = SystemRecoveryTest::new(3).await;
+#[aura_test]
+async fn test_complete_ceremony_with_guardian_approval_validation() -> AuraResult<()> {
+    let test = SystemRecoveryTest::new(3).await?;
     let request = test.create_recovery_request(1, RecoveryPriority::Normal);
     
     println!("Testing guardian approval validation...");
@@ -187,9 +189,9 @@ async fn test_complete_ceremony_with_guardian_approval_validation() {
     println!("All guardian approvals validated!");
 }
 
-#[tokio::test]
-async fn test_ceremony_cooldown_enforcement() {
-    let test = SystemRecoveryTest::new(2).await;
+#[aura_test]
+async fn test_ceremony_cooldown_enforcement() -> AuraResult<()> {
+    let test = SystemRecoveryTest::new(2).await?;
     
     println!("Testing cooldown enforcement...");
     
@@ -223,9 +225,9 @@ async fn test_ceremony_cooldown_enforcement() {
     println!("Cooldown enforcement test passed!");
 }
 
-#[tokio::test]
-async fn test_ceremony_with_different_priorities() {
-    let test = SystemRecoveryTest::new(3).await;
+#[aura_test]
+async fn test_ceremony_with_different_priorities() -> AuraResult<()> {
+    let test = SystemRecoveryTest::new(3).await?;
     
     println!("Testing ceremony with different priority levels...");
     
@@ -241,7 +243,7 @@ async fn test_ceremony_with_different_priorities() {
     
     // Wait and test urgent priority (would normally be blocked by cooldown, 
     // but we're testing with a fresh ceremony state)
-    let test_urgent = SystemRecoveryTest::new(3).await;
+    let test_urgent = SystemRecoveryTest::new(3).await?;
     let urgent_request = test_urgent.create_recovery_request(2, RecoveryPriority::Urgent);
     let urgent_response = test_urgent.recovering_ops()
         .start_guardian_recovery(urgent_request)
@@ -252,7 +254,7 @@ async fn test_ceremony_with_different_priorities() {
     println!("Urgent priority recovery succeeded");
     
     // Test emergency priority
-    let test_emergency = SystemRecoveryTest::new(3).await;
+    let test_emergency = SystemRecoveryTest::new(3).await?;
     let emergency_request = test_emergency.create_recovery_request(2, RecoveryPriority::Emergency);
     let emergency_response = test_emergency.recovering_ops()
         .start_guardian_recovery(emergency_request)
@@ -265,9 +267,9 @@ async fn test_ceremony_with_different_priorities() {
     println!("All priority levels tested successfully!");
 }
 
-#[tokio::test]
-async fn test_ceremony_insufficient_threshold() {
-    let test = SystemRecoveryTest::new(2).await; // Only 2 guardians
+#[aura_test]
+async fn test_ceremony_insufficient_threshold() -> AuraResult<()> {
+    let test = SystemRecoveryTest::new(2).await?; // Only 2 guardians
     let request = test.create_recovery_request(3, RecoveryPriority::Normal); // Need 3 approvals
     
     println!("Testing insufficient threshold handling...");
@@ -289,9 +291,9 @@ async fn test_ceremony_insufficient_threshold() {
     println!("Insufficient threshold properly handled!");
 }
 
-#[tokio::test]
-async fn test_ceremony_evidence_tracking() {
-    let test = SystemRecoveryTest::new(3).await;
+#[aura_test]
+async fn test_ceremony_evidence_tracking() -> AuraResult<()> {
+    let test = SystemRecoveryTest::new(3).await?;
     let request = test.create_recovery_request(2, RecoveryPriority::Normal);
     
     println!("Testing evidence tracking...");
@@ -323,9 +325,9 @@ async fn test_ceremony_evidence_tracking() {
     println!("Evidence tracking validated!");
 }
 
-#[tokio::test]
-async fn test_ceremony_metrics_accuracy() {
-    let test = SystemRecoveryTest::new(4).await;
+#[aura_test]
+async fn test_ceremony_metrics_accuracy() -> AuraResult<()> {
+    let test = SystemRecoveryTest::new(4).await?;
     let request = test.create_recovery_request(3, RecoveryPriority::Normal);
     
     println!("Testing ceremony metrics accuracy...");
@@ -353,15 +355,15 @@ async fn test_ceremony_metrics_accuracy() {
     println!("Metrics accuracy validated!");
 }
 
-#[tokio::test]
-async fn test_full_ceremony_deterministic_behavior() {
+#[aura_test]
+async fn test_full_ceremony_deterministic_behavior() -> AuraResult<()> {
     println!("Testing deterministic ceremony behavior...");
     
     // Run the same ceremony multiple times with the same inputs
     let mut results = Vec::new();
     
     for i in 0..3 {
-        let test = SystemRecoveryTest::new(3).await;
+        let test = SystemRecoveryTest::new(3).await?;
         let request = test.create_recovery_request(2, RecoveryPriority::Normal);
         
         let response = test.recovering_ops()

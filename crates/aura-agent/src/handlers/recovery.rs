@@ -4,14 +4,17 @@
 //! This handler provides a clean interface for guardian-based key recovery.
 
 use crate::errors::{AuraError, Result};
-use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
+use aura_authenticate::guardian_auth::RecoveryContext;
 use aura_core::{AccountId, DeviceId};
-use aura_protocol::effects::{AuraEffectSystem, EffectSystemConfig};
+use aura_protocol::effects::AuraEffectSystem;
 use aura_recovery::{
     guardian_key_recovery::GuardianKeyRecoveryCoordinator,
     types::{GuardianSet, RecoveryRequest, RecoveryResponse},
-    RecoveryResult,
 };
+#[cfg(test)]
+use aura_authenticate::guardian_auth::RecoveryOperationType;
+#[cfg(test)]
+use aura_protocol::effects::EffectSystemConfig;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

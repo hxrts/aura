@@ -7,7 +7,7 @@ use aura_core::hash::hash;
 use aura_core::{AccountId, DeviceId};
 use aura_journal::semilattice::ModernAccountState as AccountState;
 use aura_journal::{DeviceMetadata, DeviceType};
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use ed25519_dalek::VerifyingKey;
 use uuid::Uuid;
 
 /// Helper function to create test device metadata with seed

@@ -55,7 +55,7 @@ impl QuintEvaluator {
     /// Simulate using the native Rust evaluator via stdin interface
     pub async fn simulate_via_evaluator(&self, json_ir: &str) -> QuintResult<String> {
         // Path to the built quint evaluator binary
-        let evaluator_path = "../../ext/quint/evaluator/target/release/quint_evaluator";
+        let evaluator_path = "../../ext/quint/evaluator/target/release/quint_evaluator"; // TODO: this is incorrect. this needs to be called from the version provided by the nix environment
 
         let mut child = Command::new(evaluator_path)
             .args(["simulate-from-stdin"])

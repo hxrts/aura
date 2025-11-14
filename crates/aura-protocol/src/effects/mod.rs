@@ -46,17 +46,12 @@
 // Effect trait definitions
 pub mod agent;
 pub mod choreographic;
-pub mod crypto;
 pub mod ledger;
-pub mod network;
 pub mod params;
-pub mod random;
 pub mod semilattice;
-pub mod storage;
 pub mod sync;
 pub mod system; // New stateless AuraEffectSystem (previously system_v2)
 pub mod system_traits; // SystemEffects trait and SystemError
-pub mod time;
 pub mod tree;
 pub mod tree_coordination;
 
@@ -105,14 +100,29 @@ pub use aura_core::{AuraError, AuraResult};
 pub use system_traits::{SystemEffects, SystemError};
 
 // Stateless effect system components
+pub mod allocations;
+pub mod builder;
+pub mod caching;
+pub mod container;
+pub mod context;
+pub mod contextual;
 pub mod executor;
 pub mod handler_adapters;
+pub mod lifecycle;
+pub mod parallel_init;
+pub mod propagation;
 pub mod services;
 
+pub use allocations::{Arena, BufferPool, SmallVec, StringInterner, ZeroCopyString};
+pub use builder::AuraEffectSystemBuilder;
+pub use caching::{CacheKey, CachingNetworkHandler, CachingStorageHandler, EffectCache};
 pub use executor::{EffectExecutor, EffectExecutorBuilder};
+pub use parallel_init::{
+    HandlerPool, InitializationMetrics, LazyEffectSystem, ParallelInitBuilder,
+};
 pub use services::{BudgetKey, ContextManager, FlowBudgetManager, ReceiptChain, ReceiptManager};
 // Stateless effect system
-pub use system::{AuraEffectSystem, EffectSystemConfig};
+pub use system::{AuraEffectSystem, EffectSystemConfig, StorageConfig};
 
 /// Composite trait that combines all effect traits
 ///

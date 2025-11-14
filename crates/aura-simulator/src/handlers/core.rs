@@ -1,9 +1,6 @@
 //! Core simulator handler implementation
 
-use crate::middleware::{
-    Result, SimulatorContext, SimulatorHandler,
-    SimulatorOperation,
-};
+use crate::middleware::{Result, SimulatorContext, SimulatorHandler, SimulatorOperation};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -144,7 +141,11 @@ impl SimulatorHandler for CoreSimulatorHandler {
             })),
 
             // Additional operations for testkit integration
-            SimulatorOperation::ExecuteEffect { effect_type, operation_name, params } => Ok(json!({
+            SimulatorOperation::ExecuteEffect {
+                effect_type,
+                operation_name,
+                params,
+            } => Ok(json!({
                 "effect_type": effect_type,
                 "operation_name": operation_name,
                 "params": params,

@@ -113,20 +113,6 @@ enum Commands {
         action: InvitationAction,
     },
 
-    /// Test distributed key derivation
-    TestDkd {
-        /// Application ID
-        #[arg(long)]
-        app_id: String,
-
-        /// Derivation context
-        #[arg(long)]
-        context: String,
-
-        /// Config file path
-        #[arg(short = 'f', long)]
-        file: PathBuf,
-    },
 
     /// Show version information
     Version,
@@ -143,18 +129,18 @@ async fn main() -> Result<()> {
     let config = if std::env::var("AURA_CLI_TEST").is_ok() {
         aura_protocol::effects::EffectSystemConfig::for_testing(device_id)
     } else {
-        aura_protocol::effects::EffectSystemConfig::for_production(device_id)
-            .expect("Failed to create production configuration")
+        aura_protocol::effects::EffectSystemConfig::for_production(device_id)?
     };
-    let effect_system = AuraEffectSystem::new(config)
-        .expect("Failed to initialize effect system");
+    let effect_system = AuraEffectSystem::new(config)?;
 
     // Initialize logging through effects
     let log_level = if cli.verbose { "debug" } else { "info" };
-    let _ = effect_system.log_info(&format!(
-        "Initializing Aura CLI with log level: {}",
-        log_level
-    ));
+    let _ = effect_system
+        .log_info(&format!(
+            "Initializing Aura CLI with log level: {}",
+            log_level
+        ))
+        .await;
 
     // Create CLI handler
     let cli_handler = CliHandler::new(effect_system);
@@ -198,11 +184,6 @@ async fn main() -> Result<()> {
         Commands::Admin { action } => cli_handler.handle_admin(action).await,
         Commands::Recovery { action } => cli_handler.handle_recovery(action).await,
         Commands::Invite { action } => cli_handler.handle_invitation(action).await,
-        Commands::TestDkd {
-            app_id,
-            context,
-            file,
-        } => cli_handler.handle_test_dkd(app_id, context, file).await,
         Commands::Version => cli_handler.handle_version().await,
     }
 }
@@ -234,15 +215,15 @@ mod tests {
 
     #[test]
     fn test_cli_parsing() {
-        let cli = Cli::try_parse_from(&["aura", "version"]).unwrap();
+        let cli = Cli::try_parse_from(["aura", "version"]).unwrap();
         assert!(matches!(cli.command, Commands::Version));
         assert!(!cli.verbose);
     }
 
     #[test]
     fn test_cli_init() {
-        let cli = Cli::try_parse_from(&["aura", "init", "-n", "3", "-t", "2", "-o", "/tmp/test"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["aura", "init", "-n", "3", "-t", "2", "-o", "/tmp/test"]).unwrap();
         if let Commands::Init {
             num_devices,
             threshold,
@@ -259,7 +240,7 @@ mod tests {
 
     #[test]
     fn test_cli_scenarios() {
-        let cli = Cli::try_parse_from(&[
+        let cli = Cli::try_parse_from([
             "aura",
             "scenarios",
             "list",

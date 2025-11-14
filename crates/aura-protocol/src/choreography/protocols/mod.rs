@@ -85,6 +85,7 @@ pub mod ota;
 pub mod snapshot;
 // pub mod threshold_ceremony; // MOVED: Now implemented in aura-frost crate
 pub mod tree_coordination;
+pub mod tree_sync;
 
 // Re-export specific protocol types to avoid macro-generated conflicts
 // Note: choreography! macros generate types that conflict when re-exported with *

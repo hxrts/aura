@@ -11,9 +11,7 @@ use std::time::SystemTime;
 
 use aura_core::identifiers::DeviceId;
 use aura_core::LocalSessionType;
-use aura_protocol::handlers::{
-    AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
-};
+use aura_protocol::handlers::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 
 /// Property definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,16 +159,27 @@ impl PropertyCheckingMiddleware {
 
     /// Add a property to check
     pub fn add_property(&self, property: PropertyDefinition) {
-        self.properties.lock().unwrap().insert(property.id.clone(), property);
+        self.properties
+            .lock()
+            .unwrap_or_else(|e| panic!("Property lock poisoned: {}", e))
+            .insert(property.id.clone(), property);
     }
 
     /// Remove a property
     pub fn remove_property(&self, property_id: &str) -> bool {
-        self.properties.lock().unwrap().remove(property_id).is_some()
+        self.properties
+            .lock()
+            .unwrap_or_else(|e| panic!("Property lock poisoned: {}", e))
+            .remove(property_id)
+            .is_some()
     }
 
     /// Evaluate a property condition against context
-    fn evaluate_condition(&self, condition: &PropertyCondition, ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> bool {
+    fn evaluate_condition(
+        &self,
+        condition: &PropertyCondition,
+        ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> bool {
         match condition {
             PropertyCondition::FieldEquals { field, value } => self
                 .get_field_value(ctx, field)
@@ -189,26 +198,35 @@ impl PropertyCheckingMiddleware {
                 // Simple expression evaluator for common patterns
                 self.evaluate_custom_expression(expression, ctx)
             }
-            PropertyCondition::StateInvariant { state_type, invariant } => {
-                self.verify_state_invariant(state_type, invariant, ctx)
-            }
-            PropertyCondition::ResourceBounds { resource_type, max_value, unit: _ } => {
-                self.check_resource_bounds(resource_type, *max_value, ctx)
-            }
-            PropertyCondition::Temporal { condition: _, window_ms } => {
-                self.verify_temporal_property(*window_ms, ctx)
-            }
+            PropertyCondition::StateInvariant {
+                state_type,
+                invariant,
+            } => self.verify_state_invariant(state_type, invariant, ctx),
+            PropertyCondition::ResourceBounds {
+                resource_type,
+                max_value,
+                unit: _,
+            } => self.check_resource_bounds(resource_type, *max_value, ctx),
+            PropertyCondition::Temporal {
+                condition: _,
+                window_ms,
+            } => self.verify_temporal_property(*window_ms, ctx),
             PropertyCondition::CrdtConvergence { crdt_type, nodes } => {
                 self.verify_crdt_convergence(crdt_type, nodes, ctx)
             }
-            PropertyCondition::Cryptographic { property_type, tolerance } => {
-                self.verify_cryptographic_property(property_type, *tolerance, ctx)
-            }
+            PropertyCondition::Cryptographic {
+                property_type,
+                tolerance,
+            } => self.verify_cryptographic_property(property_type, *tolerance, ctx),
         }
     }
 
     /// Get field value from context
-    fn get_field_value(&self, ctx: &aura_protocol::handlers::context_immutable::AuraContext, field: &str) -> Option<serde_json::Value> {
+    fn get_field_value(
+        &self,
+        ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+        field: &str,
+    ) -> Option<serde_json::Value> {
         match field {
             "device_id" => Some(serde_json::json!(ctx.device_id)),
             "execution_mode" => Some(serde_json::json!(ctx.execution_mode)),
@@ -261,8 +279,15 @@ impl PropertyCheckingMiddleware {
     }
 
     /// Check a specific property
-    fn check_property(&self, property_id: &str, ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> PropertyCheckResult {
-        let properties = self.properties.lock().unwrap();
+    fn check_property(
+        &self,
+        property_id: &str,
+        ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> PropertyCheckResult {
+        let properties = self
+            .properties
+            .lock()
+            .unwrap_or_else(|e| panic!("Property lock poisoned: {}", e));
         let satisfied = if let Some(property) = properties.get(property_id) {
             if property.enabled {
                 let result = self.evaluate_condition(&property.condition, ctx);
@@ -277,10 +302,10 @@ impl PropertyCheckingMiddleware {
                         ),
                         context: HashMap::new(),
                     };
-                    
+
                     if let Ok(mut violations) = self.violations.lock() {
                         violations.push_back(violation);
-                        
+
                         // Trim violation history if needed
                         while violations.len() > self.max_violations {
                             violations.pop_front();
@@ -289,9 +314,7 @@ impl PropertyCheckingMiddleware {
 
                     // Update violation count
                     if let Ok(mut violation_counts) = self.violation_counts.lock() {
-                        let count = violation_counts
-                            .entry(property_id.to_string())
-                            .or_insert(0);
+                        let count = violation_counts.entry(property_id.to_string()).or_insert(0);
                         *count += 1;
                     }
                 }
@@ -303,17 +326,33 @@ impl PropertyCheckingMiddleware {
             false // Unknown properties are violations
         };
 
+        let violation_count = self
+            .violation_counts
+            .lock()
+            .ok()
+            .and_then(|counts| counts.get(property_id).copied())
+            .unwrap_or(0);
+
         PropertyCheckResult {
             property_id: property_id.to_string(),
             satisfied,
-            violation_count: self.violation_counts.lock().unwrap().get(property_id).copied().unwrap_or(0),
+            violation_count,
             last_check: SystemTime::UNIX_EPOCH,
         }
     }
 
     /// Check all properties
-    fn check_all_properties(&self, ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> Vec<PropertyCheckResult> {
-        let property_ids: Vec<String> = self.properties.lock().unwrap().keys().cloned().collect();
+    fn _check_all_properties(
+        &self,
+        ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> Vec<PropertyCheckResult> {
+        let property_ids: Vec<String> = self
+            .properties
+            .lock()
+            .unwrap_or_else(|e| panic!("Property lock poisoned: {}", e))
+            .keys()
+            .cloned()
+            .collect();
         property_ids
             .iter()
             .map(|id| self.check_property(id, ctx))
@@ -321,18 +360,23 @@ impl PropertyCheckingMiddleware {
     }
 
     /// Verify state invariant property
-    fn verify_state_invariant(&self, state_type: &str, invariant: &str, ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> bool {
+    fn verify_state_invariant(
+        &self,
+        state_type: &str,
+        invariant: &str,
+        ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> bool {
         match state_type {
             "journal" => {
                 match invariant {
                     "consistent" => ctx.execution_mode == ExecutionMode::Production,
                     "non_empty" => true, // Journal always exists
-                    _ => true, // Unknown invariants pass by default
+                    _ => true,           // Unknown invariants pass by default
                 }
             }
             "network" => {
                 match invariant {
-                    "connected" => true, // Assume network is connected in simulation
+                    "connected" => true,        // Assume network is connected in simulation
                     "message_ordering" => true, // Memory transport preserves order
                     _ => true,
                 }
@@ -342,11 +386,21 @@ impl PropertyCheckingMiddleware {
     }
 
     /// Check resource bounds
-    fn check_resource_bounds(&self, resource_type: &str, max_value: f64, _ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> bool {
+    fn check_resource_bounds(
+        &self,
+        resource_type: &str,
+        max_value: f64,
+        _ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> bool {
         match resource_type {
             "memory" => {
                 // In simulation, assume memory usage is bounded
-                let simulated_memory_usage = self.violations.lock().unwrap().len() as f64 * 1000.0; // Rough estimate
+                let simulated_memory_usage = self
+                    .violations
+                    .lock()
+                    .unwrap_or_else(|e| panic!("Violations lock poisoned: {}", e))
+                    .len() as f64
+                    * 1000.0; // Rough estimate
                 simulated_memory_usage <= max_value
             }
             "cpu" => {
@@ -362,14 +416,23 @@ impl PropertyCheckingMiddleware {
     }
 
     /// Verify temporal property
-    fn verify_temporal_property(&self, window_ms: u64, _ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> bool {
+    fn verify_temporal_property(
+        &self,
+        window_ms: u64,
+        _ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> bool {
         // Check if property has been checked recently enough
-        if let Some(latest_violation) = self.violations.lock().unwrap().back() {
+        if let Some(latest_violation) = self
+            .violations
+            .lock()
+            .unwrap_or_else(|e| panic!("Violations lock poisoned: {}", e))
+            .back()
+        {
             let time_since_violation = SystemTime::UNIX_EPOCH
                 .duration_since(latest_violation.timestamp)
                 .unwrap_or_default()
                 .as_millis() as u64;
-            
+
             time_since_violation >= window_ms // No violations in recent window
         } else {
             true // No violations at all
@@ -377,7 +440,12 @@ impl PropertyCheckingMiddleware {
     }
 
     /// Verify CRDT convergence property
-    fn verify_crdt_convergence(&self, crdt_type: &str, nodes: &[String], _ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> bool {
+    fn verify_crdt_convergence(
+        &self,
+        crdt_type: &str,
+        nodes: &[String],
+        _ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> bool {
         match crdt_type {
             "journal_map" => {
                 // In simulation, assume journal maps converge eventually
@@ -396,7 +464,12 @@ impl PropertyCheckingMiddleware {
     }
 
     /// Verify cryptographic property
-    fn verify_cryptographic_property(&self, property_type: &str, tolerance: f64, _ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> bool {
+    fn verify_cryptographic_property(
+        &self,
+        property_type: &str,
+        tolerance: f64,
+        _ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> bool {
         match property_type {
             "key_independence" => {
                 // In simulation, assume keys are independent
@@ -421,47 +494,58 @@ impl PropertyCheckingMiddleware {
 
     /// Get properties
     pub fn properties(&self) -> HashMap<String, PropertyDefinition> {
-        self.properties.lock().unwrap().clone()
+        self.properties
+            .lock()
+            .unwrap_or_else(|e| panic!("Property lock poisoned: {}", e))
+            .clone()
     }
 
     /// Get violations
     pub fn violations(&self) -> Vec<PropertyViolation> {
-        self.violations.lock().unwrap().clone().into()
+        self.violations
+            .lock()
+            .unwrap_or_else(|e| panic!("Violations lock poisoned: {}", e))
+            .clone()
+            .into()
     }
-    
+
     /// Evaluate custom expression for property checking
-    /// 
+    ///
     /// This implements a simple expression evaluator for common property patterns.
     /// Supports basic comparisons, logical operators, and context field access.
-    fn evaluate_custom_expression(&self, expression: &str, ctx: &aura_protocol::handlers::context_immutable::AuraContext) -> bool {
+    fn evaluate_custom_expression(
+        &self,
+        expression: &str,
+        ctx: &aura_protocol::handlers::context_immutable::AuraContext,
+    ) -> bool {
         // Handle common expression patterns
         let expr = expression.trim();
-        
+
         // Simple equality checks: "field == value"
         if let Some((field, value)) = expr.split_once(" == ") {
             let field = field.trim();
             let value = value.trim().trim_matches('"');
-            
+
             return match field {
                 "device_id" => ctx.device_id.to_string() == value,
                 "epoch" => ctx.epoch.to_string() == value,
                 "relationship_count" => "0" == value, // Default to 0 for immutable context
-                _ => false, // Unknown field
+                _ => false,                           // Unknown field
             };
         }
-        
+
         // Range checks: "field > value" or "field < value"
         if let Some((field, value)) = expr.split_once(" > ") {
             let field = field.trim();
             if let Ok(value) = value.trim().parse::<u64>() {
                 return match field {
                     "epoch" => ctx.epoch > value,
-                    "relationship_count" => 0u64 > value, // Default to 0 for immutable context
+                    "relationship_count" => false, // Always false: 0 is never > any u64 value
                     _ => false,
                 };
             }
         }
-        
+
         if let Some((field, value)) = expr.split_once(" < ") {
             let field = field.trim();
             if let Ok(value) = value.trim().parse::<u64>() {
@@ -472,13 +556,13 @@ impl PropertyCheckingMiddleware {
                 };
             }
         }
-        
+
         // Boolean literals
         match expr {
             "true" => true,
             "false" => false,
             "has_relationships" => false, // Default to false for immutable context
-            "has_capabilities" => false, // Default to false for immutable context
+            "has_capabilities" => false,  // Default to false for immutable context
             _ => {
                 // For unknown expressions, log and return false (safe default)
                 eprintln!("Unknown custom expression: {}", expr);
@@ -542,7 +626,10 @@ impl AuraHandler for PropertyCheckingMiddleware {
                 })
             }
             "get_violations" => {
-                let violations_guard = self.violations.lock().unwrap();
+                let violations_guard = self
+                    .violations
+                    .lock()
+                    .unwrap_or_else(|e| panic!("Violations lock poisoned: {}", e));
                 let violations: Vec<&PropertyViolation> = violations_guard.iter().collect();
                 serde_json::to_vec(&violations).map_err(|_| AuraHandlerError::ContextError {
                     message: "Failed to serialize violations".to_string(),
@@ -576,6 +663,7 @@ impl AuraHandler for PropertyCheckingMiddleware {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_protocol::handlers::context_immutable::AuraContext;
 
     #[tokio::test]
     async fn test_property_checking_creation() {
@@ -602,8 +690,8 @@ mod tests {
     #[tokio::test]
     async fn test_property_operations() {
         let device_id = DeviceId::new();
-        let mut middleware = PropertyCheckingMiddleware::for_simulation(device_id, 42);
-        let mut ctx = AuraContext::for_testing(device_id);
+        let middleware = PropertyCheckingMiddleware::for_simulation(device_id, 42);
+        let ctx = AuraContext::for_testing(device_id);
 
         // Test add property
         let property = PropertyDefinition {
@@ -619,7 +707,7 @@ mod tests {
                 EffectType::PropertyChecking,
                 "add_property",
                 &serialized,
-                &mut ctx,
+                &ctx,
             )
             .await;
         assert!(result.is_ok());
@@ -630,19 +718,14 @@ mod tests {
                 EffectType::PropertyChecking,
                 "check_property",
                 b"test_property",
-                &mut ctx,
+                &ctx,
             )
             .await;
         assert!(result.is_ok());
 
         // Test get violations
         let result = middleware
-            .execute_effect(
-                EffectType::PropertyChecking,
-                "get_violations",
-                b"",
-                &mut ctx,
-            )
+            .execute_effect(EffectType::PropertyChecking, "get_violations", b"", &ctx)
             .await;
         assert!(result.is_ok());
 
@@ -652,7 +735,7 @@ mod tests {
                 EffectType::PropertyChecking,
                 "remove_property",
                 b"test_property",
-                &mut ctx,
+                &ctx,
             )
             .await;
         assert!(result.is_ok());
@@ -661,7 +744,7 @@ mod tests {
     #[test]
     fn test_property_management() {
         let device_id = DeviceId::new();
-        let mut middleware = PropertyCheckingMiddleware::for_simulation(device_id, 42);
+        let middleware = PropertyCheckingMiddleware::for_simulation(device_id, 42);
 
         // Add property
         let property = PropertyDefinition {
@@ -686,7 +769,7 @@ mod tests {
     #[test]
     fn test_property_evaluation() {
         let device_id = DeviceId::new();
-        let mut middleware = PropertyCheckingMiddleware::for_simulation(device_id, 42);
+        let middleware = PropertyCheckingMiddleware::for_simulation(device_id, 42);
         let ctx = AuraContext::for_testing(device_id);
 
         // Add property that should be satisfied

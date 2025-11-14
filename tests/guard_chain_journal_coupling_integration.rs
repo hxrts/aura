@@ -5,8 +5,9 @@
 
 use aura_core::{
     semilattice::{Bottom, CvState, JoinSemilattice},
-    DeviceId, Journal,
+    DeviceId, Journal, AuraResult,
 };
+use aura_macros::aura_test;
 use aura_mpst::journal_coupling::{JournalAnnotation, JournalOpType};
 use aura_protocol::{
     choreography::protocols::anti_entropy::{
@@ -14,10 +15,8 @@ use aura_protocol::{
     },
     effects::{
         semilattice::CrdtCoordinator,
-        system::AuraEffectSystem,
     },
     guards::{JournalCoupler, JournalCouplerBuilder, ProtocolGuard},
-    handlers::ExecutionMode,
 };
 use aura_wot::Capability;
 use serde::{Deserialize, Serialize};
@@ -67,14 +66,14 @@ impl Bottom for TestCounter {
 
 impl CvState for TestCounter {}
 
-#[tokio::test]
-async fn test_complete_guard_chain_execution() {
+#[aura_test]
+async fn test_complete_guard_chain_execution() -> AuraResult<()> {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
 
     // Create effect systems for both devices
-    let effect_system_a = AuraEffectSystem::new(device_a, ExecutionMode::Testing);
-    let effect_system_b = AuraEffectSystem::new(device_b, ExecutionMode::Testing);
+    let effect_system_a = aura_testkit::create_test_fixture_with_device_id(device_a).await?.effects().as_ref().clone();
+    let effect_system_b = aura_testkit::create_test_fixture_with_device_id(device_b).await?.effects().as_ref().clone();
 
     // Create CRDT coordinators using builder pattern
     let coordinator_a = CrdtCoordinator::with_cv_state(device_a, TestCounter::new(device_a));
@@ -101,12 +100,14 @@ async fn test_complete_guard_chain_execution() {
     let (sync_result_a, final_coordinator_a) = result_a.unwrap();
     assert!(sync_result_a.success, "Anti-entropy sync should succeed");
     assert_eq!(final_coordinator_a.device_id(), device_a);
+    
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_journal_coupler_standalone() {
+#[aura_test]
+async fn test_journal_coupler_standalone() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let mut effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    let mut effect_system = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
 
     // Create journal coupler with annotations
     let coupler = JournalCouplerBuilder::new()
@@ -132,10 +133,10 @@ async fn test_journal_coupler_standalone() {
     assert!(result.coupling_metrics.operations_applied > 0);
 }
 
-#[tokio::test]
-async fn test_protocol_guard_with_journal_coupling() {
+#[aura_test]
+async fn test_protocol_guard_with_journal_coupling() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let mut effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    let mut effect_system = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
 
     // Create protocol guard
     let guard = ProtocolGuard::new("test_protocol")
@@ -171,10 +172,10 @@ async fn test_protocol_guard_with_journal_coupling() {
     assert!(coupling_result.coupling_metrics.coupling_successful);
 }
 
-#[tokio::test]
-async fn test_journal_coupling_with_different_annotation_types() {
+#[aura_test]
+async fn test_journal_coupling_with_different_annotation_types() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let mut effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    let mut effect_system = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
 
     // Test different journal annotation types
     let test_cases = vec![
@@ -212,12 +213,12 @@ async fn test_journal_coupling_with_different_annotation_types() {
     }
 }
 
-#[tokio::test]
-async fn test_optimistic_vs_pessimistic_journal_coupling() {
+#[aura_test]
+async fn test_optimistic_vs_pessimistic_journal_coupling() -> AuraResult<()> {
     let device_id = DeviceId::new();
 
     // Test pessimistic coupling (default)
-    let mut effect_system_pessimistic = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    let mut effect_system_pessimistic = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let pessimistic_coupler = JournalCouplerBuilder::new()
         .with_annotation(
             "pessimistic_test".to_string(),
@@ -235,7 +236,7 @@ async fn test_optimistic_vs_pessimistic_journal_coupling() {
     assert_eq!(pessimistic_result.result, "pessimistic_done");
 
     // Test optimistic coupling
-    let mut effect_system_optimistic = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    let mut effect_system_optimistic = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let optimistic_coupler = JournalCouplerBuilder::new()
         .optimistic()
         .with_annotation(
@@ -258,10 +259,10 @@ async fn test_optimistic_vs_pessimistic_journal_coupling() {
     assert!(optimistic_result.coupling_metrics.coupling_successful);
 }
 
-#[tokio::test]
-async fn test_journal_coupling_error_handling() {
+#[aura_test]
+async fn test_journal_coupling_error_handling() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let mut effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    let mut effect_system = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
 
     let coupler = JournalCouplerBuilder::new()
         .pessimistic() // Use pessimistic for this test
@@ -282,10 +283,10 @@ async fn test_journal_coupling_error_handling() {
     assert!(result.is_err(), "Operation should fail");
 }
 
-#[tokio::test]
-async fn test_guard_chain_capability_enforcement() {
+#[aura_test]
+async fn test_guard_chain_capability_enforcement() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let mut effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    let mut effect_system = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
 
     // Create guard requiring capabilities that may not be available
     let guard = ProtocolGuard::new("capability_test")
@@ -327,10 +328,10 @@ async fn test_guard_chain_capability_enforcement() {
     }
 }
 
-#[tokio::test]
-async fn test_leakage_budget_tracking() {
+#[aura_test]
+async fn test_leakage_budget_tracking() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let mut effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    let mut effect_system = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
 
     // Create guard with specific leakage budget
     let guard = ProtocolGuard::new("leakage_test")
@@ -361,10 +362,10 @@ async fn test_leakage_budget_tracking() {
     // (specific budget values depend on the effect system implementation)
 }
 
-#[tokio::test]
-async fn test_guard_chain_with_multiple_delta_facts() {
+#[aura_test]
+async fn test_guard_chain_with_multiple_delta_facts() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let mut effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    let mut effect_system = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
 
     // Create guard with multiple delta facts
     let guard = ProtocolGuard::new("multi_delta_test")

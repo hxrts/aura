@@ -13,6 +13,7 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub struct StorageCapabilityGuard {
     /// Required capabilities for the operation
+    #[allow(dead_code)]
     required_capabilities: Cap,
 }
 
@@ -25,7 +26,7 @@ impl StorageCapabilityGuard {
     }
 
     /// Check if the provided capabilities satisfy the guard requirements
-    pub fn check(&self, provided_capabilities: &Cap) -> bool {
+    pub fn check(&self, _provided_capabilities: &Cap) -> bool {
         // Simple check - in practice this would be more sophisticated
         // using capability subsumption rules from aura-wot
         true // Placeholder implementation
@@ -214,7 +215,7 @@ impl StorageAccessControl {
         }
     }
 
-    /// Create a capability guard for storage operations  
+    /// Create a capability guard for storage operations
     /// Returns a guard that can be checked against actual capabilities
     pub fn create_capability_guard(
         &self,

@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 
-use aura_core::{maintenance::CacheInvalidated, tree::Epoch as TreeEpoch};
+use aura_core::tree::Epoch as TreeEpoch;
+use crate::maintenance::CacheInvalidated;
 
 /// Tracks per-key epoch floors derived from `CacheInvalidated` events.
 #[derive(Debug, Default, Clone)]
@@ -45,7 +46,7 @@ impl CacheEpochFloors {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::maintenance::CacheInvalidated;
+    use crate::maintenance::CacheInvalidated;
 
     #[test]
     fn cache_floor_monotonic() {

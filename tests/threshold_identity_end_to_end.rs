@@ -12,16 +12,16 @@
 //! and executing recovery ceremonies.
 
 use aura_agent::AgentOperations;
-use aura_core::{AccountId, Cap, DeviceId, TrustLevel, Top};
+use aura_core::{AccountId, Cap, DeviceId, TrustLevel, Top, AuraResult};
 use aura_crypto::key_derivation::DkdEngine;
 use aura_verify::registry::IdentityVerifier;
+use aura_macros::aura_test;
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
     guardian_invitation::{GuardianInvitationRequest, GuardianInvitationCoordinator},
     invitation_acceptance::{AcceptanceProtocolConfig, InvitationAcceptanceCoordinator},
 };
 use aura_journal::{JournalOperations, semilattice::InvitationLedger};
-use aura_protocol::effects::AuraEffectSystem;
 use aura_recovery::{
     guardian_recovery::GuardianRecoveryCoordinator,
     account_recovery::{AccountRecoveryRequest, AccountRecoveryCoordinator},
@@ -52,17 +52,17 @@ struct TestParticipant {
 
 impl TestParticipant {
     /// Create a new test participant
-    async fn new(name: String) -> Self {
+    async fn new(name: String) -> aura_core::AuraResult<Self> {
         let device_id = DeviceId::new();
         let account_id = AccountId::new();
-        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
-        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let effects = fixture.effects().as_ref().clone();
 
         let agent_ops = AgentOperations::new(device_id, effects.clone()).await;
         let identity_ops = IdentityOperations::new(effects.clone());
         let journal_ops = JournalOperations::new(effects.clone());
 
-        Self {
+        Ok(Self {
             device_id,
             account_id,
             agent_ops,
@@ -70,7 +70,7 @@ impl TestParticipant {
             journal_ops,
             effects,
             name,
-        }
+        })
     }
 
     /// Initialize participant account with threshold identity
@@ -78,10 +78,8 @@ impl TestParticipant {
         println!("Initializing account for {}", self.name);
 
         // Initialize identity with 2-of-3 threshold
-        let threshold_config = aura_identity::ThresholdConfig {
-            threshold: 2,
-            total_participants: 3,
-        };
+        let threshold_config = aura_core::protocols::ThresholdConfig::new(2, 3)
+            .expect("Valid threshold configuration");
 
         self.identity_ops.initialize_account(
             self.account_id,
@@ -215,18 +213,18 @@ struct TestNetwork {
 
 impl TestNetwork {
     /// Create test network with specified participants
-    async fn with_participants(names: Vec<String>) -> Self {
+    async fn with_participants(names: Vec<String>) -> aura_core::AuraResult<Self> {
         let mut participants = HashMap::new();
 
         for name in names {
-            let participant = TestParticipant::new(name.clone()).await;
+            let participant = TestParticipant::new(name.clone()).await?;
             participants.insert(name, participant);
         }
 
-        Self {
+        Ok(Self {
             participants,
             invitation_ledger: Arc::new(Mutex::new(InvitationLedger::new())),
-        }
+        })
     }
 
     /// Get participant by name
@@ -241,12 +239,12 @@ impl TestNetwork {
 }
 
 /// Test full threshold identity workflow
-#[tokio::test]
-async fn test_threshold_identity_complete_workflow() {
+#[aura_test]
+async fn test_threshold_identity_complete_workflow() -> AuraResult<()> {
     let test_timeout = Duration::from_secs(120); // 2 minutes for complete test
 
     let result = timeout(test_timeout, async {
-        println!("🚀 Starting complete threshold identity workflow test");
+        println!("Starting complete threshold identity workflow test");
 
         // Create test network with 5 friends
         let mut network = TestNetwork::with_participants(vec![
@@ -255,17 +253,17 @@ async fn test_threshold_identity_complete_workflow() {
             "charlie".to_string(),
             "diana".to_string(),
             "eve".to_string(),
-        ]).await;
+        ]).await?;
 
         // Phase 1: Account initialization
-        println!("\n📋 Phase 1: Account Initialization");
+        println!("\nPhase 1: Account Initialization");
         for (name, participant) in network.participants.iter_mut() {
             participant.initialize_account().await
                 .expect(&format!("Failed to initialize account for {}", name));
         }
 
         // Phase 2: Guardian relationships
-        println!("\n🛡️ Phase 2: Guardian Relationships");
+        println!("\nPhase 2: Guardian Relationships");
 
         // Alice invites Bob and Charlie as guardians
         let alice = network.get("alice").unwrap();
@@ -280,7 +278,7 @@ async fn test_threshold_identity_complete_workflow() {
         charlie.accept_guardian_invitation(charlie_invitation, network.invitation_ledger.clone()).await?;
 
         // Phase 3: Device additions
-        println!("\n📱 Phase 3: Device Additions");
+        println!("\nPhase 3: Device Additions");
 
         let diana = network.get("diana").unwrap();
         let eve = network.get("eve").unwrap();
@@ -294,7 +292,7 @@ async fn test_threshold_identity_complete_workflow() {
         eve.accept_guardian_invitation(eve_invitation, network.invitation_ledger.clone()).await?;
 
         // Phase 4: Recovery ceremony
-        println!("\n🔄 Phase 4: Recovery Ceremony");
+        println!("\nPhase 4: Recovery Ceremony");
 
         // Simulate Alice losing access and needing recovery
         let recovery_request = AccountRecoveryRequest {
@@ -346,44 +344,46 @@ async fn test_threshold_identity_complete_workflow() {
         let ledger_snapshot = network.invitation_ledger.lock().await;
         println!("Final invitation ledger has {} entries", ledger_snapshot.len());
 
-        println!("🎉 Complete threshold identity workflow test passed!");
+        println!("Complete threshold identity workflow test passed!");
 
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
     }).await;
 
     match result {
         Ok(inner_result) => {
-            inner_result.expect("Threshold identity workflow should succeed");
+            inner_result.map_err(|e| aura_core::AuraError::External(e.to_string()))?;
         }
         Err(_) => {
-            panic!("Threshold identity test timed out after {:?}", test_timeout);
+            return Err(aura_core::AuraError::External(format!("Threshold identity test timed out after {:?}", test_timeout)));
         }
     }
+    
+    Ok(())
 }
 
 /// Test concurrent multi-account scenario
-#[tokio::test]
-async fn test_multi_account_concurrent_operations() {
+#[aura_test]
+async fn test_multi_account_concurrent_operations() -> AuraResult<()> {
     let test_timeout = Duration::from_secs(90);
 
     let result = timeout(test_timeout, async {
-        println!("🌐 Starting multi-account concurrent operations test");
+        println!("Starting multi-account concurrent operations test");
 
         // Create three separate friend groups
         let mut network1 = TestNetwork::with_participants(vec![
             "alice".to_string(),
             "bob".to_string(),
-        ]).await;
+        ]).await?;
 
         let mut network2 = TestNetwork::with_participants(vec![
             "charlie".to_string(),
             "diana".to_string(),
-        ]).await;
+        ]).await?;
 
         let mut network3 = TestNetwork::with_participants(vec![
             "eve".to_string(),
             "frank".to_string(),
-        ]).await;
+        ]).await?;
 
         // Initialize all accounts concurrently
         let mut initialization_tasks = vec![];
@@ -443,33 +443,35 @@ async fn test_multi_account_concurrent_operations() {
             }
         }
 
-        println!("🎉 Multi-account concurrent operations test passed!");
+        println!("Multi-account concurrent operations test passed!");
 
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
     }).await;
 
     match result {
         Ok(inner_result) => {
-            inner_result.expect("Multi-account test should succeed");
+            inner_result.map_err(|e| aura_core::AuraError::External(e.to_string()))?;
         }
         Err(_) => {
-            panic!("Multi-account test timed out after {:?}", test_timeout);
+            return Err(aura_core::AuraError::External(format!("Multi-account test timed out after {:?}", test_timeout)));
         }
     }
+    
+    Ok(())
 }
 
 /// Test error handling and recovery scenarios
-#[tokio::test]
-async fn test_error_scenarios_and_resilience() {
+#[aura_test]
+async fn test_error_scenarios_and_resilience() -> AuraResult<()> {
     let test_timeout = Duration::from_secs(60);
 
     let result = timeout(test_timeout, async {
-        println!("⚠️ Starting error scenarios and resilience test");
+        println!("Starting error scenarios and resilience test");
 
         let mut network = TestNetwork::with_participants(vec![
             "alice".to_string(),
             "bob".to_string(),
-        ]).await;
+        ]).await?;
 
         // Initialize accounts
         for (name, participant) in network.participants.iter_mut() {
@@ -546,35 +548,37 @@ async fn test_error_scenarios_and_resilience() {
         }
 
         println!("✓ System maintained stability under load");
-        println!("🎉 Error scenarios and resilience test passed!");
+        println!("Error scenarios and resilience test passed!");
 
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
     }).await;
 
     match result {
         Ok(inner_result) => {
-            inner_result.expect("Error scenarios test should succeed");
+            inner_result.map_err(|e| aura_core::AuraError::External(e.to_string()))?;
         }
         Err(_) => {
-            panic!("Error scenarios test timed out after {:?}", test_timeout);
+            return Err(aura_core::AuraError::External(format!("Error scenarios test timed out after {:?}", test_timeout)));
         }
     }
+    
+    Ok(())
 }
 
 /// Test scaling characteristics with larger groups
-#[tokio::test]
-async fn test_scaling_characteristics() {
+#[aura_test]
+async fn test_scaling_characteristics() -> AuraResult<()> {
     let test_timeout = Duration::from_secs(180); // 3 minutes for scaling test
 
     let result = timeout(test_timeout, async {
-        println!("📈 Starting scaling characteristics test");
+        println!("Starting scaling characteristics test");
 
         // Create larger friend group (simulating "20 friends" scenario)
         let participant_names: Vec<String> = (0..10)
             .map(|i| format!("friend_{:02}", i))
             .collect();
 
-        let mut network = TestNetwork::with_participants(participant_names.clone()).await;
+        let mut network = TestNetwork::with_participants(participant_names.clone()).await?;
 
         // Phase 1: Initialize all accounts
         println!("Initializing {} accounts...", participant_names.len());
@@ -658,24 +662,26 @@ async fn test_scaling_characteristics() {
         assert!(perf_duration < Duration::from_secs(10),
                "Concurrent operations should be fast");
 
-        println!("📊 Scaling test summary:");
+        println!("Scaling test summary:");
         println!("  Participants: {}", total_participants);
         println!("  Guardian relationships: {}", total_invitations);
         println!("  Account init time: {:?}", init_duration);
         println!("  Guardian setup time: {:?}", guardian_duration);
         println!("  Concurrent ops time: {:?}", perf_duration);
 
-        println!("🎉 Scaling characteristics test passed!");
+        println!("Scaling characteristics test passed!");
 
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
     }).await;
 
     match result {
         Ok(inner_result) => {
-            inner_result.expect("Scaling test should succeed");
+            inner_result.map_err(|e| aura_core::AuraError::External(e.to_string()))?;
         }
         Err(_) => {
-            panic!("Scaling test timed out after {:?}", test_timeout);
+            return Err(aura_core::AuraError::External(format!("Scaling test timed out after {:?}", test_timeout)));
         }
     }
+    
+    Ok(())
 }

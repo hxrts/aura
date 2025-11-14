@@ -22,7 +22,8 @@ use aura_cli::{create_test_cli_handler, CliHandler};
 use aura_protocol::choreography::protocols::dkd::{execute_dkd, DkdConfig, DkdResult, DkdError};
 use aura_protocol::AuraEffectSystem;
 use aura_simulator::context::SimulatorContext;
-use aura_core::{DeviceId, identifiers::SessionId};
+use aura_core::{DeviceId, identifiers::SessionId, AuraResult};
+use aura_macros::aura_test;
 
 // Additional imports for test functionality
 extern crate hex;
@@ -106,8 +107,7 @@ impl MultiAgentTestHarness {
 
         for device_id in &device_ids {
             // Create effect system for testing with deterministic seed
-            let config = aura_protocol::effects::EffectSystemConfig::for_testing(*device_id);
-            let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+            let effect_system = aura_testkit::create_test_fixture_with_device_id(*device_id).await?.effects().as_ref().clone().expect("Failed to create test effect system");
             let cli_handler = create_test_cli_handler(*device_id);
 
             effect_systems.insert(*device_id, effect_system);
@@ -356,11 +356,10 @@ impl MultiAgentTestHarness {
         };
 
         // Create effect system for this agent
-        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
-        let mut effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+        let mut effect_system = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone().expect("Failed to create test effect system");
 
         if config.verbose {
-            println!("    🔄 Agent {} executing DKD choreography...", device_id);
+            println!("    Agent {} executing DKD choreography...", device_id);
         }
 
         // Execute the DKD choreography
@@ -650,8 +649,8 @@ fn keys_match(keys1: &HashMap<DeviceId, [u8; 32]>, keys2: &HashMap<DeviceId, [u8
 }
 
 /// Main E2E test function
-#[tokio::test]
-async fn test_e2e_cli_dkd_integration() {
+#[aura_test]
+async fn test_e2e_cli_dkd_integration() -> AuraResult<()> {
     let config = E2ETestConfig::default();
 
     let mut harness = MultiAgentTestHarness::new(config);
@@ -687,8 +686,8 @@ async fn test_e2e_cli_dkd_integration() {
 }
 
 /// Test with custom configuration
-#[tokio::test]
-async fn test_e2e_cli_dkd_with_custom_config() {
+#[aura_test]
+async fn test_e2e_cli_dkd_with_custom_config() -> AuraResult<()> {
     let config = E2ETestConfig {
         participants: 2,
         threshold: 2,
@@ -714,8 +713,8 @@ async fn test_e2e_cli_dkd_with_custom_config() {
 }
 
 /// Test that demonstrates failure detection
-#[tokio::test]
-async fn test_e2e_cli_dkd_failure_detection() {
+#[aura_test]
+async fn test_e2e_cli_dkd_failure_detection() -> AuraResult<()> {
     // This test would demonstrate how the system detects and handles failures
     // TODO fix - For now, it's a placeholder that shows the structure
 
@@ -737,8 +736,8 @@ async fn test_e2e_cli_dkd_failure_detection() {
         "Error should mention timeout: {}", error_message);
 }
 
-#[tokio::test]
-async fn test_e2e_scenario_validation_only() {
+#[aura_test]
+async fn test_e2e_scenario_validation_only() -> AuraResult<()> {
     // Test that validates scenario files without executing the full choreography
     let config = E2ETestConfig::default();
     let mut harness = MultiAgentTestHarness::new(config);

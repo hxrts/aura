@@ -78,8 +78,8 @@ pub trait LedgerEffects: Send + Sync {
     /// Generate a random secret for cryptographic operations
     async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, LedgerError>;
 
-    /// Hash data with Blake3
-    async fn hash_blake3(&self, data: &[u8]) -> Result<[u8; 32], LedgerError>;
+    /// Hash data with cryptographic hash function
+    async fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], LedgerError>;
 
     /// Get current timestamp (seconds since Unix epoch)
     async fn current_timestamp(&self) -> Result<u64, LedgerError>;

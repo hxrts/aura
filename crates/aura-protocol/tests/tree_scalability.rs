@@ -8,6 +8,8 @@
 //!
 //! Run with: cargo test --test tree_scalability --release -- --nocapture
 
+#![allow(clippy::disallowed_methods)]
+
 use aura_core::tree::{
     snapshot::Snapshot, AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
 };
@@ -74,7 +76,7 @@ fn test_tree_with_100_devices() {
     // Reduce to TreeState
     let reduce_start = Instant::now();
     let ops: Vec<AttestedOp> = oplog.to_operations_vec();
-    let state = reduce(&ops).expect("Reduction should succeed");
+    let state = reduce(&ops).unwrap_or_else(|e| panic!("Reduction should succeed: {}", e));
     let reduce_time = reduce_start.elapsed();
 
     println!("Reduction time: {:?}", reduce_time);
@@ -249,7 +251,8 @@ fn test_memory_bounded_with_gc() {
 
     // Apply compaction
     let compact_start = Instant::now();
-    let compacted = compact(&oplog, &snapshot).expect("Compaction should succeed");
+    let compacted =
+        compact(&oplog, &snapshot).unwrap_or_else(|e| panic!("Compaction should succeed: {}", e));
     let compact_time = compact_start.elapsed();
 
     println!("Compaction time: {:?}", compact_time);
@@ -326,7 +329,7 @@ fn test_combined_load() {
     // Perform reduction
     let reduce_start = Instant::now();
     let ops: Vec<AttestedOp> = oplog.to_operations_vec();
-    let state = reduce(&ops).expect("Reduction should succeed");
+    let state = reduce(&ops).unwrap_or_else(|e| panic!("Reduction should succeed: {}", e));
     let reduce_time = reduce_start.elapsed();
 
     println!("Reduction time: {:?}", reduce_time);

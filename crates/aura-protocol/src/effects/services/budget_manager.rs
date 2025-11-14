@@ -84,7 +84,7 @@ impl FlowBudgetManager {
             )));
         }
 
-        Ok(budget.clone())
+        Ok(*budget)
     }
 
     /// Initialize or update a budget
@@ -136,7 +136,7 @@ impl FlowBudgetManager {
         let budget = budgets
             .entry(key)
             .or_insert_with(|| FlowBudget::new(limit, epoch));
-        Ok(budget.clone())
+        Ok(*budget)
     }
 
     /// Reset all budgets for a new epoch
@@ -213,7 +213,7 @@ impl FlowBudgetManager {
             )));
         }
 
-        Ok(budget.clone())
+        Ok(*budget)
     }
 }
 
@@ -231,7 +231,7 @@ mod tests {
     async fn test_budget_charging() {
         let manager = FlowBudgetManager::new();
         let context = ContextId::from("test-context");
-        let peer = DeviceId::from([1u8; 16]);
+        let peer = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
         let epoch = Epoch::from(1);
 
         // Initialize budget with limit of 1000
@@ -265,7 +265,7 @@ mod tests {
     async fn test_epoch_rotation() {
         let manager = FlowBudgetManager::new();
         let context = ContextId::from("test-context");
-        let peer = DeviceId::from([1u8; 16]);
+        let peer = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
         let epoch1 = Epoch::from(1);
         let epoch2 = Epoch::from(2);
 
@@ -293,7 +293,7 @@ mod tests {
     async fn test_charge_or_init() {
         let manager = FlowBudgetManager::new();
         let context = ContextId::from("test-context");
-        let peer = DeviceId::from([1u8; 16]);
+        let peer = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
         let epoch = Epoch::from(1);
 
         // Charge without initialization
@@ -319,7 +319,7 @@ mod tests {
     async fn test_concurrent_charging() {
         let manager = FlowBudgetManager::new();
         let context = ContextId::from("test-context");
-        let peer = DeviceId::from([1u8; 16]);
+        let peer = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
         let epoch = Epoch::from(1);
 
         // Initialize budget

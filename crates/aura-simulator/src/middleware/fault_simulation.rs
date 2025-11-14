@@ -107,7 +107,7 @@ impl FaultSimulationMiddleware {
     }
 
     /// Process fault injection operation
-    fn inject_fault(
+    fn _inject_fault(
         &mut self,
         fault_type: FaultType,
         target: String,
@@ -117,13 +117,13 @@ impl FaultSimulationMiddleware {
         let fault_id = format!("fault_{}_{}", target, context.tick);
 
         let active_fault = ActiveFault {
-            id: fault_id.clone(),
+            _id: fault_id.clone(),
             fault_type: fault_type.clone(),
             target: target.clone(),
-            start_tick: context.tick,
-            duration,
-            injected_at: Instant::now(),
-            effects: HashMap::new(),
+            _start_tick: context.tick,
+            _duration: duration,
+            _injected_at: Instant::now(),
+            _effects: HashMap::new(),
         };
 
         self.active_faults.insert(fault_id.clone(), active_fault);
@@ -139,7 +139,7 @@ impl FaultSimulationMiddleware {
     }
 
     /// Update active faults and remove expired ones
-    fn update_active_faults(&mut self, context: &SimulatorContext) -> Vec<String> {
+    fn _update_active_faults(&mut self, context: &SimulatorContext) -> Vec<String> {
         let mut removed_faults = Vec::new();
         let enable_auto_recovery = self.recovery_settings.enable_auto_recovery;
         let recovery_settings = self.recovery_settings.clone();
@@ -149,8 +149,8 @@ impl FaultSimulationMiddleware {
 
         for (fault_id, fault) in &self.active_faults {
             // Check if fault has expired
-            if let Some(duration) = fault.duration {
-                let elapsed_ticks = context.tick - fault.start_tick;
+            if let Some(duration) = fault._duration {
+                let elapsed_ticks = context.tick - fault._start_tick;
                 let elapsed_time = Duration::from_millis(elapsed_ticks * 100); // Assume 100ms per tick
 
                 if elapsed_time >= duration {
@@ -163,7 +163,7 @@ impl FaultSimulationMiddleware {
             // Check recovery conditions
             if enable_auto_recovery {
                 // Inline recovery check to avoid borrow conflict
-                let elapsed_ticks = context.tick - fault.start_tick;
+                let elapsed_ticks = context.tick - fault._start_tick;
                 let should_recover = elapsed_ticks >= recovery_settings.min_recovery_ticks;
 
                 if should_recover {
@@ -182,17 +182,17 @@ impl FaultSimulationMiddleware {
     }
 
     /// Check if a fault should be recovered
-    fn should_recover_fault(&self, fault: &ActiveFault, context: &SimulatorContext) -> bool {
+    fn _should_recover_fault(&self, fault: &ActiveFault, context: &SimulatorContext) -> bool {
         match &fault.fault_type {
             FaultType::NodeCrash { .. } => {
                 // Recovery based on tick count
-                let elapsed_ticks = context.tick - fault.start_tick;
+                let elapsed_ticks = context.tick - fault._start_tick;
                 elapsed_ticks >= self.recovery_settings.min_recovery_ticks
             }
 
             FaultType::NetworkPartition { .. } => {
                 // Network partitions auto-recover after some time
-                let elapsed_ticks = context.tick - fault.start_tick;
+                let elapsed_ticks = context.tick - fault._start_tick;
                 elapsed_ticks >= 50 // 5 seconds at 100ms/tick
             }
 
@@ -410,13 +410,13 @@ impl SimulatorMiddleware for FaultSimulationMiddleware {
 /// Active fault tracking
 #[derive(Debug, Clone)]
 struct ActiveFault {
-    id: String,
+    _id: String,
     fault_type: FaultType,
     target: String,
-    start_tick: u64,
-    duration: Option<Duration>,
-    injected_at: Instant,
-    effects: HashMap<String, Value>,
+    _start_tick: u64,
+    _duration: Option<Duration>,
+    _injected_at: Instant,
+    _effects: HashMap<String, Value>,
 }
 
 /// Fault injection rules

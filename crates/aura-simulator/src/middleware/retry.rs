@@ -119,7 +119,9 @@ mod tests {
             .execute(|| {
                 let attempts = attempts_clone.clone();
                 Box::pin(async move {
-                    let mut attempt_count = attempts.lock().unwrap();
+                    let mut attempt_count = attempts
+                        .lock()
+                        .unwrap_or_else(|e| panic!("Test lock poisoned: {}", e));
                     *attempt_count += 1;
                     if *attempt_count < 3 {
                         Err::<i32, _>("transient failure")
@@ -131,7 +133,12 @@ mod tests {
             .await;
 
         assert_eq!(result, Ok(42));
-        assert_eq!(*attempts.lock().unwrap(), 3);
+        assert_eq!(
+            *attempts
+                .lock()
+                .unwrap_or_else(|e| panic!("Test lock poisoned: {}", e)),
+            3
+        );
     }
 
     #[tokio::test]
@@ -144,7 +151,9 @@ mod tests {
             .execute(|| {
                 let attempts = attempts_clone.clone();
                 Box::pin(async move {
-                    let mut attempt_count = attempts.lock().unwrap();
+                    let mut attempt_count = attempts
+                        .lock()
+                        .unwrap_or_else(|e| panic!("Test lock poisoned: {}", e));
                     *attempt_count += 1;
                     Err::<i32, &str>("persistent failure")
                 })
@@ -152,7 +161,12 @@ mod tests {
             .await;
 
         assert_eq!(result, Err("persistent failure"));
-        assert_eq!(*attempts.lock().unwrap(), 3); // Default max_attempts
+        assert_eq!(
+            *attempts
+                .lock()
+                .unwrap_or_else(|e| panic!("Test lock poisoned: {}", e)),
+            3
+        ); // Default max_attempts
     }
 
     #[tokio::test]
@@ -165,7 +179,10 @@ mod tests {
 
         impl GuardedOperation {
             async fn execute(&self) -> Result<String, String> {
-                let mut count = self.attempt_count.lock().unwrap();
+                let mut count = self
+                    .attempt_count
+                    .lock()
+                    .unwrap_or_else(|e| panic!("Test lock poisoned: {}", e));
                 *count += 1;
 
                 // First attempt: capability denied (guard rejects)

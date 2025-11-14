@@ -312,6 +312,7 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_account_state_creation() {
         let account_id = AccountId(Uuid::new_v4());
         let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
@@ -324,13 +325,13 @@ mod tests {
 
     #[test]
     fn test_device_management() {
-        let account_id = AccountId(uuid::Uuid::from_bytes([0u8; 16]));
+        let account_id = AccountId(uuid::Uuid::from_bytes([1u8; 16]));
         let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public_key = signing_key.verifying_key();
 
         let mut state = AccountState::new(account_id, group_public_key);
 
-        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
         let device = DeviceMetadata {
             device_id,
             device_name: "Test Device".to_string(),
@@ -351,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_epoch_management() {
-        let account_id = AccountId(uuid::Uuid::from_bytes([0u8; 16]));
+        let account_id = AccountId(uuid::Uuid::from_bytes([3u8; 16]));
         let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public_key = signing_key.verifying_key();
 
@@ -371,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_join_semilattice() {
-        let account_id = AccountId(uuid::Uuid::from_bytes([0u8; 16]));
+        let account_id = AccountId(uuid::Uuid::from_bytes([4u8; 16]));
         let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public_key = signing_key.verifying_key();
 
@@ -379,7 +380,7 @@ mod tests {
         let mut state2 = AccountState::new(account_id, group_public_key);
 
         // Add different devices to each state
-        let device1_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let device1_id = DeviceId(uuid::Uuid::from_bytes([5u8; 16]));
         let device1 = DeviceMetadata {
             device_id: device1_id,
             device_name: "Device 1".to_string(),
@@ -393,7 +394,7 @@ mod tests {
             key_share_epoch: 0,
         };
 
-        let device2_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let device2_id = DeviceId(uuid::Uuid::from_bytes([6u8; 16]));
         let device2 = DeviceMetadata {
             device_id: device2_id,
             device_name: "Device 2".to_string(),

@@ -42,6 +42,9 @@ pub mod peer_discovery;
 /// OTA upgrade orchestration helpers
 pub mod ota;
 
+/// Maintenance events and upgrade coordination types
+pub mod maintenance;
+
 // Re-export core types
 pub use aura_core::{AccountId, AuraError, AuraResult, DeviceId};
 
@@ -50,6 +53,10 @@ pub use aura_protocol::effects::{AntiEntropyConfig, BloomDigest, SyncEffects, Sy
 
 // Maintenance helpers
 pub use cache::CacheEpochFloors;
+pub use maintenance::{
+    AdminReplaced, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEvent, 
+    SnapshotCompleted, SnapshotProposed, UpgradeActivated, UpgradeKind, UpgradeProposal,
+};
 pub use ota::{UpgradeCoordinator, UpgradeReadiness};
 pub use snapshot::{SnapshotManager, WriterFence};
 pub use sync_service::SyncService;

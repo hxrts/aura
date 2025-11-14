@@ -70,7 +70,9 @@ impl ChaosCoordinationMiddleware {
     /// Add chaos strategy template
     pub fn with_strategy_template(self, template: ChaosStrategyTemplate) -> Self {
         if let Ok(mut state) = self.state.lock() {
-            state.strategy_templates.insert(template.id.clone(), template);
+            state
+                .strategy_templates
+                .insert(template.id.clone(), template);
         }
         self
     }
@@ -111,14 +113,14 @@ impl ChaosCoordinationMiddleware {
 
             // Create chaos scenario
             let scenario = ChaosScenario {
-                id: scenario_id.clone(),
-                strategy: strategy.clone(),
-                intensity: effective_intensity,
+                _id: scenario_id.clone(),
+                _strategy: strategy.clone(),
+                _intensity: effective_intensity,
                 duration,
                 start_tick: context.tick,
                 actions_performed: Vec::new(),
-                active_faults: HashMap::new(),
-                created_at: Instant::now(),
+                _active_faults: HashMap::new(),
+                _created_at: Instant::now(),
             };
 
             // Check if we can add more scenarios
@@ -129,7 +131,8 @@ impl ChaosCoordinationMiddleware {
             }
 
             // Generate chaos actions based on strategy
-            let actions = self.generate_chaos_actions(&strategy, effective_intensity, context, &state)?;
+            let actions =
+                self.generate_chaos_actions(&strategy, effective_intensity, context, &state)?;
 
             state.active_scenarios.insert(scenario_id.clone(), scenario);
 
@@ -144,12 +147,19 @@ impl ChaosCoordinationMiddleware {
                 "status": "coordinated"
             }))
         } else {
-            Err(SimulatorError::OperationFailed("Failed to acquire chaos coordination lock".to_string()))
+            Err(SimulatorError::OperationFailed(
+                "Failed to acquire chaos coordination lock".to_string(),
+            ))
         }
     }
 
     /// Calculate adaptive chaos intensity based on simulation state
-    fn calculate_adaptive_intensity(&self, base_intensity: f64, context: &SimulatorContext, state: &ChaosCoordinationState) -> f64 {
+    fn calculate_adaptive_intensity(
+        &self,
+        base_intensity: f64,
+        context: &SimulatorContext,
+        state: &ChaosCoordinationState,
+    ) -> f64 {
         let mut adaptive_factor = 1.0;
 
         // Reduce intensity if there are already many active scenarios
@@ -175,7 +185,7 @@ impl ChaosCoordinationMiddleware {
         strategy: &ChaosStrategy,
         intensity: f64,
         context: &SimulatorContext,
-        state: &ChaosCoordinationState,
+        _state: &ChaosCoordinationState,
     ) -> Result<Vec<ChaosAction>> {
         let mut actions = Vec::new();
 
@@ -238,7 +248,7 @@ impl ChaosCoordinationMiddleware {
                 for sub_strategy in strategies {
                     let sub_intensity = intensity / strategies.len() as f64;
                     let sub_actions =
-                        self.generate_chaos_actions(sub_strategy, sub_intensity, context, state)?;
+                        self.generate_chaos_actions(sub_strategy, sub_intensity, context, _state)?;
                     actions.extend(sub_actions);
                 }
             }
@@ -300,7 +310,7 @@ impl ChaosCoordinationMiddleware {
     /// Process active chaos scenarios
     fn process_active_scenarios(&self, context: &SimulatorContext) -> Vec<ChaosEvent> {
         let mut events = Vec::new();
-        
+
         if let Ok(mut state) = self.state.lock() {
             let enable_auto_recovery = state.recovery_settings.enable_auto_recovery;
             let recovery_settings = state.recovery_settings.clone();
@@ -309,45 +319,45 @@ impl ChaosCoordinationMiddleware {
             let mut to_remove = Vec::new();
 
             for (scenario_id, scenario) in &state.active_scenarios {
-            // Check if scenario has expired
-            let elapsed_ticks = context.tick - scenario.start_tick;
-            let elapsed_time = Duration::from_millis(elapsed_ticks * 100); // Assume 100ms per tick
+                // Check if scenario has expired
+                let elapsed_ticks = context.tick - scenario.start_tick;
+                let elapsed_time = Duration::from_millis(elapsed_ticks * 100); // Assume 100ms per tick
 
-            if elapsed_time >= scenario.duration {
-                events.push(ChaosEvent {
-                    scenario_id: scenario_id.clone(),
-                    event_type: ChaosEventType::ScenarioCompleted,
-                    timestamp: context.timestamp,
-                    tick: context.tick,
-                    details: json!({
-                        "duration_ms": elapsed_time.as_millis(),
-                        "actions_performed": scenario.actions_performed.len()
-                    }),
-                });
-                to_remove.push(scenario_id.clone());
-                continue;
-            }
-
-            // Check for recovery conditions
-            if enable_auto_recovery {
-                // Inline recovery check to avoid borrow conflict
-                let should_recover = elapsed_ticks >= recovery_settings.min_recovery_ticks;
-
-                if should_recover {
+                if elapsed_time >= scenario.duration {
                     events.push(ChaosEvent {
-                        scenario_id: scenario_id.clone(),
-                        event_type: ChaosEventType::ScenarioRecovered,
-                        timestamp: context.timestamp,
-                        tick: context.tick,
-                        details: json!({
-                            "recovery_reason": "auto_recovery",
-                            "elapsed_ticks": elapsed_ticks
+                        _scenario_id: scenario_id.clone(),
+                        _event_type: ChaosEventType::ScenarioCompleted,
+                        _timestamp: context.timestamp,
+                        _tick: context.tick,
+                        _details: json!({
+                            "duration_ms": elapsed_time.as_millis(),
+                            "actions_performed": scenario.actions_performed.len()
                         }),
                     });
                     to_remove.push(scenario_id.clone());
+                    continue;
+                }
+
+                // Check for recovery conditions
+                if enable_auto_recovery {
+                    // Inline recovery check to avoid borrow conflict
+                    let should_recover = elapsed_ticks >= recovery_settings.min_recovery_ticks;
+
+                    if should_recover {
+                        events.push(ChaosEvent {
+                            _scenario_id: scenario_id.clone(),
+                            _event_type: ChaosEventType::ScenarioRecovered,
+                            _timestamp: context.timestamp,
+                            _tick: context.tick,
+                            _details: json!({
+                                "recovery_reason": "auto_recovery",
+                                "elapsed_ticks": elapsed_ticks
+                            }),
+                        });
+                        to_remove.push(scenario_id.clone());
+                    }
                 }
             }
-        }
 
             // Remove scenarios that need to be removed
             for scenario_id in to_remove {
@@ -359,7 +369,7 @@ impl ChaosCoordinationMiddleware {
     }
 
     /// Check if scenario should be recovered
-    fn should_recover_scenario(
+    fn _should_recover_scenario(
         &self,
         scenario: &ChaosScenario,
         context: &SimulatorContext,
@@ -381,11 +391,15 @@ impl ChaosCoordinationMiddleware {
     }
 
     /// Apply coordination rules
-    fn apply_coordination_rules(&self, context: &SimulatorContext, state: &ChaosCoordinationState) -> Vec<ChaosRuleAction> {
+    fn apply_coordination_rules(
+        &self,
+        context: &SimulatorContext,
+        state: &ChaosCoordinationState,
+    ) -> Vec<ChaosRuleAction> {
         let mut actions = Vec::new();
 
         for rule in &state.coordination_rules {
-            if self.evaluate_rule_condition(&rule.condition, context, state) {
+            if Self::evaluate_rule_condition(&rule.condition, context, state) {
                 actions.push(rule.action.clone());
             }
         }
@@ -395,7 +409,6 @@ impl ChaosCoordinationMiddleware {
 
     /// Evaluate rule condition
     fn evaluate_rule_condition(
-        &self,
         condition: &ChaosRuleCondition,
         context: &SimulatorContext,
         state: &ChaosCoordinationState,
@@ -417,10 +430,10 @@ impl ChaosCoordinationMiddleware {
             } => match operator {
                 ChaosRuleOperator::And => conditions
                     .iter()
-                    .all(|c| self.evaluate_rule_condition(c, context, state)),
+                    .all(|c| Self::evaluate_rule_condition(c, context, state)),
                 ChaosRuleOperator::Or => conditions
                     .iter()
-                    .any(|c| self.evaluate_rule_condition(c, context, state)),
+                    .any(|c| Self::evaluate_rule_condition(c, context, state)),
             },
         }
     }
@@ -446,7 +459,8 @@ impl SimulatorMiddleware for ChaosCoordinationMiddleware {
                 duration,
             } => {
                 // Handle chaos coordination request with real implementation
-                let coordination_result = self.coordinate_chaos(strategy.clone(), *intensity, *duration, context)?;
+                let coordination_result =
+                    self.coordinate_chaos(strategy.clone(), *intensity, *duration, context)?;
 
                 // Add chaos coordination info to context
                 let mut enhanced_context = context.clone();
@@ -471,13 +485,13 @@ impl SimulatorMiddleware for ChaosCoordinationMiddleware {
             SimulatorOperation::ExecuteTick { .. } => {
                 // Process active chaos scenarios with real implementation
                 let chaos_events = self.process_active_scenarios(context);
-                
+
                 // Add chaos coordination info to context
                 let mut enhanced_context = context.clone();
-                
+
                 if let Ok(state) = self.state.lock() {
                     let rule_actions = self.apply_coordination_rules(context, &state);
-                    
+
                     enhanced_context.metadata.insert(
                         "active_chaos_scenarios".to_string(),
                         state.active_scenarios.len().to_string(),
@@ -537,14 +551,14 @@ impl SimulatorMiddleware for ChaosCoordinationMiddleware {
 /// Chaos scenario tracking
 #[derive(Debug, Clone)]
 struct ChaosScenario {
-    id: String,
-    strategy: ChaosStrategy,
-    intensity: f64,
+    _id: String,
+    _strategy: ChaosStrategy,
+    _intensity: f64,
     duration: Duration,
     start_tick: u64,
     actions_performed: Vec<ChaosAction>,
-    active_faults: HashMap<String, FaultType>,
-    created_at: Instant,
+    _active_faults: HashMap<String, FaultType>,
+    _created_at: Instant,
 }
 
 /// Chaos strategy template
@@ -649,22 +663,22 @@ pub enum ChaosAction {
 /// Events generated by chaos coordination
 #[derive(Debug, Clone)]
 struct ChaosEvent {
-    scenario_id: String,
-    event_type: ChaosEventType,
-    timestamp: Duration,
-    tick: u64,
-    details: Value,
+    _scenario_id: String,
+    _event_type: ChaosEventType,
+    _timestamp: Duration,
+    _tick: u64,
+    _details: Value,
 }
 
 /// Types of chaos events
 #[derive(Debug, Clone)]
 enum ChaosEventType {
-    ScenarioStarted,
+    _ScenarioStarted,
     ScenarioCompleted,
     ScenarioRecovered,
-    ActionExecuted,
-    FaultInjected,
-    FaultRecovered,
+    _ActionExecuted,
+    _FaultInjected,
+    _FaultRecovered,
 }
 
 /// Chaos recovery settings
@@ -718,7 +732,7 @@ mod tests {
             assert_eq!(state.intensity_factor, 0.4);
             assert_eq!(state.max_concurrent_scenarios, 2);
             assert_eq!(state.strategy_templates.len(), 1);
-        }
+        };
     }
 
     #[test]
@@ -755,7 +769,7 @@ mod tests {
             // Should be reduced from 1.0 due to adaptive factors
             assert!(adaptive_intensity < 1.0);
             assert!(adaptive_intensity > 0.0);
-        }
+        };
     }
 
     #[test]
@@ -765,13 +779,19 @@ mod tests {
 
         let condition = ChaosRuleCondition::TickCount { min_tick: 5 };
         if let Ok(state) = middleware.state.lock() {
-            assert!(!middleware.evaluate_rule_condition(&condition, &context, &state)); // tick is 0
+            assert!(!ChaosCoordinationMiddleware::evaluate_rule_condition(
+                &condition, &context, &state
+            )); // tick is 0
 
             let mut context_later = context.clone();
             context_later.tick = 10;
-            assert!(middleware.evaluate_rule_condition(&condition, &context_later, &state));
+            assert!(ChaosCoordinationMiddleware::evaluate_rule_condition(
+                &condition,
+                &context_later,
+                &state
+            ));
             // tick is 10
-        }
+        };
     }
 
     #[test]

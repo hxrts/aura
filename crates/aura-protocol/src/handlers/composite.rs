@@ -401,7 +401,7 @@ impl aura_core::effects::RandomEffects for CompositeHandler {
 #[async_trait]
 impl CryptoEffects for CompositeHandler {
     // Note: hash is NOT an algebraic effect - use aura_core::hash::hash() instead
-    
+
     async fn ed25519_sign(&self, data: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
         self.crypto.ed25519_sign(data, private_key).await
     }
@@ -851,7 +851,7 @@ impl LedgerEffects for CompositeHandler {
         Ok(random_bytes)
     }
 
-    async fn hash_blake3(&self, _data: &[u8]) -> Result<[u8; 32], LedgerError> {
+    async fn hash_data(&self, _data: &[u8]) -> Result<[u8; 32], LedgerError> {
         let hash_result = hash(_data);
         Ok(hash_result)
     }
@@ -1638,7 +1638,7 @@ impl CompositeHandler {
                 let result = self.crypto.random_bytes(len).await;
                 Ok(serde_json::to_vec(&result).unwrap_or_default())
             }
-            "blake3_hash" => {
+            "hash_data" => {
                 let data: Vec<u8> = serde_json::from_slice(parameters).map_err(|e| {
                     AuraHandlerError::ContextError {
                         message: format!("Failed to deserialize {} parameters: {}", operation, e),

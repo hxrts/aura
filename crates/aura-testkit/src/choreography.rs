@@ -9,8 +9,8 @@
 use crate::{DeviceTestFixture, TestEffectsBuilder, TestExecutionMode};
 use aura_core::DeviceId;
 use aura_protocol::{
-    choreography::AuraHandlerAdapter, 
-    effects::{AuraEffectSystem, system::EffectSystemConfig}, 
+    choreography::AuraHandlerAdapter,
+    effects::AuraEffectSystem,
     handlers::ExecutionMode,
 };
 use std::collections::HashMap;
@@ -40,8 +40,10 @@ impl ChoreographyTestHarness {
             .map(|i| {
                 let device_fixture = DeviceTestFixture::new(i);
                 let device_id = device_fixture.device_id();
-                let config = EffectSystemConfig::for_testing(device_id);
-                let effect_system = AuraEffectSystem::new(config).expect("Failed to create effect system");
+                let effect_system = TestEffectsBuilder::for_unit_tests(device_id)
+                    .with_execution_mode(TestExecutionMode::UnitTest)
+                    .build()
+                    .expect("Failed to create effect system");
                 (device_fixture, effect_system)
             })
             .collect();
@@ -69,8 +71,10 @@ impl ChoreographyTestHarness {
             .map(|(i, label)| {
                 let device_fixture = DeviceTestFixture::with_label(i, label.to_string());
                 let device_id = device_fixture.device_id();
-                let config = EffectSystemConfig::for_testing(device_id);
-                let effect_system = AuraEffectSystem::new(config).expect("Failed to create effect system");
+                let effect_system = TestEffectsBuilder::for_unit_tests(device_id)
+                    .with_execution_mode(TestExecutionMode::UnitTest)
+                    .build()
+                    .expect("Failed to create effect system");
                 (device_fixture, effect_system)
             })
             .collect();
@@ -102,7 +106,7 @@ impl ChoreographyTestHarness {
 
         for fixture in fixtures {
             // Use the new stateless effect system
-            let _effects_builder = match execution_mode {
+            let effects_builder = match execution_mode {
                 TestExecutionMode::UnitTest => {
                     TestEffectsBuilder::for_unit_tests(fixture.device_id())
                 }
@@ -114,10 +118,10 @@ impl ChoreographyTestHarness {
                 }
             };
 
-            // Use the new stateless effect system
-            let config = EffectSystemConfig::for_testing(fixture.device_id());
-            let effect_system = AuraEffectSystem::new(config).map_err(|e| TestError::ChoreographyExecution { 
-                reason: format!("Failed to create effect system: {}", e) 
+            let effect_system = effects_builder.build().map_err(|e| {
+                TestError::ChoreographyExecution {
+                    reason: format!("Failed to create effect system: {}", e),
+                }
             })?;
             devices.push((fixture, effect_system));
         }
@@ -161,7 +165,7 @@ impl ChoreographyTestHarness {
     }
 
     /// Create for simulation scenarios with enhanced configuration
-    pub async fn for_simulation(device_count: usize, seed: u64) -> Result<Self, TestError> {
+    pub async fn for_simulation(device_count: usize, _seed: u64) -> Result<Self, TestError> {
         let fixtures: Vec<DeviceTestFixture> =
             (0..device_count).map(DeviceTestFixture::new).collect();
 
@@ -334,9 +338,7 @@ impl MockChoreographyTransport {
         message: Vec<u8>,
     ) -> Result<(), TransportError> {
         let mut channels = self.channels.write().await;
-        let channel = channels
-            .entry((from, to))
-            .or_insert_with(|| MockChannel::new());
+        let channel = channels.entry((from, to)).or_insert_with(MockChannel::new);
         channel.send(message).await
     }
 
@@ -408,11 +410,17 @@ impl MockChannel {
     }
 }
 
+impl Default for MockChannel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Mock session coordinator for multi-device sessions
 #[derive(Debug)]
 pub struct MockSessionCoordinator {
     /// Available devices
-    devices: Vec<DeviceId>,
+    _devices: Vec<DeviceId>,
     /// Active sessions
     sessions: Arc<RwLock<HashMap<String, MockSessionState>>>,
     /// Session counter for unique IDs
@@ -422,7 +430,7 @@ pub struct MockSessionCoordinator {
 impl MockSessionCoordinator {
     pub fn new(devices: Vec<DeviceId>) -> Self {
         Self {
-            devices,
+            _devices: devices,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             session_counter: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
@@ -578,9 +586,15 @@ impl From<TransportError> for TestError {
 /// Transport-specific errors
 #[derive(Debug)]
 pub enum TransportError {
+    /// Communication channel was closed
     ChannelClosed,
+    /// Message serialization failed
     SerializationError,
-    DeviceNotFound { device_id: DeviceId },
+    /// Device not found in transport
+    DeviceNotFound {
+        /// The device ID that was not found
+        device_id: DeviceId,
+    },
 }
 
 impl std::fmt::Display for TransportError {
@@ -602,8 +616,11 @@ impl std::error::Error for TransportError {}
 /// This type provides the bridge between testkit choreography infrastructure
 /// and the aura-simulator middleware system.
 pub struct SimulatorCompatibleContext {
+    /// Test devices and their effect systems
     pub devices: Vec<(DeviceTestFixture, AuraEffectSystem)>,
+    /// Mock transport layer for choreography
     pub transport: Arc<MockChoreographyTransport>,
+    /// Mock session coordinator
     pub session_coordinator: Arc<MockSessionCoordinator>,
 }
 
@@ -647,15 +664,20 @@ impl std::fmt::Debug for SimulatorCompatibleContext {
 /// monitoring capabilities.
 #[derive(Debug, Clone)]
 pub struct PerformanceSnapshot {
+    /// Number of devices in the test
     pub device_count: usize,
     // Additional metrics will be added when supported by stateless effects
 }
 
 impl PerformanceSnapshot {
+    /// Create a new performance snapshot
     pub fn new() -> Self {
         Self { device_count: 0 }
     }
 
+    /// Add metrics for a device
+    ///
+    /// This will be implemented when the stateless effect system provides metrics
     pub fn add_device_metrics(&mut self, _device_id: DeviceId, _metrics: ()) {
         // This will be implemented when the stateless effect system provides metrics
     }
@@ -668,7 +690,6 @@ impl Default for PerformanceSnapshot {
 }
 
 /// Helper functions for common test scenarios
-
 /// Create a simple two-device test harness
 pub fn test_device_pair() -> ChoreographyTestHarness {
     let mut harness = ChoreographyTestHarness::with_labeled_devices(vec!["alice", "bob"]);
@@ -725,7 +746,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_role_mapping() {
-        let mut harness = test_device_pair();
+        let harness = test_device_pair();
 
         assert!(harness.role_device_id("Alice").is_some());
         assert!(harness.role_device_id("Bob").is_some());

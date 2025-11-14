@@ -81,7 +81,7 @@ impl TypedHandlerBridge {
 impl aura_core::effects::RandomEffects for TypedHandlerBridge {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<Vec<u8>>(
             &mut **handler,
@@ -96,7 +96,7 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
 
     async fn random_bytes_32(&self) -> [u8; 32] {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<[u8; 32]>(
             &mut **handler,
@@ -111,7 +111,7 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
 
     async fn random_u64(&self) -> u64 {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<u64>(
             &mut **handler,
@@ -126,7 +126,7 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
 
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<u64>(
             &mut **handler,
@@ -153,7 +153,7 @@ impl CryptoEffects for TypedHandlerBridge {
 
     async fn ed25519_sign(&self, data: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         let params = (data.to_vec(), private_key.to_vec());
 
@@ -175,7 +175,7 @@ impl CryptoEffects for TypedHandlerBridge {
         public_key: &[u8],
     ) -> Result<bool, CryptoError> {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         let params = (data.to_vec(), signature.to_vec(), public_key.to_vec());
 
@@ -192,7 +192,7 @@ impl CryptoEffects for TypedHandlerBridge {
 
     async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<Result<(Vec<u8>, Vec<u8>), CryptoError>>(
             &mut **handler,
@@ -207,7 +207,7 @@ impl CryptoEffects for TypedHandlerBridge {
 
     async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<Result<Vec<u8>, CryptoError>>(
             &mut **handler,
@@ -238,7 +238,7 @@ impl CryptoEffects for TypedHandlerBridge {
         output_len: usize,
     ) -> Result<Vec<u8>, CryptoError> {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         let params = (ikm.to_vec(), salt.to_vec(), info.to_vec(), output_len);
 
@@ -261,7 +261,7 @@ impl CryptoEffects for TypedHandlerBridge {
         context: &aura_core::effects::crypto::KeyDerivationContext,
     ) -> Result<Vec<u8>, CryptoError> {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         let params = (master_key.to_vec(), context.clone());
 
@@ -397,7 +397,7 @@ impl CryptoEffects for TypedHandlerBridge {
 
     fn crypto_capabilities(&self) -> Vec<String> {
         vec![
-            "bridge_blake3".to_string(),
+            "bridge_hash".to_string(),
             "bridge_sha256".to_string(),
             "bridge_hkdf".to_string(),
         ]
@@ -412,7 +412,7 @@ impl CryptoEffects for TypedHandlerBridge {
 impl TimeEffects for TypedHandlerBridge {
     async fn current_epoch(&self) -> u64 {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<u64>(
             &mut **handler,
@@ -427,7 +427,7 @@ impl TimeEffects for TypedHandlerBridge {
 
     async fn current_timestamp(&self) -> u64 {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<u64>(
             &mut **handler,
@@ -442,7 +442,7 @@ impl TimeEffects for TypedHandlerBridge {
 
     async fn current_timestamp_millis(&self) -> u64 {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<u64>(
             &mut **handler,
@@ -457,7 +457,7 @@ impl TimeEffects for TypedHandlerBridge {
 
     async fn sleep_ms(&self, ms: u64) {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         let _ = HandlerUtils::execute_typed_effect::<()>(
             &mut **handler,
@@ -471,7 +471,7 @@ impl TimeEffects for TypedHandlerBridge {
 
     async fn sleep_until(&self, epoch: u64) {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         let _ = HandlerUtils::execute_typed_effect::<()>(
             &mut **handler,
@@ -485,7 +485,7 @@ impl TimeEffects for TypedHandlerBridge {
 
     async fn delay(&self, duration: Duration) {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         let _ = HandlerUtils::execute_typed_effect::<()>(
             &mut **handler,
@@ -501,7 +501,7 @@ impl TimeEffects for TypedHandlerBridge {
 
     async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<()>(
             &mut **handler,
@@ -526,7 +526,7 @@ impl TimeEffects for TypedHandlerBridge {
 
     async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<TimeoutHandle>(
             &mut **handler,
@@ -541,7 +541,7 @@ impl TimeEffects for TypedHandlerBridge {
 
     async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
         let mut handler = self.0.write().await;
-        let mut ctx = get_context();
+        let ctx = get_context();
 
         HandlerUtils::execute_typed_effect::<()>(
             &mut **handler,
@@ -610,25 +610,26 @@ impl aura_core::effects::ConsoleEffects for TypedHandlerBridge {
 mod tests {
     use super::*;
     use crate::handlers::erased::AuraHandlerFactory;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_crypto_effects_bridge() {
         let device_id = DeviceId::from(Uuid::new_v4());
-        let mut handler = AuraHandlerFactory::for_testing(device_id);
-        let mut ctx = crate::handlers::context::AuraContext::for_testing(device_id);
+        let handler = AuraHandlerFactory::for_testing(device_id);
+        let ctx = crate::handlers::context_immutable::AuraContext::for_testing(device_id);
 
-        // Test that we can call CryptoEffects methods through the handler interface
-        let param_bytes = bincode::serialize(&32_usize).unwrap();
+        // Test that we can call Random effects methods through the handler interface
+        let param_bytes = serde_json::to_vec(&32_usize).unwrap();
         let result = handler
-            .execute_effect(EffectType::Crypto, "random_bytes", &param_bytes, &mut ctx)
+            .execute_effect(EffectType::Random, "random_bytes", &param_bytes, &ctx)
             .await;
-        assert!(result.is_ok(), "random_bytes should be supported");
+        assert!(result.is_ok(), "random_bytes should be supported: {:?}", result.err());
 
-        let param_bytes = bincode::serialize(b"test data").unwrap();
+        let param_bytes = serde_json::to_vec(b"test data").unwrap();
         let result = handler
-            .execute_effect(EffectType::Crypto, "hash", &param_bytes, &mut ctx)
+            .execute_effect(EffectType::Crypto, "hash_data", &param_bytes, &ctx)
             .await;
-        assert!(result.is_ok(), "hash should be supported");
+        assert!(result.is_ok(), "hash_data should be supported: {:?}", result.err());
     }
 
     #[tokio::test]
@@ -640,7 +641,6 @@ mod tests {
         // Test that we can create and wrap the handler
         // In practice, time effects would be called through the effect system
         // This just verifies the handler can be created and wrapped correctly
-        assert!(true);
     }
 
     #[tokio::test]
@@ -652,6 +652,5 @@ mod tests {
         // Test that we can create the handler and use it for basic operations
         // In practice, effects would be called through the effect system
         // This just verifies the handler can be created and wrapped correctly
-        assert!(true);
     }
 }

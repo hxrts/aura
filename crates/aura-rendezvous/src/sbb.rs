@@ -195,6 +195,7 @@ pub trait SbbFlooding: Send + Sync {
 #[derive(Debug)]
 pub struct SbbFloodingCoordinator {
     /// Device ID of this node
+    #[allow(dead_code)]
     device_id: DeviceId,
     /// Friend relationships for flooding
     friends: Vec<DeviceId>,
@@ -532,10 +533,8 @@ mod tests {
             .flood_envelope(envelope.clone(), None)
             .await
             .unwrap();
-        match result1 {
-            FloodResult::Dropped => (), // No peers to forward to
-            _ => (),
-        }
+        // No peers to forward to - result should be Dropped
+        if let FloodResult::Dropped = result1 {}
 
         // Second flood of same envelope should be dropped as duplicate
         let result2 = coordinator.flood_envelope(envelope, None).await.unwrap();

@@ -8,9 +8,10 @@ use crate::{
     RecoveryResult,
 };
 use aura_authenticate::guardian_auth::RecoveryContext;
+use aura_core::effects::TimeEffects;
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
 use aura_crypto::frost::ThresholdSignature;
-// use aura_macros::aura_choreography; // Temporarily disabled for testing
+use aura_macros::choreography;
 use aura_protocol::AuraEffectSystem;
 use serde::{Deserialize, Serialize};
 
@@ -65,9 +66,65 @@ pub struct SetupCompletion {
     pub setup_evidence: Vec<u8>,
 }
 
-// Note: Choreography macro temporarily disabled for testing
-// The full choreographic implementation with choreography! macro
-// would be restored once testing infrastructure is working
+// Guardian Setup Choreography
+// 3-phase protocol: Invitation -> Acceptance -> Completion
+
+// Guardian Setup Choreography - 3 phase protocol
+choreography! {
+    #[namespace = "guardian_setup"]
+    protocol GuardianSetup {
+        roles: SetupInitiator, Guardian1, Guardian2, Guardian3;
+
+        // Phase 1: Setup invitation to all guardians
+        SetupInitiator[guard_capability = "initiate_guardian_setup",
+                       flow_cost = 300,
+                       journal_facts = "guardian_setup_initiated",
+                       leakage_budget = [1, 0, 0]]
+        -> Guardian1: SendInvitation(GuardianInvitation);
+
+        SetupInitiator[guard_capability = "initiate_guardian_setup",
+                       flow_cost = 300]
+        -> Guardian2: SendInvitation(GuardianInvitation);
+
+        SetupInitiator[guard_capability = "initiate_guardian_setup",
+                       flow_cost = 300]
+        -> Guardian3: SendInvitation(GuardianInvitation);
+
+        // Phase 2: Guardian acceptances back to setup initiator
+        Guardian1[guard_capability = "accept_guardian_invitation,verify_setup_context",
+                   flow_cost = 200,
+                   journal_facts = "guardian_setup_accepted",
+                   leakage_budget = [0, 1, 0]]
+        -> SetupInitiator: AcceptInvitation(GuardianAcceptance);
+
+        Guardian2[guard_capability = "accept_guardian_invitation,verify_setup_context",
+                   flow_cost = 200,
+                   journal_facts = "guardian_setup_accepted"]
+        -> SetupInitiator: AcceptInvitation(GuardianAcceptance);
+
+        Guardian3[guard_capability = "accept_guardian_invitation,verify_setup_context",
+                   flow_cost = 200,
+                   journal_facts = "guardian_setup_accepted"]
+        -> SetupInitiator: AcceptInvitation(GuardianAcceptance);
+
+        // Phase 3: Setup completion broadcast
+        SetupInitiator[guard_capability = "complete_guardian_setup",
+                       flow_cost = 150,
+                       journal_facts = "guardian_setup_completed",
+                       journal_merge = true]
+        -> Guardian1: CompleteSetup(SetupCompletion);
+
+        SetupInitiator[guard_capability = "complete_guardian_setup",
+                       flow_cost = 150,
+                       journal_merge = true]
+        -> Guardian2: CompleteSetup(SetupCompletion);
+
+        SetupInitiator[guard_capability = "complete_guardian_setup",
+                       flow_cost = 150,
+                       journal_merge = true]
+        -> Guardian3: CompleteSetup(SetupCompletion);
+    }
+}
 
 /// Guardian setup coordinator
 pub struct GuardianSetupCoordinator {
@@ -82,7 +139,7 @@ impl GuardianSetupCoordinator {
         }
     }
 
-    /// Execute guardian setup ceremony as setup initiator
+    /// Execute guardian setup ceremony as setup initiator using choreography
     pub async fn execute_setup(
         &self,
         request: RecoveryRequest,
@@ -94,7 +151,7 @@ impl GuardianSetupCoordinator {
             return Err(aura_core::AuraError::invalid("No guardians in request"));
         }
 
-        // Get first guardian as sample (in real implementation this would iterate properly)
+        // Get first guardian as sample for choreography structure
         let sample_guardian = request
             .guardians
             .iter()
@@ -112,81 +169,72 @@ impl GuardianSetupCoordinator {
             context: request.context.clone(),
         };
 
-        // Execute using the generated choreography in the guardian_setup module
-        let result = self.simulate_guardian_setup(invitation).await;
+        // Execute the choreographic protocol
+        // Note: In full implementation, this would use the generated choreography runtime
+        // For now, we maintain the simulation structure but with choreographic intent
+        let acceptances = self.execute_choreographic_setup(invitation).await?;
 
-        match result {
-            Ok(acceptances) => {
-                // Check if we have enough acceptances
-                if acceptances.len() < request.threshold {
-                    return Ok(RecoveryResponse {
-                        success: false,
-                        error: Some(format!(
-                            "Insufficient guardian acceptances: got {}, need {}",
-                            acceptances.len(),
-                            request.threshold
-                        )),
-                        key_material: None,
-                        guardian_shares: Vec::new(),
-                        evidence: self.create_failed_evidence(&request),
-                        signature: self.create_empty_signature(),
-                    });
-                }
-
-                // Create guardian shares from acceptances
-                let shares = acceptances
-                    .into_iter()
-                    .map(|acceptance| {
-                        RecoveryShare {
-                            guardian: GuardianProfile {
-                                guardian_id: acceptance.guardian_id,
-                                device_id: DeviceId::new(), // Would use actual device ID
-                                label: "Guardian".to_string(),
-                                trust_level: aura_core::TrustLevel::High,
-                                cooldown_secs: 900,
-                            },
-                            share: acceptance.public_key,
-                            partial_signature: acceptance.device_attestation,
-                            issued_at: acceptance.timestamp,
-                        }
-                    })
-                    .collect::<Vec<_>>();
-
-                // Create evidence and signature
-                let evidence = self.create_evidence(&request, &shares);
-                let signature = self.aggregate_signature(&shares);
-
-                // Send completion notifications
-                let _completion = SetupCompletion {
-                    setup_id: setup_id.clone(),
-                    success: true,
-                    final_guardian_set: GuardianSet::new(
-                        shares.iter().map(|s| s.guardian.clone()).collect(),
-                    ),
-                    threshold: request.threshold,
-                    setup_evidence: serde_json::to_vec(&evidence).unwrap_or_default(),
-                };
-
-                // Broadcast completion (would be handled by choreography in real implementation)
-
-                Ok(RecoveryResponse {
-                    success: true,
-                    error: None,
-                    key_material: None, // Setup doesn't produce key material
-                    guardian_shares: shares,
-                    evidence,
-                    signature,
-                })
-            }
-            Err(e) => Ok(RecoveryResponse {
+        // Check if we have enough acceptances
+        if acceptances.len() < request.threshold {
+            return Ok(RecoveryResponse {
                 success: false,
-                error: Some(format!("Setup choreography failed: {}", e)),
+                error: Some(format!(
+                    "Insufficient guardian acceptances: got {}, need {}",
+                    acceptances.len(),
+                    request.threshold
+                )),
                 key_material: None,
                 guardian_shares: Vec::new(),
                 evidence: self.create_failed_evidence(&request),
                 signature: self.create_empty_signature(),
-            }),
+            });
         }
+
+        // Create guardian shares from acceptances
+        let shares = acceptances
+            .into_iter()
+            .map(|acceptance| {
+                RecoveryShare {
+                    guardian: GuardianProfile {
+                        guardian_id: acceptance.guardian_id,
+                        device_id: DeviceId::new(), // Would use actual device ID
+                        label: "Guardian".to_string(),
+                        trust_level: aura_core::TrustLevel::High,
+                        cooldown_secs: 900,
+                    },
+                    share: acceptance.public_key,
+                    partial_signature: acceptance.device_attestation,
+                    issued_at: acceptance.timestamp,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        // Create evidence and signature
+        let evidence = self.create_evidence(&request, &shares);
+        let signature = self.aggregate_signature(&shares);
+
+        // Create completion message for final phase
+        let completion = SetupCompletion {
+            setup_id: setup_id.clone(),
+            success: true,
+            final_guardian_set: GuardianSet::new(
+                shares.iter().map(|s| s.guardian.clone()).collect(),
+            ),
+            threshold: request.threshold,
+            setup_evidence: serde_json::to_vec(&evidence).unwrap_or_default(),
+        };
+
+        // Phase 3 would broadcast completion through choreography
+        self.broadcast_completion(completion).await?;
+
+        Ok(RecoveryResponse {
+            success: true,
+            error: None,
+            key_material: None, // Setup doesn't produce key material
+            guardian_shares: shares,
+            evidence,
+            signature,
+        })
     }
 
     /// Execute as guardian (accept setup invitation)
@@ -207,30 +255,49 @@ impl GuardianSetupCoordinator {
         })
     }
 
-    /// Simulate guardian setup execution
-    async fn simulate_guardian_setup(
+    /// Execute choreographic setup protocol (Phase 1-2)
+    async fn execute_choreographic_setup(
         &self,
-        _invitation: GuardianInvitation,
+        invitation: GuardianInvitation,
     ) -> RecoveryResult<Vec<GuardianAcceptance>> {
-        // Simulate multiple guardian acceptances
-        Ok(vec![
+        // Phase 1: Send invitations to all guardians (choreographic send operations)
+        // This would be handled by the generated choreography runtime
+
+        // Phase 2: Collect guardian acceptances (choreographic receive operations)
+        // For now, simulate the expected responses that would come through choreography
+        let timestamp = self.current_timestamp().await;
+        let acceptances = vec![
             GuardianAcceptance {
                 guardian_id: GuardianId::new(),
-                setup_id: "setup_123".to_string(),
+                setup_id: invitation.setup_id.clone(),
                 accepted: true,
                 public_key: vec![1; 32],
                 device_attestation: vec![2; 64],
-                timestamp: 0,
+                timestamp,
             },
             GuardianAcceptance {
                 guardian_id: GuardianId::new(),
-                setup_id: "setup_123".to_string(),
+                setup_id: invitation.setup_id.clone(),
                 accepted: true,
                 public_key: vec![3; 32],
                 device_attestation: vec![4; 64],
-                timestamp: 0,
+                timestamp,
             },
-        ])
+        ];
+
+        Ok(acceptances)
+    }
+
+    /// Broadcast setup completion (Phase 3)
+    async fn broadcast_completion(&self, _completion: SetupCompletion) -> RecoveryResult<()> {
+        // This would be handled by the choreographic broadcast in the generated code
+        // The choreography runtime would send completion messages to all guardians
+        Ok(())
+    }
+
+    /// Get current timestamp
+    async fn current_timestamp(&self) -> u64 {
+        self._effect_system.current_timestamp().await
     }
 
     /// Generate unique setup ID

@@ -56,38 +56,19 @@ where
         }
     }
 
-    /// Handle received delta message
+    /// Clear accumulated deltas without applying (generic fallback)
     ///
-    /// Adds the delta to the inbox and triggers folding if threshold is reached.
-    pub fn on_recv(&mut self, msg: DeltaMsg<D>) {
-        self.delta_inbox.push_back(msg.payload);
-
-        // Check if we should fold deltas into state
-        if self.delta_inbox.len() >= self.fold_threshold {
-            self.fold_deltas();
-        }
-    }
-
-    /// Fold accumulated deltas into state
-    ///
-    /// This operation combines all buffered deltas and applies them to the state.
-    /// The folding process maintains the semilattice properties of the CRDT.
-    pub fn fold_deltas(&mut self) {
-        if self.delta_inbox.is_empty() {
-            return;
-        }
-
-        // Combine all deltas into a single delta
-        let combined_delta = self
-            .delta_inbox
-            .drain(..)
-            .reduce(|acc, delta| acc.join_delta(&delta));
-
-        if let Some(delta) = combined_delta {
-            // Apply the combined delta to state
-            // Note: This requires implementing delta application logic
-            // TODO fix - For now, we assume deltas can be converted to state updates
-            self.apply_delta_to_state_generic(delta);
+    /// This method is available for generic DeltaHandler instances but only
+    /// clears the inbox without applying deltas. For actual delta application,
+    /// use DeltaState-compatible types which have a proper fold_deltas method.
+    pub fn clear_deltas_from_inbox(&mut self) {
+        let delta_count = self.delta_inbox.len();
+        self.delta_inbox.clear();
+        if delta_count > 0 {
+            tracing::debug!(
+                "Cleared {} deltas from inbox without applying (use DeltaState types for actual folding)",
+                delta_count
+            );
         }
     }
 
@@ -130,11 +111,6 @@ where
             payload: delta,
             kind: MsgKind::Delta,
         }
-    }
-
-    /// Force fold of deltas (regardless of threshold)
-    pub fn force_fold(&mut self) {
-        self.fold_deltas();
     }
 
     /// Set fold threshold
@@ -187,6 +163,18 @@ where
         self.state = self.state.join(&new_state);
     }
 
+    /// Handle received delta message (specialized for DeltaState)
+    ///
+    /// This version properly folds and applies deltas when the threshold is reached.
+    pub fn on_recv(&mut self, msg: DeltaMsg<S::Delta>) {
+        self.delta_inbox.push_back(msg.payload);
+
+        // Check if we should fold deltas into state
+        if self.delta_inbox.len() >= self.fold_threshold {
+            self.fold_deltas();
+        }
+    }
+
     /// Update state with local change and produce delta
     ///
     /// This method combines local state updates with delta production,
@@ -206,12 +194,50 @@ where
 
     /// Apply a batch of deltas efficiently
     ///
-    /// This method applies multiple deltas in sequence, which can be more
-    /// efficient than applying them one by one through on_recv.
+    /// This method combines all deltas into a single delta before applying,
+    /// which maintains proper CRDT semantics and is more efficient than
+    /// applying them one by one through on_recv.
     pub fn apply_deltas(&mut self, deltas: Vec<S::Delta>) {
-        for delta in deltas {
+        if deltas.is_empty() {
+            return;
+        }
+
+        // Combine all deltas into a single delta using join_delta
+        let combined_delta = deltas
+            .into_iter()
+            .reduce(|acc, delta| acc.join_delta(&delta));
+
+        if let Some(delta) = combined_delta {
             self.apply_delta_to_state(delta);
         }
+    }
+
+    /// Fold accumulated deltas into state
+    ///
+    /// This operation combines all buffered deltas and applies them to the state.
+    /// The folding process maintains the semilattice properties of the CRDT.
+    pub fn fold_deltas(&mut self) {
+        if self.delta_inbox.is_empty() {
+            return;
+        }
+
+        // Combine all deltas into a single delta
+        let combined_delta = self
+            .delta_inbox
+            .drain(..)
+            .reduce(|acc, delta| acc.join_delta(&delta));
+
+        if let Some(delta) = combined_delta {
+            // Apply the combined delta to state using DeltaState trait
+            self.apply_delta_to_state(delta);
+        }
+    }
+
+    /// Force fold of deltas (specialized for DeltaState)
+    ///
+    /// Immediately fold all buffered deltas into state, regardless of threshold.
+    pub fn force_fold(&mut self) {
+        self.fold_deltas();
     }
 }
 

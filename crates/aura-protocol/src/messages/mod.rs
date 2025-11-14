@@ -23,13 +23,9 @@ pub mod social;
 // Shared infrastructure
 pub mod common;
 
-// Message routing and context isolation
-pub mod router;
-
 // Re-export main message types organized by domain
 pub use common::*;
 pub use crypto::*;
-pub use router::*;
 pub use social::*;
 
 /// Current wire format version
@@ -40,7 +36,7 @@ pub const WIRE_FORMAT_VERSION: u16 = 1;
 pub enum AuraMessage {
     /// Threshold cryptography protocol messages
     Crypto(crypto::CryptoMessage),
-    /// Social coordination protocol messages  
+    /// Social coordination protocol messages
     Social(social::SocialMessage),
 }
 

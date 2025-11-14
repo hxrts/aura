@@ -42,11 +42,23 @@ impl AgentEffectSystemHandler {
         }
     }
 
+    /// Create agent effect system with an existing core effect system (recommended)
+    /// 
+    /// This is the preferred method as it follows proper dependency injection.
+    /// Use this instead of `for_testing()` for better testability and control.
+    pub fn with_core_effects(device_id: DeviceId, core_effects: Arc<RwLock<AuraEffectSystem>>) -> Self {
+        Self::new(device_id, core_effects)
+    }
+
     /// Create agent effect system for testing
+    /// 
+    /// # Deprecated
+    /// This method creates the effect system internally which makes testing difficult.
+    /// Consider using `with_core_effects()` instead for better dependency injection.
     pub fn for_testing(device_id: DeviceId) -> Self {
-        let config = crate::effects::EffectSystemConfig::for_testing(device_id);
         let core_effects = Arc::new(RwLock::new(
-            AuraEffectSystem::new(config).expect("Failed to create test effect system")
+            AuraEffectSystem::new(crate::effects::EffectSystemConfig::for_testing(device_id))
+                .expect("Failed to create test effect system"),
         ));
         Self::new(device_id, core_effects)
     }
@@ -500,34 +512,47 @@ impl ConfigurationEffects for AgentEffectSystemHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::*;
+    use aura_macros::aura_test;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
 
-    #[tokio::test]
-    async fn test_agent_system_creation() {
-        let device_id = DeviceId::new();
-        let system = AgentEffectSystemHandler::for_testing(device_id);
+    #[aura_test]
+    async fn test_agent_system_creation() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let core_effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
+        let system = AgentEffectSystemHandler::with_core_effects(device_id, core_effects);
 
         assert_eq!(system.device_id(), device_id);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_device_info() {
-        let device_id = DeviceId::new();
-        let system = AgentEffectSystemHandler::for_testing(device_id);
+    #[aura_test]
+    async fn test_device_info() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let core_effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
+        let system = AgentEffectSystemHandler::with_core_effects(device_id, core_effects);
 
-        let info = system.get_device_info().await.unwrap();
+        let info = system.get_device_info().await?;
         assert_eq!(info.device_id, device_id);
         assert!(info.hardware_security);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_health_check() {
-        let device_id = DeviceId::new();
-        let system = AgentEffectSystemHandler::for_testing(device_id);
+    #[aura_test]
+    async fn test_health_check() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let core_effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
+        let system = AgentEffectSystemHandler::with_core_effects(device_id, core_effects);
 
-        let health = system.health_check().await.unwrap();
+        let health = system.health_check().await?;
         assert!(matches!(
             health.overall_status,
             HealthStatus::Healthy | HealthStatus::Degraded { .. }
         ));
+        Ok(())
     }
 }

@@ -15,6 +15,11 @@ aura-wot = { path = "../aura-wot" }
 aura-crypto = { path = "../aura-crypto" }
 aura-effects = { path = "../aura-effects" }
 aura-protocol = { path = "../aura-protocol" }
+aura-macros = { path = "../aura-macros" }
+aura-mpst = { path = "../aura-mpst" }
+
+# Choreography dependencies (required by aura-macros)
+rumpsteak-aura-choreography = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

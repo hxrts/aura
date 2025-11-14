@@ -6,16 +6,14 @@
 use async_trait::async_trait;
 use std::time::Duration;
 
-use aura_protocol::handlers::{
-    AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
-};
 use aura_core::identifiers::DeviceId;
 use aura_core::LocalSessionType;
+use aura_protocol::handlers::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 
 /// Time control middleware for simulation effect system
 pub struct TimeControlMiddleware {
     device_id: DeviceId,
-    time_seed: u64,
+    _time_seed: u64,
     execution_mode: ExecutionMode,
     current_time: Duration,
     time_acceleration: f64,
@@ -27,7 +25,7 @@ impl TimeControlMiddleware {
     pub fn new(device_id: DeviceId, time_seed: u64) -> Self {
         Self {
             device_id,
-            time_seed,
+            _time_seed: time_seed,
             execution_mode: ExecutionMode::Simulation { seed: time_seed },
             current_time: Duration::ZERO,
             time_acceleration: 1.0,
@@ -125,7 +123,7 @@ impl AuraHandler for TimeControlMiddleware {
                 Ok(serde_json::to_vec(&true).unwrap_or_default())
             }
             "resume" => {
-                // Return resumed state  
+                // Return resumed state
                 Ok(serde_json::to_vec(&false).unwrap_or_default())
             }
             "is_paused" => Ok(serde_json::to_vec(&self.is_paused).unwrap_or_default()),
@@ -160,6 +158,7 @@ impl AuraHandler for TimeControlMiddleware {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_protocol::handlers::context_immutable::AuraContext;
 
     #[tokio::test]
     async fn test_time_control_creation() {
@@ -167,7 +166,7 @@ mod tests {
         let middleware = TimeControlMiddleware::for_simulation(device_id, 42);
 
         assert_eq!(middleware.device_id(), device_id);
-        assert_eq!(middleware.time_seed, 42);
+        assert_eq!(middleware._time_seed, 42);
         assert_eq!(
             middleware.execution_mode(),
             ExecutionMode::Simulation { seed: 42 }
@@ -190,12 +189,12 @@ mod tests {
     #[tokio::test]
     async fn test_time_operations() {
         let device_id = DeviceId::new();
-        let mut middleware = TimeControlMiddleware::for_simulation(device_id, 42);
-        let mut ctx = AuraContext::for_testing(device_id);
+        let middleware = TimeControlMiddleware::for_simulation(device_id, 42);
+        let ctx = AuraContext::for_testing(device_id);
 
         // Test get current time
         let result = middleware
-            .execute_effect(EffectType::TimeControl, "get_current_time", b"", &mut ctx)
+            .execute_effect(EffectType::TimeControl, "get_current_time", b"", &ctx)
             .await;
         assert!(result.is_ok());
 
@@ -205,7 +204,7 @@ mod tests {
                 EffectType::TimeControl,
                 "advance_time",
                 b"5000", // 5 seconds
-                &mut ctx,
+                &ctx,
             )
             .await;
         assert!(result.is_ok());
@@ -213,14 +212,14 @@ mod tests {
 
         // Test pause
         let result = middleware
-            .execute_effect(EffectType::TimeControl, "pause", b"", &mut ctx)
+            .execute_effect(EffectType::TimeControl, "pause", b"", &ctx)
             .await;
         assert!(result.is_ok());
         assert!(middleware.is_paused);
 
         // Test resume
         let result = middleware
-            .execute_effect(EffectType::TimeControl, "resume", b"", &mut ctx)
+            .execute_effect(EffectType::TimeControl, "resume", b"", &ctx)
             .await;
         assert!(result.is_ok());
         assert!(!middleware.is_paused);

@@ -364,7 +364,7 @@ impl CryptoEffects for MockCryptoHandler {
     fn crypto_capabilities(&self) -> Vec<String> {
         vec![
             "mock_ed25519".to_string(),
-            "mock_blake3".to_string(),
+            "mock_hash".to_string(),
             "mock_frost".to_string(),
             "mock_chacha20".to_string(),
             "mock_aes_gcm".to_string(),

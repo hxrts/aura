@@ -4,10 +4,13 @@
 //! coverage for all defined effect traits and that the effect system
 //! functions correctly with comprehensive validation.
 
+#![allow(clippy::disallowed_methods)]
+
 use aura_core::identifiers::DeviceId;
+use aura_protocol::handlers::context_immutable::AuraContext;
 use aura_protocol::handlers::{
-    erased::AuraHandlerFactory, AuraContext, AuraHandler, AuraHandlerError, CompositeHandler,
-    EffectRegistry, EffectType, ExecutionMode, RegistrableHandler,
+    erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, CompositeHandler, EffectRegistry,
+    EffectType, ExecutionMode, RegistrableHandler,
 };
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -96,11 +99,11 @@ async fn test_effect_registry_validation() {
     #[async_trait::async_trait]
     impl AuraHandler for RegistrableCompositeHandler {
         async fn execute_effect(
-            &mut self,
+            &self,
             effect_type: EffectType,
             operation: &str,
             parameters: &[u8],
-            ctx: &mut AuraContext,
+            ctx: &AuraContext,
         ) -> Result<Vec<u8>, AuraHandlerError> {
             self.0
                 .execute_effect(effect_type, operation, parameters, ctx)
@@ -108,9 +111,9 @@ async fn test_effect_registry_validation() {
         }
 
         async fn execute_session(
-            &mut self,
+            &self,
             session: aura_core::LocalSessionType,
-            ctx: &mut AuraContext,
+            ctx: &AuraContext,
         ) -> Result<(), AuraHandlerError> {
             self.0.execute_session(session, ctx).await
         }
@@ -127,11 +130,11 @@ async fn test_effect_registry_validation() {
     #[async_trait::async_trait]
     impl RegistrableHandler for RegistrableCompositeHandler {
         async fn execute_operation_bytes(
-            &mut self,
+            &self,
             effect_type: EffectType,
             operation: &str,
             parameters: &[u8],
-            ctx: &mut AuraContext,
+            ctx: &AuraContext,
         ) -> Result<Vec<u8>, AuraHandlerError> {
             self.execute_effect(effect_type, operation, parameters, ctx)
                 .await
@@ -180,7 +183,7 @@ async fn test_effect_registry_validation() {
 /// Test that the unified handler bridge provides complete coverage
 #[tokio::test]
 async fn test_unified_bridge_coverage() {
-    let device_id = DeviceId::from(Uuid::new_v4());
+    let _device_id = DeviceId::from(Uuid::new_v4());
     // Note: UnifiedAuraHandlerBridge requires AuraEffects trait which CompositeHandler may not implement
     // Skipping this test for now as it requires trait implementation changes
     // let composite = CompositeHandler::for_testing(device_id.into());
@@ -281,10 +284,10 @@ async fn test_handler_determinism() {
     let device_id = DeviceId::from(Uuid::new_v4());
 
     // Create two handlers with the same device ID for deterministic testing
-    let mut handler1 = AuraHandlerFactory::for_testing(device_id);
-    let mut handler2 = AuraHandlerFactory::for_testing(device_id);
-    let mut ctx1 = aura_protocol::handlers::AuraContext::for_testing(device_id);
-    let mut ctx2 = aura_protocol::handlers::AuraContext::for_testing(device_id);
+    let handler1 = AuraHandlerFactory::for_testing(device_id);
+    let handler2 = AuraHandlerFactory::for_testing(device_id);
+    let ctx1 = AuraContext::for_testing(device_id);
+    let ctx2 = AuraContext::for_testing(device_id);
 
     // Both should be in simulation mode (deterministic)
     assert!(handler1.execution_mode().is_deterministic());
@@ -295,11 +298,11 @@ async fn test_handler_determinism() {
     let params_bytes = bincode::serialize(&random_params).unwrap();
 
     let result1 = handler1
-        .execute_effect(EffectType::Random, "random_bytes", &params_bytes, &mut ctx1)
+        .execute_effect(EffectType::Random, "random_bytes", &params_bytes, &ctx1)
         .await;
 
     let result2 = handler2
-        .execute_effect(EffectType::Random, "random_bytes", &params_bytes, &mut ctx2)
+        .execute_effect(EffectType::Random, "random_bytes", &params_bytes, &ctx2)
         .await;
 
     // Both should succeed

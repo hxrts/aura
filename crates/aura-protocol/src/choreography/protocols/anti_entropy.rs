@@ -44,7 +44,7 @@ use aura_core::hash::hash;
 use aura_core::{CausalContext, DeviceId, SessionId};
 use aura_mpst::journal_coupling::JournalAnnotation;
 use aura_wot::Capability;
-use rumpsteak_aura_choreography::choreography;
+use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 
 /// Anti-entropy choreography configuration

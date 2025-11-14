@@ -416,7 +416,7 @@ impl QuintBridge {
     /// Basic parser for Quint specifications that extracts common patterns:
     /// - Module declarations
     /// - Invariant definitions (def invariant_*)
-    /// - Property definitions (def property_*) 
+    /// - Property definitions (def property_*)
     /// - Temporal properties (always, eventually)
     fn parse_quint_content(
         &self,
@@ -510,9 +510,7 @@ impl QuintBridge {
     ) -> Result<QuintTemporalProperty> {
         // Example: "temporal eventually_consistent = eventually (all_participants.forall(p => p.state == CONSISTENT))"
 
-        let property_type = if line.contains("always") {
-            "LTL".to_string()
-        } else if line.contains("eventually") {
+        let property_type = if line.contains("always") || line.contains("eventually") {
             "LTL".to_string()
         } else {
             "CTL".to_string()
@@ -614,16 +612,11 @@ impl QuintBridge {
         spec: &QuintSpec,
         safety_prop: &QuintSafetyProperty,
     ) -> Result<Vec<ChaosScenario>> {
-        let mut scenarios = Vec::new();
-
-        // Create direct violation scenario
-        scenarios.push(self.create_direct_safety_violation_scenario(spec, safety_prop)?);
-
-        // Create byzantine participant scenarios
-        scenarios.push(self.create_byzantine_safety_violation_scenario(spec, safety_prop)?);
-
-        // Create network partition scenarios
-        scenarios.push(self.create_network_safety_violation_scenario(spec, safety_prop)?);
+        let scenarios = vec![
+            self.create_direct_safety_violation_scenario(spec, safety_prop)?,
+            self.create_byzantine_safety_violation_scenario(spec, safety_prop)?,
+            self.create_network_safety_violation_scenario(spec, safety_prop)?,
+        ];
 
         Ok(scenarios)
     }

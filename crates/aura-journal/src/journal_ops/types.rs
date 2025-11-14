@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn test_node_addition() {
         let mut journal = KeyJournal::new();
-        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([1u8; 16]));
         let node = KeyNode::new(node_id, NodeKind::Device, NodePolicy::Any);
 
         assert!(journal.add_node(node).is_ok());
@@ -321,8 +321,8 @@ mod tests {
         let mut journal = KeyJournal::new();
 
         // Add two nodes
-        let parent_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let child_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let parent_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
+        let child_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([3u8; 16]));
         let parent = KeyNode::new(
             parent_id,
             NodeKind::Identity,
@@ -350,12 +350,12 @@ mod tests {
     #[test]
     fn test_invalid_edge() {
         let mut journal = KeyJournal::new();
-        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([4u8; 16]));
 
         // Try to add edge to non-existent node
         let edge = KeyEdge::new(
             node_id,
-            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
             EdgeKind::Contains,
         );
         assert!(journal.add_edge(edge).is_err());
@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn test_self_referential_edge() {
         let mut journal = KeyJournal::new();
-        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([6u8; 16]));
         let node = KeyNode::new(node_id, NodeKind::Device, NodePolicy::Any);
 
         journal.add_node(node).unwrap();

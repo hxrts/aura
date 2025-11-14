@@ -3,6 +3,9 @@
 //! Implements guardian-specific authorization logic including threshold validation,
 //! recovery context verification, and guardian relationship checks.
 
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::unwrap_used)]
+
 use crate::authorization_bridge::{AuthorizationError, AuthorizationRequest, PermissionGrant};
 use aura_core::{DeviceId, GuardianId};
 use aura_verify::VerifiedIdentity;

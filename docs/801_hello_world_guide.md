@@ -27,7 +27,7 @@ The build compiles all Aura components and generates the CLI binary. This takes 
 Create a simple ping-pong choreography. This protocol demonstrates basic message exchange between two devices.
 
 ```rust
-use aura_macros::aura_choreography;
+use aura_macros::choreography;
 use aura_core::effects::{ConsoleEffects, NetworkEffects, TimeEffects};
 use serde::{Serialize, Deserialize};
 

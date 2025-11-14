@@ -234,11 +234,11 @@ mod tests {
             epoch: Epoch::from(1),
             cost: 100,
             nonce,
-            prev: previous,
+            prev: aura_core::Hash32(previous),
             sig: {
                 let mut sig = [0u8; 32];
                 sig[0..8].copy_from_slice(&nonce.to_le_bytes());
-                sig
+                sig.to_vec()
             },
         }
     }
@@ -247,8 +247,8 @@ mod tests {
     async fn test_receipt_chain() {
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from([1u8; 16]);
-        let dst = DeviceId::from([2u8; 16]);
+        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Add receipts
         let receipt1 = create_test_receipt(context.clone(), src, dst, 1, [0u8; 32]);
@@ -257,7 +257,9 @@ mod tests {
             .await
             .unwrap();
 
-        let receipt2 = create_test_receipt(context.clone(), src, dst, 2, receipt1.sig);
+        let mut prev_hash = [0u8; 32];
+        prev_hash[..receipt1.sig.len().min(32)].copy_from_slice(&receipt1.sig[..receipt1.sig.len().min(32)]);
+        let receipt2 = create_test_receipt(context.clone(), src, dst, 2, prev_hash);
         manager
             .add_receipt(context.clone(), receipt2.clone())
             .await
@@ -269,7 +271,7 @@ mod tests {
 
         // Check head hash
         let head = manager.head_hash(&context).await.unwrap().unwrap();
-        assert_eq!(head, receipt2.sig);
+        assert_eq!(head, receipt2.sig.as_slice());
 
         // Check chain length
         let length = manager.chain_length(&context).await.unwrap();
@@ -280,8 +282,8 @@ mod tests {
     async fn test_chain_verification() {
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from([1u8; 16]);
-        let dst = DeviceId::from([2u8; 16]);
+        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Build valid chain
         let receipt1 = create_test_receipt(context.clone(), src, dst, 1, [0u8; 32]);
@@ -290,7 +292,9 @@ mod tests {
             .await
             .unwrap();
 
-        let receipt2 = create_test_receipt(context.clone(), src, dst, 2, receipt1.sig);
+        let mut prev_hash2 = [0u8; 32];
+        prev_hash2[..receipt1.sig.len().min(32)].copy_from_slice(&receipt1.sig[..receipt1.sig.len().min(32)]);
+        let receipt2 = create_test_receipt(context.clone(), src, dst, 2, prev_hash2);
         manager
             .add_receipt(context.clone(), receipt2)
             .await
@@ -304,14 +308,14 @@ mod tests {
     async fn test_range_queries() {
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from([1u8; 16]);
-        let dst = DeviceId::from([2u8; 16]);
+        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Add multiple receipts
         let mut prev_hash = [0u8; 32];
         for i in 1..=10 {
             let receipt = create_test_receipt(context.clone(), src, dst, i, prev_hash);
-            prev_hash = receipt.sig;
+            prev_hash[..receipt.sig.len().min(32)].copy_from_slice(&receipt.sig[..receipt.sig.len().min(32)]);
             manager.add_receipt(context.clone(), receipt).await.unwrap();
         }
 
@@ -327,8 +331,8 @@ mod tests {
     async fn test_concurrent_access() {
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from([1u8; 16]);
-        let dst = DeviceId::from([2u8; 16]);
+        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Spawn concurrent writers
         let mut handles = vec![];
@@ -356,8 +360,8 @@ mod tests {
     async fn test_chain_removal() {
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from([1u8; 16]);
-        let dst = DeviceId::from([2u8; 16]);
+        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Add receipt
         let receipt = create_test_receipt(context.clone(), src, dst, 1, [0u8; 32]);

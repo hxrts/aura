@@ -26,6 +26,7 @@ use tokio::sync::RwLock;
 #[derive(Debug)]
 pub struct IntegratedSbbSystem {
     /// Device ID for this node
+    #[allow(dead_code)]
     device_id: DeviceId,
     /// Capability-aware flooding coordinator
     flooding_coordinator: CapabilityAwareSbbCoordinator,
@@ -173,7 +174,7 @@ impl IntegratedSbbSystem {
         &mut self,
         request: SbbDiscoveryRequest,
     ) -> AuraResult<SbbDiscoveryResult> {
-        let config = SbbConfig::default();
+        let _config = SbbConfig::default();
 
         // Serialize transport offer
         let payload_bytes = bincode::serialize(&request.transport_offer).map_err(|e| {
@@ -277,7 +278,9 @@ impl IntegratedSbbSystem {
 
     /// Clean up expired envelopes and flow budget periods
     pub fn cleanup_expired_data(&mut self) {
-        let current_time = std::time::SystemTime::now()
+        #[allow(clippy::disallowed_methods)]
+        let now = std::time::SystemTime::now();
+        let current_time = now
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();

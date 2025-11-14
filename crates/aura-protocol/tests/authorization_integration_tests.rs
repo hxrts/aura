@@ -2,7 +2,7 @@
 //!
 //! These tests verify the end-to-end authorization flow combining:
 //! - Identity verification (aura-verify)
-//! - Capability-based authorization (aura-wot)  
+//! - Capability-based authorization (aura-wot)
 //! - Guard chain predicate enforcement (CapGuard → FlowGuard)
 //! - Integration with effect system
 //!
@@ -25,17 +25,17 @@ async fn test_device_tree_operation_authorization() {
     // Setup test data
     let account_id = AccountId::from_bytes([1u8; 32]);
     let device_id = DeviceId::new();
-    let context_id = ContextId::new(account_id.to_string());
+    let _context_id = ContextId::new(account_id.to_string());
 
     // Create device identity proof
     let signature = Ed25519Signature::from_slice(&[0u8; 64]).unwrap();
-    let identity_proof = IdentityProof::Device {
+    let _identity_proof = IdentityProof::Device {
         device_id,
         signature,
     };
 
     // Create tree operation
-    let tree_op = TreeOp {
+    let _tree_op = TreeOp {
         parent_epoch: 1,
         parent_commitment: [0u8; 32],
         op: TreeOpKind::AddLeaf {
@@ -54,13 +54,13 @@ async fn test_device_tree_operation_authorization() {
         "message:send",
     ]);
     let tree_context = TreeAuthzContext::new(account_id, 1);
-    let authz_context = AuthorizationContext::new(account_id, capabilities, tree_context);
+    let _authz_context = AuthorizationContext::new(account_id, capabilities, tree_context);
 
     // Create mock key material (in real implementation, this would contain actual keys)
     // let key_material = KeyMaterial::mock_for_testing(); // Commented out for compilation
 
     // Test the complete authorization flow
-    let message = b"test_tree_operation_message";
+    let _message = b"test_tree_operation_message";
 
     // Note: This test would pass in a real implementation with properly configured effect system
     // For now, we verify the API structure and error handling
@@ -162,7 +162,7 @@ async fn test_send_guard_chain_structure() {
     };
 
     // Create send guard chain
-    let send_guard = create_send_guard(
+    let _send_guard = create_send_guard(
         message_capability.clone(),
         context_id.clone(),
         peer_device,
@@ -186,7 +186,7 @@ async fn test_send_guard_chain_structure() {
     // This functionality should be tested through the public guard evaluation API
 }
 
-/// Test scenario: Authorization context with local policy constraints  
+/// Test scenario: Authorization context with local policy constraints
 #[tokio::test]
 async fn test_authorization_context_with_local_policy() {
     let account_id = AccountId::from_bytes([1u8; 32]);
@@ -341,6 +341,7 @@ async fn test_authorization_error_handling() {
 }
 
 // Mock implementations for traits that would be implemented by real effect system
+#[allow(dead_code)]
 trait PermissionGrantExt {
     fn is_well_formed(&self) -> bool;
 }
@@ -356,6 +357,7 @@ impl PermissionGrantExt for PermissionGrant {
     }
 }
 
+#[allow(dead_code)]
 trait CapabilitySetExt {
     fn is_well_formed(&self) -> bool;
     fn is_empty(&self) -> bool;

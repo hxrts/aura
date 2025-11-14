@@ -21,10 +21,11 @@ impl Default for OperationId {
 impl OperationId {
     /// Create a new zero operation ID
     ///
-    /// Returns an operation ID with all zeros. For actual operation IDs, use
+    /// Create a new random operation ID. For actual operation IDs, use
     /// `from_bytes` with bytes from a RandomEffects handler.
+    #[allow(clippy::disallowed_methods)]
     pub fn new() -> Self {
-        Self(Uuid::nil())
+        Self(Uuid::new_v4())
     }
 
     /// Create an operation ID from random bytes (for use with effects)

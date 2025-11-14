@@ -124,8 +124,8 @@ mod tests {
     #[tokio::test]
     async fn test_handler_basic_functionality() {
         let device_id = DeviceId::from(Uuid::new_v4());
-        let mut handler = AuraHandlerFactory::for_testing(device_id);
-        let mut ctx = AuraContext::for_testing(device_id);
+        let handler = AuraHandlerFactory::for_testing(device_id);
+        let ctx = AuraContext::for_testing(device_id);
 
         // Test supports_effect - testing handler includes Console effects (SilentConsoleHandler)
         assert!(handler.supports_effect(EffectType::Console));
@@ -142,7 +142,7 @@ mod tests {
         // Test session execution - may fail if session type system is not fully implemented
         // This is acceptable TODO fix - For now as we're testing the handler infrastructure, not sessions
         let session = LocalSessionType::new("test".to_string(), vec![]);
-        let _result = handler.execute_session(session, &mut ctx).await;
+        let _result = handler.execute_session(session, &ctx).await;
         // Note: We don't assert result.is_ok() because session execution depends on
         // the session type system which may not be fully implemented yet
     }
@@ -151,7 +151,7 @@ mod tests {
     async fn test_typed_effect_execution() {
         let device_id = DeviceId::from(Uuid::new_v4());
         let mut handler = AuraHandlerFactory::for_testing(device_id);
-        let mut ctx = AuraContext::for_testing(device_id);
+        let ctx = AuraContext::for_testing(device_id);
 
         // Test typed effect execution
         #[derive(serde::Serialize, serde::Deserialize)]
@@ -167,7 +167,7 @@ mod tests {
             EffectType::Console,
             "print",
             params,
-            &mut ctx,
+            &ctx,
         )
         .await;
 

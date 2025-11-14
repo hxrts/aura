@@ -162,7 +162,9 @@ impl LoggingSystemHandler {
         let log_buffer = self.log_buffer.clone();
         let stats = self.stats.clone();
 
-        tokio::spawn(async move {
+        // Only spawn if a runtime is available, otherwise logs will be dropped
+        if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+            tokio::spawn(async move {
             while let Some(entry) = log_rx.recv().await {
                 // Update statistics
                 {
@@ -192,7 +194,8 @@ impl LoggingSystemHandler {
                     _ => info!("{}: {}", entry.component, entry.message),
                 }
             }
-        });
+            });
+        }
     }
 
     /// Start the background audit processor
@@ -200,7 +203,9 @@ impl LoggingSystemHandler {
         let audit_buffer = self.audit_buffer.clone();
         let stats = self.stats.clone();
 
-        tokio::spawn(async move {
+        // Only spawn if a runtime is available, otherwise audit events will be dropped
+        if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+            tokio::spawn(async move {
             while let Some(entry) = audit_rx.recv().await {
                 // Update statistics
                 {
@@ -234,7 +239,8 @@ impl LoggingSystemHandler {
                     entry.event_type, entry.actor, entry.action, entry.resource, entry.outcome
                 );
             }
-        });
+            });
+        }
     }
 
     /// Get current uptime in seconds

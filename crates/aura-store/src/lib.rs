@@ -98,10 +98,8 @@ pub struct StorageStats {
 /// Simple in-memory storage implementation (for testing)
 #[derive(Debug, Clone)]
 pub struct MemoryStorage {
-    /// Stored chunks by ID (kept for backward compatibility)
+    /// Stored chunks by ID
     pub chunks: HashMap<ChunkId, Vec<u8>>,
-    /// Key-value storage
-    storage: std::sync::Arc<std::sync::RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 impl MemoryStorage {
@@ -109,7 +107,6 @@ impl MemoryStorage {
     pub fn new() -> Self {
         Self {
             chunks: HashMap::new(),
-            storage: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
         }
     }
 
@@ -129,7 +126,7 @@ impl MemoryStorage {
     }
 
     /// Store a chunk by ID
-    pub async fn store_chunk(
+    pub fn store_chunk(
         &mut self,
         chunk_id: ChunkId,
         data: Vec<u8>,
@@ -139,7 +136,7 @@ impl MemoryStorage {
     }
 
     /// Retrieve a chunk by ID
-    pub async fn fetch_chunk(
+    pub fn fetch_chunk(
         &self,
         chunk_id: &ChunkId,
     ) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
@@ -147,7 +144,7 @@ impl MemoryStorage {
     }
 
     /// Delete a chunk by ID
-    pub async fn delete_chunk(
+    pub fn delete_chunk(
         &mut self,
         chunk_id: &ChunkId,
     ) -> Result<(), aura_core::effects::StorageError> {
@@ -168,53 +165,51 @@ impl Default for MemoryStorage {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_memory_storage_basic() {
+    #[test]
+    fn test_memory_storage_basic() {
         let mut storage = MemoryStorage::new();
 
         // Store a chunk
         let chunk_id = ChunkId::from_bytes(b"test data");
         storage
             .store_chunk(chunk_id.clone(), b"test data".to_vec())
-            .await
             .unwrap();
 
         // Retrieve the chunk
-        let data = storage.fetch_chunk(&chunk_id).await.unwrap();
+        let data = storage.fetch_chunk(&chunk_id).unwrap();
         assert_eq!(data, Some(b"test data".to_vec()));
 
         // Basic chunk storage test complete
     }
 
-    #[tokio::test]
-    async fn test_memory_storage_not_found() {
+    #[test]
+    fn test_memory_storage_not_found() {
         let storage = MemoryStorage::new();
         let chunk_id = ChunkId::from_bytes(b"nonexistent");
 
-        let data = storage.fetch_chunk(&chunk_id).await.unwrap();
+        let data = storage.fetch_chunk(&chunk_id).unwrap();
         assert_eq!(data, None);
     }
 
-    #[tokio::test]
-    async fn test_memory_storage_delete() {
+    #[test]
+    fn test_memory_storage_delete() {
         let mut storage = MemoryStorage::new();
 
         let chunk_id = ChunkId::from_bytes(b"test data");
         storage
             .store_chunk(chunk_id.clone(), b"test data".to_vec())
-            .await
             .unwrap();
 
         // Delete the chunk
-        storage.delete_chunk(&chunk_id).await.unwrap();
+        storage.delete_chunk(&chunk_id).unwrap();
 
         // Verify it's gone
-        let data = storage.fetch_chunk(&chunk_id).await.unwrap();
+        let data = storage.fetch_chunk(&chunk_id).unwrap();
         assert_eq!(data, None);
     }
 
-    #[tokio::test]
-    async fn test_chunk_id_content_addressing() {
+    #[test]
+    fn test_chunk_id_content_addressing() {
         let mut storage = MemoryStorage::new();
 
         // Same content should produce same chunk ID
@@ -229,11 +224,10 @@ mod tests {
         // Store once
         storage
             .store_chunk(chunk_id1.clone(), data1.to_vec())
-            .await
             .unwrap();
 
         // Should be retrievable by either ID
-        let retrieved = storage.fetch_chunk(&chunk_id2).await.unwrap();
+        let retrieved = storage.fetch_chunk(&chunk_id2).unwrap();
         assert_eq!(retrieved, Some(data1.to_vec()));
     }
 }

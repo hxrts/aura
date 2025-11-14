@@ -4,7 +4,7 @@ Aura implements capability-based access control using meet-semilattice operation
 
 Capability operations follow mathematical laws that prevent privilege escalation. All capability decisions use meet-semilattice intersection to compute effective permissions. The system provides formal verification properties for security analysis.
 
-See [Web of Trust](200_web_of_trust.md) for trust evaluation. See [Authentication vs Authorization Architecture](101_authentication_system.md) for integration patterns.
+See [Web of Trust](200_web_of_trust.md) for trust evaluation. See [Authentication vs Authorization Architecture](101_auth_authz_system.md) for integration patterns.
 
 ---
 

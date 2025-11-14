@@ -1,5 +1,8 @@
 //! OTA upgrade orchestration helpers.
 
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::HashMap;
 
 use aura_core::{
@@ -106,7 +109,8 @@ impl UpgradeCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{hash_canonical, maintenance::IdentityEpochFence, AccountId};
+    use aura_core::{hash_canonical, AccountId};
+    use crate::maintenance::IdentityEpochFence;
 
     fn dummy_proposal(kind: UpgradeKind, fence: Option<IdentityEpochFence>) -> UpgradeProposal {
         UpgradeProposal {

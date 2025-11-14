@@ -126,7 +126,8 @@ impl TimeControlMiddleware {
                 }
 
                 TimeControlAction::SetAcceleration { factor } => {
-                    let clamped_factor = factor.clamp(state.min_acceleration, state.max_acceleration);
+                    let clamped_factor =
+                        factor.clamp(state.min_acceleration, state.max_acceleration);
                     state.acceleration_factor = clamped_factor;
 
                     Ok(json!({
@@ -142,7 +143,7 @@ impl TimeControlMiddleware {
                     let old_time = state.current_time;
                     state.current_time = timestamp;
                     state.last_update = Instant::now();
-                    
+
                     Ok(json!({
                         "action": "jump_to",
                         "target_timestamp": timestamp.as_millis(),
@@ -154,12 +155,12 @@ impl TimeControlMiddleware {
 
                 TimeControlAction::Checkpoint { id } => {
                     let checkpoint = TimeCheckpoint {
-                        id: id.clone(),
+                        _id: id.clone(),
                         timestamp: context.timestamp,
                         tick: context.tick,
                         acceleration_factor: state.acceleration_factor,
-                        created_at: Instant::now(),
-                        metadata: parameters.clone(),
+                        _created_at: Instant::now(),
+                        _metadata: parameters.clone(),
                     };
 
                     state.checkpoints.insert(id.clone(), checkpoint);
@@ -195,7 +196,9 @@ impl TimeControlMiddleware {
                 }
             }
         } else {
-            Err(SimulatorError::OperationFailed("Failed to acquire time control lock".to_string()))
+            Err(SimulatorError::OperationFailed(
+                "Failed to acquire time control lock".to_string(),
+            ))
         }
     }
 
@@ -229,11 +232,7 @@ impl TimeControlMiddleware {
     }
 
     /// Update time travel state if enabled
-    fn update_time_travel_state(
-        &self,
-        operation: &SimulatorOperation,
-        context: &SimulatorContext,
-    ) {
+    fn update_time_travel_state(&self, operation: &SimulatorOperation, context: &SimulatorContext) {
         if let Ok(mut state) = self.state.lock() {
             // Extract the acceleration_factor before borrowing time_travel mutably
             let acceleration_factor = state.acceleration_factor;
@@ -241,9 +240,9 @@ impl TimeControlMiddleware {
                 let entry = TimeTravelEntry {
                     tick: context.tick,
                     timestamp: context.timestamp,
-                    operation: format!("{:?}", operation),
-                    acceleration_factor,
-                    recorded_at: Instant::now(),
+                    _operation: format!("{:?}", operation),
+                    _acceleration_factor: acceleration_factor,
+                    _recorded_at: Instant::now(),
                 };
 
                 time_travel.add_entry(entry);
@@ -344,7 +343,7 @@ impl SimulatorMiddleware for TimeControlMiddleware {
                 enhanced_context
                     .metadata
                     .insert("time_control_action".to_string(), format!("{:?}", action));
-                
+
                 if let Ok(state) = self.state.lock() {
                     enhanced_context.metadata.insert(
                         "acceleration_factor".to_string(),
@@ -386,7 +385,7 @@ impl SimulatorMiddleware for TimeControlMiddleware {
                     "adjusted_delta_ms".to_string(),
                     adjusted_delta.as_millis().to_string(),
                 );
-                
+
                 if let Ok(state) = self.state.lock() {
                     enhanced_context.metadata.insert(
                         "acceleration_factor".to_string(),
@@ -464,12 +463,12 @@ impl SimulatorMiddleware for TimeControlMiddleware {
 /// Time checkpoint for restoration
 #[derive(Debug, Clone)]
 struct TimeCheckpoint {
-    id: String,
+    _id: String,
     timestamp: Duration,
     tick: u64,
     acceleration_factor: f64,
-    created_at: Instant,
-    metadata: HashMap<String, Value>,
+    _created_at: Instant,
+    _metadata: HashMap<String, Value>,
 }
 
 /// Time travel debugging state
@@ -500,9 +499,9 @@ impl TimeTravelState {
 struct TimeTravelEntry {
     tick: u64,
     timestamp: Duration,
-    operation: String,
-    acceleration_factor: f64,
-    recorded_at: Instant,
+    _operation: String,
+    _acceleration_factor: f64,
+    _recorded_at: Instant,
 }
 
 /// Real-time synchronization settings
@@ -545,7 +544,7 @@ mod tests {
             assert!(state.time_travel_state.is_some());
         } else {
             panic!("Failed to acquire state lock for test");
-        }
+        };
     }
 
     #[test]
@@ -581,7 +580,7 @@ mod tests {
     #[test]
     fn test_pause_functionality() {
         let middleware = TimeControlMiddleware::new();
-        
+
         // Set paused state
         if let Ok(mut state) = middleware.state.lock() {
             state.is_paused = true;

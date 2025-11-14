@@ -11,6 +11,7 @@ use crate::effects::{
     TimeEffects, TreeDigest, ValidationContext, ValidationResult, VoteDecision,
 };
 use aura_core::{AttestedOp, DeviceId, Hash32, TreeOpKind};
+use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -47,31 +48,8 @@ pub struct TreeOperationResult {
     pub sync_progress: Option<SyncProgress>,
 }
 
-/// Tree synchronization configuration
-#[derive(Debug, Clone)]
-pub struct TreeSyncConfig {
-    /// Coordinator device for sync
-    pub coordinator: DeviceId,
-    /// Replica devices to sync with
-    pub replicas: Vec<DeviceId>,
-    /// Target epoch to sync to (None = latest)
-    pub target_epoch: Option<u64>,
-    /// Maximum operations per batch
-    pub max_batch_size: usize,
-}
-
-/// Result of tree synchronization choreography
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TreeSyncResult {
-    /// Operations synchronized
-    pub operations_synced: usize,
-    /// Peers that participated
-    pub peers_synced: Vec<DeviceId>,
-    /// Final tree digest
-    pub final_digest: Option<TreeDigest>,
-    /// Whether sync succeeded
-    pub success: bool,
-}
+// Tree synchronization types moved to tree_sync module
+pub use super::tree_sync::{TreeSyncConfig, TreeSyncResult};
 
 /// Tree choreography error types
 #[derive(Debug, thiserror::Error)]
@@ -90,6 +68,8 @@ pub enum TreeChoreographyError {
     Handler(#[from] crate::handlers::AuraHandlerError),
     #[error("Coordination error: {0}")]
     Coordination(#[from] CoordinationError),
+    #[error("Tree sync error: {0}")]
+    TreeSync(#[from] TreeSyncChoreographyError),
 }
 
 /// Message types for tree operation approval choreography
@@ -138,52 +118,15 @@ pub struct TreeSyncNotification {
     pub progress: SyncProgress,
 }
 
-/// Message types for tree synchronization choreography
+// Message types for tree synchronization moved to tree_sync module
+use super::tree_sync::{
+    DigestRequest, DigestResponse, OperationRequest, OperationResponse,
+    SyncCompletion, SyncInitiation, TreeChoreographyError as TreeSyncChoreographyError
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncInitiation {
-    pub sync_id: uuid::Uuid,
-    pub coordinator: DeviceId,
-    pub target_epoch: Option<u64>,
-    pub max_batch_size: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DigestRequest {
-    pub sync_id: uuid::Uuid,
-    pub epoch_range: std::ops::Range<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DigestResponse {
-    pub sync_id: uuid::Uuid,
-    pub digest: TreeDigest,
-    pub replica_id: DeviceId,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OperationRequest {
-    pub sync_id: uuid::Uuid,
-    pub missing_ranges: Vec<std::ops::Range<u64>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OperationResponse {
-    pub sync_id: uuid::Uuid,
-    pub operations: Vec<AttestedOp>,
-    pub sender_id: DeviceId,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncCompletion {
-    pub sync_id: uuid::Uuid,
-    pub result: TreeSyncResult,
-}
-
-// TEMPORARILY DISABLED DUE TO MACRO CONFLICTS - needs investigation
 // Multi-party protocol for coordinating tree operations with validation and approval
-/*
 choreography! {
+    #[namespace = "tree_operation_approval"]
     protocol TreeOperationApproval {
         roles: Initiator, Approver1, Approver2, Approver3, Observer1, Observer2;
 
@@ -195,36 +138,35 @@ choreography! {
         Initiator -> Observer2: ProposeOperation(TreeOperationProposal);
 
         // Phase 2: Approvers validate and send results back
-        Approver1 -> Initiator: ValidateOperation(OperationValidation);
-        Approver2 -> Initiator: ValidateOperation(OperationValidation);
-        Approver3 -> Initiator: ValidateOperation(OperationValidation);
+        Approver1 -> Initiator: ValidateOperation(TreeOperationValidation);
+        Approver2 -> Initiator: ValidateOperation(TreeOperationValidation);
+        Approver3 -> Initiator: ValidateOperation(TreeOperationValidation);
 
         // Phase 3: Initiator requests approvals based on validation results
-        Initiator -> Approver1: RequestApproval(ApprovalRequest);
-        Initiator -> Approver2: RequestApproval(ApprovalRequest);
-        Initiator -> Approver3: RequestApproval(ApprovalRequest);
+        Initiator -> Approver1: RequestApproval(TreeApprovalRequest);
+        Initiator -> Approver2: RequestApproval(TreeApprovalRequest);
+        Initiator -> Approver3: RequestApproval(TreeApprovalRequest);
 
         // Phase 4: Approvers submit their votes
-        Approver1 -> Initiator: SubmitApproval(ApprovalResponse);
-        Approver2 -> Initiator: SubmitApproval(ApprovalResponse);
-        Approver3 -> Initiator: SubmitApproval(ApprovalResponse);
+        Approver1 -> Initiator: SubmitApproval(TreeApprovalResponse);
+        Approver2 -> Initiator: SubmitApproval(TreeApprovalResponse);
+        Approver3 -> Initiator: SubmitApproval(TreeApprovalResponse);
 
         // Phase 5: Initiator broadcasts execution result to all participants
-        Initiator -> Approver1: ExecuteOperation(OperationExecution);
-        Initiator -> Approver2: ExecuteOperation(OperationExecution);
-        Initiator -> Approver3: ExecuteOperation(OperationExecution);
-        Initiator -> Observer1: ExecuteOperation(OperationExecution);
-        Initiator -> Observer2: ExecuteOperation(OperationExecution);
+        Initiator -> Approver1: ExecuteOperation(TreeOperationExecution);
+        Initiator -> Approver2: ExecuteOperation(TreeOperationExecution);
+        Initiator -> Approver3: ExecuteOperation(TreeOperationExecution);
+        Initiator -> Observer1: ExecuteOperation(TreeOperationExecution);
+        Initiator -> Observer2: ExecuteOperation(TreeOperationExecution);
 
         // Phase 6: Initiator broadcasts sync progress to all participants
-        Initiator -> Approver1: SyncUpdate(SyncNotification);
-        Initiator -> Approver2: SyncUpdate(SyncNotification);
-        Initiator -> Approver3: SyncUpdate(SyncNotification);
-        Initiator -> Observer1: SyncUpdate(SyncNotification);
-        Initiator -> Observer2: SyncUpdate(SyncNotification);
+        Initiator -> Approver1: SyncUpdate(TreeSyncNotification);
+        Initiator -> Approver2: SyncUpdate(TreeSyncNotification);
+        Initiator -> Approver3: SyncUpdate(TreeSyncNotification);
+        Initiator -> Observer1: SyncUpdate(TreeSyncNotification);
+        Initiator -> Observer2: SyncUpdate(TreeSyncNotification);
     }
 }
-*/
 
 /// Execute tree operation approval choreography following the protocol guide pattern
 pub async fn execute_tree_operation_approval(
@@ -919,8 +861,9 @@ pub async fn execute_tree_synchronization(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::AuraEffectSystem;
     use aura_core::{LeafId, LeafNode, LeafRole, NodeIndex};
+    use aura_testkit::*;
+    use aura_macros::aura_test;
 
     fn create_test_approval_config() -> TreeApprovalConfig {
         TreeApprovalConfig {
@@ -951,51 +894,51 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_approval_config_validation() {
+    #[aura_test]
+    async fn test_approval_config_validation() -> aura_core::AuraResult<()> {
         let mut config = create_test_approval_config();
         config.threshold = 0;
 
-        let device_id = DeviceId::new();
-        let effect_config = crate::effects::EffectSystemConfig::for_testing(device_id);
-        let effect_system = AuraEffectSystem::new(effect_config).expect("Failed to create test effect system");
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let effect_system = fixture.effects();
 
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let result = runtime.block_on(execute_tree_operation_approval(
+        let result = execute_tree_operation_approval(
             device_id,
             config,
-            &effect_system,
-        ));
+            effect_system,
+        ).await;
 
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
             TreeChoreographyError::InvalidConfig(_)
         ));
+        Ok(())
     }
 
-    #[test]
-    fn test_sync_config_validation() {
+    #[aura_test]
+    async fn test_sync_config_validation() -> aura_core::AuraResult<()> {
         let mut config = create_test_sync_config();
         config.replicas.clear();
 
-        let device_id = DeviceId::new();
-        let effect_config = crate::effects::EffectSystemConfig::for_testing(device_id);
-        let effect_system = AuraEffectSystem::new(effect_config).expect("Failed to create test effect system");
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let effect_system = fixture.effects();
 
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let result = runtime.block_on(execute_tree_synchronization(
+        let result = execute_tree_synchronization(
             device_id,
             config,
             true,
             None,
-            &effect_system,
-        ));
+            effect_system,
+        ).await;
 
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
             TreeChoreographyError::InvalidConfig(_)
         ));
+        Ok(())
     }
 }

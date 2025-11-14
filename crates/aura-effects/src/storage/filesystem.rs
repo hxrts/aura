@@ -2,7 +2,7 @@
 //!
 //! This module provides production-grade filesystem storage with:
 //! - AES-256-GCM authenticated encryption at rest
-//! - BLAKE3 integrity verification with checksums
+//! - Hash integrity verification with checksums
 //! - Atomic write operations with temp files
 //! - Secure file permissions and access control
 //! - Storage quota monitoring and management
@@ -66,7 +66,7 @@ impl Default for SecureStorageConfig {
 /// Encrypted file metadata stored alongside data
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct EncryptedFileMetadata {
-    /// BLAKE3 hash of original data (before encryption)
+    /// Hash of original data (before encryption)
     data_hash: String,
     /// Size of original data in bytes
     data_size: u64,
@@ -194,7 +194,7 @@ impl FilesystemStorageHandler {
         Ok(nonce)
     }
 
-    /// Calculate BLAKE3 hash for integrity verification
+    /// Calculate hash for integrity verification
     fn calculate_hash(&self, data: &[u8]) -> String {
         hex::encode(aura_core::hash::hash(data))
     }

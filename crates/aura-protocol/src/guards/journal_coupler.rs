@@ -512,9 +512,10 @@ impl Default for JournalCouplerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handlers::ExecutionMode;
     use aura_core::DeviceId;
     use aura_mpst::journal_coupling::JournalAnnotation;
+    use aura_testkit::*;
+    use aura_macros::aura_test;
 
     #[tokio::test]
     async fn test_journal_coupler_creation() {
@@ -540,28 +541,28 @@ mod tests {
         assert!(coupler.annotations.contains_key("test_op"));
     }
 
-    #[tokio::test]
-    async fn test_journal_coupling_with_no_annotations() {
-        let device_id = DeviceId::new();
-        let mut effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    #[aura_test]
+    async fn test_journal_coupling_with_no_annotations() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let mut effect_system = (*fixture.effects()).clone();
         let coupler = JournalCoupler::new();
 
         let result = coupler
             .execute_with_coupling("no_annotation_op", &mut effect_system, |_| async {
                 Ok(42u32)
             })
-            .await
-            .unwrap();
+            .await?;
 
         assert_eq!(result.result, 42);
         assert!(result.journal_ops_applied.is_empty());
         assert!(result.coupling_metrics.coupling_successful);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_journal_coupling_with_facts_annotation() {
-        let device_id = DeviceId::new();
-        let mut effect_system = AuraEffectSystem::new(device_id, ExecutionMode::Testing);
+    #[aura_test]
+    async fn test_journal_coupling_with_facts_annotation() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let mut effect_system = (*fixture.effects()).clone();
 
         let mut coupler = JournalCoupler::new();
         let annotation = JournalAnnotation::with_delta(
@@ -574,12 +575,12 @@ mod tests {
             .execute_with_coupling("test_facts_op", &mut effect_system, |_| async {
                 Ok("facts_applied".to_string())
             })
-            .await
-            .unwrap();
+            .await?;
 
         assert_eq!(result.result, "facts_applied");
         assert!(!result.journal_ops_applied.is_empty());
         assert!(result.coupling_metrics.coupling_successful);
+        Ok(())
     }
 
     #[tokio::test]

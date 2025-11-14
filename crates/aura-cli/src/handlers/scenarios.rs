@@ -5,7 +5,7 @@
 use crate::ScenarioAction;
 use anyhow::Result;
 use aura_protocol::{AuraEffectSystem, ConsoleEffects, StorageEffects};
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Handle scenario operations through effects
 pub async fn handle_scenarios(effects: &AuraEffectSystem, action: &ScenarioAction) -> Result<()> {
@@ -31,11 +31,11 @@ pub async fn handle_scenarios(effects: &AuraEffectSystem, action: &ScenarioActio
         } => {
             handle_run(
                 effects,
-                directory.as_ref(),
+                directory.as_deref(),
                 pattern.as_deref(),
                 *parallel,
                 *max_parallel,
-                output_file.as_ref(),
+                output_file.as_deref(),
                 *detailed_report,
             )
             .await
@@ -50,7 +50,7 @@ pub async fn handle_scenarios(effects: &AuraEffectSystem, action: &ScenarioActio
 }
 
 /// Handle scenario discovery through effects
-async fn handle_discover(effects: &AuraEffectSystem, root: &PathBuf, validate: bool) -> Result<()> {
+async fn handle_discover(effects: &AuraEffectSystem, root: &Path, validate: bool) -> Result<()> {
     let _ = effects
         .log_info(&format!("Discovering scenarios in: {}", root.display()))
         .await;
@@ -96,11 +96,7 @@ async fn handle_discover(effects: &AuraEffectSystem, root: &PathBuf, validate: b
 }
 
 /// Handle scenario listing through effects
-async fn handle_list(
-    effects: &AuraEffectSystem,
-    directory: &PathBuf,
-    detailed: bool,
-) -> Result<()> {
+async fn handle_list(effects: &AuraEffectSystem, directory: &Path, detailed: bool) -> Result<()> {
     let _ = effects
         .log_info(&format!("Listing scenarios in: {}", directory.display()))
         .await;
@@ -126,7 +122,7 @@ async fn handle_list(
 /// Handle scenario validation through effects
 async fn handle_validate(
     effects: &AuraEffectSystem,
-    directory: &PathBuf,
+    directory: &Path,
     strictness: Option<&str>,
 ) -> Result<()> {
     let _ = effects
@@ -151,11 +147,11 @@ async fn handle_validate(
 /// Handle scenario execution through effects
 async fn handle_run(
     effects: &AuraEffectSystem,
-    directory: Option<&PathBuf>,
+    directory: Option<&Path>,
     pattern: Option<&str>,
     parallel: bool,
     max_parallel: Option<usize>,
-    output_file: Option<&PathBuf>,
+    output_file: Option<&Path>,
     detailed_report: bool,
 ) -> Result<()> {
     let _ = effects.log_info("Running scenarios").await;
@@ -201,8 +197,8 @@ async fn handle_run(
 /// Handle report generation through effects
 async fn handle_report(
     effects: &AuraEffectSystem,
-    input: &PathBuf,
-    output: &PathBuf,
+    input: &Path,
+    output: &Path,
     format: Option<&str>,
     detailed: bool,
 ) -> Result<()> {
@@ -243,7 +239,7 @@ async fn handle_report(
 /// Discover scenarios through storage effects
 async fn discover_scenarios_through_effects(
     effects: &AuraEffectSystem,
-    root: &PathBuf,
+    root: &Path,
 ) -> Result<Vec<String>> {
     // Simulate scenario discovery
     // In real implementation, would recursively scan directories
@@ -285,7 +281,7 @@ async fn validate_scenarios_through_effects(
 /// List scenarios through storage effects
 async fn list_scenarios_through_effects(
     effects: &AuraEffectSystem,
-    directory: &PathBuf,
+    directory: &Path,
 ) -> Result<Vec<ScenarioInfo>> {
     let scenarios = vec![
         ScenarioInfo {
@@ -335,7 +331,7 @@ async fn display_detailed_scenario_info(effects: &AuraEffectSystem, scenario: &S
 /// Execute scenarios through effects
 async fn execute_scenarios_through_effects(
     effects: &AuraEffectSystem,
-    _directory: Option<&PathBuf>,
+    _directory: Option<&Path>,
     pattern: Option<&str>,
     parallel: bool,
     max_parallel: Option<usize>,
@@ -389,7 +385,7 @@ async fn execute_scenarios_through_effects(
 /// Save scenario results through storage effects
 async fn save_scenario_results(
     effects: &AuraEffectSystem,
-    output_path: &PathBuf,
+    output_path: &Path,
     results: &[ScenarioResult],
     detailed: bool,
 ) -> Result<()> {
@@ -430,7 +426,7 @@ fn generate_report_from_results(
     let report = match format.unwrap_or("text") {
         "json" => serde_json::to_string_pretty(&results)
             .map_err(|e| anyhow::anyhow!("Failed to format JSON: {}", e))?,
-        "text" | _ => {
+        _ => {
             let mut report = String::new();
             report.push_str("=== Scenario Results Report ===\n\n");
 

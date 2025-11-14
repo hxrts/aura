@@ -6,7 +6,7 @@
 
 use aura_core::{
     semilattice::{Bottom, CmApply, CvState, Dedup, DeltaState, JoinSemilattice, MeetSemiLattice},
-    CausalContext, DeviceId, SessionId,
+    CausalContext, DeviceId, SessionId, AuraResult,
 };
 use aura_protocol::{
     choreography::protocols::anti_entropy::{
@@ -14,10 +14,9 @@ use aura_protocol::{
     },
     effects::{
         semilattice::CrdtCoordinator,
-        system::AuraEffectSystem,
     },
-    handlers::ExecutionMode,
 };
+use aura_macros::aura_test;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -227,8 +226,8 @@ impl aura_core::semilattice::MvState for PermissionSet {}
 
 // === Integration Tests ===
 
-#[tokio::test]
-async fn test_cv_crdt_choreography_integration() {
+#[aura_test]
+async fn test_cv_crdt_choreography_integration() -> AuraResult<()> {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
 
@@ -252,8 +251,9 @@ async fn test_cv_crdt_choreography_integration() {
         aura_protocol::effects::semilattice::CvHandler::with_state(state_b.clone())
     );
 
-    // Create effect systems
-    let effect_system = AuraEffectSystem::new(device_a, ExecutionMode::Testing);
+    // Create test fixture
+    let fixture = aura_testkit::create_test_fixture_with_device_id(device_a).await?;
+    let effect_system = fixture.effects();
 
     // Configure anti-entropy
     let config = AntiEntropyConfig {
@@ -275,10 +275,12 @@ async fn test_cv_crdt_choreography_integration() {
     let (sync_result, updated_coordinator) = result.unwrap();
     assert!(sync_result.success, "Sync should report success");
     assert_eq!(updated_coordinator.device_id(), device_a);
+    
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_cm_crdt_choreography_integration() {
+#[aura_test]
+async fn test_cm_crdt_choreography_integration() -> AuraResult<()> {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
 
@@ -286,8 +288,9 @@ async fn test_cm_crdt_choreography_integration() {
     let coordinator_a = CrdtCoordinator::with_cm(device_a, CmTestCounter::new());
     let coordinator_b = CrdtCoordinator::with_cm(device_b, CmTestCounter::new());
 
-    // Create effect systems
-    let effect_system = AuraEffectSystem::new(device_a, ExecutionMode::Testing);
+    // Create test fixture
+    let fixture = aura_testkit::create_test_fixture_with_device_id(device_a).await?;
+    let effect_system = fixture.effects();
 
     // Configure anti-entropy
     let config = AntiEntropyConfig {
@@ -308,10 +311,12 @@ async fn test_cm_crdt_choreography_integration() {
     assert!(result.is_ok(), "CM CRDT synchronization should succeed");
     let (sync_result, _) = result.unwrap();
     assert!(sync_result.success, "Sync should report success");
+    
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_delta_crdt_choreography_integration() {
+#[aura_test]
+async fn test_delta_crdt_choreography_integration() -> AuraResult<()> {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
 
@@ -326,8 +331,9 @@ async fn test_delta_crdt_choreography_integration() {
         aura_protocol::effects::semilattice::DeltaHandler::with_state(DeltaTestCounter::new())
     );
 
-    // Create effect systems
-    let effect_system = AuraEffectSystem::new(device_a, ExecutionMode::Testing);
+    // Create test fixture
+    let fixture = aura_testkit::create_test_fixture_with_device_id(device_a).await?;
+    let effect_system = fixture.effects();
 
     // Configure anti-entropy
     let config = AntiEntropyConfig {
@@ -348,10 +354,12 @@ async fn test_delta_crdt_choreography_integration() {
     assert!(result.is_ok(), "Delta CRDT synchronization should succeed");
     let (sync_result, _) = result.unwrap();
     assert!(sync_result.success, "Sync should report success");
+    
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_mv_crdt_choreography_integration() {
+#[aura_test]
+async fn test_mv_crdt_choreography_integration() -> AuraResult<()> {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
 
@@ -370,8 +378,9 @@ async fn test_mv_crdt_choreography_integration() {
         )
     );
 
-    // Create effect systems
-    let effect_system = AuraEffectSystem::new(device_a, ExecutionMode::Testing);
+    // Create test fixture
+    let fixture = aura_testkit::create_test_fixture_with_device_id(device_a).await?;
+    let effect_system = fixture.effects();
 
     // Configure anti-entropy
     let config = AntiEntropyConfig {
@@ -392,10 +401,12 @@ async fn test_mv_crdt_choreography_integration() {
     assert!(result.is_ok(), "MV CRDT synchronization should succeed");
     let (sync_result, _) = result.unwrap();
     assert!(sync_result.success, "Sync should report success");
+    
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_multi_crdt_choreography_integration() {
+#[aura_test]
+async fn test_multi_crdt_choreography_integration() -> AuraResult<()> {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
 
@@ -422,8 +433,9 @@ async fn test_multi_crdt_choreography_integration() {
     assert!(!coordinator_a.has_handler(CrdtType::Delta));
     assert!(!coordinator_a.has_handler(CrdtType::Meet));
 
-    // Create effect systems
-    let effect_system = AuraEffectSystem::new(device_a, ExecutionMode::Testing);
+    // Create test fixture
+    let fixture = aura_testkit::create_test_fixture_with_device_id(device_a).await?;
+    let effect_system = fixture.effects();
 
     // Configure anti-entropy
     let config = AntiEntropyConfig {
@@ -448,10 +460,12 @@ async fn test_multi_crdt_choreography_integration() {
     // Should sync both CV and CM CRDTs
     assert!(sync_result.ops_sent >= 2, "Should sync at least 2 CRDT types");
     assert_eq!(final_coordinator.device_id(), device_a);
+    
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_crdt_coordinator_builder_patterns() {
+#[aura_test]
+async fn test_crdt_coordinator_builder_patterns() -> AuraResult<()> {
     let device_id = DeviceId::new();
 
     // Test CV-only builder
@@ -483,10 +497,12 @@ async fn test_crdt_coordinator_builder_patterns() {
     assert!(multi_coordinator.has_handler(CrdtType::Commutative));
     assert!(!multi_coordinator.has_handler(CrdtType::Delta));
     assert!(!multi_coordinator.has_handler(CrdtType::Meet));
+    
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_sync_request_creation_and_handling() {
+#[aura_test]
+async fn test_sync_request_creation_and_handling() -> AuraResult<()> {
     let device_id = DeviceId::new();
     let session_id = SessionId::new();
 
@@ -494,13 +510,15 @@ async fn test_sync_request_creation_and_handling() {
     let mut coordinator = CrdtCoordinator::with_cv_state(device_id, TestCounter::new());
 
     // Test sync request creation
-    let request = coordinator.create_sync_request(session_id, CrdtType::Convergent).unwrap();
+    let request = coordinator.create_sync_request(session_id, CrdtType::Convergent)?;
     assert_eq!(request.session_id, session_id);
     assert!(matches!(request.crdt_type, CrdtType::Convergent));
 
     // Test sync request handling
-    let response = coordinator.handle_sync_request(request).await.unwrap();
+    let response = coordinator.handle_sync_request(request).await?;
     assert_eq!(response.session_id, session_id);
     assert!(matches!(response.crdt_type, CrdtType::Convergent));
     assert!(matches!(response.sync_data, aura_protocol::choreography::protocols::anti_entropy::CrdtSyncData::FullState(_)));
+    
+    Ok(())
 }

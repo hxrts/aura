@@ -1,5 +1,7 @@
 //! Rich visualization for recovery state in CLI.
 
+#![allow(clippy::disallowed_methods)]
+
 use aura_recovery::types::RecoveryEvidence;
 use std::fmt::Write;
 
@@ -7,28 +9,25 @@ use std::fmt::Write;
 pub fn format_recovery_evidence(evidence: &RecoveryEvidence) -> String {
     let mut output = String::new();
 
-    writeln!(
+    // Writing to String cannot fail, so we use the _ pattern to ignore Results
+    let _ = writeln!(
         &mut output,
         "╔══════════════════════════════════════════════════════════════╗"
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "║                    Recovery Evidence                        ║"
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "╠══════════════════════════════════════════════════════════════╣"
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "║ Account ID:        {}",
         format_field(&evidence.account_id.to_string(), 39)
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "║ Recovering Device: {}",
         format_field(
@@ -36,77 +35,67 @@ pub fn format_recovery_evidence(evidence: &RecoveryEvidence) -> String {
                 [..16.min(evidence.recovering_device.to_string().len())],
             39
         )
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "║ Issued At:         {}",
         format_field(&format_timestamp(evidence.issued_at), 39)
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "║ Guardians:         {} approvals",
         format_field(&evidence.guardians.len().to_string(), 28)
-    )
-    .unwrap();
+    );
 
     if !evidence.disputes.is_empty() {
-        writeln!(
+        let _ = writeln!(
             &mut output,
             "║ Disputes:          {} filed",
             format_field(&evidence.disputes.len().to_string(), 33)
-        )
-        .unwrap();
+        );
     }
 
-    writeln!(
+    let _ = writeln!(
         &mut output,
         "╠══════════════════════════════════════════════════════════════╣"
-    )
-    .unwrap();
-    writeln!(&mut output, "║ Timeline:").unwrap();
+    );
+    let _ = writeln!(&mut output, "║ Timeline:");
 
     let dispute_ends = format_timestamp(evidence.dispute_window_ends_at);
     let cooldown_ends = format_timestamp(evidence.cooldown_expires_at);
 
-    writeln!(
+    let _ = writeln!(
         &mut output,
         "║   • Dispute window closes: {}",
         format_field(&dispute_ends, 31)
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "║   • Guardian cooldown expires: {}",
         format_field(&cooldown_ends, 27)
-    )
-    .unwrap();
+    );
 
     if !evidence.disputes.is_empty() {
-        writeln!(
+        let _ = writeln!(
             &mut output,
             "╠══════════════════════════════════════════════════════════════╣"
-        )
-        .unwrap();
-        writeln!(&mut output, "║ Disputes:").unwrap();
+        );
+        let _ = writeln!(&mut output, "║ Disputes:");
         for (idx, dispute) in evidence.disputes.iter().enumerate() {
-            writeln!(
+            let _ = writeln!(
                 &mut output,
                 "║   {}. Guardian {} - \"{}\"",
                 idx + 1,
                 &dispute.guardian_id.to_string()[..8.min(dispute.guardian_id.to_string().len())],
                 &dispute.reason[..40.min(dispute.reason.len())]
-            )
-            .unwrap();
+            );
         }
     }
 
-    writeln!(
+    let _ = writeln!(
         &mut output,
         "╚══════════════════════════════════════════════════════════════╝"
-    )
-    .unwrap();
+    );
 
     output
 }
@@ -136,38 +125,35 @@ pub fn format_evidence_list(evidence_list: &[RecoveryEvidence]) -> String {
     let total_disputes: usize = evidence_list.iter().map(|e| e.disputes.len()).sum();
     let total_guardians: usize = evidence_list.iter().map(|e| e.guardians.len()).sum();
 
-    writeln!(
+    let _ = writeln!(
         &mut output,
         "\n📜 Recovery History ({} records):",
         evidence_list.len()
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "   Total guardian approvals: {}, Total disputes: {}\n",
         total_guardians, total_disputes
-    )
-    .unwrap();
+    );
 
     for (idx, evidence) in evidence_list.iter().take(10).enumerate() {
-        writeln!(&mut output, "Record {}:", idx + 1).unwrap();
+        let _ = writeln!(&mut output, "Record {}:", idx + 1);
         output.push_str(&format_recovery_evidence(evidence));
-        writeln!(&mut output).unwrap();
+        let _ = writeln!(&mut output);
     }
 
     if evidence_list.len() > 10 {
-        writeln!(
+        let _ = writeln!(
             &mut output,
             "... and {} more records (showing most recent 10)",
             evidence_list.len() - 10
-        )
-        .unwrap();
+        );
     }
 
     output
 }
 
-/// Format a dashboard view with all recovery information  
+/// Format a dashboard view with all recovery information
 pub fn format_recovery_dashboard(
     _pending_count: usize,
     evidence_list: &[RecoveryEvidence],
@@ -175,49 +161,42 @@ pub fn format_recovery_dashboard(
 ) -> String {
     let mut output = String::new();
 
-    writeln!(
+    let _ = writeln!(
         &mut output,
         "╔══════════════════════════════════════════════════════════════╗"
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "║              Guardian Recovery Dashboard                     ║"
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "╠══════════════════════════════════════════════════════════════╣"
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "║ Total Disputes:     {}",
         format_field(&total_disputes.to_string(), 39)
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "║ Evidence Records:   {}",
         format_field(&evidence_list.len().to_string(), 39)
-    )
-    .unwrap();
-    writeln!(
+    );
+    let _ = writeln!(
         &mut output,
         "╚══════════════════════════════════════════════════════════════╝"
-    )
-    .unwrap();
-    writeln!(&mut output).unwrap();
+    );
+    let _ = writeln!(&mut output);
 
     if !evidence_list.is_empty() && evidence_list.len() <= 3 {
         output.push_str(&format_evidence_list(evidence_list));
     } else if !evidence_list.is_empty() {
-        writeln!(
+        let _ = writeln!(
             &mut output,
             "Use 'aura recovery history' to view {} evidence records.",
             evidence_list.len()
-        )
-        .unwrap();
+        );
     }
 
     output
@@ -269,10 +248,10 @@ mod tests {
 
     #[test]
     fn test_format_timestamp() {
-        let now = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = match SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(_) => return, // Skip test if system time is invalid
+        };
 
         let recent = format_timestamp(now - 30);
         assert!(recent.contains("seconds ago"));

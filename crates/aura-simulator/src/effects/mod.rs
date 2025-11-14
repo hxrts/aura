@@ -8,8 +8,10 @@ pub mod middleware;
 pub mod system;
 
 // Re-export core components
-pub use system::{SimulationEffectSystem, SimulationEffectSystemFactory, SimulationEffectSystemStats};
 pub use middleware::{
-    FaultInjectionMiddleware, TimeControlMiddleware, StateInspectionMiddleware,
-    PropertyCheckingMiddleware, ChaosCoordinationMiddleware,
+    ChaosCoordinationMiddleware, FaultInjectionMiddleware, PropertyCheckingMiddleware,
+    StateInspectionMiddleware, TimeControlMiddleware,
+};
+pub use system::{
+    SimulationEffectSystem, SimulationEffectSystemFactory, SimulationEffectSystemStats,
 };

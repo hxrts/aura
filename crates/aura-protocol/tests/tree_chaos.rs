@@ -129,10 +129,10 @@ fn test_policy_weakening_prevented() {
     use std::cmp::Ordering;
 
     // Weaker policy is not >= current policy
-    let is_stricter_or_equal = match current_policy.partial_cmp(&weaker_policy) {
-        Some(Ordering::Less) | Some(Ordering::Equal) => true,
-        _ => false,
-    };
+    let is_stricter_or_equal = matches!(
+        current_policy.partial_cmp(&weaker_policy),
+        Some(Ordering::Less) | Some(Ordering::Equal)
+    );
 
     assert!(
         !is_stricter_or_equal,
@@ -438,7 +438,7 @@ fn test_byzantine_quorum_threshold() {
     let honest_nodes = 7; // 70% honest
 
     // Policy requires 7-of-10 threshold (70%)
-    let policy = Policy::Threshold {
+    let _policy = Policy::Threshold {
         m: 7,
         n: total_participants,
     };

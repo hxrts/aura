@@ -24,7 +24,7 @@
 pub mod guards;
 
 /// Journal-coupling annotations and CRDT integration
-pub mod journal_coupling;
+pub mod journal;
 
 /// Leakage budget tracking for privacy contracts
 pub mod leakage;
@@ -35,6 +35,9 @@ pub mod context;
 /// MPST runtime extensions
 pub mod runtime;
 
+/// Extension effects for Aura-specific annotations
+pub mod extensions;
+
 // Deleted modules: analysis, infrastructure, privacy_verification
 // These provided custom choreography infrastructure that duplicated rumpsteak-aura
 
@@ -42,75 +45,52 @@ pub mod runtime;
 
 pub use context::{ContextIsolation, ContextType};
 pub use guards::{CapabilityGuard, GuardSyntax};
-pub use journal_coupling::{JournalAnnotation, JournalCoupling};
+pub use journal::{JournalAnnotation, JournalCoupling};
 pub use leakage::{LeakageBudget, LeakageTracker};
-pub use runtime::{AuraRuntime, ExecutionContext};
+pub use runtime::{
+    AuraEndpoint, AuraHandler, AuraRuntime, ConnectionState, ExecutionContext, ExecutionMode,
+};
 
 // === Extension Registry ===
 
-/// Extension registry for aura-macros generated code
-pub struct ExtensionRegistry {
-    guards: std::collections::HashMap<String, String>,
-    flow_costs: std::collections::HashMap<String, u64>,
-    journal_facts: std::collections::HashMap<String, String>,
-}
-
-impl ExtensionRegistry {
-    /// Create a new extension registry
-    pub fn new() -> Self {
-        Self {
-            guards: std::collections::HashMap::new(),
-            flow_costs: std::collections::HashMap::new(),
-            journal_facts: std::collections::HashMap::new(),
-        }
-    }
-    
-    /// Register a capability guard
-    pub fn register_guard(&mut self, capability: &str, role: &str) {
-        self.guards.insert(role.to_string(), capability.to_string());
-    }
-    
-    /// Register a flow cost
-    pub fn register_flow_cost(&mut self, cost: u64, role: &str) {
-        self.flow_costs.insert(role.to_string(), cost);
-    }
-    
-    /// Register a journal fact
-    pub fn register_journal_fact(&mut self, fact: &str, role: &str) {
-        self.journal_facts.insert(role.to_string(), fact.to_string());
-    }
-}
-
-impl Default for ExtensionRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// Re-export rumpsteak-aura ExtensionRegistry for public API
+pub use rumpsteak_aura_choreography::effects::ExtensionRegistry;
 
 // === Integration Function ===
 
-/// Execute choreography with aura-mpst runtime integration
-pub async fn execute_choreography(
-    _namespace: &str,
-    runtime: &mut AuraRuntime,
-    _context: &ExecutionContext,
-) -> MpstResult<()> {
-    // Placeholder integration with rumpsteak-aura
-    // In full implementation, this would:
-    // 1. Create rumpsteak session types program
-    // 2. Apply extension registry to runtime
-    // 3. Execute with rumpsteak-aura interpreter
-    
-    runtime.validate()?;
-    println!("Choreography execution completed successfully");
+/// Execute choreography with aura-mpst runtime integration using rumpsteak-aura
+pub async fn execute_choreography<M>(
+    handler: &mut AuraHandler,
+    endpoint: &mut AuraEndpoint,
+    program: rumpsteak_aura_choreography::effects::Program<DeviceId, M>,
+) -> MpstResult<()>
+where
+    M: rumpsteak_aura_choreography::effects::ProgramMessage
+        + serde::Serialize
+        + for<'de> serde::Deserialize<'de>
+        + Send
+        + Sync
+        + 'static,
+{
+    // Validate runtime state before execution
+    handler.runtime().validate()?;
+
+    // Execute the program through rumpsteak-aura interpreter
+    rumpsteak_aura_choreography::effects::interpret_extensible(handler, endpoint, program)
+        .await
+        .map_err(|e| {
+            MpstError::Core(aura_core::AuraError::invalid(format!(
+                "Choreography execution failed: {}",
+                e
+            )))
+        })?;
+
     Ok(())
 }
 
 // === Foundation Re-exports ===
 
-pub use aura_core::{
-    AuraError, AuraResult, Cap, DeviceId, Journal, JournalEffects,
-};
+pub use aura_core::{AuraError, AuraResult, Cap, DeviceId, Journal, JournalEffects};
 
 /// Standard result type for MPST operations
 pub type MpstResult<T> = std::result::Result<T, MpstError>;
@@ -148,7 +128,6 @@ pub enum MpstError {
         violation: String,
     },
 
-    
     /// Core error wrapped
     #[error("Core error: {0}")]
     Core(#[from] aura_core::AuraError),
@@ -180,5 +159,4 @@ impl MpstError {
             violation: violation.into(),
         }
     }
-
 }

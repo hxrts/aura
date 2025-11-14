@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 //! Aura Simulator Library
 //!
 //! This crate implements simulation functionality through composable middleware layers that handle:
@@ -59,8 +61,7 @@
 //!     &context,
 //! )?;
 //! ```
-
-#![allow(missing_docs)]
+#![allow(clippy::disallowed_methods)]
 
 // Core middleware system
 pub mod middleware;
@@ -92,15 +93,15 @@ pub mod testkit_bridge;
 // Re-export core middleware types for external usage
 pub use middleware::{
     ByzantineStrategy, ChaosCoordinationMiddleware, ChaosStrategy, FaultSimulationMiddleware,
-    FaultType, LogLevel, NetworkConfig, PerformanceMetrics, PropertyCheckingMiddleware, PropertyViolationType, Result,
-    ScenarioInjectionMiddleware, SimulationOutcome, SimulatorConfig, SimulatorContext,
-    SimulatorError, SimulatorHandler, SimulatorMiddleware, SimulatorMiddlewareStack,
-    SimulatorOperation, SimulatorStackBuilder, StateInspectionMiddleware, StateQuery, StatelessEffectsMiddleware,
-    TimeConfig, TimeControlAction, TimeControlMiddleware,
+    FaultType, LogLevel, NetworkConfig, PerformanceMetrics, PropertyCheckingMiddleware,
+    PropertyViolationType, Result, ScenarioInjectionMiddleware, SimulationOutcome, SimulatorConfig,
+    SimulatorContext, SimulatorError, SimulatorHandler, SimulatorMiddleware,
+    SimulatorMiddlewareStack, SimulatorOperation, SimulatorStackBuilder, StateInspectionMiddleware,
+    StateQuery, StatelessEffectsMiddleware, TimeConfig, TimeControlAction, TimeControlMiddleware,
 };
 
 // Re-export testkit bridge
-pub use testkit_bridge::{TestkitSimulatorBridge, MiddlewareConfig};
+pub use testkit_bridge::{MiddlewareConfig, TestkitSimulatorBridge};
 
 // Re-export handler implementations
 pub use middleware::handler::{CoreSimulatorHandler, NoOpSimulatorHandler};

@@ -11,13 +11,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Type alias for complex message queue structure
+type MessageQueue = Arc<RwLock<HashMap<DeviceId, Vec<(DeviceId, Vec<u8>)>>>>;
+
 /// Simple transport interface for testing
 ///
 /// This provides a TODO fix - Simplified transport interface that test code can use
 #[async_trait]
 pub trait Transport: Send + Sync {
+    /// Send a message to another device
     async fn send_message(&self, to: DeviceId, message: &[u8]) -> AuraResult<()>;
+    /// Receive a message if one is available
     async fn receive_message(&self) -> AuraResult<Option<(DeviceId, Vec<u8>)>>;
+    /// Get this transport's device ID
     fn device_id(&self) -> DeviceId;
 }
 
@@ -29,7 +35,7 @@ pub trait Transport: Send + Sync {
 pub struct MemoryTransport {
     device_id: DeviceId,
     // Shared message queue for all memory transports
-    messages: Arc<RwLock<HashMap<DeviceId, Vec<(DeviceId, Vec<u8>)>>>>,
+    messages: MessageQueue,
 }
 
 impl MemoryTransport {
@@ -102,11 +108,12 @@ pub fn test_memory_transport() -> MemoryTransport {
     MemoryTransport::new(DeviceId::new())
 }
 
-/// Create a transport middleware stack for testing
-///
-/// Creates a middleware stack suitable for testing scenarios
-/// Note: Disabled due to Week 11 cleanup - middleware was removed
-/* TODO fix - Re-implement when transport middleware is needed
+// Create a transport middleware stack for testing
+//
+// Creates a middleware stack suitable for testing scenarios
+// Note: Disabled due to Week 11 cleanup - middleware was removed
+// TODO fix - Re-implement when transport middleware is needed
+/*
 pub fn test_transport_stack(_device_id: DeviceId) -> TransportMiddlewareStack {
     use aura_core::AuraResult;
     use aura_transport::{NetworkAddress, TransportHandler, TransportOperation, TransportResult};

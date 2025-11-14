@@ -9,16 +9,17 @@
 
 use aura_agent::handlers::ota::OtaOperations;
 use aura_agent::maintenance::MaintenanceController;
-use aura_core::{AccountId, DeviceId, SemanticVersion};
+use aura_core::{AccountId, DeviceId, SemanticVersion, AuraResult};
+use aura_macros::aura_test;
 use aura_protocol::effects::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Test soft fork OTA upgrade (no epoch fence)
-#[tokio::test]
-async fn test_soft_fork_upgrade() {
+#[aura_test]
+async fn test_soft_fork_upgrade() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    let effects = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let ota_ops = OtaOperations::new(Arc::new(RwLock::new(effects.clone())));
 
     // Prepare upgrade proposal
@@ -35,10 +36,10 @@ async fn test_soft_fork_upgrade() {
 }
 
 /// Test hard fork OTA upgrade with identity epoch fence
-#[tokio::test]
-async fn test_hard_fork_upgrade_with_epoch_fence() {
+#[aura_test]
+async fn test_hard_fork_upgrade_with_epoch_fence() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    let effects = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let ota_ops = OtaOperations::new(Arc::new(RwLock::new(effects.clone())));
 
     // Prepare hard fork upgrade
@@ -63,10 +64,10 @@ async fn test_hard_fork_upgrade_with_epoch_fence() {
 }
 
 /// Test snapshot creation and garbage collection workflow
-#[tokio::test]
-async fn test_snapshot_and_gc_workflow() {
+#[aura_test]
+async fn test_snapshot_and_gc_workflow() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    let effects = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let maintenance = MaintenanceController::new(device_id, Arc::new(RwLock::new(effects.clone())));
 
     // Propose snapshot
@@ -91,10 +92,10 @@ async fn test_snapshot_and_gc_workflow() {
 }
 
 /// Test cache invalidation after snapshot
-#[tokio::test]
-async fn test_cache_invalidation_on_snapshot() {
+#[aura_test]
+async fn test_cache_invalidation_on_snapshot() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    let effects = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let maintenance = MaintenanceController::new(device_id, Arc::new(RwLock::new(effects.clone())));
 
     // Get initial epoch floor
@@ -134,8 +135,8 @@ async fn test_cache_invalidation_on_snapshot() {
 }
 
 /// Test multi-device upgrade coordination
-#[tokio::test]
-async fn test_multi_device_upgrade_coordination() {
+#[aura_test]
+async fn test_multi_device_upgrade_coordination() -> AuraResult<()> {
     let account_id = AccountId::new();
 
     // Create 3 devices
@@ -143,9 +144,9 @@ async fn test_multi_device_upgrade_coordination() {
     let device2 = DeviceId::new();
     let device3 = DeviceId::new();
 
-    let effects1 = AuraEffectSystem::for_testing(device1);
-    let effects2 = AuraEffectSystem::for_testing(device2);
-    let effects3 = AuraEffectSystem::for_testing(device3);
+    let effects1 = aura_testkit::create_test_fixture_with_device_id(device1).await?.effects().as_ref().clone();
+    let effects2 = aura_testkit::create_test_fixture_with_device_id(device2).await?.effects().as_ref().clone();
+    let effects3 = aura_testkit::create_test_fixture_with_device_id(device3).await?.effects().as_ref().clone();
 
     let ota1 = OtaOperations::new(Arc::new(RwLock::new(effects1.clone())));
     let ota2 = OtaOperations::new(Arc::new(RwLock::new(effects2.clone())));
@@ -172,10 +173,10 @@ async fn test_multi_device_upgrade_coordination() {
 }
 
 /// Test maintenance event replication through journal
-#[tokio::test]
-async fn test_maintenance_event_journal_replication() {
+#[aura_test]
+async fn test_maintenance_event_journal_replication() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    let effects = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let maintenance = MaintenanceController::new(device_id, Arc::new(RwLock::new(effects.clone())));
 
     // Create snapshot (emits maintenance events)
@@ -192,10 +193,10 @@ async fn test_maintenance_event_journal_replication() {
 }
 
 /// Test upgrade activation with hard fork enforcement
-#[tokio::test]
-async fn test_upgrade_activation_hard_fork_enforcement() {
+#[aura_test]
+async fn test_upgrade_activation_hard_fork_enforcement() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    let effects = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let ota_ops = OtaOperations::new(Arc::new(RwLock::new(effects.clone())));
 
     let package_id = uuid::Uuid::new_v4();
@@ -223,10 +224,10 @@ async fn test_upgrade_activation_hard_fork_enforcement() {
 }
 
 /// Test snapshot writer fence lifecycle
-#[tokio::test]
-async fn test_snapshot_writer_fence_lifecycle() {
+#[aura_test]
+async fn test_snapshot_writer_fence_lifecycle() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    let effects = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let maintenance = MaintenanceController::new(device_id, Arc::new(RwLock::new(effects.clone())));
 
     // Propose snapshot (acquires writer fence)
@@ -242,10 +243,10 @@ async fn test_snapshot_writer_fence_lifecycle() {
 }
 
 /// Test GC event emission with statistics
-#[tokio::test]
-async fn test_gc_event_emission_with_stats() {
+#[aura_test]
+async fn test_gc_event_emission_with_stats() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    let effects = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let maintenance = MaintenanceController::new(device_id, Arc::new(RwLock::new(effects.clone())));
 
     // Subscribe to cache invalidation events
@@ -269,10 +270,10 @@ async fn test_gc_event_emission_with_stats() {
 }
 
 /// Integration test: Full OTA + snapshot + GC cycle
-#[tokio::test]
-async fn test_full_ota_maintenance_cycle() {
+#[aura_test]
+async fn test_full_ota_maintenance_cycle() -> AuraResult<()> {
     let device_id = DeviceId::new();
-    let effects = AuraEffectSystem::for_testing(device_id);
+    let effects = aura_testkit::create_test_fixture_with_device_id(device_id).await?.effects().as_ref().clone();
     let ota_ops = OtaOperations::new(Arc::new(RwLock::new(effects.clone())));
     let maintenance = MaintenanceController::new(device_id, Arc::new(RwLock::new(effects.clone())));
 

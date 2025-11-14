@@ -2,6 +2,9 @@
 //!
 //! Tests for the simplified guardian recovery choreographies.
 
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::expect_used)]
+
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId, TrustLevel};
 use aura_protocol::effects::AuraEffectSystem;
@@ -10,6 +13,7 @@ use aura_recovery::{
     GuardianSetupCoordinator, MembershipChange, MembershipChangeRequest, RecoveryRequest,
 };
 use std::time::SystemTime;
+use aura_macros::aura_test;
 
 /// Helper to create guardian profile
 fn create_guardian(device_id: DeviceId, label: &str) -> GuardianProfile {
@@ -35,10 +39,10 @@ fn create_recovery_context() -> RecoveryContext {
     }
 }
 
-#[tokio::test]
-async fn test_guardian_setup() {
-    let effect_system = AuraEffectSystem::for_testing(DeviceId::new());
-    let coordinator = GuardianSetupCoordinator::new(effect_system);
+#[aura_test]
+async fn test_guardian_setup() -> aura_core::AuraResult<()> {
+    let fixture = aura_testkit::create_test_fixture().await?;
+    let coordinator = GuardianSetupCoordinator::new(fixture.effect_system());
 
     // Create guardian set
     let guardians = vec![
@@ -60,8 +64,7 @@ async fn test_guardian_setup() {
     // Execute setup
     let response = coordinator
         .execute_setup(request)
-        .await
-        .expect("Guardian setup should succeed");
+        .await?;
 
     assert!(response.success, "Setup should be successful");
     assert_eq!(
@@ -70,12 +73,13 @@ async fn test_guardian_setup() {
         "Should have 2 guardian shares"
     );
     assert!(response.error.is_none(), "Should have no error");
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_guardian_key_recovery() {
-    let effect_system = AuraEffectSystem::for_testing(DeviceId::new());
-    let coordinator = GuardianKeyRecoveryCoordinator::new(effect_system);
+#[aura_test]
+async fn test_guardian_key_recovery() -> aura_core::AuraResult<()> {
+    let fixture = aura_testkit::create_test_fixture().await?;
+    let coordinator = GuardianKeyRecoveryCoordinator::new(fixture.effect_system());
 
     // Create guardian set
     let guardians = vec![
@@ -97,8 +101,7 @@ async fn test_guardian_key_recovery() {
     // Execute key recovery
     let response = coordinator
         .execute_key_recovery(request)
-        .await
-        .expect("Key recovery should succeed");
+        .await?;
 
     assert!(response.success, "Recovery should be successful");
     assert_eq!(
@@ -111,12 +114,13 @@ async fn test_guardian_key_recovery() {
         "Should have recovered key material"
     );
     assert!(response.error.is_none(), "Should have no error");
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_guardian_membership_add() {
-    let effect_system = AuraEffectSystem::for_testing(DeviceId::new());
-    let coordinator = GuardianMembershipCoordinator::new(effect_system);
+#[aura_test]
+async fn test_guardian_membership_add() -> aura_core::AuraResult<()> {
+    let fixture = aura_testkit::create_test_fixture().await?;
+    let coordinator = GuardianMembershipCoordinator::new(fixture.effect_system());
 
     // Create initial guardian set
     let initial_guardians = vec![
@@ -146,8 +150,7 @@ async fn test_guardian_membership_add() {
     // Execute membership change
     let response = coordinator
         .execute_membership_change(request)
-        .await
-        .expect("Membership change should succeed");
+        .await?;
 
     assert!(response.success, "Membership change should be successful");
     assert_eq!(
@@ -156,12 +159,13 @@ async fn test_guardian_membership_add() {
         "Should have 2 approval shares"
     );
     assert!(response.error.is_none(), "Should have no error");
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_guardian_membership_remove() {
-    let effect_system = AuraEffectSystem::for_testing(DeviceId::new());
-    let coordinator = GuardianMembershipCoordinator::new(effect_system);
+#[aura_test]
+async fn test_guardian_membership_remove() -> aura_core::AuraResult<()> {
+    let fixture = aura_testkit::create_test_fixture().await?;
+    let coordinator = GuardianMembershipCoordinator::new(fixture.effect_system());
 
     // Create initial guardian set
     let guardians = vec![
@@ -190,8 +194,7 @@ async fn test_guardian_membership_remove() {
     // Execute membership change
     let response = coordinator
         .execute_membership_change(request)
-        .await
-        .expect("Membership change should succeed");
+        .await?;
 
     assert!(response.success, "Membership change should be successful");
     assert_eq!(
@@ -200,12 +203,13 @@ async fn test_guardian_membership_remove() {
         "Should have 2 approval shares"
     );
     assert!(response.error.is_none(), "Should have no error");
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_insufficient_threshold_failure() {
-    let effect_system = AuraEffectSystem::for_testing(DeviceId::new());
-    let coordinator = GuardianKeyRecoveryCoordinator::new(effect_system);
+#[aura_test]
+async fn test_insufficient_threshold_failure() -> aura_core::AuraResult<()> {
+    let fixture = aura_testkit::create_test_fixture().await?;
+    let coordinator = GuardianKeyRecoveryCoordinator::new(fixture.effect_system());
 
     // Create guardian set with only 2 guardians
     let guardians = vec![
@@ -226,8 +230,7 @@ async fn test_insufficient_threshold_failure() {
     // Execute key recovery
     let response = coordinator
         .execute_key_recovery(request)
-        .await
-        .expect("Recovery request should complete");
+        .await?;
 
     assert!(!response.success, "Recovery should fail");
     assert!(response.error.is_some(), "Should have error message");
@@ -240,4 +243,5 @@ async fn test_insufficient_threshold_failure() {
         2,
         "Should still have guardian shares"
     );
+    Ok(())
 }

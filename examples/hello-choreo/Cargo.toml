@@ -7,6 +7,9 @@ edition = "2021"
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.35", features = ["macros", "rt-multi-thread", "time"] }
 futures = "0.3"
-rumpsteak-aura = "0.2.3"
-rumpsteak-aura-choreography = "0.2.3"
+async-trait = "0.1"
+aura-macros = { path = "../../crates/aura-macros" }
+aura-core = { path = "../../crates/aura-core" }
+aura-mpst = { path = "../../crates/aura-mpst" }
+rumpsteak-aura-choreography = "0.5.0"
 bincode = "1.3"

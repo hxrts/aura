@@ -21,7 +21,7 @@ pub use handlers::CliHandler;
 // Action types are defined in this module and automatically available
 
 use aura_core::{identifiers::DeviceId, AuraError};
-use aura_protocol::{AuraEffectSystem, effects::EffectSystemConfig};
+use aura_protocol::{effects::EffectSystemConfig, AuraEffectSystem};
 
 /// Create a CLI handler for the given device ID
 pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
@@ -31,10 +31,10 @@ pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> 
 }
 
 /// Create a test CLI handler for the given device ID
-pub fn create_test_cli_handler(device_id: DeviceId) -> CliHandler {
+pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
     let config = EffectSystemConfig::for_testing(device_id);
-    let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
-    CliHandler::new(effect_system)
+    let effect_system = AuraEffectSystem::new(config)?;
+    Ok(CliHandler::new(effect_system))
 }
 
 /// Create a CLI handler with a generated device ID
@@ -44,7 +44,7 @@ pub fn create_default_cli_handler() -> Result<CliHandler, AuraError> {
 }
 
 /// Create a test CLI handler with a generated device ID
-pub fn create_default_test_cli_handler() -> CliHandler {
+pub fn create_default_test_cli_handler() -> Result<CliHandler, AuraError> {
     let device_id = DeviceId::new();
     create_test_cli_handler(device_id)
 }

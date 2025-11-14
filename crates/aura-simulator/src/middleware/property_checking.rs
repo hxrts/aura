@@ -366,7 +366,7 @@ impl PropertyCheckingMiddleware {
     }
 
     /// Record property violation
-    fn record_violation(&mut self, result: &PropertyCheckResult, context: &SimulatorContext) {
+    fn _record_violation(&mut self, result: &PropertyCheckResult, context: &SimulatorContext) {
         if let Some(violation_type) = &result.violation_type {
             let violation = PropertyViolation {
                 property_name: result.property_name.clone(),

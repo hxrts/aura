@@ -35,7 +35,11 @@ fn create_test_op(commitment: [u8; 32], epoch: u64, leaf_id: u64) -> AttestedOp 
             parent_epoch: epoch,
             op: TreeOpKind::AddLeaf {
                 leaf: LeafNode {
-                    leaf_id: LeafId(leaf_id.try_into().unwrap()),
+                    leaf_id: LeafId(
+                        leaf_id
+                            .try_into()
+                            .unwrap_or_else(|e| panic!("Invalid leaf_id: {}", e)),
+                    ),
                     device_id: DeviceId::new(),
                     role: LeafRole::Device,
                     public_key: vec![1, 2, 3],

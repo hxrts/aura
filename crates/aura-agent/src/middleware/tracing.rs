@@ -3,6 +3,9 @@
 //! Provides distributed tracing and logging capabilities for agent operations,
 //! enabling debugging, monitoring, and audit trails.
 
+// Allow SystemTime::now() and Uuid::new_v4() for tracing/telemetry - not part of core effects
+#![allow(clippy::disallowed_methods)]
+
 use aura_core::{
     identifiers::{DeviceId, SessionId},
     AuraError, AuraResult as Result,
@@ -421,7 +424,7 @@ pub struct OperationTracer {
     /// Current span context
     current_span: Option<SpanId>,
     /// Device ID
-    device_id: DeviceId,
+    _device_id: DeviceId,
 }
 
 impl OperationTracer {
@@ -430,7 +433,7 @@ impl OperationTracer {
         Self {
             current_trace: None,
             current_span: None,
-            device_id,
+            _device_id: device_id,
         }
     }
 
@@ -442,10 +445,10 @@ impl OperationTracer {
     }
 
     /// Start a new span in the current trace
-    pub fn start_span(&mut self, operation: String) -> SpanId {
-        let trace_id = self.current_trace.unwrap_or_else(|| self.start_trace());
+    pub fn start_span(&mut self, _operation: String) -> SpanId {
+        let _trace_id = self.current_trace.unwrap_or_else(|| self.start_trace());
         let span_id = SpanId::new();
-        let parent_span_id = self.current_span;
+        let _parent_span_id = self.current_span;
 
         self.current_span = Some(span_id);
 
@@ -505,7 +508,7 @@ impl TracingMiddleware {
     }
 
     /// End tracing an operation
-    pub async fn end_operation(&self, trace_id: TraceId, success: bool) -> Result<()> {
+    pub async fn end_operation(&self, _trace_id: TraceId, success: bool) -> Result<()> {
         let tracer = self.tracer.read().await;
         if let Some(span_id) = tracer.current_span() {
             let mut storage = self.storage.write().await;

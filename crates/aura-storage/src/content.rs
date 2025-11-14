@@ -1,4 +1,4 @@
-//! Content Addressing and Chunk Management
+//! Content Addressing and Chunk Management Choreography
 //!
 //! This module provides content addressing, chunk storage, and content management
 //! for the Aura storage layer with capability-based access control.
@@ -27,6 +27,7 @@ pub struct ChunkStore {
     /// Chunk metadata
     chunk_metadata: HashMap<ChunkId, ChunkMetadata>,
     /// Reference counts for garbage collection
+    #[allow(dead_code)]
     reference_counts: HashMap<ChunkId, u32>,
 }
 
@@ -259,13 +260,13 @@ impl ContentStore {
     /// List content accessible to device
     pub async fn list_accessible_content(
         &self,
-        device_id: DeviceId,
+        _device_id: DeviceId,
         capabilities: &[Capability],
         filters: &ContentListFilters,
     ) -> AuraResult<Vec<ContentMetadata>> {
         let mut accessible_content = Vec::new();
 
-        for (content_id, metadata) in &self.content_metadata {
+        for metadata in self.content_metadata.values() {
             // Check if device has read access
             if self
                 .verify_read_capabilities(capabilities, metadata)
@@ -292,13 +293,13 @@ impl ContentStore {
     /// Search content by tags and metadata
     pub async fn search_content(
         &self,
-        device_id: DeviceId,
+        _device_id: DeviceId,
         capabilities: &[Capability],
         query: &ContentSearchQuery,
     ) -> AuraResult<Vec<ContentMetadata>> {
         let mut matching_content = Vec::new();
 
-        for (content_id, metadata) in &self.content_metadata {
+        for metadata in self.content_metadata.values() {
             // Check access permissions
             if self
                 .verify_read_capabilities(capabilities, metadata)
@@ -327,9 +328,8 @@ impl ContentStore {
         const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
         let mut chunks = Vec::new();
 
-        for (i, chunk_bytes) in content_data.chunks(CHUNK_SIZE).enumerate() {
+        for chunk_bytes in content_data.chunks(CHUNK_SIZE) {
             let content_hash = ContentAddressing::hash_content(chunk_bytes)?;
-            let chunk_id = ChunkId::from(content_hash);
 
             chunks.push(ChunkData {
                 data: chunk_bytes.to_vec(),
@@ -401,7 +401,7 @@ impl ContentStore {
     fn verify_delete_capabilities(
         &self,
         capabilities: &[Capability],
-        metadata: &ContentMetadata,
+        _metadata: &ContentMetadata,
     ) -> AuraResult<()> {
         // Check delete permission
         let has_delete = capabilities

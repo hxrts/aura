@@ -408,10 +408,11 @@ mod tests {
     use super::super::derivation::SimpleDerivationEffects;
     use super::*;
     use crate::journal::{NodeKind, NodePolicy};
+    use aura_macros::aura_test;
 
-    fn create_test_node(kind: NodeKind, policy: NodePolicy) -> KeyNode {
+    fn create_test_node_with_id(id_bytes: [u8; 16], kind: NodeKind, policy: NodePolicy) -> KeyNode {
         KeyNode::new(
-            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes(id_bytes)),
             kind,
             policy,
         )
@@ -463,15 +464,15 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_identity_view_materialization() {
-        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+    #[aura_test]
+    async fn test_identity_view_materialization() -> aura_core::AuraResult<()> {
+        let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Create identity with devices
-        let identity = create_test_node(NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 3 });
-        let device1 = create_test_node(NodeKind::Device, NodePolicy::Any);
-        let device2 = create_test_node(NodeKind::Device, NodePolicy::Any);
-        let device3 = create_test_node(NodeKind::Device, NodePolicy::Any);
+        let identity = create_test_node_with_id([10u8; 16], NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 3 });
+        let device1 = create_test_node_with_id([11u8; 16], NodeKind::Device, NodePolicy::Any);
+        let device2 = create_test_node_with_id([12u8; 16], NodeKind::Device, NodePolicy::Any);
+        let device3 = create_test_node_with_id([13u8; 16], NodeKind::Device, NodePolicy::Any);
 
         let mut nodes = BTreeMap::new();
         nodes.insert(identity.id, identity.clone());
@@ -502,18 +503,19 @@ mod tests {
         assert_eq!(view.total_threshold.available, 3);
         assert_eq!(view.total_threshold.devices, 3);
         assert_eq!(view.total_threshold.guardians, 0);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_identity_with_guardians() {
-        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+    #[aura_test]
+    async fn test_identity_with_guardians() -> aura_core::AuraResult<()> {
+        let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Create identity with devices and guardians
-        let identity = create_test_node(NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 4 });
-        let device1 = create_test_node(NodeKind::Device, NodePolicy::Any);
-        let device2 = create_test_node(NodeKind::Device, NodePolicy::Any);
-        let guardian1 = create_test_node(NodeKind::Guardian, NodePolicy::Any);
-        let guardian2 = create_test_node(NodeKind::Guardian, NodePolicy::Any);
+        let identity = create_test_node_with_id([30u8; 16], NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 4 });
+        let device1 = create_test_node_with_id([31u8; 16], NodeKind::Device, NodePolicy::Any);
+        let device2 = create_test_node_with_id([32u8; 16], NodeKind::Device, NodePolicy::Any);
+        let guardian1 = create_test_node_with_id([33u8; 16], NodeKind::Guardian, NodePolicy::Any);
+        let guardian2 = create_test_node_with_id([34u8; 16], NodeKind::Guardian, NodePolicy::Any);
 
         let mut nodes = BTreeMap::new();
         nodes.insert(identity.id, identity.clone());
@@ -547,19 +549,20 @@ mod tests {
         assert_eq!(view.total_threshold.devices, 2);
         assert_eq!(view.total_threshold.guardians, 2);
         assert!(view.recovery_policy.is_some());
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_group_view_materialization() {
-        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+    #[aura_test]
+    async fn test_group_view_materialization() -> aura_core::AuraResult<()> {
+        let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Create group with member references
-        let group = create_test_node(NodeKind::Group, NodePolicy::Threshold { m: 2, n: 3 });
+        let group = create_test_node_with_id([20u8; 16], NodeKind::Group, NodePolicy::Threshold { m: 2, n: 3 });
 
         // Create member identity nodes for the group
-        let member1 = create_test_node(NodeKind::Identity, NodePolicy::Any);
-        let member2 = create_test_node(NodeKind::Identity, NodePolicy::Any);
-        let member3 = create_test_node(NodeKind::Identity, NodePolicy::Any);
+        let member1 = create_test_node_with_id([21u8; 16], NodeKind::Identity, NodePolicy::Any);
+        let member2 = create_test_node_with_id([22u8; 16], NodeKind::Identity, NodePolicy::Any);
+        let member3 = create_test_node_with_id([23u8; 16], NodeKind::Identity, NodePolicy::Any);
 
         // Use the member nodes' actual IDs
         let member1_id = member1.id;
@@ -576,7 +579,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         #[allow(clippy::disallowed_methods)]
         let edge1 = KeyEdge::with_id(
-            uuid::Uuid::from_bytes([0u8; 16]),
+            uuid::Uuid::from_bytes([3u8; 16]),
             group.id,
             member1_id,
             EdgeKind::Contains,
@@ -584,7 +587,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         #[allow(clippy::disallowed_methods)]
         let edge2 = KeyEdge::with_id(
-            uuid::Uuid::from_bytes([0u8; 16]),
+            uuid::Uuid::from_bytes([4u8; 16]),
             group.id,
             member2_id,
             EdgeKind::Contains,
@@ -592,7 +595,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         #[allow(clippy::disallowed_methods)]
         let edge3 = KeyEdge::with_id(
-            uuid::Uuid::from_bytes([0u8; 16]),
+            uuid::Uuid::from_bytes([5u8; 16]),
             group.id,
             member3_id,
             EdgeKind::Contains,
@@ -616,5 +619,6 @@ mod tests {
             NodePolicy::Threshold { m: 2, n: 3 }
         ));
         assert!(!view.has_messaging_key); // No messaging key set in test
+        Ok(())
     }
 }

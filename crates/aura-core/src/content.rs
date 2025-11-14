@@ -89,7 +89,7 @@ impl From<[u8; 32]> for Hash32 {
 /// - CRDT state snapshots
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ContentId {
-    /// Blake3 hash of the complete content
+    /// Hash of the complete content
     pub hash: Hash32,
     /// Optional size of the original content in bytes
     pub size: Option<u64>,
@@ -181,7 +181,7 @@ impl From<[u8; 32]> for ContentId {
 /// - Replication tracking
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ChunkId {
-    /// Blake3 hash of chunk data
+    /// Hash of chunk data
     hash: Hash32,
     /// Optional chunk sequence number (for ordered chunks)
     sequence: Option<u32>,

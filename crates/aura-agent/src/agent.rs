@@ -6,7 +6,6 @@
 //! implementing effects directly.
 
 use crate::config::AgentConfig;
-use crate::effects::*;
 use crate::errors::{AuraError, Result as AgentResult};
 use crate::handlers::{
     AgentEffectSystemHandler, OtaOperations, RecoveryOperations, StorageOperations,
@@ -38,7 +37,7 @@ pub struct AuraAgent {
     /// Device ID for this agent runtime
     device_id: DeviceId,
     /// Agent effect system handler that unifies all agent operations
-    agent_handler: AgentEffectSystemHandler,
+    _agent_handler: AgentEffectSystemHandler,
     /// Optional middleware stack for cross-cutting concerns
     middleware: Option<AgentMiddlewareStack>,
     /// Core effect system
@@ -103,7 +102,7 @@ impl AuraAgent {
 
         Self {
             device_id,
-            agent_handler: AgentEffectSystemHandler::new(device_id, core_effects.clone()),
+            _agent_handler: AgentEffectSystemHandler::new(device_id, core_effects.clone()),
             middleware: None,
             core_effects,
             storage_ops,
@@ -124,6 +123,9 @@ impl AuraAgent {
     }
 
     /// Create agent for testing with mock effects
+    /// 
+    /// Note: This method is deprecated. Use `aura_testkit::create_test_fixture().await` 
+    /// and construct agent via `AuraAgent::new()` in new code.
     pub fn for_testing(device_id: DeviceId) -> Self {
         let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
         let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
@@ -329,7 +331,7 @@ impl AuraAgent {
     }
 
     /// Verify capability through effects
-    pub async fn verify_capability(&self, capability: &str) -> AgentResult<bool> {
+    pub async fn verify_capability(&self, _capability: &str) -> AgentResult<bool> {
         // TODO: Implement proper capability verification through effects
         // TODO fix - For now, return false as placeholder (deny by default)
         Ok(false)
@@ -475,82 +477,68 @@ impl AuraAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_macros::aura_test;
 
-    #[tokio::test]
-    async fn test_agent_creation() {
+    #[aura_test]
+    async fn test_agent_creation() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
-        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let effects = fixture.effects().as_ref().clone();
         let agent = AuraAgent::new(effects, device_id);
 
         assert_eq!(agent.device_id(), device_id);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_agent_initialization() {
+    #[aura_test]
+    async fn test_agent_initialization() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
-        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let effects = fixture.effects().as_ref().clone();
         let agent = AuraAgent::new(effects, device_id);
 
         // Should not panic and should complete successfully
-        agent
-            .initialize()
-            .await
-            .expect("Initialization should succeed");
+        agent.initialize().await?;
 
         // Should be able to get config after initialization
-        let config = agent.get_config().await.expect("Should get config");
+        let config = agent.get_config().await?;
         assert_eq!(config.device_id, device_id);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_secure_storage_operations() {
+    #[aura_test]
+    async fn test_secure_storage_operations() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
-        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let effects = fixture.effects().as_ref().clone();
         let agent = AuraAgent::new(effects, device_id);
 
-        agent
-            .initialize()
-            .await
-            .expect("Initialization should succeed");
+        agent.initialize().await?;
 
         let key = "test_key";
         let data = b"test_data";
 
         // Store data
-        agent
-            .store_secure_data(key, data)
-            .await
-            .expect("Store should succeed");
+        agent.store_secure_data(key, data).await?;
 
         // Retrieve data
-        let retrieved = agent
-            .retrieve_secure_data(key)
-            .await
-            .expect("Retrieve should succeed");
+        let retrieved = agent.retrieve_secure_data(key).await?;
 
         assert_eq!(retrieved, Some(data.to_vec()));
 
         // Delete data
-        agent
-            .delete_secure_data(key)
-            .await
-            .expect("Delete should succeed");
+        agent.delete_secure_data(key).await?;
 
         // Verify deletion
-        let after_delete = agent
-            .retrieve_secure_data(key)
-            .await
-            .expect("Retrieve after delete should succeed");
+        let after_delete = agent.retrieve_secure_data(key).await?;
 
         assert_eq!(after_delete, None);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_session_management() {
-        use aura_testkit::{test_device_pair, ChoreographyTestHarness};
+    #[aura_test]
+    async fn test_session_management() -> aura_core::AuraResult<()> {
+        use aura_testkit::test_device_pair;
 
         // Create a multi-device test harness
         let harness = test_device_pair();
@@ -573,32 +561,29 @@ mod tests {
             .end()
             .await
             .expect("Should end session successfully");
+        
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_config_management() {
+    #[aura_test]
+    async fn test_config_management() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
-        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let effects = fixture.effects().as_ref().clone();
         let agent = AuraAgent::new(effects, device_id);
 
-        agent
-            .initialize()
-            .await
-            .expect("Initialization should succeed");
+        agent.initialize().await?;
 
         // Get initial config
-        let mut config = agent.get_config().await.expect("Get config should succeed");
-        let original_name = format!("Device-{}", device_id.0); // Placeholder
+        let config = agent.get_config().await?;
+        let _original_name = format!("Device-{}", device_id.0); // Placeholder
 
         // TODO: Device name stored in journal as CRDT fact, not in config
-        agent
-            .update_config(config.clone())
-            .await
-            .expect("Update config should succeed");
+        agent.update_config(config.clone()).await?;
 
         // TODO: Verify device name update through journal effects
         // For now, just verify config update succeeded
-        let _updated_config = agent.get_config().await.expect("Get config should succeed");
+        let _updated_config = agent.get_config().await?;
+        Ok(())
     }
 }

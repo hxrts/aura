@@ -273,7 +273,7 @@ impl StateInspectionMiddleware {
     }
 
     /// Capture current state snapshot
-    fn capture_state_snapshot(&mut self, context: &SimulatorContext) -> String {
+    fn _capture_state_snapshot(&mut self, context: &SimulatorContext) -> String {
         let snapshot_id = format!(
             "snapshot_{}_{}",
             context.tick,
@@ -294,7 +294,7 @@ impl StateInspectionMiddleware {
             timestamp: context.timestamp,
             tick: context.tick,
             state_data,
-            captured_at: Instant::now(),
+            _captured_at: Instant::now(),
         };
 
         self.state_snapshots.insert(snapshot_id.clone(), snapshot);
@@ -350,9 +350,9 @@ impl StateInspectionMiddleware {
                     Some(WatcherAlert {
                         watcher_id: watcher.id.clone(),
                         message: format!("Field '{}' equals expected value", field),
-                        timestamp: context.timestamp,
+                        _timestamp: context.timestamp,
                         tick: context.tick,
-                        details: json!({
+                        _details: json!({
                             "field": field,
                             "value": current_value
                         }),
@@ -367,9 +367,9 @@ impl StateInspectionMiddleware {
                     Some(WatcherAlert {
                         watcher_id: watcher.id.clone(),
                         message: format!("Reached target tick {}", target_tick),
-                        timestamp: context.timestamp,
+                        _timestamp: context.timestamp,
                         tick: context.tick,
-                        details: json!({
+                        _details: json!({
                             "target_tick": target_tick,
                             "current_tick": context.tick
                         }),
@@ -386,16 +386,16 @@ impl StateInspectionMiddleware {
                     timestamp: context.timestamp,
                     tick: context.tick,
                     state_data: HashMap::new(), // Simplified for compilation
-                    captured_at: Instant::now(),
+                    _captured_at: Instant::now(),
                 };
                 // Evaluate custom expression and trigger alert if true
                 if self.evaluate_watcher_expression(expression, context, &temp_snapshot) {
                     Some(WatcherAlert {
                         watcher_id: watcher.id.clone(),
                         message: format!("Custom condition met: {}", expression),
-                        timestamp: context.timestamp,
+                        _timestamp: context.timestamp,
                         tick: context.tick,
-                        details: json!({
+                        _details: json!({
                             "expression": expression,
                             "evaluated": true
                         }),
@@ -421,21 +421,26 @@ impl Default for StateInspectionMiddleware {
 
 impl StateInspectionMiddleware {
     /// Evaluate custom watcher expression against current state
-    /// 
+    ///
     /// Supports basic state property checks and comparisons for monitoring.
-    fn evaluate_watcher_expression(&self, expression: &str, context: &SimulatorContext, snapshot: &StateSnapshot) -> bool {
+    fn evaluate_watcher_expression(
+        &self,
+        expression: &str,
+        context: &SimulatorContext,
+        snapshot: &StateSnapshot,
+    ) -> bool {
         let expr = expression.trim();
-        
+
         // Check state data fields
         if let Some((field, value)) = expr.split_once(" == ") {
             let field = field.trim();
             let value = value.trim().trim_matches('"');
-            
+
             if let Some(state_value) = snapshot.state_data.get(field) {
                 return state_value.as_str().unwrap_or("") == value;
             }
         }
-        
+
         // Check numeric comparisons
         if let Some((field, value)) = expr.split_once(" > ") {
             let field = field.trim();
@@ -447,7 +452,7 @@ impl StateInspectionMiddleware {
                 }
             }
         }
-        
+
         if let Some((field, value)) = expr.split_once(" < ") {
             let field = field.trim();
             if let Ok(target_value) = value.trim().parse::<f64>() {
@@ -458,7 +463,7 @@ impl StateInspectionMiddleware {
                 }
             }
         }
-        
+
         // Context-based checks
         match expr {
             "tick > 100" => context.tick > 100,
@@ -576,7 +581,7 @@ struct StateSnapshot {
     timestamp: Duration,
     tick: u64,
     state_data: HashMap<String, Value>,
-    captured_at: Instant,
+    _captured_at: Instant,
 }
 
 /// State watcher for monitoring specific conditions
@@ -608,9 +613,9 @@ pub enum WatcherCondition {
 struct WatcherAlert {
     watcher_id: String,
     message: String,
-    timestamp: Duration,
+    _timestamp: Duration,
     tick: u64,
-    details: Value,
+    _details: Value,
 }
 
 /// State change triggers

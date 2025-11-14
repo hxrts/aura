@@ -7,8 +7,8 @@ use aura_core::hash::hasher;
 use aura_core::{AccountId, DeviceId, SessionId};
 
 /// Test basic DKD key derivation simulation
-#[tokio::test]
-async fn test_basic_dkd_derivation() {
+#[test]
+fn test_basic_dkd_derivation() {
     // Create test identifiers
     let account_id = AccountId::new();
     let session_id = SessionId::new();
@@ -38,8 +38,8 @@ async fn test_basic_dkd_derivation() {
 }
 
 /// Test that DKD is deterministic
-#[tokio::test]
-async fn test_dkd_determinism() {
+#[test]
+fn test_dkd_determinism() {
     let account_id = AccountId::new();
     let session_id = SessionId::new();
     let participants = vec![DeviceId::new(), DeviceId::new()];
@@ -54,8 +54,8 @@ async fn test_dkd_determinism() {
 }
 
 /// Test that different contexts produce different keys
-#[tokio::test]
-async fn test_dkd_context_separation() {
+#[test]
+fn test_dkd_context_separation() {
     let account_id = AccountId::new();
     let session_id = SessionId::new();
     let participants = vec![DeviceId::new(), DeviceId::new()];
@@ -72,8 +72,8 @@ async fn test_dkd_context_separation() {
 }
 
 /// Test that different applications produce different keys
-#[tokio::test]
-async fn test_dkd_app_separation() {
+#[test]
+fn test_dkd_app_separation() {
     let account_id = AccountId::new();
     let session_id = SessionId::new();
     let participants = vec![DeviceId::new(), DeviceId::new()];
@@ -90,8 +90,8 @@ async fn test_dkd_app_separation() {
 }
 
 /// Test that participant set affects derivation
-#[tokio::test]
-async fn test_dkd_participant_dependence() {
+#[test]
+fn test_dkd_participant_dependence() {
     let account_id = AccountId::new();
     let session_id = SessionId::new();
     let device1 = DeviceId::new();
@@ -114,8 +114,8 @@ async fn test_dkd_participant_dependence() {
 }
 
 /// Test threshold-like behavior simulation
-#[tokio::test]
-async fn test_threshold_simulation() {
+#[test]
+fn test_threshold_simulation() {
     let account_id = AccountId::new();
     let session_id = SessionId::new();
     let device1 = DeviceId::new();
@@ -166,8 +166,8 @@ async fn test_threshold_simulation() {
 }
 
 /// Test identifier creation and uniqueness
-#[tokio::test]
-async fn test_identifier_uniqueness() {
+#[test]
+fn test_identifier_uniqueness() {
     // Test that different IDs are unique
     let account1 = AccountId::new();
     let account2 = AccountId::new();

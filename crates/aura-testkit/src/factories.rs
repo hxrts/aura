@@ -4,12 +4,10 @@
 //! with consistent configuration across the Aura test suite.
 
 use crate::device::DeviceSetBuilder;
-use crate::TestEffectsBuilder;
 use aura_core::hash::hash;
 use aura_core::{AccountId, DeviceId};
 use aura_journal::semilattice::ModernAccountState as AccountState;
 use aura_journal::{DeviceMetadata, DeviceType};
-use ed25519_dalek::SigningKey;
 use uuid::Uuid;
 
 /// Factory for creating complete test scenarios with consistent configuration
@@ -152,7 +150,7 @@ impl AccountStateFactory {
     /// Add a device to the account state
     pub async fn add_device(mut self, device_id: DeviceId, device_type: DeviceType) -> Self {
         // Use simple deterministic approach for factory
-        let (signing_key, public_key) = crate::test_key_pair(42);
+        let (_signing_key, public_key) = crate::test_key_pair(42);
         let timestamp = 1000; // Default test timestamp
 
         let metadata = DeviceMetadata {
@@ -447,7 +445,7 @@ mod tests {
     #[test]
     fn test_available_scenarios() {
         let scenarios = helpers::available_scenarios();
-        assert!(scenarios.len() > 0);
+        assert!(!scenarios.is_empty());
         assert!(scenarios.contains(&"single-device"));
         assert!(scenarios.contains(&"threshold-3-5"));
     }

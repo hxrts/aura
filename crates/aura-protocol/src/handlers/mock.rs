@@ -27,6 +27,12 @@ pub struct MockCall {
     pub params: Vec<u8>,
 }
 
+impl Default for MockHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockHandler {
     /// Create a new mock handler
     pub fn new() -> Self {

@@ -3,59 +3,177 @@
 //! This module implements the G_gc choreography for coordinated garbage collection
 //! with snapshot safety following the formal model from work/whole.md.
 
+use crate::access_control::StorageCapabilityGuard;
 use aura_core::{AuraResult, ChunkId, DeviceId, Hash32};
 use aura_crypto::frost::ThresholdSignature;
-use crate::access_control::StorageCapabilityGuard;
+use aura_macros::choreography;
 use aura_protocol::effects::{AuraEffectSystem, NetworkEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// Messages for the G_gc choreography
+// G_gc choreography protocol for coordinated garbage collection
+//
+// This choreography implements distributed garbage collection with:
+// 1. Snapshot proposal with safety constraints
+// 2. Quorum-based approval with threshold signatures
+// 3. Atomic commit of GC decisions across all nodes
+choreography! {
+    #[namespace = "garbage_collection"]
+    protocol GarbageCollectionChoreography {
+        roles: Proposer, QuorumMembers[*], Coordinator;
+
+        // Phase 1: Snapshot Proposal
+        // Proposer suggests GC snapshot with safety watermarks
+        Proposer[guard_capability = "propose_garbage_collection",
+                 flow_cost = 150,
+                 journal_facts = "gc_snapshot_proposed"]
+        -> QuorumMembers[*]: SnapshotProposal(SnapshotProposal);
+
+        // Phase 2: Quorum Validation and Approval
+        choice QuorumMembers[*] {
+            approve: {
+                // Quorum member validates safety and approves
+                QuorumMembers[*][guard_capability = "approve_garbage_collection",
+                                flow_cost = 200,
+                                journal_facts = "gc_snapshot_approved"]
+                -> Proposer: SnapshotApprove(SnapshotApprove);
+            }
+            reject: {
+                // Quorum member rejects due to safety concerns
+                QuorumMembers[*][guard_capability = "reject_garbage_collection",
+                                flow_cost = 100,
+                                journal_facts = "gc_snapshot_rejected"]
+                -> Proposer: SnapshotReject(SnapshotReject);
+            }
+        }
+
+        // Phase 3: Threshold Signature and Commit
+        choice Proposer {
+            commit: {
+                // Proposer aggregates signatures and commits snapshot
+                Proposer[guard_capability = "commit_garbage_collection",
+                        flow_cost = 250,
+                        journal_facts = "gc_snapshot_committed",
+                        journal_merge = true]
+                -> QuorumMembers[*]: SnapshotCommit(SnapshotCommit);
+
+                // Notify coordinator of successful collection
+                Proposer[guard_capability = "notify_gc_completion",
+                        flow_cost = 50,
+                        journal_facts = "gc_completion_notified"]
+                -> Coordinator: SnapshotCommit(SnapshotCommit);
+            }
+            abort: {
+                // Proposer aborts due to insufficient approvals
+                Proposer[guard_capability = "abort_garbage_collection",
+                        flow_cost = 100,
+                        journal_facts = "gc_snapshot_aborted"]
+                -> QuorumMembers[*]: SnapshotAbort(SnapshotAbort);
+
+                // Notify coordinator of aborted collection
+                Proposer[guard_capability = "notify_gc_abort",
+                        flow_cost = 50,
+                        journal_facts = "gc_abort_notified"]
+                -> Coordinator: SnapshotAbort(SnapshotAbort);
+            }
+        }
+    }
+}
+
+// Message types for garbage collection choreography
+
+/// Snapshot proposal message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotProposal {
+    /// Proposing device ID
+    pub proposer_id: DeviceId,
+    /// Root commit hash for snapshot
+    pub root_commit: Hash32,
+    /// Event watermarks per shard
+    pub watermarks: HashMap<ShardId, EventId>,
+    /// Current epoch
+    pub epoch: u64,
+    /// Proposal nonce for uniqueness
+    pub proposal_nonce: [u8; 32],
+    /// Safety constraints to enforce
+    pub safety_constraints: Vec<SafetyConstraint>,
+}
+
+/// Snapshot approval message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotApprove {
+    /// Approving quorum member ID
+    pub quorum_member_id: DeviceId,
+    /// Partial FROST signature over proposal
+    pub partial_signature: Vec<u8>,
+    /// Local watermark from this node
+    pub local_watermark: EventId,
+    /// Approval timestamp
+    pub timestamp: u64,
+}
+
+/// Snapshot rejection message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotReject {
+    /// Rejecting quorum member ID
+    pub quorum_member_id: DeviceId,
+    /// Reason for rejection
+    pub reason: String,
+    /// Rejection timestamp
+    pub timestamp: u64,
+}
+
+/// Snapshot commit message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotCommit {
+    /// Committed garbage collection snapshot
+    pub snapshot: GcSnapshot,
+    /// Threshold signature over snapshot
+    pub threshold_signature: ThresholdSignature,
+    /// Participating quorum members
+    pub participating_members: Vec<DeviceId>,
+}
+
+/// Snapshot abort message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotAbort {
+    /// Reason for abort
+    pub reason: String,
+    /// Participating members that responded
+    pub responding_members: Vec<DeviceId>,
+    /// Abort timestamp
+    pub timestamp: u64,
+}
+
+/// Garbage collection message enum for choreography communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GcMessage {
-    /// Snapshot proposal from proposer
+    /// Snapshot proposal
     SnapshotProposal {
-        /// Proposing device
         proposer_id: DeviceId,
-        /// Root commit hash for snapshot
         root_commit: Hash32,
-        /// Watermarks per shard
         watermarks: HashMap<ShardId, EventId>,
-        /// Current epoch
         epoch: u64,
-        /// Proposal nonce
         proposal_nonce: [u8; 32],
+        safety_constraints: Vec<SafetyConstraint>,
     },
-
-    /// Quorum approval of snapshot
+    /// Snapshot approval
     SnapshotApprove {
-        /// Approving quorum member
         quorum_member_id: DeviceId,
-        /// Partial signature over proposal
         partial_sig: Vec<u8>,
-        /// Local watermark from this node
         local_watermark: EventId,
-        /// Timestamp of approval
         timestamp: u64,
     },
-
-    /// Quorum rejection of snapshot
+    /// Snapshot rejection
     SnapshotReject {
-        /// Rejecting quorum member
         quorum_member_id: DeviceId,
-        /// Rejection reason
         reason: String,
-        /// Timestamp of rejection
         timestamp: u64,
     },
-
-    /// Snapshot commit notification
+    /// Snapshot commit
     SnapshotCommit {
-        /// Committed snapshot
         snapshot: GcSnapshot,
-        /// Threshold signature over snapshot
         threshold_signature: ThresholdSignature,
-        /// Participating quorum members
         participating_members: Vec<DeviceId>,
     },
 }
@@ -120,11 +238,9 @@ pub enum GcRole {
     Coordinator(DeviceId),
 }
 
-/// G_gc choreography implementation
+/// Garbage collection coordinator using choreographic protocol
 #[derive(Clone)]
-pub struct GcChoreography {
-    /// Current device role
-    role: GcRole,
+pub struct GarbageCollectionCoordinator {
     /// Required quorum size
     quorum_size: usize,
     /// Effect system for handling operations
@@ -139,81 +255,47 @@ pub struct LocalStorageState {
     /// Local watermarks
     watermarks: HashMap<ShardId, EventId>,
     /// Active chunks
+    #[allow(dead_code)]
     active_chunks: HashSet<ChunkId>,
     /// Chunk reference counts
+    #[allow(dead_code)]
     reference_counts: HashMap<ChunkId, u32>,
     /// Last snapshot
+    #[allow(dead_code)]
     last_snapshot: Option<GcSnapshot>,
 }
 
-impl GcChoreography {
-    /// Create new garbage collection choreography
-    pub fn new(role: GcRole, quorum_size: usize, effects: AuraEffectSystem) -> Self {
+impl GarbageCollectionCoordinator {
+    /// Create new garbage collection coordinator
+    pub fn new(quorum_size: usize, effects: AuraEffectSystem) -> Self {
         Self {
-            role,
             quorum_size,
             effects,
             local_storage: LocalStorageState::new(),
         }
     }
 
-    /// Execute the G_gc choreography following the formal model
-    ///
-    /// ```rust,ignore
-    /// choreography! {
-    ///     G_gc[Roles: Proposer, Quorum(k)] {
-    ///         // Proposer suggests snapshot point
-    ///         [guard: need(gc_propose) ≤ caps_Proposer]
-    ///         [Context: GID(gc_group, k)]
-    ///         Proposer -> Quorum*: SnapshotProposal {
-    ///             root_commit: Hash,
-    ///             watermarks: Map<Shard, EventId>,
-    ///             epoch
-    ///         }
-    ///
-    ///         // Each quorum member validates safety
-    ///         Quorum*: verify_snapshot_safe(watermarks)
-    ///         Quorum*: check_local_invariants()
-    ///
-    ///         choice Quorum* {
-    ///             approve {
-    ///                 [guard: need(gc_approve) ≤ caps_Quorum]
-    ///                 Quorum* -> Proposer: SnapshotApprove {
-    ///                     partial_sig,
-    ///                     local_watermark
-    ///                 }
-    ///             }
-    ///             reject {
-    ///                 Quorum* -> Proposer: SnapshotReject { reason }
-    ///             }
-    ///         }
-    ///
-    ///         // Combine signatures (FROST threshold)
-    ///         Proposer: threshold_sig = combine_sigs(partial_sigs)
-    ///         Proposer: snapshot = Snapshot { root_commit, watermarks, threshold_sig }
-    ///
-    ///         // Broadcast committed snapshot
-    ///         Proposer -> Quorum*: SnapshotCommit { snapshot, threshold_sig }
-    ///
-    ///         // Journal integration - apply snapshot as delta fact
-    ///         [▷ Δfacts: GcSnapshot(root_commit, watermarks, threshold_sig)]
-    ///         All: merge_facts(GcSnapshot(...))
-    ///
-    ///         // Capability refinement (GC may affect access patterns)
-    ///         [▷ Δcaps: gc_policy ⊓ current_caps]
-    ///         All: refine_caps(gc_policy)
-    ///
-    ///         // Privacy: Group context for coordination, no external leakage
-    ///         [Leakage: ℓ_ext=0, ℓ_ngh=log(k), ℓ_grp=full]
-    ///     }
-    /// }
-    /// ```
-    pub async fn execute_gc(&mut self, proposal: GcProposal) -> AuraResult<Option<GcSnapshot>> {
-        match &self.role {
-            GcRole::Proposer(device_id) => self.execute_as_proposer(*device_id, proposal).await,
-            GcRole::QuorumMember(member_id) => self.execute_as_quorum_member(*member_id).await,
+    /// Execute garbage collection using choreographic protocol
+    pub async fn execute_gc(
+        &mut self,
+        proposal: GcProposal,
+        role: GcRole,
+    ) -> AuraResult<Option<GcSnapshot>> {
+        tracing::info!(
+            "Starting choreographic garbage collection for epoch {}",
+            proposal.root_commit
+        );
+
+        // TODO: Execute the choreographic protocol using the generated GarbageCollectionChoreography
+        // This is a placeholder until the choreography macro is fully integrated
+
+        match role {
+            GcRole::Proposer(device_id) => self.execute_as_proposer(device_id, proposal).await,
+            GcRole::QuorumMember(member_id) => {
+                self.execute_as_quorum_member(member_id, proposal).await
+            }
             GcRole::Coordinator(coordinator_id) => {
-                self.execute_as_coordinator(*coordinator_id).await
+                self.execute_as_coordinator(coordinator_id, proposal).await
             }
         }
     }
@@ -245,6 +327,7 @@ impl GcChoreography {
             watermarks: proposal.watermarks.clone(),
             epoch: current_epoch,
             proposal_nonce,
+            safety_constraints: proposal.safety_constraints.clone(),
         };
 
         // 3. Send proposal to all quorum members
@@ -282,7 +365,7 @@ impl GcChoreography {
                         quorum_member_id,
                         partial_sig,
                         local_watermark,
-                        timestamp: _,
+                        timestamp: _timestamp,
                     } => {
                         approvals.push(quorum_member_id);
                         partial_signatures.push(partial_sig);
@@ -291,7 +374,7 @@ impl GcChoreography {
                     GcMessage::SnapshotReject {
                         quorum_member_id,
                         reason,
-                        timestamp: _,
+                        timestamp: _timestamp,
                     } => {
                         rejections.push((quorum_member_id, reason));
                     }
@@ -339,7 +422,7 @@ impl GcChoreography {
             // TODO: Apply journal delta through effect system when available
             // self.effects.record_state_change(&gc_facts).await?;
 
-            // 10. Capability refinement based on GC policy  
+            // 10. Capability refinement based on GC policy
             let _capability_facts = "CapabilityUpdate(gc_policy_applied)".to_string();
             // TODO: Apply capability updates through effect system when available
             // self.effects.update_capabilities(&capability_facts).await?;
@@ -360,6 +443,7 @@ impl GcChoreography {
     async fn execute_as_quorum_member(
         &mut self,
         member_id: DeviceId,
+        _proposal: GcProposal,
     ) -> AuraResult<Option<GcSnapshot>> {
         // 1. Receive snapshot proposal
         let bytes = self
@@ -376,6 +460,7 @@ impl GcChoreography {
             watermarks,
             epoch,
             proposal_nonce,
+            safety_constraints: _safety_constraints,
         } = proposal_msg
         {
             // 2. Verify snapshot safety
@@ -426,16 +511,10 @@ impl GcChoreography {
                 }
             } else {
                 // Safety or invariant check failed
-                let reason = if safety_check.is_err() {
-                    format!(
-                        "Snapshot safety check failed: {:?}",
-                        safety_check.unwrap_err()
-                    )
-                } else {
-                    format!(
-                        "Local invariants check failed: {:?}",
-                        invariants_check.unwrap_err()
-                    )
+                let reason = match (safety_check, invariants_check) {
+                    (Err(e), _) => format!("Snapshot safety check failed: {:?}", e),
+                    (Ok(_), Err(e)) => format!("Local invariants check failed: {:?}", e),
+                    _ => "Unknown check failure".to_string(),
                 };
 
                 let reject_msg = GcMessage::SnapshotReject {
@@ -467,8 +546,8 @@ impl GcChoreography {
             {
                 if let GcMessage::SnapshotCommit {
                     snapshot,
-                    threshold_signature: _,
-                    participating_members: _,
+                    threshold_signature: _threshold_signature,
+                    participating_members: _participating_members,
                 } = commit_msg?
                 {
                     // Record snapshot locally through effect system
@@ -491,9 +570,10 @@ impl GcChoreography {
     async fn execute_as_coordinator(
         &mut self,
         _coordinator_id: DeviceId,
+        _proposal: GcProposal,
     ) -> AuraResult<Option<GcSnapshot>> {
         // Coordinator manages GC scheduling and policy enforcement
-        // TODO fix - For now, pass through
+        // TODO: Implement coordinator logic for the choreographic protocol
         Ok(None)
     }
 
@@ -534,7 +614,7 @@ impl GcChoreography {
     }
 
     /// Check local storage invariants
-    async fn check_local_invariants(&self, root_commit: &Hash32) -> AuraResult<()> {
+    async fn check_local_invariants(&self, _root_commit: &Hash32) -> AuraResult<()> {
         // Verify that root_commit is reachable and valid
         // This would check that the proposed root is a valid commit in our view
         Ok(())
@@ -567,16 +647,16 @@ impl GcChoreography {
     /// Create partial signature over proposal
     fn create_partial_signature(
         &self,
-        root_commit: &Hash32,
-        watermarks: &HashMap<ShardId, EventId>,
-        proposal_nonce: [u8; 32],
+        _root_commit: &Hash32,
+        _watermarks: &HashMap<ShardId, EventId>,
+        _proposal_nonce: [u8; 32],
     ) -> AuraResult<Vec<u8>> {
         // Create FROST partial signature over proposal data
         Ok(vec![0u8; 64]) // Placeholder
     }
 
     /// Combine partial signatures into threshold signature
-    fn combine_signatures(&self, partial_sigs: Vec<Vec<u8>>) -> AuraResult<ThresholdSignature> {
+    fn combine_signatures(&self, _partial_sigs: Vec<Vec<u8>>) -> AuraResult<ThresholdSignature> {
         // Use FROST to aggregate partial signatures
         Ok(ThresholdSignature::new(
             b"placeholder_signature".to_vec(),
@@ -593,8 +673,8 @@ impl GcChoreography {
     /// Compute snapshot identifier
     fn compute_snapshot_id(
         &self,
-        proposal: &GcProposal,
-        approvals: &[DeviceId],
+        _proposal: &GcProposal,
+        _approvals: &[DeviceId],
     ) -> AuraResult<Hash32> {
         // Compute deterministic snapshot ID from proposal and approvals
         Ok(Hash32::from_bytes(&[0u8; 32])) // Placeholder
@@ -603,7 +683,7 @@ impl GcChoreography {
     /// Compute chunks safe for collection
     async fn compute_collectible_chunks(
         &self,
-        proposal: &GcProposal,
+        _proposal: &GcProposal,
     ) -> AuraResult<HashSet<ChunkId>> {
         // Determine which chunks can safely be collected based on watermarks
         Ok(HashSet::new()) // Placeholder

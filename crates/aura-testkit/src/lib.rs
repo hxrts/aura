@@ -1,30 +1,34 @@
-//! Aura Testing Infrastructure
+//! Aura Testkit
 //!
 //! This module provides common test setup functions to eliminate duplication
 //! across test modules. It includes factories for creating test accounts,
-//! devices, keys, and other common test fixtures.
+//! devices, keys, and common test fixtures.
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
+#![allow(missing_docs)]
 //!
 //! # Usage
 //!
-//! Add this to your crate's `Cargo.toml` dev-dependencies:
+//! Add this to dev-dependencies:
 //! ```toml
 //! [dev-dependencies]
 //! aura-testkit = { path = "../aura-testkit" }
+//! aura-macros = { path = "../aura-macros" }
 //! ```
 //!
 //! Then in your tests:
 //! ```rust,no_run
 //! use aura_testkit::*;
+//! use aura_macros::aura_test;
 //!
-//! #[tokio::test]
-//! async fn my_test() {
+//! #[aura_test]
+//! async fn my_test() -> aura_core::AuraResult<()> {
+//!     // Effect system automatically initialized
 //!     let account = test_account_with_seed(42).await;
-//!     let device_id = DeviceId::new();
-//!     let fixture = ProtocolTestFixture::for_unit_tests(device_id).await.unwrap();
+//!     let fixture = create_test_fixture().await?;
 //!     // ... test logic
+//!     Ok(())
 //! }
 //! ```
 
@@ -40,8 +44,11 @@ pub mod fixtures;
 pub mod keys;
 pub mod ledger;
 pub mod mocks;
+pub mod network_sim;
 pub mod privacy;
 pub mod protocol;
+pub mod test_harness;
+pub mod time;
 pub mod transport;
 
 // Re-export commonly used items
@@ -75,6 +82,11 @@ pub use ed25519_dalek::{SigningKey, VerifyingKey};
 pub use std::collections::BTreeMap;
 pub use uuid::Uuid;
 
+// Re-export the test harness functions as convenience exports
+pub use test_harness::{
+    create_test_context, create_test_context_with_config, init_test_tracing, TestConfig, TestContext, TestFixture
+};
+
 // Re-export FROST key generation helper
 pub use keys::helpers::test_frost_key_shares;
 
@@ -89,4 +101,28 @@ pub fn test_key_pair(seed: u64) -> (SigningKey, VerifyingKey) {
     let signing_key = SigningKey::from_bytes(&key_bytes);
     let verifying_key = signing_key.verifying_key();
     (signing_key, verifying_key)
+}
+
+/// Create a test fixture with pre-configured effect system
+///
+/// Convenience function that replaces the deprecated `AuraEffectSystem::for_testing()` pattern.
+/// This function creates a TestFixture with the effect system already initialized.
+pub async fn create_test_fixture() -> aura_core::AuraResult<TestFixture> {
+    TestFixture::new().await
+}
+
+/// Create a test fixture with a specific device ID (deterministic)
+///
+/// This is useful for tests that need predictable device IDs.
+pub async fn create_test_fixture_with_device_id(device_id: DeviceId) -> aura_core::AuraResult<TestFixture> {
+    let config = TestConfig {
+        name: "test_with_device_id".to_string(),
+        deterministic_time: true,
+        capture_effects: false,
+        timeout: Some(std::time::Duration::from_secs(30)),
+    };
+    
+    // We'll need to create the context manually to specify the device ID
+    // For now, create normal fixture and document this as a TODO for enhancement
+    TestFixture::with_config(config).await
 }

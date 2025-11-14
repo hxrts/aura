@@ -105,7 +105,7 @@ impl LedgerEffects for MemoryLedgerHandler {
         Ok(secret)
     }
 
-    async fn hash_blake3(&self, data: &[u8]) -> Result<[u8; 32], LedgerError> {
+    async fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], LedgerError> {
         Ok(aura_core::hash::hash(data))
     }
 

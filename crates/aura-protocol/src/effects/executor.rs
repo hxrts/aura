@@ -153,7 +153,7 @@ mod tests {
         // Should fail with UnsupportedEffect
         assert!(matches!(
             result,
-            Err(AuraHandlerError::UnsupportedEffect(EffectType::Crypto))
+            Err(AuraHandlerError::UnsupportedEffect { effect_type: EffectType::Crypto })
         ));
     }
 

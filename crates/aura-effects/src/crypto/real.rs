@@ -7,6 +7,7 @@
 //! like `rand::thread_rng()` since its purpose is to abstract these operations
 //! for the effect system.
 #![allow(clippy::disallowed_methods)]
+#![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
 use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
@@ -317,9 +318,9 @@ impl CryptoEffects for RealCryptoHandler {
 
     fn crypto_capabilities(&self) -> Vec<String> {
         vec![
-            "blake3_hash".to_string(),
+            "hash_function".to_string(),
             "sha256_hash".to_string(),
-            "blake3_hmac".to_string(),
+            "hmac_derive".to_string(),
             "hkdf_derive".to_string(),
             "derive_key".to_string(),
             "ed25519_generate_keypair".to_string(),

@@ -761,8 +761,9 @@ pub async fn apply_snapshot_commit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::AuraEffectSystem;
     use aura_core::tree::LeafId;
+    use aura_testkit::*;
+    use aura_macros::aura_test;
     use std::collections::BTreeMap;
 
     fn create_test_config() -> SnapshotConfig {
@@ -792,38 +793,38 @@ mod tests {
         assert_eq!(config.approval_timeout_secs, 120);
     }
 
-    #[tokio::test]
-    async fn test_execute_as_proposer() {
-        let device_id = DeviceId::new();
-        let config = crate::effects::EffectSystemConfig::for_testing(device_id);
-        let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+    #[aura_test]
+    async fn test_execute_as_proposer() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let effect_system = fixture.effects();
         let config = create_test_config();
 
-        let result = execute_as_proposer(config, &effect_system).await;
+        let result = execute_as_proposer(config, effect_system).await;
         assert!(result.is_ok());
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_execute_as_quorum_member() {
-        let device_id = DeviceId::new();
-        let config = crate::effects::EffectSystemConfig::for_testing(device_id);
-        let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+    #[aura_test]
+    async fn test_execute_as_quorum_member() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let effect_system = fixture.effects();
         let config = create_test_config();
         let proposal_id = ProposalId::new_random();
 
-        let result = execute_as_quorum_member(config, proposal_id, &effect_system).await;
+        let result = execute_as_quorum_member(config, proposal_id, effect_system).await;
         assert!(result.is_ok());
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_apply_snapshot_commit() {
-        let device_id = DeviceId::new();
-        let config = crate::effects::EffectSystemConfig::for_testing(device_id);
-        let effect_system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+    #[aura_test]
+    async fn test_apply_snapshot_commit() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let effect_system = fixture.effects();
         let snapshot = create_test_snapshot();
 
-        let result = apply_snapshot_commit(snapshot, &effect_system).await;
+        let result = apply_snapshot_commit(snapshot, effect_system).await;
         assert!(result.is_ok());
+        Ok(())
     }
 
     #[test]

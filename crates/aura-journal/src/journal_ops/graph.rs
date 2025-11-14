@@ -336,9 +336,9 @@ mod tests {
         let mut journal = KeyJournal::new();
 
         // Create identity with 2 devices
-        let identity_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let device1_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let device2_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let identity_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([1u8; 16]));
+        let device1_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
+        let device2_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([3u8; 16]));
 
         let identity = KeyNode::new(
             identity_id,
@@ -364,7 +364,18 @@ mod tests {
     #[test]
     fn test_journal_validation() {
         let journal = create_test_journal();
-        assert!(JournalGraph::validate_journal(&journal).is_ok());
+        println!("Journal has {} nodes", journal.nodes.len());
+        for (id, node) in &journal.nodes {
+            println!("Node: {:?} -> {:?}", id, node);
+        }
+        println!("Journal has {} edges", journal.edges.len());
+        for (id, edge) in &journal.edges {
+            println!("Edge: {:?} -> {:?}", id, edge);
+        }
+        match JournalGraph::validate_journal(&journal) {
+            Ok(_) => {},
+            Err(e) => panic!("Journal validation failed: {:?}", e),
+        }
     }
 
     #[test]
@@ -387,8 +398,8 @@ mod tests {
         let journal = create_test_journal();
 
         // Create a new disconnected node
-        let new_node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let new_device_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let new_node_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([4u8; 16]));
+        let new_device_id = aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([5u8; 16]));
 
         let edge = KeyEdge::new(new_node_id, new_device_id, EdgeKind::Contains);
 

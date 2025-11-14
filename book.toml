@@ -1,6 +1,6 @@
 [book]
-title = "Aura - Threshold Identity and Storage Platform"
-authors = ["Hxrts"]
+title = "Aura"
+authors = ["Sam Hart"]
 language = "en"
 src = "docs"
 
@@ -8,7 +8,7 @@ src = "docs"
 build-dir = "docs/book"
 
 [output.html]
-preferred-dark-theme = "rust"
+preferred-theme = "rust"
 additional-js = ["mermaid.min.js", "mermaid-init.js"]
 
 [output.html.search]

@@ -3,14 +3,17 @@
 //! This module provides test-specific implementations and utilities
 //! that should not be used in production code.
 
+#![allow(clippy::type_complexity)]
+#![allow(clippy::expect_used)]
+
 use async_trait::async_trait;
 use aura_core::effects::*;
-use aura_core::hash;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Log levels for testing
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum LogLevel {
     Error,
@@ -35,24 +38,34 @@ impl MockNetworkTransport {
 
     /// Get all messages sent through this transport
     pub fn get_messages(&self) -> Vec<(Uuid, Vec<u8>)> {
-        self.messages.lock().unwrap().clone()
+        self.messages
+            .lock()
+            .expect("Failed to lock messages")
+            .clone()
     }
 
     /// Clear all messages from this transport
     pub fn clear_messages(&self) {
-        self.messages.lock().unwrap().clear()
+        self.messages
+            .lock()
+            .expect("Failed to lock messages")
+            .clear()
     }
 
     /// Add a connected peer
     pub fn add_peer(&self, peer_id: Uuid) {
-        self.connected_peers.lock().unwrap().push(peer_id);
+        self.connected_peers
+            .lock()
+            .expect("Failed to lock connected_peers")
+            .push(peer_id);
     }
 
     /// Remove a connected peer
+    #[allow(dead_code)]
     pub fn remove_peer(&self, peer_id: Uuid) {
         self.connected_peers
             .lock()
-            .unwrap()
+            .expect("Failed to lock connected_peers")
             .retain(|&id| id != peer_id);
     }
 }
@@ -60,25 +73,36 @@ impl MockNetworkTransport {
 #[async_trait]
 impl NetworkEffects for MockNetworkTransport {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
-        if !self.connected_peers.lock().unwrap().contains(&peer_id) {
+        if !self
+            .connected_peers
+            .lock()
+            .expect("Failed to lock connected_peers")
+            .contains(&peer_id)
+        {
             return Err(NetworkError::SendFailed {
                 peer_id: Some(peer_id),
                 reason: format!("Peer not connected: {}", peer_id),
             });
         }
 
-        self.messages.lock().unwrap().push((peer_id, message));
+        self.messages
+            .lock()
+            .expect("Failed to lock messages")
+            .push((peer_id, message));
         Ok(())
     }
 
     async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
         let broadcast_id = Uuid::from_u128(0); // Special ID for broadcasts
-        self.messages.lock().unwrap().push((broadcast_id, message));
+        self.messages
+            .lock()
+            .expect("Failed to lock messages")
+            .push((broadcast_id, message));
         Ok(())
     }
 
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
-        let messages = self.messages.lock().unwrap();
+        let messages = self.messages.lock().expect("Failed to lock messages");
         if let Some((peer_id, message)) = messages.first() {
             Ok((*peer_id, message.clone()))
         } else {
@@ -87,7 +111,7 @@ impl NetworkEffects for MockNetworkTransport {
     }
 
     async fn receive_from(&self, peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
-        let messages = self.messages.lock().unwrap();
+        let messages = self.messages.lock().expect("Failed to lock messages");
         for (id, message) in messages.iter() {
             if *id == peer_id {
                 return Ok(message.clone());
@@ -97,11 +121,17 @@ impl NetworkEffects for MockNetworkTransport {
     }
 
     async fn connected_peers(&self) -> Vec<Uuid> {
-        self.connected_peers.lock().unwrap().clone()
+        self.connected_peers
+            .lock()
+            .expect("Failed to lock connected_peers")
+            .clone()
     }
 
     async fn is_peer_connected(&self, peer_id: Uuid) -> bool {
-        self.connected_peers.lock().unwrap().contains(&peer_id)
+        self.connected_peers
+            .lock()
+            .expect("Failed to lock connected_peers")
+            .contains(&peer_id)
     }
 
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
@@ -122,34 +152,52 @@ impl MockStorage {
         Self::default()
     }
 
+    #[allow(dead_code)]
     pub fn with_data(data: HashMap<String, Vec<u8>>) -> Self {
         Self {
             data: Arc::new(Mutex::new(data)),
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_all_data(&self) -> HashMap<String, Vec<u8>> {
-        self.data.lock().unwrap().clone()
+        self.data
+            .lock()
+            .expect("Failed to lock storage data")
+            .clone()
     }
 }
 
 #[async_trait]
 impl StorageEffects for MockStorage {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        self.data.lock().unwrap().insert(key.to_string(), value);
+        self.data
+            .lock()
+            .expect("Failed to lock storage data")
+            .insert(key.to_string(), value);
         Ok(())
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        Ok(self.data.lock().unwrap().get(key).cloned())
+        Ok(self
+            .data
+            .lock()
+            .expect("Failed to lock storage data")
+            .get(key)
+            .cloned())
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-        Ok(self.data.lock().unwrap().remove(key).is_some())
+        Ok(self
+            .data
+            .lock()
+            .expect("Failed to lock storage data")
+            .remove(key)
+            .is_some())
     }
 
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        let data = self.data.lock().unwrap();
+        let data = self.data.lock().expect("Failed to lock storage data");
         let keys: Vec<String> = if let Some(prefix) = prefix {
             data.keys()
                 .filter(|k| k.starts_with(prefix))
@@ -162,11 +210,15 @@ impl StorageEffects for MockStorage {
     }
 
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        Ok(self.data.lock().unwrap().contains_key(key))
+        Ok(self
+            .data
+            .lock()
+            .expect("Failed to lock storage data")
+            .contains_key(key))
     }
 
     async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-        let mut data = self.data.lock().unwrap();
+        let mut data = self.data.lock().expect("Failed to lock storage data");
         for (key, value) in pairs {
             data.insert(key, value);
         }
@@ -177,7 +229,7 @@ impl StorageEffects for MockStorage {
         &self,
         keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-        let data = self.data.lock().unwrap();
+        let data = self.data.lock().expect("Failed to lock storage data");
         let mut result = HashMap::new();
         for key in keys {
             if let Some(value) = data.get(key) {
@@ -188,12 +240,15 @@ impl StorageEffects for MockStorage {
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
-        self.data.lock().unwrap().clear();
+        self.data
+            .lock()
+            .expect("Failed to lock storage data")
+            .clear();
         Ok(())
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
-        let data = self.data.lock().unwrap();
+        let data = self.data.lock().expect("Failed to lock storage data");
         Ok(StorageStats {
             key_count: data.len() as u64,
             total_size: data.values().map(|v| v.len() as u64).sum(),
@@ -223,7 +278,7 @@ impl aura_core::RandomEffects for MockCrypto {
     }
 
     async fn random_bytes_32(&self) -> [u8; 32] {
-        let mut counter = self.counter.lock().unwrap();
+        let mut counter = self.counter.lock().expect("Failed to lock counter");
         *counter += 1;
         let mut bytes = [0u8; 32];
         bytes[0..8].copy_from_slice(&counter.to_le_bytes());
@@ -231,7 +286,7 @@ impl aura_core::RandomEffects for MockCrypto {
     }
 
     async fn random_u64(&self) -> u64 {
-        let mut counter = self.counter.lock().unwrap();
+        let mut counter = self.counter.lock().expect("Failed to lock counter");
         *counter += 1;
         *counter
     }
@@ -243,19 +298,6 @@ impl aura_core::RandomEffects for MockCrypto {
 
 #[async_trait]
 impl aura_core::CryptoEffects for MockCrypto {
-    async fn hash(&self, data: &[u8]) -> [u8; 32] {
-        hash::hash(data)
-    }
-
-    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32] {
-        use hmac::{Hmac, Mac};
-        use sha2::Sha256;
-        type HmacSha256 = Hmac<Sha256>;
-        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
-        mac.update(data);
-        mac.finalize().into_bytes().into()
-    }
-
     async fn hkdf_derive(
         &self,
         _ikm: &[u8],
@@ -430,6 +472,7 @@ pub fn generate_test_uuid() -> Uuid {
 }
 
 /// Generate deterministic test UUIDs with different seeds
+#[allow(dead_code)]
 pub fn generate_test_uuid_with_seed(seed: u8) -> Uuid {
     Uuid::from_bytes([
         seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed, seed,
@@ -438,6 +481,7 @@ pub fn generate_test_uuid_with_seed(seed: u8) -> Uuid {
 }
 
 /// Create test keypair for deterministic testing
+#[allow(dead_code)]
 pub fn create_test_keypair() -> (ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey) {
     let seed = [0x42u8; 32];
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
@@ -517,7 +561,7 @@ mod tests {
 
         // Test hash
         let data = b"test data";
-        let hash = crypto.hash(data).await;
+        let hash = aura_core::hash::hash(data);
         assert_eq!(hash.len(), 32);
 
         // Test keypair generation

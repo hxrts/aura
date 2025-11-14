@@ -93,6 +93,9 @@ pub enum EffectType {
     Ledger,
     /// Journal operations (event log, snapshots)
     Journal,
+    
+    /// Tree operations (ratchet tree, MLS)
+    Tree,
 
     /// Choreographic protocol coordination
     Choreographic,
@@ -132,6 +135,7 @@ impl fmt::Display for EffectType {
             Self::Random => write!(f, "random"),
             Self::Ledger => write!(f, "ledger"),
             Self::Journal => write!(f, "journal"),
+            Self::Tree => write!(f, "tree"),
             Self::Choreographic => write!(f, "choreographic"),
             Self::System => write!(f, "system"),
             Self::DeviceStorage => write!(f, "device_storage"),
@@ -308,6 +312,7 @@ impl EffectType {
             Self::Random,
             Self::Ledger,
             Self::Journal,
+            Self::Tree,
             Self::Choreographic,
             Self::System,
             Self::DeviceStorage,

@@ -8,33 +8,30 @@ Rumpsteak-aura provides a rich choreographic DSL for specifying distributed prot
 
 ### Protocol Namespacing
 
-Rumpsteak-aura supports protocol namespacing for module organization and conflict prevention:
+Aura supports protocol namespacing through the `choreography!` macro for module organization and conflict prevention:
 
 ```rust
-use rumpsteak_aura_choreography::compiler::parser::parse_choreography_str;
+use aura_macros::choreography;
 
-let admin_protocol = r#"
+choreography! {
     #[namespace = "admin_operations"]
-    choreography AdminOperations {
+    protocol AdminOperations {
         roles: Admin, Moderator, User;
         
         Admin -> Moderator: GrantPermissions;
         Moderator -> User: ModerationAction;
     }
-"#;
+}
 
-let user_protocol = r#"
+choreography! {
     #[namespace = "user_management"]
-    choreography UserRegistration {
+    protocol UserRegistration {
         roles: NewUser, Validator, Admin;
         
         NewUser -> Validator: RegistrationRequest;
         Validator -> Admin: ValidationResult;
     }
-"#;
-
-let admin_choreo = parse_choreography_str(admin_protocol)?;
-let user_choreo = parse_choreography_str(user_protocol)?;
+}
 ```
 
 Namespaces generate separate module structures in code generation. Protocol names remain isolated within their namespace scope. Multiple choreographies can define similar role or message names without conflicts.
@@ -232,7 +229,7 @@ Aura extends rumpsteak-aura with domain-specific annotations for security, perfo
 Guard capabilities provide authorization control for protocol operations:
 
 ```rust
-use aura_macros::aura_choreography;
+use aura_macros::choreography;
 
 choreography! {
     #[namespace = "secure_protocol"]
@@ -248,7 +245,7 @@ choreography! {
 }
 ```
 
-Guard capabilities specify required permissions for protocol operations. The aura-mpst runtime validates capabilities before executing protocol steps. Failed capability checks prevent unauthorized operations.
+Guard capabilities specify required permissions for protocol operations. The `guard_capability` annotation compiles to `CapabilityGuardEffect` instances that integrate with rumpsteak-aura's extension system. The `AuraHandler` validates capabilities through registered extension handlers before executing protocol steps. Failed capability checks prevent unauthorized operations and return appropriate error responses.
 
 ### Flow Cost Control
 
@@ -315,7 +312,7 @@ choreography! {
 }
 ```
 
-Combined annotations provide multi-layered protocol control. Guard capabilities ensure authorization. Flow costs control resource usage. Journal facts enable auditability.
+Combined annotations compile to multiple extension effects that execute in sequence during protocol operations. Guard capabilities ensure authorization through `CapabilityGuardEffect`. Flow costs control resource usage through `FlowCostEffect`. Journal facts enable auditability through `JournalFactsEffect`. All effects are registered in the `ExtensionRegistry` and execute automatically during choreographic message operations.
 
 ## Effect System Integration
 
@@ -323,43 +320,38 @@ Rumpsteak-aura protocols integrate with algebraic effect systems for runtime exe
 
 ### Effect Programs
 
-Protocols execute as effect programs using the Program abstraction:
+Aura choreographies generate session types that integrate with rumpsteak-aura's effect system:
 
 ```rust
-use rumpsteak_aura_choreography::effects::*;
+use aura_protocol::choreography::AuraHandlerAdapter;
 
-let program = Program::new()
-    .send(Role::Server, Message("hello"))
-    .recv::<Response>(Role::Server)
-    .choose(Role::Server, Label("continue"))
-    .send(Role::Server, Message("data"))
-    .end();
+let mut handler = AuraHandlerAdapter::for_testing(device_id)?;
+let mut endpoint = AuraEndpoint::new(context_id);
 
-let mut handler = InMemoryHandler::new(Role::Client);
-let mut endpoint = ();
-let result = interpret(&mut handler, &mut endpoint, program).await?;
+// Execute choreography-generated protocol
+let result = execute_alice_role(&mut handler, &mut endpoint).await?;
 ```
 
-Programs compose protocol operations using a fluent builder API. Effect interpretation uses configurable handlers for different execution environments. Results contain received values and execution state.
+Generated protocols execute through rumpsteak-aura's `interpret_extensible` function using the `AuraHandler`. Extension effects execute automatically for annotated messages, providing capability guards, flow budgets, and journal coupling. Results contain received values and execution state with Aura-specific metadata from extension effect execution.
 
 ### Handler Abstraction
 
-Handlers implement the `ChoreoHandler` trait for effect interpretation:
+Aura provides specialized handlers that implement rumpsteak-aura's `ChoreoHandler` trait:
 
 ```rust
-use rumpsteak_aura_choreography::effects::handlers::*;
+use aura_protocol::choreography::AuraHandlerAdapter;
 
-// In-memory handler for testing
-let test_handler = InMemoryHandler::new(Role::Alice);
+// Testing handler with in-memory effects
+let test_handler = AuraHandlerAdapter::for_testing(device_id)?;
 
-// Recording handler for verification
-let recording_handler = RecordingHandler::new(Role::Alice);
+// Production handler with real network and storage
+let prod_handler = AuraHandlerAdapter::for_production(device_id)?;
 
-// Rumpsteak handler for production
-let production_handler = RumpsteakHandler::new();
+// Simulation handler with fault injection
+let sim_handler = AuraHandlerAdapter::for_simulation(device_id, config)?;
 ```
 
-Different handlers provide testing capabilities, recording for verification, and production transports. Handler selection enables flexible protocol execution environments.
+Different handler modes provide testing capabilities, production deployment, and simulation environments. Each handler implements both `ChoreoHandler` and `ExtensibleHandler` traits with appropriate extension registries for that execution mode. The `AuraHandler` integrates with Aura's effect system through registered extension effects that execute during protocol operations. Handler selection enables flexible protocol execution environments while maintaining consistent choreographic interfaces.
 
 ### Protocol Composition
 

@@ -72,19 +72,52 @@
 pub mod console;
 pub mod crypto;
 pub mod journal;
-pub mod network;
 pub mod random;
 pub mod storage;
 pub mod time;
+pub mod transport;
 
 // Re-export commonly used handlers
 pub use console::{MockConsoleHandler, RealConsoleHandler};
 pub use crypto::{MockCryptoHandler, RealCryptoHandler};
 pub use journal::MemoryJournalHandler;
-pub use network::{MemoryNetworkHandler, MockNetworkHandler, TcpNetworkHandler};
 pub use random::{MockRandomHandler, RealRandomHandler};
 pub use storage::{FilesystemStorageHandler, MemoryStorageHandler};
 pub use time::{RealTimeHandler, SimulatedTimeHandler};
+// Transport effect handlers - organized by functionality
+pub mod transport_effects {
+    //! Transport effect implementations - Layer 3 stateless handlers
+    
+    pub use crate::transport::{
+        // Core transport handlers  
+        TcpTransportHandler,
+        WebSocketTransportHandler, 
+        InMemoryTransportHandler,
+        
+        // Message processing
+        FramingHandler,
+        
+        // Utilities and helpers
+        AddressResolver,
+        TimeoutHelper,
+        BufferUtils,
+        ConnectionMetrics,
+        UrlValidator,
+        
+        // Coordination helpers (NO choreography)
+        TransportManager,
+        RetryingTransportManager,
+        
+        // Integration helpers
+        TransportError,
+    };
+}
+
+// Convenience re-exports for most common handlers
+pub use transport_effects::{
+    TcpTransportHandler, WebSocketTransportHandler, InMemoryTransportHandler,
+    FramingHandler, TransportManager, TransportError
+};
 
 // Re-export core effect traits for convenience
 pub use aura_core::effects::*;

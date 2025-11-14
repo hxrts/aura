@@ -56,19 +56,20 @@ See the authentication and authorization documentation for complete architecture
 
 ### Projection
 
-Aura treats choreographies as the source of truth with working projection infrastructure and runtime bridge. `aura-mpst` provides choreography execution via aura-choreography projection with FlowBudget charges and leakage guards. The guard chain integrates with choreographic execution.
+Aura treats choreographies as the source of truth using rumpsteak-aura's projection infrastructure. `aura-macros` parses choreographic protocols using `parse_choreography_str` and generates local session types using rumpsteak-aura's projection algorithms. `aura-mpst` provides the `AuraHandler` implementation of `ChoreoHandler` that executes protocols through rumpsteak-aura's interpreter. The guard chain integrates seamlessly with choreographic execution through extension effects registered in the `ExtensionRegistry`.
 
-## 1. Stateless Effect System Architecture
+## 1. Async Effect System Architecture
 
 ### 1.1 Core Principles
 
-Aura implements a stateless effect system that eliminates deadlocks through architectural separation of execution and state management.
+Aura implements an async-first effect system designed for concurrent execution in both native and WASM environments. The architecture eliminates deadlocks through explicit context propagation and isolated state services.
 
-**Deadlock Prevention:**
-- **Stateless Execution** - Effect handlers contain no state and execute without locks
-- **Isolated State Services** - Context, budget, and receipt management use separate lock domains
-- **Immutable Data Flow** - `AuraContext` flows through operations as immutable snapshots
-- **No Cross-Service Dependencies** - Services never acquire locks on other services
+**Key Design Principles:**
+- **Async-Native Execution** - All effect operations are async, enabling natural concurrency
+- **Explicit Context Propagation** - Context flows through operations as parameters, not ambient state
+- **Builder Pattern Initialization** - Flexible handler composition with async initialization
+- **WASM Compatibility** - No OS threads or system calls, works in browser environments
+- **Lifecycle Management** - Explicit initialization and shutdown phases with health monitoring
 
 ### 1.2 Algebraic Effect Theory & Terminology
 
@@ -114,7 +115,7 @@ The effect system is organized into 8 clean architectural layers:
 
 **Layer 1 - Interface** (`aura-core`) contains effect trait definitions only. This includes `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `JournalEffects`, `ConsoleEffects`, and `RandomEffects`. Domain types like `DeviceId`, `AccountId`, and `FlowBudget` live here. This layer serves as the single source of truth for all effect interfaces. Dependencies include only `serde`, `uuid`, `thiserror`, and `chrono` with no other Aura crates.
 
-**Layer 2 - Specification** includes domain crates and `aura-mpst`. Domain-specific types and semantics exist in `aura-crypto`, `aura-journal`, `aura-wot`, and `aura-store`. MPST choreography specifications and session type extensions live in `aura-mpst`. This layer contains domain logic and CRDT implementations but no effect handlers.
+**Layer 2 - Specification** includes domain crates and `aura-mpst`. Domain-specific types and semantics exist in `aura-crypto`, `aura-journal`, `aura-wot`, and `aura-store`. MPST choreography specifications and session type extensions live in `aura-mpst`. The `aura-macros` crate provides choreographic DSL parsing that wraps rumpsteak-aura's parser with Aura-specific extension effects. The `aura-mpst` crate implements `ChoreoHandler` and `ExtensibleHandler` traits for rumpsteak-aura integration. This layer contains domain logic and CRDT implementations but no effect handlers.
 
 **Layer 3 - Implementation** (`aura-effects`) functions as the standard library. It provides context-free, stateless effect handlers that work in any execution context. Mock handlers include `MockCryptoHandler`, `MockNetworkHandler`, and `MemoryStorageHandler`. Real handlers include `RealCryptoHandler`, `TcpNetworkHandler`, and `FilesystemStorageHandler`. Testing and production variants exist for each effect type. Dependencies include `aura-core` plus external libraries like tokio and blake3. This layer contains stateless, single-party, context-free operations. It excludes coordination, multi-handler composition, and choreographic bridging.
 
@@ -149,87 +150,135 @@ Use these questions to classify borderline cases:
 
 The architecture provides several benefits. The standard library (`aura-effects`) handles effect implementations. Clear distinction exists between basic implementations, coordination, and applications. Easy testing uses comprehensive mock handlers. The location for new code is obvious using the decision matrix.
 
-### 1.4 Stateless Architecture Components
+### 1.4 Async Architecture Components
 
-The effect system eliminates deadlocks through three architectural components that never share locks.
+The effect system uses modern async patterns for concurrent execution without deadlocks.
 
-#### Effect Executor
+#### Effect System Builder
 
-The `EffectExecutor` provides lock-free effect dispatch:
+The `AuraEffectSystemBuilder` enables flexible initialization:
 
 ```rust
-pub struct EffectExecutor {
-    handlers: HashMap<EffectType, Box<dyn AuraHandler>>,
+pub struct AuraEffectSystemBuilder {
+    config: EffectSystemConfig,
+    handlers: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
+    container: Option<EffectContainer>,
 }
 
-impl EffectExecutor {
-    async fn execute(&self, 
-        effect_type: EffectType, 
-        operation: &str, 
-        params: &[u8],
-        context: &AuraContext  // Immutable snapshot
-    ) -> Result<Vec<u8>, AuraHandlerError> {
-        // Direct dispatch with no locks
-        self.handlers.get(&effect_type)?
-            .execute(operation, params, context)
-            .await
+impl AuraEffectSystemBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    pub fn with_handler<T: 'static>(
+        mut self, 
+        handler: Arc<T>
+    ) -> Self {
+        self.handlers.insert(TypeId::of::<T>(), handler);
+        self
+    }
+    
+    pub async fn build(self) -> Result<AuraEffectSystem> {
+        // Parallel initialization for performance
+        let init_tasks = self.handlers.values()
+            .map(|h| h.initialize())
+            .collect::<Vec<_>>();
+        
+        futures::future::join_all(init_tasks).await;
+        
+        Ok(AuraEffectSystem { 
+            handlers: self.handlers,
+            lifecycle: LifecycleManager::new(),
+        })
     }
 }
 ```
 
-#### Isolated State Services
+#### Context Propagation System
 
-Three services manage state domains independently:
+Explicit context flows through all operations:
 
 ```rust
-// Context snapshots - never locks during execution
-pub struct ContextManager {
-    contexts: Arc<RwLock<HashMap<DeviceId, AuraContext>>>,
+// Context propagates explicitly, no ambient state
+#[derive(Clone, Debug)]
+pub struct EffectContext {
+    pub request_id: Uuid,
+    pub device_id: DeviceId,
+    pub flow_budget: FlowBudget,
+    pub trace_context: TraceContext,
+    pub deadline: Option<Instant>,
+    pub metadata: HashMap<String, String>,
 }
 
-// Flow budget tracking - isolated lock domain
-pub struct FlowBudgetManager {
-    budgets: Arc<RwLock<HashMap<(ContextId, DeviceId), FlowBudget>>>,
+// Context-aware effect traits
+#[async_trait]
+pub trait ContextualNetworkEffects {
+    async fn send_with_context(
+        &self,
+        ctx: &EffectContext,
+        envelope: Envelope,
+    ) -> Result<Receipt>;
 }
 
-// Receipt chain management - separate lock domain
-pub struct ReceiptManager {
-    chains: Arc<RwLock<HashMap<ContextId, ReceiptChain>>>,
+// Task-local propagation for async operations
+tokio::task_local! {
+    static EFFECT_CONTEXT: EffectContext;
+}
+
+// Scoped context execution
+pub async fn with_context<F, R>(ctx: EffectContext, f: F) -> R 
+where
+    F: Future<Output = R>,
+{
+    EFFECT_CONTEXT.scope(ctx, f).await
 }
 ```
 
-#### Coordination Without Deadlocks
+#### Lifecycle Management
 
-The `AuraEffectSystem` coordinates services using snapshot-execute-update pattern:
+The effect system manages initialization and shutdown explicitly:
 
 ```rust
-impl AuraEffectSystem {
-    pub async fn execute_effect(&self,
-        effect_type: EffectType,
-        operation: &str,
-        params: &[u8]
-    ) -> Result<Vec<u8>, AuraHandlerError> {
-        // Snapshot phase - brief lock, immediate release
-        let context = self.context_mgr.get_snapshot(self.device_id).await?;
+pub struct LifecycleManager {
+    state: Arc<AtomicU8>,  // EffectSystemState as u8
+    components: Arc<RwLock<Vec<Arc<dyn LifecycleAware>>>>,
+    start_time: Instant,
+}
+
+impl LifecycleManager {
+    pub async fn initialize(&self) -> Result<()> {
+        self.transition_to(EffectSystemState::Initializing)?;
         
-        // Execute phase - no locks held
-        let result = self.executor.execute(effect_type, operation, params, &context).await?;
-        
-        // Update phase - independent service lock
-        if operation.requires_state_update() {
-            self.handle_state_update(&result).await?;
+        // Initialize components in registration order
+        let components = self.components.read().await;
+        for component in components.iter() {
+            component.on_initialize().await?;
         }
         
-        Ok(result)
+        self.transition_to(EffectSystemState::Ready)?;
+        Ok(())
+    }
+    
+    pub async fn shutdown(&self) -> Result<()> {
+        self.transition_to(EffectSystemState::ShuttingDown)?;
+        
+        // Shutdown in reverse order
+        let components = self.components.read().await;
+        for component in components.iter().rev() {
+            component.on_shutdown().await?;
+        }
+        
+        self.transition_to(EffectSystemState::Shutdown)?;
+        Ok(())
     }
 }
 ```
 
-**Deadlock Prevention:**
-- Services never acquire locks on other services
-- All locks are held briefly and released immediately
-- Effect execution occurs with immutable data only
-- Updates use independent lock domains
+**Lifecycle States:**
+- Uninitialized → Initializing → Ready → ShuttingDown → Shutdown
+- Health checks monitor component status
+- Graceful degradation on component failures
+- Metrics track initialization and execution performance
 
 ### 1.5 Session Type Algebra Integration
 
@@ -460,34 +509,71 @@ This wrapper provides retry functionality for transient failures. Common middlew
 
 The system includes operational guardrails with default settings. Retry uses exponential backoff with jitter and a ceiling of 3 attempts. Simulation mode provides deterministic behavior via seeded RNG. Circuit breakers open after 5 consecutive failures for 30 seconds per peer or channel. Half-open probes respect FlowBudget constraints. Metrics and observability count denials for CapGuard and FlowGuard locally. Raw context identifiers are not exported.
 
-### 1.10 Context Management
+### 1.10 Context Management and Propagation
 
-Context is managed as immutable data that flows through operations, not shared mutable state.
+Context propagates explicitly through async operations with automatic tracing integration.
 
 ```rust
-// Context is a snapshot, not a reference to mutable state
-let context = effect_system.get_context_snapshot().await;
-let bytes = effect_system.random_bytes(32, &context).await;
+// Create context with tracing
+let ctx = EffectContext::new()
+    .with_device_id(device_id)
+    .with_flow_budget(1000)
+    .with_deadline(Instant::now() + Duration::from_secs(30));
+
+// Execute with context propagation
+with_context(ctx.clone(), async {
+    // Context automatically available to nested operations
+    let result = effects.network()
+        .send_with_context(&current_context(), envelope)
+        .await?;
+    
+    // Spawn tasks with inherited context
+    let handle = spawn_with_context(async {
+        // Child task inherits parent context
+        process_response().await
+    });
+    
+    handle.await?
+}).await
 ```
 
-The `AuraContext` enforces privacy isolation through data flow, not locks. Each context snapshot contains relationship IDs, DKD namespaces, and leakage counters. The ContextManager service handles updates atomically, ensuring consistency without holding locks during effect execution.
+**Context Features:**
+- W3C trace context for distributed tracing
+- Flow budget enforcement at operation boundaries
+- Deadline propagation for timeout handling
+- Metadata for custom application data
+- Parent-child relationships for nested operations
 
-### 1.11 Unified Configuration System
+### 1.11 Testing Infrastructure
 
-The stateless effect system uses a unified configuration pattern that separates concerns and enables proper storage configuration.
+The effect system provides first-class testing support through the `#[aura_test]` macro.
 
 ```rust
-// Create configuration for testing
-let config = EffectSystemConfig::for_testing(device_id);
-let test_system = AuraEffectSystem::new(config)?;
+#[aura_test]
+async fn test_protocol_execution() {
+    // Effect system automatically initialized
+    let envelope = create_test_envelope();
+    
+    // Time control for deterministic tests
+    freeze_time();
+    let result = effects.network().send(envelope).await?;
+    advance_time_by(Duration::from_secs(5));
+    
+    // Network simulation
+    let mut sim = NetworkSimulator::new();
+    sim.add_latency(50..150);
+    sim.add_packet_loss(0.05);
+    
+    // Effect snapshots for assertions
+    let snapshot = effects.snapshot();
+    assert_eq!(snapshot.network_calls(), 1);
+}
 
-// Create configuration for production
-let config = EffectSystemConfig::for_production(device_id)?;
-let prod_system = AuraEffectSystem::new(config)?;
-
-// Create configuration for simulation
-let config = EffectSystemConfig::for_simulation(device_id, 42);
-let sim_system = AuraEffectSystem::new(config)?;
+// Test fixtures for common scenarios
+let fixture = TestFixture::new()
+    .with_mocks()
+    .with_deterministic_time()
+    .build();
 ```
 
 **Configuration Features:**
@@ -501,31 +587,36 @@ let sim_system = AuraEffectSystem::new(config)?;
 - **Production**: Uses platform data directories with secure key management  
 - **Simulation**: Uses deterministic paths based on seed for reproducible testing
 
-### 1.12 Flow Budget System
+### 1.12 Performance Optimizations
 
-The stateless effect system enforces flow budgets through the isolated `FlowBudgetManager` service without deadlocks.
+The async effect system includes comprehensive performance optimizations compatible with WASM.
 
 ```rust
-// Flow budgets are managed per context-peer pair
-FlowBudget { limit: u64, spent: u64, epoch: Epoch }
+// Parallel initialization (WASM-compatible)
+let builder = ParallelInitBuilder::new(config)
+    .with_metrics();
+    
+let (system, metrics) = builder.build().await?;
+println!("Initialization speedup: {:.2}x", metrics.parallel_speedup);
+
+// Effect caching
+let cached_storage = CachingStorageHandler::new(base, 1000);
+let data = cached_storage.retrieve("key").await?; // Cache hit after first access
+
+// Allocation reduction
+let atom = intern("frequently_used_string"); // String interning
+let buffer = BUFFER_POOL.get_buffer(4096);   // Buffer pooling
+
+// Lazy initialization
+let lazy_system = LazyEffectSystem::new(config);
+let system = lazy_system.get().await?; // Initialize on first access
 ```
 
-**Budget Enforcement:**
-- **Charge-Before-Send**: Budget is charged before any network operation
-- **Receipt Generation**: Each charge produces a cryptographic receipt
-- **Isolated Service**: Budget operations never hold locks during effect execution  
-- **Epoch Boundaries**: Budgets reset automatically at epoch transitions
-
-**Integration with Guard Chain:**
-```rust
-let guard = SendGuardChain::new(capability, context_id, peer_device, cost);
-let result = guard.evaluate(&effect_system).await?;
-if result.authorized {
-    network.send_with_receipt(message, result.receipt.unwrap()).await?;
-}
-```
-
-The FlowBudgetManager ensures atomic budget operations while maintaining the deadlock-free architecture.
+**WASM Compatibility:**
+- Uses `futures::join_all` instead of `tokio::spawn`
+- Platform-agnostic time measurement
+- No file I/O in core operations
+- Compatible with `wasm-bindgen`
 
 ## 2. CRDT Implementation Architecture
 
@@ -708,19 +799,19 @@ Journal Coupling automatically updates replicated state during protocol executio
 
 Leakage Budgets track privacy costs with annotations specifying external, neighbor, and group leakage limits.
 
-### 3.3.1 AuraHandlerAdapter Implementation
+### 3.3.1 AuraHandler Implementation
 
-The AuraHandlerAdapter provides the concrete bridge between choreographic session types and the Aura effect system. This adapter lives in aura-protocol/src/choreography/aura_handler_adapter.rs and serves as the primary integration point for executing choreography-generated protocols.
+The `AuraHandler` provides the concrete bridge between rumpsteak-aura session types and the Aura effect system. This handler lives in aura-mpst/src/runtime.rs and implements both `ChoreoHandler` and `ExtensibleHandler` traits from rumpsteak-aura. It serves as the primary integration point for executing choreography-generated protocols through rumpsteak-aura's `interpret_extensible` function.
 
 The adapter maintains several key pieces of state to enable choreographic execution. The `device_id` field identifies the local participant executing the protocol. The `role_mapping` table converts choreographic role names like Alice or Bob into concrete DeviceId values representing physical devices in the network. The `flow_contexts` map associates each peer device with a ContextId governing budget and capability rules for that communication channel. The `guard_profiles` registry stores SendGuardProfile configurations for specific message types, specifying required capabilities, leakage budgets, delta facts for journal updates, and flow costs. The `default_guard` provides fallback settings when no message-specific profile exists.
 
 The adapter exposes methods for protocol execution structured around the send and receive primitives. The send method accepts a target DeviceId and serializable message, retrieves the appropriate guard profile for the message type, configures FlowBudget enforcement using the flow context for the target peer, and invokes the full guard chain before delegating to NetworkEffects for actual transmission. The `recv_from` method accepts a sender DeviceId, uses NetworkEffects to retrieve the message bytes, and deserializes them into the expected message type with proper error handling. Both methods integrate with tracing for observability during protocol execution.
 
-The adapter provides configuration methods to set up choreographic execution contexts. The `add_role_mapping` method registers the DeviceId for a given choreographic role name, enabling the adapter to resolve symbolic role references to concrete network endpoints. The `set_flow_context_for_peer` method associates a specific ContextId with a peer device, determining which budget and capability rules apply to communication with that peer. The `register_message_guard` method allows protocols to specify custom guard profiles for particular message types, controlling capabilities, flow costs, and journal coupling behavior on a per-message basis.
+The handler provides configuration methods to set up choreographic execution contexts. The `add_role_mapping` method registers the DeviceId for a given choreographic role name, enabling the handler to resolve symbolic role references to concrete network endpoints. The `set_flow_context_for_peer` method associates a specific ContextId with a peer device, determining which budget and capability rules apply to communication with that peer. The handler uses rumpsteak-aura's `ExtensionRegistry` to handle Aura-specific annotations through registered extension effects. Each annotation type (`guard_capability`, `flow_cost`, `journal_facts`) has corresponding extension effects (`CapabilityGuardEffect`, `FlowCostEffect`, `JournalFactsEffect`) that integrate seamlessly with protocol execution.
 
-The adapter supports multiple execution modes through the ExecutionMode parameter during construction. Testing mode uses in-memory handlers with deterministic behavior for unit tests. Production mode connects to real network transports and persistent storage. Simulation mode enables fault injection and controlled non-determinism for property testing. The AuraHandlerAdapterFactory provides convenient constructors for each mode while hiding internal effect system setup details.
+The handler supports multiple execution modes through factory methods during construction. Testing mode uses in-memory effects with deterministic behavior for unit tests. Production mode connects to real network transports and persistent storage. Simulation mode enables fault injection and controlled non-determinism for property testing. Each mode configures appropriate extension registries and effect handlers while maintaining the same `ChoreoHandler` interface.
 
-The adapter integrates with the complete guard chain through its send implementation. For each outgoing message, the adapter constructs a ProtocolGuard with the required capabilities from the message guard profile. It sets the FlowHint on the effect system to inform FlowGuard of the expected cost and context. The effect system then executes the full CapGuard to FlowGuard to JournalCoupler pipeline before allowing the message to reach the network layer. This ensures that every choreographic send operation respects capability constraints, budget limits, and journal consistency requirements without requiring explicit guard invocations in protocol code.
+The handler integrates with the complete guard chain through extension effects that execute automatically during protocol operations. When a message is annotated with capabilities, flow costs, or journal facts, the corresponding extension effects execute during the `send` operation through rumpsteak-aura's extension system. This ensures that every choreographic send operation respects capability constraints, budget limits, and journal consistency requirements without requiring explicit guard invocations in protocol code.
 
 Receipt tracking provides cryptographic proof of budget charges for multi-hop scenarios. The adapter exposes a `latest_receipt` method that returns the Receipt generated by the most recent FlowGuard execution. Protocols can attach these receipts to relay messages, allowing downstream hops to verify that upstream participants properly charged their budgets. The receipt contains the context, source and destination devices, epoch, cost, and a signature binding all fields together, preventing budget inflation through receipt forgery or replay.
 

@@ -1,54 +1,132 @@
-//! G_search Choreography Implementation
+//! G_search: Privacy-Preserving Distributed Search Choreography
 //!
 //! This module implements the G_search choreography for privacy-preserving
-//! distributed search following the formal model from work/whole.md.
+//! distributed search using DKD context isolation and capability filtering.
 
 use crate::access_control::{
     StorageAccessControl, StorageAccessRequest, StorageOperation, StorageResource,
 };
 use aura_core::{AccountId, AuraResult, ContentId, DeviceId};
+use aura_macros::choreography;
 use aura_protocol::effects::{AuraEffectSystem, NetworkEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// Messages for the G_search choreography
+// G_search choreography protocol with privacy-preserving distributed search
+//
+// This choreography implements distributed search with the following features:
+// 1. DKD context isolation for query privacy
+// 2. Capability-based access control for result filtering
+// 3. Semilattice aggregation for result consistency
+// 4. Leakage budget tracking for privacy bounds
+choreography! {
+    #[namespace = "distributed_search"]
+    protocol DistributedSearchChoreography {
+        roles: Querier, IndexNodes[*], Coordinator;
+
+        // Phase 1: Query Distribution
+        // Querier sends DKD-encrypted query to index nodes
+        Querier[guard_capability = "submit_search_query",
+                flow_cost = 100,
+                journal_facts = "search_query_submitted"]
+        -> IndexNodes[*]: SearchQuery(SearchQuery);
+
+        // Phase 2: Parallel Search Processing
+        // Each index node searches locally and filters by capabilities
+        IndexNodes[*][guard_capability = "process_search_query",
+                      flow_cost = 150,
+                      journal_facts = "search_processed"]
+        -> Coordinator: SearchResults(SearchResults);
+
+        // Phase 3: Result Aggregation
+        choice Coordinator {
+            success: {
+                // Coordinator aggregates results using semilattice meet
+                Coordinator[guard_capability = "aggregate_search_results",
+                           flow_cost = 200,
+                           journal_facts = "search_results_aggregated",
+                           journal_merge = true]
+                -> Querier: SearchComplete(SearchComplete);
+
+                // Notify index nodes of completion
+                Coordinator[guard_capability = "notify_search_completion",
+                           flow_cost = 50,
+                           journal_facts = "search_completion_notified"]
+                -> IndexNodes[*]: SearchComplete(SearchComplete);
+            }
+            failure: {
+                // Coordinator returns failure
+                Coordinator[guard_capability = "report_search_failure",
+                           flow_cost = 100,
+                           journal_facts = "search_failed"]
+                -> Querier: SearchFailure(SearchFailure);
+
+                // Notify index nodes of failure
+                Coordinator[guard_capability = "notify_search_failure",
+                           flow_cost = 50,
+                           journal_facts = "search_failure_notified"]
+                -> IndexNodes[*]: SearchFailure(SearchFailure);
+            }
+        }
+    }
+}
+
+// Message types for distributed search choreography
+
+/// Search query message
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SearchMessage {
-    /// Search query request
-    SearchQuery {
-        /// Querying device
-        querier_id: DeviceId,
-        /// Search terms (DKD-encrypted)
-        encrypted_terms: Vec<u8>,
-        /// DKD context for query isolation
-        dkd_context: Vec<u8>,
-        /// Maximum results requested
-        limit: usize,
-        /// Query nonce for privacy
-        query_nonce: [u8; 32],
-    },
+pub struct SearchQuery {
+    /// Querying device ID
+    pub querier_id: DeviceId,
+    /// Search terms (DKD-encrypted for privacy isolation)
+    pub encrypted_terms: Vec<u8>,
+    /// DKD context for query isolation
+    pub dkd_context: Vec<u8>,
+    /// Maximum results requested
+    pub limit: usize,
+    /// Query nonce for unlinkability
+    pub query_nonce: [u8; 32],
+    /// Privacy level required
+    pub privacy_level: SearchPrivacyLevel,
+}
 
-    /// Search results response
-    SearchResults {
-        /// Responding index node
-        node_id: DeviceId,
-        /// Capability-filtered results
-        results: Vec<SearchResult>,
-        /// Partial result signature
-        partial_sig: Vec<u8>,
-        /// Result count (for leakage tracking)
-        result_count: usize,
-    },
+/// Search results message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResults {
+    /// Index node providing results
+    pub node_id: DeviceId,
+    /// Capability-filtered search results
+    pub results: Vec<SearchResult>,
+    /// Partial signature over results
+    pub partial_signature: Vec<u8>,
+    /// Result count for leakage tracking
+    pub result_count: usize,
+    /// Leakage budget consumed
+    pub leakage_consumed: LeakageBudget,
+}
 
-    /// Search completion notification
-    SearchComplete {
-        /// Final aggregated results
-        final_results: Vec<SearchResult>,
-        /// Participating nodes
-        participating_nodes: Vec<DeviceId>,
-        /// Threshold signature over results
-        threshold_signature: Vec<u8>,
-    },
+/// Search completion message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchComplete {
+    /// Final aggregated results
+    pub final_results: Vec<SearchResult>,
+    /// Nodes that participated in search
+    pub participating_nodes: Vec<DeviceId>,
+    /// Threshold signature over final results
+    pub threshold_signature: Vec<u8>,
+    /// Total leakage budget consumed
+    pub total_leakage: LeakageBudget,
+}
+
+/// Search failure message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchFailure {
+    /// Failure reason
+    pub reason: String,
+    /// Nodes contacted before failure
+    pub contacted_nodes: Vec<DeviceId>,
+    /// Failure timestamp
+    pub failed_at: u64,
 }
 
 /// Individual search result
@@ -77,9 +155,9 @@ pub enum SearchRole {
     Coordinator(DeviceId),
 }
 
-/// Search query specification
+/// Search query specification for local processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchQuery {
+pub struct SearchQuerySpec {
     /// Search terms
     pub terms: Vec<String>,
     /// Content type filters
@@ -105,9 +183,9 @@ pub enum SearchPrivacyLevel {
     MetadataVisible,
 }
 
-/// Aggregated search results
+/// Aggregated search response
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchResults {
+pub struct SearchResponse {
     /// All results from participating nodes
     pub results: Vec<SearchResult>,
     /// Total result count across nodes
@@ -142,86 +220,46 @@ pub struct LeakageBudget {
     pub group: f64,
 }
 
-/// G_search choreography implementation
+/// Distributed search coordinator using choreographic protocol
 #[derive(Clone)]
-pub struct SearchChoreography {
-    /// Current device role
-    role: SearchRole,
+pub struct DistributedSearchCoordinator {
     /// Storage access control
     access_control: StorageAccessControl,
     /// Effect system for handling operations
     effects: AuraEffectSystem,
-    /// Search index (TODO fix - Simplified)
+    /// Local search index
     search_index: HashMap<String, HashSet<ContentId>>,
 }
 
-impl SearchChoreography {
-    /// Create new search choreography
-    pub fn new(
-        role: SearchRole,
-        access_control: StorageAccessControl,
-        effects: AuraEffectSystem,
-    ) -> Self {
+impl DistributedSearchCoordinator {
+    /// Create new distributed search coordinator
+    pub fn new(access_control: StorageAccessControl, effects: AuraEffectSystem) -> Self {
         Self {
-            role,
             access_control,
             effects,
             search_index: HashMap::new(),
         }
     }
 
-    /// Execute the G_search choreography following the formal model
-    ///
-    /// ```rust,ignore
-    /// choreography! {
-    ///     G_search[Roles: Querier, IndexNodes(k)] {
-    ///         // Query phase with DKD privacy isolation
-    ///         [guard: need(search_query) ≤ caps_Querier]
-    ///         [Context: DKD(query_context, isolation_key)]
-    ///         Querier -> IndexNodes*: SearchQuery {
-    ///             encrypted_terms: DKD_encrypt(terms, isolation_key),
-    ///             limit,
-    ///             query_nonce
-    ///         }
-    ///
-    ///         // Each index node processes query independently
-    ///         parallel {
-    ///             IndexNodes*: local_results = search_local_index(terms)
-    ///             IndexNodes*: filtered_results = capability_filter(local_results, querier_caps)
-    ///         }
-    ///
-    ///         // Index nodes return capability-filtered results
-    ///         choice IndexNodes* {
-    ///             has_results {
-    ///                 [guard: need(search_respond) ≤ caps_IndexNode]
-    ///                 IndexNodes* -> Querier: SearchResults {
-    ///                     results: capability_filter(local_results),
-    ///                     partial_sig,
-    ///                     result_count
-    ///                 }
-    ///             }
-    ///             no_results {
-    ///                 IndexNodes* -> Querier: SearchResults { results: [], ... }
-    ///             }
-    ///         }
-    ///
-    ///         // Querier aggregates (⊓ over all responses)
-    ///         Querier: final_results = ⊓ all_results
-    ///
-    ///         // Privacy: DKD context isolates query from identity
-    ///         [Leakage: ℓ_ext=0, ℓ_ngh=log(|results|), ℓ_grp=full]
-    ///     }
-    /// }
-    /// ```
+    /// Execute distributed search using choreographic protocol
     pub async fn execute_search(
         &mut self,
-        query: SearchQuery,
-    ) -> AuraResult<Option<SearchResults>> {
-        match &self.role {
-            SearchRole::Querier(device_id) => self.execute_as_querier(*device_id, query).await,
-            SearchRole::IndexNode(node_id) => self.execute_as_index_node(*node_id).await,
+        query: SearchQuerySpec,
+        role: SearchRole,
+    ) -> AuraResult<Option<SearchResponse>> {
+        tracing::info!(
+            "Starting choreographic distributed search with {} terms",
+            query.terms.len()
+        );
+
+        // TODO: Execute the choreographic protocol using the generated DistributedSearchChoreography
+        // This is a placeholder until the choreography macro is fully integrated
+
+        match role {
+            SearchRole::Querier(device_id) => self.execute_as_querier(device_id, query).await,
+            SearchRole::IndexNode(node_id) => self.execute_as_index_node(node_id, query).await,
             SearchRole::Coordinator(coordinator_id) => {
-                self.execute_as_coordinator(*coordinator_id).await
+                self.execute_as_coordinator(coordinator_id, query).await
             }
         }
     }
@@ -230,8 +268,8 @@ impl SearchChoreography {
     async fn execute_as_querier(
         &mut self,
         device_id: DeviceId,
-        query: SearchQuery,
-    ) -> AuraResult<Option<SearchResults>> {
+        query: SearchQuerySpec,
+    ) -> AuraResult<Option<SearchResponse>> {
         // 1. Capability guard: need(search_query) ≤ caps_Querier
         let access_request = StorageAccessRequest {
             device_id,
@@ -263,12 +301,13 @@ impl SearchChoreography {
         let encrypted_terms = self.encrypt_terms_with_dkd(&query.terms, &isolation_key)?;
 
         // 4. Send query to all index nodes
-        let search_msg = SearchMessage::SearchQuery {
+        let search_msg = SearchQuery {
             querier_id: device_id,
             encrypted_terms,
             dkd_context: dkd_context.clone(),
             limit: query.limit,
             query_nonce,
+            privacy_level: SearchPrivacyLevel::Full,
         };
 
         let index_nodes = self.get_available_index_nodes().await?;
@@ -293,29 +332,19 @@ impl SearchChoreography {
 
         // Wait for responses with timeout
         for node_id in &index_nodes {
-            if let Ok(response_result) = tokio::time::timeout(
+            if let Ok(Ok(response_bytes)) = tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 self.effects.receive_from(node_id.0),
             )
             .await
             {
-                if let Ok(response_bytes) = response_result {
-                    if let Ok(response) = serde_json::from_slice::<SearchMessage>(&response_bytes) {
-                        if let SearchMessage::SearchResults {
-                            node_id,
-                            results,
-                            result_count,
-                            ..
-                        } = response
-                        {
-                            all_results.extend(results);
-                            participating_nodes.push(node_id);
+                if let Ok(response) = serde_json::from_slice::<SearchResults>(&response_bytes) {
+                    all_results.extend(response.results);
+                    participating_nodes.push(response.node_id);
 
-                            // Update leakage tracking
-                            total_leakage.neighbor += (result_count as f64).log2().max(0.0);
-                            total_leakage.group = 1.0; // Full leakage within search context
-                        }
-                    }
+                    // Update leakage tracking
+                    total_leakage.neighbor += response.leakage_consumed.neighbor;
+                    total_leakage.group = response.leakage_consumed.group;
                 }
             }
         }
@@ -331,7 +360,7 @@ impl SearchChoreography {
             nodes_contacted: index_nodes.len(),
         };
 
-        let results = SearchResults {
+        let results = SearchResponse {
             results: final_results,
             total_count: participating_nodes.len(),
             participating_nodes,
@@ -345,33 +374,30 @@ impl SearchChoreography {
     async fn execute_as_index_node(
         &mut self,
         node_id: DeviceId,
-    ) -> AuraResult<Option<SearchResults>> {
+        _query: SearchQuerySpec,
+    ) -> AuraResult<Option<SearchResponse>> {
         // 1. Receive search query
         let query_bytes = self
             .effects
             .receive_from(node_id.0)
             .await
             .map_err(|e| aura_core::AuraError::network(format!("Receive error: {}", e)))?;
-        let query_msg = serde_json::from_slice::<SearchMessage>(&query_bytes)
+        let _query_msg = serde_json::from_slice::<SearchQuery>(&query_bytes)
             .map_err(|e| aura_core::AuraError::internal(format!("Deserialization error: {}", e)))?;
 
-        if let SearchMessage::SearchQuery {
-            querier_id,
-            encrypted_terms,
-            dkd_context,
-            limit,
-            query_nonce,
-        } = query_msg
-        {
+        if let Ok(search_query) = serde_json::from_slice::<SearchQuery>(&query_bytes) {
             // 2. Decrypt terms using DKD context
-            let search_terms = self.decrypt_terms_with_dkd(&encrypted_terms, &dkd_context)?;
+            let search_terms = self
+                .decrypt_terms_with_dkd(&search_query.encrypted_terms, &search_query.dkd_context)?;
 
             // 3. Search local index
-            let local_results = self.search_local_index(&search_terms, limit).await?;
+            let local_results = self
+                .search_local_index(&search_terms, search_query.limit)
+                .await?;
 
             // 4. Apply capability filtering
             let filtered_results = self
-                .filter_results_by_capabilities(local_results, querier_id)
+                .filter_results_by_capabilities(local_results, search_query.querier_id)
                 .await?;
 
             // 5. Check response capability guard - simplified check
@@ -379,36 +405,47 @@ impl SearchChoreography {
             if !filtered_results.is_empty() {
                 // Send results
                 let result_count = filtered_results.len();
-                let partial_sig = self.create_result_signature(&filtered_results, query_nonce)?;
+                let partial_sig =
+                    self.create_result_signature(&filtered_results, search_query.query_nonce)?;
 
-                let results_msg = SearchMessage::SearchResults {
+                let results_msg = SearchResults {
                     node_id,
                     results: filtered_results,
-                    partial_sig,
+                    partial_signature: partial_sig,
                     result_count,
+                    leakage_consumed: LeakageBudget {
+                        external: 0.0,
+                        neighbor: (result_count as f64).log2().max(0.0),
+                        group: 1.0,
+                    },
                 };
 
                 let message_bytes = serde_json::to_vec(&results_msg).map_err(|e| {
                     aura_core::AuraError::internal(format!("Serialization error: {}", e))
                 })?;
                 self.effects
-                    .send_to_peer(querier_id.0, message_bytes)
+                    .send_to_peer(search_query.querier_id.0, message_bytes)
                     .await
                     .map_err(|e| aura_core::AuraError::network(format!("Send error: {}", e)))?;
             } else {
                 // Send empty results
-                let results_msg = SearchMessage::SearchResults {
+                let results_msg = SearchResults {
                     node_id,
                     results: vec![],
-                    partial_sig: vec![],
+                    partial_signature: vec![],
                     result_count: 0,
+                    leakage_consumed: LeakageBudget {
+                        external: 0.0,
+                        neighbor: 0.0,
+                        group: 0.0,
+                    },
                 };
 
                 let message_bytes = serde_json::to_vec(&results_msg).map_err(|e| {
                     aura_core::AuraError::internal(format!("Serialization error: {}", e))
                 })?;
                 self.effects
-                    .send_to_peer(querier_id.0, message_bytes)
+                    .send_to_peer(search_query.querier_id.0, message_bytes)
                     .await
                     .map_err(|e| aura_core::AuraError::network(format!("Send error: {}", e)))?;
             }
@@ -421,9 +458,10 @@ impl SearchChoreography {
     async fn execute_as_coordinator(
         &mut self,
         _coordinator_id: DeviceId,
-    ) -> AuraResult<Option<SearchResults>> {
+        _query: SearchQuerySpec,
+    ) -> AuraResult<Option<SearchResponse>> {
         // Coordinator manages search routing and result aggregation
-        // TODO fix - For now, pass through to index node behavior
+        // TODO: Implement coordinator logic for the choreographic protocol
         Ok(None)
     }
 
@@ -445,8 +483,8 @@ impl SearchChoreography {
     /// Encrypt search terms with DKD
     fn encrypt_terms_with_dkd(
         &self,
-        terms: &[String],
-        isolation_key: &[u8],
+        _terms: &[String],
+        _isolation_key: &[u8],
     ) -> AuraResult<Vec<u8>> {
         // Encrypt terms using DKD with isolation key
         // This ensures query privacy from identity
@@ -456,8 +494,8 @@ impl SearchChoreography {
     /// Decrypt search terms with DKD
     fn decrypt_terms_with_dkd(
         &self,
-        encrypted_terms: &[u8],
-        dkd_context: &[u8],
+        _encrypted_terms: &[u8],
+        _dkd_context: &[u8],
     ) -> AuraResult<Vec<String>> {
         // Decrypt terms using DKD context
         Ok(vec!["placeholder".into()]) // Placeholder
@@ -526,7 +564,7 @@ impl SearchChoreography {
     fn aggregate_search_results(
         &self,
         mut results: Vec<SearchResult>,
-        query: &SearchQuery,
+        query: &SearchQuerySpec,
     ) -> AuraResult<Vec<SearchResult>> {
         // Sort by relevance score (descending)
         results.sort_by(|a, b| {
@@ -547,8 +585,8 @@ impl SearchChoreography {
     /// Create signature over search results
     fn create_result_signature(
         &self,
-        results: &[SearchResult],
-        query_nonce: [u8; 32],
+        _results: &[SearchResult],
+        _query_nonce: [u8; 32],
     ) -> AuraResult<Vec<u8>> {
         // Create partial signature over results for integrity
         Ok(vec![0u8; 64]) // Placeholder
@@ -569,7 +607,7 @@ mod tests {
 
     #[test]
     fn test_search_query_creation() {
-        let query = SearchQuery {
+        let query = SearchQuerySpec {
             terms: vec!["test".into(), "search".into()],
             content_types: vec!["document".into()],
             owner_filters: vec![],
@@ -586,13 +624,9 @@ mod tests {
     fn test_search_result_aggregation() {
         let evaluator = CapabilityEvaluator::new_for_testing();
         let access_control = crate::access_control::StorageAccessControl::new(evaluator);
-        let effects = AuraEffectSystem::for_testing(DeviceId::new());
+        let effects = AuraEffectSystem::for_testing_sync(DeviceId::new());
 
-        let choreography = SearchChoreography::new(
-            SearchRole::Querier(DeviceId::new()),
-            access_control,
-            effects,
-        );
+        let choreography = DistributedSearchCoordinator::new(access_control, effects.unwrap());
 
         let results = vec![
             SearchResult {
@@ -611,7 +645,7 @@ mod tests {
             },
         ];
 
-        let query = SearchQuery {
+        let query = SearchQuerySpec {
             terms: vec!["test".into()],
             content_types: vec![],
             owner_filters: vec![],

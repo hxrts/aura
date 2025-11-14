@@ -4,10 +4,10 @@
 //! the choreography system with the agent runtime.
 
 use crate::errors::Result as AgentResult;
-use aura_core::{
-    maintenance::{UpgradeKind, UpgradeProposal},
-    DeviceId, Epoch,
-};
+use aura_core::{DeviceId, Epoch};
+#[cfg(test)]
+use aura_sync::maintenance::UpgradeKind;
+use aura_sync::maintenance::UpgradeProposal;
 use aura_protocol::choreography::protocols::ota::{UpgradeConfig, UpgradeOrchestrator};
 use aura_protocol::choreography::AuraHandlerAdapter;
 use serde_json;
@@ -268,6 +268,7 @@ mod tests {
     async fn ota_operations_opt_in() {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let ops = OtaOperations::new(device_id);
+        #[allow(clippy::disallowed_methods)]
         let proposal_id = Uuid::new_v4();
 
         // Create a test proposal state

@@ -10,9 +10,14 @@ use crate::{
 };
 use aura_core::{relationships::ContextId, DeviceId, Receipt};
 use aura_wot::Capability;
+use async_trait::async_trait;
+use rumpsteak_aura_choreography::{
+    effects::{ChoreoHandler, Label, Result as ChoreoResult, ChoreographyError},
+    session::Endpoint,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
-use std::{any::type_name, collections::HashMap};
+use std::{any::type_name, collections::HashMap, time::Duration};
 
 #[derive(Debug, Clone)]
 pub struct SendGuardProfile {
@@ -46,19 +51,34 @@ pub struct AuraHandlerAdapter {
 }
 
 impl AuraHandlerAdapter {
+    /// Create a new adapter with an existing effect system (recommended)
+    /// 
+    /// This is the preferred method as it follows proper dependency injection.
+    /// Use this instead of `new()` for better testability and control.
+    pub fn with_effect_system(effect_system: AuraEffectSystem) -> Self {
+        Self::from_effect_system(effect_system)
+    }
+
     /// Create a new adapter for the specified execution mode
+    /// 
+    /// # Deprecated
+    /// This method creates the effect system internally which makes testing difficult.
+    /// Consider using `with_effect_system()` instead for better dependency injection.
     pub fn new(device_id: DeviceId, mode: ExecutionMode) -> Self {
         use crate::effects::EffectSystemConfig;
 
         let config = match mode {
             ExecutionMode::Testing => EffectSystemConfig::for_testing(device_id),
-            ExecutionMode::Production => EffectSystemConfig::for_production(device_id).expect("Failed to create production config"),
+            ExecutionMode::Production => EffectSystemConfig::for_production(device_id)
+                .expect("Failed to create production config"),
             ExecutionMode::Simulation { seed } => {
                 EffectSystemConfig::for_simulation(device_id, seed)
             }
         };
 
-        let effect_system = AuraEffectSystem::new(config).expect("Failed to create effect system");
+        // Create effect system based on configuration
+        let effect_system = AuraEffectSystem::new(config)
+            .expect("Failed to create effect system");
         Self::from_effect_system(effect_system)
     }
 
@@ -149,7 +169,16 @@ impl AuraHandlerAdapter {
         let flow_context = self.ensure_flow_context(&target_device);
         let flow_cost = guard_profile.flow_cost.max(1);
         self.effect_system
-            .set_flow_hint(FlowHint::new(flow_context, target_device, flow_cost));
+            .set_flow_hint(FlowHint::new(flow_context.clone(), target_device, flow_cost));
+
+        // Charge flow and generate receipt
+        use crate::guards::flow::FlowBudgetEffects;
+        let _receipt = self.effect_system
+            .charge_flow(&flow_context, &target_device, flow_cost)
+            .await
+            .map_err(|e| AuraHandlerError::ContextError {
+                message: format!("Flow budget charging failed: {}", e),
+            })?;
 
         // TODO: Apply guard constraints properly
         // For now, execute the operation directly to avoid lifetime issues
@@ -215,22 +244,108 @@ impl AuraEndpoint {
     }
 }
 
+impl Endpoint for AuraEndpoint {
+    type Role = DeviceId;
+}
+
+// Implement ChoreoHandler trait for AuraHandlerAdapter
+#[async_trait]
+impl ChoreoHandler for AuraHandlerAdapter {
+    type Role = DeviceId;
+    type Endpoint = AuraEndpoint;
+
+    /// Send a message to a specific role with guard chain enforcement
+    async fn send<M: Serialize + Send + Sync>(
+        &mut self,
+        _ep: &mut Self::Endpoint,
+        to: Self::Role,
+        msg: &M,
+    ) -> ChoreoResult<()> {
+        self.send(to, msg).await.map_err(|e| ChoreographyError::Transport(e.to_string()))
+    }
+
+    /// Receive a strongly-typed message from a specific role
+    async fn recv<M: DeserializeOwned + Send>(
+        &mut self,
+        _ep: &mut Self::Endpoint,
+        from: Self::Role,
+    ) -> ChoreoResult<M> {
+        self.recv_from(from).await.map_err(|e| ChoreographyError::Transport(e.to_string()))
+    }
+
+    /// Internal choice: broadcast a label selection (for branch protocols)
+    async fn choose(
+        &mut self,
+        _ep: &mut Self::Endpoint,
+        who: Self::Role,
+        label: Label,
+    ) -> ChoreoResult<()> {
+        // Send the label as a choice message
+        let choice_msg = ChoiceMessage { label: label.clone() };
+        self.send(who, choice_msg).await.map_err(|e| ChoreographyError::Transport(e.to_string()))
+    }
+
+    /// External choice: receive a label selection (for branch protocols)
+    async fn offer(&mut self, _ep: &mut Self::Endpoint, from: Self::Role) -> ChoreoResult<Label> {
+        // Receive a choice message and extract the label
+        let choice_msg: ChoiceMessage = self.recv_from(from).await.map_err(|e| ChoreographyError::Transport(e.to_string()))?;
+        Ok(choice_msg.label)
+    }
+
+    /// Execute a future with a timeout
+    async fn with_timeout<F, T>(
+        &mut self,
+        _ep: &mut Self::Endpoint,
+        _at: Self::Role,
+        dur: Duration,
+        body: F,
+    ) -> ChoreoResult<T>
+    where
+        F: std::future::Future<Output = ChoreoResult<T>> + Send,
+    {
+        tokio::time::timeout(dur, body)
+            .await
+            .map_err(|_| ChoreographyError::Timeout(dur))?
+    }
+}
+
+/// Internal message type for choice communication
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+struct ChoiceMessage {
+    label: Label,
+}
+
 /// Factory for creating AuraHandlerAdapter instances
 pub struct AuraHandlerAdapterFactory;
 
 impl AuraHandlerAdapterFactory {
-    /// Create adapter for testing
-    pub fn for_testing(device_id: DeviceId) -> AuraHandlerAdapter {
+    /// Create adapter for testing - uses proper AuraHandler from aura-mpst
+    pub fn for_testing(device_id: DeviceId) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {
+        aura_mpst::AuraHandler::for_testing(device_id)
+    }
+
+    /// Create adapter for production - uses proper AuraHandler from aura-mpst  
+    pub fn for_production(device_id: DeviceId) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {
+        aura_mpst::AuraHandler::for_production(device_id)
+    }
+
+    /// Create adapter for simulation - uses proper AuraHandler from aura-mpst
+    pub fn for_simulation(device_id: DeviceId) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {
+        aura_mpst::AuraHandler::for_simulation(device_id)
+    }
+
+    /// Legacy method: Create AuraHandlerAdapter for backward compatibility
+    pub fn legacy_for_testing(device_id: DeviceId) -> AuraHandlerAdapter {
         AuraHandlerAdapter::new(device_id, ExecutionMode::Testing)
     }
 
-    /// Create adapter for production
-    pub fn for_production(device_id: DeviceId) -> AuraHandlerAdapter {
+    /// Legacy method: Create AuraHandlerAdapter for backward compatibility
+    pub fn legacy_for_production(device_id: DeviceId) -> AuraHandlerAdapter {
         AuraHandlerAdapter::new(device_id, ExecutionMode::Production)
     }
 
-    /// Create adapter for simulation
-    pub fn for_simulation(device_id: DeviceId) -> AuraHandlerAdapter {
+    /// Legacy method: Create AuraHandlerAdapter for backward compatibility
+    pub fn legacy_for_simulation(device_id: DeviceId) -> AuraHandlerAdapter {
         AuraHandlerAdapter::new(device_id, ExecutionMode::Simulation { seed: 0 })
     }
 }
@@ -238,6 +353,8 @@ impl AuraHandlerAdapterFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::*;
+    use aura_macros::aura_test;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,32 +367,37 @@ mod tests {
         value: u32,
     }
 
-    #[tokio::test]
-    async fn test_adapter_creation() {
-        let device_id = DeviceId::new();
-        let adapter = AuraHandlerAdapterFactory::for_testing(device_id);
+    #[aura_test]
+    async fn test_adapter_creation() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone());
 
         // Should create without error
         assert_eq!(adapter.device_id(), device_id);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_role_mapping() {
-        let device_id = DeviceId::new();
-        let mut adapter = AuraHandlerAdapterFactory::for_testing(device_id);
+    #[aura_test]
+    async fn test_role_mapping() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone());
 
         let peer_device = DeviceId::new();
         adapter.add_role_mapping("alice".to_string(), peer_device);
 
         assert_eq!(adapter.get_device_id_for_role("alice"), Some(peer_device));
         assert_eq!(adapter.get_device_id_for_role("bob"), None);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn guard_chain_emits_receipt() {
-        let device_a = DeviceId::new();
+    #[aura_test]
+    async fn guard_chain_emits_receipt() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_a = fixture.device_id();
         let device_b = DeviceId::new();
-        let mut adapter = AuraHandlerAdapterFactory::for_testing(device_a);
+        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone());
         adapter.set_flow_context_for_peer(device_b, ContextId::new("test.ctx"));
 
         // Network send will fail due to missing peers, but guard execution should still emit a receipt.
@@ -292,32 +414,42 @@ mod tests {
             adapter.latest_receipt().await.is_some(),
             "expected FlowGuard receipt even when transport fails"
         );
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn custom_guard_profile_controls_flow_cost() {
-        let device_a = DeviceId::new();
+    #[aura_test]
+    async fn custom_guard_profile_controls_flow_cost() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_a = fixture.device_id();
         let device_b = DeviceId::new();
-        let mut adapter = AuraHandlerAdapterFactory::for_testing(device_a);
+        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone());
         adapter.set_flow_context_for_peer(device_b, ContextId::new("custom.ctx"));
 
-        let mut profile = SendGuardProfile::default();
-        profile.flow_cost = 64;
+        let profile = SendGuardProfile {
+            flow_cost: 64,
+            ..Default::default()
+        };
         adapter.register_message_guard::<GuardedPayload>(profile);
 
         let _ = adapter.send(device_b, GuardedPayload { value: 7 }).await;
 
         let receipt = adapter.latest_receipt().await.expect("receipt");
         assert_eq!(receipt.cost, 64);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_network_delivers_messages_between_adapters() {
-        let device_a = DeviceId::new();
-        let device_b = DeviceId::new();
-        let mut adapter_a = AuraHandlerAdapterFactory::for_testing(device_a);
-        let mut adapter_b = AuraHandlerAdapterFactory::for_testing(device_b);
+    #[aura_test]
+    async fn memory_network_delivers_messages_between_adapters() -> aura_core::AuraResult<()> {
+        let fixture_a = create_test_fixture().await?;
+        let fixture_b = create_test_fixture().await?;
+        let device_a = fixture_a.device_id();
+        let device_b = fixture_b.device_id();
+        
+        // Create adapters with proper testing setup
+        let mut adapter_a = AuraHandlerAdapter::with_effect_system((*fixture_a.effects()).clone());
+        let mut adapter_b = AuraHandlerAdapter::with_effect_system((*fixture_b.effects()).clone());
 
+        // The network delivery should work via shared memory network registry
         adapter_a
             .send(
                 device_b,
@@ -330,5 +462,6 @@ mod tests {
 
         let msg: TestMessage = adapter_b.recv_from(device_a).await.expect("recv");
         assert_eq!(msg.payload, "hello");
+        Ok(())
     }
 }

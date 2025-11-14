@@ -13,20 +13,30 @@ use tokio::sync::RwLock;
 /// This provides a simple storage interface that mocks can implement
 #[async_trait]
 pub trait Storage: Send + Sync {
+    /// Get the account ID for this storage
     fn account_id(&self) -> AccountId;
+    /// Store data under the given key
     async fn store(&self, key: &str, data: &[u8]) -> AuraResult<()>;
+    /// Retrieve data for the given key
     async fn retrieve(&self, key: &str) -> AuraResult<Option<Vec<u8>>>;
+    /// Check if a key exists
     async fn exists(&self, key: &str) -> AuraResult<bool>;
+    /// Delete data for the given key
     async fn delete(&self, key: &str) -> AuraResult<()>;
+    /// List all keys in storage
     async fn list_keys(&self) -> AuraResult<Vec<String>>;
+    /// Get storage statistics
     async fn get_stats(&self) -> AuraResult<StorageStats>;
 }
 
 /// Storage statistics for testing
 #[derive(Debug, Clone, Default)]
 pub struct StorageStats {
+    /// Total number of keys in storage
     pub total_keys: usize,
+    /// Total size of all stored data in bytes
     pub total_size_bytes: u64,
+    /// Available space in bytes (if known)
     pub available_space_bytes: Option<u64>,
 }
 

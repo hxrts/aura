@@ -6,8 +6,9 @@ mod common;
 
 // Note: Effects are now accessed through the unified handler interface
 use aura_core::identifiers::DeviceId;
+use aura_protocol::handlers::context_immutable::AuraContext;
 use aura_protocol::handlers::erased::AuraHandlerFactory;
-use aura_protocol::handlers::{AuraContext, EffectType, ExecutionMode, HandlerUtils};
+use aura_protocol::handlers::{EffectType, ExecutionMode, HandlerUtils};
 use uuid::Uuid;
 
 /// Test unified handler interface for crypto effects
@@ -15,20 +16,15 @@ use uuid::Uuid;
 async fn test_crypto_effects() {
     let device_id = DeviceId::from(Uuid::new_v4());
     let mut handler = AuraHandlerFactory::for_testing(device_id);
-    let mut ctx = AuraContext::for_testing(device_id);
+    let ctx = AuraContext::for_testing(device_id);
 
     // Test that crypto effects are properly routed through the unified interface
     // Note: Current implementation is a stub that returns UnsupportedEffect
 
     // Test random bytes effect
-    let result: Result<Vec<u8>, _> = HandlerUtils::execute_typed_effect(
-        &mut *handler,
-        EffectType::Random,
-        "bytes",
-        32u32,
-        &mut ctx,
-    )
-    .await;
+    let result: Result<Vec<u8>, _> =
+        HandlerUtils::execute_typed_effect(&mut *handler, EffectType::Random, "bytes", 32u32, &ctx)
+            .await;
 
     // Random effect type not handled in CompositeHandler::execute_effect
     assert!(result.is_err());
@@ -38,13 +34,13 @@ async fn test_crypto_effects() {
     let result: Result<Vec<u8>, _> = HandlerUtils::execute_typed_effect(
         &mut *handler,
         EffectType::Crypto,
-        "blake3_hash",
+        "hash_data",
         data,
-        &mut ctx,
+        &ctx,
     )
     .await;
 
-    // Operation "blake3_hash" not implemented in execute_crypto_effect
+    // Operation "hash_data" not implemented in execute_crypto_effect
     assert!(result.is_err());
 
     // Verify handler basic functionality works
@@ -60,7 +56,7 @@ async fn test_crypto_effects() {
 async fn test_network_effects() {
     let device_id = DeviceId::from(Uuid::new_v4());
     let mut handler = AuraHandlerFactory::for_testing(device_id);
-    let mut ctx = AuraContext::for_testing(device_id);
+    let ctx = AuraContext::for_testing(device_id);
 
     // Test network effects through unified interface
     // Note: Current implementation is a stub that returns UnsupportedEffect
@@ -71,7 +67,7 @@ async fn test_network_effects() {
         EffectType::Network,
         "connected_peers",
         (),
-        &mut ctx,
+        &ctx,
     )
     .await;
 
@@ -86,7 +82,7 @@ async fn test_network_effects() {
         EffectType::Network,
         "send_to_peer",
         (peer_id, message),
-        &mut ctx,
+        &ctx,
     )
     .await;
 
@@ -102,7 +98,7 @@ async fn test_network_effects() {
 async fn test_storage_effects() {
     let device_id = DeviceId::from(Uuid::new_v4());
     let mut handler = AuraHandlerFactory::for_testing(device_id);
-    let mut ctx = AuraContext::for_testing(device_id);
+    let ctx = AuraContext::for_testing(device_id);
 
     // Test storage effects through unified interface
     // Note: Current implementation is a stub that returns UnsupportedEffect
@@ -116,7 +112,7 @@ async fn test_storage_effects() {
         EffectType::Storage,
         "store",
         (key, &value),
-        &mut ctx,
+        &ctx,
     )
     .await;
 
@@ -129,7 +125,7 @@ async fn test_storage_effects() {
         EffectType::Storage,
         "retrieve",
         key,
-        &mut ctx,
+        &ctx,
     )
     .await;
 
@@ -145,7 +141,7 @@ async fn test_storage_effects() {
 async fn test_time_effects() {
     let device_id = DeviceId::from(Uuid::new_v4());
     let mut handler = AuraHandlerFactory::for_testing(device_id);
-    let mut ctx = AuraContext::for_testing(device_id);
+    let ctx = AuraContext::for_testing(device_id);
 
     // Test time effects through unified interface
     // Note: Current implementation is a stub that returns UnsupportedEffect
@@ -156,7 +152,7 @@ async fn test_time_effects() {
         EffectType::Time,
         "current_epoch",
         (),
-        &mut ctx,
+        &ctx,
     )
     .await;
 
@@ -169,7 +165,7 @@ async fn test_time_effects() {
         EffectType::Time,
         "set_timeout",
         100u64,
-        &mut ctx,
+        &ctx,
     )
     .await;
 
@@ -189,7 +185,7 @@ async fn test_time_effects() {
 async fn test_console_effects() {
     let device_id = DeviceId::from(Uuid::new_v4());
     let mut handler = AuraHandlerFactory::for_testing(device_id);
-    let mut ctx = AuraContext::for_testing(device_id);
+    let ctx = AuraContext::for_testing(device_id);
 
     // Test console effects through unified interface
     // Note: Current implementation is a stub that returns UnsupportedEffect
@@ -202,7 +198,7 @@ async fn test_console_effects() {
         EffectType::Console,
         "protocol_started",
         (protocol_id, "test_protocol"),
-        &mut ctx,
+        &ctx,
     )
     .await;
 
@@ -218,7 +214,7 @@ async fn test_console_effects() {
             "Test info message".to_string(),
             Vec::<(String, String)>::new(),
         ),
-        &mut ctx,
+        &ctx,
     )
     .await;
 

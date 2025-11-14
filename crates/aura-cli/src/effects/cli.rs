@@ -3,9 +3,9 @@
 //! Concrete implementations of CLI effects using core effect composition.
 
 use super::CliEffects;
-use anyhow::Result;
+use crate::effects::Result;
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// CLI effect handler that composes core effects
 pub struct CliEffectHandler<E> {
@@ -41,7 +41,7 @@ where
         let _ = self.inner.log_error(&format!("ERROR: {}", message)).await;
     }
 
-    async fn create_dir_all(&self, path: &PathBuf) -> Result<()> {
+    async fn create_dir_all(&self, path: &Path) -> Result<()> {
         // Use storage effects for file operations
         let path_str = path.display().to_string();
 
@@ -56,32 +56,37 @@ where
         self.inner
             .store(&path_str, b"directory".to_vec())
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to create directory: {}", e))
+            .map_err(|e| {
+                aura_core::AuraError::invalid(format!("Failed to create directory: {}", e))
+            })
     }
 
-    async fn write_file(&self, path: &PathBuf, content: &[u8]) -> Result<()> {
+    async fn write_file(&self, path: &Path, content: &[u8]) -> Result<()> {
         let path_str = path.display().to_string();
         self.inner
             .store(&path_str, content.to_vec())
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to write file: {}", e))
+            .map_err(|e| aura_core::AuraError::invalid(format!("Failed to write file: {}", e)))
     }
 
-    async fn read_file(&self, path: &PathBuf) -> Result<Vec<u8>> {
+    async fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
         let path_str = path.display().to_string();
         match self.inner.retrieve(&path_str).await {
             Ok(Some(data)) => Ok(data),
-            Ok(None) => Err(anyhow::anyhow!("File not found: {}", path.display())),
-            Err(e) => Err(anyhow::anyhow!("Failed to read file: {}", e)),
+            Ok(None) => Err(aura_core::AuraError::not_found(format!(
+                "File not found: {}",
+                path.display()
+            ))),
+            Err(e) => Err(aura_core::AuraError::invalid(format!(
+                "Failed to read file: {}",
+                e
+            ))),
         }
     }
 
-    async fn file_exists(&self, path: &PathBuf) -> bool {
+    async fn file_exists(&self, path: &Path) -> bool {
         let path_str = path.display().to_string();
-        match self.inner.exists(&path_str).await {
-            Ok(exists) => exists,
-            Err(_) => false,
-        }
+        self.inner.exists(&path_str).await.unwrap_or_default()
     }
 
     async fn format_output(&self, data: &str) -> String {

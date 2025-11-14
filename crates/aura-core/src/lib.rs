@@ -72,14 +72,9 @@ pub mod relationships;
 /// Session epochs and participant management
 pub mod session_epochs;
 
-/// Maintenance events shared across the workspace
-pub mod maintenance;
-
-/// Tree operation types (will move to aura-identity app)
+/// Tree operation types
 pub mod tree;
 
-/// Permission types (will be replaced by Cap operations)
-pub mod permissions;
 
 /// FlowBudget primitives
 pub mod flow;
@@ -87,17 +82,8 @@ pub mod flow;
 /// Type conversion utilities
 pub mod conversions;
 
-/// Encoding utilities (hex, base64)
-pub mod encoding;
-
-/// Macro utilities
-pub mod macros;
-
 /// Causal context and vector clocks for CRDT ordering
 pub mod causal_context;
-
-/// Configuration system with format support and validation
-pub mod config;
 
 /// Pure synchronous hash trait for content addressing
 pub mod hash;
@@ -131,7 +117,7 @@ pub use errors::{AuraError, Result as AuraResult};
 
 // Effect interfaces
 pub use effects::{
-    ConsoleEffects, CryptoEffects, JournalEffects, RandomEffects, TimeEffects, TransportEffects,
+    ConsoleEffects, CryptoEffects, JournalEffects, RandomEffects, TimeEffects,
 };
 
 // Time and content
@@ -153,8 +139,6 @@ pub use tree::{
 
 // Utilities
 pub use causal_context::{CausalContext, OperationId, VectorClock};
-pub use encoding::{FromBase64, FromHex, ToBase64, ToHex};
-pub use permissions::CanonicalPermission;
 
 /// Standard result type for core operations
 pub type Result<T> = std::result::Result<T, AuraError>;

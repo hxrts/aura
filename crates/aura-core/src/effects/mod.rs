@@ -47,7 +47,6 @@ pub mod network;
 pub mod random;
 pub mod storage;
 pub mod time;
-pub mod transport;
 
 // Re-export core effect traits
 pub use console::ConsoleEffects;
@@ -57,7 +56,6 @@ pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerE
 pub use random::RandomEffects;
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
 pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
-pub use transport::TransportEffects;
 
 // Re-export unified error system
 pub use crate::AuraError;

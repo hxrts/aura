@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 # Workspace crates
 aura-journal = { path = "../aura-journal" }
-# aura-transport = { path = "../aura-transport" }  # Temporarily disabled due to coordination dependencies
+aura-transport = { path = "../aura-transport" }
 aura-crypto = { path = "../aura-crypto" }
 aura-core = { path = "../aura-core" }
 # NOTE: aura-protocol removed to break circular dependency (aura-store → aura-protocol → aura-effects)
@@ -30,10 +30,7 @@ serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 bincode = { workspace = true }
 
-# Async
-tokio = { workspace = true }
-futures = { workspace = true }
-async-trait = { workspace = true }
+# Async (removed - effect-light crates should be synchronous)
 
 # Utilities
 uuid = { workspace = true }

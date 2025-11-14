@@ -3,9 +3,8 @@
 //! CLI-specific effect traits that compose core effects for command-line operations.
 //! These effects follow the unified effect system architecture.
 
-use anyhow::Result;
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub mod cli;
 pub mod config;
@@ -29,16 +28,16 @@ pub trait CliEffects: Send + Sync {
     async fn log_error(&self, message: &str);
 
     /// Create a directory and all parent directories
-    async fn create_dir_all(&self, path: &PathBuf) -> Result<()>;
+    async fn create_dir_all(&self, path: &Path) -> crate::effects::Result<()>;
 
     /// Write content to a file
-    async fn write_file(&self, path: &PathBuf, content: &[u8]) -> Result<()>;
+    async fn write_file(&self, path: &Path, content: &[u8]) -> crate::effects::Result<()>;
 
     /// Read content from a file
-    async fn read_file(&self, path: &PathBuf) -> Result<Vec<u8>>;
+    async fn read_file(&self, path: &Path) -> crate::effects::Result<Vec<u8>>;
 
     /// Check if a file exists
-    async fn file_exists(&self, path: &PathBuf) -> bool;
+    async fn file_exists(&self, path: &Path) -> bool;
 
     /// Format output for display
     async fn format_output(&self, data: &str) -> String;
@@ -51,13 +50,13 @@ pub trait CliEffects: Send + Sync {
 #[async_trait]
 pub trait ConfigEffects: Send + Sync {
     /// Load configuration from file
-    async fn load_config(&self, path: &PathBuf) -> Result<CliConfig>;
+    async fn load_config(&self, path: &Path) -> crate::effects::Result<CliConfig>;
 
     /// Save configuration to file
-    async fn save_config(&self, path: &PathBuf, config: &CliConfig) -> Result<()>;
+    async fn save_config(&self, path: &Path, config: &CliConfig) -> crate::effects::Result<()>;
 
     /// Validate configuration structure
-    async fn validate_config(&self, config: &CliConfig) -> Result<()>;
+    async fn validate_config(&self, config: &CliConfig) -> crate::effects::Result<()>;
 
     /// Get default configuration directory
     async fn default_config_dir(&self) -> PathBuf;
@@ -79,7 +78,7 @@ pub trait OutputEffects: Send + Sync {
     async fn display_progress(&self, message: &str, progress: f64);
 
     /// Format data as JSON
-    async fn format_json(&self, data: &serde_json::Value) -> Result<String>;
+    async fn format_json(&self, data: &serde_json::Value) -> crate::effects::Result<String>;
 
     /// Format data as human-readable text
     async fn format_text(&self, data: &str) -> String;

@@ -19,7 +19,7 @@ impl CapabilityId {
     /// Create a new random capability ID
     #[allow(clippy::disallowed_methods)]
     pub fn new() -> Self {
-        Self(uuid::Uuid::from_bytes([0u8; 16]))
+        Self(uuid::Uuid::new_v4())
     }
 
     /// Create from a UUID
@@ -303,7 +303,7 @@ mod tests {
             CapabilityId::new(),
             ResourceRef::recovery(0, 1),
             1000,
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16]))),
+            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
         );
 
         assert!(!cap.is_expired(500));
@@ -317,7 +317,7 @@ mod tests {
             CapabilityId::new(),
             ResourceRef::recovery(0, 1),
             1000,
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16]))),
+            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
         );
 
         assert_eq!(cap.time_until_expiration(500), 500);
@@ -335,7 +335,7 @@ mod tests {
             CapabilityId::new(),
             ResourceRef::storage("/data"),
             1000,
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16]))),
+            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
         )
         .with_attenuation(attenuation);
 
@@ -469,10 +469,10 @@ mod recovery_tests {
 
     #[test]
     fn test_recovery_capability_creation() {
-        let target = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let target = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
         let guardians = vec![
-            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
-            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            DeviceId(uuid::Uuid::from_bytes([3u8; 16])),
+            DeviceId(uuid::Uuid::from_bytes([4u8; 16])),
         ];
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
@@ -490,10 +490,10 @@ mod recovery_tests {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
         let recovery_cap = RecoveryCapability::new(
-            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
             vec![
-                DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
-                DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+                DeviceId(uuid::Uuid::from_bytes([6u8; 16])),
+                DeviceId(uuid::Uuid::from_bytes([7u8; 16])),
             ],
             2,
             1000,
@@ -511,8 +511,8 @@ mod recovery_tests {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
         let recovery_cap = RecoveryCapability::new(
-            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
-            vec![DeviceId(uuid::Uuid::from_bytes([0u8; 16]))], // Only 1 guardian
+            DeviceId(uuid::Uuid::from_bytes([8u8; 16])),
+            vec![DeviceId(uuid::Uuid::from_bytes([9u8; 16]))], // Only 1 guardian
             2,                                                 // But need 2
             10000,
             0,
@@ -529,10 +529,10 @@ mod recovery_tests {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
         let recovery_cap = RecoveryCapability::new(
-            DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            DeviceId(uuid::Uuid::from_bytes([10u8; 16])),
             vec![
-                DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
-                DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+                DeviceId(uuid::Uuid::from_bytes([11u8; 16])),
+                DeviceId(uuid::Uuid::from_bytes([12u8; 16])),
             ],
             2,
             10000,

@@ -4,17 +4,17 @@
 
 use anyhow::Result;
 use aura_protocol::{AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects};
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Handle initialization through effects
 pub async fn handle_init(
     effects: &AuraEffectSystem,
     num_devices: u32,
     threshold: u32,
-    output: &PathBuf,
+    output: &Path,
 ) -> Result<()> {
     // Log initialization start
-    effects
+    let _ = effects
         .log_info(&format!(
             "Initializing {}-of-{} threshold account",
             threshold, num_devices
@@ -81,10 +81,7 @@ pub async fn handle_init(
 }
 
 /// Create directory marker through storage effects
-async fn create_directory_through_effects(
-    effects: &AuraEffectSystem,
-    path: &PathBuf,
-) -> Result<()> {
+async fn create_directory_through_effects(effects: &AuraEffectSystem, path: &Path) -> Result<()> {
     let dir_marker_path = path.join(".aura_directory");
     let timestamp = effects.current_timestamp().await;
 

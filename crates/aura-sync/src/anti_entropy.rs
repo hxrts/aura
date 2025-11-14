@@ -7,12 +7,11 @@
 use std::collections::HashSet;
 
 use aura_core::hash;
-use blake3::Hasher;
 use aura_core::Journal;
 use aura_core::{AttestedOp, AuraError, AuraResult};
 use serde::{Deserialize, Serialize};
 
-/// Unique fingerprint for an attested operation (BLAKE3 hash).
+/// Unique fingerprint for an attested operation (cryptographic hash).
 pub type OperationFingerprint = [u8; 32];
 
 /// Summary of a journal snapshot used for anti-entropy comparisons.
@@ -207,9 +206,6 @@ fn hash_serialized<T: Serialize>(value: &T) -> AuraResult<[u8; 32]> {
     Ok(hash::hash(&bytes))
 }
 
-fn finalize_hash(hasher: Hasher) -> [u8; 32] {
-    hasher.finalize().into()
-}
 
 fn fingerprint(op: &AttestedOp) -> AuraResult<OperationFingerprint> {
     hash_serialized(op)

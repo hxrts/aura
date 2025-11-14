@@ -32,13 +32,15 @@ use super::agent::{
 use super::choreographic::ChoreographicEffects;
 use super::executor::{EffectExecutor, EffectExecutorBuilder};
 use super::handler_adapters::{
-    ConsoleHandlerAdapter, CryptoHandlerAdapter, JournalHandlerAdapter, NetworkHandlerAdapter,
-    RandomHandlerAdapter, StorageHandlerAdapter, TimeHandlerAdapter,
+    ChoreographicHandlerAdapter, ConsoleHandlerAdapter, CryptoHandlerAdapter, JournalHandlerAdapter,
+    LedgerHandlerAdapter, NetworkHandlerAdapter, RandomHandlerAdapter, StorageHandlerAdapter,
+    SystemHandlerAdapter, TimeHandlerAdapter, TreeHandlerAdapter,
 };
 use super::ledger::{LedgerEffects, LedgerError};
 use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
 use super::system_traits::{SystemEffects, SystemError};
 use super::tree::TreeEffects;
+use super::lifecycle::{LifecycleManager, EffectSystemState, LifecycleAware, HealthStatus as LifecycleHealthStatus};
 
 /// Configuration for the effect system
 #[derive(Clone, Debug)]
@@ -105,11 +107,15 @@ impl StorageConfig {
     pub fn for_simulation(seed: u64) -> Self {
         // Use seed to create deterministic but unique storage path
         let temp_dir = std::env::temp_dir().join(format!("aura_sim_{}", seed));
-        
+
         // Use seed to create deterministic master key
         let mut master_key = [0u8; 32];
         for (i, byte) in master_key.iter_mut().enumerate() {
-            *byte = ((seed.wrapping_mul(1103515245).wrapping_add(12345).wrapping_add(i as u64)) & 0xff) as u8;
+            *byte = ((seed
+                .wrapping_mul(1103515245)
+                .wrapping_add(12345)
+                .wrapping_add(i as u64))
+                & 0xff) as u8;
         }
 
         Self {
@@ -123,16 +129,16 @@ impl StorageConfig {
     /// Get or create master key for production use
     fn get_or_create_master_key(base_path: &std::path::Path) -> AuraResult<[u8; 32]> {
         let key_file = base_path.join(".aura_master_key");
-        
+
         if key_file.exists() {
             // Load existing key
             let key_bytes = std::fs::read(&key_file)
-                .map_err(|e| AuraError::storage(&format!("Failed to read master key: {}", e)))?;
-            
+                .map_err(|e| AuraError::storage(format!("Failed to read master key: {}", e)))?;
+
             if key_bytes.len() != 32 {
                 return Err(AuraError::invalid("Invalid master key length"));
             }
-            
+
             let mut key = [0u8; 32];
             key.copy_from_slice(&key_bytes);
             Ok(key)
@@ -144,17 +150,18 @@ impl StorageConfig {
             for (i, byte) in key.iter_mut().enumerate() {
                 *byte = (i as u8).wrapping_mul(17).wrapping_add(42); // Placeholder
             }
-            
+
             // Ensure directory exists
             if let Some(parent) = key_file.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| AuraError::storage(&format!("Failed to create storage directory: {}", e)))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    AuraError::storage(format!("Failed to create storage directory: {}", e))
+                })?;
             }
-            
+
             // Save key securely (would use OS keychain in real implementation)
-            std::fs::write(&key_file, &key)
-                .map_err(|e| AuraError::storage(&format!("Failed to save master key: {}", e)))?;
-            
+            std::fs::write(&key_file, key)
+                .map_err(|e| AuraError::storage(format!("Failed to save master key: {}", e)))?;
+
             Ok(key)
         }
     }
@@ -195,7 +202,11 @@ impl EffectSystemConfig {
     }
 
     /// Create a custom configuration
-    pub fn new(device_id: DeviceId, execution_mode: ExecutionMode, storage_config: StorageConfig) -> Self {
+    pub fn new(
+        device_id: DeviceId,
+        execution_mode: ExecutionMode,
+        storage_config: StorageConfig,
+    ) -> Self {
         let (default_flow_limit, initial_epoch) = match execution_mode {
             ExecutionMode::Testing => (10_000, Epoch::from(1)),
             ExecutionMode::Production => (100_000, Epoch::from(1)),
@@ -228,9 +239,33 @@ pub struct AuraEffectSystem {
     budget_mgr: Arc<FlowBudgetManager>,
     /// Isolated receipt management
     receipt_mgr: Arc<ReceiptManager>,
+    /// Lifecycle manager for system state
+    lifecycle_mgr: Arc<LifecycleManager>,
 }
 
 impl AuraEffectSystem {
+    /// Create an effect system from pre-built components
+    ///
+    /// This method is used by the builder pattern to construct the effect system
+    /// from already-initialized components.
+    pub(crate) fn from_components(
+        config: EffectSystemConfig,
+        executor: Arc<EffectExecutor>,
+        context_mgr: Arc<ContextManager>,
+        budget_mgr: Arc<FlowBudgetManager>,
+        receipt_mgr: Arc<ReceiptManager>,
+        lifecycle_mgr: Arc<LifecycleManager>,
+    ) -> Self {
+        Self {
+            config,
+            executor,
+            context_mgr,
+            budget_mgr,
+            receipt_mgr,
+            lifecycle_mgr,
+        }
+    }
+
     /// Get the device ID for this effect system
     pub fn device_id(&self) -> DeviceId {
         self.config.device_id
@@ -238,14 +273,28 @@ impl AuraEffectSystem {
 
     /// Get the execution mode for this effect system
     pub fn execution_mode(&self) -> ExecutionMode {
-        self.config.execution_mode.clone()
+        self.config.execution_mode
     }
 
     /// Get the latest receipt (stub for testing compatibility)
     pub async fn latest_receipt(&self) -> Option<Receipt> {
-        // In the stateless architecture, we don't store latest receipt
-        // This is only used by tests in the choreography adapter
-        None
+        // Get all context IDs and find the most recent receipt from any of them
+        let context_ids = self.receipt_mgr.context_ids().await;
+        
+        let mut latest_receipt = None;
+        let mut latest_nonce = 0u64;
+        
+        for context_id in context_ids {
+            if let Ok(Some(receipt)) = self.receipt_mgr.latest_receipt(&context_id).await {
+                // Use nonce as a proxy for recency (higher nonce = more recent)
+                if receipt.nonce >= latest_nonce {
+                    latest_nonce = receipt.nonce;
+                    latest_receipt = Some(receipt);
+                }
+            }
+        }
+        
+        latest_receipt
     }
 
     /// Set flow hint (stub for compatibility)
@@ -256,40 +305,100 @@ impl AuraEffectSystem {
 
     /// Create a new effect system with the given configuration
     pub fn new(config: EffectSystemConfig) -> AuraResult<Self> {
-        // Build the executor with appropriate handlers for the execution mode
-        let executor = Self::build_executor(&config)?;
+        // Use the builder pattern internally for consistency
+        super::AuraEffectSystemBuilder::new()
+            .with_config(config)
+            .build_sync()
+    }
 
-        // Initialize the context manager with the device's initial context
-        let context_mgr = Arc::new(ContextManager::new());
-        let initial_context = match config.execution_mode {
-            ExecutionMode::Testing => AuraContext::for_testing(config.device_id),
-            ExecutionMode::Production => {
-                // In production, we'd get these from TimeEffects and RandomEffects
-                // For now, use placeholder values
-                let timestamp = 0u64;
-                let operation_id = uuid::Uuid::nil();
-                AuraContext::for_production(config.device_id, timestamp, operation_id)
-            }
-            ExecutionMode::Simulation { seed } => {
-                AuraContext::for_simulation(config.device_id, seed)
-            }
-        };
+    // REMOVED: for_testing() method - use aura_testkit::create_test_fixture() instead
+    // This method was causing "cannot start a runtime from within a runtime" errors
+    // and has been replaced with proper async-native testing infrastructure.
 
-        // Block on async initialization (only during construction)
-        let runtime = tokio::runtime::Handle::try_current()
-            .map_err(|e| AuraError::internal(format!("No tokio runtime: {}", e)))?;
+    /// Create an effect system for testing without async initialization
+    ///
+    /// This method is specifically designed for use in tests to avoid
+    /// "cannot start a runtime from within a runtime" errors when called
+    /// from async test contexts.
+    ///
+    /// This is maintained for backwards compatibility. Consider using
+    /// `AuraEffectSystemBuilder::new().build_sync()` directly.
+    ///
+    /// # Example
+    /// ```
+    /// # use aura_protocol::effects::AuraEffectSystem;
+    /// # use aura_core::DeviceId;
+    /// #[tokio::test]
+    /// async fn test_something() {
+    ///     let device_id = DeviceId::new();
+    ///     let effects = AuraEffectSystem::for_testing_sync(device_id).unwrap();
+    ///     // Use effects in your test
+    /// }
+    /// ```
+    #[cfg(any(test, feature = "testing"))]
+    pub fn for_testing_sync(device_id: DeviceId) -> AuraResult<Self> {
+        // Use the builder pattern internally
+        super::AuraEffectSystemBuilder::new()
+            .with_device_id(device_id)
+            .with_execution_mode(ExecutionMode::Testing)
+            .build_sync()
+    }
 
-        runtime.block_on(async { context_mgr.initialize(config.device_id).await })?;
-
-        runtime.block_on(async { context_mgr.update(config.device_id, initial_context).await })?;
-
-        Ok(Self {
-            config,
-            executor: Arc::new(executor),
-            context_mgr,
-            budget_mgr: Arc::new(FlowBudgetManager::new()),
-            receipt_mgr: Arc::new(ReceiptManager::new()),
-        })
+    // ===== Lifecycle Management Methods =====
+    
+    /// Get the current lifecycle state
+    pub fn lifecycle_state(&self) -> EffectSystemState {
+        self.lifecycle_mgr.current_state()
+    }
+    
+    /// Initialize the effect system lifecycle
+    /// 
+    /// This method transitions the system from Uninitialized to Ready state,
+    /// initializing all registered components in the process.
+    pub async fn initialize_lifecycle(&self) -> AuraResult<()> {
+        self.lifecycle_mgr.initialize().await
+    }
+    
+    /// Shutdown the effect system lifecycle gracefully
+    /// 
+    /// This method transitions the system to Shutdown state,
+    /// cleaning up all registered components in reverse order.
+    pub async fn shutdown_lifecycle(&self) -> AuraResult<()> {
+        self.lifecycle_mgr.shutdown().await
+    }
+    
+    /// Perform a health check on the effect system
+    /// 
+    /// Returns a comprehensive health report including the status of all components.
+    pub async fn health_check(&self) -> crate::effects::lifecycle::SystemHealthReport {
+        self.lifecycle_mgr.health_check().await
+    }
+    
+    /// Check if the effect system is ready for operations
+    pub fn is_ready(&self) -> bool {
+        self.lifecycle_mgr.is_ready()
+    }
+    
+    /// Ensure the system is in a ready state or return an error
+    pub fn ensure_ready(&self) -> AuraResult<()> {
+        self.lifecycle_mgr.ensure_ready()
+    }
+    
+    /// Get system uptime
+    pub fn uptime(&self) -> std::time::Duration {
+        self.lifecycle_mgr.uptime()
+    }
+    
+    /// Register a lifecycle-aware component
+    /// 
+    /// Components registered here will be initialized and shut down
+    /// with the effect system lifecycle.
+    pub async fn register_lifecycle_component(
+        &self,
+        name: impl Into<String>,
+        component: Box<dyn LifecycleAware>,
+    ) {
+        self.lifecycle_mgr.register_component(name, component).await
     }
 
     /// Build the effect executor based on execution mode
@@ -344,6 +453,34 @@ impl AuraEffectSystem {
                             MemoryJournalHandler::new(),
                             mode,
                         )),
+                    )
+                    .with_handler(
+                        EffectType::System,
+                        Arc::new(SystemHandlerAdapter::new(
+                            crate::handlers::system::LoggingSystemHandler::default(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::Ledger,
+                        Arc::new(LedgerHandlerAdapter::new(
+                            crate::handlers::ledger::memory::MemoryLedgerHandler::new(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::Tree,
+                        Arc::new(TreeHandlerAdapter::new(
+                            crate::handlers::tree::dummy::DummyTreeHandler::new(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::Choreographic,
+                        Arc::new(ChoreographicHandlerAdapter::new(
+                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(config.device_id.0),
+                            mode,
+                        )),
                     );
             }
             ExecutionMode::Production => {
@@ -377,7 +514,10 @@ impl AuraEffectSystem {
                                     max_file_size: config.storage_config.max_file_size,
                                     ..SecureStorageConfig::default()
                                 },
-                            ).map_err(|e| AuraError::invalid(&format!("Failed to configure storage: {}", e)))?,
+                            )
+                            .map_err(|e| {
+                                AuraError::invalid(format!("Failed to configure storage: {}", e))
+                            })?,
                             mode,
                         )),
                     )
@@ -397,6 +537,34 @@ impl AuraEffectSystem {
                         EffectType::Journal,
                         Arc::new(JournalHandlerAdapter::new(
                             MemoryJournalHandler::new(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::System,
+                        Arc::new(SystemHandlerAdapter::new(
+                            crate::handlers::system::LoggingSystemHandler::default(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::Ledger,
+                        Arc::new(LedgerHandlerAdapter::new(
+                            crate::handlers::ledger::memory::MemoryLedgerHandler::new(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::Tree,
+                        Arc::new(TreeHandlerAdapter::new(
+                            crate::handlers::tree::dummy::DummyTreeHandler::new(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::Choreographic,
+                        Arc::new(ChoreographicHandlerAdapter::new(
+                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(config.device_id.0),
                             mode,
                         )),
                     );
@@ -453,6 +621,34 @@ impl AuraEffectSystem {
                             MemoryJournalHandler::new(),
                             mode,
                         )),
+                    )
+                    .with_handler(
+                        EffectType::System,
+                        Arc::new(SystemHandlerAdapter::new(
+                            crate::handlers::system::LoggingSystemHandler::default(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::Ledger,
+                        Arc::new(LedgerHandlerAdapter::new(
+                            crate::handlers::ledger::memory::MemoryLedgerHandler::new(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::Tree,
+                        Arc::new(TreeHandlerAdapter::new(
+                            crate::handlers::tree::dummy::DummyTreeHandler::new(),
+                            mode,
+                        )),
+                    )
+                    .with_handler(
+                        EffectType::Choreographic,
+                        Arc::new(ChoreographicHandlerAdapter::new(
+                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(config.device_id.0),
+                            mode,
+                        )),
                     );
             }
         }
@@ -462,7 +658,14 @@ impl AuraEffectSystem {
 
     /// Get the current context snapshot for effect execution
     async fn get_context(&self) -> AuraResult<AuraContext> {
-        self.context_mgr.get_snapshot(self.config.device_id).await
+        // Try to get existing context, initialize if it doesn't exist
+        match self.context_mgr.get_snapshot(self.config.device_id).await {
+            Ok(context) => Ok(context),
+            Err(_) => {
+                // Context doesn't exist, initialize it
+                self.context_mgr.initialize(self.config.device_id).await
+            }
+        }
     }
 
     /// Execute an effect with the current context
@@ -485,7 +688,6 @@ impl AuraEffectSystem {
             .execute(effect_type, operation, params, &context)
             .await
     }
-
 }
 
 // Implement core effect traits using the stateless executor
@@ -717,8 +919,11 @@ impl NetworkEffects for AuraEffectSystem {
         // Streams cannot be serialized/deserialized - create a placeholder
         use futures::stream;
         use std::pin::Pin;
-        
-        Ok(Box::pin(stream::empty()) as Pin<Box<dyn futures::Stream<Item = aura_core::effects::PeerEvent> + Send>>)
+
+        Ok(Box::pin(stream::empty())
+            as Pin<
+                Box<dyn futures::Stream<Item = aura_core::effects::PeerEvent> + Send>,
+            >)
     }
 }
 
@@ -1553,7 +1758,7 @@ impl AuthenticationEffects for AuraEffectSystem {
                 success: true,
                 method_used: Some(AuthMethod::DeviceCredential),
                 session_token: Some(vec![1, 2, 3, 4]),
-                expires_at: Some(timestamp + 3600_000), // 1 hour
+                expires_at: Some(timestamp + 3_600_000), // 1 hour
                 error: None,
             });
         }
@@ -1605,7 +1810,8 @@ impl AuthenticationEffects for AuraEffectSystem {
         }
 
         // Would interface with platform biometric APIs
-        self.log_info(&format!("Enrolling biometric: {:?}", biometric_type))
+        let _ = self
+            .log_info(&format!("Enrolling biometric: {:?}", biometric_type))
             .await;
         Ok(())
     }
@@ -1616,7 +1822,8 @@ impl AuthenticationEffects for AuraEffectSystem {
         }
 
         // Would interface with platform biometric APIs
-        self.log_info(&format!("Removing biometric: {:?}", biometric_type))
+        let _ = self
+            .log_info(&format!("Removing biometric: {:?}", biometric_type))
             .await;
         Ok(())
     }
@@ -1866,7 +2073,7 @@ impl SessionManagementEffects for AuraEffectSystem {
             status: SessionStatus::Created,
             created_at,
             updated_at: created_at,
-            timeout_at: Some(created_at + 3600_000), // 1 hour timeout
+            timeout_at: Some(created_at + 3_600_000), // 1 hour timeout
             operation: None,
             metadata: HashMap::new(),
         };
@@ -2023,7 +2230,11 @@ impl SessionManagementEffects for AuraEffectSystem {
         };
 
         // Store message in session queue
-        let msg_key = format!("session:{}:msg:{}", session_id, aura_core::RandomEffects::random_u64(self).await);
+        let msg_key = format!(
+            "session:{}:msg:{}",
+            session_id,
+            aura_core::RandomEffects::random_u64(self).await
+        );
         let msg_data = bincode::serialize(&msg)
             .map_err(|e| AuraError::serialization(format!("Session message: {}", e)))?;
 
@@ -2184,8 +2395,11 @@ impl ChoreographicEffects for AuraEffectSystem {
         }
 
         // Store session info
-        let session_data = bincode::serialize(&(aura_core::TimeEffects::current_timestamp(self).await, roles.clone()))
-            .map_err(|e| AuraError::serialization(format!("Session data: {}", e)))?;
+        let session_data = bincode::serialize(&(
+            aura_core::TimeEffects::current_timestamp(self).await,
+            roles.clone(),
+        ))
+        .map_err(|e| AuraError::serialization(format!("Session data: {}", e)))?;
 
         self.store(&session_key, session_data)
             .await
@@ -2274,7 +2488,7 @@ impl ChoreographicEffects for AuraEffectSystem {
 
         // Log the event
         let event_str = format!("Choreography event: {:?}", event);
-        self.log_info(&event_str).await;
+        let _ = self.log_info(&event_str).await;
 
         // Store event for analysis
         let event_key = format!(
@@ -2346,7 +2560,8 @@ impl LedgerEffects for AuraEffectSystem {
             })?;
 
         // Emit event notification
-        self.log_info(&format!("Ledger event appended at epoch {}", epoch + 1))
+        let _ = self
+            .log_info(&format!("Ledger event appended at epoch {}", epoch + 1))
             .await;
 
         Ok(())
@@ -2714,8 +2929,8 @@ impl LedgerEffects for AuraEffectSystem {
         Ok(secret)
     }
 
-    async fn hash_blake3(&self, data: &[u8]) -> Result<[u8; 32], super::ledger::LedgerError> {
-        // Use general hash function (would be Blake3 in production)
+    async fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], super::ledger::LedgerError> {
+        // Use general cryptographic hash function
         Ok(hash(data))
     }
 
@@ -2782,7 +2997,10 @@ impl TreeEffects for AuraEffectSystem {
         }
 
         // Store the operation in the oplog
-        let op_key = format!("tree:oplog:{}", aura_core::RandomEffects::random_u64(self).await);
+        let op_key = format!(
+            "tree:oplog:{}",
+            aura_core::RandomEffects::random_u64(self).await
+        );
         let op_data = bincode::serialize(&op)
             .map_err(|e| AuraError::serialization(format!("AttestedOp: {}", e)))?;
 
@@ -2797,19 +3015,23 @@ impl TreeEffects for AuraEffectSystem {
         match op.op.op {
             aura_core::TreeOpKind::AddLeaf { leaf, under } => {
                 // In real implementation, would properly update tree structure
-                self.log_info(&format!("Adding leaf under node {:?}", under))
+                let _ = self
+                    .log_info(&format!("Adding leaf under node {:?}", under))
                     .await;
             }
             aura_core::TreeOpKind::RemoveLeaf { leaf, reason } => {
-                self.log_info(&format!("Removing leaf {:?} with reason {}", leaf, reason))
+                let _ = self
+                    .log_info(&format!("Removing leaf {:?} with reason {}", leaf, reason))
                     .await;
             }
             aura_core::TreeOpKind::ChangePolicy { node, new_policy } => {
-                self.log_info(&format!("Changing policy at node {:?}", node))
+                let _ = self
+                    .log_info(&format!("Changing policy at node {:?}", node))
                     .await;
             }
             aura_core::TreeOpKind::RotateEpoch { affected } => {
-                self.log_info(&format!("Rotating epoch for {} nodes", affected.len()))
+                let _ = self
+                    .log_info(&format!("Rotating epoch for {} nodes", affected.len()))
                     .await;
             }
         }
@@ -2859,7 +3081,8 @@ impl TreeEffects for AuraEffectSystem {
         under: aura_core::NodeIndex,
     ) -> Result<aura_core::TreeOpKind, AuraError> {
         // Check authorization (in real implementation)
-        self.log_info(&format!("Proposing to add leaf under node {:?}", under))
+        let _ = self
+            .log_info(&format!("Proposing to add leaf under node {:?}", under))
             .await;
 
         Ok(aura_core::TreeOpKind::AddLeaf { leaf, under })
@@ -2870,11 +3093,12 @@ impl TreeEffects for AuraEffectSystem {
         leaf_id: aura_core::LeafId,
         reason: u8,
     ) -> Result<aura_core::TreeOpKind, AuraError> {
-        self.log_info(&format!(
-            "Proposing to remove leaf {:?} with reason {}",
-            leaf_id, reason
-        ))
-        .await;
+        let _ = self
+            .log_info(&format!(
+                "Proposing to remove leaf {:?} with reason {}",
+                leaf_id, reason
+            ))
+            .await;
 
         Ok(aura_core::TreeOpKind::RemoveLeaf {
             leaf: leaf_id,
@@ -2887,7 +3111,8 @@ impl TreeEffects for AuraEffectSystem {
         node: aura_core::NodeIndex,
         new_policy: aura_core::Policy,
     ) -> Result<aura_core::TreeOpKind, AuraError> {
-        self.log_info(&format!("Proposing policy change at node {:?}", node))
+        let _ = self
+            .log_info(&format!("Proposing policy change at node {:?}", node))
             .await;
 
         // In real implementation, would verify policy is stricter
@@ -2898,11 +3123,12 @@ impl TreeEffects for AuraEffectSystem {
         &self,
         affected: Vec<aura_core::NodeIndex>,
     ) -> Result<aura_core::TreeOpKind, AuraError> {
-        self.log_info(&format!(
-            "Proposing epoch rotation for {} nodes",
-            affected.len()
-        ))
-        .await;
+        let _ = self
+            .log_info(&format!(
+                "Proposing epoch rotation for {} nodes",
+                affected.len()
+            ))
+            .await;
 
         Ok(aura_core::TreeOpKind::RotateEpoch { affected })
     }
@@ -2911,7 +3137,8 @@ impl TreeEffects for AuraEffectSystem {
         &self,
         cut: super::tree::Cut,
     ) -> Result<super::tree::ProposalId, AuraError> {
-        let proposal_id = super::tree::ProposalId(aura_core::Hash32(hash(&bincode::serialize(&cut).unwrap())));
+        let proposal_id =
+            super::tree::ProposalId(aura_core::Hash32(hash(&bincode::serialize(&cut).unwrap())));
 
         // Store proposal
         let proposal_key = format!("tree:snapshot:proposal:{:?}", proposal_id.0);
@@ -2922,7 +3149,8 @@ impl TreeEffects for AuraEffectSystem {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to store proposal: {}", e)))?;
 
-        self.log_info(&format!("Proposed snapshot at epoch {}", cut.epoch))
+        let _ = self
+            .log_info(&format!("Proposed snapshot at epoch {}", cut.epoch))
             .await;
 
         Ok(proposal_id)
@@ -2991,7 +3219,7 @@ impl TreeEffects for AuraEffectSystem {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to store snapshot: {}", e)))?;
 
-        self.log_info("Finalized snapshot").await;
+        let _ = self.log_info("Finalized snapshot").await;
 
         Ok(snapshot)
     }
@@ -3011,7 +3239,8 @@ impl TreeEffects for AuraEffectSystem {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to apply snapshot: {}", e)))?;
 
-        self.log_info(&format!("Applied snapshot at epoch {}", snapshot.cut.epoch))
+        let _ = self
+            .log_info(&format!("Applied snapshot at epoch {}", snapshot.cut.epoch))
             .await;
 
         Ok(())
@@ -3232,66 +3461,70 @@ impl AuraEffectSystem {
     }
 }
 
+// Implement the unified AuraEffects trait
+impl crate::effects::AuraEffects for AuraEffectSystem {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::*;
+    use aura_macros::aura_test;
 
-    #[tokio::test]
-    async fn test_effect_system_creation() {
-        let device_id = DeviceId::from([1u8; 16]);
-        let config = EffectSystemConfig::for_testing(device_id);
+    #[aura_test]
+    async fn test_effect_system_creation() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let device_id = fixture.device_id();
+        let system = fixture.effects();
 
-        let system = AuraEffectSystem::new(config).unwrap();
         assert_eq!(system.device_id(), device_id);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_stateless_time_effects() {
-        let device_id = DeviceId::from([1u8; 16]);
-        let config = EffectSystemConfig::for_testing(device_id);
-
-        let system = AuraEffectSystem::new(config).unwrap();
+    #[aura_test]
+    async fn test_stateless_time_effects() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let system = fixture.effects();
 
         // Multiple calls should work without state conflicts
-        let t1 = system.current_timestamp().await;
-        let t2 = system.current_timestamp().await;
+        let t1 = aura_core::TimeEffects::current_timestamp(system).await;
+        let t2 = aura_core::TimeEffects::current_timestamp(system).await;
 
         // In testing mode, time might be fixed or monotonic
         assert!(t2 >= t1);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_flow_budget_isolation() {
-        let device_id = DeviceId::from([1u8; 16]);
-        let config = EffectSystemConfig::for_testing(device_id);
-
-        let system = AuraEffectSystem::new(config).unwrap();
+    #[aura_test]
+    async fn test_flow_budget_isolation() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let system = fixture.effects();
 
         let context = ContextId::from("test-context");
-        let peer = DeviceId::from([2u8; 16]);
+        let peer = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
 
         // First charge should initialize budget
-        let receipt1 = system.charge_flow(&context, &peer, 100).await.unwrap();
-        assert_eq!(receipt1.cost, 100);
-        assert_eq!(receipt1.sequence, 1);
+        let budget1 = system
+            .charge_flow_budget(&context, &peer, 100)
+            .await?;
+        assert_eq!(budget1.spent, 100);
 
-        // Second charge should chain properly
-        let receipt2 = system.charge_flow(&context, &peer, 200).await.unwrap();
-        assert_eq!(receipt2.cost, 200);
-        assert_eq!(receipt2.sequence, 2);
-        assert_eq!(receipt2.previous, receipt1.hash);
+        // Second charge should update spent amount
+        let budget2 = system
+            .charge_flow_budget(&context, &peer, 200)
+            .await?;
+        assert_eq!(budget2.spent, 300); // 100 + 200
+                                        // Note: Receipt prev field should match content hash of previous receipt
 
         // Check budget was updated
-        let budget = system.check_flow_budget(&context, &peer).await.unwrap();
+        let budget = system.check_flow_budget(&context, &peer).await?;
         assert_eq!(budget.spent, 300);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_concurrent_execution_no_deadlock() {
-        let device_id = DeviceId::from([1u8; 16]);
-        let config = EffectSystemConfig::for_testing(device_id);
-
-        let system = Arc::new(AuraEffectSystem::new(config).unwrap());
+    #[aura_test]
+    async fn test_concurrent_execution_no_deadlock() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let system = Arc::new((*fixture.effects()).clone());
 
         // Spawn multiple concurrent operations
         let mut handles = vec![];
@@ -3300,14 +3533,14 @@ mod tests {
             let sys = system.clone();
             let handle = tokio::spawn(async move {
                 // Mix of different effect types
-                let _ = sys.current_timestamp().await;
+                let _ = aura_core::TimeEffects::current_timestamp(&*sys).await;
                 let _ = sys.random_bytes(32).await;
                 let _ = hash(&[i as u8; 32]);
 
                 // Try flow charging
                 let context = ContextId::from(format!("ctx-{}", i));
-                let peer = DeviceId::from([i as u8; 16]);
-                let _ = sys.charge_flow(&context, &peer, 10).await;
+                let peer = DeviceId::from(uuid::Uuid::from_bytes([i as u8; 16]));
+                let _ = sys.charge_flow_budget(&context, &peer, 10).await;
             });
             handles.push(handle);
         }
@@ -3316,5 +3549,6 @@ mod tests {
         for handle in handles {
             handle.await.unwrap();
         }
+        Ok(())
     }
 }

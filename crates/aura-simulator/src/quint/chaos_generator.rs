@@ -413,7 +413,7 @@ impl ChaosGenerator {
     }
 
     /// Select appropriate byzantine strategy for chaos type and property
-    fn select_byzantine_strategy(
+    fn _select_byzantine_strategy(
         &self,
         chaos_type: &ChaosType,
         property: &VerifiableProperty,

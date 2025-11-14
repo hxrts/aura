@@ -23,6 +23,8 @@ aura-sync = { path = "../aura-sync" }
 aura-recovery = { path = "../aura-recovery" }
 aura-invitation = { path = "../aura-invitation" }
 aura-authenticate = { path = "../aura-authenticate" }
+aura-macros = { path = "../aura-macros" }
+aura-mpst = { path = "../aura-mpst" }
 
 # TODO: Re-enable cryptography when dependencies compile
 # frost-ed25519 = { workspace = true }
@@ -30,6 +32,9 @@ aura-authenticate = { path = "../aura-authenticate" }
 # qrcode = { version = "0.13", optional = true }
 # rumpsteak = { workspace = true }
 # rumpsteak-choreography = { git = "https://github.com/hxrts/rumpsteak-aura", package = "rumpsteak-choreography" }
+
+# Choreography dependencies
+rumpsteak-aura-choreography = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

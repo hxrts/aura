@@ -1,142 +1,188 @@
 # Simulation Guide
 
-This guide covers Aura's simulation engine built on the testkit infrastructure and stateless effect system architecture. The simulation engine provides deterministic, reproducible testing of distributed protocols through effect injection and fault simulation.
+This guide covers Aura's simulation engine built on the async-first effect system architecture. The simulation provides deterministic, reproducible testing of distributed protocols through effect interception, fault injection, and comprehensive network simulation - all compatible with WebAssembly environments.
 
 ## Core Simulation Philosophy
 
-Aura's simulation approach is built on three key principles. Tests run the actual `DeviceAgent` and protocol logic rather than mocks. All randomness and timing is controlled for 100% reproducible bugs. Fault injection happens at the same boundaries as production side effects.
+Aura's simulation approach is built on four key principles:
 
-This approach unlocks testing capabilities far superior to traditional integration testing. The simulation leverages the injectable effect interfaces throughout Aura's architecture for comprehensive validation.
+1. **Production Code Testing** - Run actual protocol implementations, not mocks or simplified models
+2. **Deterministic Execution** - Controlled time, seeded randomness, and reproducible network behavior
+3. **Effect Interception** - Fault injection at the same async effect boundaries as production
+4. **WASM Compatibility** - All simulation features work in browser environments without OS threads
+
+The simulation integrates with the `#[aura_test]` macro for seamless testing while providing advanced capabilities for complex distributed system validation.
 
 ## Simulation Infrastructure
 
-Aura's simulation system enables controlled testing of distributed protocols using a stateless effect system. The simulation provides deterministic environments for protocol validation with configurable network conditions and failure scenarios.
+Aura's simulation system provides controlled testing through async effect interception and comprehensive environment modeling.
 
-### Testkit Integration
+### Async Effect System Integration
 
-The simulation engine builds directly on the testkit infrastructure. All participants use `ProtocolTestFixture` instances created through `TestEffectsBuilder` for consistent behavior. The testkit provides the foundation for stateless fixture creation and effect system management.
+The simulation engine leverages the async effect system's context propagation and lifecycle management:
 
 ```rust
-use aura_testkit::{TestEffectsBuilder, TestExecutionMode, StatelessFixtureConfig};
+use aura_simulator::{SimulationBuilder, SimulationConfig};
+use aura_testkit::{aura_test, freeze_time};
 
-pub struct ProtocolSimulation {
-    fixtures: Vec<ProtocolTestFixture>,
-    config: SimulationConfig,
-}
-
-impl ProtocolSimulation {
-    pub async fn new(device_count: usize, config: SimulationConfig) -> Result<Self, SimulationError> {
-        let mut fixtures = Vec::new();
-
-        for i in 0..device_count {
-            let device_id = aura_core::DeviceId::new();
-            let effects_builder = TestEffectsBuilder::for_simulation(device_id)
-                .with_seed(config.base_seed + i as u64);
-
-            let fixture = ProtocolTestFixture::from_effects_builder(
-                effects_builder,
-                config.threshold,
-                device_count as u16,
-            ).await?;
-
-            fixtures.push(fixture);
-        }
-
-        Ok(Self {
-            fixtures,
-            config,
-        })
-    }
+#[aura_test]
+async fn simulate_protocol() {
+    // Build simulation with async initialization
+    let sim = SimulationBuilder::new()
+        .with_device_count(5)
+        .with_threshold(3)
+        .with_deterministic_time()
+        .with_effect_interception()
+        .build()
+        .await?;
+    
+    // Time is automatically controlled
+    freeze_time();
+    
+    // Add participants with parallel initialization
+    let devices = sim.add_participants(5).await?;
+    
+    // Configure network conditions
+    sim.network()
+        .add_latency(10..50)
+        .add_packet_loss(0.01)
+        .add_partition(vec![devices[0]], vec![devices[1..].to_vec()]);
+    
+    // Run simulation with automatic context propagation
+    sim.run_until_idle().await?;
+    
+    // Verify convergence
+    assert!(sim.all_devices_converged().await?);
 }
 ```
 
-The simulation creates multiple `ProtocolTestFixture` instances using the testkit infrastructure. Each fixture uses a deterministic seed derived from the base configuration. This ensures reproducible behavior across simulation runs.
+The simulation integrates seamlessly with the `#[aura_test]` macro, providing automatic setup and deterministic execution.
 
 ### Core Simulation Components
 
-The simulation engine consists of several key components that work together to manage the simulated world:
+The simulation engine uses modern async patterns with effect interception:
 
-#### The Simulation Harness
+#### Async Simulation Engine
 
 ```rust
-use aura_testkit::{TestEffectsBuilder, TestExecutionMode, StatelessFixtureConfig};
-use aura_simulator::{SimulationEngine, EffectInterceptor, EffectContext};
+use aura_simulator::{AsyncSimulationEngine, EffectInterceptor, EffectContext};
 
-/// Main simulation harness that owns the entire simulated world
-pub struct SimulationEngine {
-    /// Central runtime that intercepts and processes side effects
-    effect_runtime: StatelessEffectRuntime,
-    /// All participants in the simulation
-    participants: HashMap<DeviceId, SimulatedParticipant>,
-    /// Deterministic time source
-    time_source: SimulatedTime,
-    /// Centralized network simulation
-    network: SimulatedNetwork,
-    /// Global simulation seed for reproducibility
-    seed: u64,
+/// Async simulation engine with effect interception
+pub struct AsyncSimulationEngine {
+    /// Effect system with interception capabilities
+    effect_system: Arc<AuraEffectSystem>,
+    /// Participant management with async lifecycle
+    participants: Arc<RwLock<HashMap<DeviceId, SimulatedParticipant>>>,
+    /// Deterministic time control (WASM-compatible)
+    time_controller: TimeController,
+    /// Network simulation with async operations
+    network_sim: NetworkSimulator,
+    /// Effect interceptor registry
+    interceptors: Arc<RwLock<HashMap<DeviceId, Box<dyn EffectInterceptor>>>>,
+    /// Lifecycle manager for clean shutdown
+    lifecycle: LifecycleManager,
 }
 
-impl SimulationEngine {
-    pub fn new(seed: u64) -> Self {
-        Self {
-            effect_runtime: StatelessEffectRuntime::new(seed),
-            participants: HashMap::new(),
-            time_source: SimulatedTime::new(0),
-            network: SimulatedNetwork::new(seed),
-            seed,
-        }
+impl AsyncSimulationEngine {
+    pub async fn new() -> Result<Self> {
+        // Build effect system with simulation configuration
+        let builder = AuraEffectSystemBuilder::new()
+            .with_simulation_mode()
+            .with_deterministic_time()
+            .with_effect_interception();
+        
+        let effect_system = builder.build().await?;
+        
+        Ok(Self {
+            effect_system: Arc::new(effect_system),
+            participants: Arc::new(RwLock::new(HashMap::new())),
+            time_controller: TimeController::new(),
+            network_sim: NetworkSimulator::new(),
+            interceptors: Arc::new(RwLock::new(HashMap::new())),
+            lifecycle: LifecycleManager::new(),
+        })
     }
 
-    /// Add an honest participant to the simulation
-    pub async fn add_participant(&mut self, device_id: DeviceId) -> Result<&SimulatedParticipant, SimulationError> {
-        let config = StatelessFixtureConfig {
-            execution_mode: TestExecutionMode::Simulation,
-            seed: self.seed + device_id.as_u64(),
-            threshold: 2,
-            total_devices: 3,
-            primary_device: Some(device_id),
-        };
+    /// Add participants with parallel initialization
+    pub async fn add_participants(&self, count: usize) -> Result<Vec<DeviceId>> {
+        let init_tasks: Vec<_> = (0..count)
+            .map(|i| {
+                let engine = self.clone();
+                async move {
+                    let device_id = DeviceId::new();
+                    let participant = SimulatedParticipant::new(
+                        device_id,
+                        engine.effect_system.clone(),
+                    ).await?;
+                    
+                    engine.participants.write().await
+                        .insert(device_id, participant);
+                    
+                    Ok::<_, SimulationError>(device_id)
+                }
+            })
+            .collect();
+        
+        // Parallel initialization (WASM-compatible)
+        futures::future::try_join_all(init_tasks).await
+    }
 
+    /// Add Byzantine participant with custom effect interception
+    pub async fn add_byzantine_participant(
+        &self,
+        interceptor: impl EffectInterceptor + 'static,
+    ) -> Result<DeviceId> {
+        let device_id = DeviceId::new();
+        
+        // Register interceptor
+        self.interceptors.write().await
+            .insert(device_id, Box::new(interceptor));
+        
+        // Create participant with interception enabled
         let participant = SimulatedParticipant::new(
             device_id,
-            config,
-            self.effect_runtime.effect_sink_for(device_id),
+            self.effect_system.clone(),
         ).await?;
-
-        self.participants.insert(device_id, participant);
-        Ok(self.participants.get(&device_id).unwrap())
+        
+        self.participants.write().await
+            .insert(device_id, participant);
+        
+        Ok(device_id)
     }
 
-    /// Add a malicious participant with effect interception capabilities
-    pub async fn add_malicious_participant(
-        &mut self,
-        device_id: DeviceId,
-        interceptor: Box<dyn EffectInterceptor>,
-    ) -> Result<&MaliciousParticipant, SimulationError> {
-        // Implementation for Byzantine participants
-        todo!()
+    /// Get participant state snapshot
+    pub async fn device_state(&self, device_id: DeviceId) -> Result<AccountState> {
+        let participants = self.participants.read().await;
+        let participant = participants.get(&device_id)
+            .ok_or(SimulationError::ParticipantNotFound(device_id))?;
+        
+        Ok(participant.account_state().await)
     }
 
-    /// Convenience helper for tests to inspect participant state
-    pub fn ledger_snapshot(&self, participant: DeviceId) -> Result<AccountState, SimulationError> {
-        self.participants
-            .get(&participant)
-            .ok_or(SimulationError::ParticipantNotFound(participant))?
-            .account_state()
+    /// Advance time with automatic message delivery
+    pub async fn advance_time(&self, duration: Duration) -> Result<()> {
+        self.time_controller.advance(duration);
+        
+        // Process any messages scheduled for delivery
+        self.network_sim.process_scheduled_messages().await?;
+        
+        // Allow participants to react
+        self.process_participant_actions().await
     }
 
-    /// Advance simulation by one tick
-    pub async fn tick(&mut self) -> Result<(), SimulationError> {
-        self.time_source.advance(1);
-        self.network.process_tick(self.time_source.current_time()).await?;
-        self.deliver_pending_messages().await
-    }
-
-    /// Run simulation until no more messages are in flight
-    pub async fn run_until_idle(&mut self) -> Result<(), SimulationError> {
-        while self.network.has_pending_messages() {
-            self.tick().await?;
+    /// Run until network quiesces
+    pub async fn run_until_idle(&self) -> Result<()> {
+        let timeout = Duration::from_secs(30);
+        let start = self.time_controller.now();
+        
+        while self.network_sim.has_pending_messages().await? {
+            if self.time_controller.now() - start > timeout {
+                return Err(SimulationError::Timeout);
+            }
+            
+            self.advance_time(Duration::from_millis(10)).await?;
         }
+        
         Ok(())
     }
 }
@@ -144,247 +190,367 @@ impl SimulationEngine {
 
 The simulation engine owns the entire simulated world and provides the API for test scripts. Each participant is created using the testkit infrastructure with a `StatelessFixtureConfig`. The engine coordinates time advancement and message delivery across all participants.
 
-#### Simulated Participants
+#### Simulated Participants with Async Lifecycle
 
 ```rust
-/// Wrapper around a real DeviceAgent with injected simulation components
+/// Participant with async effect system and lifecycle management
 pub struct SimulatedParticipant {
     device_id: DeviceId,
-    fixture: ProtocolTestFixture,
-    effects_builder: TestEffectsBuilder,
-    effect_sink: EffectSink,
+    effect_system: Arc<AuraEffectSystem>,
+    state: Arc<RwLock<AccountState>>,
+    context: EffectContext,
+    lifecycle: ParticipantLifecycle,
 }
 
 impl SimulatedParticipant {
     pub async fn new(
         device_id: DeviceId,
-        config: StatelessFixtureConfig,
-        effect_sink: EffectSink,
-    ) -> Result<Self, SimulationError> {
-        let effects_builder = TestEffectsBuilder::for_simulation(device_id)
-            .with_seed(config.seed);
-
-        let fixture = ProtocolTestFixture::from_effects_builder(
-            effects_builder.clone(),
-            config.threshold,
-            config.total_devices,
-        ).await?;
-
+        effect_system: Arc<AuraEffectSystem>,
+    ) -> Result<Self> {
+        // Create participant context
+        let context = EffectContext::new()
+            .with_device_id(device_id)
+            .with_flow_budget(10_000)
+            .with_metadata("participant_type", "simulated");
+        
+        // Initialize with lifecycle management
+        let lifecycle = ParticipantLifecycle::new();
+        lifecycle.initialize().await?;
+        
         Ok(Self {
             device_id,
-            fixture,
-            effects_builder,
-            effect_sink,
+            effect_system,
+            state: Arc::new(RwLock::new(AccountState::new(device_id))),
+            context,
+            lifecycle,
         })
     }
 
-    /// Get current account state for inspection
-    pub fn account_state(&self) -> Result<AccountState, SimulationError> {
-        Ok(self.fixture.account_state().clone())
+    /// Execute action with context propagation
+    pub async fn execute_action(&self, action: Action) -> Result<ActionResult> {
+        // Execute within participant context
+        with_context(self.context.clone(), async {
+            match action {
+                Action::InitiateProtocol { protocol, params } => {
+                    self.execute_protocol(protocol, params).await
+                }
+                Action::RespondToMessage { message } => {
+                    self.handle_message(message).await
+                }
+                _ => Err(SimulationError::UnsupportedAction),
+            }
+        }).await
     }
-
-    /// Execute an action on this participant
-    pub async fn execute_action(&mut self, action: Action) -> Result<ActionResult, SimulationError> {
-        // Execute action through stateless effects and emit results to effect_sink
-        todo!()
+    
+    /// Get current state snapshot
+    pub async fn account_state(&self) -> AccountState {
+        self.state.read().await.clone()
+    }
+    
+    /// Shutdown participant cleanly
+    pub async fn shutdown(&self) -> Result<()> {
+        self.lifecycle.shutdown().await
     }
 }
 ```
 
-Each simulated participant wraps a real protocol implementation with injected simulation components. The participant uses a `ProtocolTestFixture` from the testkit for consistent state management. Actions execute through the stateless effect system and emit results to the central runtime.
+Participants use the full async effect system with proper lifecycle management and context propagation.
 
-#### Effect Interception and Fault Injection
+#### Async Effect Interception
 
 ```rust
-/// Context provided to effect interceptors
-#[derive(Debug, Clone)]
-pub struct EffectContext {
-    pub operation: Operation,
-    pub sender: DeviceId,
-    pub recipients: Vec<DeviceId>,
-    pub tick: u64,
-    pub protocol_phase: Option<ProtocolPhase>,
-}
-
-/// Trait for intercepting and modifying effects (for fault injection)
+/// Effect interceptor for async operations
+#[async_trait]
 pub trait EffectInterceptor: Send + Sync {
-    /// Intercept outgoing effects before they leave the participant
-    /// Returning Some(effect) forwards (possibly modified) effect
-    /// Returning None drops the effect
-    fn intercept_outgoing(
+    /// Intercept async effect operations
+    async fn intercept(
         &self,
         ctx: &EffectContext,
-        effect: Effect,
-    ) -> Option<Effect>;
+        operation: EffectOperation,
+    ) -> InterceptResult {
+        InterceptResult::Continue(operation)
+    }
+}
 
-    /// Intercept incoming effects before the participant sees them
-    fn intercept_incoming(
+/// Interception results
+pub enum InterceptResult {
+    Continue(EffectOperation),     // Forward (possibly modified)
+    Replace(EffectOperation),      // Replace with different operation  
+    Block(SimulationError),        // Block with error
+    Delay(Duration, EffectOperation), // Delay then forward
+}
+
+/// Byzantine behavior patterns
+pub struct ByzantineInterceptor {
+    corruption_rate: f64,
+    delay_range: Range<u64>,
+    drop_rate: f64,
+}
+
+#[async_trait]
+impl EffectInterceptor for ByzantineInterceptor {
+    async fn intercept(
         &self,
         ctx: &EffectContext,
-        effect: Effect,
-    ) -> Option<Effect>;
-}
-
-/// Runtime for processing effects in the simulation
-pub struct StatelessEffectRuntime {
-    network: SimulatedNetwork,
-    scheduler: TickScheduler,
-    interceptors: HashMap<DeviceId, Box<dyn EffectInterceptor>>,
-    seed: u64,
-}
-
-impl StatelessEffectRuntime {
-    pub fn new(seed: u64) -> Self {
-        Self {
-            network: SimulatedNetwork::new(seed),
-            scheduler: TickScheduler::new(),
-            interceptors: HashMap::new(),
-            seed,
+        operation: EffectOperation,
+    ) -> InterceptResult {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        
+        // Drop messages
+        if rng.gen::<f64>() < self.drop_rate {
+            return InterceptResult::Block(
+                SimulationError::MessageDropped
+            );
         }
+        
+        // Delay messages
+        if !self.delay_range.is_empty() {
+            let delay = rng.gen_range(self.delay_range.clone());
+            return InterceptResult::Delay(
+                Duration::from_millis(delay),
+                operation,
+            );
+        }
+        
+        // Corrupt messages
+        if rng.gen::<f64>() < self.corruption_rate {
+            if let EffectOperation::Send { mut envelope, .. } = operation {
+                envelope.corrupt_payload();
+                return InterceptResult::Replace(
+                    EffectOperation::Send { envelope, .. }
+                );
+            }
+        }
+        
+        InterceptResult::Continue(operation)
     }
+}
 
-    /// Register an effect interceptor for a specific participant
-    pub fn register_interceptor(
-        &mut self,
-        device_id: DeviceId,
-        interceptor: Box<dyn EffectInterceptor>,
-    ) {
-        self.interceptors.insert(device_id, interceptor);
-    }
+#### Effect Processing with Async Interception
 
-    /// Process an effect from a participant
+```rust
+/// Async effect processor with interception pipeline
+pub struct AsyncEffectProcessor {
+    interceptors: Arc<RwLock<HashMap<DeviceId, Box<dyn EffectInterceptor>>>>,
+    network_sim: Arc<NetworkSimulator>,
+    time_controller: Arc<TimeController>,
+    metrics: SimulationMetrics,
+}
+
+impl AsyncEffectProcessor {
+    /// Process effect with full interception pipeline
     pub async fn process_effect(
-        &mut self,
+        &self,
         ctx: EffectContext,
-        effect: Effect,
-    ) -> Result<(), SimulationError> {
-        // Apply outgoing interception
-        let effect = if let Some(interceptor) = self.interceptors.get(&ctx.sender) {
-            match interceptor.intercept_outgoing(&ctx, effect) {
-                Some(modified_effect) => modified_effect,
-                None => return Ok(()), // Effect was dropped
+        operation: EffectOperation,
+    ) -> Result<()> {
+        // Apply interception if registered
+        let final_operation = if let Some(interceptor) = 
+            self.interceptors.read().await.get(&ctx.device_id) 
+        {
+            match interceptor.intercept(&ctx, operation).await {
+                InterceptResult::Continue(op) => op,
+                InterceptResult::Replace(op) => op,
+                InterceptResult::Block(err) => {
+                    self.metrics.record_blocked_operation();
+                    return Err(err);
+                }
+                InterceptResult::Delay(duration, op) => {
+                    // Schedule delayed delivery
+                    self.time_controller.sleep(duration).await;
+                    op
+                }
             }
         } else {
-            effect
+            operation
         };
-
-        // Route effect based on type
-        match effect {
-            Effect::Send(envelope) => {
-                self.network.enqueue_message(ctx.tick, envelope).await?
+        
+        // Route to appropriate handler
+        match final_operation {
+            EffectOperation::Send { envelope, recipient } => {
+                self.network_sim.send_message(
+                    ctx.device_id,
+                    recipient,
+                    envelope,
+                ).await?
             }
-            Effect::WriteToLocalLedger(event) => {
-                // Send back to originating participant
-                self.deliver_to_participant(ctx.sender, Effect::WriteToLocalLedger(event)).await?
+            EffectOperation::Store { key, value } => {
+                // Storage operations processed locally
+                ctx.effects().storage()
+                    .store_with_context(&ctx, key, value)
+                    .await?
             }
-            Effect::UpdateTime(new_time) => {
-                // Update global time source
-                self.scheduler.set_time(new_time);
-            }
-            _ => {
-                // Handle other effect types
+            EffectOperation::Time { .. } => {
+                // Time operations controlled by simulation
+                self.time_controller.handle_time_operation(&ctx).await?
             }
         }
-
+        
+        self.metrics.record_processed_operation();
         Ok(())
     }
 }
-```
 
 Effect interception provides sophisticated fault injection capabilities. Interceptors operate on the same effect boundaries as production code. The runtime processes effects from all participants and routes them appropriately through the simulated network.
 
-#### Simulated Network
+#### Async Network Simulation
 
 ```rust
-/// Network simulation with latency, partitions, and message delivery
-pub struct SimulatedNetwork {
-    /// Messages scheduled for delivery, keyed by delivery tick
-    inflight_messages: BTreeMap<u64, Vec<Envelope>>,
-    /// Per-participant message inboxes
-    peer_mailboxes: HashMap<DeviceId, VecDeque<Envelope>>,
-    /// Network configuration
-    latency_range: Range<u64>,
-    partitions: Vec<HashSet<DeviceId>>,
-    /// Deterministic RNG for network behavior
-    rng: ChaCha8Rng,
+/// Network simulator with async operations and WASM compatibility
+pub struct NetworkSimulator {
+    /// Messages with scheduled delivery times
+    scheduled_messages: Arc<RwLock<BTreeMap<Instant, Vec<ScheduledMessage>>>>,
+    /// Active network conditions
+    conditions: Arc<RwLock<NetworkConditions>>,
+    /// Partition groups
+    partitions: Arc<RwLock<Vec<(HashSet<DeviceId>, HashSet<DeviceId>)>>>,
+    /// Metrics collection
+    metrics: NetworkMetrics,
 }
 
-impl SimulatedNetwork {
-    pub fn new(seed: u64) -> Self {
+#[derive(Clone)]
+pub struct NetworkConditions {
+    pub latency_range: Range<u64>,
+    pub jitter: u64,
+    pub packet_loss: f64,
+    pub bandwidth_limit: Option<u64>,
+    pub reorder_rate: f64,
+}
+
+impl NetworkSimulator {
+    pub fn new() -> Self {
         Self {
-            inflight_messages: BTreeMap::new(),
-            peer_mailboxes: HashMap::new(),
-            latency_range: 1..10,
-            partitions: Vec::new(),
-            rng: ChaCha8Rng::seed_from_u64(seed),
+            scheduled_messages: Arc::new(RwLock::new(BTreeMap::new())),
+            conditions: Arc::new(RwLock::new(NetworkConditions {
+                latency_range: 1..10,
+                jitter: 0,
+                packet_loss: 0.0,
+                bandwidth_limit: None,
+                reorder_rate: 0.0,
+            })),
+            partitions: Arc::new(RwLock::new(Vec::new())),
+            metrics: NetworkMetrics::new(),
         }
     }
 
-    /// Configure network latency range
-    pub fn set_latency_range(&mut self, range: Range<u64>) {
-        self.latency_range = range;
+    /// Configure network conditions fluently
+    pub fn add_latency(&mut self, range: Range<u64>) -> &mut Self {
+        self.conditions.write().await.latency_range = range;
+        self
+    }
+    
+    pub fn add_jitter(&mut self, jitter: u64) -> &mut Self {
+        self.conditions.write().await.jitter = jitter;
+        self
+    }
+    
+    pub fn add_packet_loss(&mut self, rate: f64) -> &mut Self {
+        self.conditions.write().await.packet_loss = rate;
+        self
+    }
+    
+    pub fn add_partition(
+        &mut self, 
+        group_a: Vec<DeviceId>, 
+        group_b: Vec<DeviceId>
+    ) -> &mut Self {
+        let set_a: HashSet<_> = group_a.into_iter().collect();
+        let set_b: HashSet<_> = group_b.into_iter().collect();
+        self.partitions.write().await.push((set_a, set_b));
+        self
     }
 
-    /// Add a network partition
-    pub fn add_partition(&mut self, partition: HashSet<DeviceId>) {
-        self.partitions.push(partition);
-    }
-
-    /// Enqueue a message for delivery with simulated latency
-    pub async fn enqueue_message(
-        &mut self,
-        current_tick: u64,
+    /// Send message with network simulation
+    pub async fn send_message(
+        &self,
+        sender: DeviceId,
+        recipient: DeviceId,
         envelope: Envelope,
-    ) -> Result<(), SimulationError> {
-        // Calculate delivery delay using deterministic RNG
-        let delay = self.rng.gen_range(self.latency_range.clone());
-        let delivery_tick = current_tick + delay;
-
-        // Check if message is blocked by partitions
-        if self.is_partitioned(&envelope.sender, &envelope.recipients) {
-            // Drop message due to partition
-            return Ok(());
+    ) -> Result<()> {
+        let conditions = self.conditions.read().await;
+        
+        // Check packet loss
+        if rand::thread_rng().gen::<f64>() < conditions.packet_loss {
+            self.metrics.record_packet_drop();
+            return Ok(()); // Message lost
         }
-
-        // Schedule for delivery
-        self.inflight_messages
-            .entry(delivery_tick)
+        
+        // Check partitions
+        if self.is_partitioned(sender, recipient).await {
+            self.metrics.record_partition_drop();
+            return Ok(()); // Message blocked
+        }
+        
+        // Calculate delivery time with latency and jitter
+        let base_latency = rand::thread_rng()
+            .gen_range(conditions.latency_range.clone());
+        let jitter = rand::thread_rng()
+            .gen_range(0..conditions.jitter);
+        let total_delay = Duration::from_millis(base_latency + jitter);
+        
+        let delivery_time = Instant::now() + total_delay;
+        
+        // Schedule message
+        let scheduled = ScheduledMessage {
+            sender,
+            recipient,
+            envelope,
+            scheduled_at: Instant::now(),
+        };
+        
+        self.scheduled_messages.write().await
+            .entry(delivery_time)
             .or_insert_with(Vec::new)
-            .push(envelope);
-
+            .push(scheduled);
+        
+        self.metrics.record_message_sent(total_delay);
         Ok(())
     }
 
-    /// Process messages due for delivery at the current tick
-    pub async fn process_tick(&mut self, current_tick: u64) -> Result<(), SimulationError> {
-        if let Some(messages) = self.inflight_messages.remove(&current_tick) {
-            for envelope in messages {
-                for recipient in &envelope.recipients {
-                    self.peer_mailboxes
-                        .entry(*recipient)
-                        .or_insert_with(VecDeque::new)
-                        .push_back(envelope.clone());
-                }
-            }
+    /// Process all messages ready for delivery
+    pub async fn process_scheduled_messages(&self) -> Result<()> {
+        let now = Instant::now();
+        let mut messages = self.scheduled_messages.write().await;
+        
+        // Find all messages ready for delivery
+        let ready_messages: Vec<_> = messages
+            .range(..=now)
+            .flat_map(|(_, msgs)| msgs.clone())
+            .collect();
+        
+        // Remove delivered messages
+        messages.retain(|time, _| time > &now);
+        
+        // Deliver messages
+        for msg in ready_messages {
+            self.deliver_message(msg).await?;
         }
+        
         Ok(())
     }
-
-    pub fn has_pending_messages(&self) -> bool {
-        !self.inflight_messages.is_empty() ||
-        self.peer_mailboxes.values().any(|mailbox| !mailbox.is_empty())
+    
+    /// Check if messages are pending
+    pub async fn has_pending_messages(&self) -> Result<bool> {
+        Ok(!self.scheduled_messages.read().await.is_empty())
     }
-
-    fn is_partitioned(&self, sender: &DeviceId, recipients: &[DeviceId]) -> bool {
-        for partition in &self.partitions {
-            let sender_in_partition = partition.contains(sender);
-            let any_recipient_outside = recipients.iter()
-                .any(|r| !partition.contains(r));
-
-            if sender_in_partition && any_recipient_outside {
+    
+    /// Check if devices are partitioned
+    async fn is_partitioned(&self, sender: DeviceId, recipient: DeviceId) -> bool {
+        let partitions = self.partitions.read().await;
+        
+        for (group_a, group_b) in partitions.iter() {
+            let sender_in_a = group_a.contains(&sender);
+            let sender_in_b = group_b.contains(&sender);
+            let recipient_in_a = group_a.contains(&recipient);
+            let recipient_in_b = group_b.contains(&recipient);
+            
+            // Partitioned if in different groups
+            if (sender_in_a && recipient_in_b) || (sender_in_b && recipient_in_a) {
                 return true;
             }
         }
+        
         false
     }
 }
@@ -392,441 +558,598 @@ impl SimulatedNetwork {
 
 The simulated network provides realistic message delivery with configurable latency and partitions. All behavior uses deterministic randomness for reproducible results. Messages are scheduled for delivery based on simulated network conditions.
 
-### Network Simulation
+### Network Simulation Patterns
 
-Configure network behavior using the stateless effect system:
+The simulation provides rich network modeling capabilities:
 
 ```rust
-use aura_simulator::middleware::stateless_effects::StatelessEffectsMiddleware;
+use aura_testkit::{aura_test, NetworkSimulator};
 
-pub fn create_realistic_network_conditions() -> StatelessFixtureConfig {
-    StatelessFixtureConfig {
-        execution_mode: TestExecutionMode::Simulation,
-        seed: 42,
-        threshold: 2,
-        total_devices: 5,
-        primary_device: None,
+#[aura_test]
+async fn test_realistic_network_conditions() {
+    let mut sim = NetworkSimulator::new();
+    
+    // Configure WAN-like conditions
+    sim.add_latency(20..100)        // 20-100ms latency
+        .add_jitter(10)              // ±10ms jitter
+        .add_packet_loss(0.01)       // 1% packet loss
+        .add_bandwidth_limit(10_000_000); // 10Mbps
+    
+    // Add asymmetric conditions
+    sim.add_directional_latency(device1, device2, 50..60)
+        .add_directional_latency(device2, device1, 100..150);
+    
+    // Simulate network storm
+    sim.add_packet_storm(Duration::from_secs(5), 0.5); // 50% loss for 5s
+    
+    // Execute protocol
+    let result = execute_protocol_with_network(&sim).await?;
+    
+    // Get network statistics
+    let stats = sim.statistics();
+    println!("Messages sent: {}", stats.total_sent);
+    println!("Messages delivered: {}", stats.total_delivered);
+    println!("Average latency: {:?}", stats.avg_latency);
+    println!("Packet loss rate: {:.2}%", stats.loss_rate * 100.0);
+}
+
+#[aura_test]
+async fn test_dynamic_network_changes() {
+    let mut sim = NetworkSimulator::new();
+    
+    // Start with good conditions
+    sim.add_latency(1..5);
+    
+    // Degrade over time
+    let degradation_task = async {
+        for i in 1..10 {
+            advance_time_by(Duration::from_secs(10));
+            sim.add_latency(i*10..(i+1)*10);
+            sim.add_packet_loss(i as f64 * 0.01);
+        }
+    };
+    
+    // Run protocol while network degrades
+    tokio::select! {
+        result = execute_protocol() => {
+            assert!(result.is_ok());
+        }
+        _ = degradation_task => {}
     }
 }
-
-pub async fn simulate_network_partition(
-    simulator: &mut SimulatorStackBuilder,
-    partition_devices: Vec<aura_core::DeviceId>,
-    duration: std::time::Duration,
-) -> Result<(), SimulationError> {
-    // Use stateless middleware to inject network faults
-    let fault_middleware = StatelessEffectsMiddleware::new()
-        .with_network_partition(partition_devices.clone(), duration);
-
-    simulator.add_middleware(fault_middleware).await?;
-
-    // Execute protocol under partition conditions
-    let simulation_result = simulator.execute_simulation().await?;
-
-    Ok(())
-}
 ```
-
-Network conditions simulate real-world environments with latency and packet loss. Partitions test protocol behavior during network splits. Bandwidth limits validate performance under constrained conditions.
 
 ### Device Failure Simulation
 
-Test protocol resilience with device failures using stateless effects:
+Test protocol resilience with sophisticated failure patterns:
 
 ```rust
-use aura_testkit::{TestEffectsBuilder, TestExecutionMode};
+use aura_testkit::{aura_test, FailureSimulator};
 
-pub async fn simulate_cascading_failures(
-    simulation: &mut ProtocolSimulation,
-    initial_failure_device: aura_core::DeviceId,
-    failure_spread_rate: f64,
-) -> Result<FailureAnalysis, SimulationError> {
-    let mut failed_devices = vec![initial_failure_device];
-    let mut failure_timeline = Vec::new();
-
-    // Create failure-aware effect systems
-    for fixture in &mut simulation.fixtures {
-        if fixture.device_id() == initial_failure_device {
-            // Replace with failed effect system
-            let failed_builder = TestEffectsBuilder::for_simulation(fixture.device_id())
-                .with_seed(fixture.seed())
-                .with_mock_network(true); // Network failure simulation
-
-            // Update fixture to use failed effects
-            *fixture = ProtocolTestFixture::from_effects_builder(
-                failed_builder,
-                simulation.config.threshold,
-                simulation.config.total_devices,
-            ).await?;
+#[aura_test]
+async fn test_cascading_failures() {
+    let failure_sim = FailureSimulator::new();
+    
+    // Configure failure patterns
+    failure_sim.add_failure_pattern(
+        FailurePattern::Cascading {
+            initial_device: device1,
+            spread_rate: 0.3,      // 30% chance to spread per tick
+            spread_delay: Duration::from_secs(5),
+            max_failures: 2,       // Stop at 2 failed devices
         }
-    }
-
-    failure_timeline.push((get_current_simulation_time(), initial_failure_device));
-
-    // Simulate failure spread using stateless approach
-    while failed_devices.len() < simulation.fixtures.len() / 2 {
-        let propagation_delay = calculate_failure_propagation_delay(failure_spread_rate);
-        tokio::time::sleep(propagation_delay).await;
-
-        let next_failure = select_next_failure_target(&simulation.fixtures, &failed_devices)?;
-
-        // Update next device with failed effect system
-        if let Some(fixture) = simulation.fixtures.iter_mut()
-            .find(|f| f.device_id() == next_failure) {
-
-            let failed_builder = TestEffectsBuilder::for_simulation(fixture.device_id())
-                .with_seed(fixture.seed())
-                .with_mock_network(true);
-
-            *fixture = ProtocolTestFixture::from_effects_builder(
-                failed_builder,
-                simulation.config.threshold,
-                simulation.config.total_devices,
-            ).await?;
+    );
+    
+    // Add correlated failures
+    failure_sim.add_failure_pattern(
+        FailurePattern::Correlated {
+            trigger_device: device2,
+            correlated_devices: vec![device3, device4],
+            correlation_delay: Duration::from_secs(2),
         }
+    );
+    
+    // Execute with failure injection
+    let result = execute_protocol_with_failures(&failure_sim).await;
+    
+    // Analyze failure impact
+    let analysis = failure_sim.analyze_impact();
+    println!("Devices failed: {}", analysis.failed_devices.len());
+    println!("Protocol completed: {}", analysis.protocol_succeeded);
+    println!("Healthy devices converged: {}", analysis.healthy_converged);
+    
+    // Protocol should tolerate f < n/3 failures
+    assert!(analysis.protocol_succeeded);
+    assert!(analysis.failed_devices.len() <= 2);
+}
 
-        failed_devices.push(next_failure);
-        failure_timeline.push((get_current_simulation_time(), next_failure));
-    }
+#[aura_test]
+async fn test_crash_recovery() {
+    // Simulate clean crash and recovery
+    let device = ctx.create_device().await?;
+    
+    // Take state snapshot
+    let pre_crash_state = device.checkpoint().await?;
+    
+    // Simulate crash
+    device.crash().await?;
+    
+    // Restart with recovery
+    let recovered = device.recover_from_checkpoint(pre_crash_state).await?;
+    
+    // Verify recovery
+    assert_eq!(recovered.state(), pre_crash_state);
+    assert!(recovered.is_operational());
+    
+    // Continue protocol after recovery
+    let result = continue_protocol(recovered).await?;
+    assert!(result.succeeded());
+}
 
-    Ok(FailureAnalysis {
-        total_failed: failed_devices.len(),
-        failure_timeline,
-        system_stability: assess_system_stability_stateless(simulation).await?,
-    })
+#[aura_test]
+async fn test_byzantine_behavior() {
+    // Create Byzantine device with specific behaviors
+    let byzantine = ctx.create_byzantine_device(
+        ByzantineProfile::new()
+            .equivocate(0.5)        // Send different messages to different peers
+            .corrupt_state(0.3)     // Corrupt internal state
+            .delay_messages(100..500) // Selective delays
+            .ignore_protocol(0.2)   // Ignore protocol rules
+    ).await?;
+    
+    // Run protocol with Byzantine participant
+    let result = execute_protocol_with_byzantine(byzantine).await;
+    
+    // Verify Byzantine tolerance
+    assert!(result.succeeded_despite_byzantine());
+    assert!(result.byzantine_detected());
+    assert_eq!(result.blamed_devices(), vec![byzantine.id()]);
 }
 ```
 
-Failure simulation tests system resilience under various failure scenarios. Cascading failures validate graceful degradation patterns. Failure analysis provides metrics for system robustness assessment.
+## Advanced Simulation Examples
 
-## Deterministic Simulation Examples
-
-The following examples demonstrate how to use the simulation engine for comprehensive protocol testing:
+The following examples demonstrate modern simulation patterns with async effect interception:
 
 ### Byzantine Fault Tolerance Testing
 
 ```rust
-use aura_simulator::{SimulationEngine, EffectInterceptor, EffectContext, Action};
-use aura_testkit::{StatelessFixtureConfig, TestExecutionMode};
+use aura_testkit::{aura_test};
+use aura_simulator::{AsyncSimulationEngine, ByzantineInterceptor};
 
-#[tokio::test]
-async fn test_byzantine_resharing_is_aborted() {
-    // 1. Setup: All randomness and time are controlled by the simulation
-    let mut sim = SimulationEngine::new(42); // Deterministic seed
-
-    let alice = DeviceId::new();
-    let byzantine_bob = DeviceId::new();
-    let carol = DeviceId::new();
-
+#[aura_test]
+async fn test_byzantine_resharing_detection() {
+    // Create simulation with automatic setup
+    let sim = AsyncSimulationEngine::new().await?;
+    
     // Add honest participants
-    sim.add_participant(alice).await.unwrap();
-    sim.add_participant(carol).await.unwrap();
-
-    // 2. Define malicious behavior through effect interception
-    struct ResharingCorruptor;
-    impl EffectInterceptor for ResharingCorruptor {
-        fn intercept_outgoing(&self, ctx: &EffectContext, effect: Effect) -> Option<Effect> {
-            match effect {
-                Effect::Send(mut envelope) if ctx.operation == Operation::ProduceResharingSubShare => {
-                    // Corrupt the resharing subshare
-                    envelope.payload = generate_corrupted_subshare();
-                    Some(Effect::Send(envelope))
-                }
-                _ => Some(effect), // Forward all other effects unchanged
-            }
-        }
-
-        fn intercept_incoming(&self, _ctx: &EffectContext, effect: Effect) -> Option<Effect> {
-            Some(effect) // Don't modify incoming effects
-        }
-    }
-
-    // Add malicious participant with interceptor
-    sim.add_malicious_participant(byzantine_bob, Box::new(ResharingCorruptor)).await.unwrap();
-
-    // 3. Script the scenario
+    let alice = sim.add_participant().await?;
+    let carol = sim.add_participant().await?;
+    
+    // Add Byzantine participant with corruption behavior
+    let byzantine_bob = sim.add_byzantine_participant(
+        ByzantineInterceptor::new()
+            .on_operation(Operation::ProduceResharingSubShare)
+            .corrupt_messages(1.0)  // Always corrupt resharing messages
+            .with_corruption_fn(|msg| {
+                // Specific corruption for resharing
+                let mut corrupted = msg.clone();
+                corrupted.invalidate_proof();
+                corrupted
+            })
+    ).await?;
+    
+    // Execute resharing protocol
     let action = Action::InitiateResharing {
         new_participants: vec![alice, byzantine_bob, carol],
         threshold: 2,
     };
-    sim.tell_participant(alice, action).await.unwrap();
-
-    // 4. Run the simulation until completion
-    sim.run_until_idle().await.unwrap();
-
-    // 5. Assert final state
-    let alice_state = sim.ledger_snapshot(alice).unwrap();
-    let last_event = alice_state.get_last_event();
+    
+    sim.tell_participant(alice, action).await?;
+    
+    // Run until completion with timeout
+    sim.run_until_idle_with_timeout(Duration::from_secs(10)).await?;
+    
+    // Verify Byzantine behavior was detected
+    let alice_state = sim.device_state(alice).await?;
+    let last_event = alice_state.last_event();
+    
     assert_matches!(
-        last_event.payload, 
+        last_event.payload,
         EventPayload::ResharingAborted { 
-            reason: AbortReason::InvalidShare 
+            reason: AbortReason::InvalidShare { from } 
+        } if from == byzantine_bob
+    );
+    
+    // Verify blame assignment
+    assert!(alice_state.is_device_blamed(byzantine_bob));
+    
+    // Check simulation metrics
+    let metrics = sim.metrics();
+    assert_eq!(metrics.byzantine_detections, 1);
+    assert!(metrics.protocol_completed_despite_byzantine);
+}
+
+### Sophisticated Byzantine Patterns
+
+```rust
+#[aura_test]
+async fn test_complex_byzantine_scenarios() {
+    let sim = AsyncSimulationEngine::new().await?;
+    
+    // Adaptive Byzantine that changes behavior
+    let adaptive_byzantine = sim.add_byzantine_participant(
+        AdaptiveByzantineInterceptor::new()
+            .phase(ProtocolPhase::Setup, |interceptor| {
+                interceptor.behave_honestly()  // Act honest initially
+            })
+            .phase(ProtocolPhase::Execution, |interceptor| {
+                interceptor.corrupt_selectively(0.5)  // Corrupt 50% in execution
+            })
+            .phase(ProtocolPhase::Finalization, |interceptor| {
+                interceptor.block_all_messages()  // Block during finalization
+            })
+    ).await?;
+    
+    // Colluding Byzantine devices
+    let colluder1 = sim.add_byzantine_participant(
+        ColludingByzantineInterceptor::new()
+            .collude_with(colluder2_id)
+            .share_private_state()
+            .coordinate_attacks()
+    ).await?;
+    
+    // Eclipse attack Byzantine
+    let eclipse_attacker = sim.add_byzantine_participant(
+        EclipseAttackInterceptor::new()
+            .target_device(victim_id)
+            .isolate_from_network()
+            .feed_false_information()
+    ).await?;
+    
+    // Execute protocol and verify resilience
+    let result = execute_complex_protocol(&sim).await?;
+    
+    assert!(result.succeeded_despite_byzantines());
+    assert_eq!(result.detected_byzantines.len(), 3);
+}
+```
+
+### Network Partition and Recovery
+
+```rust
+#[aura_test]
+async fn test_partition_tolerance_and_recovery() {
+    let sim = AsyncSimulationEngine::new().await?;
+    
+    // Create 5-device threshold setup
+    let devices = sim.add_participants(5).await?;
+    
+    // Start protocol
+    let protocol_handle = sim.spawn_protocol(
+        ThresholdSigningProtocol {
+            message: b"test message",
+            signers: devices.clone(),
+            threshold: 3,
         }
     );
     
-    // Verify Byzantine participant is blamed
-    assert!(alice_state.is_device_blamed(byzantine_bob));
+    // Let it progress
+    advance_time_by(Duration::from_secs(2));
+    
+    // Create dynamic partition
+    let partition_controller = sim.network()
+        .create_partition_controller();
+    
+    // Partition 1: Split 3-2
+    partition_controller.partition(
+        devices[..3].to_vec(),
+        devices[3..].to_vec(),
+    ).await?;
+    
+    // Run for 5 seconds with partition
+    advance_time_by(Duration::from_secs(5));
+    
+    // Heal partition partially (4-1 split)
+    partition_controller.move_device(devices[3], PartitionGroup::A).await?;
+    advance_time_by(Duration::from_secs(2));
+    
+    // Full heal
+    partition_controller.heal_all().await?;
+    
+    // Protocol should complete
+    let result = protocol_handle.await?;
+    assert!(result.succeeded());
+    
+    // Verify eventual consistency
+    let states = sim.all_device_states().await?;
+    let reference = &states[0];
+    for state in &states[1..] {
+        assert_eq!(state.merkle_root(), reference.merkle_root());
+    }
+    
+    // Check partition metrics
+    let metrics = sim.network().partition_metrics();
+    assert_eq!(metrics.total_partitions, 2);
+    assert_eq!(metrics.healed_partitions, 2);
+    assert!(metrics.messages_dropped_by_partition > 0);
+}
+
+#[aura_test]
+async fn test_asymmetric_partitions() {
+    // Test one-way communication failures
+    let sim = AsyncSimulationEngine::new().await?;
+    let [a, b, c] = sim.add_participants(3).await?[..] else { panic!() };
+    
+    // A can send to B, but B cannot send to A
+    sim.network()
+        .add_directional_partition(b, a)
+        .allow_direction(a, b);
+    
+    // This creates interesting protocol challenges
+    let result = execute_protocol(&[a, b, c]).await?;
+    assert!(result.succeeded_with_degraded_performance());
 }
 ```
 
-This test demonstrates deterministic Byzantine fault injection through effect interception. The simulation runs the actual protocol logic with a corrupted participant. The test verifies that honest participants detect and handle the Byzantine behavior correctly.
-
-### Network Partition Recovery
+### Complex Multi-Phase Protocols
 
 ```rust
-#[tokio::test]
-async fn test_recovery_after_network_partition() {
-    let mut sim = SimulationEngine::new(123);
+#[aura_test]
+async fn test_account_recovery_under_adverse_conditions() {
+    let sim = AsyncSimulationEngine::new().await?;
     
-    // Create a 3-of-5 threshold setup
-    let devices: Vec<DeviceId> = (0..5).map(|_| DeviceId::new()).collect();
-    for device in &devices {
-        sim.add_participant(*device).await.unwrap();
-    }
+    // Setup recovery scenario
+    let alice_old = sim.add_participant().await?;
+    let alice_new = sim.add_participant().await?;
+    let guardians = sim.add_participants(3).await?;
     
-    // Initial state: all devices can communicate
-    let action = Action::InitiateThresholdSigning {
-        message: b"test message".to_vec(),
-        signers: devices.clone(),
-    };
-    sim.tell_participant(devices[0], action).await.unwrap();
+    // Configure realistic WAN conditions
+    sim.network()
+        .add_latency(20..200)      // High latency
+        .add_jitter(50)            // High jitter
+        .add_packet_loss(0.02)     // 2% loss
+        .add_reorder_rate(0.05);   // 5% reordering
     
-    // Let protocol make some progress
-    for _ in 0..10 {
-        sim.tick().await.unwrap();
-    }
-    
-    // Introduce network partition: isolate 2 devices
-    let partition_a: HashSet<_> = devices[..3].iter().cloned().collect();
-    let partition_b: HashSet<_> = devices[3..].iter().cloned().collect();
-    
-    sim.network_mut().add_partition(partition_a.clone());
-    sim.network_mut().add_partition(partition_b.clone());
-    
-    // Run during partition
-    for _ in 0..20 {
-        sim.tick().await.unwrap();
-    }
-    
-    // Remove partition
-    sim.network_mut().clear_partitions();
-    
-    // Allow recovery
-    sim.run_until_idle().await.unwrap();
-    
-    // Verify all devices converged to the same state
-    let reference_state = sim.ledger_snapshot(devices[0]).unwrap();
-    for device in &devices[1..] {
-        let device_state = sim.ledger_snapshot(*device).unwrap();
-        assert_eq!(reference_state.merkle_root(), device_state.merkle_root());
-    }
-}
-```
-
-This test demonstrates network partition simulation and recovery validation. The simulation partitions the network during protocol execution. After partition removal the test verifies that all participants converge to a consistent state.
-
-### Complex Multi-Phase Protocol
-
-```rust
-#[tokio::test]
-async fn test_complete_account_recovery_workflow() {
-    let mut sim = SimulationEngine::new(456);
-    
-    // Setup: Alice's device is compromised, guardians help recovery
-    let alice_old = DeviceId::new();
-    let alice_new = DeviceId::new();
-    let guardian1 = DeviceId::new();
-    let guardian2 = DeviceId::new();
-    let guardian3 = DeviceId::new();
-    
-    let guardians = vec![guardian1, guardian2, guardian3];
-    
-    // Add all participants
-    sim.add_participant(alice_old).await.unwrap();
-    sim.add_participant(alice_new).await.unwrap();
-    for guardian in &guardians {
-        sim.add_participant(*guardian).await.unwrap();
-    }
-    
-    // Configure network with realistic latency
-    sim.network_mut().set_latency_range(5..50); // 5-50 ticks delay
-    
-    // Phase 1: Alice initiates recovery from new device
-    let recovery_action = Action::InitiateAccountRecovery {
+    // Phase 1: Initiate recovery
+    let recovery = RecoveryProtocol {
         old_device: alice_old,
         new_device: alice_new,
         guardians: guardians.clone(),
-        recovery_threshold: 2, // 2-of-3 guardians needed
+        threshold: 2,
     };
-    sim.tell_participant(alice_new, recovery_action).await.unwrap();
     
-    // Phase 2: Guardians respond (with one guardian being slow)
-    sim.run_for_ticks(100).await.unwrap(); // Allow initial propagation
+    let recovery_handle = sim.spawn_protocol(recovery);
     
-    // Phase 3: Simulate slow guardian by introducing temporary partition
-    let slow_guardian_partition = [guardian3].iter().cloned().collect();
-    sim.network_mut().add_partition(slow_guardian_partition);
+    // Phase 2: Inject failures during recovery
+    advance_time_by(Duration::from_secs(2));
     
-    sim.run_for_ticks(200).await.unwrap(); // Recovery should complete with 2 guardians
+    // Guardian 3 becomes slow/unreliable  
+    sim.network()
+        .throttle_device(guardians[2], 100) // 100ms extra latency
+        .add_device_packet_loss(guardians[2], 0.3); // 30% packet loss
     
-    // Phase 4: Slow guardian rejoins
-    sim.network_mut().clear_partitions();
-    sim.run_until_idle().await.unwrap();
+    // Phase 3: Guardian 1 temporarily partitioned
+    advance_time_by(Duration::from_secs(3));
+    sim.network().isolate_device(guardians[0]);
     
-    // Verify recovery succeeded
-    let alice_new_state = sim.ledger_snapshot(alice_new).unwrap();
+    // Phase 4: Heal partition after 5 seconds
+    advance_time_by(Duration::from_secs(5));
+    sim.network().reconnect_device(guardians[0]);
+    
+    // Recovery should complete despite failures
+    let result = recovery_handle.await?;
+    assert!(result.succeeded());
+    
+    // Verify new device has access
+    let alice_new_state = sim.device_state(alice_new).await?;
     assert!(alice_new_state.has_device_access(alice_new));
     assert!(!alice_new_state.has_device_access(alice_old));
     
-    // Verify all guardians have consistent view
-    let guardian_states: Vec<_> = guardians.iter()
-        .map(|g| sim.ledger_snapshot(*g).unwrap())
-        .collect();
+    // Verify eventual consistency
+    let all_states = sim.all_device_states().await?;
+    verify_merkle_root_convergence(&all_states)?;
     
-    let reference_root = guardian_states[0].merkle_root();
-    for state in &guardian_states[1..] {
-        assert_eq!(state.merkle_root(), reference_root);
+    // Analyze recovery performance
+    let recovery_analysis = sim.analyze_protocol_execution(&recovery_handle);
+    println!("Recovery Metrics:");
+    println!("  Total time: {:?}", recovery_analysis.total_duration);
+    println!("  Messages exchanged: {}", recovery_analysis.message_count);
+    println!("  Retransmissions: {}", recovery_analysis.retransmission_count);
+    println!("  Guardian participation:");
+    for (i, guardian) in guardians.iter().enumerate() {
+        let participation = recovery_analysis.device_participation(guardian);
+        println!("    Guardian {}: {:.1}%", i, participation * 100.0);
     }
     
-    // Verify timing properties
-    let recovery_events = alice_new_state.events_of_type(EventType::AccountRecoveryCompleted);
-    assert_eq!(recovery_events.len(), 1);
-    let completion_time = recovery_events[0].timestamp;
-    assert!(completion_time < 400); // Should complete within reasonable time
+    // Should complete despite 1 slow guardian
+    assert!(recovery_analysis.total_duration < Duration::from_secs(30));
+    assert!(recovery_analysis.successful_with_degradation);
 }
 ```
-
-This test demonstrates a complex multi-phase protocol with realistic network conditions. The simulation handles multiple participants with different roles. The test validates both correctness and timing properties of the recovery protocol.
 
 ## Advanced Simulation Techniques
 
-### Deterministic Byzantine Behavior Modeling
+### State Space Exploration
 
-The simulation engine supports sophisticated Byzantine fault injection through effect interception:
+The simulation engine supports systematic exploration of protocol state spaces:
 
 ```rust
-use aura_simulator::{SimulationEngine, EffectInterceptor, EffectContext};
-
-/// Interceptor that selectively corrupts protocol messages
-struct ProtocolCorruptorInterceptor {
-    corruption_probability: f64,
-    target_operations: HashSet<Operation>,
-    rng: ChaCha8Rng,
+#[aura_test]
+async fn test_exhaustive_state_exploration() {
+    let explorer = StateSpaceExplorer::new();
+    
+    // Define protocol to explore
+    let protocol = ThresholdProtocol {
+        participants: 3,
+        threshold: 2,
+    };
+    
+    // Configure exploration parameters
+    explorer.configure()
+        .max_depth(10)
+        .enable_symmetry_reduction()
+        .enable_partial_order_reduction()
+        .with_state_limit(10_000);
+    
+    // Explore all possible executions
+    let exploration = explorer.explore(protocol).await?;
+    
+    println!("States explored: {}", exploration.total_states);
+    println!("Unique states: {}", exploration.unique_states);
+    println!("Terminal states: {}", exploration.terminal_states);
+    
+    // Check safety properties
+    for invariant in &protocol.safety_invariants() {
+        assert!(
+            exploration.all_states_satisfy(invariant),
+            "Invariant violated: {}", invariant.name()
+        );
+    }
+    
+    // Check liveness properties  
+    for property in &protocol.liveness_properties() {
+        assert!(
+            exploration.eventually_satisfied(property),
+            "Liveness violated: {}", property.name()
+        );
+    }
 }
 
-impl EffectInterceptor for ProtocolCorruptorInterceptor {
-    fn intercept_outgoing(&self, ctx: &EffectContext, effect: Effect) -> Option<Effect> {
-        if self.target_operations.contains(&ctx.operation) {
-            if self.rng.gen::<f64>() < self.corruption_probability {
-                return Some(self.corrupt_based_on_operation(ctx, effect));
-            }
+### Property-Based Protocol Testing
+
+Combine simulation with property testing for thorough validation:
+
+```rust
+use proptest::prelude::*;
+
+proptest! {
+    #[aura_test]
+    async fn protocol_maintains_invariants(
+        device_count in 3..10usize,
+        failure_rate in 0.0..0.3f64,
+        network_latency in 1..100u64,
+        message_loss in 0.0..0.1f64,
+    ) {
+        let sim = AsyncSimulationEngine::new().await?;
+        
+        // Create devices
+        let devices = sim.add_participants(device_count).await?;
+        
+        // Configure network from generated parameters
+        sim.network()
+            .add_latency(network_latency..network_latency*2)
+            .add_packet_loss(message_loss);
+        
+        // Add random failures
+        let num_failures = ((device_count as f64) * failure_rate) as usize;
+        for i in 0..num_failures {
+            sim.fail_device_at_random_time(devices[i]).await?;
         }
-        Some(effect)
-    }
-
-    fn intercept_incoming(&self, _ctx: &EffectContext, effect: Effect) -> Option<Effect> {
-        Some(effect) // Don't corrupt incoming messages
-    }
-}
-
-impl ProtocolCorruptorInterceptor {
-    fn corrupt_based_on_operation(&self, ctx: &EffectContext, effect: Effect) -> Effect {
-        match (&ctx.operation, effect) {
-            (Operation::ThresholdSign, Effect::Send(mut envelope)) => {
-                // Corrupt threshold signature shares
-                envelope.payload = self.generate_invalid_signature_share(&envelope.payload);
-                Effect::Send(envelope)
-            }
-            (Operation::ConsensusVote, Effect::Send(mut envelope)) => {
-                // Send conflicting votes to different participants
-                envelope.payload = self.generate_conflicting_vote(&ctx.recipients, &envelope.payload);
-                Effect::Send(envelope)
-            }
-            (Operation::StateSync, Effect::Send(mut envelope)) => {
-                // Provide stale or corrupted state information
-                envelope.payload = self.corrupt_state_sync(&envelope.payload);
-                Effect::Send(envelope)
-            }
-            _ => effect,
+        
+        // Run protocol
+        let result = execute_protocol(&sim, &devices).await;
+        
+        // Check invariants regardless of outcome
+        let invariant_checker = InvariantChecker::new(&sim);
+        
+        // Safety: No double spending
+        prop_assert!(invariant_checker.check_no_double_spend().await?);
+        
+        // Consistency: All honest devices agree
+        prop_assert!(invariant_checker.check_honest_agreement().await?);
+        
+        // Liveness: Protocol completes if enough devices online
+        let online_count = device_count - num_failures;
+        if online_count >= (device_count * 2 / 3) {
+            prop_assert!(result.is_ok());
         }
     }
 }
 ```
 
-This interceptor demonstrates sophisticated Byzantine behavior modeling. Different operations receive different types of corruption. The interceptor uses deterministic randomness to ensure reproducible Byzantine behavior.
+### Simulation Analysis and Debugging
 
-### Simulation Debugging and Analysis
-
-The simulation engine provides comprehensive debugging capabilities:
+The simulation provides rich analysis capabilities:
 
 ```rust
-use aura_simulator::{TraceAnalyzer, ExecutionTrace, PerformanceProfiler};
-
-#[tokio::test]
-async fn test_with_comprehensive_analysis() {
-    let mut sim = SimulationEngine::new(7000);
-    sim.enable_detailed_tracing().await.unwrap();
-    sim.enable_performance_profiling().await.unwrap();
+#[aura_test]
+async fn analyze_protocol_execution() {
+    let sim = AsyncSimulationEngine::new()
+        .with_detailed_tracing()
+        .with_performance_profiling()
+        .build()
+        .await?;
     
-    // ... run simulation ...
+    // Run protocol
+    let devices = sim.add_participants(5).await?;
+    execute_complex_protocol(&sim, &devices).await?;
     
-    let trace = sim.get_execution_trace().await.unwrap();
+    // Get comprehensive trace
+    let trace = sim.get_trace().await?;
     let analyzer = TraceAnalyzer::new(trace);
     
-    // Analyze message flow patterns
-    let message_flow = analyzer.analyze_message_flow();
-    println!("Total messages: {}", message_flow.total_messages);
-    println!("Average latency: {:.2} ticks", message_flow.average_latency);
-    println!("Message drops: {}", message_flow.dropped_messages);
-    
-    // Analyze protocol phases
-    let phases = analyzer.identify_protocol_phases();
-    for phase in phases {
-        println!("Phase {}: {} ticks ({}->{})", 
-                phase.name, 
-                phase.duration, 
-                phase.start_tick, 
-                phase.end_tick);
+    // Analyze critical paths
+    let critical_path = analyzer.find_critical_path();
+    println!("Critical path length: {:?}", critical_path.duration);
+    println!("Critical path operations:");
+    for (i, op) in critical_path.operations.iter().enumerate() {
+        println!("  {}: {} ({:?})", i, op.name, op.duration);
     }
     
-    // Identify performance bottlenecks
-    let bottlenecks = analyzer.identify_performance_bottlenecks();
-    for bottleneck in bottlenecks {
-        println!("Bottleneck: {} at tick {} (devices: {:?})", 
-                bottleneck.description,
-                bottleneck.tick,
-                bottleneck.affected_devices);
+    // Find communication hotspots
+    let hotspots = analyzer.find_communication_hotspots();
+    for hotspot in &hotspots {
+        println!("Hotspot: {} ↔ {} ({} messages)", 
+            hotspot.device_a, 
+            hotspot.device_b, 
+            hotspot.message_count
+        );
     }
     
-    // Generate performance report
-    let profiler = sim.get_performance_profiler().unwrap();
-    let perf_report = profiler.generate_report();
+    // Detect anomalies
+    let anomalies = analyzer.detect_anomalies();
+    for anomaly in &anomalies {
+        println!("Anomaly: {} at {:?}", anomaly.description, anomaly.timestamp);
+        println!("  Affected devices: {:?}", anomaly.devices);
+        println!("  Suggested investigation: {}", anomaly.suggestion);
+    }
     
-    println!("Performance Summary:");
-    println!("  CPU usage: {:.2}%", perf_report.cpu_utilization);
-    println!("  Memory peak: {} MB", perf_report.peak_memory_mb);
-    println!("  Network bandwidth: {} KB/s", perf_report.avg_network_bandwidth_kb);
+    // Generate visualization
+    let viz = analyzer.generate_visualization();
+    viz.save_sequence_diagram("protocol_execution.svg")?;
+    viz.save_state_timeline("state_evolution.svg")?;
+    viz.save_message_heatmap("communication_pattern.svg")?;
+    
+    // Performance analysis
+    let perf = sim.performance_report();
+    println!("\nPerformance Summary:");
+    println!("  Total duration: {:?}", perf.total_duration);
+    println!("  Messages/second: {:.0}", perf.message_throughput);
+    println!("  State operations/second: {:.0}", perf.state_throughput);
+    println!("  Effect processing overhead: {:.1}%", perf.effect_overhead * 100.0);
+    println!("  Simulation slowdown: {:.2}x", perf.slowdown_factor);
 }
-```
 
-The simulation provides detailed tracing and performance analysis capabilities. Message flow analysis identifies communication patterns and bottlenecks. Protocol phase identification helps understand execution flow and timing.
+## Summary
 
-## Conclusion
+Aura's async simulation infrastructure provides:
 
-Aura's simulation infrastructure represents a paradigm shift in distributed systems testing. By building on injectable effect interfaces and deterministic execution the simulation engine enables comprehensive testing capabilities.
+- **Production Fidelity** - Test actual protocol implementations with real async effect system
+- **WASM Compatibility** - All simulation features work in browser environments
+- **Rich Fault Modeling** - Byzantine behaviors, network conditions, and failure patterns
+- **Deterministic Execution** - Perfect reproducibility with time control and seeded randomness
+- **Comprehensive Analysis** - Detailed tracing, performance profiling, and visualization
+- **Property Testing** - Systematic validation of safety and liveness properties
 
-### Key Capabilities
+The simulation integrates seamlessly with the `#[aura_test]` macro and async effect system, enabling thorough validation of distributed protocols under all possible conditions.
 
-Production code testing runs actual protocol logic rather than mocks. Perfect reproducibility ensures 100% reliable bug reproduction. Sophisticated fault injection models Byzantine behavior through effect interception. Comprehensive analysis provides deep insights into protocol execution.
+### Best Practices
 
-### Integration with Testkit
+1. **Start Simple** - Use basic network simulation before adding Byzantine behaviors
+2. **Incremental Complexity** - Add failures and partitions gradually
+3. **Property Focus** - Define clear invariants and check them systematically
+4. **Performance Awareness** - Monitor simulation overhead and optimize hot paths
+5. **Reproducibility First** - Always use deterministic configurations for debugging
 
-The simulation builds directly on the testkit infrastructure for consistency. All participants use `ProtocolTestFixture` instances for state management. The `TestEffectsBuilder` provides the foundation for stateless fixture creation. This integration ensures that simulation testing aligns with other testing approaches.
-
-### Testing Philosophy
-
-This approach eliminates traditional trade-offs in distributed systems testing. Production code runs unmodified without mock complexity. Perfect reproducibility eliminates non-determinism. Full protocol complexity is preserved without simplified models.
-
-The simulation infrastructure positions Aura to build robust distributed systems through comprehensive testing of production code under all possible conditions.
-
-For comprehensive testing infrastructure that complements simulation capabilities see [Testing Guide](805_testing_guide.md). Learn effect system details in [Effects API](500_effects_api.md). Explore semilattice operations in [Semilattice API](501_semilattice_api.md). Review choreography syntax in [Choreography API](502_choreography_api.md).
+For testing infrastructure that complements simulation see [Testing Guide](805_testing_guide.md). Learn about the async effect system in [System Architecture](002_system_architecture.md). Review the refactor progress in [Async Test Plan](../work/async_test.md).

@@ -784,7 +784,7 @@ mod tests {
 
     #[test]
     fn test_immutable_agent_context() {
-        let device_id = DeviceId::from([1u8; 16]);
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
         let ctx = AgentContext::new(device_id);
 
         // Test immutable configuration
@@ -833,7 +833,7 @@ mod tests {
 
     #[test]
     fn test_immutable_aura_context() {
-        let device_id = DeviceId::from([1u8; 16]);
+        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
 
         let ctx = AuraContext::for_testing(device_id);
         assert_eq!(ctx.execution_mode, ExecutionMode::Testing);
@@ -851,7 +851,7 @@ mod tests {
         assert_eq!(ctx3.session_id, Some(session_id));
 
         // Test child operation
-        let new_op_id = Uuid::nil();
+        let new_op_id = Uuid::from_bytes([1u8; 16]);
         let ctx4 = ctx3.child_operation(new_op_id);
         assert_ne!(ctx3.operation_id, new_op_id); // Original unchanged
         assert_eq!(ctx4.operation_id, new_op_id);

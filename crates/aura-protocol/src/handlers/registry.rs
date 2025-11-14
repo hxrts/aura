@@ -383,11 +383,11 @@ mod tests {
     #[async_trait]
     impl AuraHandler for MockRegistrableHandler {
         async fn execute_effect(
-            &mut self,
+            &self,
             effect_type: EffectType,
             operation: &str,
             _parameters: &[u8],
-            _ctx: &mut AuraContext,
+            _ctx: &AuraContext,
         ) -> Result<Vec<u8>, AuraHandlerError> {
             if self.effect_type == effect_type && self.operations.contains(&operation.to_string()) {
                 // Mock successful result
@@ -404,9 +404,9 @@ mod tests {
         }
 
         async fn execute_session(
-            &mut self,
+            &self,
             _session: LocalSessionType,
-            _ctx: &mut AuraContext,
+            _ctx: &AuraContext,
         ) -> Result<(), AuraHandlerError> {
             Ok(())
         }
@@ -423,11 +423,11 @@ mod tests {
     #[async_trait]
     impl RegistrableHandler for MockRegistrableHandler {
         async fn execute_operation_bytes(
-            &mut self,
+            &self,
             _effect_type: EffectType,
             operation: &str,
             _parameters: &[u8],
-            _ctx: &mut AuraContext,
+            _ctx: &AuraContext,
         ) -> Result<Vec<u8>, AuraHandlerError> {
             if self.operations.contains(&operation.to_string()) {
                 // Mock successful operation - return serialized mock result

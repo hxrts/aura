@@ -334,9 +334,10 @@ pub fn binding_message(ctx: &TreeSigningContext, op_bytes: &[u8]) -> Vec<u8> {
 /// ## Examples
 ///
 /// ```
-/// use aura_crypto::frost::tree_signing::generate_nonce;
+/// use aura_crypto::frost::tree_signing::generate_nonce_with_share;
 ///
-/// let (nonce, commitment) = generate_nonce(1);
+/// // Use generate_nonce_with_share for proper FROST nonces
+/// // let (nonce, commitment) = generate_nonce_with_share(1, &signing_share);
 /// // Send commitment to coordinator
 /// // Keep nonce secret for signing round
 /// ```
@@ -376,69 +377,8 @@ pub fn generate_nonce_with_share(
     (nonce, commitment)
 }
 
-/// Generate placeholder nonce for development/testing (deprecated)
-///
-/// This version is kept for backwards compatibility but should not be used
-/// in production as it cannot generate proper FROST nonces without a signing share.
-#[deprecated(note = "Use generate_nonce_with_share for proper FROST nonces")]
-pub fn generate_nonce(signer_id: u16) -> (Nonce, NonceCommitment) {
-    // Use valid identifier - if signer_id is invalid, use 1 as fallback
-    let _identifier = if let Ok(id) = frost::Identifier::try_from(signer_id) {
-        id
-    } else {
-        // 1 is always a valid identifier in FROST, this is safe
-        #[allow(clippy::unwrap_used)]
-        frost::Identifier::try_from(1).unwrap()
-    };
 
-    // Create nonce ID for tracking
-    #[allow(clippy::disallowed_methods)]
-    let mut rng = rand::thread_rng();
-    let mut nonce_id = [0u8; 32];
-    rand::RngCore::fill_bytes(&mut rng, &mut nonce_id);
 
-    // Generate placeholder nonce (not cryptographically secure)
-    let nonce = Nonce {
-        id: nonce_id,
-        value: vec![0u8; 64], // Placeholder value
-    };
-
-    // Generate placeholder commitment using hash
-    let mut h = hash::hasher();
-    h.update(&nonce_id);
-    let commitment_bytes = h.finalize();
-
-    let commitment = NonceCommitment {
-        signer: signer_id,
-        commitment: commitment_bytes.to_vec(),
-    };
-
-    (nonce, commitment)
-}
-
-/// Open a nonce commitment (deprecated in FROST protocol)
-///
-/// In FROST, nonces are not explicitly "opened" - instead, commitments are
-/// collected and used directly in signing. This function exists for API
-/// compatibility but is not used in the actual FROST protocol flow.
-///
-/// **Note**: In FROST, the coordinator collects commitments and participants
-/// sign directly using their nonces. No explicit opening phase.
-#[deprecated(note = "Not used in FROST protocol - commitments are used directly")]
-pub fn open_nonce(nonce: &Nonce, signer_id: u16) -> NonceOpen {
-    NonceOpen {
-        signer: signer_id,
-        nonce: nonce.value.clone(),
-    }
-}
-
-/// Verify a nonce opening matches its commitment (deprecated)
-///
-/// Not used in FROST protocol. Kept for backwards compatibility.
-#[deprecated(note = "Not used in FROST protocol")]
-pub fn verify_nonce_opening(commitment: &NonceCommitment, opening: &NonceOpen) -> bool {
-    commitment.signer == opening.signer
-}
 
 /// Create a partial signature using FROST
 ///
@@ -526,20 +466,6 @@ pub fn frost_sign_partial_with_keypackage(
     Ok(PartialSignature::from_frost(*identifier, signature_share))
 }
 
-/// Create a partial signature using pre-generated nonces (deprecated)
-///
-/// This version is kept for backwards compatibility but should not be used
-/// in production as it may reuse nonces which is a security vulnerability.
-#[deprecated(note = "Use frost_sign_partial_with_keypackage which is more secure")]
-pub fn frost_sign_partial_with_nonce(
-    _share: &Share,
-    _msg: &[u8],
-    _frost_nonce: frost::round1::SigningNonces,
-    _commitments: &BTreeMap<u16, NonceCommitment>,
-) -> Result<PartialSignature, String> {
-    // This function is deprecated for security reasons
-    Err("This function is deprecated for security reasons. Use frost_sign_partial_with_keypackage instead.".to_string())
-}
 
 /// Aggregate partial signatures using FROST
 ///
@@ -762,44 +688,6 @@ impl SigningSession {
 mod tests {
     use super::*;
 
-    #[test]
-    #[allow(deprecated)]
-    fn test_nonce_generation() {
-        let (nonce1, commitment1) = generate_nonce(1);
-        let (nonce2, commitment2) = generate_nonce(2); // Use different signer IDs
-
-        // Different nonces should have different IDs (but values are placeholders)
-        assert_ne!(nonce1.id, nonce2.id);
-        // Note: nonce.value is a placeholder and will be the same, so we don't check it
-
-        // Commitments should be different for different signers
-        assert_ne!(commitment1.commitment, commitment2.commitment);
-
-        // Note: Simplified generate_nonce() doesn't produce valid FROST data
-        // Real implementation would use frost::round1::commit() with KeyPackage
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_nonce_commitment_verification() {
-        let (nonce, commitment) = generate_nonce(1);
-        let opening = open_nonce(&nonce, 1);
-
-        // Valid opening should verify (deprecated API)
-        assert!(verify_nonce_opening(&commitment, &opening));
-    }
-
-    #[test]
-    #[ignore = "Uses deprecated API not part of real FROST protocol"]
-    #[allow(deprecated)]
-    fn test_nonce_commitment_invalid() {
-        let (_nonce1, commitment1) = generate_nonce(1);
-        let (nonce2, _) = generate_nonce(1);
-        let opening2 = open_nonce(&nonce2, 1);
-
-        // Wrong nonce should not verify (deprecated API)
-        assert!(!verify_nonce_opening(&commitment1, &opening2));
-    }
 
     #[test]
     fn test_binding_message_deterministic() {
@@ -857,71 +745,4 @@ mod tests {
         );
     }
 
-    #[test]
-    #[allow(deprecated)]
-    fn test_frost_roundtrip_serialization() {
-        // Generate a test key package (2-of-3 threshold)
-        let max_signers = 3;
-        let min_signers = 2;
-        #[allow(clippy::disallowed_methods)]
-        let mut rng = rand::thread_rng();
-
-        let (shares, _pubkey_package) = frost::keys::generate_with_dealer(
-            max_signers,
-            min_signers,
-            frost::keys::IdentifierList::Default,
-            &mut rng,
-        )
-        .unwrap();
-
-        // Test Share serialization roundtrip
-        let frost_share = shares
-            .get(&frost::Identifier::try_from(1).unwrap())
-            .unwrap();
-        let share = Share::from_frost(
-            frost::Identifier::try_from(1).unwrap(),
-            *frost_share.signing_share(),
-        );
-
-        let roundtrip_share = share.to_frost().unwrap();
-        assert_eq!(
-            frost_share.signing_share().serialize(),
-            roundtrip_share.serialize()
-        );
-
-        // Test nonce generation and commitment
-        let (_nonce, _commitment) = generate_nonce(1);
-        // Note: generate_nonce() is a simplified implementation for choreography testing
-        // and does not produce valid FROST SigningCommitments data. Real FROST protocol
-        // would use frost::round1::commit() with proper KeyPackage.
-        // Skipping commitment.to_frost() check as it's expected to fail with simplified implementation.
-
-        println!("FROST serialization roundtrip successful");
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_frost_integration_basic() {
-        // This test verifies FROST integration works but doesn't test
-        // the full signing flow (which requires proper setup)
-        let max_signers = 3;
-        let min_signers = 2;
-        #[allow(clippy::disallowed_methods)]
-        let mut rng = rand::thread_rng();
-
-        // Generate shares
-        let (_shares, _pubkey_package) = frost::keys::generate_with_dealer(
-            max_signers,
-            min_signers,
-            frost::keys::IdentifierList::Default,
-            &mut rng,
-        )
-        .unwrap();
-
-        // Generate nonces for signers
-        let (_nonce1, _commitment1) = generate_nonce(1);
-        let (_nonce2, _commitment2) = generate_nonce(2);
-
-        println!("FROST key generation and nonce commitment successful");
-    }
 }

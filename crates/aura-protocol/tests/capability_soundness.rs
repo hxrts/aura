@@ -1,3 +1,5 @@
+//! Capability soundness tests for guard chain verification
+
 use aura_core::{identifiers::MessageContext, journal::Journal, AuthLevel, Cap};
 use aura_protocol::guards::capability::{CapabilityError, EffectRequirement, GuardedContext};
 

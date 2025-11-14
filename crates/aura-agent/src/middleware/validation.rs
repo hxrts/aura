@@ -216,6 +216,7 @@ impl ValidationMiddleware {
         // Note: This is a TODO fix - Simplified in-memory rate limiter
         // Production implementation would use persistent storage
 
+        #[allow(clippy::disallowed_methods)] // Rate limiting requires wall-clock time
         let now = Instant::now();
         let window_start = now - window;
 

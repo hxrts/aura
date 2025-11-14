@@ -81,15 +81,10 @@ pub enum SimulatorOperation {
     },
 
     /// Set up devices using testkit foundations
-    SetupDevices {
-        count: usize,
-        threshold: usize,
-    },
+    SetupDevices { count: usize, threshold: usize },
 
     /// Initialize choreography protocols
-    InitializeChoreography {
-        protocol: String,
-    },
+    InitializeChoreography { protocol: String },
 
     /// Collect performance metrics
     CollectMetrics,
@@ -209,7 +204,7 @@ impl CoreSimulatorHandler {
             })),
         }
     }
-    
+
     /// Get current handler statistics
     pub fn get_stats(&self) -> Option<HandlerStats> {
         self.state.lock().ok().map(|state| HandlerStats {
@@ -217,26 +212,24 @@ impl CoreSimulatorHandler {
             checkpoint_count: state.checkpoints.len(),
             operation_count: state.operation_count,
             current_state: format!("{:?}", state.current_state),
-            uptime: state.last_operation_time
+            uptime: state
+                .last_operation_time
                 .map(|t| t.elapsed())
                 .unwrap_or_default(),
         })
     }
 
     /// Initialize a scenario
-    fn initialize_scenario(
-        &self,
-        scenario_id: &str,
-        context: &SimulatorContext,
-    ) -> Result<Value> {
-        let mut state = self.state.lock()
-            .map_err(|_| SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))?;
-            
+    fn initialize_scenario(&self, scenario_id: &str, context: &SimulatorContext) -> Result<Value> {
+        let mut state = self.state.lock().map_err(|_| {
+            SimulatorError::OperationFailed("Failed to acquire handler lock".to_string())
+        })?;
+
         let scenario = ScenarioState {
-            id: scenario_id.to_string(),
+            _id: scenario_id.to_string(),
             start_time: Instant::now(),
             tick_count: 0,
-            participants: Vec::with_capacity(context.participant_count),
+            _participants: Vec::with_capacity(context.participant_count),
             status: ScenarioStatus::Initializing,
             metadata: HashMap::new(),
         };
@@ -262,16 +255,17 @@ impl CoreSimulatorHandler {
         delta_time: Duration,
         context: &SimulatorContext,
     ) -> Result<Value> {
-        let mut state = self.state.lock()
-            .map_err(|_| SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))?;
-            
+        let mut state = self.state.lock().map_err(|_| {
+            SimulatorError::OperationFailed("Failed to acquire handler lock".to_string())
+        })?;
+
         if let Some(scenario) = state.scenarios.get_mut(&context.scenario_id) {
             scenario.tick_count = tick_number;
             scenario.status = ScenarioStatus::Running;
             let total_ticks = scenario.tick_count;
-            
+
             // Update state after releasing mutable borrow to scenario
-            drop(scenario); // explicitly drop the borrow
+            let _ = scenario; // explicitly drop the borrow
             state.operation_count += 1;
             state.last_operation_time = Some(Instant::now());
 
@@ -297,19 +291,22 @@ impl CoreSimulatorHandler {
         description: Option<String>,
         context: &SimulatorContext,
     ) -> Result<Value> {
-        let mut state = self.state.lock()
-            .map_err(|_| SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))?;
-            
+        let mut state = self.state.lock().map_err(|_| {
+            SimulatorError::OperationFailed("Failed to acquire handler lock".to_string())
+        })?;
+
         let checkpoint = CheckpointData {
-            id: checkpoint_id.to_string(),
+            _id: checkpoint_id.to_string(),
             timestamp: context.timestamp,
             tick: context.tick,
-            description,
+            _description: description,
             created_at: Instant::now(),
             scenario_id: context.scenario_id.clone(),
         };
 
-        state.checkpoints.insert(checkpoint_id.to_string(), checkpoint);
+        state
+            .checkpoints
+            .insert(checkpoint_id.to_string(), checkpoint);
         state.operation_count += 1;
         state.last_operation_time = Some(Instant::now());
 
@@ -329,9 +326,10 @@ impl CoreSimulatorHandler {
         metrics: HashMap<String, Value>,
         context: &SimulatorContext,
     ) -> Result<Value> {
-        let mut state = self.state.lock()
-            .map_err(|_| SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))?;
-            
+        let mut state = self.state.lock().map_err(|_| {
+            SimulatorError::OperationFailed("Failed to acquire handler lock".to_string())
+        })?;
+
         if let Some(scenario) = state.scenarios.get_mut(&context.scenario_id) {
             scenario.status = match outcome {
                 SimulationOutcome::Success => ScenarioStatus::Completed,
@@ -343,7 +341,7 @@ impl CoreSimulatorHandler {
 
             let duration_ms = scenario.start_time.elapsed().as_millis();
             let total_ticks = scenario.tick_count;
-            
+
             state.current_state = SimulationState::Idle;
             state.operation_count += 1;
             state.last_operation_time = Some(Instant::now());
@@ -382,9 +380,7 @@ impl SimulatorHandler for CoreSimulatorHandler {
             SimulatorOperation::ExecuteTick {
                 tick_number,
                 delta_time,
-            } => {
-                self.execute_tick(tick_number, delta_time, context)
-            }
+            } => self.execute_tick(tick_number, delta_time, context),
 
             SimulatorOperation::InjectFault {
                 fault_type,
@@ -396,15 +392,15 @@ impl SimulatorHandler for CoreSimulatorHandler {
                     state.operation_count += 1;
                     let operation_count = state.operation_count; // capture for use below
                     state.last_operation_time = Some(Instant::now());
-                    
+
                     // Track active fault in scenario metadata
                     if let Some(scenario) = state.scenarios.get_mut(&context.scenario_id) {
                         scenario.metadata.insert(
                             format!("fault_{}", operation_count),
-                            format!("{:?}:{}", fault_type, target)
+                            format!("{:?}:{}", fault_type, target),
                         );
                     }
-                    
+
                     Ok(json!({
                         "fault_type": format!("{:?}", fault_type),
                         "target": target,
@@ -414,7 +410,9 @@ impl SimulatorHandler for CoreSimulatorHandler {
                         "status": "injected"
                     }))
                 } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
+                    Err(SimulatorError::OperationFailed(
+                        "Failed to acquire handler lock".to_string(),
+                    ))
                 }
             }
 
@@ -471,9 +469,7 @@ impl SimulatorHandler for CoreSimulatorHandler {
             SimulatorOperation::CreateCheckpoint {
                 checkpoint_id,
                 description,
-            } => {
-                self.create_checkpoint(&checkpoint_id, description, context)
-            }
+            } => self.create_checkpoint(&checkpoint_id, description, context),
 
             SimulatorOperation::RestoreCheckpoint { checkpoint_id } => {
                 // Real checkpoint restoration with state rollback
@@ -482,16 +478,17 @@ impl SimulatorHandler for CoreSimulatorHandler {
                         let restored_checkpoint = checkpoint.clone();
                         state.operation_count += 1;
                         state.last_operation_time = Some(Instant::now());
-                        
+
                         // Reset scenario to checkpoint state if it exists
-                        if let Some(scenario) = state.scenarios.get_mut(&restored_checkpoint.scenario_id) {
+                        if let Some(scenario) =
+                            state.scenarios.get_mut(&restored_checkpoint.scenario_id)
+                        {
                             scenario.tick_count = restored_checkpoint.tick;
-                            scenario.metadata.insert(
-                                "last_restore".to_string(),
-                                checkpoint_id.clone()
-                            );
+                            scenario
+                                .metadata
+                                .insert("last_restore".to_string(), checkpoint_id.clone());
                         }
-                        
+
                         Ok(json!({
                             "checkpoint_id": checkpoint_id,
                             "restored_timestamp": restored_checkpoint.timestamp.as_millis(),
@@ -504,135 +501,26 @@ impl SimulatorHandler for CoreSimulatorHandler {
                         Err(SimulatorError::CheckpointNotFound(checkpoint_id))
                     }
                 } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
+                    Err(SimulatorError::OperationFailed(
+                        "Failed to acquire handler lock".to_string(),
+                    ))
                 }
             }
 
             SimulatorOperation::FinalizeSimulation { outcome, metrics } => {
                 self.finalize_simulation(outcome, metrics, context)
             }
-            
-            // Additional operations with real implementations
-            SimulatorOperation::ControlTime { action, parameters } => {
-                if let Ok(mut state) = self.state.lock() {
-                    state.operation_count += 1;
-                    state.last_operation_time = Some(Instant::now());
-                    Ok(json!({
-                        "action": format!("{:?}", action),
-                        "parameters": parameters,
-                        "operation_id": state.operation_count,
-                        "status": "controlled"
-                    }))
-                } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
-                }
-            }
-            
-            SimulatorOperation::InspectState { component, query } => {
-                if let Ok(state) = self.state.lock() {
-                    let scenario_data = state.scenarios.get(&context.scenario_id)
-                        .map(|s| json!({
-                            "tick_count": s.tick_count,
-                            "status": format!("{:?}", s.status),
-                            "participants": s.participants.len(),
-                            "metadata": s.metadata
-                        }));
-                        
-                    Ok(json!({
-                        "component": component,
-                        "query": format!("{:?}", query),
-                        "scenario_data": scenario_data,
-                        "handler_stats": {
-                            "scenarios": state.scenarios.len(),
-                            "checkpoints": state.checkpoints.len(),
-                            "operations": state.operation_count
-                        },
-                        "status": "inspected"
-                    }))
-                } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
-                }
-            }
-            
-            SimulatorOperation::CheckProperty { property_name, expected, actual } => {
-                if let Ok(mut state) = self.state.lock() {
-                    state.operation_count += 1;
-                    let operation_count = state.operation_count; // capture for use below
-                    state.last_operation_time = Some(Instant::now());
-                    
-                    let passed = expected == actual;
-                    
-                    // Track property check results in scenario metadata
-                    if let Some(scenario) = state.scenarios.get_mut(&context.scenario_id) {
-                        scenario.metadata.insert(
-                            format!("property_{}_{}", property_name, operation_count),
-                            if passed { "PASS".to_string() } else { "FAIL".to_string() }
-                        );
-                    }
-                    
-                    Ok(json!({
-                        "property": property_name,
-                        "passed": passed,
-                        "expected": expected,
-                        "actual": actual,
-                        "check_id": state.operation_count,
-                        "status": "checked"
-                    }))
-                } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
-                }
-            }
-            
-            SimulatorOperation::CoordinateChaos { strategy, intensity, duration } => {
-                if let Ok(mut state) = self.state.lock() {
-                    state.operation_count += 1;
-                    state.last_operation_time = Some(Instant::now());
-                    
-                    Ok(json!({
-                        "strategy": format!("{:?}", strategy),
-                        "intensity": intensity,
-                        "duration_ms": duration.as_millis(),
-                        "coordination_id": state.operation_count,
-                        "status": "coordinated"
-                    }))
-                } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
-                }
-            }
-            
-            SimulatorOperation::RunChoreography { protocol, participants, parameters } => {
-                if let Ok(mut state) = self.state.lock() {
-                    state.operation_count += 1;
-                    let operation_count = state.operation_count; // capture for use below
-                    state.last_operation_time = Some(Instant::now());
-                    
-                    // Track choreography execution in scenario
-                    if let Some(scenario) = state.scenarios.get_mut(&context.scenario_id) {
-                        scenario.participants.extend(participants.clone());
-                        scenario.metadata.insert(
-                            format!("choreography_{}", operation_count),
-                            protocol.clone()
-                        );
-                    }
-                    
-                    Ok(json!({
-                        "protocol": protocol,
-                        "participants": participants,
-                        "parameters": parameters,
-                        "choreography_id": state.operation_count,
-                        "status": "executed"
-                    }))
-                } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
-                }
-            }
-            
+
             // Testkit integration operations
-            SimulatorOperation::ExecuteEffect { effect_type, operation_name, params } => {
+            SimulatorOperation::ExecuteEffect {
+                effect_type,
+                operation_name,
+                params,
+            } => {
                 if let Ok(mut state) = self.state.lock() {
                     state.operation_count += 1;
                     state.last_operation_time = Some(Instant::now());
-                    
+
                     Ok(json!({
                         "effect_type": effect_type,
                         "operation_name": operation_name,
@@ -641,15 +529,17 @@ impl SimulatorHandler for CoreSimulatorHandler {
                         "status": "delegated_to_middleware"
                     }))
                 } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
+                    Err(SimulatorError::OperationFailed(
+                        "Failed to acquire handler lock".to_string(),
+                    ))
                 }
             }
-            
+
             SimulatorOperation::SetupDevices { count, threshold } => {
                 if let Ok(mut state) = self.state.lock() {
                     state.operation_count += 1;
                     state.last_operation_time = Some(Instant::now());
-                    
+
                     Ok(json!({
                         "device_count": count,
                         "threshold": threshold,
@@ -657,25 +547,29 @@ impl SimulatorHandler for CoreSimulatorHandler {
                         "status": "delegated_to_middleware"
                     }))
                 } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
+                    Err(SimulatorError::OperationFailed(
+                        "Failed to acquire handler lock".to_string(),
+                    ))
                 }
             }
-            
+
             SimulatorOperation::InitializeChoreography { protocol } => {
                 if let Ok(mut state) = self.state.lock() {
                     state.operation_count += 1;
                     state.last_operation_time = Some(Instant::now());
-                    
+
                     Ok(json!({
                         "protocol": protocol,
                         "init_id": state.operation_count,
                         "status": "delegated_to_middleware"
                     }))
                 } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
+                    Err(SimulatorError::OperationFailed(
+                        "Failed to acquire handler lock".to_string(),
+                    ))
                 }
             }
-            
+
             SimulatorOperation::CollectMetrics => {
                 if let Ok(state) = self.state.lock() {
                     Ok(json!({
@@ -691,7 +585,9 @@ impl SimulatorHandler for CoreSimulatorHandler {
                         "status": "collected"
                     }))
                 } else {
-                    Err(SimulatorError::OperationFailed("Failed to acquire handler lock".to_string()))
+                    Err(SimulatorError::OperationFailed(
+                        "Failed to acquire handler lock".to_string(),
+                    ))
                 }
             }
         }
@@ -723,10 +619,10 @@ impl SimulatorHandler for NoOpSimulatorHandler {
 /// Scenario state tracking
 #[derive(Debug, Clone)]
 struct ScenarioState {
-    id: String,
+    _id: String,
     start_time: Instant,
     tick_count: u64,
-    participants: Vec<String>,
+    _participants: Vec<String>,
     status: ScenarioStatus,
     metadata: HashMap<String, String>,
 }
@@ -745,10 +641,10 @@ enum ScenarioStatus {
 /// Checkpoint data
 #[derive(Debug, Clone)]
 struct CheckpointData {
-    id: String,
+    _id: String,
     timestamp: Duration,
     tick: u64,
-    description: Option<String>,
+    _description: Option<String>,
     created_at: Instant,
     scenario_id: String,
 }
@@ -758,8 +654,8 @@ struct CheckpointData {
 enum SimulationState {
     Idle,
     Running,
-    Paused,
-    Finished,
+    _Paused,
+    _Finished,
 }
 
 /// Handler statistics for monitoring and diagnostics

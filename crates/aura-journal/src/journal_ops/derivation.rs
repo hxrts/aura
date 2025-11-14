@@ -1,7 +1,7 @@
 //! Key Derivation
 //!
 //! Implements key derivation along Contains edges with policy-aware commitment computation.
-//! Uses petgraph for graph traversal and Blake3 for commitment hashing.
+//! Uses petgraph for graph traversal and commitment hashing.
 
 use crate::journal::*;
 use aura_core::hash::{hash, hasher};
@@ -9,32 +9,30 @@ use aura_core::AuraError;
 use std::collections::{BTreeMap, HashSet};
 
 /// Derivation effects trait for external dependency injection
-#[async_trait::async_trait]
 pub trait DerivationEffects: Send + Sync {
-    /// Compute Blake3 hash of input data
-    async fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], AuraError>;
+    /// Compute hash of input data
+    fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], AuraError>;
 
     /// Get children of a node via Contains edges
-    async fn get_node_children(
+    fn get_node_children(
         &self,
         node_id: NodeId,
         edges: &BTreeMap<EdgeId, KeyEdge>,
     ) -> Result<Vec<NodeId>, AuraError>;
 
     /// Check if graph traversal should continue
-    async fn should_continue_traversal(&self, depth: u32) -> Result<bool, AuraError>;
+    fn should_continue_traversal(&self, depth: u32) -> Result<bool, AuraError>;
 }
 
 /// Simple derivation effects adapter for MVP
 pub struct SimpleDerivationEffects;
 
-#[async_trait::async_trait]
 impl DerivationEffects for SimpleDerivationEffects {
-    async fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], AuraError> {
+    fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], AuraError> {
         Ok(hash(data))
     }
 
-    async fn get_node_children(
+    fn get_node_children(
         &self,
         node_id: NodeId,
         edges: &BTreeMap<EdgeId, KeyEdge>,
@@ -50,7 +48,7 @@ impl DerivationEffects for SimpleDerivationEffects {
         Ok(children)
     }
 
-    async fn should_continue_traversal(&self, depth: u32) -> Result<bool, AuraError> {
+    fn should_continue_traversal(&self, depth: u32) -> Result<bool, AuraError> {
         // Prevent infinite loops - reasonable depth limit for MVP
         Ok(depth < 32)
     }
@@ -111,7 +109,7 @@ impl DerivationEngine {
             h.update(&commitment.0);
         }
 
-        let hash = self.effects.hash_data(&h.finalize()).await?;
+        let hash = self.effects.hash_data(&h.finalize())?;
         Ok(NodeCommitment(hash))
     }
 
@@ -210,9 +208,10 @@ mod tests {
     use super::*;
     use crate::journal::{NodeKind, NodePolicy};
 
+    #[allow(clippy::disallowed_methods)]
     fn create_test_node(kind: NodeKind, policy: NodePolicy) -> KeyNode {
         KeyNode::new(
-            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
             kind,
             policy,
         )
@@ -231,7 +230,7 @@ mod tests {
             .compute_node_commitment(&node, &[], &nodes, &edges)
             .await
             .unwrap();
-        assert_eq!(commitment.0.len(), 32); // Blake3 produces 32-byte hashes
+        assert_eq!(commitment.0.len(), 32); // Hash produces 32-byte hashes
     }
 
     #[tokio::test]
@@ -285,9 +284,21 @@ mod tests {
         let engine = DerivationEngine::new(effects);
 
         // Create identity with two devices
-        let identity = create_test_node(NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 2 });
-        let device1 = create_test_node(NodeKind::Device, NodePolicy::Any);
-        let device2 = create_test_node(NodeKind::Device, NodePolicy::Any);
+        let identity = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([10u8; 16])),
+            NodeKind::Identity,
+            NodePolicy::Threshold { m: 2, n: 2 },
+        );
+        let device1 = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([11u8; 16])),
+            NodeKind::Device,
+            NodePolicy::Any,
+        );
+        let device2 = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([12u8; 16])),
+            NodeKind::Device,
+            NodePolicy::Any,
+        );
 
         let mut nodes = BTreeMap::new();
         nodes.insert(identity.id, identity.clone());
@@ -319,8 +330,16 @@ mod tests {
         let effects = Box::new(SimpleDerivationEffects);
         let engine = DerivationEngine::new(effects);
 
-        let node1 = create_test_node(NodeKind::Identity, NodePolicy::Any);
-        let node2 = create_test_node(NodeKind::Device, NodePolicy::Any);
+        let node1 = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([20u8; 16])),
+            NodeKind::Identity,
+            NodePolicy::Any,
+        );
+        let node2 = KeyNode::new(
+            aura_core::identifiers::DeviceId(uuid::Uuid::from_bytes([21u8; 16])),
+            NodeKind::Device,
+            NodePolicy::Any,
+        );
 
         let mut nodes = BTreeMap::new();
         nodes.insert(node1.id, node1.clone());
@@ -330,14 +349,14 @@ mod tests {
         let mut edges = BTreeMap::new();
         #[allow(clippy::disallowed_methods)]
         let edge1 = KeyEdge::with_id(
-            uuid::Uuid::from_bytes([0u8; 16]),
+            uuid::Uuid::from_bytes([2u8; 16]),
             node1.id,
             node2.id,
             EdgeKind::Contains,
         );
         #[allow(clippy::disallowed_methods)]
         let edge2 = KeyEdge::with_id(
-            uuid::Uuid::from_bytes([0u8; 16]),
+            uuid::Uuid::from_bytes([3u8; 16]),
             node2.id,
             node1.id,
             EdgeKind::Contains,
