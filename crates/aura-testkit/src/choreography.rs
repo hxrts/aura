@@ -613,7 +613,7 @@ impl std::error::Error for TransportError {}
 /// Simulator-compatible context for bridging to aura-simulator
 ///
 /// This type provides the bridge between testkit choreography infrastructure
-/// and the aura-simulator middleware system.
+/// and the aura-simulator effect system.
 pub struct SimulatorCompatibleContext {
     /// Test devices and their effect systems
     pub devices: Vec<(DeviceTestFixture, AuraEffectSystem)>,

@@ -6,12 +6,13 @@
 
 use super::{TransportConfig, TransportConnection, TransportError, TransportResult};
 use async_trait::async_trait;
-use aura_core::effects::NetworkEffects;
+use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
+use uuid::Uuid;
 
 /// TCP transport handler implementation
 #[derive(Debug, Clone)]
@@ -172,26 +173,56 @@ impl TcpTransportHandler {
 
 #[async_trait]
 impl NetworkEffects for TcpTransportHandler {
-    type Error = TransportError;
-    type PeerId = SocketAddr;
-
-    async fn send_to_peer(&self, peer_id: Self::PeerId, data: Vec<u8>) -> Result<(), Self::Error> {
-        let mut stream = TcpStream::connect(peer_id)
+    async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
+        // Convert UUID to socket address - this is a simplified implementation
+        // In practice, you'd need a proper peer discovery/registry system
+        let addr_str = format!("127.0.0.1:{}", peer_id.as_u128() % 65535 + 1024);
+        let addr: SocketAddr = addr_str.parse()
+            .map_err(|e| NetworkError::SendFailed { peer_id: Some(peer_id), reason: format!("Invalid address: {}", e) })?;
+        
+        let mut stream = TcpStream::connect(addr)
             .await
-            .map_err(|e| TransportError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
 
-        self.send_framed(&mut stream, &data).await?;
+        self.send_framed(&mut stream, &message).await
+            .map_err(|e| NetworkError::SendFailed { peer_id: Some(peer_id), reason: e.to_string() })?;
         Ok(())
     }
 
-    async fn broadcast(
-        &self,
-        _peers: Vec<Self::PeerId>,
-        _data: Vec<u8>,
-    ) -> Result<(), Self::Error> {
-        // TCP doesn't support native broadcast - would need connection management
-        Err(TransportError::Protocol(
-            "TCP broadcast not implemented in stateless handler".to_string(),
-        ))
+    async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
+        let peers = self.connected_peers().await;
+        for peer in peers {
+            // Ignore individual send failures in broadcast
+            let _ = self.send_to_peer(peer, message.clone()).await;
+        }
+        Ok(())
+    }
+
+    async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
+        // TCP receiving requires a persistent connection and listener
+        // This is a placeholder for stateless implementation
+        Err(NetworkError::ReceiveFailed { reason: "TCP receive requires connection management".to_string() })
+    }
+
+    async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
+        Err(NetworkError::ReceiveFailed { reason: "TCP receive_from requires connection management".to_string() })
+    }
+
+    async fn connected_peers(&self) -> Vec<Uuid> {
+        // TCP stateless handler doesn't maintain connection state
+        Vec::new()
+    }
+
+    async fn is_peer_connected(&self, _peer_id: Uuid) -> bool {
+        // Stateless TCP handler doesn't track connections
+        false
+    }
+
+    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
+        use futures::stream;
+        use std::pin::Pin;
+        
+        let stream = stream::empty::<PeerEvent>();
+        Ok(Pin::from(Box::new(stream)))
     }
 }

@@ -15,7 +15,7 @@ pub struct AddressResolver;
 impl AddressResolver {
     /// Resolve hostname to socket addresses
     pub async fn resolve(host: &str, port: u16) -> TransportResult<Vec<SocketAddr>> {
-        let addresses = tokio::net::lookup_host((host, port))
+        let addresses: Vec<_> = tokio::net::lookup_host((host, port))
             .await
             .map_err(|e| TransportError::ConnectionFailed(format!("DNS resolution failed: {}", e)))?
             .collect();

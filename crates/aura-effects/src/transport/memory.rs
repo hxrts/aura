@@ -6,7 +6,7 @@
 
 use super::{TransportConfig, TransportConnection, TransportError, TransportResult};
 use async_trait::async_trait;
-use aura_core::effects::NetworkEffects;
+use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
@@ -198,17 +198,57 @@ pub struct TransportStats {
 
 #[async_trait]
 impl NetworkEffects for InMemoryTransportHandler {
-    type Error = TransportError;
-    type PeerId = String;
-
-    async fn send_to_peer(&self, peer_id: Self::PeerId, data: Vec<u8>) -> Result<(), Self::Error> {
-        self.send_to_peer(&peer_id, data).await
+    async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
+        let peer_str = peer_id.to_string();
+        self.send_to_peer(&peer_str, message).await
+            .map_err(|e| NetworkError::SendFailed { 
+                peer_id: Some(peer_id), 
+                reason: e.to_string() 
+            })
     }
 
-    async fn broadcast(&self, peers: Vec<Self::PeerId>, data: Vec<u8>) -> Result<(), Self::Error> {
+    async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
+        let peers = self.connected_peers().await;
         for peer in peers {
-            self.send_to_peer(&peer, data.clone()).await?;
+            // Use the trait method explicitly to avoid naming conflict
+            NetworkEffects::send_to_peer(self, peer, message.clone()).await?;
         }
         Ok(())
+    }
+
+    async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
+        // For memory transport, we need to implement proper message receiving
+        // This is a placeholder implementation
+        Err(NetworkError::ReceiveFailed { 
+            reason: "Not implemented for memory transport".to_string() 
+        })
+    }
+
+    async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
+        // Placeholder implementation
+        Err(NetworkError::ReceiveFailed { 
+            reason: "Not implemented for memory transport".to_string() 
+        })
+    }
+
+    async fn connected_peers(&self) -> Vec<Uuid> {
+        let registry = self.registry.read().await;
+        registry.channels.keys()
+            .filter_map(|k| Uuid::parse_str(k).ok())
+            .collect()
+    }
+
+    async fn is_peer_connected(&self, peer_id: Uuid) -> bool {
+        let registry = self.registry.read().await;
+        registry.channels.contains_key(&peer_id.to_string())
+    }
+
+    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
+        // Placeholder implementation for event subscription
+        use futures::stream;
+        use std::pin::Pin;
+        
+        let stream = stream::empty::<PeerEvent>();
+        Ok(Pin::from(Box::new(stream)))
     }
 }

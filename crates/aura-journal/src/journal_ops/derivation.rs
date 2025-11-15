@@ -137,7 +137,7 @@ impl DerivationEngine {
     > {
         Box::pin(async move {
             // Check traversal limits
-            if !self.effects.should_continue_traversal(depth).await? {
+            if !self.effects.should_continue_traversal(depth)? {
                 return Err(AuraError::invalid(format!(
                     "Derivation traversal depth exceeded - Node: {}, Depth: {}",
                     node_id, depth
@@ -159,7 +159,7 @@ impl DerivationEngine {
             })?;
 
             // Get children via Contains edges
-            let children = self.effects.get_node_children(node_id, edges).await?;
+            let children = self.effects.get_node_children(node_id, edges)?;
 
             // Recursively compute child commitments
             let mut child_commitments = Vec::new();

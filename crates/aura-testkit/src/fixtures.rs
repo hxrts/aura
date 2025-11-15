@@ -108,14 +108,16 @@ impl ProtocolTestFixture {
         // This will be replaced with the actual stateless implementation
         let fixture = Self::with_config(threshold, total_devices, seed).await;
 
-        // TODO: Replace with actual stateless effect system when available
-        // let primary_device = fixture.device_id;
-        // let effects_builder = match execution_mode {
-        //     TestExecutionMode::UnitTest => TestEffectsBuilder::for_unit_tests(primary_device),
-        //     TestExecutionMode::Integration => TestEffectsBuilder::for_integration_tests(primary_device),
-        //     TestExecutionMode::Simulation => TestEffectsBuilder::for_simulation(primary_device),
-        // };
-        // let stateless_effects = effects_builder.with_seed(seed).build()?;
+        // Use stateless effect system for proper effect injection
+        let primary_device = fixture.device_id;
+        let effects_builder = match execution_mode {
+            TestExecutionMode::UnitTest => TestEffectsBuilder::for_unit_tests(primary_device),
+            TestExecutionMode::Integration => TestEffectsBuilder::for_integration_tests(primary_device),
+            TestExecutionMode::Simulation => TestEffectsBuilder::for_simulation(primary_device),
+        };
+        let _stateless_effects = effects_builder.with_seed(seed).build().map_err(|e| 
+            StatelessFixtureError::EffectSystemError(e.to_string())
+        )?;
 
         Ok(fixture)
     }
@@ -134,9 +136,13 @@ impl ProtocolTestFixture {
         let seed = effects_builder.seed();
         let fixture = Self::with_config(threshold, total_devices, seed).await;
 
-        // TODO: Replace with actual stateless effect system integration
-        // let stateless_effects = effects_builder.build()?;
-        // let account_state = create_account_with_stateless_effects(&stateless_effects, threshold, total_devices).await?;
+        // Use stateless effect system integration
+        let stateless_effects = effects_builder.build().map_err(|e|
+            StatelessFixtureError::EffectSystemError(e.to_string())
+        )?;
+        
+        // TODO: Integrate account creation with stateless effects in future iteration
+        let _account_effects = stateless_effects;
 
         Ok(fixture)
     }

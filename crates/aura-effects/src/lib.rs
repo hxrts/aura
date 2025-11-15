@@ -83,11 +83,13 @@ pub mod transport;
 pub use authorization::{MockAuthorizationHandler, StandardAuthorizationHandler};
 pub use console::{MockConsoleHandler, RealConsoleHandler};
 pub use context::{ExecutionContext, MockContextHandler, StandardContextHandler};
-pub use crypto::{MockCryptoHandler, RealCryptoHandler};
+// Crypto handlers - TODO: Fix macro generation
+// pub use crypto::{MockCryptoHandler, RealCryptoHandler};
 pub use journal::{MockJournalHandler, StandardJournalHandler};
 pub use random::{MockRandomHandler, RealRandomHandler};
 pub use storage::{FilesystemStorageHandler, MemoryStorageHandler};
-pub use time::{RealTimeHandler, SimulatedTimeHandler};
+// Time handlers - TODO: Fix macro generation  
+// pub use time::{RealTimeHandler, SimulatedTimeHandler};
 // Transport effect handlers - organized by functionality
 pub mod transport_effects {
     //! Transport effect implementations - Layer 3 stateless handlers

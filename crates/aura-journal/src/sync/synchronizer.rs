@@ -10,7 +10,8 @@
 
 use super::SelectionCriteria;
 use super::{AttestedOp, DeviceId, Hash32, OpLog, OpLogSummary, PeerInfo};
-use aura_macros::choreography;
+// TODO: Re-enable when choreography macro issues are resolved
+// use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
@@ -278,26 +279,28 @@ impl SyncRole {
 
 // Journal Synchronization Choreography
 //
+// TODO: Fix choreography macro compilation issues
 // This choreography implements the distributed synchronization protocol
 // with type-safe multi-party coordination using session types.
-choreography! {
-    #[namespace = "journal_sync"]
-    choreography SyncChoreography {
-        roles: Requester, Responder;
-
-        // Phase 1: Summary Exchange
-        Requester -> Responder: SummaryRequest;
-        Responder -> Requester: SummaryResponse;
-
-        // Phase 2: Operation Transfer
-        Requester -> Responder: OperationRequest;
-        Responder -> Requester: OperationResponse;
-
-        // Phase 3: Completion
-        Requester -> Responder: SyncComplete;
-        Responder -> Requester: SyncAcknowledged;
-    }
-}
+//
+// choreography! {
+//     #[namespace = "journal_sync"]
+//     choreography SyncChoreography {
+//         roles: Requester, Responder;
+//
+//         // Phase 1: Summary Exchange
+//         Requester -> Responder: SummaryRequest;
+//         Responder -> Requester: SummaryResponse;
+//
+//         // Phase 2: Operation Transfer
+//         Requester -> Responder: OperationRequest;
+//         Responder -> Requester: OperationResponse;
+//
+//         // Phase 3: Completion
+//         Requester -> Responder: SyncComplete;
+//         Responder -> Requester: SyncAcknowledged;
+//     }
+// }
 
 // Message types for journal synchronization choreography
 

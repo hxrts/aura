@@ -7,7 +7,7 @@
 //! Designed for the stateless effect system architecture (work/021.md).
 
 use crate::middleware::SimulatorConfig;
-use crate::{Result as SimResult, SimulatorContext, SimulatorError, SimulatorStackBuilder};
+use crate::{Result as SimResult, SimulatorContext, SimulatorError};
 use aura_core::DeviceId;
 use aura_protocol::effects::system::{AuraEffectSystem, EffectSystemConfig};
 use aura_testkit::{DeviceTestFixture, ProtocolTestFixture, TestExecutionMode};
@@ -90,11 +90,14 @@ impl TestkitSimulatorBridge {
         })
     }
 
-    /// Convert harness to simulator stack
-    pub fn harness_to_stack<H>(_harness: H) -> SimResult<SimulatorStackBuilder> {
-        // For now, create a default stack builder
-        // This would need proper implementation based on harness type
-        Ok(SimulatorStackBuilder::new())
+    /// Convert harness to effect system
+    pub fn harness_to_effects<H>(_harness: H, device_id: DeviceId, seed: u64) -> SimResult<Arc<AuraEffectSystem>> {
+        // Convert test harness to effect system instead of middleware stack
+        let config = EffectSystemConfig::for_simulation(device_id, seed);
+        let effect_system = Arc::new(AuraEffectSystem::new(config).map_err(|e| {
+            SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
+        })?);
+        Ok(effect_system)
     }
 }
 

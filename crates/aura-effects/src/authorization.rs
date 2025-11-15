@@ -112,12 +112,16 @@ aura_effect_handlers! {
 impl MockAuthorizationHandler {
     /// Create a mock handler that allows all operations
     pub fn allow_all() -> Self {
-        Self::new_deterministic(true, HashMap::new(), HashMap::new())
+        let mut handler = Self::new_deterministic();
+        handler.default_allow = true;
+        handler
     }
     
     /// Create a mock handler that denies all operations
     pub fn deny_all() -> Self {
-        Self::new_deterministic(false, HashMap::new(), HashMap::new())
+        let mut handler = Self::new_deterministic();
+        handler.default_allow = false;
+        handler
     }
     
     /// Set the default allow/deny behavior
@@ -150,11 +154,11 @@ impl MockAuthorizationHandler {
 impl StandardAuthorizationHandler {
     /// Create a handler that allows all operations (for development)
     pub fn allow_all() -> Self {
-        Self::new_deterministic(true)
+        Self::new()
     }
     
-    /// Create a handler with standard authorization rules
+    /// Create a handler with standard authorization rules  
     pub fn with_standard_rules() -> Self {
-        Self::new_deterministic(false)
+        Self::new()
     }
 }

@@ -4,8 +4,8 @@
 //! defined in `aura-core`. These handlers can be used by choreographic applications
 //! and other Aura components.
 
-use aura_macros::aura_effect_handlers;
-use aura_core::{effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition}, AuraError};
+use aura_core::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
+use aura_core::AuraError;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -14,246 +14,30 @@ use tokio::sync::{broadcast, RwLock};
 use tokio::time;
 use uuid::Uuid;
 
-// Generate both real and simulated time handlers using the macro
-aura_effect_handlers! {
-    trait_name: TimeEffects,
-    mock: {
-        struct_name: SimulatedTimeHandler,
-        state: {
-            current_time: Arc<Mutex<u64>>,
-            time_scale: f64,
-        },
-        features: {
-            async_trait: true,
-            deterministic: true,
-        },
-        methods: {
-            current_epoch() -> u64 => {
-                *self.current_time.lock().unwrap()
-            },
-            current_timestamp() -> u64 => {
-                *self.current_time.lock().unwrap() / 1000
-            },
-            current_timestamp_millis() -> u64 => {
-                *self.current_time.lock().unwrap()
-            },
-            sleep_ms(ms: u64) => {
-                let scaled_duration = Duration::from_millis((ms as f64 / self.time_scale) as u64);
-                if self.time_scale > 100.0 {
-                    self.advance_time(ms);
-                } else {
-                    tokio::time::sleep(scaled_duration).await;
-                    self.advance_time(ms);
-                }
-            },
-            sleep_until(epoch: u64) => {
-                let current = self.current_timestamp_millis().await;
-                if epoch > current {
-                    let wait_time = epoch - current;
-                    self.sleep_ms(wait_time).await;
-                }
-            },
-            delay(duration: Duration) => {
-                self.sleep_ms(duration.as_millis() as u64).await;
-            },
-            sleep(duration_ms: u64) -> Result<(), AuraError> => {
-                self.sleep_ms(duration_ms).await;
-                Ok(())
-            },
-            yield_until(condition: WakeCondition) -> Result<(), TimeError> => {
-                if self.time_scale > 10.0 {
-                    self.advance_time(1);
-                } else {
-                    tokio::task::yield_now().await;
-                }
-                Ok(())
-            },
-            wait_until(condition: WakeCondition) -> Result<(), AuraError> => {
-                self.yield_until(condition)
-                    .await
-                    .map_err(|e| AuraError::internal(format!("Wait condition failed: {}", e)))
-            },
-            set_timeout(timeout_ms: u64) -> TimeoutHandle => {
-                Uuid::new_v4()
-            },
-            cancel_timeout(handle: TimeoutHandle) -> Result<(), TimeError> => {
-                Ok(())
-            },
-            is_simulated() -> bool => {
-                true
-            },
-            register_context(context_id: Uuid) => {
-                // In simulation, track registered contexts
-            },
-            unregister_context(context_id: Uuid) => {
-                // In simulation, track unregistered contexts  
-            },
-            notify_events_available() => {
-                self.advance_time(1);
-            },
-            resolution_ms() -> u64 => {
-                1
-            },
-        },
-    },
-    real: {
-        struct_name: RealTimeHandler,
-        state: {
-            registry: Arc<RwLock<ContextRegistry>>,
-        },
-        features: {
-            async_trait: true,
-            disallowed_methods: true,
-        },
-        methods: {
-            current_epoch() -> u64 => {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or(Duration::ZERO)
-                    .as_millis() as u64
-            },
-            current_timestamp() -> u64 => {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or(Duration::ZERO)
-                    .as_secs()
-            },
-            current_timestamp_millis() -> u64 => {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or(Duration::ZERO)
-                    .as_millis() as u64
-            },
-            sleep_ms(ms: u64) => {
-                time::sleep(Duration::from_millis(ms)).await;
-            },
-            sleep_until(epoch: u64) => {
-                let current = self.current_timestamp_millis().await;
-                if epoch > current {
-                    let wait_time = epoch - current;
-                    time::sleep(Duration::from_millis(wait_time)).await;
-                }
-            },
-            delay(duration: Duration) => {
-                time::sleep(duration).await;
-            },
-            sleep(duration_ms: u64) -> Result<(), AuraError> => {
-                time::sleep(Duration::from_millis(duration_ms)).await;
-                Ok(())
-            },
-            yield_until(condition: WakeCondition) -> Result<(), TimeError> => {
-                match condition {
-                    WakeCondition::NewEvents => {
-                        tokio::task::yield_now().await;
-                        Ok(())
-                    }
-                    WakeCondition::EpochReached { target } => {
-                        let current_time = self.current_timestamp().await;
-                        if target > current_time {
-                            let delay = target - current_time;
-                            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-                        }
-                        Ok(())
-                    }
-                    WakeCondition::TimeoutAt(target_time) => {
-                        let current_time = self.current_timestamp().await;
-                        if target_time > current_time {
-                            let delay = target_time - current_time;
-                            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-                        }
-                        Ok(())
-                    }
-                    WakeCondition::EventMatching(_) => {
-                        tokio::task::yield_now().await;
-                        Ok(())
-                    }
-                    WakeCondition::ThresholdEvents { threshold: _, timeout_ms } => {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(timeout_ms)).await;
-                        Ok(())
-                    }
-                    WakeCondition::Immediate => Ok(()),
-                    WakeCondition::Custom(_) => {
-                        tokio::task::yield_now().await;
-                        Ok(())
-                    }
-                    WakeCondition::TimeoutExpired { timeout_id: _ } => {
-                        tokio::task::yield_now().await;
-                        Ok(())
-                    }
-                }
-            },
-            wait_until(condition: WakeCondition) -> Result<(), AuraError> => {
-                self.yield_until(condition)
-                    .await
-                    .map_err(|e| AuraError::internal(format!("Wait condition failed: {}", e)))
-            },
-            set_timeout(timeout_ms: u64) -> TimeoutHandle => {
-                let handle = Uuid::new_v4();
-                let registry = Arc::clone(&self.registry);
-                let handle_clone = handle;
-                let timeout_task = tokio::spawn(async move {
-                    time::sleep(Duration::from_millis(timeout_ms)).await;
-                    let mut reg = registry.write().await;
-                    reg.timeouts.remove(&handle_clone);
-                });
-                let registry = Arc::clone(&self.registry);
-                tokio::spawn(async move {
-                    let mut reg = registry.write().await;
-                    reg.timeouts.insert(handle, timeout_task);
-                });
-                handle
-            },
-            cancel_timeout(handle: TimeoutHandle) -> Result<(), TimeError> => {
-                let mut registry = self.registry.write().await;
-                if let Some(task) = registry.timeouts.remove(&handle) {
-                    task.abort();
-                    Ok(())
-                } else {
-                    Err(TimeError::TimeoutNotFound {
-                        handle: handle.to_string(),
-                    })
-                }
-            },
-            is_simulated() -> bool => {
-                false
-            },
-            register_context(context_id: Uuid) => {
-                let registry = Arc::clone(&self.registry);
-                tokio::spawn(async move {
-                    let mut reg = registry.write().await;
-                    let (tx, _) = broadcast::channel(100);
-                    reg.contexts.insert(context_id, tx);
-                });
-            },
-            unregister_context(context_id: Uuid) => {
-                let registry = Arc::clone(&self.registry);
-                tokio::spawn(async move {
-                    let mut reg = registry.write().await;
-                    reg.contexts.remove(&context_id);
-                });
-            },
-            notify_events_available() => {
-                let registry = self.registry.read().await;
-                for (_, sender) in registry.contexts.iter() {
-                    let _ = sender.send(());
-                }
-            },
-            resolution_ms() -> u64 => {
-                1
-            },
-        },
-    },
+/// Mock time handler for deterministic testing
+#[derive(Debug, Clone)]
+pub struct SimulatedTimeHandler {
+    current_time: Arc<Mutex<u64>>,
+    time_scale: f64,
 }
 
-/// Context registry for managing time contexts
-#[derive(Debug, Default)]
-struct ContextRegistry {
-    contexts: HashMap<Uuid, broadcast::Sender<()>>,
-    timeouts: HashMap<Uuid, tokio::task::JoinHandle<()>>,
-}
-
-#[allow(clippy::disallowed_methods)]
 impl SimulatedTimeHandler {
+    /// Create a new simulated time handler
+    pub fn new() -> Self {
+        Self {
+            current_time: Arc::new(Mutex::new(0)),
+            time_scale: 1.0,
+        }
+    }
+
+    /// Create a new simulated time handler with specified time and scale
+    pub fn new_deterministic(start_time_ms: u64, time_scale: f64) -> Self {
+        Self {
+            current_time: Arc::new(Mutex::new(start_time_ms)),
+            time_scale,
+        }
+    }
+
     /// Create a new simulated time handler starting at the given time
     pub fn new_with_time(start_time_ms: u64) -> Self {
         Self::new_deterministic(start_time_ms, 1.0)
@@ -297,10 +81,268 @@ impl SimulatedTimeHandler {
     }
 }
 
-#[allow(clippy::disallowed_methods)]
+#[async_trait]
+impl TimeEffects for SimulatedTimeHandler {
+    async fn current_epoch(&self) -> u64 {
+        *self.current_time.lock().unwrap()
+    }
+
+    async fn current_timestamp(&self) -> u64 {
+        *self.current_time.lock().unwrap() / 1000
+    }
+
+    async fn current_timestamp_millis(&self) -> u64 {
+        *self.current_time.lock().unwrap()
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        let scaled_duration = Duration::from_millis((ms as f64 / self.time_scale) as u64);
+        if self.time_scale > 100.0 {
+            self.advance_time(ms);
+        } else {
+            tokio::time::sleep(scaled_duration).await;
+            self.advance_time(ms);
+        }
+    }
+
+    async fn sleep_until(&self, epoch: u64) {
+        let current = self.current_timestamp_millis().await;
+        if epoch > current {
+            let wait_time = epoch - current;
+            self.sleep_ms(wait_time).await;
+        }
+    }
+
+    async fn delay(&self, duration: Duration) {
+        self.sleep_ms(duration.as_millis() as u64).await;
+    }
+
+    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
+        self.sleep_ms(duration_ms).await;
+        Ok(())
+    }
+
+    async fn yield_until(&self, _condition: WakeCondition) -> Result<(), TimeError> {
+        if self.time_scale > 10.0 {
+            self.advance_time(1);
+        } else {
+            tokio::task::yield_now().await;
+        }
+        Ok(())
+    }
+
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
+        self.yield_until(condition)
+            .await
+            .map_err(|e| AuraError::internal(format!("Wait condition failed: {}", e)))
+    }
+
+    async fn set_timeout(&self, _timeout_ms: u64) -> TimeoutHandle {
+        Uuid::new_v4()
+    }
+
+    async fn cancel_timeout(&self, _handle: TimeoutHandle) -> Result<(), TimeError> {
+        Ok(())
+    }
+
+    fn is_simulated(&self) -> bool {
+        true
+    }
+
+    fn register_context(&self, _context_id: Uuid) {
+        // In simulation, track registered contexts
+    }
+
+    fn unregister_context(&self, _context_id: Uuid) {
+        // In simulation, track unregistered contexts  
+    }
+
+    async fn notify_events_available(&self) {
+        self.advance_time(1);
+    }
+
+    fn resolution_ms(&self) -> u64 {
+        1
+    }
+}
+
+/// Context registry for managing time contexts
+#[derive(Debug, Default)]
+struct ContextRegistry {
+    contexts: HashMap<Uuid, broadcast::Sender<()>>,
+    timeouts: HashMap<Uuid, tokio::task::JoinHandle<()>>,
+}
+
+/// Real time handler using actual system time
+#[derive(Debug, Clone)]
+pub struct RealTimeHandler {
+    registry: Arc<RwLock<ContextRegistry>>,
+}
+
 impl RealTimeHandler {
+    /// Create a new real time handler
+    pub fn new() -> Self {
+        Self {
+            registry: Arc::new(RwLock::new(ContextRegistry::default())),
+        }
+    }
+
     /// Create a new real time handler
     pub fn new_real() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait]
+impl TimeEffects for RealTimeHandler {
+    async fn current_epoch(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis() as u64
+    }
+
+    async fn current_timestamp(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs()
+    }
+
+    async fn current_timestamp_millis(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis() as u64
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        time::sleep(Duration::from_millis(ms)).await;
+    }
+
+    async fn sleep_until(&self, epoch: u64) {
+        let current = self.current_timestamp_millis().await;
+        if epoch > current {
+            let wait_time = epoch - current;
+            time::sleep(Duration::from_millis(wait_time)).await;
+        }
+    }
+
+    async fn delay(&self, duration: Duration) {
+        time::sleep(duration).await;
+    }
+
+    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
+        time::sleep(Duration::from_millis(duration_ms)).await;
+        Ok(())
+    }
+
+    async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError> {
+        match condition {
+            WakeCondition::NewEvents => {
+                tokio::task::yield_now().await;
+                Ok(())
+            }
+            WakeCondition::EpochReached { target } => {
+                let current_time = self.current_timestamp().await;
+                if target > current_time {
+                    let delay = target - current_time;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                }
+                Ok(())
+            }
+            WakeCondition::TimeoutAt(target_time) => {
+                let current_time = self.current_timestamp().await;
+                if target_time > current_time {
+                    let delay = target_time - current_time;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                }
+                Ok(())
+            }
+            WakeCondition::EventMatching(_) => {
+                tokio::task::yield_now().await;
+                Ok(())
+            }
+            WakeCondition::ThresholdEvents { threshold: _, timeout_ms } => {
+                tokio::time::sleep(tokio::time::Duration::from_millis(timeout_ms)).await;
+                Ok(())
+            }
+            WakeCondition::Immediate => Ok(()),
+            WakeCondition::Custom(_) => {
+                tokio::task::yield_now().await;
+                Ok(())
+            }
+            WakeCondition::TimeoutExpired { timeout_id: _ } => {
+                tokio::task::yield_now().await;
+                Ok(())
+            }
+        }
+    }
+
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
+        self.yield_until(condition)
+            .await
+            .map_err(|e| AuraError::internal(format!("Wait condition failed: {}", e)))
+    }
+
+    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
+        let handle = Uuid::new_v4();
+        let registry = Arc::clone(&self.registry);
+        let handle_clone = handle;
+        let timeout_task = tokio::spawn(async move {
+            time::sleep(Duration::from_millis(timeout_ms)).await;
+            let mut reg = registry.write().await;
+            reg.timeouts.remove(&handle_clone);
+        });
+        let registry = Arc::clone(&self.registry);
+        tokio::spawn(async move {
+            let mut reg = registry.write().await;
+            reg.timeouts.insert(handle, timeout_task);
+        });
+        handle
+    }
+
+    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
+        let mut registry = self.registry.write().await;
+        if let Some(task) = registry.timeouts.remove(&handle) {
+            task.abort();
+            Ok(())
+        } else {
+            Err(TimeError::TimeoutNotFound {
+                handle: handle.to_string(),
+            })
+        }
+    }
+
+    fn is_simulated(&self) -> bool {
+        false
+    }
+
+    fn register_context(&self, context_id: Uuid) {
+        let registry = Arc::clone(&self.registry);
+        tokio::spawn(async move {
+            let mut reg = registry.write().await;
+            let (tx, _) = broadcast::channel(100);
+            reg.contexts.insert(context_id, tx);
+        });
+    }
+
+    fn unregister_context(&self, context_id: Uuid) {
+        let registry = Arc::clone(&self.registry);
+        tokio::spawn(async move {
+            let mut reg = registry.write().await;
+            reg.contexts.remove(&context_id);
+        });
+    }
+
+    async fn notify_events_available(&self) {
+        let registry = self.registry.read().await;
+        for (_, sender) in registry.contexts.iter() {
+            let _ = sender.send(());
+        }
+    }
+
+    fn resolution_ms(&self) -> u64 {
+        1
     }
 }

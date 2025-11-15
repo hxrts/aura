@@ -278,7 +278,7 @@ impl MemoryStorageHandler {
 impl FilesystemStorageHandler {
     /// Create a new filesystem storage handler with base path
     pub fn with_path(base_path: PathBuf) -> Self {
-        Self::new_deterministic(base_path)
+        Self::new()
     }
 
     /// Get the base path

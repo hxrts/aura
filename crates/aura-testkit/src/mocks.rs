@@ -1,7 +1,7 @@
 //! Mock implementations for testing
 //!
 //! This module provides mock Storage implementation for testing.
-//! For transport mocking, use the aura_transport middleware system.
+//! For transport mocking, use the aura_transport effect system.
 
 use async_trait::async_trait;
 use aura_core::{AccountId, AuraResult};

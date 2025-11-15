@@ -50,8 +50,9 @@ impl EncryptedStorageHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
-    fn store(&self, key: &str, value: Vec<u8>) -> Result<(), aura_core::effects::StorageError> {
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), aura_core::effects::StorageError> {
         let mut storage = self.storage.write().unwrap();
         storage
             .chunks
@@ -59,19 +60,19 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
         Ok(())
     }
 
-    fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
         let storage = self.storage.read().unwrap();
         let chunk_id = ChunkId::from_bytes(key.as_bytes());
         Ok(storage.chunks.get(&chunk_id).cloned())
     }
 
-    fn remove(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
+    async fn remove(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
         let mut storage = self.storage.write().unwrap();
         let chunk_id = ChunkId::from_bytes(key.as_bytes());
         Ok(storage.chunks.remove(&chunk_id).is_some())
     }
 
-    fn list_keys(
+    async fn list_keys(
         &self,
         prefix: Option<&str>,
     ) -> Result<Vec<String>, aura_core::effects::StorageError> {
@@ -81,13 +82,13 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
         ))
     }
 
-    fn exists(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
+    async fn exists(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
         let storage = self.storage.read().unwrap();
         let chunk_id = ChunkId::from_bytes(key.as_bytes());
         Ok(storage.chunks.contains_key(&chunk_id))
     }
 
-    fn store_batch(
+    async fn store_batch(
         &self,
         pairs: HashMap<String, Vec<u8>>,
     ) -> Result<(), aura_core::effects::StorageError> {
@@ -99,7 +100,7 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
         Ok(())
     }
 
-    fn retrieve_batch(
+    async fn retrieve_batch(
         &self,
         keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, aura_core::effects::StorageError> {
@@ -114,13 +115,13 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
         Ok(result)
     }
 
-    fn clear_all(&self) -> Result<(), aura_core::effects::StorageError> {
+    async fn clear_all(&self) -> Result<(), aura_core::effects::StorageError> {
         let mut storage = self.storage.write().unwrap();
         storage.clear();
         Ok(())
     }
 
-    fn stats(&self) -> Result<aura_core::effects::StorageStats, aura_core::effects::StorageError> {
+    async fn stats(&self) -> Result<aura_core::effects::StorageStats, aura_core::effects::StorageError> {
         let storage = self.storage.read().unwrap();
         let total_size: u64 = storage.chunks.values().map(|v| v.len() as u64).sum();
 

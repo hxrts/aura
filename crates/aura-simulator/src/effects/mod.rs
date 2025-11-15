@@ -1,17 +1,13 @@
 //! Simulation Effect System
 //!
 //! This module provides the simulation-specific effect system that extends the core
-//! Aura effect system with simulation capabilities including fault injection,
-//! time control, state inspection, property checking, and chaos coordination.
+//! Aura effect system with simulation capabilities. Middleware patterns have been
+//! removed in favor of direct effect handler composition.
 
-pub mod middleware;
 pub mod system;
 
 // Re-export core components
-pub use middleware::{
-    ChaosCoordinationMiddleware, FaultInjectionMiddleware, PropertyCheckingMiddleware,
-    StateInspectionMiddleware, TimeControlMiddleware,
-};
+// middleware exports removed - migrated to effect system
 pub use system::{
     SimulationEffectSystem, SimulationEffectSystemFactory, SimulationEffectSystemStats,
 };

@@ -189,12 +189,7 @@ impl TestEffectsBuilder {
         }
     }
 
-    /// Create a test effects system (legacy compatibility)
-    #[deprecated = "Use build() instead for stateless effect system"]
-    pub fn build_placeholder(self) -> (ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey) {
-        // Fallback for backward compatibility - just provide deterministic keys
-        crate::test_key_pair(self.seed)
-    }
+    // build_placeholder() method removed - use build() for unified effect system
 }
 
 /// Execution mode configuration for testkit integration

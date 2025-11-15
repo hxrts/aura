@@ -3,39 +3,39 @@
 //! These tests verify that the proc macros compile and generate valid code.
 
 use aura_macros::{choreography, aura_effect_handlers};
-use rumpsteak_aura::*;
-use futures::channel::mpsc::{UnboundedSender, UnboundedReceiver};
 use serde::{Deserialize, Serialize};
 
-// Type definitions required by the generated code
-#[allow(dead_code)]
-type Channel = channel::Bidirectional<UnboundedSender<Label>, UnboundedReceiver<Label>>;
-
-#[derive(Message)]
-#[allow(dead_code)]
-enum Label {
-    Message(Message),
+// Message types for choreography (matching the expected Ping/Pong pattern)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ping {
+    pub data: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
+pub struct Pong {
     pub data: String,
 }
 
 // Test that the macro compiles and generates valid types
-// This generates session types and role enums for a basic protocol
+// This generates both rumpsteak session types and Aura choreography wrapper
 choreography! {
-    #[namespace = "test"]
     choreography TestProtocol {
         roles: Alice, Bob;
-        Alice -> Bob: Message;
+        Alice -> Bob: Ping;
+        Bob -> Alice: Pong;
     }
 }
 
 #[test]
 fn test_choreography_macro_compiles() {
-    // If we reach this point, the macro compiled successfully
-    // The actual types are generated at compile time
+    // Test that both Aura choreography module and rumpsteak session types were generated
+    use aura_choreography::{AuraRole, create_handler};
+    
+    // Test Aura choreography functionality
+    let alice_handler = create_handler(AuraRole::Alice, vec!["test".to_string()]);
+    assert_eq!(alice_handler.get_flow_balance(), 1000);
+    
+    // If we reach this point, the macro compiled successfully and generated working code
 }
 
 // Define a test trait for the effect handlers macro

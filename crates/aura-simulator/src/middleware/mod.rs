@@ -1,54 +1,24 @@
-//! Simulator Middleware System
+//! Simulator Core System
 //!
-//! This module implements the algebraic effect-style middleware pattern for the Aura simulator,
-//! providing composable layers for scenario injection, fault simulation, time control,
-//! state inspection, property checking, and chaos coordination.
+//! This module provides the foundation types for the Aura simulator,
+//! including context management, configuration, and handler interfaces.
+//! Effect-specific functionality is implemented in the handlers module.
 
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 
-pub mod chaos_coordination;
-pub mod fault_simulation;
 pub mod handler;
-pub mod property_checking;
-pub mod retry;
-pub mod scenario_injection;
-pub mod stack;
-pub mod state_inspection;
 pub mod stateless_effects;
-pub mod time_control;
 
 // Re-export for convenience
 pub use handler::{
-    ChaosStrategy, NoOpSimulatorHandler, SimulationOutcome, SimulatorHandler, SimulatorOperation,
+    ChaosStrategy, SimulationOutcome, SimulatorHandler, SimulatorOperation,
     StateQuery, TimeControlAction,
 };
-pub use stack::{SimulatorMiddlewareStack, SimulatorStackBuilder};
-
-// Re-export middleware components
-pub use chaos_coordination::{
-    ChaosAction, ChaosCoordinationMiddleware, ChaosRecoverySettings, ChaosRule, ChaosRuleAction,
-    ChaosRuleCondition, ChaosRuleOperator, ChaosStrategyTemplate,
-};
-pub use fault_simulation::{
-    FaultCondition, FaultInjectionRule, FaultRecoverySettings, FaultSimulationMiddleware,
-};
-pub use property_checking::{
-    PropertyCheckResult, PropertyChecker, PropertyCheckingMiddleware, PropertyType,
-    PropertyViolation,
-};
-pub use retry::{RetryConfig, RetryMiddleware};
-pub use scenario_injection::{
-    InjectionAction, ScenarioDefinition, ScenarioInjectionMiddleware, TriggerCondition,
-};
-pub use state_inspection::{
-    StateInspectionMiddleware, StateTrigger, StateWatcher, TriggerAction, WatcherCondition,
-};
 pub use stateless_effects::{PerformanceMetrics, StatelessEffectsMiddleware};
-pub use time_control::{RealtimeSync, TimeControlMiddleware};
 
-/// Simulator execution context that flows through middleware layers
+/// Simulator execution context that provides runtime information
 #[derive(Debug, Clone)]
 pub struct SimulatorContext {
     /// Current simulation timestamp
@@ -75,7 +45,7 @@ pub struct SimulatorContext {
     pub debug_mode: bool,
     /// Verbose logging flag
     pub verbose: bool,
-    /// Metadata for middleware communication
+    /// Metadata for effect communication
     pub metadata: HashMap<String, String>,
 }
 
@@ -317,7 +287,10 @@ pub enum PropertyViolationType {
     Security { description: String, threat: String },
 }
 
-/// Middleware trait for simulator operations
+/// Legacy middleware trait for simulator operations
+/// 
+/// This trait is deprecated in favor of the effect system.
+/// Use SimulationEffectComposer and effect handlers instead.
 pub trait SimulatorMiddleware: Send + Sync {
     /// Process a simulator operation through the middleware layer
     fn process(

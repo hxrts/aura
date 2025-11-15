@@ -24,14 +24,14 @@ use uuid;
 ///
 /// The AuraAgent represents a complete device runtime composed from:
 /// - Core effect handlers (from aura-protocol)
-/// - Agent-specific handlers (authentication)
-/// - Middleware stack (metrics, tracing, validation)
+/// - Agent-specific handlers (authentication, storage, recovery, OTA)
+/// - Effect system composition for unified runtime behavior
 ///
 /// This follows the runtime composition pattern:
 /// - **Handler Composition**: Combines specialized handlers into unified runtime
-/// - **Middleware Integration**: Layers cross-cutting concerns over operations
-/// - **Mode Awareness**: Supports production, testing, and simulation modes
 /// - **Effect Injection**: All behavior controllable through injected effects
+/// - **Mode Awareness**: Supports production, testing, and simulation modes
+/// - **Clean Architecture**: No middleware layers - direct effect composition
 pub struct AuraAgent {
     /// Device ID for this agent runtime
     device_id: DeviceId,

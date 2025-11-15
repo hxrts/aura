@@ -5,7 +5,6 @@
 //! Target: Each file <200 lines, use mature libraries.
 
 pub mod framing;
-pub mod integration;
 pub mod memory;
 pub mod tcp;
 pub mod utils;
@@ -47,7 +46,7 @@ impl Default for TransportConfig {
 }
 
 /// Transport connection result
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransportConnection {
     /// Connection identifier
     pub connection_id: String,
@@ -76,21 +75,20 @@ pub enum TransportError {
 
 type TransportResult<T> = Result<T, TransportError>;
 
-//! Transport facade patterns removed - migrated to orchestration layer
-//!
-//! **MIGRATION NOTE**: Facade patterns that violate Layer 3 principles have been removed:
-//!
-//! - `TransportManager`: Combined multiple handlers with routing logic → Move to aura-protocol
-//! - `RetryingTransportManager`: Wrapper with coordination logic → Move to aura-protocol
-//!
-//! These patterns violated Layer 3 principles by performing multi-handler coordination
-//! instead of implementing single-party, stateless effects. The coordination logic
-//! belongs in Layer 4 (aura-protocol).
-//!
-//! Individual transport handlers remain in this crate as they follow Layer 3 principles:
-//! - TcpTransportHandler, WebSocketTransportHandler, InMemoryTransportHandler
-//!
-//! TODO: Implement proper Layer 4 coordination patterns in aura-protocol where:
-//! - TransportManager coordinates multiple transport handlers
-//! - RetryingTransportManager provides retry orchestration
-//! - Protocol-level routing and connection management logic resides
+// Transport facade patterns removed - migrated to orchestration layer
+//
+// **MIGRATION NOTE**: Facade patterns that violate Layer 3 principles have been removed:
+//
+// - `TransportManager`: Combined multiple handlers with routing logic → Move to aura-protocol
+// - `RetryingTransportManager`: Wrapper with coordination logic → Move to aura-protocol
+//
+// These patterns violated Layer 3 principles by performing multi-handler coordination
+// instead of implementing single-party, stateless effects. The coordination logic
+// belongs in Layer 4 (aura-protocol).
+// Individual transport handlers remain in this crate as they follow Layer 3 principles:
+// - TcpTransportHandler, WebSocketTransportHandler, InMemoryTransportHandler
+//
+// TODO: Implement proper Layer 4 coordination patterns in aura-protocol where:
+// - TransportManager coordinates multiple transport handlers
+// - RetryingTransportManager provides retry orchestration
+// - Protocol-level routing and connection management logic resides

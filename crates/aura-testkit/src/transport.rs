@@ -1,12 +1,11 @@
 //! Test Transport Utilities
 //!
 //! Provides transport utilities and mock transport implementations for testing.
-//! Uses the new middleware-based transport system from aura-transport.
+//! Uses effect-based transport system from aura-transport.
 
 use async_trait::async_trait;
 use aura_core::{AuraResult, DeviceId};
-// Note: TransportMiddlewareStack and TransportStackBuilder were removed in Week 11 cleanup
-// use aura_transport::{TransportMiddlewareStack, TransportStackBuilder};
+// Note: Transport middleware patterns removed - use effect system instead
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -108,11 +107,8 @@ pub fn test_memory_transport() -> MemoryTransport {
     MemoryTransport::new(DeviceId::new())
 }
 
-// Create a transport middleware stack for testing
-//
-// Creates a middleware stack suitable for testing scenarios
-// Note: Disabled due to Week 11 cleanup - middleware was removed
-// TODO fix - Re-implement when transport middleware is needed
+// Transport middleware patterns removed - use effect system for transport testing
+// Modern approach: Create transport handlers through effect system composition
 /*
 pub fn test_transport_stack(_device_id: DeviceId) -> TransportMiddlewareStack {
     use aura_core::AuraResult;

@@ -10,6 +10,9 @@ use proc_macro::TokenStream;
 
 mod choreography;
 mod effect_handlers;
+mod handler_adapters;
+mod effect_system;
+mod error_types;
 
 /// Full-featured choreography! macro with complete rumpsteak-aura feature inheritance
 ///
@@ -88,4 +91,88 @@ pub fn aura_effect_handlers(input: TokenStream) -> TokenStream {
         Ok(output) => output,
         Err(err) => err.to_compile_error().into(),
     }
+}
+
+/// Generate handler adapter implementations for the AuraHandler trait
+///
+/// This macro eliminates boilerplate for creating handler adapters that bridge
+/// effect traits to the AuraHandler trait for use in the stateless executor.
+///
+/// # Example
+///
+/// ```ignore
+/// use aura_macros::aura_handler_adapters;
+///
+/// aura_handler_adapters! {
+///     TimeHandlerAdapter: TimeEffects => Time {
+///         "current_epoch" => current_epoch() -> u64,
+///         "sleep_ms" => sleep_ms(u64),
+///         "set_timeout" => set_timeout(u64) -> TimeoutHandle,
+///     },
+///     NetworkHandlerAdapter: NetworkEffects => Network {
+///         "send_to_peer" => send_to_peer((Uuid, Vec<u8>)),
+///         "receive" => receive() -> Vec<u8>,
+///     }
+/// }
+/// ```
+#[proc_macro]
+pub fn aura_handler_adapters(input: TokenStream) -> TokenStream {
+    handler_adapters::aura_handler_adapters_impl(input)
+}
+
+/// Generate effect trait implementations with automatic execution patterns
+///
+/// This macro eliminates the repetitive serialize → execute → deserialize pattern
+/// that appears hundreds of times in effect system implementations.
+///
+/// # Example
+///
+/// ```ignore
+/// use aura_macros::aura_effect_implementations;
+///
+/// aura_effect_implementations! {
+///     TimeEffects: Time -> TimeError {
+///         "current_epoch" => current_epoch() -> u64,
+///         "sleep_ms" => sleep_ms(u64),
+///         "set_timeout" => set_timeout(u64) -> TimeoutHandle,
+///     },
+///     NetworkEffects: Network -> NetworkError {
+///         "send_to_peer" => send_to_peer((uuid::Uuid, Vec<u8>)),
+///         "receive" => receive() -> Vec<u8>,
+///     }
+/// }
+/// ```
+#[proc_macro]
+pub fn aura_effect_implementations(input: TokenStream) -> TokenStream {
+    effect_system::aura_effect_implementations_impl(input)
+}
+
+/// Generate error type definitions with automatic implementations
+///
+/// This macro eliminates boilerplate in error type definitions by auto-generating
+/// Display implementations, From conversions, constructor helpers, and other
+/// common patterns that appear across 66+ files with 2,000+ lines of repetition.
+///
+/// # Example
+///
+/// ```ignore
+/// use aura_macros::aura_error_types;
+///
+/// aura_error_types! {
+///     #[derive(Debug, Clone, Serialize, Deserialize)]
+///     pub enum StorageError {
+///         #[category = "not_found"]
+///         ContentNotFound { content_id: String } => "Content not found: {content_id}",
+///         
+///         #[category = "storage"]
+///         QuotaExceeded { requested: u64, available: u64 } => 
+///             "Storage quota exceeded: requested {requested} bytes, available {available} bytes",
+///             
+///         NetworkTimeout => "Network operation timed out",
+///     }
+/// }
+/// ```
+#[proc_macro]
+pub fn aura_error_types(input: TokenStream) -> TokenStream {
+    error_types::aura_error_types_impl(input)
 }

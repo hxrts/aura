@@ -1,67 +1,55 @@
 //! End-to-end integration test demonstrating simulator basic functionality
 //!
-//! This test validates the basic simulator middleware stack
+//! This test validates the basic simulator effect system
 
 use aura_macros::aura_test;
 use aura_simulator::{
-    CoreSimulatorHandler, Duration, Result, ScenarioInjectionMiddleware, SimulatorContext,
-    SimulatorOperation, SimulatorStackBuilder,
+    SimulationEffectComposer, Duration, Result, SimulatorContext,
 };
-use std::sync::Arc;
+use aura_core::DeviceId;
 
 #[aura_test]
-async fn test_simulator_stack_basic() -> Result<()> {
-    // Create a basic simulator stack
-    let stack = SimulatorStackBuilder::new()
-        .with_middleware(Arc::new(ScenarioInjectionMiddleware::new()))
-        .with_handler(Arc::new(CoreSimulatorHandler::new()))
-        .build()?;
+async fn test_simulator_effect_composition_basic() -> Result<()> {
+    // Create a basic simulation environment
+    let device_id = DeviceId::new();
+    let environment = SimulationEffectComposer::for_testing(device_id)
+        .map_err(|e| aura_simulator::SimulatorError::OperationFailed(e.to_string()))?;
 
-    // Create simulation context
-    let context = SimulatorContext::new("test_scenario".to_string(), "run_1".to_string())
-        .with_participants(3, 2)
-        .with_seed(42);
+    // Test basic time effect
+    let timestamp = environment.current_timestamp().await
+        .map_err(|e| aura_simulator::SimulatorError::TimeControlError(e.to_string()))?;
 
-    // Execute a simple tick operation
-    let _result = stack.process(
-        SimulatorOperation::ExecuteTick {
-            tick_number: 1,
-            delta_time: Duration::from_millis(100),
-        },
-        &context,
-    )?;
+    assert!(timestamp >= 0);
 
-    // Verify basic operation succeeded
-    println!("[OK] Simulator stack test completed");
+    println!("[OK] Simulator effect composition test completed");
 
     Ok(())
 }
 
 #[aura_test]
-async fn test_simulator_middleware_composition() -> Result<()> {
-    // Test multiple middleware layers
-    use aura_simulator::{FaultSimulationMiddleware, TimeControlMiddleware};
+async fn test_simulator_full_effect_composition() -> Result<()> {
+    // Test all effect handlers together
+    let device_id = DeviceId::new();
+    let environment = SimulationEffectComposer::for_simulation(device_id, 123)
+        .map_err(|e| aura_simulator::SimulatorError::OperationFailed(e.to_string()))?;
 
-    let stack = SimulatorStackBuilder::new()
-        .with_middleware(Arc::new(ScenarioInjectionMiddleware::new()))
-        .with_middleware(Arc::new(FaultSimulationMiddleware::new()))
-        .with_middleware(Arc::new(TimeControlMiddleware::new()))
-        .with_handler(Arc::new(CoreSimulatorHandler::new()))
-        .build()?;
+    // Test time effects
+    let timestamp = environment.current_timestamp().await
+        .map_err(|e| aura_simulator::SimulatorError::TimeControlError(e.to_string()))?;
+    assert!(timestamp >= 0);
 
-    let context = SimulatorContext::new("middleware_test".to_string(), "run_1".to_string())
-        .with_participants(2, 2)
-        .with_seed(123);
+    // Test fault injection
+    environment.inject_network_delay(
+        (Duration::from_millis(10), Duration::from_millis(50)),
+        None
+    ).await.map_err(|e| aura_simulator::SimulatorError::FaultInjectionFailed(e.to_string()))?;
 
-    // Test tick execution with multiple middleware
-    let _result = stack.process(
-        SimulatorOperation::ExecuteTick {
-            tick_number: 1,
-            delta_time: Duration::from_millis(50),
-        },
-        &context,
-    )?;
+    // Test scenario management  
+    let mut event_data = std::collections::HashMap::new();
+    event_data.insert("test_key".to_string(), "test_value".to_string());
+    environment.record_test_event("integration_test", event_data).await
+        .map_err(|e| aura_simulator::SimulatorError::OperationFailed(e.to_string()))?;
 
-    println!("[OK] Middleware composition test completed");
+    println!("[OK] Full effect composition test completed");
     Ok(())
 }

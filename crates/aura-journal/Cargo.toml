@@ -18,7 +18,7 @@ aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
 
 # Choreography dependencies (required by aura-macros)
-rumpsteak-aura-choreography = "0.3.1"
+rumpsteak-aura-choreography = "0.6.0"
 # aura-verify = { path = "../aura-verify" }  # Temporarily disabled due to compilation issues
 # Note: Cannot import aura-protocol due to circular dependency (aura-protocol imports journal)
 # Protocol types are now available through aura-core

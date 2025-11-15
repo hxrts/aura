@@ -29,7 +29,8 @@ serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 bincode = { workspace = true }
 
-# Async (removed - effect-light crates should be synchronous)
+# Async
+async-trait = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }

@@ -26,9 +26,9 @@
 //! - Complete FROST ceremonies → `aura-frost` (Layer 5)
 
 // Domain modules - pure functions and types only
-pub mod frost;
 pub mod key_derivation;
 pub mod merkle;
+pub mod tree_signing;
 
 // Re-export commonly used cryptographic types
 pub use ed25519_dalek::{
@@ -46,6 +46,9 @@ pub use key_derivation::{
 pub use merkle::{
     build_commitment_tree, build_merkle_root, verify_merkle_proof, SimpleMerkleProof,
 };
+
+// Re-export tree signing utilities
+pub use tree_signing::*;
 
 /// HPKE private key - 32 bytes for X25519
 pub type HpkePrivateKey = [u8; 32];
