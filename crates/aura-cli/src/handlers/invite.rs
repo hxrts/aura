@@ -11,7 +11,7 @@ use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects};
 use std::{fs, str::FromStr};
 
 /// Handle invitation-related CLI commands
-/// 
+///
 /// Processes invitation actions including create, accept, and status operations
 pub async fn handle_invitation(
     effects: &AuraEffectSystem,

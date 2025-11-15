@@ -1173,21 +1173,24 @@ impl Cap {
         }
     }
 
-
     /// Join capabilities (union operation - more permissive)
     pub fn join_capabilities(&self, other: &Self) -> Self {
         use std::collections::HashSet;
-        
+
         let mut result_lattice = self.lattice.clone();
-        
+
         // Union atomic permissions (more permissive)
-        result_lattice.permissions.atomic_permissions
+        result_lattice
+            .permissions
+            .atomic_permissions
             .extend(other.lattice.permissions.atomic_permissions.iter().cloned());
-        
+
         // Union wildcards (more permissive)
-        result_lattice.permissions.wildcards
+        result_lattice
+            .permissions
+            .wildcards
             .extend(other.lattice.permissions.wildcards.iter().cloned());
-            
+
         // Union derived permissions
         for (key, value) in &other.lattice.permissions.derived_permissions {
             match result_lattice.permissions.derived_permissions.get_mut(key) {
@@ -1198,22 +1201,28 @@ impl Cap {
                     *existing = combined.into_iter().collect();
                 }
                 None => {
-                    result_lattice.permissions.derived_permissions.insert(key.clone(), value.clone());
+                    result_lattice
+                        .permissions
+                        .derived_permissions
+                        .insert(key.clone(), value.clone());
                 }
             }
         }
-        
+
         // Union resources (more permissive)
-        result_lattice.resources.allowed_patterns
+        result_lattice
+            .resources
+            .allowed_patterns
             .extend(other.lattice.resources.allowed_patterns.iter().cloned());
-        
-        // Intersect excluded patterns (more permissive)    
-        result_lattice.resources.excluded_patterns = 
-            result_lattice.resources.excluded_patterns
-                .intersection(&other.lattice.resources.excluded_patterns)
-                .cloned()
-                .collect();
-                
+
+        // Intersect excluded patterns (more permissive)
+        result_lattice.resources.excluded_patterns = result_lattice
+            .resources
+            .excluded_patterns
+            .intersection(&other.lattice.resources.excluded_patterns)
+            .cloned()
+            .collect();
+
         // Temporal constraints: take the most permissive
         if let Some(other_until) = other.lattice.temporal.valid_until {
             match result_lattice.temporal.valid_until {
@@ -1221,18 +1230,23 @@ impl Cap {
                 None => result_lattice.temporal.valid_until = Some(other_until),
             }
         }
-        
+
         if let Some(other_limit) = other.lattice.temporal.usage_limit {
             match result_lattice.temporal.usage_limit {
                 Some(limit) => result_lattice.temporal.usage_limit = Some(limit.max(other_limit)),
                 None => result_lattice.temporal.usage_limit = Some(other_limit),
             }
         }
-        
-        result_lattice.temporal.usage_count = 
-            self.lattice.temporal.usage_count.min(other.lattice.temporal.usage_count);
-            
-        Cap { lattice: result_lattice }
+
+        result_lattice.temporal.usage_count = self
+            .lattice
+            .temporal
+            .usage_count
+            .min(other.lattice.temporal.usage_count);
+
+        Cap {
+            lattice: result_lattice,
+        }
     }
 }
 

@@ -324,7 +324,7 @@ fn verify_frost_signature(
     }
 
     // Placeholder verification - always succeeds for now
-    // Real implementation would use aura_crypto::frost verification
+    // Real implementation would use aura_core::frost verification
     tracing::debug!(
         "Verifying FROST signature: sig_len={}, msg_len={}, key_len={}",
         signature.len(),

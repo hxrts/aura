@@ -42,9 +42,9 @@ use crate::effects::RandomEffects;
 use crate::guards::{JournalCoupler, JournalCouplerBuilder, ProtocolGuard};
 use aura_core::hash::hash;
 use aura_core::{CausalContext, DeviceId, SessionId};
+use aura_macros::choreography;
 use aura_mpst::journal_coupling::JournalAnnotation;
 use aura_wot::Capability;
-use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 
 /// Anti-entropy choreography configuration

@@ -91,7 +91,7 @@ Developer integration provides seamless incorporation of testing tools into prot
 **Property-Based Testing**:
 - **Proptest integration**: [`crates/aura-testkit/`](../crates/aura-testkit/) - Shared property-based testing utilities
 - **CRDT law verification**: Semilattice properties tested across all CRDT implementations
-- **Crypto property tests**: [`crates/aura-crypto/tests/property_tests.rs`](../crates/aura-crypto/tests/property_tests.rs)
+- **Crypto property tests**: [`crates/aura-core/tests/crypto_property_tests.rs`](../crates/aura-core/tests/crypto_property_tests.rs)
 
 **Deterministic Simulation**:
 - **Simulation engine**: [`crates/aura-simulator/`](../crates/aura-simulator/) - Complete deterministic testing framework
@@ -100,8 +100,8 @@ Developer integration provides seamless incorporation of testing tools into prot
 - **Controlled time**: [`crates/aura-protocol/src/handlers/time/simulated.rs`](../crates/aura-protocol/src/handlers/time/simulated.rs)
 
 **Basic Fault Injection**:
-- **Chaos middleware**: [`crates/aura-simulator/src/effects/middleware/chaos_coordination.rs`](../crates/aura-simulator/src/effects/middleware/chaos_coordination.rs)
-- **Fault injection**: [`crates/aura-simulator/src/effects/middleware/fault_injection.rs`](../crates/aura-simulator/src/effects/middleware/fault_injection.rs)
+- **Chaos coordination**: [`crates/aura-simulator/src/effects/chaos.rs`](../crates/aura-simulator/src/effects/chaos.rs)
+- **Fault injection**: [`crates/aura-simulator/src/effects/fault_injection.rs`](../crates/aura-simulator/src/effects/fault_injection.rs)
 - **Basic Byzantine behavior**: Network partitions, message delays, controlled crashes
 
 ### ⚠️ Partial Implementation (Infrastructure Exists)
@@ -112,8 +112,8 @@ Developer integration provides seamless incorporation of testing tools into prot
 - **Leakage tracking**: [`crates/aura-mpst/src/leakage.rs`](../crates/aura-mpst/src/leakage.rs) - Budget tracking implemented
 
 **Advanced Simulation**:
-- **State inspection**: [`crates/aura-simulator/src/effects/middleware/state_inspection.rs`](../crates/aura-simulator/src/effects/middleware/state_inspection.rs) - Basic capabilities
-- **Time control**: [`crates/aura-simulator/src/effects/middleware/time_control.rs`](../crates/aura-simulator/src/effects/middleware/time_control.rs) - Checkpoint/restore foundation
+- **State inspection**: [`crates/aura-simulator/src/effects/state_inspection.rs`](../crates/aura-simulator/src/effects/state_inspection.rs) - Basic capabilities
+- **Time control**: [`crates/aura-simulator/src/effects/time_control.rs`](../crates/aura-simulator/src/effects/time_control.rs) - Checkpoint/restore foundation
 
 ### 🚀 Planned Features (Future Work)
 
@@ -155,7 +155,7 @@ just smoke-test
 just test-dkd <app_id> <context>
 
 # Run property-based tests for specific components
-cargo test --package aura-crypto -- property_tests
+cargo test --package aura-core -- crypto_property_tests
 cargo test --package aura-journal -- semilattice
 ```
 

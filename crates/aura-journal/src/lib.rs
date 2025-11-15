@@ -52,5 +52,5 @@ pub use semilattice::{
 pub use ratchet_tree::{reduce, TreeState};
 
 // Selective re-exports to avoid conflicts
-pub use middleware::{JournalHandler, JournalMiddleware};
+pub use middleware::JournalContext;
 pub use types::{DeviceMetadata, DeviceType, GuardianMetadata, Session};

@@ -109,8 +109,8 @@ impl UpgradeCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{hash_canonical, AccountId};
     use crate::maintenance::IdentityEpochFence;
+    use aura_core::{hash_canonical, AccountId};
 
     fn dummy_proposal(kind: UpgradeKind, fence: Option<IdentityEpochFence>) -> UpgradeProposal {
         UpgradeProposal {

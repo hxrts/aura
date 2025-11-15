@@ -17,8 +17,10 @@ workspace = true
 # Core traits (interface layer)
 aura-core = { path = "../aura-core" }
 
+# Proc macros for generating boilerplate
+aura-macros = { path = "../aura-macros" }
+
 # Domain crates (for specialized types)
-aura-crypto = { path = "../aura-crypto" }
 aura-journal = { path = "../aura-journal" }
 aura-transport = { path = "../aura-transport" }
 # NOTE: aura-store creates circular dependency (aura-store → aura-protocol → aura-effects)

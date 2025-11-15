@@ -6,18 +6,18 @@
 //! - Monitor system health
 //! - Perform graceful shutdown
 
+use async_trait::async_trait;
 use aura_core::{AuraResult, DeviceId};
 use aura_protocol::effects::{
+    lifecycle::{HealthStatus, LifecycleAware},
     AuraEffectSystemBuilder, EffectSystemState,
-    lifecycle::{LifecycleAware, HealthStatus},
 };
 use aura_protocol::ExecutionMode;
-use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{info, error};
+use tracing::{error, info};
 
 /// Example lifecycle-aware component
 struct DatabaseConnection {
@@ -42,39 +42,37 @@ impl DatabaseConnection {
 impl LifecycleAware for DatabaseConnection {
     async fn on_initialize(&self) -> AuraResult<()> {
         info!("Initializing database connection: {}", self.name);
-        
+
         // Simulate connection setup
         sleep(Duration::from_millis(100)).await;
         self.connected.store(true, Ordering::Relaxed);
-        
+
         info!("Database connection {} established", self.name);
         Ok(())
     }
 
     async fn on_shutdown(&self) -> AuraResult<()> {
         info!("Shutting down database connection: {}", self.name);
-        
+
         // Simulate connection cleanup
         sleep(Duration::from_millis(50)).await;
         self.connected.store(false, Ordering::Relaxed);
-        
+
         info!("Database connection {} closed", self.name);
         Ok(())
     }
 
     async fn health_check(&self) -> HealthStatus {
         if self.is_connected() {
-            HealthStatus::healthy()
-                .with_metadata(serde_json::json!({
-                    "connection": self.name,
-                    "status": "connected"
-                }))
+            HealthStatus::healthy().with_metadata(serde_json::json!({
+                "connection": self.name,
+                "status": "connected"
+            }))
         } else {
-            HealthStatus::unhealthy("Database connection lost")
-                .with_metadata(serde_json::json!({
-                    "connection": self.name,
-                    "status": "disconnected"
-                }))
+            HealthStatus::unhealthy("Database connection lost").with_metadata(serde_json::json!({
+                "connection": self.name,
+                "status": "disconnected"
+            }))
         }
     }
 }
@@ -100,29 +98,29 @@ impl DataService {
 impl LifecycleAware for DataService {
     async fn on_initialize(&self) -> AuraResult<()> {
         info!("Initializing data service: {}", self.name);
-        
+
         // Check if database is connected
         if !self.db.is_connected() {
             return Err(aura_core::AuraError::invalid(
-                "Cannot initialize data service: database not connected"
+                "Cannot initialize data service: database not connected",
             ));
         }
-        
+
         // Simulate service startup
         sleep(Duration::from_millis(50)).await;
         self.running.store(true, Ordering::Relaxed);
-        
+
         info!("Data service {} started", self.name);
         Ok(())
     }
 
     async fn on_shutdown(&self) -> AuraResult<()> {
         info!("Shutting down data service: {}", self.name);
-        
+
         // Simulate service cleanup
         sleep(Duration::from_millis(25)).await;
         self.running.store(false, Ordering::Relaxed);
-        
+
         info!("Data service {} stopped", self.name);
         Ok(())
     }
@@ -130,27 +128,25 @@ impl LifecycleAware for DataService {
     async fn health_check(&self) -> HealthStatus {
         let is_running = self.running.load(Ordering::Relaxed);
         let db_connected = self.db.is_connected();
-        
+
         if is_running && db_connected {
-            HealthStatus::healthy()
-                .with_metadata(serde_json::json!({
-                    "service": self.name,
-                    "status": "running",
-                    "database": "connected"
-                }))
+            HealthStatus::healthy().with_metadata(serde_json::json!({
+                "service": self.name,
+                "status": "running",
+                "database": "connected"
+            }))
         } else {
             let message = if !is_running {
                 "Service not running"
             } else {
                 "Database dependency unavailable"
             };
-            
-            HealthStatus::unhealthy(message)
-                .with_metadata(serde_json::json!({
-                    "service": self.name,
-                    "running": is_running,
-                    "database_connected": db_connected
-                }))
+
+            HealthStatus::unhealthy(message).with_metadata(serde_json::json!({
+                "service": self.name,
+                "running": is_running,
+                "database_connected": db_connected
+            }))
         }
     }
 }
@@ -176,23 +172,30 @@ async fn main() -> AuraResult<()> {
     println!("Effect system created with device ID: {:?}\n", device_id);
 
     // Check initial state
-    println!("Initial lifecycle state: {:?}", effect_system.lifecycle_state());
-    assert_eq!(effect_system.lifecycle_state(), EffectSystemState::Uninitialized);
+    println!(
+        "Initial lifecycle state: {:?}",
+        effect_system.lifecycle_state()
+    );
+    assert_eq!(
+        effect_system.lifecycle_state(),
+        EffectSystemState::Uninitialized
+    );
 
     // Create and register components
     let db = Arc::new(DatabaseConnection::new("main_db"));
     let data_service = Arc::new(DataService::new("user_data_service", db.clone()));
 
     println!("\nRegistering lifecycle-aware components...");
-    effect_system.register_lifecycle_component(
-        "database",
-        Box::new(db.clone()) as Box<dyn LifecycleAware>
-    ).await;
+    effect_system
+        .register_lifecycle_component("database", Box::new(db.clone()) as Box<dyn LifecycleAware>)
+        .await;
 
-    effect_system.register_lifecycle_component(
-        "data_service",
-        Box::new(data_service.clone()) as Box<dyn LifecycleAware>
-    ).await;
+    effect_system
+        .register_lifecycle_component(
+            "data_service",
+            Box::new(data_service.clone()) as Box<dyn LifecycleAware>,
+        )
+        .await;
 
     // Initialize the system
     println!("\nInitializing effect system...");
@@ -211,23 +214,38 @@ async fn main() -> AuraResult<()> {
     // Perform health check
     println!("\nPerforming system health check...");
     let health_report = effect_system.health_check().await;
-    
+
     println!("System Health Report:");
-    println!("  Overall health: {}", if health_report.is_healthy { "✓ Healthy" } else { "✗ Unhealthy" });
+    println!(
+        "  Overall health: {}",
+        if health_report.is_healthy {
+            "✓ Healthy"
+        } else {
+            "✗ Unhealthy"
+        }
+    );
     println!("  Uptime: {:?}", health_report.uptime);
     println!("  State: {:?}", health_report.state);
     println!("  Component health:");
-    
+
     for (component_name, health_status) in &health_report.component_health {
-        let status_icon = if health_status.is_healthy { "✓" } else { "✗" };
-        println!("    {} {}: {}", 
+        let status_icon = if health_status.is_healthy {
+            "✓"
+        } else {
+            "✗"
+        };
+        println!(
+            "    {} {}: {}",
             status_icon,
             component_name,
             health_status.message.as_deref().unwrap_or("Healthy")
         );
-        
+
         if let Some(metadata) = &health_status.metadata {
-            println!("      Metadata: {}", serde_json::to_string_pretty(metadata)?);
+            println!(
+                "      Metadata: {}",
+                serde_json::to_string_pretty(metadata)?
+            );
         }
     }
 
@@ -254,7 +272,10 @@ async fn main() -> AuraResult<()> {
     // Verify components are shut down
     println!("\nVerifying component states:");
     println!("  Database connected: {}", db.is_connected());
-    println!("  Data service running: {}", data_service.running.load(Ordering::Relaxed));
+    println!(
+        "  Data service running: {}",
+        data_service.running.load(Ordering::Relaxed)
+    );
 
     // Try to use the system after shutdown (should fail)
     println!("\nAttempting to use system after shutdown...");

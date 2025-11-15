@@ -32,15 +32,17 @@ use super::agent::{
 use super::choreographic::ChoreographicEffects;
 use super::executor::{EffectExecutor, EffectExecutorBuilder};
 use super::handler_adapters::{
-    ChoreographicHandlerAdapter, ConsoleHandlerAdapter, CryptoHandlerAdapter, JournalHandlerAdapter,
-    LedgerHandlerAdapter, NetworkHandlerAdapter, RandomHandlerAdapter, StorageHandlerAdapter,
-    SystemHandlerAdapter, TimeHandlerAdapter, TreeHandlerAdapter,
+    ChoreographicHandlerAdapter, ConsoleHandlerAdapter, CryptoHandlerAdapter,
+    JournalHandlerAdapter, LedgerHandlerAdapter, NetworkHandlerAdapter, RandomHandlerAdapter,
+    StorageHandlerAdapter, SystemHandlerAdapter, TimeHandlerAdapter, TreeHandlerAdapter,
 };
 use super::ledger::{LedgerEffects, LedgerError};
+use super::lifecycle::{
+    EffectSystemState, HealthStatus as LifecycleHealthStatus, LifecycleAware, LifecycleManager,
+};
 use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
 use super::system_traits::{SystemEffects, SystemError};
 use super::tree::TreeEffects;
-use super::lifecycle::{LifecycleManager, EffectSystemState, LifecycleAware, HealthStatus as LifecycleHealthStatus};
 
 /// Configuration for the effect system
 #[derive(Clone, Debug)]
@@ -280,10 +282,10 @@ impl AuraEffectSystem {
     pub async fn latest_receipt(&self) -> Option<Receipt> {
         // Get all context IDs and find the most recent receipt from any of them
         let context_ids = self.receipt_mgr.context_ids().await;
-        
+
         let mut latest_receipt = None;
         let mut latest_nonce = 0u64;
-        
+
         for context_id in context_ids {
             if let Ok(Some(receipt)) = self.receipt_mgr.latest_receipt(&context_id).await {
                 // Use nonce as a proxy for recency (higher nonce = more recent)
@@ -293,7 +295,7 @@ impl AuraEffectSystem {
                 }
             }
         }
-        
+
         latest_receipt
     }
 
@@ -327,12 +329,14 @@ impl AuraEffectSystem {
     /// # Example
     /// ```
     /// # use aura_protocol::effects::AuraEffectSystem;
-    /// # use aura_core::DeviceId;
-    /// #[tokio::test]
-    /// async fn test_something() {
-    ///     let device_id = DeviceId::new();
-    ///     let effects = AuraEffectSystem::for_testing_sync(device_id).unwrap();
+    /// # use aura_core::{DeviceId, AuraResult};
+    /// # use aura_testkit::{aura_test, TestFixture};
+    /// #[aura_test]
+    /// async fn test_something() -> AuraResult<()> {
+    ///     let fixture = TestFixture::new().await?;
+    ///     let effects = fixture.effects();
     ///     // Use effects in your test
+    ///     Ok(())
     /// }
     /// ```
     #[cfg(any(test, feature = "testing"))]
@@ -345,52 +349,52 @@ impl AuraEffectSystem {
     }
 
     // ===== Lifecycle Management Methods =====
-    
+
     /// Get the current lifecycle state
     pub fn lifecycle_state(&self) -> EffectSystemState {
         self.lifecycle_mgr.current_state()
     }
-    
+
     /// Initialize the effect system lifecycle
-    /// 
+    ///
     /// This method transitions the system from Uninitialized to Ready state,
     /// initializing all registered components in the process.
     pub async fn initialize_lifecycle(&self) -> AuraResult<()> {
         self.lifecycle_mgr.initialize().await
     }
-    
+
     /// Shutdown the effect system lifecycle gracefully
-    /// 
+    ///
     /// This method transitions the system to Shutdown state,
     /// cleaning up all registered components in reverse order.
     pub async fn shutdown_lifecycle(&self) -> AuraResult<()> {
         self.lifecycle_mgr.shutdown().await
     }
-    
+
     /// Perform a health check on the effect system
-    /// 
+    ///
     /// Returns a comprehensive health report including the status of all components.
     pub async fn health_check(&self) -> crate::effects::lifecycle::SystemHealthReport {
         self.lifecycle_mgr.health_check().await
     }
-    
+
     /// Check if the effect system is ready for operations
     pub fn is_ready(&self) -> bool {
         self.lifecycle_mgr.is_ready()
     }
-    
+
     /// Ensure the system is in a ready state or return an error
     pub fn ensure_ready(&self) -> AuraResult<()> {
         self.lifecycle_mgr.ensure_ready()
     }
-    
+
     /// Get system uptime
     pub fn uptime(&self) -> std::time::Duration {
         self.lifecycle_mgr.uptime()
     }
-    
+
     /// Register a lifecycle-aware component
-    /// 
+    ///
     /// Components registered here will be initialized and shut down
     /// with the effect system lifecycle.
     pub async fn register_lifecycle_component(
@@ -478,7 +482,9 @@ impl AuraEffectSystem {
                     .with_handler(
                         EffectType::Choreographic,
                         Arc::new(ChoreographicHandlerAdapter::new(
-                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(config.device_id.0),
+                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(
+                                config.device_id.0,
+                            ),
                             mode,
                         )),
                     );
@@ -564,7 +570,9 @@ impl AuraEffectSystem {
                     .with_handler(
                         EffectType::Choreographic,
                         Arc::new(ChoreographicHandlerAdapter::new(
-                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(config.device_id.0),
+                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(
+                                config.device_id.0,
+                            ),
                             mode,
                         )),
                     );
@@ -646,7 +654,9 @@ impl AuraEffectSystem {
                     .with_handler(
                         EffectType::Choreographic,
                         Arc::new(ChoreographicHandlerAdapter::new(
-                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(config.device_id.0),
+                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(
+                                config.device_id.0,
+                            ),
                             mode,
                         )),
                     );
@@ -2467,7 +2477,8 @@ impl ChoreographicEffects for AuraEffectSystem {
             choreographic: None, // Clear it
             simulation: context.simulation,
             agent: context.agent,
-            middleware: context.middleware,
+            tracing: context.tracing,
+            metrics: context.metrics,
         };
 
         self.context_mgr
@@ -3467,8 +3478,8 @@ impl crate::effects::AuraEffects for AuraEffectSystem {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::*;
     use aura_macros::aura_test;
+    use aura_testkit::*;
 
     #[aura_test]
     async fn test_effect_system_creation() -> aura_core::AuraResult<()> {
@@ -3503,15 +3514,11 @@ mod tests {
         let peer = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
 
         // First charge should initialize budget
-        let budget1 = system
-            .charge_flow_budget(&context, &peer, 100)
-            .await?;
+        let budget1 = system.charge_flow_budget(&context, &peer, 100).await?;
         assert_eq!(budget1.spent, 100);
 
         // Second charge should update spent amount
-        let budget2 = system
-            .charge_flow_budget(&context, &peer, 200)
-            .await?;
+        let budget2 = system.charge_flow_budget(&context, &peer, 200).await?;
         assert_eq!(budget2.spent, 300); // 100 + 200
                                         // Note: Receipt prev field should match content hash of previous receipt
 

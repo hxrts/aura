@@ -5,7 +5,7 @@
 
 use crate::{AuthenticationError, Result, ThresholdSig};
 use aura_core::{DeviceId, GuardianId};
-use aura_crypto::Ed25519Signature;
+use aura_core::Ed25519Signature;
 
 /// Identity verification functions
 pub struct IdentityValidator;
@@ -16,10 +16,10 @@ impl IdentityValidator {
         _device_id: DeviceId,
         signature: &Ed25519Signature,
         event_hash: &[u8],
-        device_public_key: &aura_crypto::Ed25519VerifyingKey,
+        device_public_key: &aura_core::Ed25519VerifyingKey,
     ) -> Result<()> {
         // Verify signature
-        aura_crypto::ed25519_verify(device_public_key, event_hash, signature).map_err(|e| {
+        aura_core::ed25519_verify(device_public_key, event_hash, signature).map_err(|e| {
             AuthenticationError::InvalidDeviceSignature(format!(
                 "Device signature verification failed: {}",
                 e
@@ -34,10 +34,10 @@ impl IdentityValidator {
         guardian_id: GuardianId,
         signature: &Ed25519Signature,
         message: &[u8],
-        guardian_public_key: &aura_crypto::Ed25519VerifyingKey,
+        guardian_public_key: &aura_core::Ed25519VerifyingKey,
     ) -> Result<()> {
         // Verify the actual signature provided with the event
-        aura_crypto::ed25519_verify(guardian_public_key, message, signature).map_err(|e| {
+        aura_core::ed25519_verify(guardian_public_key, message, signature).map_err(|e| {
             AuthenticationError::InvalidGuardianSignature(format!(
                 "Guardian signature verification failed for {:?}: {}",
                 guardian_id, e
@@ -51,7 +51,7 @@ impl IdentityValidator {
     pub fn validate_threshold_signature(
         threshold_sig: &ThresholdSig,
         event_hash: &[u8],
-        group_public_key: &aura_crypto::Ed25519VerifyingKey,
+        group_public_key: &aura_core::Ed25519VerifyingKey,
         required_threshold: u16,
     ) -> Result<()> {
         // Check we have enough signers
@@ -90,10 +90,10 @@ impl IdentityValidator {
     fn verify_frost_signature(
         message: &[u8],
         threshold_sig: &ThresholdSig,
-        group_public_key: &aura_crypto::Ed25519VerifyingKey,
+        group_public_key: &aura_core::Ed25519VerifyingKey,
     ) -> Result<()> {
         // FROST signatures are compatible with standard Ed25519 verification
-        aura_crypto::ed25519_verify(group_public_key, message, &threshold_sig.signature).map_err(
+        aura_core::ed25519_verify(group_public_key, message, &threshold_sig.signature).map_err(
             |e| {
                 AuthenticationError::InvalidThresholdSignature(format!(
                     "FROST threshold signature verification failed: {}",
@@ -111,7 +111,7 @@ pub fn validate_device_signature(
     device_id: DeviceId,
     signature: &Ed25519Signature,
     event_hash: &[u8],
-    device_public_key: &aura_crypto::Ed25519VerifyingKey,
+    device_public_key: &aura_core::Ed25519VerifyingKey,
 ) -> Result<()> {
     IdentityValidator::validate_device_signature(
         device_id,
@@ -126,7 +126,7 @@ pub fn validate_guardian_signature(
     guardian_id: GuardianId,
     signature: &Ed25519Signature,
     message: &[u8],
-    guardian_public_key: &aura_crypto::Ed25519VerifyingKey,
+    guardian_public_key: &aura_core::Ed25519VerifyingKey,
 ) -> Result<()> {
     IdentityValidator::validate_guardian_signature(
         guardian_id,
@@ -140,7 +140,7 @@ pub fn validate_guardian_signature(
 pub fn validate_threshold_signature(
     threshold_sig: &ThresholdSig,
     event_hash: &[u8],
-    group_public_key: &aura_crypto::Ed25519VerifyingKey,
+    group_public_key: &aura_core::Ed25519VerifyingKey,
     required_threshold: u16,
 ) -> Result<()> {
     IdentityValidator::validate_threshold_signature(

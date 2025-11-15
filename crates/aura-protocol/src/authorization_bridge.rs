@@ -114,7 +114,7 @@
 //!                     grant.denial_reason.unwrap_or_default()).into())
 //!     }
 //! }
-//! # async fn get_signature_for_operation(op: &TreeOp) -> Result<aura_crypto::Ed25519Signature, Box<dyn std::error::Error>> { unimplemented!() }
+//! # async fn get_signature_for_operation(op: &TreeOp) -> Result<aura_core::Ed25519Signature, Box<dyn std::error::Error>> { unimplemented!() }
 //! # fn hash_operation(op: &TreeOp) -> [u8; 32] { [0u8; 32] }
 //! ```
 //!
@@ -723,7 +723,7 @@ impl AuthorizedEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_crypto::Ed25519Signature;
+    use aura_core::Ed25519Signature;
     use aura_verify::ThresholdSig;
     use aura_wot::{LeafRole, TreeOpKind};
 

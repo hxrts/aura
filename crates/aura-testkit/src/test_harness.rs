@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
-use aura_core::{AuraResult, DeviceId, AuraError};
+use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_protocol::effects::{AuraEffectSystem, AuraEffectSystemBuilder};
 use aura_protocol::ExecutionMode;
 use tracing_subscriber::EnvFilter;
@@ -19,9 +19,9 @@ static TRACING_INIT: Once = Once::new();
 /// It's safe to call multiple times - initialization only happens once.
 pub fn init_test_tracing() -> TestTracingGuard {
     TRACING_INIT.call_once(|| {
-        let filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("aura=debug,warn"));
-        
+        let filter =
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("aura=debug,warn"));
+
         tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_test_writer()
@@ -32,7 +32,7 @@ pub fn init_test_tracing() -> TestTracingGuard {
             .try_init()
             .ok(); // Ignore error if already initialized
     });
-    
+
     TestTracingGuard
 }
 
@@ -81,16 +81,16 @@ pub async fn create_test_context() -> AuraResult<TestContext> {
 /// Create a test context with custom configuration
 pub async fn create_test_context_with_config(config: TestConfig) -> AuraResult<TestContext> {
     let device_id = DeviceId::new();
-    
+
     let effects = AuraEffectSystemBuilder::new()
         .with_device_id(device_id)
         .with_execution_mode(ExecutionMode::Testing)
         .build()
         .await?;
-    
+
     // Initialize the effect system
     effects.initialize_lifecycle().await?;
-    
+
     Ok(TestContext {
         effects: Arc::new(effects),
         device_id,
@@ -109,23 +109,23 @@ impl TestFixture {
         let context = create_test_context().await?;
         Ok(Self { context })
     }
-    
+
     /// Create a fixture with custom configuration
     pub async fn with_config(config: TestConfig) -> AuraResult<Self> {
         let context = create_test_context_with_config(config).await?;
         Ok(Self { context })
     }
-    
+
     /// Get the effect system
     pub fn effects(&self) -> &Arc<AuraEffectSystem> {
         &self.context.effects
     }
-    
+
     /// Get the device ID
     pub fn device_id(&self) -> DeviceId {
         self.context.device_id
     }
-    
+
     /// Run a test with automatic cleanup
     pub async fn run_test<F, Fut, T>(&self, test_fn: F) -> AuraResult<T>
     where
@@ -134,9 +134,9 @@ impl TestFixture {
     {
         // Run the test
         let result = test_fn(self.context.effects.clone()).await;
-        
+
         // Cleanup is handled by Drop implementations
-        
+
         result
     }
 }
@@ -146,7 +146,7 @@ impl Drop for TestFixture {
     fn drop(&mut self) {
         // Schedule cleanup
         let effects = self.context.effects.clone();
-        
+
         // We can't await in drop, so spawn a task
         tokio::spawn(async move {
             let _ = effects.shutdown_lifecycle().await;
@@ -158,7 +158,7 @@ impl Drop for TestFixture {
 pub mod snapshot {
     use super::*;
     use std::collections::HashMap;
-    
+
     /// Effect snapshot for testing
     #[derive(Debug, Clone)]
     pub struct EffectSnapshot {
@@ -167,7 +167,7 @@ pub mod snapshot {
         /// Metadata about the snapshot
         pub metadata: HashMap<String, String>,
     }
-    
+
     /// A single captured effect call
     #[derive(Debug, Clone)]
     pub struct EffectCall {
@@ -180,7 +180,7 @@ pub mod snapshot {
         /// Timestamp relative to test start
         pub timestamp: Duration,
     }
-    
+
     impl EffectSnapshot {
         /// Create a new empty snapshot
         pub fn new() -> Self {
@@ -189,12 +189,12 @@ pub mod snapshot {
                 metadata: HashMap::new(),
             }
         }
-        
+
         /// Record an effect call
         pub fn record(&mut self, call: EffectCall) {
             self.calls.push(call);
         }
-        
+
         /// Assert snapshot matches expected
         pub fn assert_matches(&self, expected: &EffectSnapshot) -> AuraResult<()> {
             // Simple implementation - compare counts
@@ -205,10 +205,13 @@ pub mod snapshot {
                     self.calls.len()
                 )));
             }
-            
+
             // Compare each call
-            for (i, (actual, expected)) in self.calls.iter().zip(expected.calls.iter()).enumerate() {
-                if actual.effect_type != expected.effect_type || actual.operation != expected.operation {
+            for (i, (actual, expected)) in self.calls.iter().zip(expected.calls.iter()).enumerate()
+            {
+                if actual.effect_type != expected.effect_type
+                    || actual.operation != expected.operation
+                {
                     return Err(AuraError::invalid(format!(
                         "Call {} mismatch: expected {}::{}, got {}::{}",
                         i,
@@ -219,7 +222,7 @@ pub mod snapshot {
                     )));
                 }
             }
-            
+
             Ok(())
         }
     }

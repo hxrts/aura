@@ -4,7 +4,7 @@
 //! operations within a protocol session.
 
 use crate::{AuthenticationError, Result};
-use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
+use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 use uuid::Uuid;
 
 /// Session ticket that authorizes operations within a session
@@ -73,7 +73,7 @@ pub fn verify_session_ticket(
     let ticket_bytes = serialize_session_ticket(ticket)?;
 
     // Verify the signature
-    aura_crypto::ed25519_verify(issuer_public_key, &ticket_bytes, ticket_signature).map_err(
+    aura_core::ed25519_verify(issuer_public_key, &ticket_bytes, ticket_signature).map_err(
         |e| {
             AuthenticationError::InvalidSessionTicket(format!(
                 "Session ticket signature verification failed: {}",
@@ -171,7 +171,7 @@ fn serialize_session_ticket(ticket: &SessionTicket) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_crypto::Effects;
+    use aura_core::Effects;
     use aura_core::DeviceId;
     use uuid::Uuid;
 
@@ -195,12 +195,12 @@ mod tests {
         let ticket = create_test_ticket(&effects);
 
         // Generate a key pair for testing
-        let signing_key = aura_crypto::generate_ed25519_key();
-        let verifying_key = aura_crypto::ed25519_verifying_key(&signing_key);
+        let signing_key = aura_core::generate_ed25519_key();
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
 
         // Sign the ticket
         let ticket_bytes = serialize_session_ticket(&ticket).unwrap();
-        let signature = aura_crypto::ed25519_sign(&signing_key, &ticket_bytes);
+        let signature = aura_core::ed25519_sign(&signing_key, &ticket_bytes);
 
         let current_time = 1500; // Between issued_at and expires_at
 
@@ -214,10 +214,10 @@ mod tests {
         let effects = Effects::test();
         let ticket = create_test_ticket(&effects);
 
-        let signing_key = aura_crypto::generate_ed25519_key();
-        let verifying_key = aura_crypto::ed25519_verifying_key(&signing_key);
+        let signing_key = aura_core::generate_ed25519_key();
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
         let ticket_bytes = serialize_session_ticket(&ticket).unwrap();
-        let signature = aura_crypto::ed25519_sign(&signing_key, &ticket_bytes);
+        let signature = aura_core::ed25519_sign(&signing_key, &ticket_bytes);
 
         let current_time = 3000; // After expires_at
 
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_scope_matches() {
-        let effects = aura_crypto::Effects::test();
+        let effects = aura_core::Effects::test();
         let dkd_scope1 = SessionScope::Dkd {
             app_id: "app1".to_string(),
             context: "ctx1".to_string(),

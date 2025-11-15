@@ -21,9 +21,7 @@ tokio::task_local! {
 
 /// Get the current task-local context
 pub async fn current_context() -> Option<EffectContext> {
-    TASK_CONTEXT
-        .try_with(|ctx| ctx.clone())
-        .ok()
+    TASK_CONTEXT.try_with(|ctx| ctx.clone()).ok()
 }
 
 /// Set the task-local context
@@ -51,12 +49,8 @@ where
     F::Output: Send + 'static,
 {
     let span = context.span();
-    
-    tokio::spawn(async move {
-        TASK_CONTEXT
-            .scope(context, future.instrument(span))
-            .await
-    })
+
+    tokio::spawn(async move { TASK_CONTEXT.scope(context, future.instrument(span)).await })
 }
 
 /// Context propagation wrapper for futures
@@ -97,9 +91,10 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Get context from task-local or use stored context
-        let context = self.context.clone().or_else(|| {
-            TASK_CONTEXT.try_with(|ctx| ctx.clone()).ok()
-        });
+        let context = self
+            .context
+            .clone()
+            .or_else(|| TASK_CONTEXT.try_with(|ctx| ctx.clone()).ok());
 
         if let Some(ctx) = context {
             // Enter the context span for this poll
@@ -138,11 +133,11 @@ impl ContextGuard {
     pub fn enter(context: EffectContext) -> Self {
         let previous = super::context::thread_local::current();
         super::context::thread_local::set(context.clone());
-        
+
         // Create and enter the tracing span
         let span = context.span();
         let span_guard = Some(span.entered());
-        
+
         Self {
             previous,
             span_guard,
@@ -154,7 +149,7 @@ impl Drop for ContextGuard {
     fn drop(&mut self) {
         // Exit the span
         drop(self.span_guard.take());
-        
+
         // Restore previous context
         match &self.previous {
             Some(ctx) => super::context::thread_local::set(ctx.clone()),
@@ -163,31 +158,17 @@ impl Drop for ContextGuard {
     }
 }
 
-/// Middleware for automatic context propagation
-pub struct ContextMiddleware<H> {
-    inner: H,
-}
-
-impl<H> ContextMiddleware<H> {
-    /// Create new context middleware
-    pub fn new(inner: H) -> Self {
-        Self { inner }
-    }
-
-    /// Execute with context propagation
-    pub async fn execute<F, T>(&self, f: F) -> T
-    where
-        F: FnOnce(&H) -> T,
-    {
-        // Get current context if available
-        if let Some(context) = current_context().await {
-            let _guard = context.span().entered();
-            f(&self.inner)
-        } else {
-            f(&self.inner)
-        }
-    }
-}
+// Middleware pattern removed - migrated to explicit context propagation
+// 
+// **MIGRATION NOTE**: ContextMiddleware wrapper pattern has been removed in favor of
+// explicit context propagation using the context utilities in this module.
+//
+// Instead of wrapping handlers, use:
+// - `with_context()` to run operations with explicit context
+// - `spawn_with_context()` to spawn tasks with context propagation
+// - Direct calls to context utilities for explicit control
+//
+// This provides cleaner Layer 4 orchestration without hidden wrapper patterns.
 
 /// Batch context for executing multiple operations
 pub struct BatchContext {
@@ -245,33 +226,37 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use aura_core::{AuraResult, DeviceId};
+    use aura_testkit::{aura_test, TestFixture};
 
-    #[tokio::test]
-    async fn test_context_propagation() {
-        let device_id = DeviceId::new();
-        let context = EffectContext::new(device_id)
-            .with_metadata("test", "value");
+    #[aura_test]
+    async fn test_context_propagation() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let device_id = fixture.device_id();
+        let context = EffectContext::new(device_id).with_metadata("test", "value");
 
         let result = with_context(context.clone(), async {
             // Context should be available here
             let current = current_context().await;
             assert!(current.is_some());
-            
+
             let ctx = current.unwrap();
             assert_eq!(ctx.device_id, device_id);
             assert_eq!(ctx.metadata.get("test"), Some(&"value".to_string()));
-            
+
             42
-        }).await;
+        })
+        .await;
 
         assert_eq!(result, 42);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_spawn_with_context() {
-        let context = EffectContext::new(DeviceId::new());
-        
+    #[aura_test]
+    async fn test_spawn_with_context() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let context = EffectContext::new(fixture.device_id());
+
         let handle = spawn_with_context(context.clone(), async {
             // Context should be propagated to spawned task
             let current = current_context().await;
@@ -281,54 +266,53 @@ mod tests {
 
         let result = handle.await.unwrap();
         assert_eq!(result, "spawned");
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_propagating_future() {
-        let context = EffectContext::new(DeviceId::new());
-        
-        let future = async {
-            current_context().await
-        };
+    #[aura_test]
+    async fn test_propagating_future() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let context = EffectContext::new(fixture.device_id());
+
+        let future = async { current_context().await };
 
         let propagated = future.with_propagated_context(context.clone());
         let result = propagated.await;
-        
+
         assert!(result.is_some());
+        Ok(())
     }
 
     #[test]
     fn test_context_guard() {
         let context = EffectContext::new(DeviceId::new());
-        
+
         {
             let _guard = ContextGuard::enter(context.clone());
             let current = super::super::context::thread_local::current();
             assert!(current.is_some());
         }
-        
+
         // Context should be cleared after guard drops
         let current = super::super::context::thread_local::current();
         assert!(current.is_none());
     }
 
-    #[tokio::test]
-    async fn test_batch_context() {
+    #[aura_test]
+    async fn test_batch_context() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let mut batch = BatchContext::new();
-        
+
         for i in 0..3 {
-            let context = EffectContext::new(DeviceId::new())
+            let context = EffectContext::new(fixture.create_device_id())
                 .with_metadata("index", i.to_string());
             batch.add(context);
         }
 
-        let operations = vec![
-            async { 1 },
-            async { 2 },
-            async { 3 },
-        ];
+        let operations = vec![async { 1 }, async { 2 }, async { 3 }];
 
         let results = batch.execute_all(operations).await;
         assert_eq!(results, vec![1, 2, 3]);
+        Ok(())
     }
 }

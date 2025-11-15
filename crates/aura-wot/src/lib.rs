@@ -62,11 +62,11 @@ pub use errors::{AuraError, AuraResult, WotError, WotResult};
 pub use evaluation::{evaluate_capabilities, EvaluationContext, LocalChecks};
 pub use policy::{Policy, PolicyEngine};
 pub use policy_meet::{PolicyMeet, TreePolicyCapabilityExt};
-pub use storage_authz::{storage_capabilities, StorageAuthorizationMiddleware, StorageOperation};
+pub use storage_authz::{storage_capabilities, StorageOperation};
 pub use tokens::{CapabilityCondition, CapabilityId, CapabilityToken, DelegationProof};
 pub use tree_authz::{
     tree_device_lifecycle_capabilities, tree_management_capabilities, tree_read_capabilities,
-    TreeAuthorizationMiddleware, TreeOperation,
+    TreeOperation,
 };
 pub use tree_operations::{
     evaluate_tree_operation, tree_operation_capabilities, LeafRole, TreeAuthzContext,

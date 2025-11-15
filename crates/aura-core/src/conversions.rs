@@ -71,7 +71,7 @@ impl FromJournalOperation for Cap {
             ("communication", "receive") => "protocol:execute",
             ("communication", "subscribe") => "protocol:execute",
 
-            // Relay operations  
+            // Relay operations
             ("relay", "forward") => "protocol:execute",
             ("relay", "store") => "storage:write",
             ("relay", "announce") => "admin", // Announcement requires admin

@@ -6,8 +6,8 @@
 
 use anyhow::{Context, Result};
 use aura_core::{Hash32, SemanticVersion};
-use aura_sync::maintenance::{UpgradeKind, UpgradeProposal};
 use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects};
+use aura_sync::maintenance::{UpgradeKind, UpgradeProposal};
 use uuid::Uuid;
 
 use crate::OtaAction;

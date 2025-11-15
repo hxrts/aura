@@ -595,23 +595,19 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "get_current_state" => {
-                let result =
-                    effects
-                        .get_current_state()
-                        .await
-                        .map_err(|e| AuraHandlerError::ExecutionFailed {
-                            source: Box::new(e),
-                        })?;
+                let result = effects.get_current_state().await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
                 Ok(bincode::serialize(&result).unwrap_or_default())
             }
             "get_current_commitment" => {
-                let result =
-                    effects
-                        .get_current_commitment()
-                        .await
-                        .map_err(|e| AuraHandlerError::ExecutionFailed {
-                            source: Box::new(e),
-                        })?;
+                let result = effects.get_current_commitment().await.map_err(|e| {
+                    AuraHandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
                 Ok(bincode::serialize(&result).unwrap_or_default())
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
@@ -728,8 +724,8 @@ impl UnifiedHandlerBridgeFactory {
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;
-    use aura_testkit::*;
     use aura_macros::aura_test;
+    use aura_testkit::*;
     use uuid::Uuid;
 
     #[aura_test]

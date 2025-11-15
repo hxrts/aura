@@ -111,6 +111,7 @@ pub mod handler_adapters;
 pub mod lifecycle;
 pub mod parallel_init;
 pub mod propagation;
+pub mod reliability;
 pub mod services;
 
 pub use allocations::{Arena, BufferPool, SmallVec, StringInterner, ZeroCopyString};
@@ -120,6 +121,7 @@ pub use executor::{EffectExecutor, EffectExecutorBuilder};
 pub use parallel_init::{
     HandlerPool, InitializationMetrics, LazyEffectSystem, ParallelInitBuilder,
 };
+pub use reliability::{CircuitBreakerConfig, ReliabilityCoordinator, RetryConfig};
 pub use services::{BudgetKey, ContextManager, FlowBudgetManager, ReceiptChain, ReceiptManager};
 // Stateless effect system
 pub use system::{AuraEffectSystem, EffectSystemConfig, StorageConfig};

@@ -10,7 +10,6 @@ description = "Secret-Branded Broadcasting (SBB) and rendezvous protocols for Au
 [dependencies]
 # Core Aura crates
 aura-core = { path = "../aura-core" }
-aura-crypto = { path = "../aura-crypto" }
 aura-wot = { path = "../aura-wot" }
 aura-transport = { path = "../aura-transport" }
 aura-protocol = { path = "../aura-protocol" }

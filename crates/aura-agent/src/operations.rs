@@ -434,7 +434,7 @@ impl AuthorizedAgentOperations {
     pub fn add_device_key(
         &mut self,
         device_id: DeviceId,
-        public_key: aura_crypto::Ed25519VerifyingKey,
+        public_key: aura_core::Ed25519VerifyingKey,
     ) {
         self.key_material.add_device_key(device_id, public_key);
     }
@@ -443,7 +443,7 @@ impl AuthorizedAgentOperations {
     pub fn add_guardian_key(
         &mut self,
         guardian_id: GuardianId,
-        public_key: aura_crypto::Ed25519VerifyingKey,
+        public_key: aura_core::Ed25519VerifyingKey,
     ) {
         self.key_material.add_guardian_key(guardian_id, public_key);
     }

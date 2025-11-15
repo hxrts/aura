@@ -99,8 +99,8 @@ impl SecurityContext {
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;
-    use aura_testkit::*;
     use aura_macros::aura_test;
+    use aura_testkit::*;
 
     #[aura_test]
     async fn test_effect_system_interface() -> aura_core::AuraResult<()> {

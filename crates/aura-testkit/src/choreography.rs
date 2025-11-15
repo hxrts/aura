@@ -9,9 +9,7 @@
 use crate::{DeviceTestFixture, TestEffectsBuilder, TestExecutionMode};
 use aura_core::DeviceId;
 use aura_protocol::{
-    choreography::AuraHandlerAdapter,
-    effects::AuraEffectSystem,
-    handlers::ExecutionMode,
+    choreography::AuraHandlerAdapter, effects::AuraEffectSystem, handlers::ExecutionMode,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -118,11 +116,12 @@ impl ChoreographyTestHarness {
                 }
             };
 
-            let effect_system = effects_builder.build().map_err(|e| {
-                TestError::ChoreographyExecution {
-                    reason: format!("Failed to create effect system: {}", e),
-                }
-            })?;
+            let effect_system =
+                effects_builder
+                    .build()
+                    .map_err(|e| TestError::ChoreographyExecution {
+                        reason: format!("Failed to create effect system: {}", e),
+                    })?;
             devices.push((fixture, effect_system));
         }
 

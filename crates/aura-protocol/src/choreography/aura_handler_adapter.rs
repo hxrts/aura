@@ -8,11 +8,11 @@ use crate::{
     guards::{FlowHint, LeakageBudget, ProtocolGuard},
     handlers::{AuraHandlerError, ExecutionMode},
 };
+use async_trait::async_trait;
 use aura_core::{relationships::ContextId, DeviceId, Receipt};
 use aura_wot::Capability;
-use async_trait::async_trait;
 use rumpsteak_aura_choreography::{
-    effects::{ChoreoHandler, Label, Result as ChoreoResult, ChoreographyError},
+    effects::{ChoreoHandler, ChoreographyError, Label, Result as ChoreoResult},
     session::Endpoint,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -52,7 +52,7 @@ pub struct AuraHandlerAdapter {
 
 impl AuraHandlerAdapter {
     /// Create a new adapter with an existing effect system (recommended)
-    /// 
+    ///
     /// This is the preferred method as it follows proper dependency injection.
     /// Use this instead of `new()` for better testability and control.
     pub fn with_effect_system(effect_system: AuraEffectSystem) -> Self {
@@ -60,7 +60,7 @@ impl AuraHandlerAdapter {
     }
 
     /// Create a new adapter for the specified execution mode
-    /// 
+    ///
     /// # Deprecated
     /// This method creates the effect system internally which makes testing difficult.
     /// Consider using `with_effect_system()` instead for better dependency injection.
@@ -77,8 +77,7 @@ impl AuraHandlerAdapter {
         };
 
         // Create effect system based on configuration
-        let effect_system = AuraEffectSystem::new(config)
-            .expect("Failed to create effect system");
+        let effect_system = AuraEffectSystem::new(config).expect("Failed to create effect system");
         Self::from_effect_system(effect_system)
     }
 
@@ -168,12 +167,16 @@ impl AuraHandlerAdapter {
 
         let flow_context = self.ensure_flow_context(&target_device);
         let flow_cost = guard_profile.flow_cost.max(1);
-        self.effect_system
-            .set_flow_hint(FlowHint::new(flow_context.clone(), target_device, flow_cost));
+        self.effect_system.set_flow_hint(FlowHint::new(
+            flow_context.clone(),
+            target_device,
+            flow_cost,
+        ));
 
         // Charge flow and generate receipt
         use crate::guards::flow::FlowBudgetEffects;
-        let _receipt = self.effect_system
+        let _receipt = self
+            .effect_system
             .charge_flow(&flow_context, &target_device, flow_cost)
             .await
             .map_err(|e| AuraHandlerError::ContextError {
@@ -261,7 +264,9 @@ impl ChoreoHandler for AuraHandlerAdapter {
         to: Self::Role,
         msg: &M,
     ) -> ChoreoResult<()> {
-        self.send(to, msg).await.map_err(|e| ChoreographyError::Transport(e.to_string()))
+        self.send(to, msg)
+            .await
+            .map_err(|e| ChoreographyError::Transport(e.to_string()))
     }
 
     /// Receive a strongly-typed message from a specific role
@@ -270,7 +275,9 @@ impl ChoreoHandler for AuraHandlerAdapter {
         _ep: &mut Self::Endpoint,
         from: Self::Role,
     ) -> ChoreoResult<M> {
-        self.recv_from(from).await.map_err(|e| ChoreographyError::Transport(e.to_string()))
+        self.recv_from(from)
+            .await
+            .map_err(|e| ChoreographyError::Transport(e.to_string()))
     }
 
     /// Internal choice: broadcast a label selection (for branch protocols)
@@ -281,14 +288,21 @@ impl ChoreoHandler for AuraHandlerAdapter {
         label: Label,
     ) -> ChoreoResult<()> {
         // Send the label as a choice message
-        let choice_msg = ChoiceMessage { label: label.clone() };
-        self.send(who, choice_msg).await.map_err(|e| ChoreographyError::Transport(e.to_string()))
+        let choice_msg = ChoiceMessage {
+            label: label.clone(),
+        };
+        self.send(who, choice_msg)
+            .await
+            .map_err(|e| ChoreographyError::Transport(e.to_string()))
     }
 
     /// External choice: receive a label selection (for branch protocols)
     async fn offer(&mut self, _ep: &mut Self::Endpoint, from: Self::Role) -> ChoreoResult<Label> {
         // Receive a choice message and extract the label
-        let choice_msg: ChoiceMessage = self.recv_from(from).await.map_err(|e| ChoreographyError::Transport(e.to_string()))?;
+        let choice_msg: ChoiceMessage = self
+            .recv_from(from)
+            .await
+            .map_err(|e| ChoreographyError::Transport(e.to_string()))?;
         Ok(choice_msg.label)
     }
 
@@ -320,17 +334,23 @@ pub struct AuraHandlerAdapterFactory;
 
 impl AuraHandlerAdapterFactory {
     /// Create adapter for testing - uses proper AuraHandler from aura-mpst
-    pub fn for_testing(device_id: DeviceId) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {
+    pub fn for_testing(
+        device_id: DeviceId,
+    ) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {
         aura_mpst::AuraHandler::for_testing(device_id)
     }
 
     /// Create adapter for production - uses proper AuraHandler from aura-mpst  
-    pub fn for_production(device_id: DeviceId) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {
+    pub fn for_production(
+        device_id: DeviceId,
+    ) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {
         aura_mpst::AuraHandler::for_production(device_id)
     }
 
     /// Create adapter for simulation - uses proper AuraHandler from aura-mpst
-    pub fn for_simulation(device_id: DeviceId) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {
+    pub fn for_simulation(
+        device_id: DeviceId,
+    ) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {
         aura_mpst::AuraHandler::for_simulation(device_id)
     }
 
@@ -353,8 +373,8 @@ impl AuraHandlerAdapterFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::*;
     use aura_macros::aura_test;
+    use aura_testkit::*;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -444,7 +464,7 @@ mod tests {
         let fixture_b = create_test_fixture().await?;
         let device_a = fixture_a.device_id();
         let device_b = fixture_b.device_id();
-        
+
         // Create adapters with proper testing setup
         let mut adapter_a = AuraHandlerAdapter::with_effect_system((*fixture_a.effects()).clone());
         let mut adapter_b = AuraHandlerAdapter::with_effect_system((*fixture_b.effects()).clone());

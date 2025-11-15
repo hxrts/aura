@@ -623,13 +623,21 @@ mod tests {
         let result = handler
             .execute_effect(EffectType::Random, "random_bytes", &param_bytes, &ctx)
             .await;
-        assert!(result.is_ok(), "random_bytes should be supported: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "random_bytes should be supported: {:?}",
+            result.err()
+        );
 
         let param_bytes = serde_json::to_vec(b"test data").unwrap();
         let result = handler
             .execute_effect(EffectType::Crypto, "hash_data", &param_bytes, &ctx)
             .await;
-        assert!(result.is_ok(), "hash_data should be supported: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "hash_data should be supported: {:?}",
+            result.err()
+        );
     }
 
     #[tokio::test]

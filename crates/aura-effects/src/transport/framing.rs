@@ -1,8 +1,6 @@
 //! Message Framing Handler
 //!
 //! Stateless message framing and serialization utilities.
-//! NO choreography - single-party effect handler only.
-//! Target: <200 lines, use serde ecosystem.
 
 use super::{TransportError, TransportResult};
 use serde::{Deserialize, Serialize};
@@ -72,16 +70,16 @@ impl FramingHandler {
         }
 
         let mut buffer = Vec::with_capacity(FRAME_HEADER_SIZE + frame.payload.len());
-        
+
         // Serialize header
         buffer.push(frame.header.frame_type as u8);
         buffer.extend_from_slice(&frame.header.payload_length.to_be_bytes());
         buffer.push(frame.header.flags);
         buffer.extend_from_slice(&frame.header.sequence.to_be_bytes());
-        
+
         // Add payload
         buffer.extend_from_slice(&frame.payload);
-        
+
         Ok(buffer)
     }
 
@@ -89,45 +87,57 @@ impl FramingHandler {
     pub fn deserialize_frame(&self, data: &[u8]) -> TransportResult<Frame> {
         if data.len() < FRAME_HEADER_SIZE {
             return Err(TransportError::Protocol(
-                "Insufficient data for frame header".to_string()
+                "Insufficient data for frame header".to_string(),
             ));
         }
 
         let mut cursor = 0;
-        
+
         // Parse header
         let frame_type = match data[cursor] {
             0 => FrameType::Data,
             1 => FrameType::Control,
             2 => FrameType::Heartbeat,
             3 => FrameType::Error,
-            other => return Err(TransportError::Protocol(
-                format!("Invalid frame type: {}", other)
-            )),
+            other => {
+                return Err(TransportError::Protocol(format!(
+                    "Invalid frame type: {}",
+                    other
+                )))
+            }
         };
         cursor += 1;
-        
+
         let payload_length = u32::from_be_bytes([
-            data[cursor], data[cursor + 1], data[cursor + 2], data[cursor + 3]
+            data[cursor],
+            data[cursor + 1],
+            data[cursor + 2],
+            data[cursor + 3],
         ]);
         cursor += 4;
-        
+
         let flags = data[cursor];
         cursor += 1;
-        
+
         let sequence = u64::from_be_bytes([
-            data[cursor], data[cursor + 1], data[cursor + 2], data[cursor + 3],
-            data[cursor + 4], data[cursor + 5], data[cursor + 6], data[cursor + 7],
+            data[cursor],
+            data[cursor + 1],
+            data[cursor + 2],
+            data[cursor + 3],
+            data[cursor + 4],
+            data[cursor + 5],
+            data[cursor + 6],
+            data[cursor + 7],
         ]);
         cursor += 8;
-        
+
         let header = FrameHeader {
             frame_type,
             payload_length,
             flags,
             sequence,
         };
-        
+
         // Validate payload length
         if payload_length as usize > self.max_frame_size {
             return Err(TransportError::Protocol(format!(
@@ -135,17 +145,17 @@ impl FramingHandler {
                 payload_length, self.max_frame_size
             )));
         }
-        
+
         let expected_total_size = FRAME_HEADER_SIZE + payload_length as usize;
         if data.len() < expected_total_size {
             return Err(TransportError::Protocol(
-                "Insufficient data for frame payload".to_string()
+                "Insufficient data for frame payload".to_string(),
             ));
         }
-        
+
         // Extract payload
         let payload = data[FRAME_HEADER_SIZE..expected_total_size].to_vec();
-        
+
         Ok(Frame { header, payload })
     }
 
@@ -167,29 +177,38 @@ impl FramingHandler {
     {
         // Read header first
         let mut header_bytes = [0u8; FRAME_HEADER_SIZE];
-        reader.read_exact(&mut header_bytes).await.map_err(TransportError::Io)?;
-        
+        reader
+            .read_exact(&mut header_bytes)
+            .await
+            .map_err(TransportError::Io)?;
+
         // Parse payload length from header
         let payload_length = u32::from_be_bytes([
-            header_bytes[1], header_bytes[2], header_bytes[3], header_bytes[4]
+            header_bytes[1],
+            header_bytes[2],
+            header_bytes[3],
+            header_bytes[4],
         ]) as usize;
-        
+
         if payload_length > self.max_frame_size {
             return Err(TransportError::Protocol(format!(
                 "Payload too large: {} > {}",
                 payload_length, self.max_frame_size
             )));
         }
-        
+
         // Read payload
         let mut payload_bytes = vec![0u8; payload_length];
-        reader.read_exact(&mut payload_bytes).await.map_err(TransportError::Io)?;
-        
+        reader
+            .read_exact(&mut payload_bytes)
+            .await
+            .map_err(TransportError::Io)?;
+
         // Combine and deserialize
         let mut frame_data = Vec::with_capacity(FRAME_HEADER_SIZE + payload_length);
         frame_data.extend_from_slice(&header_bytes);
         frame_data.extend_from_slice(&payload_bytes);
-        
+
         self.deserialize_frame(&frame_data)
     }
 
@@ -236,19 +255,26 @@ impl FramingHandler {
 /// JSON message serialization helpers
 impl FramingHandler {
     /// Serialize message as JSON frame
-    pub fn serialize_json<T: Serialize>(&self, message: &T, sequence: u64) -> TransportResult<Frame> {
+    pub fn serialize_json<T: Serialize>(
+        &self,
+        message: &T,
+        sequence: u64,
+    ) -> TransportResult<Frame> {
         let payload = serde_json::to_vec(message)?;
         Ok(self.create_data_frame(payload, sequence))
     }
 
     /// Deserialize JSON frame to message
-    pub fn deserialize_json<T: for<'de> Deserialize<'de>>(&self, frame: &Frame) -> TransportResult<T> {
+    pub fn deserialize_json<T: for<'de> Deserialize<'de>>(
+        &self,
+        frame: &Frame,
+    ) -> TransportResult<T> {
         if frame.header.frame_type != FrameType::Data {
             return Err(TransportError::Protocol(
-                "Expected data frame for JSON deserialization".to_string()
+                "Expected data frame for JSON deserialization".to_string(),
             ));
         }
-        
+
         let message = serde_json::from_slice(&frame.payload)?;
         Ok(message)
     }

@@ -4,7 +4,7 @@
 //! These tests ensure authentication is stateless and contains no authorization logic.
 
 use aura_core::{DeviceId, GuardianId};
-use aura_crypto::Ed25519SigningKey;
+use aura_core::Ed25519SigningKey;
 use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};
 use signature::Signer;
 use uuid::Uuid;

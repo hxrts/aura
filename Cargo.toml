@@ -9,7 +9,6 @@ members = [
     "crates/aura-verify",
     "crates/aura-protocol",
     "crates/aura-effects",
-    "crates/aura-crypto",
     "crates/aura-journal",
     "crates/aura-store",
     "crates/aura-transport",
@@ -99,8 +98,8 @@ subtle = "2.6"
 getrandom = "0.2"
 
 # Session types & choreographic programming
-rumpsteak-aura = { version = "0.3.1" }
-rumpsteak-aura-choreography = { version = "0.3.1" }
+rumpsteak-aura = "0.6.0"
+rumpsteak-aura-choreography = "0.6.0"
 
 # Additional dependencies for cryptography
 x25519-dalek = { version = "2.0", features = ["serde", "reusable_secrets", "static_secrets"] }

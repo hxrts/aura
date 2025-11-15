@@ -3,14 +3,13 @@
 //! This module provides utilities for controlling time in tests,
 //! including freezing time, advancing time, and time-based assertions.
 
+use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use once_cell::sync::Lazy;
 
 /// Global time controller for tests
-static TIME_CONTROLLER: Lazy<Arc<Mutex<TimeController>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(TimeController::new()))
-});
+static TIME_CONTROLLER: Lazy<Arc<Mutex<TimeController>>> =
+    Lazy::new(|| Arc::new(Mutex::new(TimeController::new())));
 
 /// Time controller for managing test time
 #[derive(Debug)]
@@ -28,7 +27,7 @@ impl TimeController {
             offset: Duration::ZERO,
         }
     }
-    
+
     fn current_time(&self) -> SystemTime {
         if let Some(frozen) = self.frozen_time {
             frozen
@@ -36,11 +35,11 @@ impl TimeController {
             SystemTime::now() + self.offset
         }
     }
-    
+
     fn freeze_at(&mut self, time: SystemTime) {
         self.frozen_time = Some(time);
     }
-    
+
     fn advance_by(&mut self, duration: Duration) {
         if let Some(ref mut frozen) = self.frozen_time {
             *frozen += duration;
@@ -48,7 +47,7 @@ impl TimeController {
             self.offset += duration;
         }
     }
-    
+
     fn reset(&mut self) {
         self.frozen_time = None;
         self.offset = Duration::ZERO;
@@ -101,7 +100,7 @@ impl TimeGuard {
         freeze_time_at_epoch();
         Self { _private: () }
     }
-    
+
     /// Create a new time guard that freezes time at current instant
     pub fn freeze() -> Self {
         freeze_time();
@@ -118,13 +117,10 @@ impl Drop for TimeGuard {
 /// Time-based test assertions
 pub mod assertions {
     use super::*;
-    use aura_core::{AuraResult, AuraError};
-    
+    use aura_core::{AuraError, AuraResult};
+
     /// Assert that an operation completes within a duration
-    pub async fn assert_completes_within<F, T>(
-        duration: Duration,
-        future: F,
-    ) -> AuraResult<T>
+    pub async fn assert_completes_within<F, T>(duration: Duration, future: F) -> AuraResult<T>
     where
         F: std::future::Future<Output = AuraResult<T>>,
     {
@@ -136,29 +132,26 @@ pub mod assertions {
             ))),
         }
     }
-    
+
     /// Assert that an operation takes at least a certain duration
-    pub async fn assert_takes_at_least<F, T>(
-        duration: Duration,
-        future: F,
-    ) -> AuraResult<T>
+    pub async fn assert_takes_at_least<F, T>(duration: Duration, future: F) -> AuraResult<T>
     where
         F: std::future::Future<Output = AuraResult<T>>,
     {
         let start = tokio::time::Instant::now();
         let result = future.await?;
         let elapsed = start.elapsed();
-        
+
         if elapsed < duration {
             return Err(AuraError::invalid(format!(
                 "Operation completed too quickly: {:?} < {:?}",
                 elapsed, duration
             )));
         }
-        
+
         Ok(result)
     }
-    
+
     /// Run a test with a specific time progression
     pub async fn with_time_progression<F, T>(
         steps: Vec<(Duration, Duration)>, // (advance_by, wait_for)
@@ -168,24 +161,23 @@ pub mod assertions {
         F: FnOnce() -> T,
     {
         freeze_time_at_epoch();
-        
+
         // Start the test
-        let result = tokio::spawn(async move {
-            test_fn()
-        });
-        
+        let result = tokio::spawn(async move { test_fn() });
+
         // Progress through time steps
         for (advance_by, wait_for) in steps {
             tokio::time::sleep(wait_for).await;
             advance_time_by(advance_by);
         }
-        
+
         // Get the result
-        let output = result.await
+        let output = result
+            .await
             .map_err(|e| AuraError::invalid(format!("Test panicked: {:?}", e)))?;
-        
+
         reset_time();
-        
+
         Ok(output)
     }
 }
@@ -193,27 +185,27 @@ pub mod assertions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_time_freeze() {
         let _guard = TimeGuard::freeze_at_epoch();
-        
+
         let time1 = current_test_time();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let time2 = current_test_time();
-        
+
         assert_eq!(time1, time2);
         assert_eq!(time1, UNIX_EPOCH);
     }
-    
+
     #[test]
     fn test_time_advance() {
         let _guard = TimeGuard::freeze_at_epoch();
-        
+
         let time1 = current_test_time();
         advance_time_by(Duration::from_secs(60));
         let time2 = current_test_time();
-        
+
         assert_eq!(
             time2.duration_since(time1).unwrap(),
             Duration::from_secs(60)

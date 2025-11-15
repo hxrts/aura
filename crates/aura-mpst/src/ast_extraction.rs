@@ -1,0 +1,301 @@
+//! Aura Annotation Extraction
+//!
+//! Simple annotation extraction utilities for Aura choreographic effects.
+//! Follows the rumpsteak-aura demo pattern for clean, simple annotation processing.
+
+/// Aura-specific effect that can be generated from annotations
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuraEffect {
+    /// Capability-based authorization requirement
+    GuardCapability {
+        /// The required capability string
+        capability: String,
+        /// The role that needs this capability  
+        role: String,
+    },
+    /// Flow budget cost for operations
+    FlowCost {
+        /// The cost in flow units
+        cost: u64,
+        /// The role that pays this cost
+        role: String,
+    },
+    /// Journal facts to be recorded
+    JournalFacts {
+        /// The facts to record
+        facts: String,
+        /// The role that records these facts
+        role: String,
+    },
+    /// Journal merge operation
+    JournalMerge {
+        /// The role that triggers the merge
+        role: String,
+    },
+    /// Audit log entry
+    AuditLog {
+        /// The action to log
+        action: String,
+        /// The role that performs the action
+        role: String,
+    },
+}
+
+/// Errors that can occur during annotation extraction
+#[derive(Debug, thiserror::Error)]
+pub enum AuraExtractionError {
+    /// Failed to parse an annotation
+    #[error("Annotation parse error: {0}")]
+    AnnotationParseError(String),
+    
+    /// Invalid annotation value
+    #[error("Invalid annotation value: {0}")]
+    InvalidAnnotationValue(String),
+    
+    /// Unsupported feature
+    #[error("Unsupported feature: {0}")]
+    UnsupportedFeature(String),
+}
+
+/// Extract Aura annotations from a choreography string
+/// 
+/// Simple pattern-based extraction following the rumpsteak-aura demo approach.
+/// This works with the extension system rather than trying to reparse the AST.
+pub fn extract_aura_annotations(choreography_str: &str) -> Result<Vec<AuraEffect>, AuraExtractionError> {
+    let mut effects = Vec::new();
+    
+    // Simple annotation detection for demonstration
+    detect_annotations_in_text(choreography_str, &mut effects)?;
+    
+    Ok(effects)
+}
+
+/// Generate Aura choreography code from extracted effects
+///
+/// This function takes the namespace, roles, and extracted effects and generates
+/// the appropriate code structures for integration with the Aura effect system.
+pub fn generate_aura_choreography_code(
+    namespace: &str,
+    roles: &[&str],
+    aura_effects: &[AuraEffect],
+) -> String {
+    let mut code = String::new();
+    
+    // Generate module header
+    code.push_str(&format!("pub mod {} {{\n", namespace));
+    
+    // Generate role enum
+    code.push_str("    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n");
+    code.push_str("    pub enum Role {\n");
+    for role in roles {
+        code.push_str(&format!("        {},\n", role));
+    }
+    code.push_str("    }\n\n");
+    
+    // Generate effect implementations
+    for effect in aura_effects {
+        match effect {
+            AuraEffect::GuardCapability { capability, role } => {
+                code.push_str(&format!(
+                    "    // Guard capability '{}' for role {}\n",
+                    capability, role
+                ));
+            }
+            AuraEffect::FlowCost { cost, role } => {
+                code.push_str(&format!(
+                    "    // Flow cost {} for role {}\n", 
+                    cost, role
+                ));
+            }
+            AuraEffect::JournalFacts { facts, role } => {
+                code.push_str(&format!(
+                    "    // Journal facts '{}' for role {}\n",
+                    facts, role
+                ));
+            }
+            AuraEffect::JournalMerge { role } => {
+                code.push_str(&format!(
+                    "    // Journal merge for role {}\n", 
+                    role
+                ));
+            }
+            AuraEffect::AuditLog { action, role } => {
+                code.push_str(&format!(
+                    "    // Audit log '{}' for role {}\n",
+                    action, role
+                ));
+            }
+        }
+    }
+    
+    code.push_str("}\n");
+    code
+}
+
+/// Detect annotations in choreography text (simple pattern matching)
+fn detect_annotations_in_text(
+    choreography_str: &str, 
+    effects: &mut Vec<AuraEffect>
+) -> Result<(), AuraExtractionError> {
+    // Simple pattern matching for demonstration
+    // Following the rumpsteak-aura demo approach
+    
+    for line in choreography_str.lines() {
+        if line.contains("guard_capability") {
+            if let Some(cap) = extract_capability_from_line(line) {
+                effects.push(AuraEffect::GuardCapability {
+                    capability: cap,
+                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
+                });
+            }
+        }
+        
+        if line.contains("flow_cost") {
+            if let Some(cost) = extract_flow_cost_from_line(line) {
+                effects.push(AuraEffect::FlowCost {
+                    cost,
+                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
+                });
+            }
+        }
+        
+        if line.contains("journal_facts") {
+            if let Some(facts) = extract_journal_facts_from_line(line) {
+                effects.push(AuraEffect::JournalFacts {
+                    facts,
+                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
+                });
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Extract role from a line - simple implementation
+fn extract_role_from_line(line: &str) -> Option<String> {
+    // Try to find role before brackets like "Alice[guard_capability = ...]"
+    if let Some(bracket_pos) = line.find('[') {
+        let before_bracket = line[..bracket_pos].trim();
+        if !before_bracket.is_empty() {
+            return Some(before_bracket.to_string());
+        }
+    }
+    None
+}
+
+fn extract_capability_from_line(line: &str) -> Option<String> {
+    // Extract capability value from line like: guard_capability = "send_message"
+    if let Some(start) = line.find("guard_capability") {
+        if let Some(quote_start) = line[start..].find('"') {
+            let quote_start = start + quote_start + 1;
+            if let Some(quote_end) = line[quote_start..].find('"') {
+                return Some(line[quote_start..quote_start + quote_end].to_string());
+            }
+        }
+    }
+    None
+}
+
+fn extract_flow_cost_from_line(line: &str) -> Option<u64> {
+    // Extract cost value from line like: flow_cost = 100 or Alice[flow_cost = 100]
+    if let Some(start) = line.find("flow_cost") {
+        if let Some(equals) = line[start..].find('=') {
+            let after_equals = start + equals + 1;
+            // Look for digits after the equals sign
+            let remaining = &line[after_equals..];
+            
+            // Handle both bracketed and non-bracketed values  
+            let value_str = remaining.trim().split(|c: char| c == ']' || c.is_whitespace()).next()?;
+            if let Ok(cost) = value_str.trim().parse::<u64>() {
+                return Some(cost);
+            }
+            
+            // Fallback: look for tokens in remaining string
+            for token in remaining.split_whitespace() {
+                if let Ok(cost) = token.trim_end_matches(&[',', ']'][..]).parse::<u64>() {
+                    return Some(cost);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_journal_facts_from_line(line: &str) -> Option<String> {
+    // Extract facts value from line like: journal_facts = "message_sent"
+    if let Some(start) = line.find("journal_facts") {
+        if let Some(quote_start) = line[start..].find('"') {
+            let quote_start = start + quote_start + 1;
+            if let Some(quote_end) = line[quote_start..].find('"') {
+                return Some(line[quote_start..quote_start + quote_end].to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_aura_effect_types() {
+        let guard_effect = AuraEffect::GuardCapability {
+            capability: "test_capability".to_string(),
+            role: "TestRole".to_string(),
+        };
+
+        match guard_effect {
+            AuraEffect::GuardCapability { capability, role } => {
+                assert_eq!(capability, "test_capability");
+                assert_eq!(role, "TestRole");
+            }
+            _ => panic!("Wrong effect type"),
+        }
+    }
+
+    #[test]
+    fn test_flow_cost_effect() {
+        let cost_effect = AuraEffect::FlowCost {
+            cost: 150,
+            role: "Coordinator".to_string(),
+        };
+
+        match cost_effect {
+            AuraEffect::FlowCost { cost, role } => {
+                assert_eq!(cost, 150);
+                assert_eq!(role, "Coordinator");
+            }
+            _ => panic!("Wrong effect type"),
+        }
+    }
+
+    #[test]
+    fn test_extract_capability_from_line() {
+        let line = r#"Alice[guard_capability = "send_message"] -> Bob: Message;"#;
+        let capability = extract_capability_from_line(line);
+        assert_eq!(capability, Some("send_message".to_string()));
+    }
+
+    #[test]
+    fn test_extract_flow_cost_from_line() {
+        let line = "Alice[flow_cost = 100] -> Bob: Message;";
+        let cost = extract_flow_cost_from_line(line);
+        assert_eq!(cost, Some(100));
+    }
+
+    #[test]
+    fn test_extract_journal_facts_from_line() {
+        let line = r#"Alice[journal_facts = "message_sent"] -> Bob: Message;"#;
+        let facts = extract_journal_facts_from_line(line);
+        assert_eq!(facts, Some("message_sent".to_string()));
+    }
+
+    #[test]
+    fn test_extract_role_from_line() {
+        let line = r#"Alice[guard_capability = "send_message"] -> Bob: Message;"#;
+        let role = extract_role_from_line(line);
+        assert_eq!(role, Some("Alice".to_string()));
+    }
+}

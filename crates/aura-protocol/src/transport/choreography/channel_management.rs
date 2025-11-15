@@ -5,7 +5,7 @@
 //! Target: <250 lines, focused on choreographic channel lifecycle.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
-use aura_core::{DeviceId, ContextId};
+use aura_core::{ContextId, DeviceId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -207,7 +207,7 @@ impl ChannelEstablishmentCoordinator {
             establishing_channels: HashMap::new(),
         }
     }
-    
+
     /// Initiate channel establishment
     pub fn initiate_establishment(
         &mut self,
@@ -217,17 +217,19 @@ impl ChannelEstablishmentCoordinator {
     ) -> ChoreographicResult<String> {
         if self.establishing_channels.len() >= self.config.max_concurrent_protocols {
             return Err(ChoreographicError::ExecutionFailed(
-                "Maximum concurrent establishments exceeded".to_string()
+                "Maximum concurrent establishments exceeded".to_string(),
             ));
         }
-        
+
         let channel_id = format!(
             "channel-{}-{}",
             self.device_id.to_hex()[..8].to_string(),
-            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default().as_millis()
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
         );
-        
+
         let establishment_state = ChannelEstablishmentState {
             channel_id: channel_id.clone(),
             participants: participants.clone(),
@@ -235,36 +237,41 @@ impl ChannelEstablishmentCoordinator {
             started_at: SystemTime::now(),
             confirmations: HashMap::new(),
         };
-        
-        self.establishing_channels.insert(channel_id.clone(), establishment_state);
+
+        self.establishing_channels
+            .insert(channel_id.clone(), establishment_state);
         Ok(channel_id)
     }
-    
+
     /// Process channel confirmation
     pub fn process_confirmation(
         &mut self,
         confirmation: ChannelConfirmation,
     ) -> ChoreographicResult<bool> {
-        let establishment = self.establishing_channels.get_mut(&confirmation.channel_id)
-            .ok_or_else(|| ChoreographicError::ExecutionFailed(
-                format!("Channel establishment not found: {}", confirmation.channel_id)
-            ))?;
-        
-        establishment.confirmations.insert(
-            confirmation.participant_id,
-            confirmation
-        );
-        
+        let establishment = self
+            .establishing_channels
+            .get_mut(&confirmation.channel_id)
+            .ok_or_else(|| {
+                ChoreographicError::ExecutionFailed(format!(
+                    "Channel establishment not found: {}",
+                    confirmation.channel_id
+                ))
+            })?;
+
+        establishment
+            .confirmations
+            .insert(confirmation.participant_id, confirmation);
+
         // Check if we have all confirmations
         let all_confirmed = establishment.confirmations.len() == establishment.participants.len();
-        
+
         if all_confirmed {
             establishment.phase = EstablishmentPhase::Finalizing;
         }
-        
+
         Ok(all_confirmed)
     }
-    
+
     /// Get establishment status
     pub fn get_establishment_status(&self, channel_id: &str) -> Option<&EstablishmentPhase> {
         self.establishing_channels.get(channel_id).map(|e| &e.phase)
@@ -280,7 +287,7 @@ impl ChannelTeardownCoordinator {
             tearing_down_channels: HashMap::new(),
         }
     }
-    
+
     /// Initiate channel teardown
     pub fn initiate_teardown(
         &mut self,
@@ -295,33 +302,38 @@ impl ChannelTeardownCoordinator {
             started_at: SystemTime::now(),
             acknowledgments: HashMap::new(),
         };
-        
-        self.tearing_down_channels.insert(channel_id, teardown_state);
+
+        self.tearing_down_channels
+            .insert(channel_id, teardown_state);
         Ok(())
     }
-    
+
     /// Process teardown acknowledgment
     pub fn process_acknowledgment(
         &mut self,
         acknowledgment: TeardownAcknowledgment,
     ) -> ChoreographicResult<bool> {
-        let teardown = self.tearing_down_channels.get_mut(&acknowledgment.channel_id)
-            .ok_or_else(|| ChoreographicError::ExecutionFailed(
-                format!("Channel teardown not found: {}", acknowledgment.channel_id)
-            ))?;
-        
-        teardown.acknowledgments.insert(
-            acknowledgment.participant_id,
-            acknowledgment
-        );
-        
+        let teardown = self
+            .tearing_down_channels
+            .get_mut(&acknowledgment.channel_id)
+            .ok_or_else(|| {
+                ChoreographicError::ExecutionFailed(format!(
+                    "Channel teardown not found: {}",
+                    acknowledgment.channel_id
+                ))
+            })?;
+
+        teardown
+            .acknowledgments
+            .insert(acknowledgment.participant_id, acknowledgment);
+
         // Check if we have all acknowledgments
         let all_acknowledged = teardown.acknowledgments.len() == teardown.participants.len();
-        
+
         if all_acknowledged {
             teardown.phase = TeardownPhase::TornDown;
         }
-        
+
         Ok(all_acknowledged)
     }
 }
@@ -332,34 +344,34 @@ choreography! {
     #[namespace = "channel_establishment"]
     protocol ChannelEstablishmentProtocol {
         roles: Coordinator, Participant1, Participant2;
-        
+
         // Phase 1: Request channel establishment
         Coordinator[guard_capability = "coordinate_channel_establishment",
                    flow_cost = 200,
                    journal_facts = "channel_establishment_initiated"]
         -> Participant1: ChannelEstablishmentRequest(ChannelEstablishmentRequest);
-        
+
         Coordinator[guard_capability = "coordinate_channel_establishment",
                    flow_cost = 200]
         -> Participant2: ChannelEstablishmentRequest(ChannelEstablishmentRequest);
-        
+
         // Phase 2: Participants confirm with resource allocation
         Participant1[guard_capability = "confirm_channel_participation",
                     flow_cost = 150,
                     journal_facts = "channel_participation_confirmed"]
         -> Coordinator: ChannelConfirmation(ChannelConfirmation);
-        
+
         Participant2[guard_capability = "confirm_channel_participation",
                     flow_cost = 150,
                     journal_facts = "channel_participation_confirmed"]
         -> Coordinator: ChannelConfirmation(ChannelConfirmation);
-        
+
         // Phase 3: Coordinator finalizes channel establishment
         Coordinator[guard_capability = "finalize_channel_establishment",
                    flow_cost = 100,
                    journal_facts = "channel_establishment_finalized"]
         -> Participant1: ChannelFinalization(ChannelFinalization);
-        
+
         Coordinator[guard_capability = "finalize_channel_establishment",
                    flow_cost = 100,
                    journal_facts = "channel_establishment_finalized"]
@@ -372,23 +384,23 @@ choreography! {
     #[namespace = "channel_teardown"]
     protocol ChannelTeardownProtocol {
         roles: Initiator, Participant1, Participant2;
-        
+
         // Phase 1: Request channel teardown
         Initiator[guard_capability = "initiate_channel_teardown",
                  flow_cost = 120,
                  journal_facts = "channel_teardown_initiated"]
         -> Participant1: ChannelTeardownRequest(ChannelTeardownRequest);
-        
+
         Initiator[guard_capability = "initiate_channel_teardown",
                  flow_cost = 120]
         -> Participant2: ChannelTeardownRequest(ChannelTeardownRequest);
-        
+
         // Phase 2: Participants acknowledge and perform cleanup
         Participant1[guard_capability = "acknowledge_channel_teardown",
                     flow_cost = 100,
                     journal_facts = "channel_teardown_acknowledged"]
         -> Initiator: TeardownAcknowledgment(TeardownAcknowledgment);
-        
+
         Participant2[guard_capability = "acknowledge_channel_teardown",
                     flow_cost = 100,
                     journal_facts = "channel_teardown_acknowledged"]

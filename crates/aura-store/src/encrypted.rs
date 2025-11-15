@@ -51,11 +51,7 @@ impl EncryptedStorageHandler {
 }
 
 impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
-    fn store(
-        &self,
-        key: &str,
-        value: Vec<u8>,
-    ) -> Result<(), aura_core::effects::StorageError> {
+    fn store(&self, key: &str, value: Vec<u8>) -> Result<(), aura_core::effects::StorageError> {
         let mut storage = self.storage.write().unwrap();
         storage
             .chunks
@@ -63,10 +59,7 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
         Ok(())
     }
 
-    fn retrieve(
-        &self,
-        key: &str,
-    ) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
+    fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
         let storage = self.storage.read().unwrap();
         let chunk_id = ChunkId::from_bytes(key.as_bytes());
         Ok(storage.chunks.get(&chunk_id).cloned())
@@ -127,9 +120,7 @@ impl aura_core::effects::StorageEffects for EncryptedStorageHandler {
         Ok(())
     }
 
-    fn stats(
-        &self,
-    ) -> Result<aura_core::effects::StorageStats, aura_core::effects::StorageError> {
+    fn stats(&self) -> Result<aura_core::effects::StorageStats, aura_core::effects::StorageError> {
         let storage = self.storage.read().unwrap();
         let total_size: u64 = storage.chunks.values().map(|v| v.len() as u64).sum();
 

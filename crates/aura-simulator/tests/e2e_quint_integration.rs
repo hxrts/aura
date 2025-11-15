@@ -2,11 +2,11 @@
 //!
 //! This test validates the basic simulator middleware stack
 
+use aura_macros::aura_test;
 use aura_simulator::{
     CoreSimulatorHandler, Duration, Result, ScenarioInjectionMiddleware, SimulatorContext,
     SimulatorOperation, SimulatorStackBuilder,
 };
-use aura_macros::aura_test;
 use std::sync::Arc;
 
 #[aura_test]

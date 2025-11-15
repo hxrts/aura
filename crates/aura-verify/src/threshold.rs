@@ -5,7 +5,7 @@
 
 use crate::{AuthenticationError, Result};
 use aura_core::DeviceId;
-use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
+use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 
 /// Verify that a threshold of devices signed a message
 ///
@@ -40,7 +40,7 @@ pub fn verify_threshold_signature(
 
     // Verify using FROST-compatible signature verification
     // FROST signatures are compatible with standard Ed25519 verification
-    aura_crypto::ed25519_verify(group_public_key, message, threshold_sig).map_err(|e| {
+    aura_core::ed25519_verify(group_public_key, message, threshold_sig).map_err(|e| {
         AuthenticationError::InvalidThresholdSignature(format!(
             "FROST threshold signature verification failed: {}",
             e
@@ -78,7 +78,7 @@ pub fn verify_threshold_signature_with_signers(
     group_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
     // First verify the signature itself using FROST-compatible verification
-    aura_crypto::ed25519_verify(group_public_key, message, threshold_sig).map_err(|e| {
+    aura_core::ed25519_verify(group_public_key, message, threshold_sig).map_err(|e| {
         AuthenticationError::InvalidThresholdSignature(format!(
             "FROST threshold signature verification failed: {}",
             e
@@ -99,7 +99,7 @@ pub fn verify_threshold_signature_with_signers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_crypto::Effects;
+    use aura_core::Effects;
     use aura_core::DeviceId;
     use uuid::Uuid;
 
@@ -108,10 +108,10 @@ mod tests {
         let _effects = Effects::test();
 
         // Create a test signature
-        let signing_key = aura_crypto::generate_ed25519_key();
-        let verifying_key = aura_crypto::ed25519_verifying_key(&signing_key);
+        let signing_key = aura_core::generate_ed25519_key();
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
         let message = b"test threshold message";
-        let signature = aura_crypto::ed25519_sign(&signing_key, message);
+        let signature = aura_core::ed25519_sign(&signing_key, message);
         let min_signers = 1;
 
         let result = verify_threshold_signature(message, &signature, &verifying_key, min_signers);
@@ -123,10 +123,10 @@ mod tests {
     fn test_verify_threshold_signature_insufficient_signers() {
         let _effects = Effects::test();
 
-        let signing_key = aura_crypto::generate_ed25519_key();
-        let verifying_key = aura_crypto::ed25519_verifying_key(&signing_key);
+        let signing_key = aura_core::generate_ed25519_key();
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
         let message = b"test threshold message";
-        let signature = aura_crypto::ed25519_sign(&signing_key, message);
+        let signature = aura_core::ed25519_sign(&signing_key, message);
         let min_signers = 2; // Require more than available (Ed25519 is single signature)
 
         let result = verify_threshold_signature(message, &signature, &verifying_key, min_signers);
@@ -144,10 +144,10 @@ mod tests {
 
         let expected_signers = vec![DeviceId(Uuid::new_v4())];
 
-        let signing_key = aura_crypto::generate_ed25519_key();
-        let verifying_key = aura_crypto::ed25519_verifying_key(&signing_key);
+        let signing_key = aura_core::generate_ed25519_key();
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
         let message = b"test threshold message";
-        let signature = aura_crypto::ed25519_sign(&signing_key, message);
+        let signature = aura_core::ed25519_sign(&signing_key, message);
 
         let result = verify_threshold_signature_with_signers(
             message,

@@ -26,7 +26,7 @@
 //! - **Atomic Updates**: Either all participants get new shares or none do
 
 use aura_core::{AccountId, DeviceId};
-use aura_crypto::frost::PublicKeyPackage;
+use aura_core::frost::PublicKeyPackage;
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 

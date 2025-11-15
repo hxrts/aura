@@ -12,8 +12,8 @@ use aura_invitation::{
     invitation_acceptance::InvitationAcceptanceCoordinator,
 };
 use aura_journal::semilattice::InvitationLedger;
-use aura_protocol::effects::AuraEffectSystem;
 use aura_macros::aura_test;
+use aura_protocol::effects::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -38,19 +38,13 @@ async fn invitation_lifecycle() -> aura_core::AuraResult<()> {
     let invitee_effects = invitee_fixture.effect_system();
     let shared_ledger = Arc::new(Mutex::new(InvitationLedger::new()));
 
-    let coordinator = DeviceInvitationCoordinator::with_ledger(
-        inviter_effects,
-        shared_ledger.clone(),
-    );
+    let coordinator =
+        DeviceInvitationCoordinator::with_ledger(inviter_effects, shared_ledger.clone());
     let request = sample_request(DeviceId(Uuid::new_v4()));
-    let response = coordinator
-        .invite_device(request.clone())
-        .await?;
+    let response = coordinator.invite_device(request.clone()).await?;
 
-    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_ledger(
-        invitee_effects,
-        shared_ledger.clone(),
-    );
+    let acceptance_coordinator =
+        InvitationAcceptanceCoordinator::with_ledger(invitee_effects, shared_ledger.clone());
     let acceptance = acceptance_coordinator
         .accept_invitation(response.invitation.clone())
         .await?;

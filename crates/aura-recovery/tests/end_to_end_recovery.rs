@@ -7,13 +7,13 @@
 
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId, TrustLevel};
+use aura_macros::aura_test;
 use aura_protocol::effects::AuraEffectSystem;
 use aura_recovery::{
     GuardianKeyRecoveryCoordinator, GuardianMembershipCoordinator, GuardianProfile, GuardianSet,
     GuardianSetupCoordinator, MembershipChange, MembershipChangeRequest, RecoveryRequest,
 };
 use std::time::SystemTime;
-use aura_macros::aura_test;
 
 /// Helper to create guardian profile
 fn create_guardian(device_id: DeviceId, label: &str) -> GuardianProfile {
@@ -62,9 +62,7 @@ async fn test_guardian_setup() -> aura_core::AuraResult<()> {
     };
 
     // Execute setup
-    let response = coordinator
-        .execute_setup(request)
-        .await?;
+    let response = coordinator.execute_setup(request).await?;
 
     assert!(response.success, "Setup should be successful");
     assert_eq!(
@@ -99,9 +97,7 @@ async fn test_guardian_key_recovery() -> aura_core::AuraResult<()> {
     };
 
     // Execute key recovery
-    let response = coordinator
-        .execute_key_recovery(request)
-        .await?;
+    let response = coordinator.execute_key_recovery(request).await?;
 
     assert!(response.success, "Recovery should be successful");
     assert_eq!(
@@ -148,9 +144,7 @@ async fn test_guardian_membership_add() -> aura_core::AuraResult<()> {
     };
 
     // Execute membership change
-    let response = coordinator
-        .execute_membership_change(request)
-        .await?;
+    let response = coordinator.execute_membership_change(request).await?;
 
     assert!(response.success, "Membership change should be successful");
     assert_eq!(
@@ -192,9 +186,7 @@ async fn test_guardian_membership_remove() -> aura_core::AuraResult<()> {
     };
 
     // Execute membership change
-    let response = coordinator
-        .execute_membership_change(request)
-        .await?;
+    let response = coordinator.execute_membership_change(request).await?;
 
     assert!(response.success, "Membership change should be successful");
     assert_eq!(
@@ -228,9 +220,7 @@ async fn test_insufficient_threshold_failure() -> aura_core::AuraResult<()> {
     };
 
     // Execute key recovery
-    let response = coordinator
-        .execute_key_recovery(request)
-        .await?;
+    let response = coordinator.execute_key_recovery(request).await?;
 
     assert!(!response.success, "Recovery should fail");
     assert!(response.error.is_some(), "Should have error message");

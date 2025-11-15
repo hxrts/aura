@@ -466,8 +466,8 @@ pub struct StorageStats {
 mod tests {
     use super::*;
     use aura_core::DeviceId;
-    use aura_protocol::effects::AuraEffectSystem;
     use aura_macros::aura_test;
+    use aura_protocol::effects::AuraEffectSystem;
 
     #[aura_test]
     async fn test_storage_operations() -> aura_core::AuraResult<()> {
@@ -504,7 +504,7 @@ mod tests {
         storage.delete_data("specific").await?;
         let after_delete = storage.retrieve_data("specific").await?;
         assert_eq!(after_delete, None);
-        
+
         Ok(())
     }
 
@@ -538,7 +538,7 @@ mod tests {
         // Verify restored
         let keys_after_restore = storage.list_keys().await?;
         assert_eq!(keys_after_restore.len(), 2);
-        
+
         Ok(())
     }
 }

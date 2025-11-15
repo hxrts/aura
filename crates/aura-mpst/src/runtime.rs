@@ -7,12 +7,12 @@ use crate::{
     CapabilityGuard, ContextIsolation, JournalAnnotation, LeakageTracker, MpstError, MpstResult,
 };
 use async_trait::async_trait;
-use aura_core::{Cap, DeviceId, Journal, JournalEffects, ContextId};
+use aura_core::{Cap, ContextId, DeviceId, Journal, JournalEffects};
 use rumpsteak_aura_choreography::effects::{
-    ChoreoHandler, ExtensibleHandler, ExtensionRegistry, 
-    ChoreographyError, Label, Result as ChoreoResult
+    ChoreoHandler, ChoreographyError, ExtensibleHandler, ExtensionRegistry, Label,
+    Result as ChoreoResult,
 };
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -460,7 +460,7 @@ impl AuraHandler {
     pub fn for_testing(device_id: DeviceId) -> Result<Self, MpstError> {
         let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
-        
+
         Ok(Self {
             runtime,
             extension_registry,
@@ -474,7 +474,7 @@ impl AuraHandler {
     pub fn for_production(device_id: DeviceId) -> Result<Self, MpstError> {
         let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
-        
+
         Ok(Self {
             runtime,
             extension_registry,
@@ -488,7 +488,7 @@ impl AuraHandler {
     pub fn for_simulation(device_id: DeviceId) -> Result<Self, MpstError> {
         let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
-        
+
         Ok(Self {
             runtime,
             extension_registry,
@@ -501,20 +501,22 @@ impl AuraHandler {
     /// Create the extension registry with Aura handlers
     fn create_extension_registry() -> ExtensionRegistry<AuraEndpoint> {
         use rumpsteak_aura_choreography::effects::extension::ExtensionError;
-        
+
         let mut registry = ExtensionRegistry::new();
-        
+
         // Register ValidateCapability handler
         registry.register::<crate::extensions::ValidateCapability, _>(
-            |endpoint: &mut AuraEndpoint, ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
+            |endpoint: &mut AuraEndpoint,
+             ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
                 Box::pin(async move {
-                    let validate_cap = ext.as_any()
+                    let validate_cap = ext
+                        .as_any()
                         .downcast_ref::<crate::extensions::ValidateCapability>()
                         .ok_or_else(|| ExtensionError::TypeMismatch {
                             expected: "ValidateCapability",
                             actual: ext.type_name(),
                         })?;
-                    
+
                     // TODO: Implement capability validation logic
                     // For now, just log the capability check
                     tracing::debug!(
@@ -523,23 +525,25 @@ impl AuraHandler {
                         role = %validate_cap.role,
                         "Validating capability"
                     );
-                    
+
                     Ok(())
                 })
-            }
+            },
         );
-        
+
         // Register ChargeFlowCost handler
         registry.register::<crate::extensions::ChargeFlowCost, _>(
-            |endpoint: &mut AuraEndpoint, ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
+            |endpoint: &mut AuraEndpoint,
+             ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
                 Box::pin(async move {
-                    let flow_cost = ext.as_any()
+                    let flow_cost = ext
+                        .as_any()
                         .downcast_ref::<crate::extensions::ChargeFlowCost>()
                         .ok_or_else(|| ExtensionError::TypeMismatch {
                             expected: "ChargeFlowCost",
                             actual: ext.type_name(),
                         })?;
-                    
+
                     // TODO: Implement flow cost charging logic
                     // For now, just log the flow cost charge
                     tracing::debug!(
@@ -549,23 +553,25 @@ impl AuraHandler {
                         role = %flow_cost.role,
                         "Charging flow cost"
                     );
-                    
+
                     Ok(())
                 })
-            }
+            },
         );
-        
+
         // Register JournalFact handler
         registry.register::<crate::extensions::JournalFact, _>(
-            |endpoint: &mut AuraEndpoint, ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
+            |endpoint: &mut AuraEndpoint,
+             ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
                 Box::pin(async move {
-                    let journal_fact = ext.as_any()
+                    let journal_fact = ext
+                        .as_any()
                         .downcast_ref::<crate::extensions::JournalFact>()
                         .ok_or_else(|| ExtensionError::TypeMismatch {
                             expected: "JournalFact",
                             actual: ext.type_name(),
                         })?;
-                    
+
                     // TODO: Implement journal fact recording logic
                     // For now, just log the journal fact
                     tracing::debug!(
@@ -575,23 +581,25 @@ impl AuraHandler {
                         role = %journal_fact.role,
                         "Recording journal fact"
                     );
-                    
+
                     Ok(())
                 })
-            }
+            },
         );
-        
+
         // Register JournalMerge handler
         registry.register::<crate::extensions::JournalMerge, _>(
-            |endpoint: &mut AuraEndpoint, ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
+            |endpoint: &mut AuraEndpoint,
+             ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
                 Box::pin(async move {
-                    let journal_merge = ext.as_any()
+                    let journal_merge = ext
+                        .as_any()
                         .downcast_ref::<crate::extensions::JournalMerge>()
                         .ok_or_else(|| ExtensionError::TypeMismatch {
                             expected: "JournalMerge",
                             actual: ext.type_name(),
                         })?;
-                    
+
                     // TODO: Implement journal merge logic
                     // For now, just log the journal merge operation
                     tracing::debug!(
@@ -600,23 +608,25 @@ impl AuraHandler {
                         roles = ?journal_merge.roles,
                         "Executing journal merge"
                     );
-                    
+
                     Ok(())
                 })
-            }
+            },
         );
-        
+
         // Register ExecuteGuardChain handler
         registry.register::<crate::extensions::ExecuteGuardChain, _>(
-            |endpoint: &mut AuraEndpoint, ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
+            |endpoint: &mut AuraEndpoint,
+             ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
                 Box::pin(async move {
-                    let guard_chain = ext.as_any()
+                    let guard_chain = ext
+                        .as_any()
                         .downcast_ref::<crate::extensions::ExecuteGuardChain>()
                         .ok_or_else(|| ExtensionError::TypeMismatch {
                             expected: "ExecuteGuardChain",
                             actual: ext.type_name(),
                         })?;
-                    
+
                     // TODO: Implement guard chain execution logic
                     // For now, just log the guard chain execution
                     tracing::debug!(
@@ -626,23 +636,25 @@ impl AuraHandler {
                         role = %guard_chain.role,
                         "Executing guard chain"
                     );
-                    
+
                     Ok(())
                 })
-            }
+            },
         );
-        
+
         // Register CompositeExtension handler
         registry.register::<crate::extensions::CompositeExtension, _>(
-            |endpoint: &mut AuraEndpoint, ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
+            |endpoint: &mut AuraEndpoint,
+             ext: &dyn rumpsteak_aura_choreography::effects::ExtensionEffect| {
                 Box::pin(async move {
-                    let composite = ext.as_any()
+                    let composite = ext
+                        .as_any()
                         .downcast_ref::<crate::extensions::CompositeExtension>()
                         .ok_or_else(|| ExtensionError::TypeMismatch {
                             expected: "CompositeExtension",
                             actual: ext.type_name(),
                         })?;
-                    
+
                     tracing::debug!(
                         device_id = ?endpoint.device_id,
                         extension_count = composite.extensions.len(),
@@ -650,7 +662,7 @@ impl AuraHandler {
                         role = %composite.role,
                         "Executing composite extension"
                     );
-                    
+
                     // Execute all contained extensions in sequence
                     for contained_ext in composite.extensions() {
                         match contained_ext {
@@ -699,12 +711,12 @@ impl AuraHandler {
                             }
                         }
                     }
-                    
+
                     Ok(())
                 })
-            }
+            },
         );
-        
+
         registry
     }
 
@@ -747,22 +759,30 @@ impl ChoreoHandler for AuraHandler {
     ) -> ChoreoResult<()> {
         // Validate connection
         if !endpoint.is_connected_to(to) {
-            return Err(ChoreographyError::Transport(format!("No active connection to device {}", to)));
+            return Err(ChoreographyError::Transport(format!(
+                "No active connection to device {}",
+                to
+            )));
         }
 
         // Check capability guards (simplified - full implementation in Priority 2)
-        self.runtime.check_guards()
-            .map_err(|e| ChoreographyError::ProtocolViolation(format!("Guard check failed: {}", e)))?;
+        self.runtime.check_guards().map_err(|e| {
+            ChoreographyError::ProtocolViolation(format!("Guard check failed: {}", e))
+        })?;
 
         // TODO: Apply extension effects for this message
         // TODO: Charge flow budgets
         // TODO: Update journal with facts
-        
+
         // Simulate message sending based on execution mode
         match self.execution_mode {
             ExecutionMode::Testing => {
-                println!("TEST SEND: {} -> {}: {} bytes", endpoint.device_id, to, 
-                    serde_json::to_string(msg).unwrap_or_default().len());
+                println!(
+                    "TEST SEND: {} -> {}: {} bytes",
+                    endpoint.device_id,
+                    to,
+                    serde_json::to_string(msg).unwrap_or_default().len()
+                );
             }
             ExecutionMode::Production => {
                 // TODO: Integrate with actual NetworkEffects
@@ -784,23 +804,35 @@ impl ChoreoHandler for AuraHandler {
     ) -> ChoreoResult<M> {
         // Validate connection
         if !endpoint.is_connected_to(from) {
-            return Err(ChoreographyError::Transport(format!("No active connection to device {}", from)));
+            return Err(ChoreographyError::Transport(format!(
+                "No active connection to device {}",
+                from
+            )));
         }
 
         // Simulate message receiving based on execution mode
         match self.execution_mode {
             ExecutionMode::Testing => {
-                println!("TEST RECV: {} <- {}: waiting for message", endpoint.device_id, from);
+                println!(
+                    "TEST RECV: {} <- {}: waiting for message",
+                    endpoint.device_id, from
+                );
                 // TODO: Return mock message for testing
-                return Err(ChoreographyError::Transport("Mock message receiving not implemented".to_string()));
+                return Err(ChoreographyError::Transport(
+                    "Mock message receiving not implemented".to_string(),
+                ));
             }
             ExecutionMode::Production => {
                 // TODO: Integrate with actual NetworkEffects
-                return Err(ChoreographyError::Transport("Production message receiving not implemented".to_string()));
+                return Err(ChoreographyError::Transport(
+                    "Production message receiving not implemented".to_string(),
+                ));
             }
             ExecutionMode::Simulation => {
                 // TODO: Add fault injection
-                return Err(ChoreographyError::Transport("Simulation message receiving not implemented".to_string()));
+                return Err(ChoreographyError::Transport(
+                    "Simulation message receiving not implemented".to_string(),
+                ));
             }
         }
     }
@@ -821,7 +853,9 @@ impl ChoreoHandler for AuraHandler {
         _from: Self::Role,
     ) -> ChoreoResult<Label> {
         // TODO: Implement choice offering
-        Err(ChoreographyError::Transport("Choice offering not implemented".to_string()))
+        Err(ChoreographyError::Transport(
+            "Choice offering not implemented".to_string(),
+        ))
     }
 
     async fn with_timeout<F, T>(
@@ -835,7 +869,9 @@ impl ChoreoHandler for AuraHandler {
         F: std::future::Future<Output = ChoreoResult<T>> + Send,
     {
         // TODO: Implement timeout support
-        Err(ChoreographyError::Transport("Timeout not implemented".to_string()))
+        Err(ChoreographyError::Transport(
+            "Timeout not implemented".to_string(),
+        ))
     }
 }
 

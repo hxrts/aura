@@ -13,9 +13,9 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use aura_core::{AuraResult, AuraError};
+use aura_core::{AuraError, AuraResult};
 
-use super::lifecycle::{LifecycleAware, HealthStatus};
+use super::lifecycle::{HealthStatus, LifecycleAware};
 
 /// A type-erased container for storing effect handlers
 type AnyHandler = Arc<dyn Any + Send + Sync>;
@@ -69,7 +69,8 @@ impl EffectContainer {
     where
         T: Send + Sync + 'static,
     {
-        self.register_with_scope(BindingScope::Singleton, builder).await;
+        self.register_with_scope(BindingScope::Singleton, builder)
+            .await;
     }
 
     /// Register a handler type with transient scope
@@ -77,7 +78,8 @@ impl EffectContainer {
     where
         T: Send + Sync + 'static,
     {
-        self.register_with_scope(BindingScope::Transient, builder).await;
+        self.register_with_scope(BindingScope::Transient, builder)
+            .await;
     }
 
     /// Register a handler type with specific scope
@@ -85,8 +87,7 @@ impl EffectContainer {
         &self,
         scope: BindingScope,
         builder: impl Fn() -> T + Send + Sync + 'static,
-    )
-    where
+    ) where
         T: Send + Sync + 'static,
     {
         let type_id = TypeId::of::<T>();
@@ -128,7 +129,10 @@ impl EffectContainer {
         let mut bindings = self.bindings.write().await;
         bindings.insert(type_id, binding);
 
-        debug!("Registered instance for type {:?}", std::any::type_name::<T>());
+        debug!(
+            "Registered instance for type {:?}",
+            std::any::type_name::<T>()
+        );
     }
 
     /// Resolve a handler instance
@@ -141,9 +145,9 @@ impl EffectContainer {
 
         // Check if binding exists
         let bindings = self.bindings.read().await;
-        let binding = bindings
-            .get(&type_id)
-            .ok_or_else(|| AuraError::invalid(format!("No binding found for type {}", type_name)))?;
+        let binding = bindings.get(&type_id).ok_or_else(|| {
+            AuraError::invalid(format!("No binding found for type {}", type_name))
+        })?;
 
         match binding.scope {
             BindingScope::Singleton => {
@@ -154,29 +158,31 @@ impl EffectContainer {
                         .downcast::<T>()
                         .map_err(|_| AuraError::invalid("Type mismatch in singleton instance"));
                 }
-                
+
                 // Need to create singleton - drop read lock and acquire write lock
                 drop(bindings);
                 let mut bindings = self.bindings.write().await;
-                
+
                 // Re-check in case another thread created it
                 if let Some(binding) = bindings.get_mut(&type_id) {
                     if let Some(ref instance) = binding.singleton_instance {
-                        return instance
-                            .clone()
-                            .downcast::<T>()
-                            .map_err(|_| AuraError::invalid("Type mismatch in singleton instance"));
+                        return instance.clone().downcast::<T>().map_err(|_| {
+                            AuraError::invalid("Type mismatch in singleton instance")
+                        });
                     }
-                    
+
                     // Create singleton instance
                     let instance = (binding.builder)();
                     binding.singleton_instance = Some(instance.clone());
-                    
+
                     instance
                         .downcast::<T>()
                         .map_err(|_| AuraError::invalid("Type mismatch in created singleton"))
                 } else {
-                    Err(AuraError::invalid(format!("Binding disappeared for type {}", type_name)))
+                    Err(AuraError::invalid(format!(
+                        "Binding disappeared for type {}",
+                        type_name
+                    )))
                 }
             }
 
@@ -211,10 +217,10 @@ impl EffectContainer {
                 // Create scoped instance
                 drop(scoped);
                 let mut scoped = self.scoped_instances.write().await;
-                
+
                 let instance = (binding.builder)();
                 scoped.insert(key, instance.clone());
-                
+
                 instance
                     .downcast::<T>()
                     .map_err(|_| AuraError::invalid("Type mismatch in created scoped instance"))
@@ -234,7 +240,7 @@ impl EffectContainer {
             // Clear scoped instances
             let mut scoped = self.scoped_instances.write().await;
             scoped.retain(|(_, sid), _| *sid != scope_id);
-            
+
             *self.current_scope.write().await = None;
             info!("Exited scope {}", scope_id);
         }
@@ -306,23 +312,33 @@ impl TestFixture {
     /// Build fixture with mock handlers
     pub async fn with_mocks(self) -> EffectContainer {
         use aura_effects::{
-            crypto::MockCryptoHandler,
-            network::MockNetworkHandler,
-            storage::MemoryStorageHandler,
+            console::MockConsoleHandler, crypto::MockCryptoHandler, journal::MemoryJournalHandler,
+            network::MockNetworkHandler, random::MockRandomHandler, storage::MemoryStorageHandler,
             time::SimulatedTimeHandler,
-            console::MockConsoleHandler,
-            random::MockRandomHandler,
-            journal::MemoryJournalHandler,
         };
 
         // Register all mock handlers
-        self.container.register_singleton(|| MockCryptoHandler::new(42)).await;
-        self.container.register_singleton(MockNetworkHandler::new).await;
-        self.container.register_singleton(MemoryStorageHandler::new).await;
-        self.container.register_singleton(SimulatedTimeHandler::new_at_epoch).await;
-        self.container.register_singleton(MockConsoleHandler::new).await;
-        self.container.register_singleton(|| MockRandomHandler::new(0)).await;
-        self.container.register_singleton(MemoryJournalHandler::new).await;
+        self.container
+            .register_singleton(|| MockCryptoHandler::new(42))
+            .await;
+        self.container
+            .register_singleton(MockNetworkHandler::new)
+            .await;
+        self.container
+            .register_singleton(MemoryStorageHandler::new)
+            .await;
+        self.container
+            .register_singleton(SimulatedTimeHandler::new_at_epoch)
+            .await;
+        self.container
+            .register_singleton(MockConsoleHandler::new)
+            .await;
+        self.container
+            .register_singleton(|| MockRandomHandler::new(0))
+            .await;
+        self.container
+            .register_singleton(MemoryJournalHandler::new)
+            .await;
 
         self.container
     }
@@ -367,7 +383,10 @@ impl ScopedContainer {
 
         container.enter_scope(scope_id).await;
 
-        Self { container, scope_id }
+        Self {
+            container,
+            scope_id,
+        }
     }
 
     /// Get the inner container
@@ -381,7 +400,7 @@ impl Drop for ScopedContainer {
         // Schedule scope cleanup
         let container = self.container.clone();
         let scope_id = self.scope_id;
-        
+
         // We can't await in drop, so we spawn a task
         tokio::spawn(async move {
             container.exit_scope().await;
@@ -393,6 +412,8 @@ impl Drop for ScopedContainer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::AuraResult;
+    use aura_testkit::{aura_test, TestFixture};
 
     #[derive(Debug, Clone)]
     struct TestHandler {
@@ -405,94 +426,112 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_singleton_registration() {
+    #[aura_test]
+    async fn test_singleton_registration() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let container = EffectContainer::new();
-        
+
         let counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let counter_clone = counter.clone();
-        
-        container.register_singleton(move || {
-            let id = counter_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            TestHandler::new(id)
-        }).await;
+
+        container
+            .register_singleton(move || {
+                let id = counter_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                TestHandler::new(id)
+            })
+            .await;
 
         // Resolve multiple times - should get same instance
-        let instance1 = container.resolve::<TestHandler>().await.unwrap();
-        let instance2 = container.resolve::<TestHandler>().await.unwrap();
+        let instance1 = container.resolve::<TestHandler>().await?;
+        let instance2 = container.resolve::<TestHandler>().await?;
 
         assert_eq!(instance1.id, instance2.id);
         assert_eq!(instance1.id, 0); // First instance created
+
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_transient_registration() {
+    #[aura_test]
+    async fn test_transient_registration() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let container = EffectContainer::new();
-        
+
         let counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let counter_clone = counter.clone();
-        
-        container.register_transient(move || {
-            let id = counter_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            TestHandler::new(id)
-        }).await;
+
+        container
+            .register_transient(move || {
+                let id = counter_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                TestHandler::new(id)
+            })
+            .await;
 
         // Resolve multiple times - should get different instances
-        let instance1 = container.resolve::<TestHandler>().await.unwrap();
-        let instance2 = container.resolve::<TestHandler>().await.unwrap();
+        let instance1 = container.resolve::<TestHandler>().await?;
+        let instance2 = container.resolve::<TestHandler>().await?;
 
         assert_ne!(instance1.id, instance2.id);
         assert_eq!(instance1.id, 0);
         assert_eq!(instance2.id, 1);
+
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_instance_registration() {
+    #[aura_test]
+    async fn test_instance_registration() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let container = EffectContainer::new();
-        
+
         let test_handler = TestHandler::new(42);
         container.register_instance(test_handler.clone()).await;
 
-        let resolved = container.resolve::<TestHandler>().await.unwrap();
+        let resolved = container.resolve::<TestHandler>().await?;
         assert_eq!(resolved.id, 42);
+
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_scoped_container() {
+    #[aura_test]
+    async fn test_scoped_container() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let container = Arc::new(EffectContainer::new());
-        
+
         {
             let scoped = ScopedContainer::new(container.clone()).await;
             let scope_id = scoped.scope_id;
-            
-            scoped.inner().register_with_scope(
-                BindingScope::Scoped(scope_id),
-                || TestHandler::new(100),
-            ).await;
+
+            scoped
+                .inner()
+                .register_with_scope(BindingScope::Scoped(scope_id), || TestHandler::new(100))
+                .await;
 
             // Should resolve within scope
-            let instance = scoped.inner().resolve::<TestHandler>().await.unwrap();
+            let instance = scoped.inner().resolve::<TestHandler>().await?;
             assert_eq!(instance.id, 100);
         }
-        
+
         // After scope is dropped, should not be able to resolve
         // (Note: In real test we'd need to wait for the cleanup task)
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
+
         // Register a non-scoped handler to test
         container.register_singleton(|| TestHandler::new(200)).await;
-        let instance = container.resolve::<TestHandler>().await.unwrap();
+        let instance = container.resolve::<TestHandler>().await?;
         assert_eq!(instance.id, 200); // Should get the singleton, not the scoped one
+
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_fixture_builder() {
-        let fixture = TestFixture::new();
-        let container = fixture.with_mocks().await;
+    #[aura_test]
+    async fn test_fixture_builder() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let test_fixture = super::TestFixture::new();
+        let container = test_fixture.with_mocks().await;
 
         // Should be able to resolve mock handlers
         use aura_effects::crypto::MockCryptoHandler;
-        let crypto = container.resolve::<MockCryptoHandler>().await;
-        assert!(crypto.is_ok());
+        let crypto = container.resolve::<MockCryptoHandler>().await?;
+
+        Ok(())
     }
 }

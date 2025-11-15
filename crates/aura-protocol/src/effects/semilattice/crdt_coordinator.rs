@@ -518,7 +518,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::semilattice::{Bottom, JoinSemilattice};
+    use aura_core::{
+        semilattice::{Bottom, JoinSemilattice},
+        AuraResult,
+    };
+    use aura_testkit::{aura_test, TestFixture};
 
     // Test types for CvRDT
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -699,9 +703,10 @@ mod tests {
         assert!(coordinator.has_handler(CrdtType::Convergent));
     }
 
-    #[tokio::test]
-    async fn test_sync_request_creation() {
-        let device_id = DeviceId::new();
+    #[aura_test]
+    async fn test_sync_request_creation() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let device_id = fixture.device_id();
         let coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -712,17 +717,17 @@ mod tests {
         > = CrdtCoordinator::with_cv(device_id);
         let session_id = SessionId::new();
 
-        let request = coordinator
-            .create_sync_request(session_id, CrdtType::Convergent)
-            .unwrap();
+        let request = coordinator.create_sync_request(session_id, CrdtType::Convergent)?;
 
         assert_eq!(request.session_id, session_id);
         assert!(matches!(request.crdt_type, CrdtType::Convergent));
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_cv_sync_request_handling() {
-        let device_id = DeviceId::new();
+    #[aura_test]
+    async fn test_cv_sync_request_handling() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let device_id = fixture.device_id();
         let mut coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -739,16 +744,18 @@ mod tests {
             vector_clock: bincode::serialize(&VectorClock::new()).unwrap(),
         };
 
-        let response = coordinator.handle_sync_request(request).await.unwrap();
+        let response = coordinator.handle_sync_request(request).await?;
 
         assert_eq!(response.session_id, session_id);
         assert!(matches!(response.crdt_type, CrdtType::Convergent));
         assert!(matches!(response.sync_data, CrdtSyncData::FullState(_)));
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_cv_sync_response_handling() {
-        let device_id = DeviceId::new();
+    #[aura_test]
+    async fn test_cv_sync_response_handling() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let device_id = fixture.device_id();
         let mut coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -770,11 +777,12 @@ mod tests {
         };
 
         // Apply the response - should merge states using join
-        coordinator.handle_sync_response(response).await.unwrap();
+        coordinator.handle_sync_response(response).await?;
 
         // Verify the state was updated through join operation (max)
         // Note: We can't directly access the state without adding a getter,
         // but we've verified the merge logic works
+        Ok(())
     }
 
     #[test]

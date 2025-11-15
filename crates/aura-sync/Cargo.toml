@@ -11,11 +11,10 @@ repository.workspace = true
 aura-core = { path = "../aura-core" }
 aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../aura-journal" }
-aura-macros = { path = "../aura-macros" }
-aura-mpst = { path = "../aura-mpst" }
 
-# Choreography dependencies (required by aura-macros)
-rumpsteak-aura-choreography = "0.3.1"
+# Note: aura-macros and aura-mpst intentionally omitted
+# This crate demonstrates semantic library independence by using
+# pure effect composition without choreography dependencies
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

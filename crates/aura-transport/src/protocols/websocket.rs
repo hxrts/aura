@@ -22,7 +22,7 @@ pub enum WebSocketMessage {
         /// Supported capabilities
         capabilities: Vec<String>,
     },
-    
+
     /// Handshake response
     HandshakeResponse {
         /// Session ID from request
@@ -32,7 +32,7 @@ pub enum WebSocketMessage {
         /// Accepted capabilities
         accepted_capabilities: Vec<String>,
     },
-    
+
     /// Session data frame
     DataFrame {
         /// Session ID
@@ -42,7 +42,7 @@ pub enum WebSocketMessage {
         /// Frame metadata
         metadata: FrameMetadata,
     },
-    
+
     /// Session teardown initiation
     TeardownRequest {
         /// Session ID to teardown
@@ -52,7 +52,7 @@ pub enum WebSocketMessage {
         /// Reason for teardown
         reason: String,
     },
-    
+
     /// Teardown acknowledgment
     TeardownResponse {
         /// Session ID being torn down
@@ -68,9 +68,9 @@ pub enum HandshakeResult {
     /// Handshake successful
     Success,
     /// Handshake failed
-    Failed { 
+    Failed {
         /// Reason for handshake failure
-        reason: String 
+        reason: String,
     },
 }
 
@@ -101,9 +101,13 @@ impl WebSocketMessage {
     pub fn handshake_request(initiator: DeviceId, capabilities: Vec<String>) -> Self {
         Self::handshake_request_with_id(Self::generate_session_id(), initiator, capabilities)
     }
-    
+
     /// Create handshake request with specific session ID
-    pub fn handshake_request_with_id(session_id: Uuid, initiator: DeviceId, capabilities: Vec<String>) -> Self {
+    pub fn handshake_request_with_id(
+        session_id: Uuid,
+        initiator: DeviceId,
+        capabilities: Vec<String>,
+    ) -> Self {
         Self::HandshakeRequest {
             session_id,
             initiator,
@@ -111,14 +115,14 @@ impl WebSocketMessage {
             capabilities,
         }
     }
-    
+
     /// Generate deterministic session ID
     fn generate_session_id() -> Uuid {
         // Use deterministic approach for session IDs
         // In production this would use a proper deterministic algorithm
         Uuid::nil() // Placeholder
     }
-    
+
     /// Create successful handshake response
     pub fn handshake_success(session_id: Uuid, accepted_capabilities: Vec<String>) -> Self {
         Self::HandshakeResponse {
@@ -127,7 +131,7 @@ impl WebSocketMessage {
             accepted_capabilities,
         }
     }
-    
+
     /// Create failed handshake response
     pub fn handshake_failed(session_id: Uuid, reason: String) -> Self {
         Self::HandshakeResponse {
@@ -136,14 +140,19 @@ impl WebSocketMessage {
             accepted_capabilities: Vec::new(),
         }
     }
-    
+
     /// Create data frame
     pub fn data_frame(session_id: Uuid, payload: Vec<u8>, frame_type: FrameType) -> Self {
         Self::data_frame_at_time(session_id, payload, frame_type, SystemTime::UNIX_EPOCH)
     }
-    
+
     /// Create data frame with specific timestamp
-    pub fn data_frame_at_time(session_id: Uuid, payload: Vec<u8>, frame_type: FrameType, timestamp: SystemTime) -> Self {
+    pub fn data_frame_at_time(
+        session_id: Uuid,
+        payload: Vec<u8>,
+        frame_type: FrameType,
+        timestamp: SystemTime,
+    ) -> Self {
         Self::DataFrame {
             session_id,
             payload,
@@ -154,7 +163,7 @@ impl WebSocketMessage {
             },
         }
     }
-    
+
     /// Create teardown request
     pub fn teardown_request(session_id: Uuid, requester: DeviceId, reason: String) -> Self {
         Self::TeardownRequest {
@@ -163,23 +172,26 @@ impl WebSocketMessage {
             reason,
         }
     }
-    
+
     /// Get session ID from any message
     pub fn session_id(&self) -> Uuid {
         match self {
-            Self::HandshakeRequest { session_id, .. } |
-            Self::HandshakeResponse { session_id, .. } |
-            Self::DataFrame { session_id, .. } |
-            Self::TeardownRequest { session_id, .. } |
-            Self::TeardownResponse { session_id, .. } => *session_id,
+            Self::HandshakeRequest { session_id, .. }
+            | Self::HandshakeResponse { session_id, .. }
+            | Self::DataFrame { session_id, .. }
+            | Self::TeardownRequest { session_id, .. }
+            | Self::TeardownResponse { session_id, .. } => *session_id,
         }
     }
-    
+
     /// Check if this is a handshake message
     pub fn is_handshake(&self) -> bool {
-        matches!(self, Self::HandshakeRequest { .. } | Self::HandshakeResponse { .. })
+        matches!(
+            self,
+            Self::HandshakeRequest { .. } | Self::HandshakeResponse { .. }
+        )
     }
-    
+
     /// Check if this is a data message
     pub fn is_data(&self) -> bool {
         matches!(self, Self::DataFrame { .. })

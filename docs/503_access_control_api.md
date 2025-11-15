@@ -63,7 +63,7 @@ Identity verification returns cryptographic proofs without policy evaluation. Ve
 ### Context Identity Derivation
 
 ```rust
-use aura_crypto::{DKDCapsule, derive_context_identity};
+use aura_core::{DKDCapsule, derive_context_identity};
 
 // Derive context-specific identity
 pub async fn derive_device_context<E: CryptoEffects>(

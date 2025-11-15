@@ -5,16 +5,16 @@
 
 use crate::errors::{AuraError, Result};
 use aura_authenticate::guardian_auth::RecoveryContext;
+#[cfg(test)]
+use aura_authenticate::guardian_auth::RecoveryOperationType;
 use aura_core::{AccountId, DeviceId};
 use aura_protocol::effects::AuraEffectSystem;
+#[cfg(test)]
+use aura_protocol::effects::EffectSystemConfig;
 use aura_recovery::{
     guardian_key_recovery::GuardianKeyRecoveryCoordinator,
     types::{GuardianSet, RecoveryRequest, RecoveryResponse},
 };
-#[cfg(test)]
-use aura_authenticate::guardian_auth::RecoveryOperationType;
-#[cfg(test)]
-use aura_protocol::effects::EffectSystemConfig;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

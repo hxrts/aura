@@ -10,7 +10,7 @@
 
 use super::SelectionCriteria;
 use super::{AttestedOp, DeviceId, Hash32, OpLog, OpLogSummary, PeerInfo};
-use aura_macros::{choreography, aura_test};
+use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
@@ -249,7 +249,6 @@ pub struct SyncMetrics {
     pub compression_ratio: Option<f32>,
 }
 
-
 /// Synchronization choreography roles
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SyncRole {
@@ -289,11 +288,11 @@ choreography! {
         // Phase 1: Summary Exchange
         Requester -> Responder: SummaryRequest;
         Responder -> Requester: SummaryResponse;
-        
-        // Phase 2: Operation Transfer 
+
+        // Phase 2: Operation Transfer
         Requester -> Responder: OperationRequest;
         Responder -> Requester: OperationResponse;
-        
+
         // Phase 3: Completion
         Requester -> Responder: SyncComplete;
         Responder -> Requester: SyncAcknowledged;
@@ -768,7 +767,6 @@ impl OpLogSynchronizer {
 
     // Note: Operation application is now handled within the choreographic protocol
     // The choreography automatically applies validated operations during execution
-
 }
 
 #[cfg(test)]

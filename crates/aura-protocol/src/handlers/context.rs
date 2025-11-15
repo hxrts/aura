@@ -289,18 +289,12 @@ impl AgentContext {
     }
 }
 
-/// Middleware-specific context for cross-cutting concerns
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MiddlewareContext {
-    /// Tracing information
-    pub tracing: TracingContext,
-    /// Metrics collection
-    pub metrics: MetricsContext,
-    /// Retry configuration
-    pub retry: RetryContext,
-    /// Custom middleware data
-    pub custom_data: HashMap<String, Vec<u8>>,
-}
+// Middleware pattern removed - migrated to explicit context fields
+//
+// **MIGRATION NOTE**: MiddlewareContext wrapper has been removed in favor of
+// explicit tracing and metrics context directly in AuraContext.
+//
+// This provides cleaner Layer 4 orchestration without middleware patterns.
 
 /// Tracing context for observability
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -322,98 +316,11 @@ pub struct MetricsContext {
     pub labels: HashMap<String, String>,
 }
 
-/// Retry context for resilience
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RetryContext {
-    /// Current retry attempt (0-based)
-    pub attempt: u32,
-    /// Maximum retry attempts
-    pub max_attempts: u32,
-    /// Base delay between retries
-    pub base_delay: Duration,
-    /// Whether exponential backoff is enabled
-    pub exponential_backoff: bool,
-}
+// RetryContext removed - retry logic belongs in Layer 4 coordination patterns,
+// not in middleware wrappers.
 
-impl Default for RetryContext {
-    fn default() -> Self {
-        Self {
-            attempt: 0,
-            max_attempts: 3,
-            base_delay: Duration::from_millis(100),
-            exponential_backoff: true,
-        }
-    }
-}
-
-impl MiddlewareContext {
-    /// Create a new middleware context
-    pub fn new() -> Self {
-        Self {
-            tracing: TracingContext::default(),
-            metrics: MetricsContext::default(),
-            retry: RetryContext::default(),
-            custom_data: HashMap::new(),
-        }
-    }
-
-    /// Set custom middleware data
-    pub fn set_custom_data<T: serde::Serialize>(
-        &mut self,
-        key: &str,
-        value: &T,
-    ) -> Result<(), AuraHandlerError> {
-        let serialized = bincode::serialize(value).map_err(|e| {
-            AuraHandlerError::context_error(format!("Failed to serialize custom data: {}", e))
-        })?;
-        self.custom_data.insert(key.to_string(), serialized);
-        Ok(())
-    }
-
-    /// Get custom middleware data
-    pub fn get_custom_data<T: serde::de::DeserializeOwned>(
-        &self,
-        key: &str,
-    ) -> Result<Option<T>, AuraHandlerError> {
-        match self.custom_data.get(key) {
-            Some(data) => {
-                let value = bincode::deserialize(data).map_err(|e| {
-                    AuraHandlerError::context_error(format!(
-                        "Failed to deserialize custom data: {}",
-                        e
-                    ))
-                })?;
-                Ok(Some(value))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Enable tracing with IDs
-    pub fn enable_tracing(&mut self, trace_id: String, span_id: String) {
-        self.tracing.enabled = true;
-        self.tracing.trace_id = Some(trace_id);
-        self.tracing.span_id = Some(span_id);
-    }
-
-    /// Enable metrics collection
-    pub fn enable_metrics(&mut self) {
-        self.metrics.enabled = true;
-    }
-
-    /// Add metrics label
-    pub fn add_metrics_label(&mut self, key: &str, value: &str) {
-        self.metrics
-            .labels
-            .insert(key.to_string(), value.to_string());
-    }
-}
-
-impl Default for MiddlewareContext {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// MiddlewareContext implementation removed - functionality migrated to
+// direct context field access patterns.
 
 /// Unified context for all Aura operations
 ///
@@ -451,9 +358,11 @@ pub struct AuraContext {
     /// Agent operations context
     pub agent: Option<AgentContext>,
 
-    // Cross-cutting context
-    /// Middleware operations context
-    pub middleware: MiddlewareContext,
+    // Cross-cutting context (explicit, not middleware)
+    /// Tracing information for observability  
+    pub tracing: TracingContext,
+    /// Metrics collection context
+    pub metrics: MetricsContext,
 }
 
 impl AuraContext {
@@ -474,7 +383,8 @@ impl AuraContext {
             choreographic: None,
             simulation: None,
             agent: Some(AgentContext::new(device_id)),
-            middleware: MiddlewareContext::new(),
+            tracing: TracingContext::default(),
+            metrics: MetricsContext::default(),
         }
     }
 
@@ -497,7 +407,8 @@ impl AuraContext {
             choreographic: None,
             simulation: None,
             agent: Some(AgentContext::new(device_id)),
-            middleware: MiddlewareContext::new(),
+            tracing: TracingContext::default(),
+            metrics: MetricsContext::default(),
         }
     }
 
@@ -518,7 +429,8 @@ impl AuraContext {
             choreographic: None,
             simulation: Some(SimulationContext::new(seed)),
             agent: Some(AgentContext::new(device_id)),
-            middleware: MiddlewareContext::new(),
+            tracing: TracingContext::default(),
+            metrics: MetricsContext::default(),
         }
     }
 
@@ -549,13 +461,15 @@ impl AuraContext {
 
     /// Enable tracing
     pub fn with_tracing(mut self, trace_id: String, span_id: String) -> Self {
-        self.middleware.enable_tracing(trace_id, span_id);
+        self.tracing.enabled = true;
+        self.tracing.trace_id = Some(trace_id);
+        self.tracing.span_id = Some(span_id);
         self
     }
 
     /// Enable metrics
     pub fn with_metrics(mut self) -> Self {
-        self.middleware.enable_metrics();
+        self.metrics.enabled = true;
         self
     }
 
@@ -689,27 +603,19 @@ mod tests {
     }
 
     #[test]
-    fn test_middleware_context() {
-        let mut ctx = MiddlewareContext::new();
-
-        // Test custom data
-        ctx.set_custom_data("test", &42u32).unwrap();
-        let value: Option<u32> = ctx.get_custom_data("test").unwrap();
-        assert_eq!(value, Some(42));
+    fn test_explicit_context_fields() {
+        let device_id = DeviceId::from(Uuid::new_v4());
+        let ctx = AuraContext::for_testing(device_id)
+            .with_tracing("trace123".to_string(), "span456".to_string())
+            .with_metrics();
 
         // Test tracing
-        assert!(!ctx.tracing.enabled);
-        ctx.enable_tracing("trace123".to_string(), "span456".to_string());
         assert!(ctx.tracing.enabled);
         assert_eq!(ctx.tracing.trace_id, Some("trace123".to_string()));
+        assert_eq!(ctx.tracing.span_id, Some("span456".to_string()));
 
         // Test metrics
-        assert!(!ctx.metrics.enabled);
-        ctx.enable_metrics();
         assert!(ctx.metrics.enabled);
-
-        ctx.add_metrics_label("service", "test");
-        assert_eq!(ctx.metrics.labels.get("service"), Some(&"test".to_string()));
     }
 
     #[test]

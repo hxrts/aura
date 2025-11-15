@@ -11,8 +11,10 @@ use std::any::{Any, TypeId};
 /// Extension for validating capabilities before protocol operations
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidateCapability {
+    /// The capability string to validate
     pub capability: String,
-    pub role: String, // Role name as string to avoid generic conflicts
+    /// Role name as string to avoid generic conflicts
+    pub role: String,
 }
 
 impl ExtensionEffect for ValidateCapability {
@@ -45,8 +47,11 @@ impl ExtensionEffect for ValidateCapability {
 /// Extension for executing guard chain validations
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExecuteGuardChain {
+    /// List of guard strings to execute
     pub guards: Vec<String>,
+    /// Role executing the guard chain
     pub role: String,
+    /// Operation being guarded
     pub operation: String,
 }
 
@@ -79,8 +84,11 @@ impl ExtensionEffect for ExecuteGuardChain {
 /// Extension for tracking flow costs in protocols
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChargeFlowCost {
+    /// The flow cost amount to charge for this operation
     pub cost: u64,
+    /// The specific operation being performed that incurs this cost
     pub operation: String,
+    /// The role that is being charged for this operation
     pub role: String,
 }
 
@@ -113,8 +121,11 @@ impl ExtensionEffect for ChargeFlowCost {
 /// Extension for journal fact recording
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JournalFact {
+    /// The fact to record in the journal
     pub fact: String,
+    /// The role that is recording this fact
     pub role: String,
+    /// The operation that generated this fact
     pub operation: String,
 }
 
@@ -147,8 +158,10 @@ impl ExtensionEffect for JournalFact {
 /// Extension for journal merge operations
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JournalMerge {
+    /// The type of merge operation to perform (e.g., "anti_entropy", "consensus")
     pub merge_type: String,
-    pub roles: Vec<String>, // Multiple roles can participate in merge
+    /// Multiple roles that can participate in the merge operation
+    pub roles: Vec<String>,
 }
 
 impl ExtensionEffect for JournalMerge {
@@ -184,18 +197,26 @@ impl ExtensionEffect for JournalMerge {
 /// Wrapper enum for concrete extension types
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ConcreteExtension {
+    /// Capability validation extension
     ValidateCapability(ValidateCapability),
+    /// Guard chain execution extension
     ExecuteGuardChain(ExecuteGuardChain),
+    /// Flow cost tracking extension
     ChargeFlowCost(ChargeFlowCost),
+    /// Journal fact recording extension
     JournalFact(JournalFact),
+    /// Journal merge operation extension
     JournalMerge(JournalMerge),
 }
 
 /// Composite extension for handling multiple annotations on a single message
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompositeExtension {
+    /// The list of concrete extensions to execute for this operation
     pub extensions: Vec<ConcreteExtension>,
+    /// The primary role executing this composite extension
     pub role: String,
+    /// The operation that this composite extension is attached to
     pub operation: String,
 }
 
@@ -211,7 +232,7 @@ impl ExtensionEffect for CompositeExtension {
     fn participating_role_ids(&self) -> Vec<Box<dyn Any>> {
         // Collect all participating roles from contained extensions
         let mut all_roles = vec![Box::new(self.role.clone()) as Box<dyn Any>];
-        
+
         for ext in &self.extensions {
             match ext {
                 ConcreteExtension::ValidateCapability(e) => {
@@ -231,11 +252,11 @@ impl ExtensionEffect for CompositeExtension {
                 }
             }
         }
-        
+
         // Deduplicate roles (basic approach)
         all_roles.sort_by_key(|r| format!("{:?}", r));
         all_roles.dedup_by_key(|r| format!("{:?}", r));
-        
+
         all_roles
     }
 
@@ -261,13 +282,13 @@ impl CompositeExtension {
             operation,
         }
     }
-    
+
     /// Add an extension to the composite
     pub fn add_extension(mut self, extension: ConcreteExtension) -> Self {
         self.extensions.push(extension);
         self
     }
-    
+
     /// Add a capability guard
     pub fn with_capability_guard(self, capability: String) -> Self {
         let ext = ValidateCapability {
@@ -276,7 +297,7 @@ impl CompositeExtension {
         };
         self.add_extension(ConcreteExtension::ValidateCapability(ext))
     }
-    
+
     /// Add flow cost charging
     pub fn with_flow_cost(self, cost: u64) -> Self {
         let ext = ChargeFlowCost {
@@ -286,7 +307,7 @@ impl CompositeExtension {
         };
         self.add_extension(ConcreteExtension::ChargeFlowCost(ext))
     }
-    
+
     /// Add journal fact recording
     pub fn with_journal_fact(self, fact: String) -> Self {
         let ext = JournalFact {
@@ -296,7 +317,7 @@ impl CompositeExtension {
         };
         self.add_extension(ConcreteExtension::JournalFact(ext))
     }
-    
+
     /// Add guard chain execution
     pub fn with_guard_chain(self, guards: Vec<String>) -> Self {
         let ext = ExecuteGuardChain {
@@ -306,7 +327,7 @@ impl CompositeExtension {
         };
         self.add_extension(ConcreteExtension::ExecuteGuardChain(ext))
     }
-    
+
     /// Get all contained extensions
     pub fn extensions(&self) -> &[ConcreteExtension] {
         &self.extensions

@@ -4,8 +4,8 @@
 //! YES choreography - complex handshake with multiple phases and choices.
 //! Target: <250 lines, focused on choreographic handshake coordination.
 
-use super::{TransportCoordinationError, CoordinationResult};
-use aura_core::{DeviceId, ContextId};
+use super::{CoordinationResult, TransportCoordinationError};
+use aura_core::{ContextId, DeviceId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -116,24 +116,33 @@ impl SecureChannelCoordinator {
             active_channels: HashMap::new(),
         }
     }
-    
+
     /// Get device ID
     pub fn device_id(&self) -> DeviceId {
         self.device_id
     }
-    
+
     /// Initialize new channel
-    pub fn init_channel(&mut self, peer_id: DeviceId, context_id: ContextId) -> CoordinationResult<String> {
+    pub fn init_channel(
+        &mut self,
+        peer_id: DeviceId,
+        context_id: ContextId,
+    ) -> CoordinationResult<String> {
         if self.active_channels.len() >= self.channel_config.max_concurrent_channels {
             return Err(TransportCoordinationError::ProtocolFailed(
-                "Maximum concurrent channels exceeded".to_string()
+                "Maximum concurrent channels exceeded".to_string(),
             ));
         }
-        
-        let channel_id = format!("channel-{}-{}", self.device_id.to_hex()[..8].to_string(), 
-                                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                                 .unwrap_or_default().as_millis());
-        
+
+        let channel_id = format!(
+            "channel-{}-{}",
+            self.device_id.to_hex()[..8].to_string(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
+
         let channel_state = ChannelState {
             channel_id: channel_id.clone(),
             peer_id,
@@ -141,21 +150,27 @@ impl SecureChannelCoordinator {
             established_at: None,
             last_rotation: None,
         };
-        
-        self.active_channels.insert(channel_id.clone(), channel_state);
+
+        self.active_channels
+            .insert(channel_id.clone(), channel_state);
         Ok(channel_id)
     }
-    
+
     /// Process handshake response
     pub fn process_handshake_response(
         &mut self,
         response: &HandshakeResponse,
     ) -> CoordinationResult<bool> {
-        let channel = self.active_channels.get_mut(&response.channel_id)
-            .ok_or_else(|| TransportCoordinationError::ProtocolFailed(
-                format!("Channel not found: {}", response.channel_id)
-            ))?;
-        
+        let channel = self
+            .active_channels
+            .get_mut(&response.channel_id)
+            .ok_or_else(|| {
+                TransportCoordinationError::ProtocolFailed(format!(
+                    "Channel not found: {}",
+                    response.channel_id
+                ))
+            })?;
+
         match &response.handshake_result {
             HandshakeResult::Accept => {
                 channel.state = ChannelLifecycleState::Established;
@@ -172,30 +187,32 @@ impl SecureChannelCoordinator {
             }
         }
     }
-    
+
     /// Check if key rotation is needed
     pub fn needs_key_rotation(&self, channel_id: &str) -> bool {
         if let Some(channel) = self.active_channels.get(channel_id) {
             if let Some(last_rotation) = channel.last_rotation {
-                return last_rotation.elapsed().unwrap_or_default() >= self.channel_config.key_rotation_interval;
+                return last_rotation.elapsed().unwrap_or_default()
+                    >= self.channel_config.key_rotation_interval;
             }
             if let Some(established_at) = channel.established_at {
-                return established_at.elapsed().unwrap_or_default() >= self.channel_config.key_rotation_interval;
+                return established_at.elapsed().unwrap_or_default()
+                    >= self.channel_config.key_rotation_interval;
             }
         }
         false
     }
-    
+
     /// Get channel state
     pub fn get_channel_state(&self, channel_id: &str) -> Option<&ChannelState> {
         self.active_channels.get(channel_id)
     }
-    
+
     /// List active channels
     pub fn list_channels(&self) -> Vec<&ChannelState> {
         self.active_channels.values().collect()
     }
-    
+
     /// Close channel
     pub fn close_channel(&mut self, channel_id: &str) -> CoordinationResult<()> {
         if let Some(mut channel) = self.active_channels.remove(channel_id) {
@@ -211,13 +228,13 @@ choreography! {
     #[namespace = "secure_channel"]
     protocol SecureChannelEstablishment {
         roles: Initiator, Responder;
-        
+
         // Phase 1: Handshake initiation
         Initiator[guard_capability = "initiate_handshake",
                   flow_cost = 150,
                   journal_facts = "handshake_initiated"]
         -> Responder: HandshakeInit(HandshakeInit);
-        
+
         // Phase 2: Responder choice - accept, reject, or renegotiate
         choice Responder {
             accept: {
@@ -225,7 +242,7 @@ choreography! {
                           flow_cost = 100,
                           journal_facts = "handshake_accepted"]
                 -> Initiator: HandshakeResponse(HandshakeResponse);
-                
+
                 // Phase 3a: Handshake completion
                 Initiator[guard_capability = "complete_handshake",
                           flow_cost = 75,
@@ -243,7 +260,7 @@ choreography! {
                           flow_cost = 80,
                           journal_facts = "renegotiation_requested"]
                 -> Initiator: HandshakeResponse(HandshakeResponse);
-                
+
                 // Phase 3b: Renegotiation loop (simplified)
                 Initiator[guard_capability = "initiate_handshake",
                           flow_cost = 120]
@@ -258,13 +275,13 @@ choreography! {
     #[namespace = "key_rotation"]
     protocol KeyRotationProtocol {
         roles: ChannelPeer1, ChannelPeer2;
-        
+
         // Coordinated key rotation
         ChannelPeer1[guard_capability = "rotate_keys",
                      flow_cost = 100,
                      journal_facts = "key_rotation_initiated"]
         -> ChannelPeer2: KeyRotationRequest(KeyRotationRequest);
-        
+
         ChannelPeer2[guard_capability = "confirm_rotation",
                      flow_cost = 80,
                      journal_facts = "key_rotation_confirmed"]

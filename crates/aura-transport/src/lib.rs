@@ -48,17 +48,17 @@
 // Internal module implementations
 
 /// Core transport types with privacy-by-design
-/// 
+///
 /// This module provides fundamental transport abstractions including envelopes,
 /// configuration, and connection management, all with built-in privacy preservation.
 pub mod types {
-    pub mod envelope;
-    pub mod config; 
+    pub mod config;
     pub mod connection;
+    pub mod envelope;
 }
 
 /// Privacy-aware peer management
-/// 
+///
 /// This module provides peer discovery, information management, and privacy-preserving
 /// selection algorithms that protect capability information and relationship contexts.
 pub mod peers {
@@ -67,25 +67,25 @@ pub mod peers {
 }
 
 /// Transport protocol implementations
-/// 
+///
 /// This module contains protocol-specific implementations for STUN, hole punching,
 /// and WebSocket communication, all designed with privacy preservation in mind.
 pub mod protocols {
-    pub mod stun;
     pub mod hole_punch;
+    pub mod stun;
     pub mod websocket;
 }
 
 // Re-export types from sub-modules
-pub use types::envelope::{Envelope, ScopedEnvelope, FrameHeader, FrameType, PrivacyLevel};
 pub use types::config::TransportConfig;
-pub use types::connection::{ConnectionId, ScopedConnectionId, ConnectionState, ConnectionInfo};
+pub use types::connection::{ConnectionId, ConnectionInfo, ConnectionState, ScopedConnectionId};
+pub use types::envelope::{Envelope, FrameHeader, FrameType, PrivacyLevel, ScopedEnvelope};
 
 // Re-export peers from sub-modules
-pub use peers::info::{PeerInfo, BlindedPeerCapabilities, ScopedPeerMetrics};
+pub use peers::info::{BlindedPeerCapabilities, PeerInfo, ScopedPeerMetrics};
 pub use peers::selection::PrivacyAwareSelectionCriteria;
 
 // Re-export protocols from sub-modules
-pub use protocols::stun::{StunMessage, StunMethod, StunClass, StunAttribute, StunConfig};
 pub use protocols::hole_punch::{HolePunchMessage, PunchConfig};
+pub use protocols::stun::{StunAttribute, StunClass, StunConfig, StunMessage, StunMethod};
 pub use protocols::websocket::WebSocketMessage;

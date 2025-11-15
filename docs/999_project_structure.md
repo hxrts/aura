@@ -40,6 +40,7 @@ Aura's codebase is organized into 8 clean architectural layers, progressing from
 **Contains**:
 - Effect traits: `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `JournalEffects`, `ConsoleEffects`, `RandomEffects`, `TransportEffects`
 - Domain types: `DeviceId`, `AccountId`, `SessionId`, `Capability`, `FlowBudget`
+- Cryptographic utilities: Key derivation, FROST types, merkle trees, Ed25519 operations
 - Semantic traits: `JoinSemilattice`, `MeetSemilattice`, `CvState`, `MvState`
 - Error types and core protocols
 
@@ -59,7 +60,6 @@ Define domain-specific types, semantics, and pure logic without effect handlers:
 
 | Crate | Domain | Responsibility |
 |-------|--------|-----------------|
-| `aura-crypto` | Cryptography | FROST protocol types, DKD, HPKE, threshold signature logic |
 | `aura-journal` | CRDT State | Eventually-consistent ledger, semilattice merge, ratchet tree |
 | `aura-wot` | Trust/Authorization | Capability refinement, meet-semilattice, trust relationships |
 | `aura-verify` | Identity | Complete identity system: cryptographic verification + device lifecycle |
@@ -237,10 +237,10 @@ Provides **stateful coordination infrastructure** for multi-party execution:
 - `CrdtCoordinator` - Coordinates 4+ CRDT handler types for distributed sync
 - `GuardChain` - Authorization pipeline: `CapGuard → FlowGuard → JournalCoupler`
 
-**Middleware & Cross-Cutting Concerns**:
-- Circuit breakers for fault isolation
-- Retry logic with exponential backoff
-- Protocol-level authorization and validation
+**Cross-Cutting Effect Implementations**:
+- Reliability patterns for fault isolation (circuit breakers, retry logic)
+- Distributed coordination with exponential backoff
+- Protocol-level authorization and validation through explicit effect interfaces
 
 ### Reusable Coordination Patterns
 
@@ -438,7 +438,7 @@ Each layer builds on lower layers without reaching back down. This enables:
 
 ### Adding a New Cryptographic Primitive
 
-1. Define type in appropriate domain crate (`aura-crypto`)
+1. Define type in `aura-core` crypto module
 2. Implement `aura-core` traits for semantics
 3. Add single-operation handler in `aura-effects`
 4. Use in feature crates or protocols
@@ -479,14 +479,13 @@ crates/
 ├── aura-agent           Main agent entry point and device runtime
 ├── aura-authenticate    Device, threshold, and guardian authentication protocols
 ├── aura-cli             Command-line interface for account management
-├── aura-core            Foundation types (ID system, effects, semilattice, config)
-├── aura-crypto          Crypto primitives (FROST, HPKE, key derivation, middleware)
+├── aura-core            Foundation types (ID system, effects, semilattice, config, crypto)
 ├── aura-effects         Standard effect handler implementations (the standard library)
 ├── aura-frost           FROST threshold signatures and key resharing (TEMPORARILY EXCLUDED)
 ├── aura-invitation      Invitation and acceptance choreographies
 ├── aura-journal         CRDT-based authenticated ledger for account state
 ├── aura-mpst            Multi-party session types and choreographic specifications
-├── aura-protocol        Unified effect system and middleware architecture
+├── aura-protocol        Unified effect system and coordination architecture
 ├── aura-quint-api       Quint formal verification integration
 ├── aura-recovery        Guardian recovery and account recovery choreographies
 ├── aura-rendezvous      Social Bulletin Board peer discovery and routing
@@ -495,7 +494,7 @@ crates/
 ├── aura-store           Capability-driven encrypted chunk storage
 ├── aura-sync            CRDT synchronization protocols and anti-entropy
 ├── aura-testkit         Shared testing utilities, mocks, fixtures
-├── aura-transport       P2P communication with middleware-based architecture
+├── aura-transport       P2P communication with effect-based architecture
 ├── aura-verify          Signature verification and identity validation
 └── aura-wot             Web-of-trust capability system with meet-semilattice
 ```
@@ -507,8 +506,7 @@ graph TD
     %% Foundation Layer
     types[aura-core]
 
-    %% Cryptography Layer
-    crypto[aura-crypto]
+    %% Verification Layer
     verify[aura-verify]
 
     %% Implementation Layer (Standard Library)
@@ -549,24 +547,18 @@ graph TD
     simulator[aura-simulator]
 
     %% Dependencies
-    crypto --> types
     verify --> types
-    verify --> crypto
     effects --> types
-    effects --> crypto
     mpst --> types
     identity --> types
     identity --> crypto
     identity --> mpst
     journal --> types
-    journal --> crypto
     transport --> types
     transport --> protocol
     store --> journal
-    store --> crypto
     store --> types
     store --> protocol
-    protocol --> crypto
     protocol --> journal
     protocol --> types
     protocol --> verify
@@ -592,7 +584,7 @@ graph TD
     invitation --> wot
     invitation --> mpst
     invitation --> transport
-    frost --> crypto
+    frost --> types
     frost --> journal
     frost --> mpst
     rendezvous --> transport
@@ -603,7 +595,6 @@ graph TD
     agent --> types
     agent --> protocol
     agent --> journal
-    agent --> crypto
     agent --> transport
     agent --> store
     agent --> verify
@@ -613,7 +604,6 @@ graph TD
     agent --> invitation
     agent --> effects
     testkit --> agent
-    testkit --> crypto
     testkit --> journal
     testkit --> transport
     testkit --> types
@@ -625,14 +615,13 @@ graph TD
     simulator --> agent
     simulator --> journal
     simulator --> transport
-    simulator --> crypto
     simulator --> protocol
     simulator --> types
     simulator --> aura_quint_api
 
     %% Styling
     classDef foundation fill:#e1f5fe
-    classDef crypto fill:#f3e5f5
+    classDef verify fill:#f3e5f5
     classDef effects fill:#e8f5e8
     classDef types fill:#f8e5f5
     classDef protocol fill:#e8f5e8
@@ -642,7 +631,7 @@ graph TD
     classDef sim fill:#e0f2f1
 
     class types foundation
-    class crypto,verify crypto
+    class verify verify
     class effects effects
     class mpst,identity types
     class journal,protocol,wot,sync protocol
@@ -656,10 +645,9 @@ graph TD
 ## Architecture Layers
 
 ### Foundation Layer (Blue)
-- **aura-core**: Core shared types and identifiers (types, errors, protocols, sessions, capabilities)
+- **aura-core**: Core shared types and identifiers (types, errors, protocols, sessions, capabilities, crypto utilities)
 
-### Cryptography Layer (Purple)
-- **aura-crypto**: Cryptographic primitives (FROST, DKD, Ed25519, HPKE)
+### Verification Layer (Purple)
 - **aura-verify**: Signature verification and authentication checking
 
 ### Implementation Layer - Standard Library (Light Green)
@@ -670,12 +658,12 @@ graph TD
 
 ### Protocol Infrastructure Layer (Green)
 - **aura-journal**: CRDT-based authenticated ledger for account state
-- **aura-protocol**: Unified effect system and middleware for protocol operations
+- **aura-protocol**: Unified effect system and coordination for protocol operations
 - **aura-wot**: Web of Trust capability-based authorization with meet-semilattice operations
 - **aura-sync**: Synchronization protocols and anti-entropy algorithms
 
 ### Storage & Transport Layer (Yellow)
-- **aura-transport**: P2P communication with middleware-based architecture
+- **aura-transport**: P2P communication with effect-based architecture
 - **aura-store**: Capability-driven encrypted storage with access control
 
 ### Authentication Layer (Orange)
@@ -736,19 +724,6 @@ graph TD
 
 ---
 
-### aura-crypto
-**Purpose**: Cryptographic primitives and threshold cryptography implementation
-
-**Key Exports**:
-- **FROST**: Threshold signatures (`FrostSignature`, `FrostKeyShare`)
-- **DKD**: Deterministic Key Derivation
-- **Encryption**: Ed25519 signatures, HPKE encryption, Blake3 hashing
-- **Middleware**: Composable security and audit logging middleware
-- **Key Derivation**: Key rotation and secure random generation
-
-**Dependencies**: `aura-core`
-
----
 
 ### aura-verify
 **Purpose**: Signature verification and identity validation
@@ -759,7 +734,7 @@ graph TD
 - **Authentication Types**: Verification contexts and results
 - **Errors**: `VerificationError`
 
-**Dependencies**: `aura-core`, `aura-crypto`
+**Dependencies**: `aura-core`
 
 ---
 
@@ -804,19 +779,19 @@ graph TD
 - **Synchronization**: Anti-entropy sync operations
 - **Errors**: `JournalError`
 
-**Dependencies**: `aura-core`, `aura-crypto`
+**Dependencies**: `aura-core`
 
 **Note**: `aura-verify` dependency temporarily disabled due to compilation issues
 
 ---
 
 ### aura-protocol
-**Purpose**: Unified effect system and middleware architecture for protocol operations
+**Purpose**: Unified effect system and coordination architecture for protocol operations
 
 **Key Exports**:
 - **Effects**: Core effect traits (`CryptoEffects`, `TimeEffects`, `SystemEffects`)
 - **Handlers**: Effect handler registry and composition
-- **Middleware**: Composable middleware for effects (tracing, metrics, security)
+- **Cross-Cutting Effects**: Reliability patterns, metrics collection, and distributed tracing
 - **Guards**: Guard chain implementation (`SendGuardChain`, `JournalCoupler`)
 - **Context**: Protocol execution context
 - **Types**: Protocol configuration and error types
@@ -832,7 +807,7 @@ JournalCoupler ensures atomic journal updates by coordinating CRDT operations wi
 
 The guard chain prevents unauthorized sends, enforces privacy budgets, and maintains journal consistency across distributed protocol operations.
 
-**Dependencies**: `aura-core`, `aura-effects`, `aura-crypto`, `aura-journal`, `aura-verify`, `aura-wot`, `aura-transport`, `aura-mpst`, `aura-macros`
+**Dependencies**: `aura-core`, `aura-effects`, `aura-journal`, `aura-verify`, `aura-wot`, `aura-transport`, `aura-mpst`, `aura-macros`
 
 ---
 
@@ -866,11 +841,11 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 ---
 
 ### aura-transport
-**Purpose**: P2P communication layer with middleware-based architecture
+**Purpose**: P2P communication layer with effect-based architecture
 
 **Key Exports**:
 - **Core Transport**: `TransportHandler`, `TransportOperation`
-- **Middleware System**: Composable middleware stack
+- **Effect System Integration**: Direct effect trait implementations for transport operations
 - **Network Address**: Unified `NetworkAddress` type (TCP, UDP, Memory, Peer)
 - **Types**: Message envelopes and metadata
 - **Errors**: `TransportError`
@@ -890,7 +865,7 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 - **Replication**: Replication strategies
 - **Errors**: `StoreError`
 
-**Dependencies**: `aura-journal`, `aura-crypto`, `aura-core`, `aura-protocol`
+**Dependencies**: `aura-journal`, `aura-core`, `aura-protocol`
 
 **Note**: `aura-transport` dependency temporarily disabled
 
@@ -951,7 +926,7 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 - **Share Management**: Secure key share distribution and aggregation
 - **Errors**: `FrostError`
 
-**Dependencies**: `aura-core`, `aura-crypto`, `aura-journal`, `aura-mpst`
+**Dependencies**: `aura-core`, `aura-journal`, `aura-mpst`
 
 **Status**: Currently excluded from workspace build due to frost-ed25519 API compatibility issues
 
@@ -962,13 +937,13 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 
 **Key Exports**:
 - **Agent Interface**: `AuraAgent` with device runtime composition
-- **Effect System Integration**: Runtime composition with handlers and middleware
+- **Effect System Integration**: Runtime composition with handlers and coordination primitives
 - **Maintenance & OTA**: OTA orchestration and garbage collection
 - **Operations**: Authorization-aware device operations
 - **Configuration**: Agent bootstrap and configuration
 - **Errors**: `AgentError`
 
-**Dependencies**: `aura-core`, `aura-protocol`, `aura-journal`, `aura-crypto`, `aura-transport`, `aura-store`, `aura-verify`, `aura-wot`, `aura-sync`, `aura-recovery`, `aura-invitation`, `aura-effects`
+**Dependencies**: `aura-core`, `aura-protocol`, `aura-journal`, `aura-transport`, `aura-store`, `aura-verify`, `aura-wot`, `aura-sync`, `aura-recovery`, `aura-invitation`, `aura-effects`
 
 **Key Features**:
 - **OTA Support**: Soft/hard fork detection with epoch fence enforcement
@@ -986,7 +961,7 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 - **Assertions**: Testing helpers and assertion macros
 - **Crypto Utilities**: Test key and signature generation
 
-**Dependencies**: `aura-agent`, `aura-crypto`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`
+**Dependencies**: `aura-agent`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`
 
 ---
 
@@ -1032,9 +1007,9 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 - **Adversary Models**: Byzantine failure and network attack simulation
 - **Analysis**: Trace recording and failure analysis
 - **Builder**: Simulation scenario configuration
-- **Middleware System**: Property checking, state inspection, chaos injection
+- **Effect System Integration**: Property checking, state inspection, chaos injection through explicit effect handlers
 
-**Dependencies**: `aura-agent`, `aura-journal`, `aura-transport`, `aura-crypto`, `aura-protocol`, `aura-core`, `aura-quint-api`
+**Dependencies**: `aura-agent`, `aura-journal`, `aura-transport`, `aura-protocol`, `aura-core`, `aura-quint-api`
 
 ---
 
@@ -1044,7 +1019,7 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 2. **Dependency Injection**: Effects system allows injectable side effects for testing
 3. **CRDT-Based State**: Eventually consistent state management with semilattice operations
 4. **Capability-Based Security**: Meet-semilattice authorization with unified access control
-5. **Middleware System**: Composable cross-cutting concerns for effects and transport
+5. **Effect System**: Explicit cross-cutting concerns through dependency injection and effect traits
 6. **Single Source of Truth**: Core types consolidated in aura-core (ProtocolType, SessionStatus, etc.)
 7. **Effect System**: Algebraic effects for protocol coordination with composable handlers
 8. **Choreographic Programming**: Global protocol specifications with local projections via rumpsteak-aura
@@ -1107,9 +1082,8 @@ The capability system intentionally uses **multiple architectural layers**, each
 ## System Architecture Summary
 
 ### Foundation Layer
-- **aura-core**: Core types, effects, semilattice operations, identifiers, and configuration system
-- **aura-crypto**: FROST threshold cryptography, deterministic key derivation, middleware, and composable security stacks
-- **aura-transport**: P2P communication layer with middleware architecture and unified network addressing
+- **aura-core**: Core types, effects, semilattice operations, identifiers, configuration system, and cryptographic utilities (FROST, DKD, merkle trees)
+- **aura-transport**: P2P communication layer with effect-based architecture and unified network addressing
 
 ### Effect System
 - **aura-protocol**: Unified stateless effect system with handlers, guard chains, authorization bridges, and capability soundness verification

@@ -513,9 +513,9 @@ impl Default for JournalCouplerBuilder {
 mod tests {
     use super::*;
     use aura_core::DeviceId;
+    use aura_macros::aura_test;
     use aura_mpst::journal_coupling::JournalAnnotation;
     use aura_testkit::*;
-    use aura_macros::aura_test;
 
     #[tokio::test]
     async fn test_journal_coupler_creation() {

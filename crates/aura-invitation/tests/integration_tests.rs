@@ -6,8 +6,8 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
 
-use aura_core::{AccountId, Cap, DeviceId, TrustLevel};
 use aura_core::effects::TimeEffects;
+use aura_core::{AccountId, Cap, DeviceId, TrustLevel};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
     invitation_acceptance::{AcceptanceProtocolConfig, InvitationAcceptanceCoordinator},
@@ -16,9 +16,9 @@ use aura_invitation::{
     },
 };
 use aura_journal::semilattice::{InvitationLedger, InvitationStatus};
+use aura_macros::aura_test;
 use aura_protocol::effects::AuraEffectSystem;
 use aura_testkit::effects_integration::TestEffectsBuilder;
-use aura_macros::aura_test;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -110,9 +110,7 @@ async fn test_device_invitation_coordinator_integration() -> aura_core::AuraResu
         test.shared_ledger.clone(),
     );
 
-    let response = coordinator
-        .invite_device(request.clone())
-        .await?;
+    let response = coordinator.invite_device(request.clone()).await?;
 
     assert!(response.success);
     assert_eq!(response.invitation.inviter, test.inviter_device);
@@ -145,9 +143,7 @@ async fn test_invitation_acceptance_coordinator_integration() -> aura_core::Aura
         test.shared_ledger.clone(),
     );
 
-    let invitation_response = invitation_coordinator
-        .invite_device(request)
-        .await?;
+    let invitation_response = invitation_coordinator.invite_device(request).await?;
 
     // Configure acceptance protocol
     let acceptance_config = AcceptanceProtocolConfig {
@@ -216,7 +212,11 @@ async fn test_relationship_formation_coordinator_integration() -> aura_core::Aur
             println!("Relationship formation failed: {}", error);
         }
     }
-    assert!(response.success, "Expected success but got error: {:?}", response.error);
+    assert!(
+        response.success,
+        "Expected success but got error: {:?}",
+        response.error
+    );
     assert!(response.established);
     assert!(response.relationship.is_some());
 
@@ -245,9 +245,7 @@ async fn test_full_invitation_to_relationship_flow() -> aura_core::AuraResult<()
         test.shared_ledger.clone(),
     );
 
-    let invitation_response = invitation_coordinator
-        .invite_device(request)
-        .await?;
+    let invitation_response = invitation_coordinator.invite_device(request).await?;
 
     println!(
         "Created invitation: {}",
@@ -319,7 +317,11 @@ async fn test_full_invitation_to_relationship_flow() -> aura_core::AuraResult<()
             println!("Final relationship formation failed: {}", error);
         }
     }
-    assert!(relationship_response.success, "Final relationship formation failed: {:?}", relationship_response.error);
+    assert!(
+        relationship_response.success,
+        "Final relationship formation failed: {:?}",
+        relationship_response.error
+    );
     assert!(relationship_response.established);
 
     println!("✓ Full invitation to relationship flow integration successful");
@@ -358,7 +360,9 @@ async fn test_concurrent_invitation_processing() -> aura_core::AuraResult<()> {
     // Verify all invitations succeeded
     let mut envelopes = Vec::new();
     for (i, result) in invitation_results.into_iter().enumerate() {
-        let response = result.map_err(|e| aura_core::AuraError::invalid(&format!("Invitation {} failed: {}", i, e)))?;
+        let response = result.map_err(|e| {
+            aura_core::AuraError::invalid(&format!("Invitation {} failed: {}", i, e))
+        })?;
         assert!(response.success);
         let invitation_id = response.invitation.invitation_id.clone();
         envelopes.push(response.invitation);
@@ -381,7 +385,9 @@ async fn test_concurrent_invitation_processing() -> aura_core::AuraResult<()> {
 
     // Verify all acceptances succeeded
     for (i, result) in acceptance_results.into_iter().enumerate() {
-        let acceptance = result.map_err(|e| aura_core::AuraError::invalid(&format!("Acceptance {} failed: {}", i, e)))?;
+        let acceptance = result.map_err(|e| {
+            aura_core::AuraError::invalid(&format!("Acceptance {} failed: {}", i, e))
+        })?;
         assert!(acceptance.success);
         println!(
             "Accepted concurrent invitation {}: {}",
@@ -423,9 +429,7 @@ async fn test_error_handling_integration() -> aura_core::AuraResult<()> {
 
     // Test acceptance error handling with expiration
     let valid_request = test.create_invitation_request("test-device", Some(1)); // Very short TTL
-    let invitation_response = coordinator
-        .invite_device(valid_request)
-        .await?;
+    let invitation_response = coordinator.invite_device(valid_request).await?;
 
     // Wait for expiration using mock time advancement
     test.invitee_effects.sleep_ms(2000).await;

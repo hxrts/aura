@@ -3,10 +3,10 @@
 //! This module provides optimized initialization paths that leverage
 //! parallelism to reduce startup time for the effect system.
 
-use std::sync::Arc;
 use futures::future::{join_all, FutureExt};
+use std::sync::Arc;
 
-use aura_core::{AuraResult, AuraError, DeviceId};
+use aura_core::{AuraError, AuraResult, DeviceId};
 
 // Platform-specific imports
 #[cfg(not(target_arch = "wasm32"))]
@@ -14,31 +14,27 @@ use std::time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinSet;
 
+use aura_effects::handlers::{
+    MockConsoleHandler, MockCryptoHandler, MockNetworkHandler, MockRandomHandler, MockTimeHandler,
+};
+use aura_effects::journal::MemoryJournalHandler;
+use aura_effects::storage::MemoryStorageHandler;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use web_sys::Performance;
-use aura_effects::handlers::{
-    MockNetworkHandler, MockCryptoHandler, MockTimeHandler,
-    MockRandomHandler, MockConsoleHandler,
-};
-use aura_effects::storage::MemoryStorageHandler;
-use aura_effects::journal::MemoryJournalHandler;
 
 use crate::handlers::{
-    EffectType, ExecutionMode,
-    system::LoggingSystemHandler,
-    ledger::memory::MemoryLedgerHandler,
-    tree::dummy::DummyTreeHandler,
-    choreographic::memory::MemoryChoreographicHandler,
+    choreographic::memory::MemoryChoreographicHandler, ledger::memory::MemoryLedgerHandler,
+    system::LoggingSystemHandler, tree::dummy::DummyTreeHandler, EffectType, ExecutionMode,
 };
 
 use super::{
-    EffectSystemConfig, AuraEffectSystem,
     executor::{EffectExecutor, EffectExecutorBuilder},
     handler_adapters::*,
-    services::{ContextManager, FlowBudgetManager, ReceiptManager},
     lifecycle::LifecycleManager,
+    services::{ContextManager, FlowBudgetManager, ReceiptManager},
+    AuraEffectSystem, EffectSystemConfig,
 };
 
 /// Metrics for initialization performance
@@ -113,7 +109,7 @@ impl ParallelInitBuilder {
         // Phase 1: Initialize handlers in parallel
         let handler_start = now();
         let handlers = self.initialize_handlers_parallel().await?;
-        
+
         if let Some(ref mut m) = metrics {
             m.handler_init_duration = elapsed_since(handler_start);
         }
@@ -123,13 +119,13 @@ impl ParallelInitBuilder {
 
         // Phase 3: Initialize services in parallel
         let service_start = now();
-        let (context_mgr, budget_mgr, receipt_mgr, lifecycle_mgr) = 
+        let (context_mgr, budget_mgr, receipt_mgr, lifecycle_mgr) =
             self.initialize_services_parallel().await?;
-        
+
         if let Some(ref mut m) = metrics {
             m.service_init_duration = elapsed_since(service_start);
             m.total_duration = elapsed_since(start_time);
-            
+
             // Calculate speedup vs sequential
             let sequential_estimate = m.handler_init_duration.as_millis() * 11 // 11 handlers
                 + m.service_init_duration.as_millis() * 4; // 4 services
@@ -149,10 +145,12 @@ impl ParallelInitBuilder {
     }
 
     /// Initialize all handlers in parallel
-    async fn initialize_handlers_parallel(&self) -> AuraResult<Vec<(EffectType, Arc<dyn std::any::Any + Send + Sync>)>> {
+    async fn initialize_handlers_parallel(
+        &self,
+    ) -> AuraResult<Vec<(EffectType, Arc<dyn std::any::Any + Send + Sync>)>> {
         let mode = self.config.execution_mode;
         let device_id = self.config.device_id;
-        
+
         // For WASM, we use join_all instead of JoinSet
         // This still provides concurrency but without OS threads
         let seed = match mode {
@@ -164,22 +162,18 @@ impl ParallelInitBuilder {
         let handler_futures = vec![
             // Crypto handler
             async move {
-                let handler = Arc::new(CryptoHandlerAdapter::new(
-                    MockCryptoHandler::new(42),
-                    mode,
-                )) as Arc<dyn std::any::Any + Send + Sync>;
+                let handler = Arc::new(CryptoHandlerAdapter::new(MockCryptoHandler::new(42), mode))
+                    as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Crypto, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // Network handler
             async move {
-                let handler = Arc::new(NetworkHandlerAdapter::new(
-                    MockNetworkHandler::new(),
-                    mode,
-                )) as Arc<dyn std::any::Any + Send + Sync>;
+                let handler = Arc::new(NetworkHandlerAdapter::new(MockNetworkHandler::new(), mode))
+                    as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Network, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // Storage handler
             async move {
                 let handler = Arc::new(StorageHandlerAdapter::new(
@@ -187,26 +181,22 @@ impl ParallelInitBuilder {
                     mode,
                 )) as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Storage, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // Time handler
             async move {
-                let handler = Arc::new(TimeHandlerAdapter::new(
-                    MockTimeHandler::new(),
-                    mode,
-                )) as Arc<dyn std::any::Any + Send + Sync>;
+                let handler = Arc::new(TimeHandlerAdapter::new(MockTimeHandler::new(), mode))
+                    as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Time, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // Console handler
             async move {
-                let handler = Arc::new(ConsoleHandlerAdapter::new(
-                    MockConsoleHandler::new(),
-                    mode,
-                )) as Arc<dyn std::any::Any + Send + Sync>;
+                let handler = Arc::new(ConsoleHandlerAdapter::new(MockConsoleHandler::new(), mode))
+                    as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Console, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // Random handler
             async move {
                 let handler = Arc::new(RandomHandlerAdapter::new(
@@ -214,8 +204,8 @@ impl ParallelInitBuilder {
                     mode,
                 )) as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Random, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // Journal handler
             async move {
                 let handler = Arc::new(JournalHandlerAdapter::new(
@@ -223,8 +213,8 @@ impl ParallelInitBuilder {
                     mode,
                 )) as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Journal, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // System handler
             async move {
                 let handler = Arc::new(SystemHandlerAdapter::new(
@@ -232,26 +222,22 @@ impl ParallelInitBuilder {
                     mode,
                 )) as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::System, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // Ledger handler
             async move {
-                let handler = Arc::new(LedgerHandlerAdapter::new(
-                    MemoryLedgerHandler::new(),
-                    mode,
-                )) as Arc<dyn std::any::Any + Send + Sync>;
+                let handler = Arc::new(LedgerHandlerAdapter::new(MemoryLedgerHandler::new(), mode))
+                    as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Ledger, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // Tree handler
             async move {
-                let handler = Arc::new(TreeHandlerAdapter::new(
-                    DummyTreeHandler::new(),
-                    mode,
-                )) as Arc<dyn std::any::Any + Send + Sync>;
+                let handler = Arc::new(TreeHandlerAdapter::new(DummyTreeHandler::new(), mode))
+                    as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Tree, handler)
-            }.boxed(),
-
+            }
+            .boxed(),
             // Choreographic handler
             async move {
                 let handler = Arc::new(ChoreographicHandlerAdapter::new(
@@ -259,7 +245,8 @@ impl ParallelInitBuilder {
                     mode,
                 )) as Arc<dyn std::any::Any + Send + Sync>;
                 (EffectType::Choreographic, handler)
-            }.boxed(),
+            }
+            .boxed(),
         ];
 
         // Execute all handler initializations concurrently
@@ -273,7 +260,7 @@ impl ParallelInitBuilder {
         handlers: Vec<(EffectType, Arc<dyn std::any::Any + Send + Sync>)>,
     ) -> AuraResult<EffectExecutor> {
         let mut builder = EffectExecutorBuilder::new();
-        
+
         for (effect_type, handler) in handlers {
             builder = builder.with_handler(effect_type, handler);
         }
@@ -292,7 +279,7 @@ impl ParallelInitBuilder {
     )> {
         // Services are lightweight, but we can still parallelize
         let device_id = self.config.device_id;
-        
+
         // Use join_all with boxed futures for WASM compatibility
         let service_futures = vec![
             async { Arc::new(ContextManager::new()) }.boxed(),
@@ -300,7 +287,7 @@ impl ParallelInitBuilder {
             async { Arc::new(ReceiptManager::new()) }.boxed(),
             async move { Arc::new(LifecycleManager::new(device_id)) }.boxed(),
         ];
-        
+
         let services = join_all(service_futures).await;
 
         Ok((
@@ -359,16 +346,14 @@ impl HandlerPool {
     /// Pre-warm the pool with handlers (WASM-compatible)
     pub async fn warm_up(&mut self, count: usize) {
         let count = count.min(self.max_size);
-        
+
         // Pre-create handlers without spawning OS threads
-        let network_futures = (0..count).map(|_| {
-            async { Arc::new(MockNetworkHandler::new()) }.boxed()
-        });
+        let network_futures =
+            (0..count).map(|_| async { Arc::new(MockNetworkHandler::new()) }.boxed());
         let network_handlers = join_all(network_futures).await;
 
-        let storage_futures = (0..count).map(|_| {
-            async { Arc::new(MemoryStorageHandler::new()) }.boxed()
-        });
+        let storage_futures =
+            (0..count).map(|_| async { Arc::new(MemoryStorageHandler::new()) }.boxed());
         let storage_handlers = join_all(storage_futures).await;
 
         // Add to pools
@@ -383,7 +368,8 @@ impl HandlerPool {
 
     /// Get a network handler from the pool or create new
     pub fn get_network_handler(&mut self) -> Arc<MockNetworkHandler> {
-        self.network_pool.pop()
+        self.network_pool
+            .pop()
             .unwrap_or_else(|| Arc::new(MockNetworkHandler::new()))
     }
 
@@ -398,59 +384,67 @@ impl HandlerPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::AuraResult;
+    use aura_testkit::{aura_test, TestFixture};
 
-    #[tokio::test]
-    async fn test_parallel_initialization() {
-        let config = EffectSystemConfig::for_testing(DeviceId::new());
+    #[aura_test]
+    async fn test_parallel_initialization() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let config = EffectSystemConfig::for_testing(fixture.device_id());
         let builder = ParallelInitBuilder::new(config).with_metrics();
-        
-        let (system, metrics) = builder.build().await.unwrap();
+
+        let (system, metrics) = builder.build().await?;
         let metrics = metrics.unwrap();
-        
+
         println!("Initialization metrics:");
         println!("  Total duration: {:?}", metrics.total_duration);
         println!("  Handler init: {:?}", metrics.handler_init_duration);
         println!("  Service init: {:?}", metrics.service_init_duration);
         println!("  Parallel speedup: {:.2}x", metrics.parallel_speedup);
-        
+
         assert!(metrics.parallel_speedup > 1.0);
-        
+
         // Verify system is functional
         let epoch = system.current_epoch().await;
         assert_eq!(epoch, 1);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_lazy_initialization() {
-        let config = EffectSystemConfig::for_testing(DeviceId::new());
+    #[aura_test]
+    async fn test_lazy_initialization() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let config = EffectSystemConfig::for_testing(fixture.device_id());
         let lazy = LazyEffectSystem::new(config);
-        
+
         // First access triggers initialization
-        let system1 = lazy.get().await.unwrap();
-        
+        let system1 = lazy.get().await?;
+
         // Second access returns cached instance
-        let system2 = lazy.get().await.unwrap();
-        
+        let system2 = lazy.get().await?;
+
         // Verify same instance
         assert!(Arc::ptr_eq(system1, system2));
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_handler_pool() {
+    #[aura_test]
+    async fn test_handler_pool() -> AuraResult<()> {
+        let _fixture = TestFixture::new().await?;
         let mut pool = HandlerPool::new(10);
-        
+
         // Warm up pool
         pool.warm_up(5).await;
-        
+
         // Get handlers
         let h1 = pool.get_network_handler();
         let h2 = pool.get_network_handler();
-        
+
         // Return one handler
         pool.return_network_handler(h1);
-        
+
         // Next get should reuse the returned handler
         let h3 = pool.get_network_handler();
         assert!(Arc::strong_count(&h3) > 1);
+        Ok(())
     }
 }

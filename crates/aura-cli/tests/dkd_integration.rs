@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 use aura_core::{hash, DeviceId};
-use aura_protocol::{AuraEffectSystem, RandomEffects, effects::EffectSystemConfig};
 use aura_macros::aura_test;
+use aura_protocol::{effects::EffectSystemConfig, AuraEffectSystem, RandomEffects};
 use uuid::Uuid;
 
 /// Test DKD functionality through effects system
@@ -13,7 +13,9 @@ use uuid::Uuid;
 async fn test_dkd_integration() -> Result<()> {
     // Create test effect system
     let device_id = DeviceId(Uuid::from_bytes([0u8; 16]));
-    let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await.map_err(|e| anyhow::anyhow!(e))?;
+    let fixture = aura_testkit::create_test_fixture_with_device_id(device_id)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
     let effects = fixture.effect_system();
 
     // Test parameters
@@ -40,12 +42,12 @@ async fn test_dkd_integration() -> Result<()> {
     assert_eq!(result.threshold, 2);
     assert_eq!(result.participants, 3);
     assert!(result.threshold_success);
-    
+
     // Verify that derived values are generated
     assert!(!result.randomness.is_empty());
     assert!(!result.derived_key.is_empty());
     assert!(!result.commitment.is_empty());
-    
+
     // Values should be valid hex
     assert!(hex::decode(&result.randomness).is_ok());
     assert!(hex::decode(&result.derived_key).is_ok());
@@ -55,10 +57,12 @@ async fn test_dkd_integration() -> Result<()> {
 }
 
 /// Test DKD derivation input creation
-#[aura_test] 
+#[aura_test]
 async fn test_derivation_input_creation() -> Result<()> {
     let device_id = DeviceId(uuid::Uuid::from_bytes([1u8; 16]));
-    let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await.map_err(|e| anyhow::anyhow!(e))?;
+    let fixture = aura_testkit::create_test_fixture_with_device_id(device_id)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
     let effects = fixture.effect_system();
 
     let app_id = "test_app";

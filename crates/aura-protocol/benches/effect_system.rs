@@ -6,17 +6,16 @@
 //! - Effect execution overhead
 //! - Memory usage patterns
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use tokio::runtime::Runtime;
 
-use aura_protocol::effects::{
-    AuraEffectSystem, AuraEffectSystemBuilder, EffectSystemConfig,
-    NetworkEffects, StorageEffects, CryptoEffects, TimeEffects,
-};
 use aura_core::{DeviceId, FlowBudget};
 use aura_effects::handlers::{
-    MockNetworkHandler, InMemoryStorageHandler, 
-    MockCryptoHandler, MockTimeHandler,
+    InMemoryStorageHandler, MockCryptoHandler, MockNetworkHandler, MockTimeHandler,
+};
+use aura_protocol::effects::{
+    AuraEffectSystem, AuraEffectSystemBuilder, CryptoEffects, EffectSystemConfig, NetworkEffects,
+    StorageEffects, TimeEffects,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,21 +23,21 @@ use std::time::Duration;
 /// Benchmark effect system initialization
 fn bench_initialization(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    
+
     c.bench_function("effect_system_new_sync", |b| {
         b.iter(|| {
             let system = AuraEffectSystem::for_testing_sync();
             black_box(system);
         });
     });
-    
+
     c.bench_function("effect_system_new_async", |b| {
         b.to_async(&runtime).iter(|| async {
             let system = AuraEffectSystem::new().await;
             black_box(system);
         });
     });
-    
+
     c.bench_function("effect_system_builder_minimal", |b| {
         b.to_async(&runtime).iter(|| async {
             let builder = AuraEffectSystemBuilder::new()
@@ -48,7 +47,7 @@ fn bench_initialization(c: &mut Criterion) {
             black_box(builder);
         });
     });
-    
+
     c.bench_function("effect_system_builder_full", |b| {
         b.to_async(&runtime).iter(|| async {
             let builder = AuraEffectSystemBuilder::new()
@@ -67,7 +66,7 @@ fn bench_initialization(c: &mut Criterion) {
 /// Benchmark handler registration performance
 fn bench_handler_registration(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    
+
     c.bench_function("register_single_handler", |b| {
         b.to_async(&runtime).iter_batched(
             || AuraEffectSystemBuilder::new(),
@@ -80,7 +79,7 @@ fn bench_handler_registration(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
-    
+
     c.bench_function("register_multiple_handlers", |b| {
         b.to_async(&runtime).iter_batched(
             || AuraEffectSystemBuilder::new(),
@@ -101,12 +100,10 @@ fn bench_handler_registration(c: &mut Criterion) {
 /// Benchmark effect execution overhead
 fn bench_effect_execution(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    
+
     // Setup effect system once for execution benchmarks
-    let effect_system = runtime.block_on(async {
-        Arc::new(AuraEffectSystem::new().await)
-    });
-    
+    let effect_system = runtime.block_on(async { Arc::new(AuraEffectSystem::new().await) });
+
     c.bench_function("network_send_overhead", |b| {
         let system = effect_system.clone();
         b.to_async(&runtime).iter(|| async {
@@ -115,7 +112,7 @@ fn bench_effect_execution(c: &mut Criterion) {
             let _ = system.send_to_peer(peer_id, message).await;
         });
     });
-    
+
     c.bench_function("storage_store_overhead", |b| {
         let system = effect_system.clone();
         b.to_async(&runtime).iter(|| async {
@@ -124,7 +121,7 @@ fn bench_effect_execution(c: &mut Criterion) {
             let _ = system.store(key, value, false).await;
         });
     });
-    
+
     c.bench_function("crypto_sign_overhead", |b| {
         let system = effect_system.clone();
         b.to_async(&runtime).iter(|| async {
@@ -133,7 +130,7 @@ fn bench_effect_execution(c: &mut Criterion) {
             let _ = system.ed25519_sign(message, &private_key).await;
         });
     });
-    
+
     c.bench_function("time_current_epoch", |b| {
         let system = effect_system.clone();
         b.to_async(&runtime).iter(|| async {
@@ -145,10 +142,8 @@ fn bench_effect_execution(c: &mut Criterion) {
 /// Benchmark effect batching and parallelization
 fn bench_effect_batching(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    let effect_system = runtime.block_on(async {
-        Arc::new(AuraEffectSystem::new().await)
-    });
-    
+    let effect_system = runtime.block_on(async { Arc::new(AuraEffectSystem::new().await) });
+
     c.bench_function("sequential_network_calls", |b| {
         let system = effect_system.clone();
         b.to_async(&runtime).iter(|| async {
@@ -158,13 +153,13 @@ fn bench_effect_batching(c: &mut Criterion) {
             }
         });
     });
-    
+
     c.bench_function("parallel_network_calls", |b| {
         let system = effect_system.clone();
         b.to_async(&runtime).iter(|| async {
             let peer_id = DeviceId::new();
             let mut handles = vec![];
-            
+
             for _ in 0..10 {
                 let sys = system.clone();
                 let handle = tokio::spawn(async move {
@@ -172,18 +167,18 @@ fn bench_effect_batching(c: &mut Criterion) {
                 });
                 handles.push(handle);
             }
-            
+
             for handle in handles {
                 let _ = handle.await;
             }
         });
     });
-    
+
     c.bench_function("mixed_effect_calls", |b| {
         let system = effect_system.clone();
         b.to_async(&runtime).iter(|| async {
             let peer_id = DeviceId::new();
-            
+
             // Mix of different effect calls
             let _ = system.send_to_peer(peer_id, vec![0u8; 256]).await;
             let _ = system.store("key", vec![0u8; 512], false).await;
@@ -197,7 +192,7 @@ fn bench_effect_batching(c: &mut Criterion) {
 /// Benchmark memory allocation patterns
 fn bench_memory_patterns(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    
+
     c.bench_function("effect_system_memory_footprint", |b| {
         b.to_async(&runtime).iter_batched(
             || {},
@@ -210,7 +205,7 @@ fn bench_memory_patterns(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
-    
+
     c.bench_function("handler_allocation_overhead", |b| {
         b.iter(|| {
             let handlers: Vec<Arc<dyn NetworkEffects>> = (0..100)
@@ -224,7 +219,7 @@ fn bench_memory_patterns(c: &mut Criterion) {
 /// Benchmark configuration variations
 fn bench_configurations(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    
+
     c.bench_function("default_config", |b| {
         b.to_async(&runtime).iter(|| async {
             let config = EffectSystemConfig::default();
@@ -235,7 +230,7 @@ fn bench_configurations(c: &mut Criterion) {
             black_box(system);
         });
     });
-    
+
     c.bench_function("minimal_config", |b| {
         b.to_async(&runtime).iter(|| async {
             let config = EffectSystemConfig {
@@ -252,7 +247,7 @@ fn bench_configurations(c: &mut Criterion) {
             black_box(system);
         });
     });
-    
+
     c.bench_function("maximal_config", |b| {
         b.to_async(&runtime).iter(|| async {
             let config = EffectSystemConfig {

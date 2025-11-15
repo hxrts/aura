@@ -58,7 +58,6 @@ impl CliHandler {
         scenarios::handle_scenarios(&self.effect_system, action).await
     }
 
-
     /// Handle version command through effects
     pub async fn handle_version(&self) -> Result<()> {
         version::handle_version(&self.effect_system).await

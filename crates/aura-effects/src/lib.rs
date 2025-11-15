@@ -69,7 +69,9 @@
 //!     .build();
 //! ```
 
+pub mod authorization;
 pub mod console;
+pub mod context;
 pub mod crypto;
 pub mod journal;
 pub mod random;
@@ -78,45 +80,47 @@ pub mod time;
 pub mod transport;
 
 // Re-export commonly used handlers
+pub use authorization::{MockAuthorizationHandler, StandardAuthorizationHandler};
 pub use console::{MockConsoleHandler, RealConsoleHandler};
+pub use context::{ExecutionContext, MockContextHandler, StandardContextHandler};
 pub use crypto::{MockCryptoHandler, RealCryptoHandler};
-pub use journal::MemoryJournalHandler;
+pub use journal::{MockJournalHandler, StandardJournalHandler};
 pub use random::{MockRandomHandler, RealRandomHandler};
 pub use storage::{FilesystemStorageHandler, MemoryStorageHandler};
 pub use time::{RealTimeHandler, SimulatedTimeHandler};
 // Transport effect handlers - organized by functionality
 pub mod transport_effects {
     //! Transport effect implementations - Layer 3 stateless handlers
-    
+
     pub use crate::transport::{
-        // Core transport handlers  
-        TcpTransportHandler,
-        WebSocketTransportHandler, 
-        InMemoryTransportHandler,
-        
-        // Message processing
-        FramingHandler,
-        
         // Utilities and helpers
         AddressResolver,
-        TimeoutHelper,
         BufferUtils,
         ConnectionMetrics,
-        UrlValidator,
-        
-        // Coordination helpers (NO choreography)
-        TransportManager,
-        RetryingTransportManager,
-        
+        // Message processing
+        FramingHandler,
+
+        InMemoryTransportHandler,
+
+        // Facade patterns removed - migrate to aura-protocol
+        // RetryingTransportManager,
+        // TransportManager,
+
+        // Core transport handlers
+        TcpTransportHandler,
+        TimeoutHelper,
         // Integration helpers
         TransportError,
+        UrlValidator,
+
+        WebSocketTransportHandler,
     };
 }
 
 // Convenience re-exports for most common handlers
 pub use transport_effects::{
-    TcpTransportHandler, WebSocketTransportHandler, InMemoryTransportHandler,
-    FramingHandler, TransportManager, TransportError
+    FramingHandler, InMemoryTransportHandler, TcpTransportHandler, TransportError,
+    WebSocketTransportHandler,
 };
 
 // Re-export core effect traits for convenience

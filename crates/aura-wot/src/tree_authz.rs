@@ -28,12 +28,8 @@
 //! }
 //! ```
 
-use crate::{
-    evaluate_capabilities, CapabilitySet, EvaluationContext, LocalChecks, Policy, PolicyEngine,
-    WotError,
-};
-use aura_core::{identifiers::DeviceId, LeafId, LeafNode, NodeIndex, Policy as TreePolicy};
-use std::collections::HashMap;
+use crate::CapabilitySet;
+use aura_core::{LeafId, LeafNode, NodeIndex, Policy as TreePolicy};
 
 /// Tree-specific operations that can be authorized
 ///
@@ -92,125 +88,8 @@ impl TreeOperation {
     }
 }
 
-/// Capability-based tree authorization middleware
-///
-/// Enforces capability checks before tree operations are proposed for
-/// threshold signing. Uses meet-semilattice intersection to compute
-/// effective capabilities from policy, delegations, and local checks.
-#[derive(Debug)]
-pub struct TreeAuthorizationMiddleware {
-    policy_engine: PolicyEngine,
-    local_checks: LocalChecks,
-}
-
-impl TreeAuthorizationMiddleware {
-    /// Create new tree authorization middleware with default policy
-    pub fn new() -> Self {
-        Self {
-            policy_engine: PolicyEngine::new(),
-            local_checks: LocalChecks::empty(),
-        }
-    }
-
-    /// Create with custom policy
-    pub fn with_policy(policy: Policy) -> Self {
-        Self {
-            policy_engine: PolicyEngine::with_policy(policy),
-            local_checks: LocalChecks::empty(),
-        }
-    }
-
-    /// Grant tree capabilities to a device
-    ///
-    /// Valid tree capabilities:
-    /// - `tree:add_leaf` - Propose adding new leaves
-    /// - `tree:remove_leaf` - Propose removing leaves
-    /// - `tree:change_policy` - Propose policy changes
-    /// - `tree:rotate_epoch` - Propose epoch rotation
-    /// - `tree:propose` - General proposal capability (required for all ops)
-    /// - `tree:sign` - Participate in threshold signing (separate from proposal)
-    pub fn grant_tree_capabilities(&mut self, device_id: DeviceId, operations: &[&str]) {
-        let tree_caps = CapabilitySet::from_permissions(operations);
-        self.policy_engine.grant_capabilities(device_id, tree_caps);
-    }
-
-    /// Check if a device can propose a tree operation
-    ///
-    /// This implements the meet-guarded precondition:
-    /// `authorize ⟺ need(op) ≤ effective_caps`
-    ///
-    /// Where `effective_caps = policy ⊓ delegations ⊓ local_checks`
-    ///
-    /// **CRITICAL**: This check happens BEFORE the signing ceremony, not during.
-    /// The ceremony itself verifies threshold, not individual authorization.
-    pub fn authorize_operation(
-        &self,
-        device_id: DeviceId,
-        operation: &TreeOperation,
-        metadata: &HashMap<String, String>,
-    ) -> Result<bool, WotError> {
-        // Get required capabilities for this operation
-        let required = operation.required_capabilities();
-
-        // Convert to operation string for context
-        let operation_string = operation.to_operation_string();
-
-        // Create evaluation context
-        let mut context = EvaluationContext::new(device_id, operation_string);
-        for (key, value) in metadata {
-            context = context.with_metadata(key.clone(), value.clone());
-        }
-
-        // Evaluate effective capabilities (policy ⊓ delegations ⊓ local_checks)
-        let effective_caps = evaluate_capabilities(
-            self.policy_engine.active_policy(),
-            &[], // No delegation chains for tree operations (direct policy only)
-            &self.local_checks,
-            &context,
-        )?;
-
-        // Check if effective capabilities include all required capabilities
-        // This implements: need(op) ≤ effective_caps
-        Ok(required.is_subset_of(&effective_caps))
-    }
-
-    /// Add local checks (time restrictions, rate limits, etc.)
-    ///
-    /// Local checks are intersected with policy via meet operation,
-    /// ensuring capabilities can only shrink.
-    pub fn with_local_checks(mut self, local_checks: LocalChecks) -> Self {
-        self.local_checks = local_checks;
-        self
-    }
-
-    /// Get current policy engine (for inspection/debugging)
-    pub fn policy_engine(&self) -> &PolicyEngine {
-        &self.policy_engine
-    }
-
-    /// Check if device can participate in threshold signing
-    ///
-    /// This is separate from proposal authorization. A device may be able
-    /// to sign operations without being able to propose them.
-    pub fn authorize_signing(&self, device_id: DeviceId) -> Result<bool, WotError> {
-        let context = EvaluationContext::new(device_id, "tree:sign".to_string());
-
-        let effective_caps = evaluate_capabilities(
-            self.policy_engine.active_policy(),
-            &[],
-            &self.local_checks,
-            &context,
-        )?;
-
-        Ok(effective_caps.permits("tree:sign"))
-    }
-}
-
-impl Default for TreeAuthorizationMiddleware {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Middleware implementation removed - migrated to AuthorizationEffects pattern
+// TODO: Complete migration by implementing TreeAuthorizationHandler in aura-effects
 
 /// Helper function to create a CapabilitySet for common tree operations
 ///
@@ -271,55 +150,6 @@ mod tests {
     }
 
     #[test]
-    fn test_authorization_with_sufficient_capabilities() {
-        let device_id = DeviceId::new();
-        let mut authz = TreeAuthorizationMiddleware::new();
-
-        // Grant capabilities
-        authz.grant_tree_capabilities(device_id, &["tree:add_leaf", "tree:propose"]);
-
-        // Should authorize
-        let op = TreeOperation::AddLeaf {
-            leaf: LeafNode::new_device(LeafId(1), aura_core::DeviceId::new(), vec![0u8; 32]),
-            under: NodeIndex(0),
-        };
-        let result = authz.authorize_operation(device_id, &op, &HashMap::new());
-        assert!(result.is_ok());
-        assert!(result.unwrap());
-    }
-
-    #[test]
-    fn test_authorization_with_insufficient_capabilities() {
-        let device_id = DeviceId::new();
-        let mut authz = TreeAuthorizationMiddleware::new();
-
-        // Grant only read capability
-        authz.grant_tree_capabilities(device_id, &["tree:read"]);
-
-        // Should not authorize write operation
-        let op = TreeOperation::AddLeaf {
-            leaf: LeafNode::new_device(LeafId(1), aura_core::DeviceId::new(), vec![0u8; 32]),
-            under: NodeIndex(0),
-        };
-        let result = authz.authorize_operation(device_id, &op, &HashMap::new());
-        assert!(result.is_ok());
-        assert!(!result.unwrap()); // Should be false (not authorized)
-    }
-
-    #[test]
-    fn test_signing_authorization() {
-        let device_id = DeviceId::new();
-        let mut authz = TreeAuthorizationMiddleware::new();
-
-        // Grant signing capability
-        authz.grant_tree_capabilities(device_id, &["tree:sign"]);
-
-        let result = authz.authorize_signing(device_id);
-        assert!(result.is_ok());
-        assert!(result.unwrap());
-    }
-
-    #[test]
     fn test_helper_capabilities() {
         let mgmt_caps = tree_management_capabilities();
         assert!(mgmt_caps.permits("tree:add_leaf"));
@@ -334,4 +164,7 @@ mod tests {
         assert!(lifecycle_caps.permits("tree:remove_leaf"));
         assert!(!lifecycle_caps.permits("tree:change_policy"));
     }
+
+    // TODO: Implement tests for new AuthorizationEffects-based tree authorization
+    // These tests should use dependency injection with AuthorizationEffects trait
 }

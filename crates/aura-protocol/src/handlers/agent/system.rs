@@ -43,15 +43,18 @@ impl AgentEffectSystemHandler {
     }
 
     /// Create agent effect system with an existing core effect system (recommended)
-    /// 
+    ///
     /// This is the preferred method as it follows proper dependency injection.
     /// Use this instead of `for_testing()` for better testability and control.
-    pub fn with_core_effects(device_id: DeviceId, core_effects: Arc<RwLock<AuraEffectSystem>>) -> Self {
+    pub fn with_core_effects(
+        device_id: DeviceId,
+        core_effects: Arc<RwLock<AuraEffectSystem>>,
+    ) -> Self {
         Self::new(device_id, core_effects)
     }
 
     /// Create agent effect system for testing
-    /// 
+    ///
     /// # Deprecated
     /// This method creates the effect system internally which makes testing difficult.
     /// Consider using `with_core_effects()` instead for better dependency injection.
@@ -512,8 +515,8 @@ impl ConfigurationEffects for AgentEffectSystemHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::*;
     use aura_macros::aura_test;
+    use aura_testkit::*;
     use std::sync::Arc;
     use tokio::sync::RwLock;
 

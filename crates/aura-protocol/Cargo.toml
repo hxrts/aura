@@ -18,7 +18,6 @@ testing = []
 # Workspace crates
 aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
-aura-crypto = { path = "../aura-crypto" }
 aura-journal = { path = "../aura-journal" }
 aura-verify = { path = "../aura-verify" }
 aura-wot = { path = "../aura-wot" }
@@ -35,7 +34,7 @@ ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
 sha2 = { workspace = true }
 
-# Cryptography provided through aura-crypto
+# Cryptography provided through aura-core
 blake3 = { workspace = true }
 hmac = { workspace = true }
 hkdf = { workspace = true }

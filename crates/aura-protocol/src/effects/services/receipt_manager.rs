@@ -218,7 +218,9 @@ impl Default for ReceiptManager {
 mod tests {
     use super::*;
     use aura_core::session_epochs::Epoch;
+    use aura_core::AuraResult;
     use aura_core::DeviceId;
+    use aura_testkit::{aura_test, TestFixture};
 
     fn create_test_receipt(
         context: ContextId,
@@ -243,96 +245,100 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_receipt_chain() {
+    #[aura_test]
+    async fn test_receipt_chain() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
-        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
+        let src = fixture.device_id();
+        let dst = fixture.create_device_id();
 
         // Add receipts
         let receipt1 = create_test_receipt(context.clone(), src, dst, 1, [0u8; 32]);
         manager
             .add_receipt(context.clone(), receipt1.clone())
-            .await
-            .unwrap();
+            .await?;
 
         let mut prev_hash = [0u8; 32];
-        prev_hash[..receipt1.sig.len().min(32)].copy_from_slice(&receipt1.sig[..receipt1.sig.len().min(32)]);
+        prev_hash[..receipt1.sig.len().min(32)]
+            .copy_from_slice(&receipt1.sig[..receipt1.sig.len().min(32)]);
         let receipt2 = create_test_receipt(context.clone(), src, dst, 2, prev_hash);
         manager
             .add_receipt(context.clone(), receipt2.clone())
-            .await
-            .unwrap();
+            .await?;
 
         // Check latest receipt
-        let latest = manager.latest_receipt(&context).await.unwrap().unwrap();
+        let latest = manager.latest_receipt(&context).await?.unwrap();
         assert_eq!(latest.nonce, 2);
 
         // Check head hash
-        let head = manager.head_hash(&context).await.unwrap().unwrap();
+        let head = manager.head_hash(&context).await?.unwrap();
         assert_eq!(head, receipt2.sig.as_slice());
 
         // Check chain length
-        let length = manager.chain_length(&context).await.unwrap();
+        let length = manager.chain_length(&context).await?;
         assert_eq!(length, 2);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_chain_verification() {
+    #[aura_test]
+    async fn test_chain_verification() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
-        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
+        let src = fixture.device_id();
+        let dst = fixture.create_device_id();
 
         // Build valid chain
         let receipt1 = create_test_receipt(context.clone(), src, dst, 1, [0u8; 32]);
         manager
             .add_receipt(context.clone(), receipt1.clone())
-            .await
-            .unwrap();
+            .await?;
 
         let mut prev_hash2 = [0u8; 32];
-        prev_hash2[..receipt1.sig.len().min(32)].copy_from_slice(&receipt1.sig[..receipt1.sig.len().min(32)]);
+        prev_hash2[..receipt1.sig.len().min(32)]
+            .copy_from_slice(&receipt1.sig[..receipt1.sig.len().min(32)]);
         let receipt2 = create_test_receipt(context.clone(), src, dst, 2, prev_hash2);
-        manager
-            .add_receipt(context.clone(), receipt2)
-            .await
-            .unwrap();
+        manager.add_receipt(context.clone(), receipt2).await?;
 
         // Verify chain
-        assert!(manager.verify_chain(&context).await.unwrap());
+        assert!(manager.verify_chain(&context).await?);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_range_queries() {
+    #[aura_test]
+    async fn test_range_queries() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
-        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
+        let src = fixture.device_id();
+        let dst = fixture.create_device_id();
 
         // Add multiple receipts
         let mut prev_hash = [0u8; 32];
         for i in 1..=10 {
             let receipt = create_test_receipt(context.clone(), src, dst, i, prev_hash);
-            prev_hash[..receipt.sig.len().min(32)].copy_from_slice(&receipt.sig[..receipt.sig.len().min(32)]);
-            manager.add_receipt(context.clone(), receipt).await.unwrap();
+            prev_hash[..receipt.sig.len().min(32)]
+                .copy_from_slice(&receipt.sig[..receipt.sig.len().min(32)]);
+            manager.add_receipt(context.clone(), receipt).await?;
         }
 
         // Get range
-        let range = manager.get_receipts_range(&context, 2, 3).await.unwrap();
+        let range = manager.get_receipts_range(&context, 2, 3).await?;
         assert_eq!(range.len(), 3);
         assert_eq!(range[0].nonce, 3);
         assert_eq!(range[1].nonce, 4);
         assert_eq!(range[2].nonce, 5);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_concurrent_access() {
+    #[aura_test]
+    async fn test_concurrent_access() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
-        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
+        let src = fixture.device_id();
+        let dst = fixture.create_device_id();
 
         // Spawn concurrent writers
         let mut handles = vec![];
@@ -352,27 +358,30 @@ mod tests {
         }
 
         // Verify all receipts were added
-        let length = manager.chain_length(&context).await.unwrap();
+        let length = manager.chain_length(&context).await?;
         assert_eq!(length, 10);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_chain_removal() {
+    #[aura_test]
+    async fn test_chain_removal() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
         let context = ContextId::from("test-context");
-        let src = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
-        let dst = DeviceId::from(uuid::Uuid::from_bytes([2u8; 16]));
+        let src = fixture.device_id();
+        let dst = fixture.create_device_id();
 
         // Add receipt
         let receipt = create_test_receipt(context.clone(), src, dst, 1, [0u8; 32]);
-        manager.add_receipt(context.clone(), receipt).await.unwrap();
+        manager.add_receipt(context.clone(), receipt).await?;
 
         // Remove chain
-        let removed = manager.remove_chain(&context).await.unwrap();
+        let removed = manager.remove_chain(&context).await?;
         assert!(removed.is_some());
         assert_eq!(removed.unwrap().len(), 1);
 
         // Verify chain is gone
-        assert!(manager.latest_receipt(&context).await.unwrap().is_none());
+        assert!(manager.latest_receipt(&context).await?.is_none());
+        Ok(())
     }
 }

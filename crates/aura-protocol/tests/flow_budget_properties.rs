@@ -8,9 +8,9 @@
 use aura_core::{
     flow::FlowBudget, identifiers::DeviceId, relationships::ContextId, session_epochs::Epoch,
 };
+use aura_macros::aura_test;
 use aura_protocol::guards::flow::FlowBudgetEffects;
 use aura_testkit::{create_test_fixture, TestFixture};
-use aura_macros::aura_test;
 use proptest::prelude::*;
 
 /// Wrapper for FlowBudget to implement Arbitrary (avoids orphan rule)
@@ -249,9 +249,21 @@ mod integration_tests {
         // Budget will be auto-initialized on first charge
 
         // Generate multiple receipts
-        let receipt1 = fixture.effects().charge_flow(&context, &device2, 10).await.unwrap();
-        let receipt2 = fixture.effects().charge_flow(&context, &device2, 20).await.unwrap();
-        let receipt3 = fixture.effects().charge_flow(&context, &device2, 30).await.unwrap();
+        let receipt1 = fixture
+            .effects()
+            .charge_flow(&context, &device2, 10)
+            .await
+            .unwrap();
+        let receipt2 = fixture
+            .effects()
+            .charge_flow(&context, &device2, 20)
+            .await
+            .unwrap();
+        let receipt3 = fixture
+            .effects()
+            .charge_flow(&context, &device2, 30)
+            .await
+            .unwrap();
 
         // Verify nonces are strictly increasing
         assert!(receipt1.nonce < receipt2.nonce);
@@ -306,8 +318,16 @@ mod integration_tests {
         // Budget will be auto-initialized on first charge with default settings
 
         // Both systems should converge to identical state after same operations
-        let receipt1 = fixture1.effects().charge_flow(&context, &device2, 50).await.unwrap();
-        let receipt2 = fixture2.effects().charge_flow(&context, &device2, 50).await.unwrap();
+        let receipt1 = fixture1
+            .effects()
+            .charge_flow(&context, &device2, 50)
+            .await
+            .unwrap();
+        let receipt2 = fixture2
+            .effects()
+            .charge_flow(&context, &device2, 50)
+            .await
+            .unwrap();
 
         // Both receipts should be for the same cost
         assert_eq!(receipt1.cost, receipt2.cost);

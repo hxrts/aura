@@ -1,7 +1,7 @@
 //! Shared types for guardian operations.
 
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId, TrustLevel};
-use aura_crypto::frost::ThresholdSignature;
+use aura_core::frost::ThresholdSignature;
 use serde::{Deserialize, Serialize};
 
 /// Metadata describing a guardian that can participate in recovery.

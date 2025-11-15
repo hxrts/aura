@@ -165,35 +165,35 @@ impl LoggingSystemHandler {
         // Only spawn if a runtime is available, otherwise logs will be dropped
         if let Ok(_handle) = tokio::runtime::Handle::try_current() {
             tokio::spawn(async move {
-            while let Some(entry) = log_rx.recv().await {
-                // Update statistics
-                {
-                    let mut stats_guard = stats.write().await;
-                    stats_guard.total_logs += 1;
+                while let Some(entry) = log_rx.recv().await {
+                    // Update statistics
+                    {
+                        let mut stats_guard = stats.write().await;
+                        stats_guard.total_logs += 1;
+                        match entry.level.as_str() {
+                            "error" => stats_guard.error_logs += 1,
+                            "warn" => stats_guard.warn_logs += 1,
+                            "info" => stats_guard.info_logs += 1,
+                            "debug" => stats_guard.debug_logs += 1,
+                            _ => {}
+                        }
+                    }
+
+                    // Store in buffer
+                    {
+                        let mut buffer = log_buffer.write().await;
+                        buffer.push(entry.clone());
+                    }
+
+                    // Forward to tracing if enabled
                     match entry.level.as_str() {
-                        "error" => stats_guard.error_logs += 1,
-                        "warn" => stats_guard.warn_logs += 1,
-                        "info" => stats_guard.info_logs += 1,
-                        "debug" => stats_guard.debug_logs += 1,
-                        _ => {}
+                        "error" => error!("{}: {}", entry.component, entry.message),
+                        "warn" => warn!("{}: {}", entry.component, entry.message),
+                        "info" => info!("{}: {}", entry.component, entry.message),
+                        "debug" => debug!("{}: {}", entry.component, entry.message),
+                        _ => info!("{}: {}", entry.component, entry.message),
                     }
                 }
-
-                // Store in buffer
-                {
-                    let mut buffer = log_buffer.write().await;
-                    buffer.push(entry.clone());
-                }
-
-                // Forward to tracing if enabled
-                match entry.level.as_str() {
-                    "error" => error!("{}: {}", entry.component, entry.message),
-                    "warn" => warn!("{}: {}", entry.component, entry.message),
-                    "info" => info!("{}: {}", entry.component, entry.message),
-                    "debug" => debug!("{}: {}", entry.component, entry.message),
-                    _ => info!("{}: {}", entry.component, entry.message),
-                }
-            }
             });
         }
     }
@@ -206,39 +206,39 @@ impl LoggingSystemHandler {
         // Only spawn if a runtime is available, otherwise audit events will be dropped
         if let Ok(_handle) = tokio::runtime::Handle::try_current() {
             tokio::spawn(async move {
-            while let Some(entry) = audit_rx.recv().await {
-                // Update statistics
-                {
-                    let mut stats_guard = stats.write().await;
-                    stats_guard.total_audit_logs += 1;
+                while let Some(entry) = audit_rx.recv().await {
+                    // Update statistics
+                    {
+                        let mut stats_guard = stats.write().await;
+                        stats_guard.total_audit_logs += 1;
+                    }
+
+                    // Store in buffer (convert to LogEntry for storage)
+                    {
+                        let log_entry = LogEntry {
+                            timestamp: entry.timestamp,
+                            level: "audit".to_string(),
+                            message: format!(
+                                "{}: {} {} on {}",
+                                entry.event_type, entry.action, entry.outcome, entry.resource
+                            ),
+                            component: "audit".to_string(),
+                            session_id: entry.session_id,
+                            device_id: entry.actor,
+                            metadata: entry.metadata.clone(),
+                            trace_id: None,
+                        };
+
+                        let mut buffer = audit_buffer.write().await;
+                        buffer.push(log_entry);
+                    }
+
+                    // Log audit entry
+                    info!(
+                        "AUDIT: {} by {:?} - {} on {} (outcome: {})",
+                        entry.event_type, entry.actor, entry.action, entry.resource, entry.outcome
+                    );
                 }
-
-                // Store in buffer (convert to LogEntry for storage)
-                {
-                    let log_entry = LogEntry {
-                        timestamp: entry.timestamp,
-                        level: "audit".to_string(),
-                        message: format!(
-                            "{}: {} {} on {}",
-                            entry.event_type, entry.action, entry.outcome, entry.resource
-                        ),
-                        component: "audit".to_string(),
-                        session_id: entry.session_id,
-                        device_id: entry.actor,
-                        metadata: entry.metadata.clone(),
-                        trace_id: None,
-                    };
-
-                    let mut buffer = audit_buffer.write().await;
-                    buffer.push(log_entry);
-                }
-
-                // Log audit entry
-                info!(
-                    "AUDIT: {} by {:?} - {} on {} (outcome: {})",
-                    entry.event_type, entry.actor, entry.action, entry.resource, entry.outcome
-                );
-            }
             });
         }
     }

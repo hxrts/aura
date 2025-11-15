@@ -5,16 +5,16 @@
 //! Focuses on session type safety and multi-party coordination.
 
 use super::{
+    choreography::{
+        ChannelEstablishmentCoordinator, ChoreographicConfig, ChoreographicError,
+        ReceiptCoordinationProtocol, WebSocketHandshakeCoordinator,
+    },
     coordination::TransportCoordinator,
     receipt_verification::ReceiptVerificationCoordinator,
     secure_channel::SecureChannelCoordinator,
-    choreography::{
-        WebSocketHandshakeCoordinator, ChannelEstablishmentCoordinator,
-        ReceiptCoordinationProtocol, ChoreographicConfig, ChoreographicError,
-    },
     TransportCoordinationConfig, TransportCoordinationError,
 };
-use aura_core::{DeviceId, ContextId};
+use aura_core::{ContextId, DeviceId};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use tokio::time::timeout;
@@ -27,7 +27,7 @@ mod coordination_tests {
     fn test_transport_coordinator_creation() {
         let config = TransportCoordinationConfig::default();
         let coordinator = TransportCoordinator::new(config);
-        
+
         assert_eq!(coordinator.active_connections(), 0);
         assert!(!coordinator.is_at_capacity());
     }
@@ -40,15 +40,15 @@ mod coordination_tests {
             max_retries: 3,
             default_capabilities: vec!["transport".to_string()],
         };
-        
+
         let result = TransportCoordinator::validate_config(&config);
         assert!(result.is_err());
-        
+
         let valid_config = TransportCoordinationConfig {
             max_connections: 10,
             ..config
         };
-        
+
         let result = TransportCoordinator::validate_config(&valid_config);
         assert!(result.is_ok());
     }
@@ -57,44 +57,52 @@ mod coordination_tests {
     async fn test_local_coordination() {
         let config = TransportCoordinationConfig::default();
         let mut coordinator = TransportCoordinator::new(config);
-        
+
         let peer_id = DeviceId::new();
         let connection_id = "test-connection".to_string();
-        
+
         // Test local connection registration (no choreography)
-        let result = coordinator.register_connection(connection_id.clone(), peer_id).await;
+        let result = coordinator
+            .register_connection(connection_id.clone(), peer_id)
+            .await;
         assert!(result.is_ok());
         assert_eq!(coordinator.active_connections(), 1);
-        
+
         // Test connection lookup
         let found = coordinator.find_connection(&connection_id);
         assert!(found.is_some());
         assert_eq!(found.unwrap().peer_id, peer_id);
-        
+
         // Test connection cleanup
         coordinator.cleanup_connection(&connection_id).await;
         assert_eq!(coordinator.active_connections(), 0);
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_connection_capacity_limits() {
         let config = TransportCoordinationConfig {
             max_connections: 2,
             ..Default::default()
         };
         let mut coordinator = TransportCoordinator::new(config);
-        
+
         // Add connections up to capacity
-        let result1 = coordinator.register_connection("conn1".to_string(), DeviceId::new()).await;
+        let result1 = coordinator
+            .register_connection("conn1".to_string(), DeviceId::new())
+            .await;
         assert!(result1.is_ok());
-        
-        let result2 = coordinator.register_connection("conn2".to_string(), DeviceId::new()).await;
+
+        let result2 = coordinator
+            .register_connection("conn2".to_string(), DeviceId::new())
+            .await;
         assert!(result2.is_ok());
-        
+
         assert!(coordinator.is_at_capacity());
-        
+
         // Adding another should fail
-        let result3 = coordinator.register_connection("conn3".to_string(), DeviceId::new()).await;
+        let result3 = coordinator
+            .register_connection("conn3".to_string(), DeviceId::new())
+            .await;
         assert!(result3.is_err());
     }
 
@@ -105,17 +113,20 @@ mod coordination_tests {
             ..Default::default()
         };
         let mut coordinator = TransportCoordinator::new(config);
-        
+
         // Register a connection
         let connection_id = "timeout-test".to_string();
-        coordinator.register_connection(connection_id.clone(), DeviceId::new()).await.unwrap();
-        
+        coordinator
+            .register_connection(connection_id.clone(), DeviceId::new())
+            .await
+            .unwrap();
+
         // Wait for timeout
         tokio::time::sleep(Duration::from_millis(150)).await;
-        
+
         // Run cleanup
         coordinator.cleanup_stale_connections().await;
-        
+
         // Connection should be cleaned up
         assert_eq!(coordinator.active_connections(), 0);
     }
@@ -124,13 +135,15 @@ mod coordination_tests {
 #[cfg(test)]
 mod receipt_verification_tests {
     use super::*;
-    use aura_transport::protocols::websocket::{ReceiptData, ReceiptVerificationResponse, VerificationOutcome};
+    use aura_transport::protocols::websocket::{
+        ReceiptData, ReceiptVerificationResponse, VerificationOutcome,
+    };
 
     #[test]
     fn test_receipt_coordinator_creation() {
         let config = ChoreographicConfig::default();
         let coordinator = ReceiptVerificationCoordinator::new(DeviceId::new(), config);
-        
+
         assert_eq!(coordinator.active_verifications(), 0);
     }
 
@@ -140,10 +153,10 @@ mod receipt_verification_tests {
         let verifier1_id = DeviceId::new();
         let verifier2_id = DeviceId::new();
         let context_id = ContextId::new();
-        
+
         let config = ChoreographicConfig::default();
         let mut coordinator = ReceiptVerificationCoordinator::new(coordinator_id, config);
-        
+
         // Create test receipt data
         let receipt_data = ReceiptData {
             receipt_id: "test-receipt".to_string(),
@@ -154,13 +167,12 @@ mod receipt_verification_tests {
             timestamp: SystemTime::now(),
             context_id,
         };
-        
+
         // Initiate verification (choreographic protocol)
-        let verification_id = coordinator.initiate_verification(
-            receipt_data,
-            vec![verifier1_id, verifier2_id],
-        ).expect("Verification initiation failed");
-        
+        let verification_id = coordinator
+            .initiate_verification(receipt_data, vec![verifier1_id, verifier2_id])
+            .expect("Verification initiation failed");
+
         assert_eq!(coordinator.active_verifications(), 1);
         assert!(!verification_id.is_empty());
     }
@@ -169,10 +181,10 @@ mod receipt_verification_tests {
     async fn test_verification_response_processing() {
         let coordinator_id = DeviceId::new();
         let verifier_id = DeviceId::new();
-        
+
         let config = ChoreographicConfig::default();
         let mut coordinator = ReceiptVerificationCoordinator::new(coordinator_id, config);
-        
+
         // First initiate a verification
         let receipt_data = ReceiptData {
             receipt_id: "response-test".to_string(),
@@ -183,12 +195,11 @@ mod receipt_verification_tests {
             timestamp: SystemTime::now(),
             context_id: ContextId::new(),
         };
-        
-        let verification_id = coordinator.initiate_verification(
-            receipt_data,
-            vec![verifier_id],
-        ).unwrap();
-        
+
+        let verification_id = coordinator
+            .initiate_verification(receipt_data, vec![verifier_id])
+            .unwrap();
+
         // Create verification response
         let response = ReceiptVerificationResponse {
             verification_id: verification_id.clone(),
@@ -198,15 +209,15 @@ mod receipt_verification_tests {
             anti_replay_token: vec![0x44, 0x55, 0x66],
             timestamp: SystemTime::now(),
         };
-        
+
         // Process response (choreographic coordination)
         let result = coordinator.process_verification_response(response);
         assert!(result.is_ok());
-        
+
         // Build consensus
         let consensus = coordinator.build_consensus(&verification_id);
         assert!(consensus.is_ok());
-        
+
         // Should indicate successful verification
         match consensus.unwrap() {
             aura_transport::protocols::websocket::ConsensusResult::Valid { confirmation_count } => {
@@ -221,7 +232,7 @@ mod receipt_verification_tests {
         let coordinator_id = DeviceId::new();
         let config = ChoreographicConfig::default();
         let mut coordinator = ReceiptVerificationCoordinator::new(coordinator_id, config);
-        
+
         let receipt_data = ReceiptData {
             receipt_id: "replay-test".to_string(),
             sender_id: DeviceId::new(),
@@ -231,24 +242,19 @@ mod receipt_verification_tests {
             timestamp: SystemTime::now(),
             context_id: ContextId::new(),
         };
-        
+
         // First verification should succeed
-        let result1 = coordinator.initiate_verification(
-            receipt_data.clone(),
-            vec![DeviceId::new()],
-        );
+        let result1 =
+            coordinator.initiate_verification(receipt_data.clone(), vec![DeviceId::new()]);
         assert!(result1.is_ok());
-        
+
         // Second verification with same message hash should fail (replay protection)
-        let result2 = coordinator.initiate_verification(
-            receipt_data,
-            vec![DeviceId::new()],
-        );
+        let result2 = coordinator.initiate_verification(receipt_data, vec![DeviceId::new()]);
         assert!(result2.is_err());
-        
+
         // Clean up replay prevention cache
         coordinator.cleanup_replay_prevention(Duration::from_secs(0)); // Force cleanup
-        
+
         // Now it should work again
         let receipt_data_new = ReceiptData {
             receipt_id: "replay-test-2".to_string(),
@@ -259,11 +265,8 @@ mod receipt_verification_tests {
             timestamp: SystemTime::now(),
             context_id: ContextId::new(),
         };
-        
-        let result3 = coordinator.initiate_verification(
-            receipt_data_new,
-            vec![DeviceId::new()],
-        );
+
+        let result3 = coordinator.initiate_verification(receipt_data_new, vec![DeviceId::new()]);
         assert!(result3.is_ok());
     }
 }
@@ -279,7 +282,7 @@ mod websocket_choreography_tests {
     fn test_websocket_handshake_coordinator() {
         let device_id = DeviceId::new();
         let config = ChoreographicConfig::default();
-        
+
         let coordinator = WebSocketHandshakeCoordinator::new(device_id, config);
         assert_eq!(coordinator.active_handshakes(), 0);
     }
@@ -289,20 +292,22 @@ mod websocket_choreography_tests {
         let initiator_id = DeviceId::new();
         let peer_id = DeviceId::new();
         let context_id = ContextId::new();
-        
+
         let config = ChoreographicConfig::default();
         let mut coordinator = WebSocketHandshakeCoordinator::new(initiator_id, config);
-        
+
         // Initiate choreographic handshake
-        let session_id = coordinator.initiate_handshake(
-            peer_id,
-            "ws://test.example.com:8080/socket".to_string(),
-            context_id,
-        ).expect("Handshake initiation failed");
-        
+        let session_id = coordinator
+            .initiate_handshake(
+                peer_id,
+                "ws://test.example.com:8080/socket".to_string(),
+                context_id,
+            )
+            .expect("Handshake initiation failed");
+
         assert_eq!(coordinator.active_handshakes(), 1);
         assert!(!session_id.is_empty());
-        
+
         let state = coordinator.get_handshake_state(&session_id);
         assert!(state.is_some());
     }
@@ -312,17 +317,19 @@ mod websocket_choreography_tests {
         let initiator_id = DeviceId::new();
         let responder_id = DeviceId::new();
         let context_id = ContextId::new();
-        
+
         let config = ChoreographicConfig::default();
         let mut coordinator = WebSocketHandshakeCoordinator::new(initiator_id, config);
-        
+
         // Start handshake
-        let session_id = coordinator.initiate_handshake(
-            responder_id,
-            "ws://test.example.com:8080/socket".to_string(),
-            context_id,
-        ).unwrap();
-        
+        let session_id = coordinator
+            .initiate_handshake(
+                responder_id,
+                "ws://test.example.com:8080/socket".to_string(),
+                context_id,
+            )
+            .unwrap();
+
         // Create successful response
         let response = WebSocketHandshakeResponse {
             session_id: session_id.clone(),
@@ -331,12 +338,12 @@ mod websocket_choreography_tests {
             granted_capabilities: vec!["messaging".to_string()],
             handshake_result: WebSocketHandshakeResult::Success,
         };
-        
+
         // Process response (choreographic coordination)
         let result = coordinator.process_handshake_response(&response);
         assert!(result.is_ok());
         assert!(result.unwrap()); // Should indicate success
-        
+
         // Verify handshake completed
         let state = coordinator.get_handshake_state(&session_id);
         assert!(state.is_some());
@@ -346,16 +353,18 @@ mod websocket_choreography_tests {
     async fn test_websocket_handshake_failure_scenarios() {
         let initiator_id = DeviceId::new();
         let responder_id = DeviceId::new();
-        
+
         let config = ChoreographicConfig::default();
         let mut coordinator = WebSocketHandshakeCoordinator::new(initiator_id, config);
-        
-        let session_id = coordinator.initiate_handshake(
-            responder_id,
-            "ws://test.example.com/socket".to_string(),
-            ContextId::new(),
-        ).unwrap();
-        
+
+        let session_id = coordinator
+            .initiate_handshake(
+                responder_id,
+                "ws://test.example.com/socket".to_string(),
+                ContextId::new(),
+            )
+            .unwrap();
+
         // Test protocol mismatch failure
         let mismatch_response = WebSocketHandshakeResponse {
             session_id: session_id.clone(),
@@ -366,11 +375,11 @@ mod websocket_choreography_tests {
                 supported: vec!["incompatible-protocol".to_string()],
             },
         };
-        
+
         let result = coordinator.process_handshake_response(&mismatch_response);
         assert!(result.is_ok());
         assert!(!result.unwrap()); // Should indicate failure
-        
+
         // Test capability denial
         let capability_denial_response = WebSocketHandshakeResponse {
             session_id: session_id.clone(),
@@ -381,7 +390,7 @@ mod websocket_choreography_tests {
                 missing: vec!["required_capability".to_string()],
             },
         };
-        
+
         let result = coordinator.process_handshake_response(&capability_denial_response);
         assert!(result.is_ok());
         assert!(!result.unwrap()); // Should indicate failure
@@ -395,7 +404,7 @@ mod websocket_choreography_tests {
             ..Default::default()
         };
         let mut coordinator = WebSocketHandshakeCoordinator::new(initiator_id, config);
-        
+
         // Start multiple handshakes up to limit
         let session1 = coordinator.initiate_handshake(
             DeviceId::new(),
@@ -403,16 +412,16 @@ mod websocket_choreography_tests {
             ContextId::new(),
         );
         assert!(session1.is_ok());
-        
+
         let session2 = coordinator.initiate_handshake(
             DeviceId::new(),
             "ws://peer2.example.com/socket".to_string(),
             ContextId::new(),
         );
         assert!(session2.is_ok());
-        
+
         assert_eq!(coordinator.active_handshakes(), 2);
-        
+
         // Third handshake should fail (over limit)
         let session3 = coordinator.initiate_handshake(
             DeviceId::new(),
@@ -420,7 +429,7 @@ mod websocket_choreography_tests {
             ContextId::new(),
         );
         assert!(session3.is_err());
-        
+
         // Clean up completed handshakes to make room
         let cleaned = coordinator.cleanup_completed();
         assert_eq!(cleaned, 0); // Nothing completed yet
@@ -431,15 +440,15 @@ mod websocket_choreography_tests {
 mod channel_management_tests {
     use super::*;
     use aura_transport::protocols::websocket::{
-        ChannelEstablishmentRequest, ChannelConfirmation, ConfirmationResult,
-        ChannelType, AllocatedResources,
+        AllocatedResources, ChannelConfirmation, ChannelEstablishmentRequest, ChannelType,
+        ConfirmationResult,
     };
 
     #[test]
     fn test_channel_establishment_coordinator() {
         let device_id = DeviceId::new();
         let config = ChoreographicConfig::default();
-        
+
         let coordinator = ChannelEstablishmentCoordinator::new(device_id, config);
         assert_eq!(coordinator.active_establishments(), 0);
     }
@@ -450,20 +459,22 @@ mod channel_management_tests {
         let participant1 = DeviceId::new();
         let participant2 = DeviceId::new();
         let context_id = ContextId::new();
-        
+
         let config = ChoreographicConfig::default();
         let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, config);
-        
+
         // Initiate channel establishment (choreographic protocol)
-        let channel_id = coordinator.initiate_establishment(
-            vec![participant1, participant2],
-            ChannelType::SecureMessaging,
-            context_id,
-        ).expect("Channel establishment failed");
-        
+        let channel_id = coordinator
+            .initiate_establishment(
+                vec![participant1, participant2],
+                ChannelType::SecureMessaging,
+                context_id,
+            )
+            .expect("Channel establishment failed");
+
         assert_eq!(coordinator.active_establishments(), 1);
         assert!(!channel_id.is_empty());
-        
+
         let status = coordinator.get_establishment_status(&channel_id);
         assert!(status.is_some());
     }
@@ -473,17 +484,15 @@ mod channel_management_tests {
         let coordinator_id = DeviceId::new();
         let participant_id = DeviceId::new();
         let context_id = ContextId::new();
-        
+
         let config = ChoreographicConfig::default();
         let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, config);
-        
+
         // Start establishment
-        let channel_id = coordinator.initiate_establishment(
-            vec![participant_id],
-            ChannelType::FileTransfer,
-            context_id,
-        ).unwrap();
-        
+        let channel_id = coordinator
+            .initiate_establishment(vec![participant_id], ChannelType::FileTransfer, context_id)
+            .unwrap();
+
         // Create confirmation
         let confirmation = ChannelConfirmation {
             channel_id: channel_id.clone(),
@@ -497,7 +506,7 @@ mod channel_management_tests {
             },
             timestamp: SystemTime::now(),
         };
-        
+
         // Process confirmation (choreographic coordination)
         let result = coordinator.process_confirmation(confirmation);
         assert!(result.is_ok());
@@ -509,16 +518,14 @@ mod channel_management_tests {
         let coordinator_id = DeviceId::new();
         let participants = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
         let context_id = ContextId::new();
-        
+
         let config = ChoreographicConfig::default();
         let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, config);
-        
-        let channel_id = coordinator.initiate_establishment(
-            participants.clone(),
-            ChannelType::StreamingData,
-            context_id,
-        ).unwrap();
-        
+
+        let channel_id = coordinator
+            .initiate_establishment(participants.clone(), ChannelType::StreamingData, context_id)
+            .unwrap();
+
         // Process confirmations from all participants with different resource allocations
         let resource_allocations = vec![
             AllocatedResources {
@@ -540,7 +547,7 @@ mod channel_management_tests {
                 memory_allocated: 384,
             },
         ];
-        
+
         let mut all_confirmed = false;
         for (i, participant) in participants.iter().enumerate() {
             let confirmation = ChannelConfirmation {
@@ -550,12 +557,12 @@ mod channel_management_tests {
                 allocated_resources: resource_allocations[i].clone(),
                 timestamp: SystemTime::now(),
             };
-            
+
             let result = coordinator.process_confirmation(confirmation);
             assert!(result.is_ok());
             all_confirmed = result.unwrap();
         }
-        
+
         // All participants should have confirmed
         assert!(all_confirmed);
     }
@@ -565,16 +572,14 @@ mod channel_management_tests {
         let coordinator_id = DeviceId::new();
         let participant_id = DeviceId::new();
         let context_id = ContextId::new();
-        
+
         let config = ChoreographicConfig::default();
         let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, config);
-        
-        let channel_id = coordinator.initiate_establishment(
-            vec![participant_id],
-            ChannelType::Control,
-            context_id,
-        ).unwrap();
-        
+
+        let channel_id = coordinator
+            .initiate_establishment(vec![participant_id], ChannelType::Control, context_id)
+            .unwrap();
+
         // Test resource shortage scenario
         let resource_shortage_confirmation = ChannelConfirmation {
             channel_id: channel_id.clone(),
@@ -595,11 +600,11 @@ mod channel_management_tests {
             },
             timestamp: SystemTime::now(),
         };
-        
+
         let result = coordinator.process_confirmation(resource_shortage_confirmation);
         // Should handle gracefully (might succeed processing but indicate failure)
         assert!(result.is_ok());
-        
+
         // Test capability denial scenario
         let capability_denial_confirmation = ChannelConfirmation {
             channel_id: channel_id.clone(),
@@ -615,7 +620,7 @@ mod channel_management_tests {
             },
             timestamp: SystemTime::now(),
         };
-        
+
         let result = coordinator.process_confirmation(capability_denial_confirmation);
         assert!(result.is_ok()); // Should handle gracefully
     }
@@ -632,12 +637,12 @@ mod choreographic_integration_tests {
             max_concurrent_protocols: 5,
             ..Default::default()
         };
-        
+
         // Create multiple coordinators
         let ws_coordinator = WebSocketHandshakeCoordinator::new(device_id, config.clone());
         let channel_coordinator = ChannelEstablishmentCoordinator::new(device_id, config.clone());
         let receipt_coordinator = ReceiptVerificationCoordinator::new(device_id, config);
-        
+
         // All should be able to coexist
         assert_eq!(ws_coordinator.active_handshakes(), 0);
         assert_eq!(channel_coordinator.active_establishments(), 0);
@@ -660,12 +665,12 @@ mod choreographic_integration_tests {
                 extension_registry: Default::default(),
             },
         ];
-        
+
         for config in configs {
             let result = ChoreographicConfig::validate(&config);
             assert!(result.is_err(), "Config should be invalid: {:?}", config);
         }
-        
+
         // Valid config
         let valid_config = ChoreographicConfig::default();
         let result = ChoreographicConfig::validate(&valid_config);
@@ -678,9 +683,9 @@ mod choreographic_integration_tests {
         // is enforced at compile time by the choreography system
         let device_id = DeviceId::new();
         let config = ChoreographicConfig::default();
-        
+
         let mut ws_coordinator = WebSocketHandshakeCoordinator::new(device_id, config);
-        
+
         // Initiate handshake (valid first step)
         let session_id = ws_coordinator.initiate_handshake(
             DeviceId::new(),
@@ -688,7 +693,7 @@ mod choreographic_integration_tests {
             ContextId::new(),
         );
         assert!(session_id.is_ok());
-        
+
         // Try to process response for non-existent session (should fail gracefully)
         let invalid_response = WebSocketHandshakeResponse {
             session_id: "non-existent".to_string(),
@@ -697,7 +702,7 @@ mod choreographic_integration_tests {
             granted_capabilities: vec![],
             handshake_result: WebSocketHandshakeResult::Success,
         };
-        
+
         let result = ws_coordinator.process_handshake_response(&invalid_response);
         assert!(result.is_err()); // Should reject invalid session
     }

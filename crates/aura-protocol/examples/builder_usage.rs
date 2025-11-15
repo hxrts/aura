@@ -1,6 +1,6 @@
 //! Example demonstrating various ways to use the AuraEffectSystemBuilder
 
-use aura_core::{AuraResult, DeviceId, session_epochs::Epoch};
+use aura_core::{session_epochs::Epoch, AuraResult, DeviceId};
 use aura_protocol::effects::{AuraEffectSystemBuilder, StorageConfig};
 use aura_protocol::ExecutionMode;
 
@@ -13,7 +13,7 @@ async fn main() -> AuraResult<()> {
         .with_device_id(device_id)
         .with_execution_mode(ExecutionMode::Testing)
         .build_sync()?;
-    
+
     println!("Created test system for device: {:?}", system.device_id());
 
     // Example 2: Custom configuration with specific settings
@@ -25,7 +25,7 @@ async fn main() -> AuraResult<()> {
         .with_default_flow_limit(5000)
         .with_initial_epoch(Epoch::from(10))
         .build_sync()?;
-    
+
     println!("Created system with custom flow limit and epoch");
 
     // Example 3: Production configuration
@@ -37,13 +37,13 @@ async fn main() -> AuraResult<()> {
         enable_compression: true,
         max_file_size: 50 * 1024 * 1024, // 50MB
     };
-    
+
     let system = AuraEffectSystemBuilder::new()
         .with_device_id(device_id)
         .with_execution_mode(ExecutionMode::Production)
         .with_storage_config(storage_config)
         .build_sync()?;
-    
+
     println!("Created production-like system");
 
     // Example 4: Simulation mode with deterministic seed
@@ -54,7 +54,7 @@ async fn main() -> AuraResult<()> {
         .with_device_id(device_id)
         .with_execution_mode(ExecutionMode::Simulation { seed })
         .build_sync()?;
-    
+
     println!("Created simulation system with seed: {}", seed);
 
     // Example 5: Async initialization
@@ -65,14 +65,14 @@ async fn main() -> AuraResult<()> {
         .with_execution_mode(ExecutionMode::Testing)
         .build()
         .await?;
-    
+
     println!("Created system using async initialization");
 
     // Example 6: Using with custom handlers (commented out as it requires handler implementation)
     /*
     use aura_effects::crypto::MockCryptoHandler;
     use aura_protocol::effects::{EffectType, handler_adapters::CryptoHandlerAdapter};
-    
+
     let custom_crypto = MockCryptoHandler::new(99999);
     let system = AuraEffectSystemBuilder::new()
         .with_device_id(device_id)

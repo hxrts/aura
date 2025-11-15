@@ -131,7 +131,7 @@ Member addition inserts devices at empty leaf positions. Member removal clears t
 Derive group encryption keys from tree state:
 
 ```rust
-use aura_crypto::DerivedKeyContext;
+use aura_core::DerivedKeyContext;
 
 impl GroupRatchetTree {
     pub async fn derive_group_key<E: CryptoEffects>(

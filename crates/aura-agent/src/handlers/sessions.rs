@@ -193,7 +193,7 @@ choreography! {
         roles: Initiator, Participant, Coordinator;
 
         // Phase 1: Session Creation Request
-        Initiator[guard_capability = "initiate_session", 
+        Initiator[guard_capability = "initiate_session",
                   flow_cost = 100,
                   journal_facts = "session_requested"]
         -> Coordinator: CreateRequest(SessionCreateRequest);

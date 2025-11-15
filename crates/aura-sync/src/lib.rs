@@ -54,7 +54,7 @@ pub use aura_protocol::effects::{AntiEntropyConfig, BloomDigest, SyncEffects, Sy
 // Maintenance helpers
 pub use cache::CacheEpochFloors;
 pub use maintenance::{
-    AdminReplaced, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEvent, 
+    AdminReplaced, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEvent,
     SnapshotCompleted, SnapshotProposed, UpgradeActivated, UpgradeKind, UpgradeProposal,
 };
 pub use ota::{UpgradeCoordinator, UpgradeReadiness};

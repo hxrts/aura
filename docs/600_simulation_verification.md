@@ -20,7 +20,7 @@ The simulation framework integrates deeply with Aura's effect system architectur
 
 Effect injection occurs at system initialization. The simulation framework provides alternative handler implementations for each effect type. CryptoEffects handlers use deterministic algorithms instead of hardware random number generators. TimeEffects handlers advance logical time rather than reading system clocks. NetworkEffects handlers route messages through the simulation engine rather than actual network transports.
 
-Handler composition enables layered simulation behavior. Base simulation handlers provide deterministic implementations of core effects. Middleware layers add fault injection, performance modeling, and property monitoring. This composition allows complex simulation scenarios without modifying protocol code.
+Effect composition enables layered simulation behavior. Base simulation handlers provide deterministic implementations of core effects. Explicit coordination effects add fault injection, performance modeling, and property monitoring. This composition allows complex simulation scenarios without modifying protocol code.
 
 State isolation ensures that simulation runs do not interfere with each other. Each simulation instance operates with independent handler state. Multiple simulations can run concurrently without shared state corruption. This isolation enables parallel testing and comparative analysis of different scenarios.
 

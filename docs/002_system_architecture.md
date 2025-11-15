@@ -103,11 +103,14 @@ impl CryptoEffects for RealCryptoHandler {
 ```
 Handlers contain the actual business logic. Different handlers enable testing, production, and simulation modes.
 
-Middleware wraps handlers with cross-cutting concerns:
+Cross-cutting concerns are implemented as explicit effect traits:
 ```rust
-pub struct RetryMiddleware<H> { inner: H, max_attempts: u32 }
+#[async_trait]
+pub trait ReliabilityEffects {
+    async fn with_retry<T>(&self, ctx: &EffectContext, operation: impl Fn() -> Result<T>) -> Result<T>;
+}
 ```
-Middleware implements effect traits by delegating to inner handlers with additional behavior like retry logic or metrics.
+Cross-cutting concerns use explicit dependency injection rather than wrapper patterns, maintaining clear separation between effect interfaces and their implementations.
 
 ### 1.3 Layered Effect Architecture
 
@@ -115,11 +118,11 @@ The effect system is organized into 8 clean architectural layers:
 
 **Layer 1 - Interface** (`aura-core`) contains effect trait definitions only. This includes `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `JournalEffects`, `ConsoleEffects`, and `RandomEffects`. Domain types like `DeviceId`, `AccountId`, and `FlowBudget` live here. This layer serves as the single source of truth for all effect interfaces. Dependencies include only `serde`, `uuid`, `thiserror`, and `chrono` with no other Aura crates.
 
-**Layer 2 - Specification** includes domain crates and `aura-mpst`. Domain-specific types and semantics exist in `aura-crypto`, `aura-journal`, `aura-wot`, and `aura-store`. MPST choreography specifications and session type extensions live in `aura-mpst`. The `aura-macros` crate provides choreographic DSL parsing that wraps rumpsteak-aura's parser with Aura-specific extension effects. The `aura-mpst` crate implements `ChoreoHandler` and `ExtensibleHandler` traits for rumpsteak-aura integration. This layer contains domain logic and CRDT implementations but no effect handlers.
+**Layer 2 - Specification** includes domain crates and `aura-mpst`. Domain-specific types and semantics exist in `aura-journal`, `aura-wot`, and `aura-store`. MPST choreography specifications and session type extensions live in `aura-mpst`. The `aura-macros` crate provides choreographic DSL parsing that wraps rumpsteak-aura's parser with Aura-specific extension effects. The `aura-mpst` crate implements `ChoreoHandler` and `ExtensibleHandler` traits for rumpsteak-aura integration. This layer contains domain logic and CRDT implementations but no effect handlers.
 
 **Layer 3 - Implementation** (`aura-effects`) functions as the standard library. It provides context-free, stateless effect handlers that work in any execution context. Mock handlers include `MockCryptoHandler`, `MockNetworkHandler`, and `MemoryStorageHandler`. Real handlers include `RealCryptoHandler`, `TcpNetworkHandler`, and `FilesystemStorageHandler`. Testing and production variants exist for each effect type. Dependencies include `aura-core` plus external libraries like tokio and blake3. This layer contains stateless, single-party, context-free operations. It excludes coordination, multi-handler composition, and choreographic bridging.
 
-**Layer 4 - Orchestration** (`aura-protocol`) provides multi-party coordination primitives. These include `AuraHandlerAdapter`, `CompositeHandler`, and `CrdtCoordinator`. Stateful coordination encompasses guard chains, middleware stacks, and choreographic bridges. Protocol-specific effect traits include `TreeEffects`, `LedgerEffects`, `ChoreographicEffects`, and `SystemEffects`. Reusable distributed protocols cover anti-entropy, snapshot, and threshold ceremony. Enhanced handlers with coordination features include `EnhancedTimeHandler` and `GuardedJournalHandler`.
+**Layer 4 - Orchestration** (`aura-protocol`) provides multi-party coordination primitives. These include `AuraHandlerAdapter`, `CompositeHandler`, and `CrdtCoordinator`. Stateful coordination encompasses guard chains, cross-cutting effect implementations, and choreographic bridges. Protocol-specific effect traits include `TreeEffects`, `LedgerEffects`, `ChoreographicEffects`, and `SystemEffects`. Reusable distributed protocols cover anti-entropy, snapshot, and threshold ceremony. Enhanced handlers with coordination features include `EnhancedTimeHandler` and `GuardedJournalHandler`.
 
 **Layer 5 - Feature/Protocol** (`aura-frost`, `aura-invitation`, `aura-recovery`) contains complete end-to-end protocol implementations. Feature-specific choreographies and business logic reside here. These components serve as reusable protocol building blocks, not basic handlers or complete applications.
 
@@ -497,17 +500,20 @@ impl AuraHandler for CryptoHandlerAdapter {
 
 The adapter layer enables mode-specific handler selection while maintaining uniform dispatch through the stateless executor.
 
-### 1.9 Middleware Architecture
+### 1.9 Cross-Cutting Effect Architecture
 
-Middleware provides optional cross-cutting enhancements without affecting core protocols.
+Cross-cutting concerns are implemented as explicit effect traits in the orchestration layer.
 
 ```rust
-let with_retry = RetryMiddleware::new(base_handler, 3);
+// Reliability effects in aura-protocol (Layer 4: Orchestration)
+let result = reliability_effects.with_retry(&ctx, || {
+    base_handler.operation().await
+}).await?;
 ```
 
-This wrapper provides retry functionality for transient failures. Common middleware includes retry logic, metrics collection, distributed tracing, and circuit breakers.
+This approach provides retry functionality through explicit effect interfaces. Common cross-cutting concerns include reliability patterns, metrics collection, distributed tracing, and circuit breaking implemented as coordination primitives rather than wrapper patterns.
 
-The system includes operational guardrails with default settings. Retry uses exponential backoff with jitter and a ceiling of 3 attempts. Simulation mode provides deterministic behavior via seeded RNG. Circuit breakers open after 5 consecutive failures for 30 seconds per peer or channel. Half-open probes respect FlowBudget constraints. Metrics and observability count denials for CapGuard and FlowGuard locally. Raw context identifiers are not exported.
+The system includes operational guardrails through explicit effect implementations. Retry uses exponential backoff with jitter and a ceiling of 3 attempts. Simulation mode provides deterministic behavior via seeded RNG. Circuit breakers open after 5 consecutive failures for 30 seconds per peer or channel. Half-open probes respect FlowBudget constraints. Metrics and observability count denials for CapGuard and FlowGuard locally. Raw context identifiers are not exported.
 
 ### 1.10 Context Management and Propagation
 
@@ -1063,9 +1069,9 @@ Applications (`aura-cli`) provide what users actually run. These are main entry 
 
 ## 8. Implementation Guidelines
 
-### 8.1 Creating Custom Middleware
+### 8.1 Creating Custom Effect Handlers
 
-Custom middleware wraps handlers to add cross-cutting functionality. It uses macro-generated trait implementations that delegate to inner handlers.
+Custom cross-cutting functionality is implemented as explicit effect traits. New effect traits are defined in `aura-core` and implemented in the appropriate architectural layer based on their responsibility (stateless operations in `aura-effects`, coordination in `aura-protocol`, or runtime-specific concerns in runtime layers).
 
 ### 8.2 Direct System Access
 

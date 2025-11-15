@@ -457,7 +457,6 @@ impl Hash for CapabilityToken {
     }
 }
 
-
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -523,7 +522,7 @@ mod tests {
         assert_eq!(delegated.current_delegation_depth, 1);
         assert_eq!(delegated.delegation_chain.len(), 1);
         assert!(delegated.can_delegate());
-        
+
         // Verify capabilities are properly restricted
         assert!(delegated.has_capability("storage:read"));
         assert!(!delegated.has_capability("storage:write"));
@@ -538,7 +537,7 @@ mod tests {
         assert!(!token.can_delegate());
 
         let delegator = aura_core::DeviceId::from_bytes(*b"delegator_test_id_12345678901234");
-        
+
         let result = token.delegate(
             aura_core::Cap::with_permissions(vec!["storage:read".to_string()]),
             vec![],

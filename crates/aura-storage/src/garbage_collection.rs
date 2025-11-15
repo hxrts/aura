@@ -5,7 +5,7 @@
 
 use crate::access_control::StorageCapabilityGuard;
 use aura_core::{AuraResult, ChunkId, DeviceId, Hash32};
-use aura_crypto::frost::ThresholdSignature;
+use aura_core::frost::ThresholdSignature;
 use aura_macros::choreography;
 use aura_protocol::effects::{AuraEffectSystem, NetworkEffects};
 use serde::{Deserialize, Serialize};

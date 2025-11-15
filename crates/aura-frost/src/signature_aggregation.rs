@@ -7,7 +7,7 @@
 
 use crate::FrostResult;
 use aura_core::{AuraError, DeviceId};
-use aura_crypto::frost::{PartialSignature, ThresholdSignature};
+use aura_core::frost::{PartialSignature, ThresholdSignature};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 
@@ -139,7 +139,7 @@ pub async fn perform_frost_aggregation(
     threshold: usize,
     total_signers: usize,
 ) -> FrostResult<ThresholdSignature> {
-    use aura_crypto::frost::tree_signing::{binding_message, frost_aggregate, TreeSigningContext};
+    use aura_core::frost::tree_signing::{binding_message, frost_aggregate, TreeSigningContext};
     use frost_ed25519 as frost;
     use std::collections::BTreeMap;
 
@@ -160,7 +160,7 @@ pub async fn perform_frost_aggregation(
     for i in 0..partial_signatures.len() {
         frost_commitments.insert(
             (i + 1) as u16,
-            aura_crypto::frost::NonceCommitment {
+            aura_core::frost::NonceCommitment {
                 signer: (i + 1) as u16,
                 commitment: vec![0u8; 32],
             },

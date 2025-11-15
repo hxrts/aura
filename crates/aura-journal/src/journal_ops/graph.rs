@@ -373,7 +373,7 @@ mod tests {
             println!("Edge: {:?} -> {:?}", id, edge);
         }
         match JournalGraph::validate_journal(&journal) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => panic!("Journal validation failed: {:?}", e),
         }
     }

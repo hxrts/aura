@@ -1,7 +1,7 @@
 //! Core Agent Runtime Composition
 //!
 //! This module provides the main AuraAgent implementation that composes
-//! handlers and middleware into a unified device runtime. The agent follows
+//! handlers into a unified device runtime. The agent follows
 //! the runtime composition pattern by combining effect handlers rather than
 //! implementing effects directly.
 
@@ -11,7 +11,6 @@ use crate::handlers::{
     AgentEffectSystemHandler, OtaOperations, RecoveryOperations, StorageOperations,
 };
 use crate::maintenance::{MaintenanceController, SnapshotOutcome};
-use crate::middleware::AgentMiddlewareStack;
 use aura_core::effects::{ConsoleEffects, StorageEffects};
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_protocol::effects::{AuraEffectSystem, SessionType};
@@ -21,7 +20,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid;
 
-/// Core agent runtime that composes handlers and middleware
+/// Core agent runtime that composes handlers through effect system
 ///
 /// The AuraAgent represents a complete device runtime composed from:
 /// - Core effect handlers (from aura-protocol)
@@ -38,8 +37,6 @@ pub struct AuraAgent {
     device_id: DeviceId,
     /// Agent effect system handler that unifies all agent operations
     _agent_handler: AgentEffectSystemHandler,
-    /// Optional middleware stack for cross-cutting concerns
-    middleware: Option<AgentMiddlewareStack>,
     /// Core effect system
     core_effects: Arc<RwLock<AuraEffectSystem>>,
     /// Storage operations handler
@@ -103,7 +100,6 @@ impl AuraAgent {
         Self {
             device_id,
             _agent_handler: AgentEffectSystemHandler::new(device_id, core_effects.clone()),
-            middleware: None,
             core_effects,
             storage_ops,
             recovery_ops,
@@ -113,18 +109,9 @@ impl AuraAgent {
         }
     }
 
-    /// Create agent with middleware stack
-    ///
-    /// This adds a middleware stack for cross-cutting concerns like metrics,
-    /// tracing, and validation.
-    pub fn with_middleware(mut self, middleware: AgentMiddlewareStack) -> Self {
-        self.middleware = Some(middleware);
-        self
-    }
-
     /// Create agent for testing with mock effects
-    /// 
-    /// Note: This method is deprecated. Use `aura_testkit::create_test_fixture().await` 
+    ///
+    /// Note: This method is deprecated. Use `aura_testkit::create_test_fixture().await`
     /// and construct agent via `AuraAgent::new()` in new code.
     pub fn for_testing(device_id: DeviceId) -> Self {
         let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
@@ -561,7 +548,7 @@ mod tests {
             .end()
             .await
             .expect("Should end session successfully");
-        
+
         Ok(())
     }
 

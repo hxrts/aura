@@ -1,6 +1,6 @@
 // Core types for the CRDT ledger
 
-use aura_crypto::Ed25519VerifyingKey;
+use aura_core::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -17,7 +17,7 @@ pub use aura_core::{
 
 // Use ContentId from aura-core
 
-// Display for AccountId is implemented in aura-crypto crate
+// Display for AccountId is implemented in aura-core crate
 
 /// Device metadata stored in CRDT
 ///

@@ -62,7 +62,7 @@ All incident facts and policy changes remain in the journal so future devices ca
 
 ## System Implementation
 
-FROST threshold signature implementation in `crates/aura-frost/` provides distributed keygen, threshold signing, signature aggregation, and key resharing. Ratchet tree and journal integration in `crates/aura-journal/src/ratchet_tree/` delivers comprehensive state management. Deterministic key derivation in `crates/aura-crypto/src/key_derivation.rs` supports all identity contexts.
+FROST threshold signature implementation in `crates/aura-frost/` provides distributed keygen, threshold signing, signature aggregation, and key resharing. Ratchet tree and journal integration in `crates/aura-journal/src/ratchet_tree/` delivers comprehensive state management. Deterministic key derivation in `crates/aura-core/src/key_derivation.rs` supports all identity contexts.
 
 Identity management in `crates/aura-verify/` provides core protocol implementations. Guardian ceremonies in `crates/aura-recovery/` include comprehensive infrastructure with choreographic protocols. Device coordination uses choreographic protocol definitions for multi-party coordination.
 

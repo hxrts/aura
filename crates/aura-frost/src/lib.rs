@@ -14,7 +14,7 @@
 //! # Design Principles
 //!
 //! - Uses stateless effect composition for distributed FROST coordination
-//! - Integrates with aura-crypto for real cryptographic operations
+//! - Integrates with aura-core for real cryptographic operations
 //! - Effect-based architecture for predictable execution
 //! - Supports M-of-N threshold configurations with Byzantine fault tolerance
 
@@ -47,7 +47,7 @@ pub mod signature_aggregation;
 pub use aura_core::{AccountId, AuraError, AuraResult, Cap, DeviceId, Journal};
 
 // Re-export crypto types
-pub use aura_crypto::frost::{
+pub use aura_core::frost::{
     Nonce, NonceCommitment, PartialSignature, PublicKeyPackage, Share, SigningSession,
     ThresholdSignature, TreeSigningContext,
 };
@@ -57,11 +57,7 @@ pub use aura_protocol::AuraEffectSystem;
 
 // Re-export FROST types and utilities
 pub use signature_aggregation::{perform_frost_aggregation, validate_aggregation_config};
-pub use threshold_signing::{
-    FrostCrypto,
-    SigningPhase,
-    ThresholdSigningConfig,
-};
+pub use threshold_signing::{FrostCrypto, SigningPhase, ThresholdSigningConfig};
 
 // Re-export message types for choreographies
 pub use distributed_keygen::{

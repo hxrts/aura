@@ -11,7 +11,6 @@ description = "Capability-based storage layer with choreographic search protocol
 # Core Aura crates
 aura-core = { path = "../aura-core" }
 aura-wot = { path = "../aura-wot" }
-aura-crypto = { path = "../aura-crypto" }
 aura-protocol = { path = "../aura-protocol" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }

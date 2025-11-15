@@ -4,8 +4,8 @@
 //! YES choreography - synchronized state transitions require coordination.
 //! Target: <200 lines, focused on epoch coordination logic.
 
-use super::{TransportCoordinationError, CoordinationResult};
-use aura_core::{DeviceId, ContextId};
+use super::{CoordinationResult, TransportCoordinationError};
+use aura_core::{ContextId, DeviceId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -99,17 +99,17 @@ impl EpochRotationCoordinator {
             pending_rotations: HashMap::new(),
         }
     }
-    
+
     /// Get current epoch
     pub fn current_epoch(&self) -> u64 {
         self.current_epoch
     }
-    
+
     /// Check if epoch rotation is needed
     pub fn needs_rotation(&self, last_rotation: SystemTime) -> bool {
         last_rotation.elapsed().unwrap_or_default() >= self.epoch_config.epoch_duration
     }
-    
+
     /// Initiate epoch rotation
     pub fn initiate_rotation(
         &mut self,
@@ -117,22 +117,22 @@ impl EpochRotationCoordinator {
         context_id: ContextId,
     ) -> CoordinationResult<String> {
         if participants.len() < self.epoch_config.rotation_threshold {
-            return Err(TransportCoordinationError::ProtocolFailed(
-                format!(
-                    "Insufficient participants: {} < {}",
-                    participants.len(),
-                    self.epoch_config.rotation_threshold
-                )
-            ));
+            return Err(TransportCoordinationError::ProtocolFailed(format!(
+                "Insufficient participants: {} < {}",
+                participants.len(),
+                self.epoch_config.rotation_threshold
+            )));
         }
-        
+
         let rotation_id = format!(
             "epoch-rotation-{}-{}",
             self.current_epoch + 1,
-            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default().as_millis()
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
         );
-        
+
         let rotation = EpochRotation {
             rotation_id: rotation_id.clone(),
             target_epoch: self.current_epoch + 1,
@@ -141,83 +141,91 @@ impl EpochRotationCoordinator {
             initiated_at: SystemTime::now(),
             status: RotationStatus::Initiated,
         };
-        
+
         self.pending_rotations.insert(rotation_id.clone(), rotation);
         Ok(rotation_id)
     }
-    
+
     /// Process epoch confirmation
     pub fn process_confirmation(
         &mut self,
         confirmation: EpochConfirmation,
     ) -> CoordinationResult<bool> {
-        let rotation = self.pending_rotations.get_mut(&confirmation.rotation_id)
-            .ok_or_else(|| TransportCoordinationError::ProtocolFailed(
-                format!("Rotation not found: {}", confirmation.rotation_id)
-            ))?;
-        
+        let rotation = self
+            .pending_rotations
+            .get_mut(&confirmation.rotation_id)
+            .ok_or_else(|| {
+                TransportCoordinationError::ProtocolFailed(format!(
+                    "Rotation not found: {}",
+                    confirmation.rotation_id
+                ))
+            })?;
+
         // Validate confirmation
         if confirmation.ready_for_epoch != rotation.target_epoch {
-            return Err(TransportCoordinationError::ProtocolFailed(
-                format!(
-                    "Epoch mismatch: expected {}, got {}",
-                    rotation.target_epoch, confirmation.ready_for_epoch
-                )
-            ));
+            return Err(TransportCoordinationError::ProtocolFailed(format!(
+                "Epoch mismatch: expected {}, got {}",
+                rotation.target_epoch, confirmation.ready_for_epoch
+            )));
         }
-        
+
         // Store confirmation
-        rotation.confirmations.insert(
-            confirmation.participant_id,
-            confirmation
-        );
-        
+        rotation
+            .confirmations
+            .insert(confirmation.participant_id, confirmation);
+
         // Check if we have enough confirmations
         let ready_for_commit = rotation.confirmations.len() >= self.epoch_config.rotation_threshold;
-        
+
         if ready_for_commit {
             rotation.status = RotationStatus::Synchronizing;
         }
-        
+
         Ok(ready_for_commit)
     }
-    
+
     /// Commit epoch rotation
     pub fn commit_rotation(&mut self, rotation_id: &str) -> CoordinationResult<u64> {
-        let rotation = self.pending_rotations.get_mut(rotation_id)
-            .ok_or_else(|| TransportCoordinationError::ProtocolFailed(
-                format!("Rotation not found: {}", rotation_id)
-            ))?;
-        
+        let rotation = self.pending_rotations.get_mut(rotation_id).ok_or_else(|| {
+            TransportCoordinationError::ProtocolFailed(format!(
+                "Rotation not found: {}",
+                rotation_id
+            ))
+        })?;
+
         if rotation.status != RotationStatus::Synchronizing {
-            return Err(TransportCoordinationError::ProtocolFailed(
-                format!("Invalid rotation status: {:?}", rotation.status)
-            ));
+            return Err(TransportCoordinationError::ProtocolFailed(format!(
+                "Invalid rotation status: {:?}",
+                rotation.status
+            )));
         }
-        
+
         // Commit the epoch
         self.current_epoch = rotation.target_epoch;
         rotation.status = RotationStatus::Completed;
-        
+
         Ok(self.current_epoch)
     }
-    
+
     /// Clean up completed rotations
     pub fn cleanup_completed_rotations(&mut self) -> usize {
         let initial_count = self.pending_rotations.len();
-        
+
         self.pending_rotations.retain(|_, rotation| {
-            !matches!(rotation.status, RotationStatus::Completed | RotationStatus::Failed(_))
+            !matches!(
+                rotation.status,
+                RotationStatus::Completed | RotationStatus::Failed(_)
+            )
         });
-        
+
         initial_count - self.pending_rotations.len()
     }
-    
+
     /// Get rotation status
     pub fn get_rotation_status(&self, rotation_id: &str) -> Option<&RotationStatus> {
         self.pending_rotations.get(rotation_id).map(|r| &r.status)
     }
-    
+
     /// List pending rotations
     pub fn list_pending_rotations(&self) -> Vec<&EpochRotation> {
         self.pending_rotations.values().collect()
@@ -230,34 +238,34 @@ choreography! {
     #[namespace = "epoch_rotation"]
     protocol EpochRotationProtocol {
         roles: Coordinator, Participant1, Participant2;
-        
+
         // Phase 1: Propose epoch rotation
         Coordinator[guard_capability = "propose_epoch_rotation",
                    flow_cost = 120,
                    journal_facts = "epoch_rotation_proposed"]
         -> Participant1: EpochRotationProposal(EpochRotationProposal);
-        
+
         Coordinator[guard_capability = "propose_epoch_rotation",
                    flow_cost = 120]
         -> Participant2: EpochRotationProposal(EpochRotationProposal);
-        
+
         // Phase 2: Participants confirm readiness
         Participant1[guard_capability = "confirm_epoch_readiness",
                     flow_cost = 80,
                     journal_facts = "epoch_confirmation_sent"]
         -> Coordinator: EpochConfirmation(EpochConfirmation);
-        
+
         Participant2[guard_capability = "confirm_epoch_readiness",
                     flow_cost = 80,
                     journal_facts = "epoch_confirmation_sent"]
         -> Coordinator: EpochConfirmation(EpochConfirmation);
-        
+
         // Phase 3: Synchronized commit
         Coordinator[guard_capability = "commit_epoch_rotation",
                    flow_cost = 100,
                    journal_facts = "epoch_rotation_committed"]
         -> Participant1: EpochCommit(EpochCommit);
-        
+
         Coordinator[guard_capability = "commit_epoch_rotation",
                    flow_cost = 100,
                    journal_facts = "epoch_rotation_committed"]

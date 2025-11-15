@@ -3,7 +3,7 @@
 //! Provides essential message wrappers with built-in privacy preservation, relationship scoping,
 //! and minimal framing metadata. Target: <150 lines (concise implementation).
 
-use aura_core::{DeviceId, RelationshipId, AuraResult};
+use aura_core::{AuraResult, DeviceId, RelationshipId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -82,7 +82,7 @@ impl Envelope {
     pub fn new(payload: Vec<u8>) -> Self {
         Self::new_with_id(Self::generate_message_id(), payload)
     }
-    
+
     /// Create new envelope with specified message ID
     pub fn new_with_id(message_id: Uuid, payload: Vec<u8>) -> Self {
         Self {
@@ -97,7 +97,7 @@ impl Envelope {
             relationship_scope: None,
         }
     }
-    
+
     /// Generate a deterministic message ID based on payload
     /// This avoids direct UUID generation while providing uniqueness
     fn generate_message_id() -> Uuid {
@@ -108,19 +108,24 @@ impl Envelope {
 
     /// Create relationship-scoped envelope with privacy preservation
     pub fn new_scoped(
-        payload: Vec<u8>, 
+        payload: Vec<u8>,
         relationship_id: RelationshipId,
-        capability_hint: Option<String>
+        capability_hint: Option<String>,
     ) -> Self {
-        Self::new_scoped_with_id(Self::generate_message_id(), payload, relationship_id, capability_hint)
+        Self::new_scoped_with_id(
+            Self::generate_message_id(),
+            payload,
+            relationship_id,
+            capability_hint,
+        )
     }
-    
+
     /// Create relationship-scoped envelope with specified message ID
     pub fn new_scoped_with_id(
         message_id: Uuid,
-        payload: Vec<u8>, 
+        payload: Vec<u8>,
         relationship_id: RelationshipId,
-        capability_hint: Option<String>
+        capability_hint: Option<String>,
     ) -> Self {
         Self {
             message_id,
@@ -139,7 +144,7 @@ impl Envelope {
     pub fn new_blinded(payload: Vec<u8>) -> Self {
         Self::new_blinded_with_id(Self::generate_message_id(), payload)
     }
-    
+
     /// Create blinded envelope with specified message ID
     pub fn new_blinded_with_id(message_id: Uuid, payload: Vec<u8>) -> Self {
         Self {
@@ -157,8 +162,8 @@ impl Envelope {
 
     /// Check if envelope requires relationship context
     pub fn requires_relationship_scope(&self) -> bool {
-        matches!(self.header.frame_type, FrameType::RelationshipScoped) ||
-        self.relationship_scope.is_some()
+        matches!(self.header.frame_type, FrameType::RelationshipScoped)
+            || self.relationship_scope.is_some()
     }
 
     /// Get privacy level for this envelope
@@ -178,7 +183,7 @@ impl ScopedEnvelope {
         // Verify envelope supports scoping
         if !envelope.requires_relationship_scope() {
             return Err(aura_core::AuraError::invalid(
-                "Envelope does not support relationship scoping"
+                "Envelope does not support relationship scoping",
             ));
         }
 
@@ -215,19 +220,22 @@ mod tests {
     #[test]
     fn test_envelope_privacy_levels() {
         let payload = b"test message".to_vec();
-        
+
         // Clear envelope
         let clear = Envelope::new(payload.clone());
         assert!(matches!(clear.privacy_level(), PrivacyLevel::Clear));
         assert!(!clear.requires_relationship_scope());
-        
+
         // Scoped envelope
         let relationship_id = RelationshipId::new([1u8; 32]);
         let scoped = Envelope::new_scoped(payload.clone(), relationship_id, None);
-        assert!(matches!(scoped.privacy_level(), PrivacyLevel::RelationshipScoped));
+        assert!(matches!(
+            scoped.privacy_level(),
+            PrivacyLevel::RelationshipScoped
+        ));
         assert!(scoped.requires_relationship_scope());
-        
-        // Blinded envelope  
+
+        // Blinded envelope
         let blinded = Envelope::new_blinded(payload);
         assert!(matches!(blinded.privacy_level(), PrivacyLevel::Blinded));
         assert_eq!(blinded.header.frame_size, 0); // Size is hidden
@@ -239,12 +247,12 @@ mod tests {
         let relationship_id = RelationshipId::new([2u8; 32]);
         let sender = DeviceId::new();
         let recipient = DeviceId::new();
-        
+
         // Valid scoped envelope
         let scoped_env = Envelope::new_scoped(payload.clone(), relationship_id.clone(), None);
         let scoped = ScopedEnvelope::new(scoped_env, relationship_id.clone(), sender, recipient);
         assert!(scoped.is_ok());
-        
+
         // Invalid - envelope doesn't support scoping
         let clear_env = Envelope::new(payload);
         let result = ScopedEnvelope::new(clear_env, relationship_id, sender, recipient);

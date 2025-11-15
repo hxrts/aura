@@ -8,10 +8,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tracing::{Span, Level};
+use tracing::{Level, Span};
 use uuid::Uuid;
 
-use aura_core::{DeviceId, FlowBudget, AuraResult, AuraError};
+use aura_core::{AuraError, AuraResult, DeviceId, FlowBudget};
 
 /// Context that flows through effect execution
 #[derive(Debug, Clone)]
@@ -90,7 +90,8 @@ impl EffectContext {
 
     /// Get remaining time until deadline
     pub fn time_until_deadline(&self) -> Option<Duration> {
-        self.deadline.map(|d| d.saturating_duration_since(Instant::now()))
+        self.deadline
+            .map(|d| d.saturating_duration_since(Instant::now()))
     }
 
     /// Charge flow budget
@@ -199,15 +200,15 @@ impl TraceContext {
     /// Export as headers for propagation
     pub fn as_headers(&self) -> HashMap<String, String> {
         let mut headers = HashMap::new();
-        
+
         if let Some(ref trace_parent) = self.trace_parent {
             headers.insert("traceparent".to_string(), trace_parent.clone());
         }
-        
+
         if let Some(ref trace_state) = self.trace_state {
             headers.insert("tracestate".to_string(), trace_state.clone());
         }
-        
+
         headers
     }
 }
@@ -243,7 +244,7 @@ where
     ) -> std::task::Poll<Self::Output> {
         // Enter the context span
         let _guard = self.context.span().enter();
-        
+
         // Poll the inner future
         let this = unsafe { self.get_unchecked_mut() };
         let future = unsafe { std::pin::Pin::new_unchecked(&mut this.future) };
@@ -265,10 +266,10 @@ impl<F: std::future::Future> WithContext for F {}
 pub trait ContextProvider: Send + Sync {
     /// Get the current context
     fn current_context(&self) -> Option<EffectContext>;
-    
+
     /// Set the current context
     fn set_context(&self, context: EffectContext);
-    
+
     /// Run with a specific context
     fn with_context<R>(&self, context: EffectContext, f: impl FnOnce() -> R) -> R {
         let previous = self.current_context();
@@ -342,7 +343,7 @@ mod tests {
     fn test_context_hierarchy() {
         let root = EffectContext::new(DeviceId::new());
         let child = root.child();
-        
+
         assert_ne!(root.request_id, child.request_id);
         assert_eq!(root.device_id, child.device_id);
         assert!(child.parent.is_some());
@@ -350,8 +351,8 @@ mod tests {
 
     #[test]
     fn test_flow_budget_charging() {
-        let mut context = EffectContext::new(DeviceId::new())
-            .with_flow_budget(FlowBudget::new(100));
+        let mut context =
+            EffectContext::new(DeviceId::new()).with_flow_budget(FlowBudget::new(100));
 
         assert!(context.charge_flow(50).is_ok());
         assert_eq!(context.flow_budget.remaining(), 50);

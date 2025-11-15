@@ -3,14 +3,17 @@
 //! This module provides explicit lifecycle state management for effect systems,
 //! ensuring proper initialization, health monitoring, and graceful shutdown.
 
-use std::sync::{Arc, atomic::{AtomicU8, Ordering}};
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use tokio::sync::{RwLock, Mutex};
-use tracing::{info, warn, error, debug};
+use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, error, info, warn};
 
-use aura_core::{AuraResult, AuraError, DeviceId};
+use aura_core::{AuraError, AuraResult, DeviceId};
 
 /// Lifecycle states for the effect system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -51,17 +54,17 @@ impl EffectSystemState {
         match (*self, target) {
             // Uninitialized can only go to Initializing
             (Self::Uninitialized, Self::Initializing) => true,
-            
+
             // Initializing can go to Ready or ShuttingDown (on init failure)
             (Self::Initializing, Self::Ready) => true,
             (Self::Initializing, Self::ShuttingDown) => true,
-            
+
             // Ready can only go to ShuttingDown
             (Self::Ready, Self::ShuttingDown) => true,
-            
+
             // ShuttingDown can only go to Shutdown
             (Self::ShuttingDown, Self::Shutdown) => true,
-            
+
             // All other transitions are invalid
             _ => false,
         }
@@ -188,7 +191,7 @@ impl LifecycleManager {
     pub async fn initialize(&self) -> AuraResult<()> {
         // Acquire transition lock
         let _lock = self.transition_lock.lock().await;
-        
+
         let current = self.current_state();
         if !current.can_transition_to(EffectSystemState::Initializing) {
             return Err(AuraError::invalid(format!(
@@ -198,8 +201,9 @@ impl LifecycleManager {
         }
 
         // Transition to Initializing
-        self.state.store(EffectSystemState::Initializing as u8, Ordering::Release);
-        
+        self.state
+            .store(EffectSystemState::Initializing as u8, Ordering::Release);
+
         info!(
             device_id = %self.device_id,
             "Starting effect system initialization"
@@ -211,7 +215,7 @@ impl LifecycleManager {
 
         for (name, component) in components.iter() {
             debug!(component = %name, "Initializing component");
-            
+
             match component.on_initialize().await {
                 Ok(()) => {
                     debug!(component = %name, "Component initialized successfully");
@@ -226,21 +230,23 @@ impl LifecycleManager {
         // Check if initialization succeeded
         if init_errors.is_empty() {
             // Transition to Ready
-            self.state.store(EffectSystemState::Ready as u8, Ordering::Release);
-            
+            self.state
+                .store(EffectSystemState::Ready as u8, Ordering::Release);
+
             info!(
                 device_id = %self.device_id,
                 "Effect system initialization completed successfully"
             );
-            
+
             Ok(())
         } else {
             // Initialization failed, transition to ShuttingDown
-            self.state.store(EffectSystemState::ShuttingDown as u8, Ordering::Release);
-            
+            self.state
+                .store(EffectSystemState::ShuttingDown as u8, Ordering::Release);
+
             // Try to clean up initialized components
             let _ = self.shutdown_internal().await;
-            
+
             Err(AuraError::invalid(format!(
                 "Effect system initialization failed: {} components failed",
                 init_errors.len()
@@ -252,7 +258,7 @@ impl LifecycleManager {
     pub async fn shutdown(&self) -> AuraResult<()> {
         // Acquire transition lock
         let _lock = self.transition_lock.lock().await;
-        
+
         let current = self.current_state();
         if !current.can_transition_to(EffectSystemState::ShuttingDown) {
             return Err(AuraError::invalid(format!(
@@ -262,8 +268,9 @@ impl LifecycleManager {
         }
 
         // Transition to ShuttingDown
-        self.state.store(EffectSystemState::ShuttingDown as u8, Ordering::Release);
-        
+        self.state
+            .store(EffectSystemState::ShuttingDown as u8, Ordering::Release);
+
         info!(
             device_id = %self.device_id,
             "Starting effect system shutdown"
@@ -280,7 +287,7 @@ impl LifecycleManager {
 
         for (name, component) in components.iter().rev() {
             debug!(component = %name, "Shutting down component");
-            
+
             match component.on_shutdown().await {
                 Ok(()) => {
                     debug!(component = %name, "Component shut down successfully");
@@ -293,8 +300,9 @@ impl LifecycleManager {
         }
 
         // Transition to Shutdown regardless of errors
-        self.state.store(EffectSystemState::Shutdown as u8, Ordering::Release);
-        
+        self.state
+            .store(EffectSystemState::Shutdown as u8, Ordering::Release);
+
         if shutdown_errors.is_empty() {
             info!(
                 device_id = %self.device_id,
@@ -318,7 +326,7 @@ impl LifecycleManager {
     pub async fn health_check(&self) -> SystemHealthReport {
         let current_state = self.current_state();
         let uptime = self.start_time.elapsed();
-        
+
         let components = self.components.read().await;
         let mut component_health = Vec::new();
         let mut all_healthy = true;
@@ -369,6 +377,7 @@ impl LifecycleManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::{aura_test, TestFixture};
 
     #[test]
     fn test_state_transitions() {
@@ -385,43 +394,47 @@ mod tests {
         assert!(!EffectSystemState::Shutdown.can_transition_to(EffectSystemState::Ready));
     }
 
-    #[tokio::test]
-    async fn test_lifecycle_manager_basic() {
-        let manager = LifecycleManager::new(DeviceId::new());
-        
+    #[aura_test]
+    async fn test_lifecycle_manager_basic() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let manager = LifecycleManager::new(fixture.device_id());
+
         // Initial state
         assert_eq!(manager.current_state(), EffectSystemState::Uninitialized);
         assert!(!manager.is_ready());
 
         // Initialize
-        manager.initialize().await.unwrap();
+        manager.initialize().await?;
         assert_eq!(manager.current_state(), EffectSystemState::Ready);
         assert!(manager.is_ready());
 
         // Shutdown
-        manager.shutdown().await.unwrap();
+        manager.shutdown().await?;
         assert_eq!(manager.current_state(), EffectSystemState::Shutdown);
         assert!(!manager.is_ready());
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_invalid_transitions() {
-        let manager = LifecycleManager::new(DeviceId::new());
-        
+    #[aura_test]
+    async fn test_invalid_transitions() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let manager = LifecycleManager::new(fixture.device_id());
+
         // Cannot shutdown from Uninitialized
         assert!(manager.shutdown().await.is_err());
-        
+
         // Initialize first
-        manager.initialize().await.unwrap();
-        
+        manager.initialize().await?;
+
         // Cannot initialize again
         assert!(manager.initialize().await.is_err());
-        
+
         // Shutdown
-        manager.shutdown().await.unwrap();
-        
+        manager.shutdown().await?;
+
         // Cannot shutdown again
         assert!(manager.shutdown().await.is_err());
+        Ok(())
     }
 
     /// Mock component for testing
@@ -451,10 +464,11 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_component_lifecycle() {
-        let manager = LifecycleManager::new(DeviceId::new());
-        
+    #[aura_test]
+    async fn test_component_lifecycle() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let manager = LifecycleManager::new(fixture.device_id());
+
         // Register a healthy component
         let component = MockComponent {
             name: "test_component".to_string(),
@@ -462,10 +476,12 @@ mod tests {
             shutdown_result: Ok(()),
             is_healthy: true,
         };
-        manager.register_component("test_component", Box::new(component)).await;
+        manager
+            .register_component("test_component", Box::new(component))
+            .await;
 
         // Initialize should succeed
-        manager.initialize().await.unwrap();
+        manager.initialize().await?;
         assert_eq!(manager.current_state(), EffectSystemState::Ready);
 
         // Health check should be healthy
@@ -475,14 +491,16 @@ mod tests {
         assert!(health_report.component_health[0].1.is_healthy);
 
         // Shutdown should succeed
-        manager.shutdown().await.unwrap();
+        manager.shutdown().await?;
         assert_eq!(manager.current_state(), EffectSystemState::Shutdown);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_component_init_failure() {
-        let manager = LifecycleManager::new(DeviceId::new());
-        
+    #[aura_test]
+    async fn test_component_init_failure() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let manager = LifecycleManager::new(fixture.device_id());
+
         // Register a component that fails to initialize
         let component = MockComponent {
             name: "failing_component".to_string(),
@@ -490,10 +508,13 @@ mod tests {
             shutdown_result: Ok(()),
             is_healthy: false,
         };
-        manager.register_component("failing_component", Box::new(component)).await;
+        manager
+            .register_component("failing_component", Box::new(component))
+            .await;
 
         // Initialize should fail and transition to Shutdown
         assert!(manager.initialize().await.is_err());
         assert_eq!(manager.current_state(), EffectSystemState::Shutdown);
+        Ok(())
     }
 }

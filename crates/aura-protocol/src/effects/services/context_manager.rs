@@ -121,52 +121,59 @@ impl Default for ContextManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::{aura_test, TestFixture};
 
-    #[tokio::test]
-    async fn test_context_snapshot() {
+    #[aura_test]
+    async fn test_context_snapshot() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = ContextManager::new();
-        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let device_id = fixture.device_id();
 
         // Initialize a context
-        let context = manager.initialize(device_id).await.unwrap();
+        let context = manager.initialize(device_id).await?;
         assert_eq!(context.device_id, device_id);
 
         // Get snapshot - should not hold lock
-        let snapshot1 = manager.get_snapshot(device_id).await.unwrap();
-        let snapshot2 = manager.get_snapshot(device_id).await.unwrap();
+        let snapshot1 = manager.get_snapshot(device_id).await?;
+        let snapshot2 = manager.get_snapshot(device_id).await?;
 
         // Snapshots should be equal but independent
         assert_eq!(snapshot1.device_id, snapshot2.device_id);
         assert_eq!(snapshot1.epoch, snapshot2.epoch);
+
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_atomic_update() {
+    #[aura_test]
+    async fn test_atomic_update() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = ContextManager::new();
-        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let device_id = fixture.device_id();
 
         // Initialize context
-        manager.initialize(device_id).await.unwrap();
+        manager.initialize(device_id).await?;
 
         // Update atomically
         let updated = manager
             .update_with(device_id, |ctx| {
                 ctx.epoch = 42;
             })
-            .await
-            .unwrap();
+            .await?;
 
         assert_eq!(updated.epoch, 42);
 
         // Verify update persisted
-        let snapshot = manager.get_snapshot(device_id).await.unwrap();
+        let snapshot = manager.get_snapshot(device_id).await?;
         assert_eq!(snapshot.epoch, 42);
+
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_context_not_found() {
+    #[aura_test]
+    async fn test_context_not_found() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = ContextManager::new();
-        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let device_id = fixture.device_id();
 
         let result = manager.get_snapshot(device_id).await;
         assert!(result.is_err());
@@ -174,15 +181,18 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Context for device"));
+
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_concurrent_access() {
+    #[aura_test]
+    async fn test_concurrent_access() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = ContextManager::new();
-        let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let device_id = fixture.device_id();
 
         // Initialize context
-        manager.initialize(device_id).await.unwrap();
+        manager.initialize(device_id).await?;
 
         // Spawn concurrent readers
         let mut handles = vec![];
@@ -197,5 +207,7 @@ mod tests {
             let context = handle.await.unwrap();
             assert_eq!(context.device_id, device_id);
         }
+
+        Ok(())
     }
 }

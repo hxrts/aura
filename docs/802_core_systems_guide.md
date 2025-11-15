@@ -124,7 +124,7 @@ Tree operations create attested facts in the journal. No device edits account st
 Context identities derive from account keys using deterministic key derivation:
 
 ```rust
-use aura_crypto::{DKDCapsule, ContextId};
+use aura_core::{DKDCapsule, ContextId};
 
 pub async fn derive_context_identity<E: CryptoEffects>(
     effects: &E,

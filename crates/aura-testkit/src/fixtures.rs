@@ -320,11 +320,11 @@ pub enum StatelessFixtureError {
     /// Device configuration error
     DeviceConfigError(String),
     /// Invalid parameter
-    InvalidParameter { 
+    InvalidParameter {
         /// Parameter name
-        param: String, 
+        param: String,
         /// Reason for invalidity
-        reason: String 
+        reason: String,
     },
 }
 

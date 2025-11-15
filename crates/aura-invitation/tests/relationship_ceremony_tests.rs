@@ -7,8 +7,8 @@ use aura_invitation::relationship_formation::{
     execute_relationship_formation, RelationshipFormationConfig, RelationshipFormationError,
     RelationshipKeys,
 };
-use aura_protocol::effects::AuraEffectSystem;
 use aura_macros::aura_test;
+use aura_protocol::effects::AuraEffectSystem;
 // use aura_testkit::ChoreographyTestHarness; // Commented out for now
 use uuid::Uuid;
 // Note: For testing, use mock handlers from aura-effects
@@ -76,7 +76,8 @@ async fn test_successful_relationship_formation() -> aura_core::AuraResult<()> {
 #[aura_test]
 async fn test_invalid_configuration() -> aura_core::AuraResult<()> {
     let device_id = DeviceId(Uuid::new_v4());
-    let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;\n    let effect_system = fixture.effect_system();
+    let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+    let effect_system = fixture.effect_system();
 
     let config = RelationshipFormationConfig {
         initiator_id: device_id,
@@ -100,7 +101,7 @@ async fn test_invalid_configuration() -> aura_core::AuraResult<()> {
 async fn test_bidirectional_relationship_formation() -> aura_core::AuraResult<()> {
     // Simplified test that validates the API and structure
     // The ChoreographyTestHarness requires more complex setup for full bidirectional coordination
-    
+
     let initiator_id = DeviceId(Uuid::new_v4());
     let responder_id = DeviceId(Uuid::new_v4());
     let account_context = Some(AccountId::new());

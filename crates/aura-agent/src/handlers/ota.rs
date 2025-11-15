@@ -5,11 +5,11 @@
 
 use crate::errors::Result as AgentResult;
 use aura_core::{DeviceId, Epoch};
+use aura_protocol::choreography::protocols::ota::{UpgradeConfig, UpgradeOrchestrator};
+use aura_protocol::choreography::AuraHandlerAdapter;
 #[cfg(test)]
 use aura_sync::maintenance::UpgradeKind;
 use aura_sync::maintenance::UpgradeProposal;
-use aura_protocol::choreography::protocols::ota::{UpgradeConfig, UpgradeOrchestrator};
-use aura_protocol::choreography::AuraHandlerAdapter;
 use serde_json;
 use std::collections::HashMap;
 use tokio::sync::RwLock;

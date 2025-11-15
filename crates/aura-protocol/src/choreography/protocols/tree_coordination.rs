@@ -120,8 +120,8 @@ pub struct TreeSyncNotification {
 
 // Message types for tree synchronization moved to tree_sync module
 use super::tree_sync::{
-    DigestRequest, DigestResponse, OperationRequest, OperationResponse,
-    SyncCompletion, SyncInitiation, TreeChoreographyError as TreeSyncChoreographyError
+    DigestRequest, DigestResponse, OperationRequest, OperationResponse, SyncCompletion,
+    SyncInitiation, TreeChoreographyError as TreeSyncChoreographyError,
 };
 
 // Multi-party protocol for coordinating tree operations with validation and approval
@@ -862,8 +862,8 @@ pub async fn execute_tree_synchronization(
 mod tests {
     use super::*;
     use aura_core::{LeafId, LeafNode, LeafRole, NodeIndex};
-    use aura_testkit::*;
     use aura_macros::aura_test;
+    use aura_testkit::*;
 
     fn create_test_approval_config() -> TreeApprovalConfig {
         TreeApprovalConfig {
@@ -903,11 +903,7 @@ mod tests {
         let device_id = fixture.device_id();
         let effect_system = fixture.effects();
 
-        let result = execute_tree_operation_approval(
-            device_id,
-            config,
-            effect_system,
-        ).await;
+        let result = execute_tree_operation_approval(device_id, config, effect_system).await;
 
         assert!(result.is_err());
         assert!(matches!(
@@ -926,13 +922,8 @@ mod tests {
         let device_id = fixture.device_id();
         let effect_system = fixture.effects();
 
-        let result = execute_tree_synchronization(
-            device_id,
-            config,
-            true,
-            None,
-            effect_system,
-        ).await;
+        let result =
+            execute_tree_synchronization(device_id, config, true, None, effect_system).await;
 
         assert!(result.is_err());
         assert!(matches!(

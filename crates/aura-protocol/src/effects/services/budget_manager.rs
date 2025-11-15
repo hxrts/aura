@@ -226,30 +226,31 @@ impl Default for FlowBudgetManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::{aura_test, TestFixture};
 
-    #[tokio::test]
-    async fn test_budget_charging() {
+    #[aura_test]
+    async fn test_budget_charging() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
         let context = ContextId::from("test-context");
-        let peer = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let peer = fixture.device_id();
         let epoch = Epoch::from(1);
 
         // Initialize budget with limit of 1000
         manager
             .initialize_budget(&context, &peer, 1000, epoch)
-            .await
-            .unwrap();
+            .await?;
 
         // Check we can charge
-        assert!(manager.can_charge(&context, &peer, 100).await.unwrap());
+        assert!(manager.can_charge(&context, &peer, 100).await?);
 
         // Charge 100
-        let budget = manager.charge(&context, &peer, 100).await.unwrap();
+        let budget = manager.charge(&context, &peer, 100).await?;
         assert_eq!(budget.spent, 100);
         assert_eq!(budget.limit, 1000);
 
         // Charge another 400
-        let budget = manager.charge(&context, &peer, 400).await.unwrap();
+        let budget = manager.charge(&context, &peer, 400).await?;
         assert_eq!(budget.spent, 500);
 
         // Try to charge more than remaining
@@ -259,48 +260,50 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Flow budget exceeded"));
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_epoch_rotation() {
+    #[aura_test]
+    async fn test_epoch_rotation() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
         let context = ContextId::from("test-context");
-        let peer = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let peer = fixture.device_id();
         let epoch1 = Epoch::from(1);
         let epoch2 = Epoch::from(2);
 
         // Initialize and charge budget
         manager
             .initialize_budget(&context, &peer, 1000, epoch1)
-            .await
-            .unwrap();
-        manager.charge(&context, &peer, 800).await.unwrap();
+            .await?;
+        manager.charge(&context, &peer, 800).await?;
 
         // Verify spent
-        let budget = manager.get_budget(&context, &peer).await.unwrap().unwrap();
+        let budget = manager.get_budget(&context, &peer).await?.unwrap();
         assert_eq!(budget.spent, 800);
 
         // Rotate epoch
-        manager.rotate_epoch(epoch2).await.unwrap();
+        manager.rotate_epoch(epoch2).await?;
 
         // Verify budget was reset
-        let budget = manager.get_budget(&context, &peer).await.unwrap().unwrap();
+        let budget = manager.get_budget(&context, &peer).await?.unwrap();
         assert_eq!(budget.spent, 0);
         assert_eq!(budget.epoch, epoch2);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_charge_or_init() {
+    #[aura_test]
+    async fn test_charge_or_init() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
         let context = ContextId::from("test-context");
-        let peer = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let peer = fixture.device_id();
         let epoch = Epoch::from(1);
 
         // Charge without initialization
         let budget = manager
             .charge_or_init(&context, &peer, 100, 1000, epoch)
-            .await
-            .unwrap();
+            .await?;
 
         assert_eq!(budget.spent, 100);
         assert_eq!(budget.limit, 1000);
@@ -308,25 +311,25 @@ mod tests {
         // Charge again - should use existing budget
         let budget = manager
             .charge_or_init(&context, &peer, 200, 2000, epoch)
-            .await
-            .unwrap();
+            .await?;
 
         assert_eq!(budget.spent, 300);
         assert_eq!(budget.limit, 1000); // Original limit preserved
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_concurrent_charging() {
+    #[aura_test]
+    async fn test_concurrent_charging() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
         let context = ContextId::from("test-context");
-        let peer = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
+        let peer = fixture.device_id();
         let epoch = Epoch::from(1);
 
         // Initialize budget
         manager
             .initialize_budget(&context, &peer, 1000, epoch)
-            .await
-            .unwrap();
+            .await?;
 
         // Spawn concurrent charges
         let mut handles = vec![];
@@ -349,7 +352,8 @@ mod tests {
         assert_eq!(successes, 10);
 
         // Verify final state
-        let budget = manager.get_budget(&context, &peer).await.unwrap().unwrap();
+        let budget = manager.get_budget(&context, &peer).await?.unwrap();
         assert_eq!(budget.spent, 500);
+        Ok(())
     }
 }

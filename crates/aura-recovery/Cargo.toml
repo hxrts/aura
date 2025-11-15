@@ -12,7 +12,6 @@ aura-core = { path = "../aura-core" }
 aura-verify = { path = "../aura-verify" }
 aura-authenticate = { path = "../aura-authenticate" }
 aura-wot = { path = "../aura-wot" }
-aura-crypto = { path = "../aura-crypto" }
 aura-effects = { path = "../aura-effects" }
 aura-protocol = { path = "../aura-protocol" }
 aura-macros = { path = "../aura-macros" }

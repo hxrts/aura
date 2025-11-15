@@ -14,7 +14,7 @@ use aura_core::{AccountId, DeviceId};
 
 // The following imports are intentionally broken as the modules were refactored
 // use aura_agent::device_secure_store::{DeviceAttestation, PlatformSecureStorage};
-// use aura_crypto::Effects;
+// use aura_core::Effects;
 // use uuid::Uuid;
 
 /// Quick compilation and instantiation test

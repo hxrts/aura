@@ -10,7 +10,7 @@ use aura_core::{
     identifiers::{AccountId, DeviceId},
     semilattice::{Bottom, CvState, JoinSemilattice},
 };
-use aura_crypto::Ed25519VerifyingKey;
+use aura_core::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -315,7 +315,7 @@ mod tests {
     #[allow(clippy::disallowed_methods)]
     fn test_account_state_creation() {
         let account_id = AccountId(Uuid::new_v4());
-        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
+        let signing_key = aura_core::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public_key = signing_key.verifying_key();
 
         let state = AccountState::new(account_id, group_public_key);
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn test_device_management() {
         let account_id = AccountId(uuid::Uuid::from_bytes([1u8; 16]));
-        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
+        let signing_key = aura_core::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public_key = signing_key.verifying_key();
 
         let mut state = AccountState::new(account_id, group_public_key);
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn test_epoch_management() {
         let account_id = AccountId(uuid::Uuid::from_bytes([3u8; 16]));
-        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
+        let signing_key = aura_core::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public_key = signing_key.verifying_key();
 
         let mut state = AccountState::new(account_id, group_public_key);
@@ -373,7 +373,7 @@ mod tests {
     #[test]
     fn test_join_semilattice() {
         let account_id = AccountId(uuid::Uuid::from_bytes([4u8; 16]));
-        let signing_key = aura_crypto::Ed25519SigningKey::from_bytes(&[1u8; 32]);
+        let signing_key = aura_core::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public_key = signing_key.verifying_key();
 
         let mut state1 = AccountState::new(account_id, group_public_key);

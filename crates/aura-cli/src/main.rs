@@ -113,7 +113,6 @@ enum Commands {
         action: InvitationAction,
     },
 
-
     /// Show version information
     Version,
 }

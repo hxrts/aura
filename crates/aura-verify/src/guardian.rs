@@ -5,7 +5,7 @@
 
 use crate::{AuthenticationError, Result};
 use aura_core::GuardianId;
-use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
+use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 
 /// Verify that a guardian signed a message
 ///
@@ -30,7 +30,7 @@ pub fn verify_guardian_signature(
     guardian_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
     // Verify the cryptographic signature
-    aura_crypto::ed25519_verify(guardian_public_key, message, signature).map_err(|e| {
+    aura_core::ed25519_verify(guardian_public_key, message, signature).map_err(|e| {
         AuthenticationError::InvalidGuardianSignature(format!(
             "Guardian {} signature verification failed: {}",
             guardian_id, e
@@ -98,7 +98,7 @@ fn create_recovery_approval_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_crypto::Effects;
+    use aura_core::Effects;
 
     #[test]
     fn test_verify_guardian_signature_success() {
@@ -106,11 +106,11 @@ mod tests {
         let guardian_id = effects.gen_uuid();
 
         // Generate a key pair for testing
-        let signing_key = aura_crypto::generate_ed25519_key();
-        let verifying_key = aura_crypto::ed25519_verifying_key(&signing_key);
+        let signing_key = aura_core::generate_ed25519_key();
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
 
         let message = b"guardian test message";
-        let signature = aura_crypto::ed25519_sign(&signing_key, message);
+        let signature = aura_core::ed25519_sign(&signing_key, message);
 
         let result = verify_guardian_signature(guardian_id, message, &signature, &verifying_key);
 
@@ -123,13 +123,13 @@ mod tests {
         let guardian_id = effects.gen_uuid();
 
         // Generate two different key pairs
-        let signing_key1 = aura_crypto::generate_ed25519_key();
-        let verifying_key1 = aura_crypto::ed25519_verifying_key(&signing_key1);
-        let signing_key2 = aura_crypto::generate_ed25519_key();
+        let signing_key1 = aura_core::generate_ed25519_key();
+        let verifying_key1 = aura_core::ed25519_verifying_key(&signing_key1);
+        let signing_key2 = aura_core::generate_ed25519_key();
 
         let message = b"guardian test message";
         // Sign with key2 but verify with key1 (should fail)
-        let signature = aura_crypto::ed25519_sign(&signing_key2, message);
+        let signature = aura_core::ed25519_sign(&signing_key2, message);
 
         let result = verify_guardian_signature(guardian_id, message, &signature, &verifying_key1);
 
@@ -147,13 +147,13 @@ mod tests {
         let recovery_request_hash = [42u8; 32];
 
         // Generate a key pair for testing
-        let signing_key = aura_crypto::generate_ed25519_key();
-        let verifying_key = aura_crypto::ed25519_verifying_key(&signing_key);
+        let signing_key = aura_core::generate_ed25519_key();
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
 
         // Create the approval message and sign it
         let approval_message =
             create_recovery_approval_message(guardian_id, &recovery_request_hash);
-        let signature = aura_crypto::ed25519_sign(&signing_key, &approval_message);
+        let signature = aura_core::ed25519_sign(&signing_key, &approval_message);
 
         let result = verify_recovery_approval(
             guardian_id,

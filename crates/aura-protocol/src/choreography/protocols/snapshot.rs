@@ -762,8 +762,8 @@ pub async fn apply_snapshot_commit(
 mod tests {
     use super::*;
     use aura_core::tree::LeafId;
-    use aura_testkit::*;
     use aura_macros::aura_test;
+    use aura_testkit::*;
     use std::collections::BTreeMap;
 
     fn create_test_config() -> SnapshotConfig {

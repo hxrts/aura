@@ -11,12 +11,20 @@ description = "Multi-party session type extensions for Aura"
 workspace = true
 
 [dependencies]
-# Core dependencies
+# Re-export all rumpsteak-aura functionality
+rumpsteak-aura = { workspace = true }
+rumpsteak-aura-choreography = { workspace = true }
+
+# Note: aura-macros generates code that uses aura-mpst types, 
+# but aura-mpst does not depend on aura-macros to avoid circular dependency
+
+# Core Aura dependencies
 aura-core = { path = "../aura-core" }
 
-# Session types framework
-rumpsteak-aura = "0.5.0"
-rumpsteak-aura-choreography = "0.5.0"
+# Dependencies needed for extension system
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -41,10 +49,10 @@ hex = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-aura-macros = { path = "../aura-macros" }
 # Temporarily removed due to build issues in dependencies
 # aura-testkit = { path = "../aura-testkit" }
 # aura-protocol = { path = "../aura-protocol" }
+aura-macros = { path = "../aura-macros" }
 proptest = { workspace = true }
 tokio = { workspace = true }
 

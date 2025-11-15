@@ -1084,13 +1084,14 @@ where
                     bincode::deserialize(parameters).map_err(|e| {
                         AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                     })?;
-                
-                self.inner().log(&level, &component, &message).await.map_err(|e| {
-                    AuraHandlerError::ExecutionFailed {
+
+                self.inner()
+                    .log(&level, &component, &message)
+                    .await
+                    .map_err(|e| AuraHandlerError::ExecutionFailed {
                         source: Box::new(e),
-                    }
-                })?;
-                
+                    })?;
+
                 Ok(bincode::serialize(&()).unwrap_or_default())
             }
             "health_check" => {
@@ -1179,13 +1180,13 @@ where
                 let event = bincode::deserialize(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
-                
+
                 self.inner().append_event(event).await.map_err(|e| {
                     AuraHandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                
+
                 Ok(bincode::serialize(&()).unwrap_or_default())
             }
             "subscribe_to_events" => {
@@ -1195,12 +1196,10 @@ where
                     operation: operation.to_string(),
                 })
             }
-            _ => {
-                Err(AuraHandlerError::UnsupportedOperation {
-                    effect_type,
-                    operation: operation.to_string(),
-                })
-            }
+            _ => Err(AuraHandlerError::UnsupportedOperation {
+                effect_type,
+                operation: operation.to_string(),
+            }),
         }
     }
 
@@ -1269,12 +1268,10 @@ where
                 })?;
                 Ok(bincode::serialize(&result).unwrap_or_default())
             }
-            _ => {
-                Err(AuraHandlerError::UnsupportedOperation {
-                    effect_type,
-                    operation: operation.to_string(),
-                })
-            }
+            _ => Err(AuraHandlerError::UnsupportedOperation {
+                effect_type,
+                operation: operation.to_string(),
+            }),
         }
     }
 
@@ -1332,47 +1329,46 @@ where
                     bincode::deserialize(parameters).map_err(|e| {
                         AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                     })?;
-                
-                self.inner().send_to_role_bytes(role, message).await.map_err(|e| {
-                    AuraHandlerError::ExecutionFailed {
+
+                self.inner()
+                    .send_to_role_bytes(role, message)
+                    .await
+                    .map_err(|e| AuraHandlerError::ExecutionFailed {
                         source: Box::new(e),
-                    }
-                })?;
-                
+                    })?;
+
                 Ok(bincode::serialize(&()).unwrap_or_default())
             }
             "broadcast_bytes" => {
                 let message: Vec<u8> = bincode::deserialize(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
-                
+
                 self.inner().broadcast_bytes(message).await.map_err(|e| {
                     AuraHandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                
+
                 Ok(bincode::serialize(&()).unwrap_or_default())
             }
             "emit_choreo_event" => {
                 let event = bincode::deserialize(parameters).map_err(|e| {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
-                
+
                 self.inner().emit_choreo_event(event).await.map_err(|e| {
                     AuraHandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                
+
                 Ok(bincode::serialize(&()).unwrap_or_default())
             }
-            _ => {
-                Err(AuraHandlerError::UnsupportedOperation {
-                    effect_type,
-                    operation: operation.to_string(),
-                })
-            }
+            _ => Err(AuraHandlerError::UnsupportedOperation {
+                effect_type,
+                operation: operation.to_string(),
+            }),
         }
     }
 
@@ -1394,44 +1390,46 @@ where
 mod tests {
     use super::*;
     use crate::handlers::immutable::AuraContext;
-    use aura_core::identifiers::DeviceId;
+    use aura_core::{identifiers::DeviceId, AuraResult};
     use aura_effects::{storage::MemoryStorageHandler, time::SimulatedTimeHandler};
+    use aura_testkit::{aura_test, TestFixture};
     use uuid::Uuid;
 
-    #[tokio::test]
-    async fn time_adapter_serializes_timestamp() {
+    #[aura_test]
+    async fn time_adapter_serializes_timestamp() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let adapter =
             TimeHandlerAdapter::new(SimulatedTimeHandler::new_at_epoch(), ExecutionMode::Testing);
-        let ctx = AuraContext::for_testing(DeviceId::from(Uuid::nil()));
+        let ctx = AuraContext::for_testing(fixture.device_id());
 
         let bytes = adapter
             .execute_effect(EffectType::Time, "current_timestamp_millis", &[], &ctx)
-            .await
-            .expect("time effect should succeed");
+            .await?;
 
         let mut timestamp_bytes = [0u8; 8];
         timestamp_bytes.copy_from_slice(&bytes[..8]);
         assert_eq!(u64::from_le_bytes(timestamp_bytes), 0);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn storage_adapter_round_trips_values() {
+    #[aura_test]
+    async fn storage_adapter_round_trips_values() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
         let adapter =
             StorageHandlerAdapter::new(MemoryStorageHandler::new(), ExecutionMode::Testing);
-        let ctx = AuraContext::for_testing(DeviceId::from(Uuid::nil()));
+        let ctx = AuraContext::for_testing(fixture.device_id());
 
         let store_params = bincode::serialize(&("demo".to_string(), vec![1u8, 2, 3])).unwrap();
         adapter
             .execute_effect(EffectType::Storage, "store", &store_params, &ctx)
-            .await
-            .expect("store effect");
+            .await?;
 
         let retrieved = adapter
             .execute_effect(EffectType::Storage, "retrieve", b"demo", &ctx)
-            .await
-            .expect("retrieve effect");
+            .await?;
 
         let value: Option<Vec<u8>> = bincode::deserialize(&retrieved).unwrap();
         assert_eq!(value, Some(vec![1, 2, 3]));
+        Ok(())
     }
 }

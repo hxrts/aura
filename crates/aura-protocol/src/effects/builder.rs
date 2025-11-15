@@ -7,21 +7,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use aura_core::{AuraResult, AuraError, DeviceId, session_epochs::Epoch};
 use aura_core::effects::CryptoEffects;
+use aura_core::{session_epochs::Epoch, AuraError, AuraResult, DeviceId};
 
-use crate::handlers::{AuraHandler, EffectType, ExecutionMode};
 use crate::effects::{
-    AuraEffectSystem, EffectSystemConfig, StorageConfig,
     container::EffectContainer,
     executor::{EffectExecutor, EffectExecutorBuilder},
+    handler_adapters::*,
     lifecycle::LifecycleManager,
     services::{ContextManager, FlowBudgetManager, ReceiptManager},
-    handler_adapters::*,
+    AuraEffectSystem, EffectSystemConfig, StorageConfig,
 };
+use crate::handlers::{AuraHandler, EffectType, ExecutionMode};
 
 /// Builder for constructing AuraEffectSystem instances
-/// 
+///
 /// This builder provides a flexible way to construct effect systems with
 /// custom configurations and handlers. It supports both synchronous and
 /// asynchronous initialization paths.
@@ -125,23 +125,24 @@ impl AuraEffectSystemBuilder {
     /// production use where async operations are expected.
     pub async fn build(self) -> AuraResult<AuraEffectSystem> {
         let config = self.resolve_config()?;
-        
+
         // Build executor with custom handlers
         let executor = if let Some(container) = self.container {
-            self.build_executor_with_container(&config, container).await?
+            self.build_executor_with_container(&config, container)
+                .await?
         } else {
             self.build_executor(&config)?
         };
-        
+
         // Initialize services
         let context_mgr = Arc::new(ContextManager::new());
         let budget_mgr = Arc::new(FlowBudgetManager::new());
         let receipt_mgr = Arc::new(ReceiptManager::new());
         let lifecycle_mgr = Arc::new(LifecycleManager::new(config.device_id));
-        
+
         // Perform async initialization if needed
         // For now, we defer initialization to avoid runtime conflicts
-        
+
         Ok(AuraEffectSystem::from_components(
             config,
             Arc::new(executor),
@@ -158,16 +159,16 @@ impl AuraEffectSystemBuilder {
     /// test contexts where async runtimes might already be active.
     pub fn build_sync(self) -> AuraResult<AuraEffectSystem> {
         let config = self.resolve_config()?;
-        
+
         // Build executor with custom handlers
         let executor = self.build_executor(&config)?;
-        
+
         // Initialize services without async operations
         let context_mgr = Arc::new(ContextManager::new());
         let budget_mgr = Arc::new(FlowBudgetManager::new());
         let receipt_mgr = Arc::new(ReceiptManager::new());
         let lifecycle_mgr = Arc::new(LifecycleManager::new(config.device_id));
-        
+
         Ok(AuraEffectSystem::from_components(
             config,
             Arc::new(executor),
@@ -186,12 +187,12 @@ impl AuraEffectSystemBuilder {
         }
 
         // Otherwise, build config from individual settings
-        let device_id = self.device_id.ok_or_else(|| {
-            aura_core::AuraError::invalid("Device ID is required")
-        })?;
+        let device_id = self
+            .device_id
+            .ok_or_else(|| aura_core::AuraError::invalid("Device ID is required"))?;
 
         let execution_mode = self.execution_mode.unwrap_or(ExecutionMode::Testing);
-        
+
         let storage_config = self.storage_config.clone().unwrap_or_else(|| {
             match execution_mode {
                 ExecutionMode::Testing => StorageConfig::for_testing(),
@@ -255,7 +256,7 @@ impl AuraEffectSystemBuilder {
 
         // Try to resolve handlers from container first
         // If not found, fall back to default handlers
-        
+
         // For now, we'll use a simplified approach
         // In a full implementation, we'd have a more sophisticated container integration
         // that can resolve handlers by their trait implementations
@@ -279,12 +280,8 @@ impl AuraEffectSystemBuilder {
         config: &EffectSystemConfig,
     ) -> AuraResult<EffectExecutorBuilder> {
         use aura_effects::{
-            console::MockConsoleHandler,
-            crypto::MockCryptoHandler,
-            journal::MemoryJournalHandler,
-            network::MockNetworkHandler,
-            random::MockRandomHandler,
-            storage::MemoryStorageHandler,
+            console::MockConsoleHandler, crypto::MockCryptoHandler, journal::MemoryJournalHandler,
+            network::MockNetworkHandler, random::MockRandomHandler, storage::MemoryStorageHandler,
             time::SimulatedTimeHandler,
         };
 
@@ -308,7 +305,10 @@ impl AuraEffectSystemBuilder {
                 if !self.custom_handlers.contains_key(&EffectType::Storage) {
                     builder = builder.with_handler(
                         EffectType::Storage,
-                        Arc::new(StorageHandlerAdapter::new(MemoryStorageHandler::new(), mode)),
+                        Arc::new(StorageHandlerAdapter::new(
+                            MemoryStorageHandler::new(),
+                            mode,
+                        )),
                     );
                 }
                 if !self.custom_handlers.contains_key(&EffectType::Time) {
@@ -335,7 +335,10 @@ impl AuraEffectSystemBuilder {
                 if !self.custom_handlers.contains_key(&EffectType::Journal) {
                     builder = builder.with_handler(
                         EffectType::Journal,
-                        Arc::new(JournalHandlerAdapter::new(MemoryJournalHandler::new(), mode)),
+                        Arc::new(JournalHandlerAdapter::new(
+                            MemoryJournalHandler::new(),
+                            mode,
+                        )),
                     );
                 }
                 if !self.custom_handlers.contains_key(&EffectType::System) {
@@ -365,7 +368,10 @@ impl AuraEffectSystemBuilder {
                         )),
                     );
                 }
-                if !self.custom_handlers.contains_key(&EffectType::Choreographic) {
+                if !self
+                    .custom_handlers
+                    .contains_key(&EffectType::Choreographic)
+                {
                     builder = builder.with_handler(
                         EffectType::Choreographic,
                         Arc::new(ChoreographicHandlerAdapter::new(
@@ -380,7 +386,9 @@ impl AuraEffectSystemBuilder {
             ExecutionMode::Production => {
                 // Production handlers would be added here
                 // For now, reuse test handlers with a warning
-                tracing::warn!("Using test handlers in production mode - replace with real implementations");
+                tracing::warn!(
+                    "Using test handlers in production mode - replace with real implementations"
+                );
                 return self.add_default_handlers(
                     builder,
                     &EffectSystemConfig {
@@ -395,7 +403,10 @@ impl AuraEffectSystemBuilder {
                 if !self.custom_handlers.contains_key(&EffectType::Random) {
                     builder = builder.with_handler(
                         EffectType::Random,
-                        Arc::new(RandomHandlerAdapter::new(MockRandomHandler::new(seed), mode)),
+                        Arc::new(RandomHandlerAdapter::new(
+                            MockRandomHandler::new(seed),
+                            mode,
+                        )),
                     );
                 }
                 // Add other simulation-specific handlers
@@ -422,6 +433,7 @@ impl Default for AuraEffectSystemBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::{aura_test, TestFixture};
 
     #[test]
     fn test_builder_basic() {
@@ -435,25 +447,26 @@ mod tests {
         assert_eq!(system.execution_mode(), ExecutionMode::Testing);
     }
 
-    #[tokio::test]
-    async fn test_builder_async() {
-        let device_id = DeviceId::new();
+    #[aura_test]
+    async fn test_builder_async() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let device_id = fixture.device_id();
         let system = AuraEffectSystemBuilder::new()
             .with_device_id(device_id)
             .with_execution_mode(ExecutionMode::Testing)
             .with_default_flow_limit(5000)
             .build()
-            .await
-            .unwrap();
+            .await?;
 
         assert_eq!(system.device_id(), device_id);
+        Ok(())
     }
 
     #[test]
     fn test_builder_with_config() {
         let device_id = DeviceId::new();
         let config = EffectSystemConfig::for_testing(device_id);
-        
+
         let system = AuraEffectSystemBuilder::new()
             .with_config(config.clone())
             .build_sync()
@@ -466,15 +479,18 @@ mod tests {
     #[test]
     fn test_builder_custom_handler() {
         use aura_effects::crypto::MockCryptoHandler;
-        
+
         let device_id = DeviceId::new();
         let custom_crypto = MockCryptoHandler::new(12345);
-        
+
         let system = AuraEffectSystemBuilder::new()
             .with_device_id(device_id)
             .with_handler(
                 EffectType::Crypto,
-                Box::new(CryptoHandlerAdapter::new(custom_crypto, ExecutionMode::Testing)),
+                Box::new(CryptoHandlerAdapter::new(
+                    custom_crypto,
+                    ExecutionMode::Testing,
+                )),
             )
             .build_sync()
             .unwrap();

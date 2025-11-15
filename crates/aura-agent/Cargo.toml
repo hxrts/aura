@@ -15,7 +15,6 @@ categories = ["cryptography", "authentication"]
 aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
 aura-protocol = { path = "../aura-protocol" }
-aura-crypto = { path = "../aura-crypto" }
 aura-journal = { path = "../aura-journal" }
 aura-wot = { path = "../aura-wot" }
 aura-verify = { path = "../aura-verify" }

@@ -84,7 +84,8 @@ pub use uuid::Uuid;
 
 // Re-export the test harness functions as convenience exports
 pub use test_harness::{
-    create_test_context, create_test_context_with_config, init_test_tracing, TestConfig, TestContext, TestFixture
+    create_test_context, create_test_context_with_config, init_test_tracing, TestConfig,
+    TestContext, TestFixture,
 };
 
 // Re-export FROST key generation helper
@@ -114,14 +115,16 @@ pub async fn create_test_fixture() -> aura_core::AuraResult<TestFixture> {
 /// Create a test fixture with a specific device ID (deterministic)
 ///
 /// This is useful for tests that need predictable device IDs.
-pub async fn create_test_fixture_with_device_id(device_id: DeviceId) -> aura_core::AuraResult<TestFixture> {
+pub async fn create_test_fixture_with_device_id(
+    device_id: DeviceId,
+) -> aura_core::AuraResult<TestFixture> {
     let config = TestConfig {
         name: "test_with_device_id".to_string(),
         deterministic_time: true,
         capture_effects: false,
         timeout: Some(std::time::Duration::from_secs(30)),
     };
-    
+
     // We'll need to create the context manually to specify the device ID
     // For now, create normal fixture and document this as a TODO for enhancement
     TestFixture::with_config(config).await

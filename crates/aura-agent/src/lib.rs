@@ -1,14 +1,14 @@
 //! Aura Agent: Device Runtime Composition with Effect System Architecture
 //!
-//! This crate provides device-side identity management by composing handlers and middleware
+//! This crate provides device-side identity management by composing handlers
 //! into unified device runtimes. It follows the runtime composition pattern from the
 //! unified effect system architecture.
 //!
 //! # Architecture
 //!
-//! This crate follows **Layer 4 Runtime Composition** patterns:
+//! This crate follows **Layer 6 Runtime Composition** patterns:
 //! - **Handler Composition**: Combines core effects into device-specific workflows
-//! - **Runtime Creation**: Composes handlers + middleware into executable runtimes
+//! - **Runtime Creation**: Composes handlers into executable device runtimes
 //! - **Agent Effects**: Defines device-level capabilities and operations
 //! - **Simulation Ready**: All behavior controllable through injected effects
 //!
@@ -23,12 +23,12 @@
 //! // Testing runtime with mock handlers
 //! let agent = AuraAgent::for_testing(device_id);
 //!
-//! // Custom runtime composition
-//! let agent = AuraAgent::builder(device_id)
-//!     .with_secure_storage()
-//!     .with_biometric_auth()
-//!     .with_metrics_middleware()
-//!     .build().await?;
+//! // Custom runtime composition using effect system
+//! let config = aura_protocol::effects::EffectSystemConfig::for_production(device_id)?
+//!     .with_logging(true)
+//!     .with_metrics(true);
+//! let effects = aura_protocol::effects::AuraEffectSystem::new(config)?;
+//! let agent = AuraAgent::new(effects, device_id);
 //! ```
 
 // Allow expect() for testing and development code in this crate
@@ -42,7 +42,6 @@ pub mod errors;
 // Effect system integration
 pub mod effects;
 pub mod handlers;
-pub mod middleware;
 
 // Storage utilities
 pub mod storage_keys;
@@ -64,11 +63,6 @@ pub use errors::Result as AgentResult;
 
 // Re-export effect traits for documentation
 pub use effects::*;
-
-pub use middleware::{
-    AgentMetrics, AgentMiddlewareStack, InputValidator, MetricsMiddleware, MiddlewareStackBuilder,
-    OperationMetrics, TracingMiddleware, ValidationMiddleware, ValidationRule,
-};
 
 // Re-export core types from aura-core for convenience
 pub use aura_core::{

@@ -14,7 +14,6 @@ workspace = true
 
 # Internal crates
 aura-core = { path = "../aura-core" }
-aura-crypto = { path = "../aura-crypto" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
 
@@ -28,7 +27,7 @@ rumpsteak-aura-choreography = "0.3.1"
 # CRDT
 automerge = { workspace = true }
 
-# Cryptography provided through aura-crypto
+# Cryptography provided through aura-core
 ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
 signature = { workspace = true }

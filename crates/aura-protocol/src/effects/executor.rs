@@ -115,9 +115,13 @@ impl Default for EffectExecutorBuilder {
 mod tests {
     use super::*;
     use crate::handlers::MockHandler;
+    use aura_core::AuraResult;
+    use aura_testkit::{aura_test, TestFixture};
 
-    #[tokio::test]
-    async fn test_executor_dispatch() {
+    #[aura_test]
+    async fn test_executor_dispatch() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+
         // Create a mock handler
         let mock_handler = Arc::new(MockHandler::new());
 
@@ -132,15 +136,17 @@ mod tests {
         // Execute an operation
         let result = executor
             .execute(EffectType::Time, "current_timestamp", &[], &context)
-            .await
-            .unwrap();
+            .await?;
 
         // Verify result
         assert!(!result.is_empty());
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_unsupported_effect() {
+    #[aura_test]
+    async fn test_unsupported_effect() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+
         // Create executor with no handlers
         let executor = EffectExecutor::new();
         let context = crate::handlers::immutable::AuraContext::default();
@@ -153,12 +159,17 @@ mod tests {
         // Should fail with UnsupportedEffect
         assert!(matches!(
             result,
-            Err(AuraHandlerError::UnsupportedEffect { effect_type: EffectType::Crypto })
+            Err(AuraHandlerError::UnsupportedEffect {
+                effect_type: EffectType::Crypto
+            })
         ));
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_executor_is_stateless() {
+    #[aura_test]
+    async fn test_executor_is_stateless() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+
         // Create two executors with same configuration
         let handler = Arc::new(MockHandler::new());
 
@@ -173,15 +184,14 @@ mod tests {
 
         let result1 = executor1
             .execute(EffectType::Time, "current_timestamp", &[], &context)
-            .await
-            .unwrap();
+            .await?;
 
         let result2 = executor2
             .execute(EffectType::Time, "current_timestamp", &[], &context)
-            .await
-            .unwrap();
+            .await?;
 
         // Results should be consistent (stateless execution)
         assert_eq!(result1, result2);
+        Ok(())
     }
 }

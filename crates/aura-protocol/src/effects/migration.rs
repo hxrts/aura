@@ -264,6 +264,7 @@ impl MigrationGuide {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::{aura_test, TestFixture};
     use aura_core::effects::NetworkEffects;
 
     struct MockNetworkEffects;
@@ -290,9 +291,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_migration_adapter() {
-        let device_id = DeviceId::new();
+    #[aura_test]
+    async fn test_migration_adapter() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let device_id = fixture.device_id();
         let mock = MockNetworkEffects;
         let adapter = MigrationAdapter::new(mock, device_id);
 
@@ -300,8 +302,9 @@ mod tests {
             .with_flow_budget(FlowBudget::new(100));
 
         // Should work with contextual interface
-        assert!(adapter.send_to_peer(&mut ctx, device_id, vec![]).await.is_ok());
+        adapter.send_to_peer(&mut ctx, device_id, vec![]).await?;
         assert_eq!(ctx.flow_budget.remaining(), 90);
+        Ok(())
     }
 
     #[test]

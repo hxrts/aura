@@ -23,7 +23,7 @@ pub enum HolePunchMessage {
         /// Relay server coordinates the process
         relay_server: SocketAddr,
     },
-    
+
     /// Punch packet sent directly between peers
     PunchPacket {
         /// Session ID matching coordination request
@@ -37,7 +37,7 @@ pub enum HolePunchMessage {
         /// Timestamp when packet was sent
         timestamp: SystemTime,
     },
-    
+
     /// Acknowledgment of successful hole punch
     PunchAcknowledgment {
         /// Session ID being acknowledged
@@ -51,7 +51,7 @@ pub enum HolePunchMessage {
         /// Remote endpoint that was reached
         remote_endpoint: SocketAddr,
     },
-    
+
     /// Coordination response from relay
     CoordinationResponse {
         /// Session ID from original request
@@ -89,7 +89,7 @@ pub enum HolePunchInstruction {
         /// Interval between packets in milliseconds
         interval_ms: u64,
     },
-    
+
     /// Listen for incoming punch packets
     ListenForPunch {
         /// Local endpoint to bind for listening
@@ -97,13 +97,13 @@ pub enum HolePunchInstruction {
         /// Timeout for listening operation in milliseconds
         timeout_ms: u64,
     },
-    
+
     /// Wait before starting punch sequence
     Wait {
         /// Duration to wait in milliseconds
         duration_ms: u64,
     },
-    
+
     /// Use specific local endpoint
     BindToEndpoint {
         /// Specific endpoint to bind to
@@ -122,10 +122,10 @@ impl HolePunchMessage {
             Self::generate_session_id(),
             initiator,
             target,
-            relay_server
+            relay_server,
         )
     }
-    
+
     /// Create coordination request with specific session ID
     pub fn coordination_request_with_id(
         session_id: Uuid,
@@ -140,14 +140,14 @@ impl HolePunchMessage {
             relay_server,
         }
     }
-    
+
     /// Generate deterministic session ID
     fn generate_session_id() -> Uuid {
         // Use deterministic approach for session IDs
         // In production this would use a proper deterministic algorithm
         Uuid::nil() // Placeholder
     }
-    
+
     /// Create punch packet
     pub fn punch_packet(
         session_id: Uuid,
@@ -157,7 +157,7 @@ impl HolePunchMessage {
     ) -> Self {
         Self::punch_packet_at_time(session_id, source, target, sequence, SystemTime::UNIX_EPOCH)
     }
-    
+
     /// Create punch packet with specific timestamp
     pub fn punch_packet_at_time(
         session_id: Uuid,
@@ -174,7 +174,7 @@ impl HolePunchMessage {
             timestamp,
         }
     }
-    
+
     /// Create acknowledgment
     pub fn acknowledgment(
         session_id: Uuid,
@@ -191,7 +191,7 @@ impl HolePunchMessage {
             remote_endpoint,
         }
     }
-    
+
     /// Create successful coordination response
     pub fn success_response(session_id: Uuid, instructions: Vec<HolePunchInstruction>) -> Self {
         Self::CoordinationResponse {
@@ -200,7 +200,7 @@ impl HolePunchMessage {
             instructions,
         }
     }
-    
+
     /// Create failed coordination response
     pub fn failed_response(session_id: Uuid, reason: String) -> Self {
         Self::CoordinationResponse {
@@ -209,25 +209,31 @@ impl HolePunchMessage {
             instructions: Vec::new(),
         }
     }
-    
+
     /// Get session ID from any message
     pub fn session_id(&self) -> Uuid {
         match self {
-            Self::CoordinationRequest { session_id, .. } |
-            Self::PunchPacket { session_id, .. } |
-            Self::PunchAcknowledgment { session_id, .. } |
-            Self::CoordinationResponse { session_id, .. } => *session_id,
+            Self::CoordinationRequest { session_id, .. }
+            | Self::PunchPacket { session_id, .. }
+            | Self::PunchAcknowledgment { session_id, .. }
+            | Self::CoordinationResponse { session_id, .. } => *session_id,
         }
     }
-    
+
     /// Check if message is a coordination message
     pub fn is_coordination(&self) -> bool {
-        matches!(self, Self::CoordinationRequest { .. } | Self::CoordinationResponse { .. })
+        matches!(
+            self,
+            Self::CoordinationRequest { .. } | Self::CoordinationResponse { .. }
+        )
     }
-    
+
     /// Check if message is a punch attempt
     pub fn is_punch_attempt(&self) -> bool {
-        matches!(self, Self::PunchPacket { .. } | Self::PunchAcknowledgment { .. })
+        matches!(
+            self,
+            Self::PunchPacket { .. } | Self::PunchAcknowledgment { .. }
+        )
     }
 }
 

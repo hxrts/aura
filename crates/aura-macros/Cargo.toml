@@ -6,26 +6,24 @@ edition = "2021"
 [lib]
 proc-macro = true
 
+[features]
+default = ["proc-macro"]
+proc-macro = []
+
 [dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "2.0", features = ["full", "extra-traits"] }
+rumpsteak-aura-choreography = "0.6.0"
+thiserror = "1.0"
 
-# Rumpsteak-aura dependencies with native extension support
-rumpsteak-aura-macros = "0.5.0"
-rumpsteak-aura-choreography = "0.5.0"
-
-# Serialization for extensions
-serde = { version = "1.0", features = ["derive"] }
-
-# Async trait support
+# Async trait support for generated code  
 async-trait = "0.1"
 
 [dev-dependencies]
-# For examples to access generated ExtensionRegistry calls
-aura-mpst = { path = "../aura-mpst" }
-# Additional dependencies for examples
 tokio = { version = "1.0", features = ["full"] }
-rumpsteak-aura = "0.5.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rumpsteak-aura = "0.6.0"
 futures = "0.3"
 

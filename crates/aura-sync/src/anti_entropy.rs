@@ -206,7 +206,6 @@ fn hash_serialized<T: Serialize>(value: &T) -> AuraResult<[u8; 32]> {
     Ok(hash::hash(&bytes))
 }
 
-
 fn fingerprint(op: &AttestedOp) -> AuraResult<OperationFingerprint> {
     hash_serialized(op)
 }

@@ -6,18 +6,20 @@
 //! - Context propagation through async calls
 //! - Tracing span overhead
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use tokio::runtime::Runtime;
 
-use aura_protocol::effects::{
-    context::{EffectContext, TraceContext, WithContext},
-    contextual::{ContextualNetworkEffects, ContextAdapter},
-    propagation::{with_context, spawn_with_context, current_context, 
-                  PropagateContext, ContextGuard, BatchContext},
-    migration::{MigrationAdapter, MigrationTool},
-};
 use aura_core::{DeviceId, FlowBudget};
 use aura_effects::handlers::MockNetworkHandler;
+use aura_protocol::effects::{
+    context::{EffectContext, TraceContext, WithContext},
+    contextual::{ContextAdapter, ContextualNetworkEffects},
+    migration::{MigrationAdapter, MigrationTool},
+    propagation::{
+        current_context, spawn_with_context, with_context, BatchContext, ContextGuard,
+        PropagateContext,
+    },
+};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -30,7 +32,7 @@ fn bench_context_operations(c: &mut Criterion) {
             black_box(context);
         });
     });
-    
+
     c.bench_function("context_with_metadata", |b| {
         b.iter(|| {
             let context = EffectContext::new(DeviceId::new())
@@ -42,28 +44,27 @@ fn bench_context_operations(c: &mut Criterion) {
             black_box(context);
         });
     });
-    
+
     c.bench_function("context_cloning", |b| {
         let context = EffectContext::new(DeviceId::new())
             .with_flow_budget(FlowBudget::new(1000))
             .with_metadata("test", "value");
-        
+
         b.iter(|| {
             let cloned = context.clone();
             black_box(cloned);
         });
     });
-    
+
     c.bench_function("context_child_creation", |b| {
-        let parent = EffectContext::new(DeviceId::new())
-            .with_flow_budget(FlowBudget::new(1000));
-        
+        let parent = EffectContext::new(DeviceId::new()).with_flow_budget(FlowBudget::new(1000));
+
         b.iter(|| {
             let child = parent.child();
             black_box(child);
         });
     });
-    
+
     c.bench_function("context_hierarchy_depth", |b| {
         b.iter_batched(
             || EffectContext::new(DeviceId::new()),
@@ -88,7 +89,7 @@ fn bench_trace_context(c: &mut Criterion) {
             black_box(trace);
         });
     });
-    
+
     c.bench_function("trace_context_from_header", |b| {
         let header = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
         b.iter(|| {
@@ -96,7 +97,7 @@ fn bench_trace_context(c: &mut Criterion) {
             black_box(trace);
         });
     });
-    
+
     c.bench_function("trace_context_child", |b| {
         let parent = TraceContext::new();
         b.iter(|| {
@@ -104,7 +105,7 @@ fn bench_trace_context(c: &mut Criterion) {
             black_box(child);
         });
     });
-    
+
     c.bench_function("trace_headers_export", |b| {
         let trace = TraceContext::new();
         b.iter(|| {
@@ -117,36 +118,40 @@ fn bench_trace_context(c: &mut Criterion) {
 /// Benchmark context propagation through async operations
 fn bench_async_propagation(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    
+
     c.bench_function("task_local_set_get", |b| {
         b.to_async(&runtime).iter(|| async {
             let context = EffectContext::new(DeviceId::new());
             with_context(context, async {
                 let current = current_context().await;
                 black_box(current);
-            }).await;
+            })
+            .await;
         });
     });
-    
+
     c.bench_function("nested_context_propagation", |b| {
         b.to_async(&runtime).iter(|| async {
             let root = EffectContext::new(DeviceId::new());
-            
+
             with_context(root, async {
                 let ctx1 = current_context().await.unwrap();
-                
+
                 with_context(ctx1.child(), async {
                     let ctx2 = current_context().await.unwrap();
-                    
+
                     with_context(ctx2.child(), async {
                         let ctx3 = current_context().await.unwrap();
                         black_box(ctx3);
-                    }).await;
-                }).await;
-            }).await;
+                    })
+                    .await;
+                })
+                .await;
+            })
+            .await;
         });
     });
-    
+
     c.bench_function("spawn_with_context_overhead", |b| {
         b.to_async(&runtime).iter(|| async {
             let context = EffectContext::new(DeviceId::new());
@@ -158,16 +163,16 @@ fn bench_async_propagation(c: &mut Criterion) {
             black_box(result);
         });
     });
-    
+
     c.bench_function("future_propagation", |b| {
         b.to_async(&runtime).iter(|| async {
             let context = EffectContext::new(DeviceId::new());
-            
+
             let future = async {
                 let ctx = current_context().await;
                 black_box(ctx);
             };
-            
+
             future.with_propagated_context(context).await;
         });
     });
@@ -177,18 +182,18 @@ fn bench_async_propagation(c: &mut Criterion) {
 fn bench_context_guards(c: &mut Criterion) {
     c.bench_function("context_guard_enter_exit", |b| {
         let context = EffectContext::new(DeviceId::new());
-        
+
         b.iter(|| {
             let _guard = ContextGuard::enter(context.clone());
             // Guard automatically drops
         });
     });
-    
+
     c.bench_function("nested_guards", |b| {
         let ctx1 = EffectContext::new(DeviceId::new());
         let ctx2 = ctx1.child();
         let ctx3 = ctx2.child();
-        
+
         b.iter(|| {
             let _g1 = ContextGuard::enter(ctx1.clone());
             {
@@ -205,40 +210,40 @@ fn bench_context_guards(c: &mut Criterion) {
 /// Benchmark batch context operations
 fn bench_batch_operations(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    
+
     c.bench_function("batch_context_10_operations", |b| {
         b.to_async(&runtime).iter(|| async {
             let mut batch = BatchContext::new();
-            
+
             // Add 10 contexts
             for i in 0..10 {
-                let context = EffectContext::new(DeviceId::new())
-                    .with_metadata("index", i.to_string());
+                let context =
+                    EffectContext::new(DeviceId::new()).with_metadata("index", i.to_string());
                 batch.add(context);
             }
-            
+
             // Create 10 operations
             let operations: Vec<_> = (0..10).map(|i| async move { i }).collect();
-            
+
             let results = batch.execute_all(operations).await;
             black_box(results);
         });
     });
-    
+
     c.bench_function("batch_context_100_operations", |b| {
         b.to_async(&runtime).iter(|| async {
             let mut batch = BatchContext::new();
-            
+
             // Add 100 contexts
             for i in 0..100 {
-                let context = EffectContext::new(DeviceId::new())
-                    .with_metadata("index", i.to_string());
+                let context =
+                    EffectContext::new(DeviceId::new()).with_metadata("index", i.to_string());
                 batch.add(context);
             }
-            
+
             // Create 100 operations
             let operations: Vec<_> = (0..100).map(|i| async move { i }).collect();
-            
+
             let results = batch.execute_all(operations).await;
             black_box(results);
         });
@@ -248,35 +253,36 @@ fn bench_batch_operations(c: &mut Criterion) {
 /// Benchmark migration overhead
 fn bench_migration(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    
+
     c.bench_function("migration_adapter_overhead", |b| {
         let device_id = DeviceId::new();
         let handler = MockNetworkHandler::new();
         let adapter = MigrationAdapter::new(handler, device_id);
-        
+
         b.to_async(&runtime).iter(|| async {
-            let mut context = EffectContext::new(device_id)
-                .with_flow_budget(FlowBudget::new(1000));
-            
-            let _ = adapter.send_to_peer(&mut context, DeviceId::new(), vec![]).await;
+            let mut context = EffectContext::new(device_id).with_flow_budget(FlowBudget::new(1000));
+
+            let _ = adapter
+                .send_to_peer(&mut context, DeviceId::new(), vec![])
+                .await;
         });
     });
-    
+
     c.bench_function("migration_tool_wrapper", |b| {
         let device_id = DeviceId::new();
         let tool = MigrationTool::new(device_id);
-        
+
         b.iter(|| {
             let handler = MockNetworkHandler::new();
             let wrapped = tool.wrap(handler);
             black_box(wrapped);
         });
     });
-    
+
     c.bench_function("migration_context_creation", |b| {
         let device_id = DeviceId::new();
         let tool = MigrationTool::new(device_id);
-        
+
         b.iter(|| {
             let context = tool.create_context();
             black_box(context);
@@ -288,10 +294,7 @@ fn bench_migration(c: &mut Criterion) {
 fn bench_flow_budget(c: &mut Criterion) {
     c.bench_function("flow_budget_charging", |b| {
         b.iter_batched(
-            || {
-                EffectContext::new(DeviceId::new())
-                    .with_flow_budget(FlowBudget::new(10000))
-            },
+            || EffectContext::new(DeviceId::new()).with_flow_budget(FlowBudget::new(10000)),
             |mut context| {
                 // Charge budget 100 times
                 for _ in 0..100 {
@@ -302,11 +305,11 @@ fn bench_flow_budget(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
-    
+
     c.bench_function("deadline_checking", |b| {
         let context = EffectContext::new(DeviceId::new())
             .with_deadline(Instant::now() + Duration::from_secs(60));
-        
+
         b.iter(|| {
             let exceeded = context.is_deadline_exceeded();
             let remaining = context.time_until_deadline();
@@ -318,10 +321,10 @@ fn bench_flow_budget(c: &mut Criterion) {
 /// Benchmark contextual effect trait overhead
 fn bench_contextual_traits(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
-    
+
     // Mock contextual handler
     struct MockContextualHandler;
-    
+
     #[async_trait::async_trait]
     impl ContextualNetworkEffects for MockContextualHandler {
         async fn send_to_peer(
@@ -333,7 +336,7 @@ fn bench_contextual_traits(c: &mut Criterion) {
             ctx.charge_flow(10).ok();
             Ok(())
         }
-        
+
         async fn recv_from_peer(
             &self,
             ctx: &mut EffectContext,
@@ -342,7 +345,7 @@ fn bench_contextual_traits(c: &mut Criterion) {
             ctx.charge_flow(10).ok();
             Ok(vec![])
         }
-        
+
         async fn broadcast(
             &self,
             ctx: &mut EffectContext,
@@ -352,17 +355,16 @@ fn bench_contextual_traits(c: &mut Criterion) {
             Ok(())
         }
     }
-    
+
     let handler = MockContextualHandler;
-    
+
     c.bench_function("contextual_send_overhead", |b| {
         b.to_async(&runtime).iter_batched(
-            || {
-                EffectContext::new(DeviceId::new())
-                    .with_flow_budget(FlowBudget::new(1000))
-            },
+            || EffectContext::new(DeviceId::new()).with_flow_budget(FlowBudget::new(1000)),
             |mut context| async {
-                let _ = handler.send_to_peer(&mut context, DeviceId::new(), vec![]).await;
+                let _ = handler
+                    .send_to_peer(&mut context, DeviceId::new(), vec![])
+                    .await;
                 black_box(context);
             },
             BatchSize::SmallInput,

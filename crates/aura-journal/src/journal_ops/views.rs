@@ -469,7 +469,11 @@ mod tests {
         let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Create identity with devices
-        let identity = create_test_node_with_id([10u8; 16], NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 3 });
+        let identity = create_test_node_with_id(
+            [10u8; 16],
+            NodeKind::Identity,
+            NodePolicy::Threshold { m: 2, n: 3 },
+        );
         let device1 = create_test_node_with_id([11u8; 16], NodeKind::Device, NodePolicy::Any);
         let device2 = create_test_node_with_id([12u8; 16], NodeKind::Device, NodePolicy::Any);
         let device3 = create_test_node_with_id([13u8; 16], NodeKind::Device, NodePolicy::Any);
@@ -511,7 +515,11 @@ mod tests {
         let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Create identity with devices and guardians
-        let identity = create_test_node_with_id([30u8; 16], NodeKind::Identity, NodePolicy::Threshold { m: 2, n: 4 });
+        let identity = create_test_node_with_id(
+            [30u8; 16],
+            NodeKind::Identity,
+            NodePolicy::Threshold { m: 2, n: 4 },
+        );
         let device1 = create_test_node_with_id([31u8; 16], NodeKind::Device, NodePolicy::Any);
         let device2 = create_test_node_with_id([32u8; 16], NodeKind::Device, NodePolicy::Any);
         let guardian1 = create_test_node_with_id([33u8; 16], NodeKind::Guardian, NodePolicy::Any);
@@ -557,7 +565,11 @@ mod tests {
         let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
 
         // Create group with member references
-        let group = create_test_node_with_id([20u8; 16], NodeKind::Group, NodePolicy::Threshold { m: 2, n: 3 });
+        let group = create_test_node_with_id(
+            [20u8; 16],
+            NodeKind::Group,
+            NodePolicy::Threshold { m: 2, n: 3 },
+        );
 
         // Create member identity nodes for the group
         let member1 = create_test_node_with_id([21u8; 16], NodeKind::Identity, NodePolicy::Any);

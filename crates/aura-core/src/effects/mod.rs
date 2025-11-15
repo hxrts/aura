@@ -40,21 +40,32 @@
 //! ```
 
 // Core effect trait definitions
+pub mod authorization;
+pub mod chaos;
 pub mod console;
 pub mod crypto;
 pub mod journal;
+pub mod migration; // Empty module - migration complete
 pub mod network;
 pub mod random;
+pub mod reliability;
 pub mod storage;
+pub mod testing;
 pub mod time;
 
 // Re-export core effect traits
+pub use authorization::{AuthorizationEffects, AuthorizationError};
+pub use chaos::{ChaosEffects, ChaosError, CorruptionType, ByzantineType, ResourceType};
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
 pub use journal::JournalEffects;
+#[allow(deprecated)]
+// Migration utilities removed - middleware transition complete
 pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 pub use random::RandomEffects;
+pub use reliability::{ReliabilityEffects, ReliabilityError};
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
+pub use testing::{TestingEffects, TestingError};
 pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 
 // Re-export unified error system

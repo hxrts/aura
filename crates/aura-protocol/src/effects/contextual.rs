@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 
 use aura_core::{
-    AuraResult, AuraError, DeviceId, FlowBudget, Receipt,
     effects::{NetworkError, StorageError, TimeError, WakeCondition},
+    AuraError, AuraResult, DeviceId, FlowBudget, Receipt,
 };
 
 use super::context::EffectContext;
@@ -60,11 +60,7 @@ pub trait ContextualStorageEffects: Send + Sync {
     ) -> Result<Option<Vec<u8>>, StorageError>;
 
     /// Delete data with context
-    async fn delete(
-        &self,
-        ctx: &mut EffectContext,
-        key: &str,
-    ) -> Result<(), StorageError>;
+    async fn delete(&self, ctx: &mut EffectContext, key: &str) -> Result<(), StorageError>;
 
     /// List keys with context
     async fn list_keys(
@@ -95,11 +91,7 @@ pub trait ContextualCryptoEffects: Send + Sync {
     ) -> Result<bool, AuraError>;
 
     /// Generate random bytes with context
-    async fn secure_random(
-        &self,
-        ctx: &mut EffectContext,
-        len: usize,
-    ) -> Vec<u8>;
+    async fn secure_random(&self, ctx: &mut EffectContext, len: usize) -> Vec<u8>;
 }
 
 /// Context-aware time effects
@@ -183,11 +175,7 @@ impl ContextPropagator {
     }
 
     /// Run an operation with context propagation
-    pub async fn with_context<F, R>(
-        &self,
-        context: EffectContext,
-        operation: F,
-    ) -> R
+    pub async fn with_context<F, R>(&self, context: EffectContext, operation: F) -> R
     where
         F: FnOnce() -> R,
     {
@@ -282,6 +270,7 @@ pub trait ContextualEffects:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::{aura_test, TestFixture};
 
     struct MockContextualEffects {
         device_id: DeviceId,
@@ -296,8 +285,7 @@ mod tests {
             _message: Vec<u8>,
         ) -> Result<(), NetworkError> {
             // Charge flow for network operation
-            ctx.charge_flow(10)
-                .map_err(|_| NetworkError::Timeout)?;
+            ctx.charge_flow(10).map_err(|_| NetworkError::Timeout)?;
             Ok(())
         }
 
@@ -315,26 +303,28 @@ mod tests {
             _message: Vec<u8>,
         ) -> Result<(), NetworkError> {
             // Charge more for broadcast
-            ctx.charge_flow(50)
-                .map_err(|_| NetworkError::Timeout)?;
+            ctx.charge_flow(50).map_err(|_| NetworkError::Timeout)?;
             Ok(())
         }
     }
 
-    #[tokio::test]
-    async fn test_contextual_effects() {
-        let device_id = DeviceId::new();
+    #[aura_test]
+    async fn test_contextual_effects() -> AuraResult<()> {
+        let fixture = TestFixture::new().await?;
+        let device_id = fixture.device_id();
         let effects = MockContextualEffects { device_id };
-        
-        let mut context = EffectContext::new(device_id)
-            .with_flow_budget(FlowBudget::new(100));
+
+        let mut context = EffectContext::new(device_id).with_flow_budget(FlowBudget::new(100));
 
         // Test flow budget charging
-        assert!(effects.send_to_peer(&mut context, device_id, vec![]).await.is_ok());
+        effects
+            .send_to_peer(&mut context, device_id, vec![])
+            .await?;
         assert_eq!(context.flow_budget.remaining(), 90);
 
-        assert!(effects.broadcast(&mut context, vec![]).await.is_ok());
+        effects.broadcast(&mut context, vec![]).await?;
         assert_eq!(context.flow_budget.remaining(), 40);
+        Ok(())
     }
 
     #[test]

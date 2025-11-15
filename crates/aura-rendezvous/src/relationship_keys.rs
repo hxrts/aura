@@ -6,7 +6,7 @@
 
 use aura_core::hash::hasher;
 use aura_core::{AuraError, AuraResult, DeviceId};
-use aura_crypto::{derive_encryption_key, IdentityKeyContext, KeyDerivationSpec};
+use aura_core::{derive_encryption_key, IdentityKeyContext, KeyDerivationSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

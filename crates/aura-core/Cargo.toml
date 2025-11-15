@@ -33,12 +33,21 @@ sha2 = { workspace = true }
 
 # Randomness
 rand = { workspace = true }
+getrandom = { workspace = true }
 
 # FROST threshold cryptography (for ParticipantId conversion)
+frost-core = { workspace = true }
 frost-ed25519 = { workspace = true }
+curve25519-dalek = { workspace = true }
 
 # Ed25519 signatures for effects
 ed25519-dalek = { workspace = true }
+
+# Key derivation
+hkdf = { workspace = true }
+
+# Additional serialization for crypto types
+serde_bytes = { workspace = true }
 
 # Time utilities
 chrono = { workspace = true }

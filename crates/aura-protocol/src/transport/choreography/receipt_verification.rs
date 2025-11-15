@@ -5,7 +5,7 @@
 //! Target: <250 lines, focused on choreographic verification patterns.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
-use aura_core::{DeviceId, ContextId};
+use aura_core::{ContextId, DeviceId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -138,9 +138,16 @@ pub enum ReplayCheckResult {
 /// Consensus result enumeration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConsensusResult {
-    Valid { confirmation_count: usize },
-    Invalid { rejection_count: usize },
-    Split { valid_count: usize, invalid_count: usize },
+    Valid {
+        confirmation_count: usize,
+    },
+    Invalid {
+        rejection_count: usize,
+    },
+    Split {
+        valid_count: usize,
+        invalid_count: usize,
+    },
     InsufficientParticipation,
 }
 
@@ -154,7 +161,7 @@ impl ReceiptCoordinationProtocol {
             replay_prevention: HashMap::new(),
         }
     }
-    
+
     /// Initiate receipt verification workflow
     pub fn initiate_verification(
         &mut self,
@@ -162,19 +169,24 @@ impl ReceiptCoordinationProtocol {
         verifiers: Vec<DeviceId>,
     ) -> ChoreographicResult<String> {
         // Check for potential replay
-        if self.replay_prevention.contains_key(&receipt_data.message_hash) {
+        if self
+            .replay_prevention
+            .contains_key(&receipt_data.message_hash)
+        {
             return Err(ChoreographicError::ExecutionFailed(
-                "Potential replay attack detected".to_string()
+                "Potential replay attack detected".to_string(),
             ));
         }
-        
+
         let verification_id = format!(
             "verification-{}-{}",
             self.device_id.to_hex()[..8].to_string(),
-            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default().as_millis()
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
         );
-        
+
         let workflow = VerificationWorkflow {
             verification_id: verification_id.clone(),
             receipt_hash: receipt_data.message_hash.clone(),
@@ -183,87 +195,113 @@ impl ReceiptCoordinationProtocol {
             started_at: SystemTime::now(),
             verifications: HashMap::new(),
         };
-        
+
         // Record receipt hash for replay prevention
-        self.replay_prevention.insert(
-            receipt_data.message_hash.clone(),
-            SystemTime::now()
-        );
-        
-        self.active_verifications.insert(verification_id.clone(), workflow);
+        self.replay_prevention
+            .insert(receipt_data.message_hash.clone(), SystemTime::now());
+
+        self.active_verifications
+            .insert(verification_id.clone(), workflow);
         Ok(verification_id)
     }
-    
+
     /// Process verification response
     pub fn process_verification_response(
         &mut self,
         response: ReceiptVerificationResponse,
     ) -> ChoreographicResult<bool> {
-        let workflow = self.active_verifications.get_mut(&response.verification_id)
-            .ok_or_else(|| ChoreographicError::ExecutionFailed(
-                format!("Verification not found: {}", response.verification_id)
-            ))?;
-        
+        let workflow = self
+            .active_verifications
+            .get_mut(&response.verification_id)
+            .ok_or_else(|| {
+                ChoreographicError::ExecutionFailed(format!(
+                    "Verification not found: {}",
+                    response.verification_id
+                ))
+            })?;
+
         let verification = IndividualVerification {
             verifier_id: response.verifier_id,
-            verification_result: matches!(response.verification_result, VerificationOutcome::Valid { .. }),
+            verification_result: matches!(
+                response.verification_result,
+                VerificationOutcome::Valid { .. }
+            ),
             verification_proof: response.verification_proof,
             timestamp: response.timestamp,
             anti_replay_token: response.anti_replay_token,
         };
-        
-        workflow.verifications.insert(response.verifier_id, verification);
-        
+
+        workflow
+            .verifications
+            .insert(response.verifier_id, verification);
+
         // Check if we have enough verifications
-        let sufficient_verifications = workflow.verifications.len() >= 
-            (workflow.participants.len() * 2) / 3; // 2/3 majority
-        
+        let sufficient_verifications =
+            workflow.verifications.len() >= (workflow.participants.len() * 2) / 3; // 2/3 majority
+
         if sufficient_verifications {
             workflow.phase = VerificationPhase::ConsensusBuilding;
         }
-        
+
         Ok(sufficient_verifications)
     }
-    
+
     /// Build consensus from verifications
     pub fn build_consensus(
         &mut self,
         verification_id: &str,
     ) -> ChoreographicResult<ConsensusResult> {
-        let workflow = self.active_verifications.get_mut(verification_id)
-            .ok_or_else(|| ChoreographicError::ExecutionFailed(
-                format!("Verification not found: {}", verification_id)
-            ))?;
-        
-        let valid_count = workflow.verifications.values()
+        let workflow = self
+            .active_verifications
+            .get_mut(verification_id)
+            .ok_or_else(|| {
+                ChoreographicError::ExecutionFailed(format!(
+                    "Verification not found: {}",
+                    verification_id
+                ))
+            })?;
+
+        let valid_count = workflow
+            .verifications
+            .values()
             .filter(|v| v.verification_result)
             .count();
-        
+
         let invalid_count = workflow.verifications.len() - valid_count;
-        
+
         let consensus = if valid_count > invalid_count {
             workflow.phase = VerificationPhase::Completed;
-            ConsensusResult::Valid { confirmation_count: valid_count }
+            ConsensusResult::Valid {
+                confirmation_count: valid_count,
+            }
         } else if invalid_count > valid_count {
             workflow.phase = VerificationPhase::Failed("Majority rejection".to_string());
-            ConsensusResult::Invalid { rejection_count: invalid_count }
+            ConsensusResult::Invalid {
+                rejection_count: invalid_count,
+            }
         } else {
             workflow.phase = VerificationPhase::Failed("Split decision".to_string());
-            ConsensusResult::Split { valid_count, invalid_count }
+            ConsensusResult::Split {
+                valid_count,
+                invalid_count,
+            }
         };
-        
+
         Ok(consensus)
     }
-    
+
     /// Clean up old replay prevention entries
     pub fn cleanup_replay_prevention(&mut self, max_age: std::time::Duration) {
         let cutoff = SystemTime::now() - max_age;
-        self.replay_prevention.retain(|_, timestamp| *timestamp > cutoff);
+        self.replay_prevention
+            .retain(|_, timestamp| *timestamp > cutoff);
     }
-    
+
     /// Get verification status
     pub fn get_verification_status(&self, verification_id: &str) -> Option<&VerificationPhase> {
-        self.active_verifications.get(verification_id).map(|w| &w.phase)
+        self.active_verifications
+            .get(verification_id)
+            .map(|w| &w.phase)
     }
 }
 
@@ -273,45 +311,45 @@ choreography! {
     #[namespace = "receipt_verification_coordination"]
     protocol ReceiptVerificationCoordination {
         roles: Coordinator, Verifier1, Verifier2, AntiReplayValidator;
-        
+
         // Phase 1: Initiate verification workflow
         Coordinator[guard_capability = "initiate_receipt_verification",
                    flow_cost = 200,
                    journal_facts = "receipt_verification_initiated"]
         -> Verifier1: ReceiptVerificationInit(ReceiptVerificationInit);
-        
+
         Coordinator[guard_capability = "initiate_receipt_verification",
                    flow_cost = 200]
         -> Verifier2: ReceiptVerificationInit(ReceiptVerificationInit);
-        
+
         // Phase 2: Verifiers perform individual verification
         Verifier1[guard_capability = "perform_receipt_verification",
                   flow_cost = 150,
                   journal_facts = "individual_verification_completed"]
         -> Coordinator: ReceiptVerificationResponse(ReceiptVerificationResponse);
-        
+
         Verifier2[guard_capability = "perform_receipt_verification",
                   flow_cost = 150,
                   journal_facts = "individual_verification_completed"]
         -> Coordinator: ReceiptVerificationResponse(ReceiptVerificationResponse);
-        
+
         // Phase 3: Anti-replay protection challenge
         Coordinator[guard_capability = "initiate_anti_replay_check",
                    flow_cost = 120,
                    journal_facts = "anti_replay_check_initiated"]
         -> AntiReplayValidator: AntiReplayChallenge(AntiReplayChallenge);
-        
+
         AntiReplayValidator[guard_capability = "validate_anti_replay",
                            flow_cost = 100,
                            journal_facts = "anti_replay_validation_completed"]
         -> Coordinator: AntiReplayResponse(AntiReplayResponse);
-        
+
         // Phase 4: Final consensus distribution
         Coordinator[guard_capability = "distribute_verification_consensus",
                    flow_cost = 100,
                    journal_facts = "verification_consensus_finalized"]
         -> Verifier1: VerificationConsensus(VerificationConsensus);
-        
+
         Coordinator[guard_capability = "distribute_verification_consensus",
                    flow_cost = 100,
                    journal_facts = "verification_consensus_finalized"]

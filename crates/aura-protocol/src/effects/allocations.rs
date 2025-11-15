@@ -3,16 +3,16 @@
 //! This module provides techniques to reduce memory allocations
 //! during effect execution, improving performance and reducing GC pressure.
 
-use std::sync::Arc;
-use std::borrow::Cow;
-use parking_lot::RwLock;
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
+use std::borrow::Cow;
+use std::sync::Arc;
 use string_cache::DefaultAtom;
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashMap;
 #[cfg(target_arch = "wasm32")]
 use fnv::FnvHashMap as HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
 
 /// Thread-safe string interner for reducing string allocations
 pub struct StringInterner {
@@ -243,12 +243,15 @@ impl Arena {
     /// Allocate bytes from the arena
     pub fn alloc_bytes(&self, size: usize) -> &[u8] {
         if size > self.chunk_size {
-            panic!("Allocation size {} exceeds chunk size {}", size, self.chunk_size);
+            panic!(
+                "Allocation size {} exceeds chunk size {}",
+                size, self.chunk_size
+            );
         }
 
         let mut current = self.current.write();
         let chunks = self.chunks.read();
-        
+
         // Check if current chunk has space
         if current.1 + size > self.chunk_size {
             // Need new chunk
@@ -263,7 +266,7 @@ impl Arena {
         let chunk = &chunks[current.0];
         let offset = current.1;
         current.1 += size;
-        
+
         // SAFETY: We know the chunk is valid and we have exclusive access to this range
         unsafe {
             let ptr = chunk.as_ptr().add(offset);
@@ -274,7 +277,7 @@ impl Arena {
     /// Allocate a string from the arena
     pub fn alloc_str(&self, s: &str) -> &str {
         let bytes = self.alloc_bytes(s.len());
-        
+
         // SAFETY: We have exclusive access to these bytes
         unsafe {
             let ptr = bytes.as_ptr() as *mut u8;
@@ -386,7 +389,7 @@ impl BufferPool {
     pub fn return_buffer(&self, mut buffer: Vec<u8>) {
         let capacity = buffer.capacity();
         buffer.clear();
-        
+
         if capacity <= 1024 && self.small_buffers.read().len() < 50 {
             self.small_buffers.write().push(buffer);
         } else if capacity <= 65536 && self.medium_buffers.read().len() < 20 {
@@ -414,10 +417,10 @@ mod tests {
     #[test]
     fn test_string_interner() {
         let interner = StringInterner::new();
-        
+
         let atom1 = interner.intern("hello");
         let atom2 = interner.intern("hello");
-        
+
         // Should return the same atom
         assert_eq!(atom1, atom2);
         assert_eq!(interner.stats().interned_count, 1);
@@ -426,17 +429,17 @@ mod tests {
     #[test]
     fn test_small_vec() {
         let mut vec: SmallVec<i32> = SmallVec::new();
-        
+
         // Should stay inline
         vec.push(1);
         vec.push(2);
         vec.push(3);
         assert_eq!(vec.len(), 3);
-        
+
         // Should spill to heap
         vec.push(4);
         assert_eq!(vec.len(), 4);
-        
+
         let values: Vec<_> = vec.iter().copied().collect();
         assert_eq!(values, vec![1, 2, 3, 4]);
     }
@@ -444,13 +447,13 @@ mod tests {
     #[test]
     fn test_arena() {
         let arena = Arena::new(1024);
-        
+
         let s1 = arena.alloc_str("hello");
         let s2 = arena.alloc_str("world");
-        
+
         assert_eq!(s1, "hello");
         assert_eq!(s2, "world");
-        
+
         let stats = arena.stats();
         assert_eq!(stats.chunks, 1);
         assert_eq!(stats.used, 10); // "hello" + "world"
@@ -459,12 +462,12 @@ mod tests {
     #[test]
     fn test_buffer_pool() {
         let pool = BufferPool::new();
-        
+
         let buf1 = pool.get_buffer(512);
         assert!(buf1.capacity() >= 512);
-        
+
         pool.return_buffer(buf1);
-        
+
         let buf2 = pool.get_buffer(512);
         assert!(buf2.capacity() >= 512); // Should reuse
     }

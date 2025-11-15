@@ -344,8 +344,8 @@ impl AuthenticationEffects for AuthenticationHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::*;
     use aura_macros::aura_test;
+    use aura_testkit::*;
     use std::sync::Arc;
     use tokio::sync::RwLock;
 

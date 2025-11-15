@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use aura_core::tree::Epoch as TreeEpoch;
 use crate::maintenance::CacheInvalidated;
+use aura_core::tree::Epoch as TreeEpoch;
 
 /// Tracks per-key epoch floors derived from `CacheInvalidated` events.
 #[derive(Debug, Default, Clone)]

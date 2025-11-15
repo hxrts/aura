@@ -9,7 +9,6 @@ repository.workspace = true
 
 [dependencies]
 aura-core = { path = "../aura-core" }
-aura-crypto = { path = "../aura-crypto" }
 aura-effects = { path = "../aura-effects" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }

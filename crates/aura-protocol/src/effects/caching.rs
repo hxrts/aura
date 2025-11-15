@@ -3,17 +3,17 @@
 //! This module provides caching layers and allocation-reducing strategies
 //! to optimize runtime performance of effect execution.
 
-use std::sync::Arc;
+use lru::LruCache;
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::time::{Duration, Instant};
-use parking_lot::RwLock;
-use lru::LruCache;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use aura_core::{
-    AuraResult, AuraError, DeviceId,
     effects::{NetworkError, StorageError},
+    AuraError, AuraResult, DeviceId,
 };
 
 /// Cache key for effect results
@@ -63,7 +63,7 @@ impl<T: Clone> EffectCache<T> {
     pub fn new(max_size: usize, default_ttl: Duration) -> Self {
         Self {
             cache: RwLock::new(LruCache::new(
-                NonZeroUsize::new(max_size).unwrap_or(NonZeroUsize::new(100).unwrap())
+                NonZeroUsize::new(max_size).unwrap_or(NonZeroUsize::new(100).unwrap()),
             )),
             default_ttl,
             max_size: NonZeroUsize::new(max_size).unwrap_or(NonZeroUsize::new(100).unwrap()),
@@ -73,7 +73,7 @@ impl<T: Clone> EffectCache<T> {
     /// Get a value from cache
     pub fn get(&self, key: &CacheKey) -> Option<T> {
         let mut cache = self.cache.write();
-        
+
         if let Some(cached) = cache.get(key) {
             if !cached.is_expired() {
                 return Some(cached.value.clone());
@@ -137,33 +137,28 @@ impl<H> CachingNetworkHandler<H> {
 }
 
 #[async_trait::async_trait]
-impl<H: aura_core::effects::NetworkEffects> aura_core::effects::NetworkEffects for CachingNetworkHandler<H> {
-    async fn send_to_peer(
-        &self,
-        peer_id: DeviceId,
-        message: Vec<u8>,
-    ) -> Result<(), NetworkError> {
+impl<H: aura_core::effects::NetworkEffects> aura_core::effects::NetworkEffects
+    for CachingNetworkHandler<H>
+{
+    async fn send_to_peer(&self, peer_id: DeviceId, message: Vec<u8>) -> Result<(), NetworkError> {
         // Sends are not cached
         self.inner.send_to_peer(peer_id, message).await
     }
 
-    async fn recv_from_peer(
-        &self,
-        peer_id: DeviceId,
-    ) -> Result<Vec<u8>, NetworkError> {
+    async fn recv_from_peer(&self, peer_id: DeviceId) -> Result<Vec<u8>, NetworkError> {
         let cache_key = CacheKey::NetworkRecv { peer_id };
-        
+
         // Check cache first
         if let Some(cached) = self.recv_cache.get(&cache_key) {
             return Ok(cached);
         }
-        
+
         // Cache miss - fetch from inner handler
         let result = self.inner.recv_from_peer(peer_id).await?;
-        
+
         // Cache successful result
         self.recv_cache.insert(cache_key, result.clone());
-        
+
         Ok(result)
     }
 
@@ -189,7 +184,7 @@ impl<H> CachingStorageHandler<H> {
                 Duration::from_secs(300), // 5 minute TTL for storage data
             )),
             list_cache: Arc::new(EffectCache::new(
-                cache_size / 4, // Smaller cache for list operations
+                cache_size / 4,           // Smaller cache for list operations
                 Duration::from_secs(120), // 2 minute TTL for listings
             )),
         }
@@ -197,71 +192,76 @@ impl<H> CachingStorageHandler<H> {
 }
 
 #[async_trait::async_trait]
-impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects for CachingStorageHandler<H> {
-    async fn store(
-        &self,
-        key: &str,
-        value: Vec<u8>,
-        encrypted: bool,
-    ) -> Result<(), StorageError> {
+impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
+    for CachingStorageHandler<H>
+{
+    async fn store(&self, key: &str, value: Vec<u8>, encrypted: bool) -> Result<(), StorageError> {
         // Store in inner handler
         self.inner.store(key, value.clone(), encrypted).await?;
-        
+
         // Update cache with new value
-        let cache_key = CacheKey::StorageRetrieve { key: key.to_string() };
+        let cache_key = CacheKey::StorageRetrieve {
+            key: key.to_string(),
+        };
         self.read_cache.insert(cache_key, Some(value));
-        
+
         // Invalidate list cache as new key was added
         self.list_cache.clear();
-        
+
         Ok(())
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        let cache_key = CacheKey::StorageRetrieve { key: key.to_string() };
-        
+        let cache_key = CacheKey::StorageRetrieve {
+            key: key.to_string(),
+        };
+
         // Check cache first
         if let Some(cached) = self.read_cache.get(&cache_key) {
             return Ok(cached);
         }
-        
+
         // Cache miss - fetch from inner handler
         let result = self.inner.retrieve(key).await?;
-        
+
         // Cache result (including None for non-existent keys)
         self.read_cache.insert(cache_key, result.clone());
-        
+
         Ok(result)
     }
 
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
         // Delete from inner handler
         self.inner.delete(key).await?;
-        
+
         // Remove from cache
-        let cache_key = CacheKey::StorageRetrieve { key: key.to_string() };
+        let cache_key = CacheKey::StorageRetrieve {
+            key: key.to_string(),
+        };
         self.read_cache.insert(cache_key, None);
-        
+
         // Invalidate list cache
         self.list_cache.clear();
-        
+
         Ok(())
     }
 
     async fn list_keys(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
-        let cache_key = CacheKey::StorageListKeys { prefix: prefix.to_string() };
-        
+        let cache_key = CacheKey::StorageListKeys {
+            prefix: prefix.to_string(),
+        };
+
         // Check cache first
         if let Some(cached) = self.list_cache.get(&cache_key) {
             return Ok(cached);
         }
-        
+
         // Cache miss - fetch from inner handler
         let result = self.inner.list_keys(prefix).await?;
-        
+
         // Cache result
         self.list_cache.insert(cache_key, result.clone());
-        
+
         Ok(result)
     }
 
@@ -320,7 +320,7 @@ pub struct PooledObject<T> {
 
 impl<T> std::ops::Deref for PooledObject<T> {
     type Target = T;
-    
+
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref().unwrap()
     }
@@ -373,17 +373,20 @@ impl Default for EffectObjectPools {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::{aura_test, TestFixture};
 
     #[test]
     fn test_effect_cache() {
         let cache = EffectCache::new(10, Duration::from_secs(60));
-        
+
         // Test insertion and retrieval
-        let key = CacheKey::StorageRetrieve { key: "test".to_string() };
+        let key = CacheKey::StorageRetrieve {
+            key: "test".to_string(),
+        };
         cache.insert(key.clone(), vec![1, 2, 3]);
-        
+
         assert_eq!(cache.get(&key), Some(vec![1, 2, 3]));
-        
+
         // Test expiration
         let cache = EffectCache::new(10, Duration::from_millis(10));
         cache.insert(key.clone(), vec![4, 5, 6]);
@@ -394,45 +397,48 @@ mod tests {
     #[test]
     fn test_object_pool() {
         let pool = ObjectPool::new(5, || vec![0u8; 1024]);
-        
+
         // Get objects from pool
         let mut obj1 = pool.get();
         obj1[0] = 42;
-        
+
         let obj2 = pool.get();
         assert_eq!(obj2[0], 0); // New object
-        
+
         // Return to pool
         drop(obj1);
         drop(obj2);
-        
+
         // Reuse from pool
         let obj3 = pool.get();
         assert_eq!(obj3[0], 42); // Reused obj1
     }
 
-    #[tokio::test]
-    async fn test_caching_handlers() {
-        use aura_effects::handlers::{MockNetworkHandler, InMemoryStorageHandler};
-        
+    #[aura_test]
+    async fn test_caching_handlers() -> AuraResult<()> {
+        use aura_effects::handlers::{InMemoryStorageHandler, MockNetworkHandler};
+
+        let fixture = TestFixture::new().await?;
+
         // Test network caching
         let inner = MockNetworkHandler::new();
         let cached = CachingNetworkHandler::new(inner, 10);
-        
-        let peer_id = DeviceId::new();
-        let _ = cached.recv_from_peer(peer_id).await.unwrap();
-        let _ = cached.recv_from_peer(peer_id).await.unwrap(); // Should hit cache
-        
+
+        let peer_id = fixture.device_id();
+        let _ = cached.recv_from_peer(peer_id).await?;
+        let _ = cached.recv_from_peer(peer_id).await?; // Should hit cache
+
         // Test storage caching
         let inner = InMemoryStorageHandler::new();
         let cached = CachingStorageHandler::new(inner, 10);
-        
-        cached.store("key1", vec![1, 2, 3], false).await.unwrap();
-        let result = cached.retrieve("key1").await.unwrap();
+
+        cached.store("key1", vec![1, 2, 3], false).await?;
+        let result = cached.retrieve("key1").await?;
         assert_eq!(result, Some(vec![1, 2, 3]));
-        
+
         // Second retrieve should hit cache
-        let result = cached.retrieve("key1").await.unwrap();
+        let result = cached.retrieve("key1").await?;
         assert_eq!(result, Some(vec![1, 2, 3]));
+        Ok(())
     }
 }

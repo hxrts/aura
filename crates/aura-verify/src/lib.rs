@@ -36,7 +36,7 @@ pub mod session;
 pub mod threshold;
 
 // Re-export commonly used types
-pub use aura_crypto::{Ed25519Signature, Ed25519VerifyingKey};
+pub use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 pub use device::verify_device_signature;
 pub use guardian::verify_guardian_signature;
 pub use session::verify_session_ticket;
@@ -87,14 +87,14 @@ pub type Result<T> = std::result::Result<T, AuthenticationError>;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KeyMaterial {
     /// Device public keys indexed by DeviceId
-    device_keys: std::collections::HashMap<aura_core::DeviceId, aura_crypto::Ed25519VerifyingKey>,
+    device_keys: std::collections::HashMap<aura_core::DeviceId, aura_core::Ed25519VerifyingKey>,
 
     /// Guardian public keys indexed by GuardianId
     guardian_keys:
-        std::collections::HashMap<aura_core::GuardianId, aura_crypto::Ed25519VerifyingKey>,
+        std::collections::HashMap<aura_core::GuardianId, aura_core::Ed25519VerifyingKey>,
 
     /// Group public keys for threshold verification indexed by AccountId
-    group_keys: std::collections::HashMap<aura_core::AccountId, aura_crypto::Ed25519VerifyingKey>,
+    group_keys: std::collections::HashMap<aura_core::AccountId, aura_core::Ed25519VerifyingKey>,
 }
 
 impl KeyMaterial {
@@ -183,13 +183,11 @@ pub enum IdentityProof {
     /// Single device identity proof
     Device {
         device_id: aura_core::DeviceId,
-        #[serde(with = "aura_crypto::middleware::serde_utils::signature_serde")]
         signature: Ed25519Signature,
     },
     /// Guardian identity proof
     Guardian {
         guardian_id: aura_core::GuardianId,
-        #[serde(with = "aura_crypto::middleware::serde_utils::signature_serde")]
         signature: Ed25519Signature,
     },
     /// Threshold signature proof (M-of-N participants)
@@ -200,7 +198,6 @@ pub enum IdentityProof {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ThresholdSig {
     /// The aggregated Ed25519 signature
-    #[serde(with = "aura_crypto::middleware::serde_utils::signature_serde")]
     pub signature: Ed25519Signature,
     /// Indices of devices that participated in signing
     pub signers: Vec<u8>,

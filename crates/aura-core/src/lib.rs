@@ -75,7 +75,6 @@ pub mod session_epochs;
 /// Tree operation types
 pub mod tree;
 
-
 /// FlowBudget primitives
 pub mod flow;
 
@@ -87,6 +86,9 @@ pub mod causal_context;
 
 /// Pure synchronous hash trait for content addressing
 pub mod hash;
+
+/// Cryptographic domain types and utilities
+pub mod crypto;
 
 // === Public API Re-exports ===
 
@@ -117,7 +119,17 @@ pub use errors::{AuraError, Result as AuraResult};
 
 // Effect interfaces
 pub use effects::{
-    ConsoleEffects, CryptoEffects, JournalEffects, RandomEffects, TimeEffects,
+    AuthorizationEffects, ChaosEffects, ConsoleEffects, CryptoEffects, JournalEffects, RandomEffects,
+    ReliabilityEffects, TestingEffects, TimeEffects,
+};
+
+// Cryptographic utilities
+pub use crypto::{
+    derive_encryption_key, derive_key_material, ed25519_verify, generate_uuid,
+    build_commitment_tree, build_merkle_root, verify_merkle_proof,
+    Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey,
+    HpkeKeyPair, HpkePrivateKey, HpkePublicKey, IdentityKeyContext, KeyDerivationSpec,
+    MerkleProof, PermissionKeyContext, SimpleMerkleProof,
 };
 
 // Time and content

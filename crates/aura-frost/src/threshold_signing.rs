@@ -22,7 +22,7 @@
 
 use crate::FrostResult;
 use aura_core::{AccountId, AuraError, DeviceId, SessionId};
-use aura_crypto::frost::{
+use aura_core::frost::{
     NonceCommitment, PartialSignature, ThresholdSignature, TreeSigningContext,
 };
 use aura_macros::choreography;
@@ -195,7 +195,7 @@ pub struct FrostCrypto;
 impl FrostCrypto {
     /// Generate a FROST nonce commitment using real cryptographic operations
     pub async fn generate_nonce_commitment(signer_index: u16) -> FrostResult<NonceCommitment> {
-        use aura_crypto::frost::tree_signing::generate_nonce_with_share;
+        use aura_core::frost::tree_signing::generate_nonce_with_share;
         use frost_ed25519 as frost;
 
         // In production, this would use the actual signing share from DKG
@@ -212,7 +212,7 @@ impl FrostCrypto {
         message: &[u8],
         signer_index: u16,
     ) -> FrostResult<PartialSignature> {
-        use aura_crypto::frost::tree_signing::{
+        use aura_core::frost::tree_signing::{
             binding_message, frost_sign_partial_with_keypackage,
         };
         use frost_ed25519 as frost;
@@ -265,7 +265,7 @@ impl FrostCrypto {
         nonce_commitments: &HashMap<DeviceId, NonceCommitment>,
         config: &ThresholdSigningConfig,
     ) -> FrostResult<ThresholdSignature> {
-        use aura_crypto::frost::tree_signing::{binding_message, frost_aggregate};
+        use aura_core::frost::tree_signing::{binding_message, frost_aggregate};
         use frost_ed25519 as frost;
         use std::collections::BTreeMap;
 
@@ -346,7 +346,6 @@ pub enum SigningPhase {
 // Legacy coordinator and signer types for backward compatibility
 // These are now deprecated in favor of the choreography! macro
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,7 +380,7 @@ mod tests {
             async fn _test() {
                 let _commitment = FrostCrypto::generate_nonce_commitment(1).await;
                 let _signature = FrostCrypto::generate_partial_signature(
-                    &aura_crypto::frost::TreeSigningContext::new(1, 0, [0u8; 32]),
+                    &aura_core::frost::TreeSigningContext::new(1, 0, [0u8; 32]),
                     b"test",
                     1,
                 )
@@ -405,5 +404,4 @@ mod tests {
         // which requires a complete DKG ceremony setup
         assert!(partial_signatures.len() < config.threshold);
     }
-
 }

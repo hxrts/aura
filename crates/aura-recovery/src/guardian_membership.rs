@@ -10,7 +10,7 @@ use crate::{
 use aura_authenticate::guardian_auth::RecoveryContext;
 use aura_core::effects::TimeEffects;
 use aura_core::{identifiers::GuardianId, AccountId, AuraError, DeviceId};
-use aura_crypto::frost::ThresholdSignature;
+use aura_core::frost::ThresholdSignature;
 use aura_macros::choreography;
 use aura_protocol::AuraEffectSystem;
 use serde::{Deserialize, Serialize};

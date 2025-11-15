@@ -4,13 +4,13 @@
 //! YES choreography - complex distributed coordination patterns.
 //! Target: Each protocol <250 lines, focused on session type safety.
 
-pub mod websocket;
 pub mod channel_management;
 pub mod receipt_verification;
+pub mod websocket;
 
-pub use websocket::{WebSocketHandshakeCoordinator, WebSocketSessionCoordinator};
 pub use channel_management::{ChannelEstablishmentCoordinator, ChannelTeardownCoordinator};
 pub use receipt_verification::ReceiptCoordinationProtocol;
+pub use websocket::{WebSocketHandshakeCoordinator, WebSocketSessionCoordinator};
 
 /// Choreographic coordination configuration
 #[derive(Debug, Clone)]

@@ -93,7 +93,7 @@ pub enum EffectType {
     Ledger,
     /// Journal operations (event log, snapshots)
     Journal,
-    
+
     /// Tree operations (ratchet tree, MLS)
     Tree,
 
@@ -372,16 +372,16 @@ impl EffectType {
 
 pub use composite::CompositeHandler;
 pub use context::{
-    AgentContext, AuraContext, ChoreographicContext, MiddlewareContext, PlatformInfo,
-    SimulationContext,
+    AgentContext, AuraContext, ChoreographicContext, PlatformInfo,
+    SimulationContext, TracingContext, MetricsContext,
 };
 
 // Re-export immutable context types with namespace prefix to avoid conflicts
 pub mod immutable {
     pub use super::context_immutable::{
         AgentContext, AuraContext, AuthenticationState, ChoreographicContext,
-        FaultInjectionSettings, MetricsContext, MiddlewareContext, PlatformInfo,
-        PropertyCheckingConfig, RetryContext, SessionMetadata, SimulationContext, TracingContext,
+        FaultInjectionSettings, MetricsContext, PlatformInfo,
+        PropertyCheckingConfig, SessionMetadata, SimulationContext, TracingContext,
     };
 }
 pub use erased::{AuraHandler, BoxedHandler, HandlerUtils};

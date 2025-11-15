@@ -365,7 +365,7 @@ The system treats computation and communication symmetrically. A step is the sam
 
 ### 3.9 Algebraic Effects and the Interpreter
 
-Aura treats protocol execution as interpretation over an algebraic effect interface. After projecting a global choreography to each role, a polymorphic interpreter walks the role's AST and dispatches each operation to `AuraEffectSystem` via handlers and middleware. The core actions are exactly the ones defined by the calculus and effect signatures in this document: $\text{merge}$ (facts grow by $\sqcup$), $\text{refine}$ (caps shrink by $\sqcap$), $\text{send}/\text{recv}$ (context-scoped communication), and leakage/budget metering. The interpreter enforces the lattice laws and guard predicates while executing these actions in the order dictated by the session type.
+Aura treats protocol execution as interpretation over an algebraic effect interface. After projecting a global choreography to each role, a polymorphic interpreter walks the role's AST and dispatches each operation to `AuraEffectSystem` via explicit effect handlers. The core actions are exactly the ones defined by the calculus and effect signatures in this document: $\text{merge}$ (facts grow by $\sqcup$), $\text{refine}$ (caps shrink by $\sqcap$), $\text{send}/\text{recv}$ (context-scoped communication), and leakage/budget metering. The interpreter enforces the lattice laws and guard predicates while executing these actions in the order dictated by the session type.
 
 Because the interface is algebraic, there is a single semantics regardless of execution strategy. This enables two interchangeable modes:
 
@@ -527,7 +527,7 @@ This layer guarantees *communication safety* and *progress*. It projects global 
 
 ### The Effect Handler Layer
 
-The Effect Handler system provides *operational semantics and composability*. It realizes $\text{merge}/\text{refine}/\text{send}/\text{recv}$ as algebraic effects, enforces lattice monotonicity ($\sqcup$ facts, $\sqcap$ caps), guard predicates, and budget/leakage metering, and composes via middleware across crypto, storage, and transport.
+The Effect Handler system provides *operational semantics and composability*. It realizes $\text{merge}/\text{refine}/\text{send}/\text{recv}$ as algebraic effects, enforces lattice monotonicity ($\sqcup$ facts, $\sqcap$ caps), guard predicates, and budget/leakage metering, and composes via explicit dependency injection across crypto, storage, and transport layers.
 
 ### The Privacy Contract
 
