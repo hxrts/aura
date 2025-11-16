@@ -1,13 +1,19 @@
 //! High-level capability evaluator for protocol integration
 //!
-//! This module provides a higher-level interface for capability evaluation
-//! that integrates with the effect system and provides caching and metrics.
+//! **Layer 4 (aura-protocol)**: Orchestration logic with effect system integration.
+//!
+//! This module was moved from aura-wot (Layer 2) because it contains effect-dependent
+//! orchestration logic (async methods, caching, effect system integration) that violates
+//! Layer 2's principle of "semantics without implementation."
+//!
+//! The pure capability evaluation logic (`evaluate_capabilities`) remains in aura-wot
+//! as domain semantics.
 
-use crate::{
-    evaluation::{evaluate_capabilities, EvaluationContext},
-    Capability, CapabilitySet, DelegationChain, LocalChecks, Policy,
-};
 use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_wot::{
+    evaluation::{evaluate_capabilities, EvaluationContext, LocalChecks},
+    Capability, CapabilitySet, DelegationChain, Policy,
+};
 use chrono::Utc;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -84,7 +90,7 @@ impl CapabilityEvaluator {
         // Get local checks (placeholder - would integrate with actual local checks)
         let local_checks = self.get_local_checks(effect_system).await?;
 
-        // Evaluate capabilities using core function
+        // Evaluate capabilities using core function from aura-wot
         let capabilities = evaluate_capabilities(&policy, &delegations, &local_checks, &context)
             .map_err(|e| {
                 let msg = format!("Capability evaluation failed: {:?}", e);
@@ -98,100 +104,87 @@ impl CapabilityEvaluator {
             .unsigned_abs();
         let current_timestamp = end_time.timestamp() as u64;
 
-        let result = EffectiveCapabilitySet {
+        trace!(
+            device_id = ?self.device_id,
+            policies_evaluated = 1,
+            delegations_processed = delegations.len(),
+            computation_time_us = computation_time,
+            "Capability computation complete"
+        );
+
+        Ok(EffectiveCapabilitySet {
             capabilities,
-            policies_evaluated: 1, // Would be actual count
+            policies_evaluated: 1,
             delegations_processed: delegations.len(),
             computed_at: current_timestamp,
             computation_time_us: computation_time,
-        };
+        })
+    }
 
-        trace!(
-            device_id = ?self.device_id,
-            policies_evaluated = result.policies_evaluated,
-            delegations_processed = result.delegations_processed,
-            computation_time_us = result.computation_time_us,
-            "Capability evaluation completed"
-        );
+    /// Compute effective capabilities with caching
+    pub async fn compute_effective_capabilities_cached(
+        &mut self,
+        cache_key: String,
+        effect_system: &dyn EffectSystemInterface,
+    ) -> AuraResult<EffectiveCapabilitySet> {
+        // Check cache
+        if let Some(cached) = self.cached_results.get(&cache_key) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            if now - cached.computed_at < self.cache_ttl_seconds {
+                debug!(
+                    cache_key = %cache_key,
+                    "Using cached capability evaluation"
+                );
+                return Ok(cached.clone());
+            }
+        }
+
+        // Compute fresh
+        let result = self.compute_effective_capabilities(effect_system).await?;
+
+        // Update cache
+        self.cached_results.insert(cache_key, result.clone());
 
         Ok(result)
     }
 
-    /// Get cached capabilities if available and not expired
-    #[allow(clippy::disallowed_methods)]
-    pub fn get_cached_capabilities(&self, operation: &str) -> Option<&EffectiveCapabilitySet> {
-        let cache_key = format!("{}:{}", self.device_id, operation);
+    /// Set cache TTL (time-to-live) in seconds
+    pub fn set_cache_ttl(&mut self, ttl_seconds: u64) {
+        self.cache_ttl_seconds = ttl_seconds;
+    }
 
-        if let Some(cached) = self.cached_results.get(&cache_key) {
-            let current_time = SystemTime::UNIX_EPOCH
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or(Duration::from_secs(0))
-                .as_secs();
+    /// Clear capability cache
+    pub fn clear_cache(&mut self) {
+        self.cached_results.clear();
+    }
 
-            if current_time - cached.computed_at < self.cache_ttl_seconds {
-                trace!(
-                    device_id = ?self.device_id,
-                    operation = %operation,
-                    "Using cached capability evaluation"
-                );
-                return Some(cached);
-            }
+    /// Get cache statistics
+    pub fn cache_stats(&self) -> CacheStats {
+        CacheStats {
+            total_entries: self.cached_results.len(),
+            ttl_seconds: self.cache_ttl_seconds,
         }
-
-        None
     }
 
-    /// Clear expired cache entries
-    #[allow(clippy::disallowed_methods)]
-    pub fn cleanup_cache(&mut self) {
-        let current_time = SystemTime::UNIX_EPOCH
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
-            .as_secs();
-
-        self.cached_results
-            .retain(|_, result| current_time - result.computed_at < self.cache_ttl_seconds);
-    }
-
-    /// Evaluate storage access based on capabilities and permission requirements
-    pub fn evaluate_storage_access(
-        &self,
-        capabilities: &[crate::Capability],
-        required_permission: &crate::StoragePermission,
-        resource: &dyn std::fmt::Debug,
-    ) -> AuraResult<bool> {
-        // TODO: Implement proper capability evaluation logic
-        // For now, return a simple check that capabilities list is non-empty
-        // In a real implementation, this would check if any of the capabilities
-        // grant the required permission for the specified resource
-        debug!(
-            device_id = ?self.device_id,
-            permission = ?required_permission,
-            resource = ?resource,
-            capabilities_count = capabilities.len(),
-            "Evaluating storage access"
-        );
-
-        // Placeholder logic - always allow for now to enable development
-        Ok(!capabilities.is_empty())
-    }
-
-    // Placeholder methods for integration points
+    // Placeholder integration methods - would be replaced with real effect system integration
 
     async fn get_device_policy(
         &self,
         _effect_system: &dyn EffectSystemInterface,
     ) -> AuraResult<Policy> {
-        // Placeholder: In actual implementation, this would query the policy system
-        // TODO fix - For now, return a permissive policy for development
-        Ok(Policy::default_for_device(self.device_id))
+        // Placeholder: In actual implementation, this would query the policy from storage
+        Ok(Policy::new(HashMap::new()))
     }
 
     async fn get_delegation_chains(
         &self,
         _effect_system: &dyn EffectSystemInterface,
     ) -> AuraResult<Vec<DelegationChain>> {
-        // Placeholder: In actual implementation, this would query the delegation system
+        // Placeholder: In actual implementation, this would query delegation chains
         Ok(Vec::new())
     }
 
@@ -204,7 +197,16 @@ impl CapabilityEvaluator {
     }
 }
 
-/// TODO fix - Simplified interface for effect system integration
+/// Cache statistics
+#[derive(Debug, Clone)]
+pub struct CacheStats {
+    /// Total number of cached entries
+    pub total_entries: usize,
+    /// Cache TTL in seconds
+    pub ttl_seconds: u64,
+}
+
+/// Effect system interface for capability evaluation
 ///
 /// This trait abstracts the effect system interface to avoid circular dependencies
 /// between aura-wot and aura-protocol. In practice, this would be implemented
@@ -215,22 +217,4 @@ pub trait EffectSystemInterface {
 
     /// Query metadata from the effect system
     fn get_metadata(&self, key: &str) -> Option<String>;
-}
-
-// Temporary stub implementation for CapabilitySet methods used by guards
-impl CapabilitySet {
-    /// Check if this capability set permits a specific capability
-    pub fn permits_capability(&self, _capability: &Capability) -> bool {
-        // Placeholder implementation - would check if capability is in the set
-        // TODO fix - For now, be permissive to allow development
-        true
-    }
-}
-
-impl Policy {
-    /// Create a default policy for a device (if not already defined)
-    pub fn default_for_device(_device_id: DeviceId) -> Self {
-        // Placeholder: would create appropriate default policy
-        Policy::new()
-    }
 }

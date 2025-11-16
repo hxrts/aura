@@ -37,7 +37,8 @@
 
 pub mod capability;
 pub mod capability_evaluation;
-pub mod capability_evaluator;
+// MOVED: capability_evaluator → aura-protocol/src/wot/ (Layer 2 → Layer 4)
+// Effect-dependent orchestration logic belongs in protocol layer
 pub mod delegation;
 pub mod errors;
 pub mod evaluation;
@@ -54,9 +55,8 @@ pub use capability_evaluation::{
     evaluate_tree_operation_capabilities, CapabilityEvaluationContext, CapabilityEvaluationResult,
     EntityId, TreeCapabilityRequest,
 };
-pub use capability_evaluator::{
-    CapabilityEvaluator, EffectSystemInterface, EffectiveCapabilitySet,
-};
+// REMOVED: CapabilityEvaluator, EffectSystemInterface, EffectiveCapabilitySet
+// → Moved to aura-protocol/src/wot/ (effect-dependent orchestration)
 pub use delegation::{DelegationChain, DelegationLink};
 pub use errors::{AuraError, AuraResult, WotError, WotResult};
 pub use evaluation::{evaluate_capabilities, EvaluationContext, LocalChecks};

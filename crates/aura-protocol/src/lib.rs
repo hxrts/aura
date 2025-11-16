@@ -105,6 +105,7 @@ pub mod handlers;
 pub mod messages;
 pub mod state;
 pub mod transport;
+pub mod wot;
 
 // Unified AuraEffectSystem architecture only
 

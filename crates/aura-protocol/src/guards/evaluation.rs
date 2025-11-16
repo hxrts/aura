@@ -8,7 +8,8 @@
 use super::effect_system_trait::GuardEffectSystem;
 use super::ProtocolGuard;
 use aura_core::{AuraError, AuraResult, DeviceId};
-use aura_wot::{Capability, CapabilityEvaluator, EffectiveCapabilitySet};
+use aura_wot::Capability;
+use crate::wot::{CapabilityEvaluator, EffectSystemInterface, EffectiveCapabilitySet};
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
@@ -52,7 +53,7 @@ impl GuardEvaluator {
     }
 
     /// Evaluate protocol guards against current capabilities
-    pub async fn evaluate_guards<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+    pub async fn evaluate_guards<E: GuardEffectSystem + EffectSystemInterface>(
         &self,
         guard: &ProtocolGuard,
         effect_system: &E,
@@ -143,7 +144,7 @@ impl GuardEvaluator {
     }
 
     /// Batch evaluate multiple guards (optimization for complex protocols)
-    pub async fn evaluate_guards_batch<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+    pub async fn evaluate_guards_batch<E: GuardEffectSystem + EffectSystemInterface>(
         &self,
         guards: &[&ProtocolGuard],
         effect_system: &E,
@@ -190,15 +191,15 @@ impl GuardEvaluator {
 }
 
 /// Create a guard evaluator from an effect system
-pub async fn create_guard_evaluator<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+pub async fn create_guard_evaluator<E: GuardEffectSystem + EffectSystemInterface>(
     effect_system: &E,
 ) -> AuraResult<GuardEvaluator> {
-    let device_id = aura_wot::EffectSystemInterface::device_id(effect_system);
+    let device_id = EffectSystemInterface::device_id(effect_system);
     Ok(GuardEvaluator::new(device_id))
 }
 
 /// Convenience function to evaluate a single guard
-pub async fn evaluate_guard<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+pub async fn evaluate_guard<E: GuardEffectSystem + EffectSystemInterface>(
     guard: &ProtocolGuard,
     effect_system: &E,
 ) -> AuraResult<GuardEvaluationResult> {
