@@ -465,7 +465,7 @@ mod tests {
 // Remaining handler modules  
 pub mod agent;
 pub mod storage;
-pub mod system;
+// REMOVED: pub mod system; // Moved to aura-effects (Layer 3) - basic handlers
 pub mod mock;
 
 // Flattened handlers (previously in subdirectories)
