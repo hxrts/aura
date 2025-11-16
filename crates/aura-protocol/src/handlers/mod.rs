@@ -477,6 +477,9 @@ pub use sync_broadcaster::{BroadcastConfig, BroadcasterHandler};
 pub mod time_enhanced;
 pub use time_enhanced::EnhancedTimeHandler;
 
+pub mod timeout_coordinator;
+pub use timeout_coordinator::TimeoutCoordinator;
+
 pub mod transport_coordinator;
 
 pub use transport_coordinator::{
