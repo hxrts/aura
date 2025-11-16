@@ -209,6 +209,7 @@ pub struct SharePackage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::test_utils::test_device_id;
 
     #[test]
     fn test_resharing_request_serialization() {
@@ -217,8 +218,8 @@ mod tests {
             account_id: AccountId::new(),
             old_threshold: 2,
             new_threshold: 3,
-            old_participants: vec![DeviceId::new(), DeviceId::new()],
-            new_participants: vec![DeviceId::new(), DeviceId::new(), DeviceId::new()],
+            old_participants: vec![test_device_id(1), test_device_id(2)],
+            new_participants: vec![test_device_id(3), test_device_id(4), test_device_id(5)],
             timeout_seconds: 300,
         };
 
@@ -243,7 +244,7 @@ mod tests {
         let package = SharePackage {
             session_id: "test_session".to_string(),
             share_data: vec![1, 2, 3, 4],
-            target_participant: DeviceId::new(),
+            target_participant: test_device_id(6),
         };
 
         let serialized = serde_json::to_vec(&package).unwrap();
@@ -259,7 +260,7 @@ mod tests {
         let result = VerificationResult {
             session_id: "test_session".to_string(),
             verified: true,
-            participant_id: DeviceId::new(),
+            participant_id: test_device_id(7),
         };
 
         let serialized = serde_json::to_vec(&result).unwrap();
