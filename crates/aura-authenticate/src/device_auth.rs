@@ -228,6 +228,7 @@ impl DeviceAuthCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::test_utils::test_device_id;
     use aura_core::{AccountId, DeviceId};
     use aura_macros::aura_test;
     use aura_verify::session::SessionScope;
@@ -242,7 +243,7 @@ mod tests {
     #[test]
     fn test_challenge_request_serialization() {
         let request = ChallengeRequest {
-            device_id: DeviceId::new(),
+            device_id: test_device_id(1),
             account_id: AccountId::new(),
             scope: SessionScope::Protocol {
                 protocol_type: "device_auth".to_string(),
@@ -260,7 +261,7 @@ mod tests {
     // The effect system initialization requires careful async runtime management
     #[aura_test]
     async fn test_coordinator_creation() -> aura_core::AuraResult<()> {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(2);
         let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
         let coordinator = DeviceAuthCoordinator::new(fixture.effect_system());
 

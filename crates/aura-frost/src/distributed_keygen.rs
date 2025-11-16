@@ -199,6 +199,7 @@ choreography! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::test_utils::test_device_id;
 
     #[test]
     fn test_dkg_request_serialization() {
@@ -207,7 +208,7 @@ mod tests {
             account_id: AccountId::new(),
             threshold: 2,
             total_participants: 3,
-            participants: vec![DeviceId::new(), DeviceId::new(), DeviceId::new()],
+            participants: vec![test_device_id(1), test_device_id(2), test_device_id(3)],
             timeout_seconds: 120,
         };
 

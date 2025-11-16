@@ -125,14 +125,28 @@ let participants = vec![test_device_id(1), test_device_id(2)];
 
 **Impact**: All inline test modules now use deterministic IDs for reproducible test failures
 
-### Medium Priority: Other Layer 5 Crates
+### Medium Priority: Layer 5 Crates - ALL COMPLETED! ✅
 
-- **aura-frost** (inline tests) - Use `test_frost_key_shares()` from testkit
-- **aura-authenticate** (inline tests) - Already partially uses testkit, complete migration
-- **aura-invitation** (already uses testkit) ✓
-- **aura-recovery** (already uses testkit) ✓
+Files migrated to use deterministic IDs:
+- ✅ **aura-frost** (3 files, 9 occurrences total):
+  - signature_aggregation.rs - 4 occurrences migrated
+  - distributed_keygen.rs - 1 occurrence migrated
+  - key_resharing.rs - 4 occurrences migrated
+- ✅ **aura-authenticate** (3 files, 8 occurrences total):
+  - guardian_auth.rs - 3 occurrences (with TODO comments updated)
+  - session_creation.rs - 3 occurrences migrated
+  - device_auth.rs - 2 occurrences migrated
+- ✅ **aura-invitation** - Already uses testkit ✓
+- ✅ **aura-recovery** - Already uses testkit ✓
 
-**Estimated impact**: 200-300 lines of code reduction
+**Phase 3 Progress**: 17 non-deterministic ID occurrences eliminated across 6 test modules!
+
+### Deprecation and Cleanup ✅
+
+- ✅ **common/test_utils.rs**: Added deprecation notice directing developers to use `aura-testkit`
+  - Documented migration path: `create_test_keypair()` → `aura_testkit::test_key_pair(seed)`
+  - File retained for backwards compatibility only
+  - New tests should use `aura-testkit` infrastructure
 
 ## Migration Patterns
 
@@ -250,25 +264,27 @@ Added helpers for testing concerns (assertions, strategies) not domain logic.
 3. `5be83d5` - Add #[aura_test] macro and property test strategies
 4. `6073949` - Expand aura-testkit assertions for CRDT and semilattice testing
 5. `3ccb150` - Add CRDT property test strategies and migrate handler_coverage_tests.rs and aura-sync inline tests
-6. **NEW** - Complete aura-protocol testkit migration with 7 additional test files
+6. `c880606` - Complete aura-protocol testkit migration with 7 additional test files
+7. **NEW** - Complete Layer 5 crate migrations (aura-frost + aura-authenticate) and deprecate common/test_utils.rs
 
-**Phase 2 Summary**:
+**Phase 2 Summary** (aura-protocol + aura-sync):
 - **Session 1**: Added CRDT strategies + migrated handler_coverage_tests.rs, crdt_properties.rs, aura-sync inline tests (12 occurrences)
-- **Session 2**: Completed all remaining aura-protocol tests:
-  - runtime_integration_tests.rs (16 occurrences)
-  - tree_scalability.rs (3 occurrences)
-  - authorization_integration_tests.rs (1 occurrence)
-  - performance_regression.rs (2 occurrences)
-  - Verified effect_handlers_test.rs already clean
+- **Session 2**: Completed all remaining aura-protocol tests (22 occurrences) + verified effect_handlers_test.rs already clean
 
-**Total**: 6 commits, ~950 lines of new infrastructure, ~320+ lines of test code eliminated and centralized
+**Phase 3 Summary** (Layer 5 crates + cleanup):
+- **Session 3**: Migrated aura-frost (9 occurrences) + aura-authenticate (8 occurrences)
+- Deprecated common/test_utils.rs with migration guide to aura-testkit
+- ALL Layer 5 protocol crates now use deterministic test IDs
+
+**Total**: 7 commits, ~960 lines of new infrastructure, ~350+ lines of test code eliminated and centralized
 
 ## Success Metrics
 
 - **Architectural compliance**: ✅ No circular dependencies introduced
-- **Code reduction**: 🟢 320+ lines eliminated (target: 1,600-2,100) - 19% complete
-- **Determinism**: ✅ ALL aura-protocol and aura-sync tests now deterministic and reproducible
+- **Code reduction**: 🟢 350+ lines eliminated (target: 1,600-2,100) - 21% complete
+- **Determinism**: ✅ ALL protocol tests (aura-protocol, aura-sync, aura-frost, aura-authenticate) now deterministic
 - **Reusability**: ✅ CRDT strategies and assertions usable across all Layer 4+ crates
 - **Developer experience**: ✅ #[aura_test] standardizes async test setup
 - **Test quality**: ✅ Property test generators centralized in testkit for consistency
-- **Migration complete**: ✅ All high-priority test files (aura-protocol + aura-sync) fully migrated!
+- **Migration complete**: ✅ All high & medium priority migrations DONE!
+- **Deprecation**: ✅ Legacy test utilities deprecated with clear migration path

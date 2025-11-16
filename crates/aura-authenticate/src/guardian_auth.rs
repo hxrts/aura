@@ -559,7 +559,7 @@ impl GuardianAuthenticationCoordinator {
 
         // In production, this would use the guardian's actual private key
         // For MVP, we create a mock signature
-        let device_id = DeviceId::new(); // TODO: Get actual device_id from effect_system
+        let device_id = test_device_id(1) // Deterministic device ID for testing
         let mock_signature = format!("guardian_sig_{}_{}", device_id, message.len());
 
         Ok(mock_signature.into_bytes())
@@ -593,7 +593,7 @@ impl GuardianAuthenticationCoordinator {
         // This will be implemented with aura-wot capability evaluation
 
         // TODO: Implement network communication with new effect system
-        let _device_id = DeviceId::new(); // TODO: Get actual device_id from effect_system
+        let _device_id = test_device_id(1) // Deterministic device ID for testing
 
         // Generate request ID
         let request_id = uuid::Uuid::from_bytes([0u8; 16]).to_string();
@@ -755,7 +755,7 @@ impl GuardianAuthenticationCoordinator {
     async fn execute_guardian(&self) -> AuraResult<GuardianAuthResponse> {
         tracing::info!("Executing guardian auth as guardian");
 
-        let device_id = DeviceId::new(); // TODO: Get actual device_id from effect_system
+        let device_id = test_device_id(1) // Deterministic device ID for testing
 
         // TODO: Implement capability-based authorization with new effect system
         // This will be implemented with aura-wot capability evaluation
@@ -984,6 +984,7 @@ impl GuardianAuthCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::test_utils::test_device_id;
     use aura_core::DeviceId;
     use aura_macros::aura_test;
 

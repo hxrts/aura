@@ -1,7 +1,18 @@
 //! Test utilities for protocol testing
 //!
+//! **DEPRECATED**: New tests should use `aura-testkit` instead of this module.
+//! This module is retained for backwards compatibility with existing tests only.
+//!
 //! This module provides test-specific implementations and utilities
 //! that should not be used in production code.
+//!
+//! ## Migration Guide
+//!
+//! - Instead of `create_test_keypair()`, use `aura_testkit::test_key_pair(seed)`
+//! - Instead of `MockNetworkTransport`, use `aura_testkit` mock handlers
+//! - Instead of `MockStorage`, use `aura_testkit` storage fixtures
+//!
+//! See `aura-testkit/src/lib.rs` for the modern testing infrastructure.
 
 #![allow(clippy::type_complexity)]
 #![allow(clippy::expect_used)]

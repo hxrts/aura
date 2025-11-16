@@ -245,6 +245,7 @@ impl SessionCreationCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::test_utils::test_device_id;
     use aura_core::{AccountId, DeviceId};
     use aura_macros::aura_test;
     use aura_verify::session::SessionScope;
@@ -260,11 +261,11 @@ mod tests {
     #[test]
     fn test_session_request_serialization() {
         let request = SessionRequest {
-            device_id: DeviceId::new(),
+            device_id: test_device_id(1),
             account_id: AccountId::new(),
             verified_identity: VerifiedIdentity {
                 proof: aura_verify::IdentityProof::Device {
-                    device_id: DeviceId::new(),
+                    device_id: test_device_id(1),
                     signature: [0u8; 64].into(),
                 },
                 message_hash: [0u8; 32],
@@ -286,7 +287,7 @@ mod tests {
 
     #[aura_test]
     async fn test_coordinator_creation() -> aura_core::AuraResult<()> {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(2);
         let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
         let coordinator = SessionCreationCoordinator::new(fixture.effect_system());
 

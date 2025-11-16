@@ -205,6 +205,7 @@ pub async fn perform_frost_aggregation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::test_utils::test_device_id;
 
     #[test]
     fn test_aggregation_config_validation() {
@@ -212,7 +213,7 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 2,
-            signers: vec![DeviceId::new(), DeviceId::new(), DeviceId::new()],
+            signers: vec![test_device_id(1), test_device_id(2), test_device_id(3)],
             timeout_seconds: 60,
         };
         assert!(validate_aggregation_config(&valid_request).is_ok());
@@ -221,7 +222,7 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 0, // Invalid threshold
-            signers: vec![DeviceId::new(), DeviceId::new()],
+            signers: vec![test_device_id(4), test_device_id(5)],
             timeout_seconds: 60,
         };
         assert!(validate_aggregation_config(&invalid_request).is_err());
@@ -233,7 +234,7 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 2,
-            signers: vec![DeviceId::new(), DeviceId::new(), DeviceId::new()],
+            signers: vec![test_device_id(6), test_device_id(7), test_device_id(8)],
             timeout_seconds: 60,
         };
 
@@ -271,7 +272,7 @@ mod tests {
     fn test_partial_signature_submission_serialization() {
         let submission = PartialSignatureSubmission {
             session_id: "test_session".to_string(),
-            signer_id: DeviceId::new(),
+            signer_id: test_device_id(9),
             partial_signature: PartialSignature::from_bytes(vec![1; 32]).unwrap(), // 32-byte signature as required
             signature_index: 1,
         };
