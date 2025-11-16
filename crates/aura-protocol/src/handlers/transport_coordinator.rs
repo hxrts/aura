@@ -1,11 +1,21 @@
-//! Transport Coordination - Effect Composition
+//! Transport Coordinator - Multi-Party Connection Management
 //!
-//! Layer 3: Single-party transport coordination logic for transport effects.
-//! NO choreography - direct effect composition only.
-//! Target: <300 lines, minimal abstractions.
+//! **Layer 4 (aura-protocol)**: Stateful multi-party coordination handler.
+//! 
+//! This module was moved from aura-effects (Layer 3) because it violates the Layer 3 principle
+//! of "stateless, single-party, context-free" handlers. The TransportCoordinator maintains
+//! shared state across multiple peer connections, making it multi-party coordination logic
+//! that belongs in the orchestration layer.
+//!
+//! Key violations that required the move:
+//! - Maintains global connection registry (`Arc<RwLock<HashMap<String, ConnectionState>>>`)
+//! - Manages connections to multiple peers (multi-party, not single-party)
+//! - Coordinates connection lifecycle across the system
+//! - Enforces global connection limits and cleanup policies
 
 use aura_core::effects::{NetworkEffects, StorageEffects, TimeEffects};
 use aura_core::{ContextId, DeviceId};
+use aura_effects::transport::{TransportConfig, TransportError};
 use std::collections::HashMap;
 
 /// Transport coordination configuration
@@ -46,7 +56,7 @@ pub enum TransportCoordinationError {
     FlowBudgetExceeded(String),
     /// Transport layer error
     #[error("Transport error: {0}")]
-    Transport(#[from] super::TransportError),
+    Transport(#[from] TransportError),
     /// Effect system error
     #[error("Effect error: {0}")]
     Effect(String),
@@ -55,10 +65,10 @@ pub enum TransportCoordinationError {
 /// Result type for transport coordination operations
 pub type CoordinationResult<T> = Result<T, TransportCoordinationError>;
 
-/// Transport inner interface placeholder  
+/// Transport inner interface placeholder
 #[derive(Debug, Clone)]
 struct TransportManagerInner {
-    _config: super::TransportConfig,
+    _config: TransportConfig,
 }
 
 impl TransportManagerInner {
@@ -78,17 +88,17 @@ impl TransportManagerInner {
     }
 }
 
-/// Simple transport manager placeholder for Layer 3 coordination
+/// Simple transport manager placeholder for Layer 4 coordination
 #[derive(Debug, Clone)]
 pub struct RetryingTransportManager {
-    _config: super::TransportConfig,
+    _config: TransportConfig,
     _max_retries: u32,
     inner: TransportManagerInner,
 }
 
 impl RetryingTransportManager {
     /// Create new retrying transport manager
-    pub fn new(config: super::TransportConfig, max_retries: u32) -> Self {
+    pub fn new(config: TransportConfig, max_retries: u32) -> Self {
         Self { 
             inner: TransportManagerInner { _config: config.clone() },
             _config: config, 
@@ -139,7 +149,7 @@ where
 {
     /// Create new transport coordinator
     pub fn new(config: TransportCoordinationConfig, effects: E) -> Self {
-        let transport_config = super::TransportConfig {
+        let transport_config = TransportConfig {
             connect_timeout: config.connection_timeout,
             read_timeout: std::time::Duration::from_secs(60),
             write_timeout: std::time::Duration::from_secs(30),

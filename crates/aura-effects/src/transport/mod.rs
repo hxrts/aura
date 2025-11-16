@@ -3,15 +3,21 @@
 //! Layer 3: Single-party, stateless transport effect implementations.
 //! NO choreography - these are context-free effect handlers only.
 //! Target: Each file <200 lines, use mature libraries.
+//!
+//! **Note**: TransportCoordinator and RetryingTransportManager were moved to aura-protocol
+//! (Layer 4) as they implement multi-party coordination logic. Import from
+//! `aura_protocol::handlers::transport_coordinator` instead.
 
-pub mod coordination;
+// REMOVED: pub mod coordination; // Moved to aura-protocol (Layer 4)
 pub mod framing;
 pub mod memory;
 pub mod tcp;
 pub mod utils;
 pub mod websocket;
 
-pub use coordination::{RetryingTransportManager, TransportCoordinationConfig, TransportCoordinationError, CoordinationResult};
+// REMOVED: Re-exports moved to aura-protocol
+// pub use coordination::{RetryingTransportManager, TransportCoordinationConfig,
+//                        TransportCoordinationError, CoordinationResult};
 pub use framing::FramingHandler;
 pub use memory::InMemoryTransportHandler;
 pub use tcp::TcpTransportHandler;

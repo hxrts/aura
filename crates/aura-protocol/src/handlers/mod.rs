@@ -471,12 +471,18 @@ pub mod mock;
 // Flattened handlers (previously in subdirectories)
 pub mod sync_anti_entropy;
 pub use sync_anti_entropy::AntiEntropyHandler;
-pub mod sync_broadcaster; 
+pub mod sync_broadcaster;
 pub use sync_broadcaster::{BroadcastConfig, BroadcasterHandler};
 
 pub mod time_enhanced;
 pub use time_enhanced::EnhancedTimeHandler;
 
+pub mod transport_coordinator;
+
+pub use transport_coordinator::{
+    CoordinationResult, RetryingTransportManager, TransportCoordinator,
+    TransportCoordinationConfig, TransportCoordinationError,
+};
 
 // External re-exports
 // REMOVED: Users should import MockJournalHandler directly from aura-effects
