@@ -29,6 +29,8 @@ rand = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+# Testing infrastructure (Layer 5 can use testkit)
+aura-testkit = { path = "../aura-testkit" }
 tokio = { workspace = true }
 
 [lints]

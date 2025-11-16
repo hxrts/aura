@@ -47,5 +47,9 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 once_cell = { workspace = true }
 
+[dev-dependencies]
+# Testing infrastructure (Layer 7 can use testkit)
+aura-testkit = { path = "../aura-testkit" }
+
 [features]
 default = []
