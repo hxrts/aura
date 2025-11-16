@@ -64,6 +64,7 @@ pub mod mocks;
 pub mod network_sim;
 pub mod privacy;
 pub mod protocol;
+pub mod strategies; // Property test strategies for proptest
 pub mod test_harness;
 pub mod time;
 pub mod transport;

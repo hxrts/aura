@@ -41,6 +41,9 @@ uuid = { workspace = true }
 once_cell = { workspace = true }
 serde = { workspace = true }
 
+# Property testing
+proptest = { workspace = true }
+
 [dev-dependencies]
 # For testing the test utilities themselves
 # tokio-test = { workspace = true } # removed - unused
