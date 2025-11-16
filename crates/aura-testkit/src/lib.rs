@@ -95,6 +95,11 @@ pub use keys::KeyTestFixture;
 pub use ledger::*;
 pub use mocks::*;
 pub use protocol::*;
+pub use strategies::{
+    arb_account_id, arb_attested_op, arb_device_id, arb_key_pair, arb_non_empty_bytes,
+    arb_non_empty_vec, arb_oplog, arb_session_id, arb_small_count, arb_threshold_config,
+    arb_timestamp, create_test_tree_op,
+};
 pub use transport::*;
 pub use verification::{
     CapabilitySoundnessVerifier, CapabilityState, SoundnessProperty, SoundnessReport,

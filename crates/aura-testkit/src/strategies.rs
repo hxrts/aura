@@ -7,15 +7,16 @@
 //! # Architecture Note
 //!
 //! These strategies are for cross-cutting concerns (DeviceId, AccountId, etc.).
-//! Domain-specific strategies (OpLog, Capability, etc.) should remain in their
-//! respective crates to avoid bloat.
+//! Domain-specific strategies should be added here if used by 3+ Layer 4+ crates.
 
 use proptest::prelude::*;
 
 // Re-export proptest for convenience
 pub use proptest;
 
+use aura_core::tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
 use aura_core::{AccountId, DeviceId, SessionId};
+use aura_journal::semilattice::OpLog;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
 /// Strategy for generating deterministic DeviceIds
@@ -242,6 +243,108 @@ pub fn arb_threshold_config() -> impl Strategy<Value = (u16, u16)> {
     (1u16..=10u16).prop_flat_map(|threshold| {
         (Just(threshold), threshold..=20u16)
     })
+}
+
+// ============================================================================
+// CRDT and Tree Operation Strategies
+// ============================================================================
+
+/// Helper function to create a test TreeOp with deterministic values
+///
+/// This is used by the OpLog strategy and can be used directly in tests.
+///
+/// # Example
+///
+/// ```rust
+/// use aura_testkit::strategies::create_test_tree_op;
+///
+/// let op = create_test_tree_op([0u8; 32], 1, 42);
+/// assert_eq!(op.op.parent_epoch, 1);
+/// ```
+pub fn create_test_tree_op(commitment: [u8; 32], epoch: u64, leaf_id: u64) -> AttestedOp {
+    AttestedOp {
+        op: TreeOp {
+            parent_commitment: commitment,
+            parent_epoch: epoch,
+            op: TreeOpKind::AddLeaf {
+                leaf: LeafNode {
+                    leaf_id: LeafId(
+                        leaf_id
+                            .try_into()
+                            .unwrap_or_else(|e| panic!("Invalid leaf_id: {}", e)),
+                    ),
+                    device_id: {
+                        use aura_core::hash::hash;
+                        use uuid::Uuid;
+                        let hash_input = format!("device-{}", leaf_id);
+                        let hash_bytes = hash(hash_input.as_bytes());
+                        let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+                        DeviceId(Uuid::from_bytes(uuid_bytes))
+                    },
+                    role: LeafRole::Device,
+                    public_key: vec![1, 2, 3],
+                    meta: vec![],
+                },
+                under: NodeIndex(0),
+            },
+            version: 1,
+        },
+        agg_sig: vec![],
+        signer_count: 0,
+    }
+}
+
+/// Strategy for generating OpLog instances
+///
+/// Generates OpLog with 0-10 operations for property testing.
+///
+/// # Example
+///
+/// ```rust
+/// use aura_testkit::strategies::arb_oplog;
+/// use proptest::prelude::*;
+///
+/// proptest! {
+///     #[test]
+///     fn test_oplog_property(oplog in arb_oplog()) {
+///         // Test CRDT properties...
+///     }
+/// }
+/// ```
+pub fn arb_oplog() -> impl Strategy<Value = OpLog> {
+    prop::collection::vec(
+        (prop::array::uniform32(any::<u8>()), 1u64..=10, 1u64..=100),
+        0..=10,
+    )
+    .prop_map(|ops| {
+        let mut oplog = OpLog::new();
+        for (commitment, epoch, leaf_id) in ops {
+            oplog.add_operation(create_test_tree_op(commitment, epoch, leaf_id));
+        }
+        oplog
+    })
+}
+
+/// Strategy for generating AttestedOp instances
+///
+/// Generates individual tree operations for property testing.
+///
+/// # Example
+///
+/// ```rust
+/// use aura_testkit::strategies::arb_attested_op;
+/// use proptest::prelude::*;
+///
+/// proptest! {
+///     #[test]
+///     fn test_op_property(op in arb_attested_op()) {
+///         assert_eq!(op.op.version, 1);
+///     }
+/// }
+/// ```
+pub fn arb_attested_op() -> impl Strategy<Value = AttestedOp> {
+    (prop::array::uniform32(any::<u8>()), 1u64..=10, 1u64..=100)
+        .prop_map(|(commitment, epoch, leaf_id)| create_test_tree_op(commitment, epoch, leaf_id))
 }
 
 #[cfg(test)]

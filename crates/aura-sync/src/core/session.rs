@@ -684,6 +684,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::test_utils::test_device_id;
     use std::thread;
     use std::time::Duration as StdDuration;
 
@@ -696,7 +697,7 @@ mod tests {
     #[test]
     fn test_session_creation_and_activation() {
         let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default());
-        let participants = vec![DeviceId::new(), DeviceId::new()];
+        let participants = vec![test_device_id(1), test_device_id(2)];
 
         // Create session
         let session_id = manager.create_session(participants.clone()).unwrap();
@@ -724,7 +725,7 @@ mod tests {
     #[test]
     fn test_session_completion() {
         let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default());
-        let session_id = manager.create_session(vec![DeviceId::new()]).unwrap();
+        let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
 
         let initial_state = TestProtocolState {
             phase: "test".to_string(),
@@ -754,7 +755,7 @@ mod tests {
     #[test]
     fn test_session_failure() {
         let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default());
-        let session_id = manager.create_session(vec![DeviceId::new()]).unwrap();
+        let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
 
         let initial_state = TestProtocolState {
             phase: "test".to_string(),
@@ -792,8 +793,8 @@ mod tests {
         let mut manager = SessionManager::<TestProtocolState>::new(config);
 
         // Create and activate maximum sessions
-        let session1 = manager.create_session(vec![DeviceId::new()]).unwrap();
-        let session2 = manager.create_session(vec![DeviceId::new()]).unwrap();
+        let session1 = manager.create_session(vec![test_device_id(1)]).unwrap();
+        let session2 = manager.create_session(vec![test_device_id(1)]).unwrap();
 
         let state = TestProtocolState {
             phase: "test".to_string(),
@@ -803,7 +804,7 @@ mod tests {
         manager.activate_session(session2, state).unwrap();
 
         // Try to exceed limit
-        let result = manager.create_session(vec![DeviceId::new()]);
+        let result = manager.create_session(vec![test_device_id(1)]);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SyncError::ResourceExhausted { .. }));
     }
@@ -816,7 +817,7 @@ mod tests {
         };
         let mut manager = SessionManager::<TestProtocolState>::new(config);
         
-        let session_id = manager.create_session(vec![DeviceId::new()]).unwrap();
+        let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
         
         // Wait for timeout
         thread::sleep(StdDuration::from_millis(150));
@@ -840,7 +841,7 @@ mod tests {
         let mut manager = SessionManager::<TestProtocolState>::new(config);
 
         // Create and complete a session
-        let session_id = manager.create_session(vec![DeviceId::new()]).unwrap();
+        let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
         let state = TestProtocolState {
             phase: "test".to_string(),
             data: vec![],
@@ -864,7 +865,7 @@ mod tests {
 
         // Create and complete some sessions
         for i in 0..3 {
-            let session_id = manager.create_session(vec![DeviceId::new()]).unwrap();
+            let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
             let state = TestProtocolState {
                 phase: "test".to_string(),
                 data: vec![],

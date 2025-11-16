@@ -379,6 +379,7 @@ impl ProgressMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::test_utils::test_device_id;
 
     #[test]
     fn test_session_message() {
@@ -403,8 +404,8 @@ mod tests {
 
     #[test]
     fn test_request_response_flow() {
-        let from = DeviceId::new();
-        let to = DeviceId::new();
+        let from = test_device_id(1);
+        let to = test_device_id(2);
         
         let request = RequestMessage::new(from, to, "ping".to_string());
         let response = ResponseMessage::success(&request, "pong".to_string());
