@@ -12,13 +12,22 @@ use aura_protocol::handlers::{
     erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, CompositeHandler, EffectRegistry,
     EffectType, ExecutionMode, RegistrableHandler,
 };
+use aura_testkit::strategies::arb_device_id;
 use std::collections::HashSet;
-use uuid::Uuid;
+
+/// Helper to create deterministic device IDs for tests
+fn test_device_id(seed: &[u8]) -> DeviceId {
+    use aura_core::hash::hash;
+    use uuid::Uuid;
+    let hash_bytes = hash(seed);
+    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    DeviceId(Uuid::from_bytes(uuid_bytes))
+}
 
 /// Test that all effect types have corresponding implementations
 #[test]
 fn test_effect_coverage_completeness() {
-    let device_id = DeviceId::from(Uuid::new_v4());
+    let device_id = test_device_id(b"test_effect_coverage");
 
     // Create handlers for all execution modes
     let testing_handler = AuraHandlerFactory::for_testing(device_id);
@@ -87,7 +96,7 @@ fn test_effect_coverage_completeness() {
 #[tokio::test]
 async fn test_effect_registry_validation() {
     let mut registry = EffectRegistry::new(ExecutionMode::Testing);
-    let device_id = Uuid::new_v4();
+    let device_id = test_device_id(b"test_effect_registry_validation").0;
 
     // Create a composite handler to register
     let composite_handler = CompositeHandler::for_testing(device_id);
@@ -183,7 +192,7 @@ async fn test_effect_registry_validation() {
 /// Test that the unified handler bridge provides complete coverage
 #[tokio::test]
 async fn test_unified_bridge_coverage() {
-    let _device_id = DeviceId::from(Uuid::new_v4());
+    let _device_id = test_device_id(b"test_unified_bridge_coverage");
     // Note: UnifiedAuraHandlerBridge requires AuraEffects trait which CompositeHandler may not implement
     // Skipping this test for now as it requires trait implementation changes
     // let composite = CompositeHandler::for_testing(device_id.into());
@@ -196,7 +205,7 @@ async fn test_unified_bridge_coverage() {
 /// Test handler factory coverage for all execution modes
 #[test]
 fn test_handler_factory_coverage() {
-    let device_id = DeviceId::from(Uuid::new_v4());
+    let device_id = test_device_id(b"test_handler_factory_coverage");
 
     // Test testing mode
     let testing_handler = AuraHandlerFactory::for_testing(device_id);
@@ -255,7 +264,7 @@ fn test_comprehensive_effect_type_validation() {
     assert!(all_effect_types.contains(&EffectType::Choreographic));
 
     // Validate that we have handlers for critical protocol effects
-    let device_id = DeviceId::from(Uuid::new_v4());
+    let device_id = test_device_id(b"test_effect_registry_completeness");
     let handler = AuraHandlerFactory::for_testing(device_id);
 
     for effect_type in &protocol_effects {
@@ -281,7 +290,7 @@ fn test_comprehensive_effect_type_validation() {
 /// Test that effect handler implementations are deterministic in testing mode
 #[tokio::test]
 async fn test_handler_determinism() {
-    let device_id = DeviceId::from(Uuid::new_v4());
+    let device_id = test_device_id(b"test_handler_determinism");
 
     // Create two handlers with the same device ID for deterministic testing
     let handler1 = AuraHandlerFactory::for_testing(device_id);
@@ -319,7 +328,7 @@ async fn test_handler_determinism() {
 /// Performance and coverage metrics test
 #[test]
 fn test_handler_coverage_metrics() {
-    let device_id = DeviceId::from(Uuid::new_v4());
+    let device_id = test_device_id(b"test_handler_coverage_metrics");
     let handler = AuraHandlerFactory::for_testing(device_id);
 
     let all_effects = EffectType::all();
@@ -373,7 +382,7 @@ fn test_registry_capability_validation() {
 /// Integration test for complete handler system
 #[tokio::test]
 async fn test_complete_handler_system_integration() {
-    let device_id = DeviceId::from(Uuid::new_v4());
+    let device_id = test_device_id(b"test_complete_handler_system_integration");
 
     // Test all factory methods work
     let testing_handler = AuraHandlerFactory::for_testing(device_id);

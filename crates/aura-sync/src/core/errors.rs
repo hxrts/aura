@@ -358,6 +358,7 @@ impl SyncError {
 }
 
 #[cfg(test)]
+    use aura_core::test_utils::test_device_id;
 mod tests {
     use super::*;
 
@@ -382,7 +383,7 @@ mod tests {
         let err = SyncError::timeout("journal_sync", Duration::from_secs(30));
         assert!(err.user_message().contains("timed out"));
 
-        let peer = DeviceId::new();
+        let peer = test_device_id(1);
         let err = SyncError::peer_with_device("discovery", "unreachable", peer);
         assert!(err.user_message().contains(&peer.to_string()));
     }

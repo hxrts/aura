@@ -17,56 +17,14 @@
 //! - Join is idempotent: a ⊔ a = a
 //! - Bottom element exists: a ⊔ ⊥ = a
 
-use aura_core::tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
-use aura_core::DeviceId;
-use aura_journal::semilattice::{Bottom, JoinSemilattice, OpLog};
+use aura_journal::semilattice::{Bottom, JoinSemilattice};
 use aura_protocol::sync::{IntentState, PeerView};
+use aura_testkit::strategies::{arb_oplog, proptest};
 use proptest::prelude::*;
-use uuid::Uuid;
 
 // ============================================================================
 // OpLog Property Tests
 // ============================================================================
-
-fn create_test_op(commitment: [u8; 32], epoch: u64, leaf_id: u64) -> AttestedOp {
-    AttestedOp {
-        op: TreeOp {
-            parent_commitment: commitment,
-            parent_epoch: epoch,
-            op: TreeOpKind::AddLeaf {
-                leaf: LeafNode {
-                    leaf_id: LeafId(
-                        leaf_id
-                            .try_into()
-                            .unwrap_or_else(|e| panic!("Invalid leaf_id: {}", e)),
-                    ),
-                    device_id: DeviceId::new(),
-                    role: LeafRole::Device,
-                    public_key: vec![1, 2, 3],
-                    meta: vec![],
-                },
-                under: NodeIndex(0),
-            },
-            version: 1,
-        },
-        agg_sig: vec![],
-        signer_count: 0,
-    }
-}
-
-fn arb_oplog() -> impl Strategy<Value = OpLog> {
-    prop::collection::vec(
-        (prop::array::uniform32(any::<u8>()), 1u64..=10, 1u64..=100),
-        0..=10,
-    )
-    .prop_map(|ops| {
-        let mut oplog = OpLog::new();
-        for (commitment, epoch, leaf_id) in ops {
-            oplog.add_operation(create_test_op(commitment, epoch, leaf_id));
-        }
-        oplog
-    })
-}
 
 proptest! {
     /// Property: OpLog join is associative
