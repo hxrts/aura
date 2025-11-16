@@ -479,5 +479,6 @@ pub use time_enhanced::EnhancedTimeHandler;
 
 
 // External re-exports
-pub use aura_effects::journal::MockJournalHandler;
+// REMOVED: Users should import MockJournalHandler directly from aura-effects
+// pub use aura_effects::journal::MockJournalHandler;
 pub use mock::MockHandler;
