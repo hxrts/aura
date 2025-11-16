@@ -13,6 +13,7 @@ mod effect_handlers;
 mod handler_adapters;
 mod effect_system;
 mod error_types;
+mod test_macros;
 
 /// Full-featured choreography! macro with complete rumpsteak-aura feature inheritance
 ///
@@ -175,4 +176,31 @@ pub fn aura_effect_implementations(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn aura_error_types(input: TokenStream) -> TokenStream {
     error_types::aura_error_types_impl(input)
+}
+
+/// Attribute macro for Aura async tests with automatic setup
+///
+/// This macro wraps `#[tokio::test]` and provides:
+/// - Automatic tracing initialization via `aura_testkit::init_test_tracing()`
+/// - 30 second timeout by default
+/// - Better error messages on timeout
+///
+/// # Example
+///
+/// ```ignore
+/// use aura_macros::aura_test;
+/// use aura_core::AuraResult;
+///
+/// #[aura_test]
+/// async fn my_test() -> AuraResult<()> {
+///     // Tracing is automatically initialized
+///     // Test has 30s timeout
+///     let fixture = aura_testkit::create_test_fixture().await?;
+///     assert_ne!(fixture.device_id().to_string(), "");
+///     Ok(())
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn aura_test(attr: TokenStream, item: TokenStream) -> TokenStream {
+    test_macros::aura_test_impl(attr, item)
 }
