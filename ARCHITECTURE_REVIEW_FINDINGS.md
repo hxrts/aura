@@ -408,8 +408,8 @@ These are **foundational effect traits**, not orchestration-specific effects.
    - [x] ~~Move `handlers/system/monitoring.rs` to aura-effects~~ ✅ (Commit 290f3c6)
    - [x] ~~Move `handlers/time_enhanced.rs` to aura-effects~~ ✅ NOT NEEDED (correctly placed in aura-protocol)
 
-2. **Move to aura-core**:
-   - [ ] Move all 5 agent effect traits from `effects/agent.rs` to aura-core
+2. **Move to aura-core**: ✅ COMPLETED
+   - [x] ~~Move all 5 agent effect traits from `effects/agent.rs` to aura-core~~ ✅ (Commit 54704ba)
 
 3. **Delete**:
    - [x] ~~`messages/crypto/dkd.rs` (unused dead code)~~ ✅ COMPLETED (Commit 720387e)
