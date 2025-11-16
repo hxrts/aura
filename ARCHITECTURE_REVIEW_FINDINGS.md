@@ -308,12 +308,12 @@ pub struct MockCryptoHandler {
 **Priority: CRITICAL - Immediate refactoring required**
 
 1. **Remove from aura-effects**:
-   - `src/transport/coordination.rs` - Entire file violates Layer 3
-   - `src/time.rs` - `RealTimeHandler` struct and `ContextRegistry`
+   - [x] ~~`src/transport/coordination.rs` - Entire file violates Layer 3~~ ✅ COMPLETED (Commit 826b221)
+   - [ ] `src/time.rs` - `RealTimeHandler` struct and `ContextRegistry`
 
 2. **Create in aura-protocol**:
-   - `src/handlers/transport_coordinator.rs` - Move TransportCoordinator
-   - `src/handlers/timeout_coordinator.rs` - Move RealTimeHandler
+   - [x] ~~`src/handlers/transport_coordinator.rs` - Move TransportCoordinator~~ ✅ COMPLETED (Commit 826b221)
+   - [ ] `src/handlers/timeout_coordinator.rs` - Move RealTimeHandler
 
 3. **Keep in aura-effects**:
    - Simple stateless time handler that delegates to `tokio::time`
