@@ -1,233 +1,54 @@
-//! Aura Storage Layer - Pure Effect Interface
+//! Aura Storage Domain Layer
 //!
-//! This crate implements the storage layer for Aura as a simple effect interface,
-//! aligned with the formal system model defined in docs/001_theoretical_foundations.md.
+//! This crate provides storage domain types, semantics, and pure logic for the Aura platform.
+//! It follows the 8-layer architecture as a Layer 2 (Specification/Domain) crate.
 //!
-//! ## Architecture
+//! ## Architecture Position
 //!
-//! The storage layer provides two core capabilities:
-//! 1. **Content-addressed storage**: Store and retrieve chunks by content ID (CID)
-//! 2. **Capability-filtered search**: Privacy-preserving search over stored content
+//! - **Layer 2 - Domain/Specification**: Pure storage types and logic
+//! - **Dependencies**: Only `aura-core` (foundation layer)
+//! - **Responsibilities**: Storage domain concepts, no effect handlers or coordination
 //!
-//! ## Model Alignment
+//! ## Core Concepts
 //!
-//! From the formal model (Section C.2):
-//! ```ignore
-//! Storage is simply an effect family:
-//!   store_chunk : (ChunkId, Bytes) -> ()
-//!   fetch_chunk : ChunkId -> Bytes?
-//! ```
+//! - **Content Addressing**: Content-addressed storage with cryptographic chunk IDs
+//! - **Capability-Based Access**: Storage permissions using meet-semilattice operations
+//! - **Search Domain Types**: Query types and result filtering logic
+//! - **Storage Semantics**: Pure functions for storage operations and access control
 //!
-//! Search is defined as capability-filtered queries over join-semilattice indices (Section E.1).
+//! ## What's NOT in this crate
 //!
-//! ## Example Usage
-//!
-//! ```rust,ignore
-//! use aura_store::{StorageEffects, ChunkId};
-//!
-//! // Store a chunk
-//! let chunk_id = ChunkId::from_bytes(b"hello world");
-//! effects.store_chunk(chunk_id.clone(), b"hello world".to_vec()).await?;
-//!
-//! // Retrieve a chunk
-//! let data = effects.fetch_chunk(chunk_id).await?;
-//! ```
+//! - Effect handlers (belong in `aura-effects`)
+//! - Coordination logic (belongs in `aura-protocol`)
+//! - Choreographic protocols (belong in `aura-storage`)
+//! - Async execution (pure synchronous domain logic)
 
-pub mod encrypted;
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
+/// Content addressing and chunk management types
+pub mod chunk;
+
+/// Storage capability types and access control logic
+pub mod capabilities;
+
+/// Search query types and result filtering logic
 pub mod search;
 
-// Re-export core types
-pub use aura_core::{ChunkId, ContentSize};
-pub use encrypted::EncryptedStorageHandler;
-pub use search::{
-    AccessLevel, CapabilityFilteredQuery, CapabilityFilteredSearchEngine, FilteredSearchResult,
-    SearchError, SearchQuery, SearchScope,
+/// Storage-specific CRDT types and operations
+pub mod crdt;
+
+/// Unified storage error types
+pub mod errors;
+
+// Re-export core types from aura-core
+pub use aura_core::{ChunkId, ContentId, ContentSize};
+
+// Re-export main APIs
+pub use capabilities::{
+    AccessDecision, StorageCapability, StorageCapabilitySet, StoragePermission, StorageResource,
 };
-
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
-/// Storage operation errors
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum StorageError {
-    /// Chunk not found
-    NotFound(ChunkId),
-    /// I/O error
-    IoError(String),
-    /// Serialization error
-    SerializationError(String),
-    /// Invalid chunk ID
-    InvalidChunkId(String),
-    /// Storage quota exceeded
-    QuotaExceeded,
-    /// Permission denied
-    PermissionDenied,
-}
-
-impl std::fmt::Display for StorageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StorageError::NotFound(id) => write!(f, "Chunk not found: {}", id),
-            StorageError::IoError(msg) => write!(f, "I/O error: {}", msg),
-            StorageError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
-            StorageError::InvalidChunkId(msg) => write!(f, "Invalid chunk ID: {}", msg),
-            StorageError::QuotaExceeded => write!(f, "Storage quota exceeded"),
-            StorageError::PermissionDenied => write!(f, "Permission denied"),
-        }
-    }
-}
-
-impl std::error::Error for StorageError {}
-
-// Use storage effects from aura-core instead of defining our own
-// This aligns with work/013.md architecture where aura-store focuses on search,
-// while aura-core provides the core storage effects interface
-pub use aura_core::effects::StorageEffects;
-
-/// Storage statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorageStats {
-    /// Total number of chunks stored
-    pub chunk_count: u64,
-    /// Total bytes stored
-    pub total_bytes: u64,
-    /// Storage backend type
-    pub backend_type: String,
-}
-
-/// Simple in-memory storage implementation (for testing)
-#[derive(Debug, Clone)]
-pub struct MemoryStorage {
-    /// Stored chunks by ID
-    pub chunks: HashMap<ChunkId, Vec<u8>>,
-}
-
-impl MemoryStorage {
-    /// Create a new in-memory storage
-    pub fn new() -> Self {
-        Self {
-            chunks: HashMap::new(),
-        }
-    }
-
-    /// Get number of stored chunks
-    pub fn len(&self) -> usize {
-        self.chunks.len()
-    }
-
-    /// Check if storage is empty
-    pub fn is_empty(&self) -> bool {
-        self.chunks.is_empty()
-    }
-
-    /// Clear all stored chunks
-    pub fn clear(&mut self) {
-        self.chunks.clear();
-    }
-
-    /// Store a chunk by ID
-    pub fn store_chunk(
-        &mut self,
-        chunk_id: ChunkId,
-        data: Vec<u8>,
-    ) -> Result<(), aura_core::effects::StorageError> {
-        self.chunks.insert(chunk_id, data);
-        Ok(())
-    }
-
-    /// Retrieve a chunk by ID
-    pub fn fetch_chunk(
-        &self,
-        chunk_id: &ChunkId,
-    ) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
-        Ok(self.chunks.get(chunk_id).cloned())
-    }
-
-    /// Delete a chunk by ID
-    pub fn delete_chunk(
-        &mut self,
-        chunk_id: &ChunkId,
-    ) -> Result<(), aura_core::effects::StorageError> {
-        self.chunks.remove(chunk_id);
-        Ok(())
-    }
-}
-
-impl Default for MemoryStorage {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// StorageEffects implementation moved to aura-effects to maintain clean domain layer separation
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_memory_storage_basic() {
-        let mut storage = MemoryStorage::new();
-
-        // Store a chunk
-        let chunk_id = ChunkId::from_bytes(b"test data");
-        storage
-            .store_chunk(chunk_id.clone(), b"test data".to_vec())
-            .unwrap();
-
-        // Retrieve the chunk
-        let data = storage.fetch_chunk(&chunk_id).unwrap();
-        assert_eq!(data, Some(b"test data".to_vec()));
-
-        // Basic chunk storage test complete
-    }
-
-    #[test]
-    fn test_memory_storage_not_found() {
-        let storage = MemoryStorage::new();
-        let chunk_id = ChunkId::from_bytes(b"nonexistent");
-
-        let data = storage.fetch_chunk(&chunk_id).unwrap();
-        assert_eq!(data, None);
-    }
-
-    #[test]
-    fn test_memory_storage_delete() {
-        let mut storage = MemoryStorage::new();
-
-        let chunk_id = ChunkId::from_bytes(b"test data");
-        storage
-            .store_chunk(chunk_id.clone(), b"test data".to_vec())
-            .unwrap();
-
-        // Delete the chunk
-        storage.delete_chunk(&chunk_id).unwrap();
-
-        // Verify it's gone
-        let data = storage.fetch_chunk(&chunk_id).unwrap();
-        assert_eq!(data, None);
-    }
-
-    #[test]
-    fn test_chunk_id_content_addressing() {
-        let mut storage = MemoryStorage::new();
-
-        // Same content should produce same chunk ID
-        let data1 = b"identical content";
-        let data2 = b"identical content";
-
-        let chunk_id1 = ChunkId::from_bytes(data1);
-        let chunk_id2 = ChunkId::from_bytes(data2);
-
-        assert_eq!(chunk_id1, chunk_id2);
-
-        // Store once
-        storage
-            .store_chunk(chunk_id1.clone(), data1.to_vec())
-            .unwrap();
-
-        // Should be retrievable by either ID
-        let retrieved = storage.fetch_chunk(&chunk_id2).unwrap();
-        assert_eq!(retrieved, Some(data1.to_vec()));
-    }
-}
+pub use chunk::{compute_chunk_layout, ChunkLayout, ChunkManifest, ContentManifest, ErasureConfig};
+pub use crdt::{StorageIndex, StorageOpLog, StorageState};
+pub use errors::StorageError;
+pub use search::{FilteredResults, SearchIndexEntry, SearchQuery, SearchResults, SearchScope};

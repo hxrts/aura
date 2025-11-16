@@ -10,10 +10,9 @@
 //! 5. Return comprehensive execution results
 
 use super::{
-    deltas::apply_delta_facts, evaluation::evaluate_guard, privacy::track_leakage_consumption,
-    ExecutionMetrics, GuardedExecutionResult, ProtocolGuard,
+    deltas::apply_delta_facts, effect_system_trait::GuardEffectSystem, evaluation::evaluate_guard,
+    privacy::track_leakage_consumption, ExecutionMetrics, GuardedExecutionResult, ProtocolGuard,
 };
-use crate::effects::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult};
 use std::future::Future;
 use std::time::Instant;
@@ -28,13 +27,14 @@ use tracing::{debug, error, info, warn, Instrument};
 ///
 /// The execution is atomic: either all guards pass and execution succeeds with
 /// delta application, or the operation fails with no side effects.
-pub async fn execute_guarded_operation<T, F, Fut>(
+pub async fn execute_guarded_operation<E, T, F, Fut>(
     guard: &ProtocolGuard,
-    effect_system: &mut AuraEffectSystem,
+    effect_system: &mut E,
     operation: F,
 ) -> AuraResult<GuardedExecutionResult<T>>
 where
-    F: FnOnce(&mut AuraEffectSystem) -> Fut,
+    E: GuardEffectSystem + aura_wot::EffectSystemInterface,
+    F: FnOnce(&mut E) -> Fut,
     Fut: Future<Output = AuraResult<T>>,
 {
     let total_start_time = Instant::now();
@@ -161,19 +161,19 @@ where
 ///
 /// This provides transaction-like semantics for complex protocols that require
 /// multiple guarded steps. If any step fails, no delta facts are applied.
-pub async fn execute_guarded_sequence<T>(
+pub async fn execute_guarded_sequence<E, T>(
     guards_and_operations: Vec<(
         ProtocolGuard,
         Box<
-            dyn FnOnce(
-                    &mut AuraEffectSystem,
-                )
-                    -> std::pin::Pin<Box<dyn Future<Output = AuraResult<T>> + Send>>
+            dyn FnOnce(&mut E) -> std::pin::Pin<Box<dyn Future<Output = AuraResult<T>> + Send>>
                 + Send,
         >,
     )>,
-    effect_system: &mut AuraEffectSystem,
-) -> AuraResult<Vec<GuardedExecutionResult<T>>> {
+    effect_system: &mut E,
+) -> AuraResult<Vec<GuardedExecutionResult<T>>>
+where
+    E: GuardEffectSystem + aura_wot::EffectSystemInterface,
+{
     let sequence_start = Instant::now();
     let span = tracing::info_span!("guarded_sequence", operations = guards_and_operations.len());
 

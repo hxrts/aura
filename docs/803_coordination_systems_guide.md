@@ -69,7 +69,7 @@ Meet operations produce capability sets that are subsets of both inputs. This en
 Integrate CRDTs with choreographic protocols:
 
 ```rust
-use aura_protocol::choreography::protocols::anti_entropy::execute_anti_entropy;
+use aura_sync::choreography::anti_entropy::execute_as_requester;
 
 let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_state);
 
@@ -513,8 +513,9 @@ Annotations compile to extension effects that execute during protocol operations
 Choreographies compose through effect programs:
 
 ```rust
-use aura_protocol::choreography::protocols::anti_entropy::execute_anti_entropy;
-use aura_protocol::choreography::protocols::threshold_ceremony::execute_threshold_ceremony;
+use aura_sync::choreography::anti_entropy::execute_as_requester;
+// TODO: Move threshold ceremony to aura-frost feature crate
+// use aura_frost::threshold_ceremony::execute_threshold_ceremony;
 
 let composed_protocol = Program::new()
     .ext(ValidateCapability {

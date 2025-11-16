@@ -11,12 +11,12 @@ workspace = true
 
 [dependencies]
 # Workspace crates
-aura-agent = { path = "../aura-agent" }  # TODO: Remove circular dependency - Layer 8 should not depend on Layer 6
+# REMOVED: aura-agent dependency violates 8-layer architecture (Layer 8 should not depend on Layer 6)
 aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
 aura-journal = { path = "../aura-journal" }
 aura-transport = { path = "../aura-transport" }
-aura-protocol = { path = "../aura-protocol" }
+# aura-protocol dependency removed - migrated to foundation-based testing
 
 # Async runtime
 async-trait = { workspace = true }
@@ -34,9 +34,12 @@ rand = { workspace = true }
 
 # Logging
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }
+once_cell = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 # For testing the test utilities themselves

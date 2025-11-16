@@ -92,7 +92,7 @@ pub trait LedgerEffects: Send + Sync {
 }
 
 /// Ledger-related errors
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum LedgerError {
     /// Ledger is not available
     #[error("Ledger not available")]
@@ -135,10 +135,10 @@ pub enum LedgerError {
     ConcurrentAccess,
 
     /// Backend storage error
-    #[error("Backend error: {source}")]
+    #[error("Backend error: {error}")]
     Backend {
-        /// The underlying backend error
-        source: Box<dyn std::error::Error + Send + Sync>,
+        /// Backend error message
+        error: String,
     },
 
     /// Journal graph operation failed

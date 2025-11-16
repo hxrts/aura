@@ -7,6 +7,8 @@
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
 use aura_core::{ContextId, DeviceId};
 use aura_macros::choreography;
+use crate::handlers::{AuraHandlerError, EffectType, ExecutionMode};
+use crate::handlers::core::AuraHandler;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -223,7 +225,7 @@ impl ChannelEstablishmentCoordinator {
 
         let channel_id = format!(
             "channel-{}-{}",
-            self.device_id.to_hex()[..8].to_string(),
+            format!("{:?}", self.device_id)[..8].to_string(),
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -339,48 +341,55 @@ impl ChannelTeardownCoordinator {
 }
 
 // Choreographic Protocol Definitions
-// Multi-phase channel establishment with resource allocation
-choreography! {
-    #[namespace = "channel_establishment"]
-    protocol ChannelEstablishmentProtocol {
-        roles: Coordinator, Participant1, Participant2;
+mod channel_establishment {
+    use super::*;
+    
+    // Multi-phase channel establishment with resource allocation
+    choreography! {
+        #[namespace = "channel_establishment"]
+        protocol ChannelEstablishmentProtocol {
+            roles: Coordinator, Participant1, Participant2;
 
-        // Phase 1: Request channel establishment
-        Coordinator[guard_capability = "coordinate_channel_establishment",
-                   flow_cost = 200,
-                   journal_facts = "channel_establishment_initiated"]
-        -> Participant1: ChannelEstablishmentRequest(ChannelEstablishmentRequest);
+            // Phase 1: Request channel establishment
+            Coordinator[guard_capability = "coordinate_channel_establishment",
+                       flow_cost = 200,
+                       journal_facts = "channel_establishment_initiated"]
+            -> Participant1: ChannelEstablishmentRequest(ChannelEstablishmentRequest);
 
-        Coordinator[guard_capability = "coordinate_channel_establishment",
-                   flow_cost = 200]
-        -> Participant2: ChannelEstablishmentRequest(ChannelEstablishmentRequest);
+            Coordinator[guard_capability = "coordinate_channel_establishment",
+                       flow_cost = 200]
+            -> Participant2: ChannelEstablishmentRequest(ChannelEstablishmentRequest);
 
-        // Phase 2: Participants confirm with resource allocation
-        Participant1[guard_capability = "confirm_channel_participation",
-                    flow_cost = 150,
-                    journal_facts = "channel_participation_confirmed"]
-        -> Coordinator: ChannelConfirmation(ChannelConfirmation);
+            // Phase 2: Participants confirm with resource allocation
+            Participant1[guard_capability = "confirm_channel_participation",
+                        flow_cost = 150,
+                        journal_facts = "channel_participation_confirmed"]
+            -> Coordinator: ChannelConfirmation(ChannelConfirmation);
 
-        Participant2[guard_capability = "confirm_channel_participation",
-                    flow_cost = 150,
-                    journal_facts = "channel_participation_confirmed"]
-        -> Coordinator: ChannelConfirmation(ChannelConfirmation);
+            Participant2[guard_capability = "confirm_channel_participation",
+                        flow_cost = 150,
+                        journal_facts = "channel_participation_confirmed"]
+            -> Coordinator: ChannelConfirmation(ChannelConfirmation);
 
-        // Phase 3: Coordinator finalizes channel establishment
-        Coordinator[guard_capability = "finalize_channel_establishment",
-                   flow_cost = 100,
-                   journal_facts = "channel_establishment_finalized"]
-        -> Participant1: ChannelFinalization(ChannelFinalization);
+            // Phase 3: Coordinator finalizes channel establishment
+            Coordinator[guard_capability = "finalize_channel_establishment",
+                       flow_cost = 100,
+                       journal_facts = "channel_establishment_finalized"]
+            -> Participant1: ChannelFinalization(ChannelFinalization);
 
-        Coordinator[guard_capability = "finalize_channel_establishment",
-                   flow_cost = 100,
-                   journal_facts = "channel_establishment_finalized"]
-        -> Participant2: ChannelFinalization(ChannelFinalization);
+            Coordinator[guard_capability = "finalize_channel_establishment",
+                       flow_cost = 100,
+                       journal_facts = "channel_establishment_finalized"]
+            -> Participant2: ChannelFinalization(ChannelFinalization);
+        }
     }
 }
 
-// Coordinated channel teardown with cleanup
-choreography! {
+mod channel_teardown {
+    use super::*;
+    
+    // Coordinated channel teardown with cleanup
+    choreography! {
     #[namespace = "channel_teardown"]
     protocol ChannelTeardownProtocol {
         roles: Initiator, Participant1, Participant2;
@@ -405,5 +414,6 @@ choreography! {
                     flow_cost = 100,
                     journal_facts = "channel_teardown_acknowledged"]
         -> Initiator: TeardownAcknowledgment(TeardownAcknowledgment);
+    }
     }
 }

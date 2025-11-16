@@ -6,6 +6,9 @@
 //!
 //! **Phase 5 Update**: Now integrated with authorization operations system and choreographic protocols.
 
+use crate::runtime::AuraEffectSystem;
+#[cfg(test)]
+use crate::runtime::EffectSystemConfig;
 use crate::{
     errors::{AuraError, Result},
     operations::*,
@@ -13,10 +16,8 @@ use crate::{
 use aura_core::effects::ConsoleEffects;
 use aura_core::{AccountId, DeviceId};
 use aura_macros::choreography;
-#[cfg(test)]
-use aura_protocol::effects::EffectSystemConfig;
 use aura_protocol::effects::{
-    AuraEffectSystem, ChoreographicRole, LedgerEffects, SessionManagementEffects, SessionType,
+    ChoreographicRole, LedgerEffects, SessionManagementEffects, SessionType,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -187,9 +188,12 @@ pub struct SessionTerminated {
 }
 
 // Session creation choreography
-choreography! {
-    #[namespace = "session_creation"]
-    protocol SessionCreation {
+mod session_creation_protocol {
+    use super::*;
+
+    choreography! {
+        #[namespace = "session_creation"]
+        protocol SessionCreation {
         roles: Initiator, Participant, Coordinator;
 
         // Phase 1: Session Creation Request
@@ -223,10 +227,15 @@ choreography! {
     }
 }
 
+}
+
 // Session management choreography (for active sessions)
-choreography! {
-    #[namespace = "session_management"]
-    protocol SessionManagement {
+mod session_management_protocol {
+    use super::*;
+
+    choreography! {
+        #[namespace = "session_management"]
+        protocol SessionManagement {
         roles: Initiator, Participant, Coordinator;
 
         // Metadata update flow
@@ -242,10 +251,15 @@ choreography! {
     }
 }
 
+}
+
 // Session termination choreography
-choreography! {
-    #[namespace = "session_termination"]
-    protocol SessionTermination {
+mod session_termination_protocol {
+    use super::*;
+
+    choreography! {
+        #[namespace = "session_termination"]
+        protocol SessionTermination {
         roles: Initiator, Participant, Coordinator;
 
         // Session end request
@@ -265,6 +279,8 @@ choreography! {
                    journal_facts = "session_terminated"]
         -> Initiator: TerminateToInitiator(SessionTerminated);
     }
+}
+
 }
 
 /// Session operations handler
@@ -788,7 +804,7 @@ fn _session_type_suffix(session_type: &SessionType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_protocol::effects::AuraEffectSystem;
+    use crate::runtime::AuraEffectSystem;
 
     #[tokio::test]
     async fn test_session_creation() {

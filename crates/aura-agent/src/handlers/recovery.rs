@@ -4,13 +4,13 @@
 //! This handler provides a clean interface for guardian-based key recovery.
 
 use crate::errors::{AuraError, Result};
+use crate::runtime::AuraEffectSystem;
+#[cfg(test)]
+use crate::runtime::EffectSystemConfig;
 use aura_authenticate::guardian_auth::RecoveryContext;
 #[cfg(test)]
 use aura_authenticate::guardian_auth::RecoveryOperationType;
 use aura_core::{AccountId, DeviceId};
-use aura_protocol::effects::AuraEffectSystem;
-#[cfg(test)]
-use aura_protocol::effects::EffectSystemConfig;
 use aura_recovery::{
     guardian_key_recovery::GuardianKeyRecoveryCoordinator,
     types::{GuardianSet, RecoveryRequest, RecoveryResponse},
@@ -71,7 +71,7 @@ impl RecoveryOperations {
         self.account_id
     }
 
-    /// Get device ID  
+    /// Get device ID
     pub fn device_id(&self) -> DeviceId {
         self.device_id
     }

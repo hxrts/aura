@@ -21,55 +21,54 @@
 //! - **Middleware-First**: All handlers are middleware in a composable stack
 //! - **Unified Context**: Single context object flows through all layers
 //! - **Zero Legacy**: Clean replacement with no backwards compatibility
+//!
+//! # Naming Conventions
+//!
+//! This module follows algebraic effects theory naming conventions:
+//!
+//! ## Effects vs Handlers
+//!
+//! - **Effect**: A declaration of capabilities or operations that a computation may perform,
+//!   without specifying how those operations are implemented. Effects are abstract interfaces
+//!   that represent what can be done.
+//!   - Examples: `CryptoEffects`, `NetworkEffects`, `StorageEffects`
+//!   - Naming: `{Domain}Effects` trait
+//!
+//! - **Handler**: A concrete implementation that interprets effects by providing the actual
+//!   behavior for each effect operation. Handlers define how effects are executed in a
+//!   specific context.
+//!   - Examples: `MockCryptoHandler`, `RealCryptoHandler`, `TcpNetworkHandler`
+//!   - Naming: `{Adjective}{Domain}Handler` struct
+//!
+//! ## Coordination Patterns
+//!
+//! - **Coordinator**: Orchestrates multiple handlers or manages multi-party operations
+//!   - Examples: `CrdtCoordinator`, `StorageCoordinator`
+//!   - Naming: `{Domain}Coordinator`
+//!
+//! - **Adapter**: Bridges between different interfaces or protocols
+//!   - Examples: `AuraHandlerAdapter`, `ChoreographicAdapter`
+//!   - Naming: `{Source}{Target}Adapter`
+//!
+//! - **Bridge**: Connects different subsystems or layers
+//!   - Examples: `UnifiedAuraHandlerBridge`, `TypedBridge`
+//!   - Naming: `{System}Bridge` or `{Adjective}Bridge`
+//!
+//! This distinction ensures:
+//! 1. Effects are purely declarative - they specify the interface without implementation
+//! 2. Handlers are interpretive - they provide the concrete semantics
+//! 3. The same effect can have multiple handlers (mock vs real, different backends)
+//! 4. Handlers can be composed, chained, or swapped without changing effect declarations
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
 
-pub mod composite;
-pub mod context;
-pub mod context_immutable;
-pub mod erased;
-pub mod factory;
-pub mod registry;
-pub mod typed_bridge;
-pub mod unified_bridge;
+// Re-export ExecutionMode from aura_core to avoid duplication
+pub use aura_core::effects::ExecutionMode;
 
-/// Execution mode for Aura handlers
-///
-/// Controls the environment and implementation strategy for effect execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ExecutionMode {
-    /// Testing mode: Mock implementations, deterministic behavior
-    Testing,
-    /// Production mode: Real implementations, actual system operations
-    Production,
-    /// Simulation mode: Deterministic implementations with controllable effects
-    Simulation {
-        /// Random seed for deterministic simulation
-        seed: u64,
-    },
-}
+// Legacy module declarations removed - now organized under new structure
 
-impl ExecutionMode {
-    /// Check if this mode uses deterministic effects
-    pub fn is_deterministic(&self) -> bool {
-        matches!(self, Self::Testing | Self::Simulation { .. })
-    }
-
-    /// Check if this mode uses real system operations
-    pub fn is_production(&self) -> bool {
-        matches!(self, Self::Production)
-    }
-
-    /// Get the seed for deterministic modes
-    pub fn seed(&self) -> Option<u64> {
-        match self {
-            Self::Simulation { seed } => Some(*seed),
-            _ => None,
-        }
-    }
-}
 
 /// Effect type classification for dispatch and middleware routing
 ///
@@ -370,25 +369,30 @@ impl EffectType {
 
 // Re-export types from submodules (selective to avoid ambiguous re-exports)
 
-pub use composite::CompositeHandler;
+// Core handler infrastructure
+pub mod core;
+pub use core::{
+    CompositeHandler, AuraHandler, BoxedHandler, HandlerUtils,
+    AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, FactoryError,
+    EffectRegistry, RegistrableHandler, RegistryError,
+};
+
+// Context management
+pub mod context;
 pub use context::{
     AgentContext, AuraContext, ChoreographicContext, PlatformInfo,
     SimulationContext, TracingContext, MetricsContext,
 };
 
-// Re-export immutable context types with namespace prefix to avoid conflicts
-pub mod immutable {
-    pub use super::context_immutable::{
-        AgentContext, AuraContext, AuthenticationState, ChoreographicContext,
-        FaultInjectionSettings, MetricsContext, PlatformInfo,
-        PropertyCheckingConfig, SessionMetadata, SimulationContext, TracingContext,
-    };
-}
-pub use erased::{AuraHandler, BoxedHandler, HandlerUtils};
-pub use factory::{AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, FactoryError};
-// Unified CompositeHandler replaces old MiddlewareStack
-pub use registry::{EffectRegistry, RegistrableHandler, RegistryError};
-pub use unified_bridge::{UnifiedAuraHandlerBridge, UnifiedHandlerBridgeFactory};
+// Bridge adapters  
+pub mod bridges;
+pub use bridges::{TypedHandlerBridge, UnifiedAuraHandlerBridge, UnifiedHandlerBridgeFactory};
+
+// Memory-based handlers
+pub mod memory;
+pub use memory::{
+    MemoryChoreographicHandler, GuardianAuthorizationHandler, MemoryLedgerHandler,
+};
 
 // Convert AuraHandlerError to AuraError for ? operator
 impl From<AuraHandlerError> for aura_core::AuraError {
@@ -458,17 +462,22 @@ mod tests {
     }
 }
 
-// Additional handler modules (others already declared above)
+// Remaining handler modules  
 pub mod agent;
-pub mod choreographic;
-pub mod guardian;
-pub mod journal;
-pub mod ledger;
-pub mod mock;
-pub mod sync;
+pub mod storage;
 pub mod system;
-pub mod time;
-pub mod tree;
+pub mod mock;
 
-// Export mock handler for testing
+// Flattened handlers (previously in subdirectories)
+pub mod sync_anti_entropy;
+pub use sync_anti_entropy::AntiEntropyHandler;
+pub mod sync_broadcaster; 
+pub use sync_broadcaster::{BroadcastConfig, BroadcasterHandler};
+
+pub mod time_enhanced;
+pub use time_enhanced::EnhancedTimeHandler;
+
+
+// External re-exports
+pub use aura_effects::journal::MockJournalHandler;
 pub use mock::MockHandler;

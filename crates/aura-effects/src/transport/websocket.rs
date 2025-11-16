@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
 use url::Url;
@@ -214,15 +214,27 @@ impl NetworkEffects for WebSocketTransportHandler {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         // Convert UUID to WebSocket URL - simplified mapping
         let url_str = format!("ws://localhost:8080/{}", peer_id);
-        let url: Url = url_str.parse()
-            .map_err(|e| NetworkError::SendFailed { peer_id: Some(peer_id), reason: format!("Invalid WebSocket URL: {}", e) })?;
-        
-        let (mut ws_stream, _connection) = self.connect(url).await
+        let url: Url = url_str.parse().map_err(|e| NetworkError::SendFailed {
+            peer_id: Some(peer_id),
+            reason: format!("Invalid WebSocket URL: {}", e),
+        })?;
+
+        let (mut ws_stream, _connection) = self
+            .connect(url)
+            .await
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
-        self.send(&mut ws_stream, &message).await
-            .map_err(|e| NetworkError::SendFailed { peer_id: Some(peer_id), reason: e.to_string() })?;
-        self.close(&mut ws_stream, Some("Message sent".to_string())).await
-            .map_err(|e| NetworkError::SendFailed { peer_id: Some(peer_id), reason: e.to_string() })?;
+        self.send(&mut ws_stream, &message)
+            .await
+            .map_err(|e| NetworkError::SendFailed {
+                peer_id: Some(peer_id),
+                reason: e.to_string(),
+            })?;
+        self.close(&mut ws_stream, Some("Message sent".to_string()))
+            .await
+            .map_err(|e| NetworkError::SendFailed {
+                peer_id: Some(peer_id),
+                reason: e.to_string(),
+            })?;
         Ok(())
     }
 
@@ -236,11 +248,15 @@ impl NetworkEffects for WebSocketTransportHandler {
     }
 
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
-        Err(NetworkError::ReceiveFailed { reason: "WebSocket receive requires connection management".to_string() })
+        Err(NetworkError::ReceiveFailed {
+            reason: "WebSocket receive requires connection management".to_string(),
+        })
     }
 
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
-        Err(NetworkError::ReceiveFailed { reason: "WebSocket receive_from requires connection management".to_string() })
+        Err(NetworkError::ReceiveFailed {
+            reason: "WebSocket receive_from requires connection management".to_string(),
+        })
     }
 
     async fn connected_peers(&self) -> Vec<Uuid> {
@@ -255,7 +271,7 @@ impl NetworkEffects for WebSocketTransportHandler {
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
         use futures::stream;
         use std::pin::Pin;
-        
+
         let stream = stream::empty::<PeerEvent>();
         Ok(Pin::from(Box::new(stream)))
     }

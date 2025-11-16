@@ -58,6 +58,9 @@ pub mod connection_manager;
 /// Relay selection heuristics with guardian preference
 pub mod relay_selection;
 
+/// Secure channel establishment protocols
+pub mod secure_channel;
+
 mod crypto;
 
 // Re-export core types
@@ -100,4 +103,8 @@ pub use relay_selection::{
 };
 pub use sbb::{
     EnvelopeId, FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding, SbbFloodingCoordinator,
+};
+pub use secure_channel::{
+    SecureChannelCoordinator, ChannelConfig, ChannelState, ChannelLifecycleState,
+    HandshakeInit, HandshakeResponse, HandshakeComplete, HandshakeResult, KeyRotationRequest,
 };

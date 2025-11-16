@@ -8,13 +8,11 @@ use aura_core::{
     semilattice::{Bottom, CmApply, CvState, Dedup, DeltaState, JoinSemilattice, MeetSemiLattice},
     CausalContext, DeviceId, SessionId, AuraResult,
 };
-use aura_protocol::{
-    choreography::protocols::anti_entropy::{
-        execute_anti_entropy, AntiEntropyConfig, CrdtType,
-    },
-    effects::{
-        semilattice::CrdtCoordinator,
-    },
+use aura_sync::choreography::anti_entropy::{
+    execute_as_requester, AntiEntropyConfig,
+};
+use aura_protocol::effects::{
+    semilattice::CrdtCoordinator,
 };
 use aura_macros::aura_test;
 use serde::{Deserialize, Serialize};
@@ -518,7 +516,7 @@ async fn test_sync_request_creation_and_handling() -> AuraResult<()> {
     let response = coordinator.handle_sync_request(request).await?;
     assert_eq!(response.session_id, session_id);
     assert!(matches!(response.crdt_type, CrdtType::Convergent));
-    assert!(matches!(response.sync_data, aura_protocol::choreography::protocols::anti_entropy::CrdtSyncData::FullState(_)));
+    assert!(matches!(response.sync_data, aura_protocol::choreography::CrdtSyncData::FullState(_)));
     
     Ok(())
 }

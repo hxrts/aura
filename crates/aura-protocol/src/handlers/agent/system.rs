@@ -15,7 +15,7 @@ use crate::effects::{
         DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
         SessionManagementEffects, SessionMessage, SessionStatus, SessionType,
     },
-    AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects,
+    AuraEffectSystem, StorageEffects, TimeEffects,
 };
 use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraResult as Result};
@@ -53,18 +53,6 @@ impl AgentEffectSystemHandler {
         Self::new(device_id, core_effects)
     }
 
-    /// Create agent effect system for testing
-    ///
-    /// # Deprecated
-    /// This method creates the effect system internally which makes testing difficult.
-    /// Consider using `with_core_effects()` instead for better dependency injection.
-    pub fn for_testing(device_id: DeviceId) -> Self {
-        let core_effects = Arc::new(RwLock::new(
-            AuraEffectSystem::new(crate::effects::EffectSystemConfig::for_testing(device_id))
-                .expect("Failed to create test effect system"),
-        ));
-        Self::new(device_id, core_effects)
-    }
 
     /// Initialize the agent effect system
     pub async fn initialize(&self) -> Result<()> {
@@ -107,7 +95,7 @@ impl AgentEffects for AgentEffectSystemHandler {
             device_name: "Aura Device".to_string(),
             hardware_security: true, // Assume hardware security is available
             attestation_available: true,
-            last_sync: Some(effects.current_timestamp().await),
+            last_sync: Some(TimeEffects::current_timestamp(&*effects).await),
             storage_usage,
             storage_limit: 100 * 1024 * 1024, // 100 MB default
         })
@@ -174,7 +162,7 @@ impl AgentEffects for AgentEffectSystemHandler {
             network_status: network_health,
             authentication_status: auth_health,
             session_status: session_health,
-            last_check: effects.current_timestamp().await,
+            last_check: TimeEffects::current_timestamp(&*effects).await,
         })
     }
 }
@@ -244,7 +232,7 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
 
     async fn backup_credentials(&self) -> Result<CredentialBackup> {
         let effects = self.core_effects.read().await;
-        let timestamp = effects.current_timestamp().await;
+        let timestamp = TimeEffects::current_timestamp(&*effects).await;
 
         // Get all credentials
         let credentials = self.list_credentials().await?;

@@ -5,10 +5,37 @@
 
 use crate::sbb::{RendezvousEnvelope, SbbFlooding, SbbFloodingCoordinator};
 use aura_core::{AuraError, AuraResult, DeviceId};
-use aura_transport::NetworkTransport;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+// TODO: Replace with actual NetworkTransport when transport layer is implemented
+#[derive(Debug, Clone)]
+pub struct NetworkTransport {
+    device_id: DeviceId,
+}
+
+impl NetworkTransport {
+    pub fn new(device_id: DeviceId, _config: NetworkConfig) -> Arc<RwLock<Self>> {
+        Arc::new(RwLock::new(Self { device_id }))
+    }
+
+    pub async fn send(&self, _recipient: &DeviceId, _data: Vec<u8>) -> AuraResult<()> {
+        // TODO: Implement actual transport sending
+        Ok(())
+    }
+
+    pub async fn is_peer_connected(&self, _peer: DeviceId) -> bool {
+        // TODO: Implement actual peer connection checking
+        false
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NetworkConfig {
+    pub max_connections: usize,
+    pub timeout_ms: u64,
+}
 
 /// SBB message types for transport protocol
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -272,7 +299,7 @@ impl TransportSender for NetworkTransportSender {
         // Send via network transport
         let transport = self.transport.read().await;
         transport
-            .send(peer, payload, "sbb-message".to_string())
+            .send(&peer, payload)
             .await
     }
 

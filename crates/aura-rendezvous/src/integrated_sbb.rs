@@ -16,7 +16,7 @@ use crate::{
     sbb::{FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding},
 };
 use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId};
-use aura_transport::NetworkTransport;
+use crate::messaging::{NetworkTransport, NetworkConfig};
 use aura_wot::TrustLevel;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

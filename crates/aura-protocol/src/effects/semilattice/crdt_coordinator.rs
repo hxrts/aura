@@ -46,9 +46,7 @@
 //! ```
 
 use super::{CmHandler, CvHandler, DeltaHandler, MvHandler};
-use crate::choreography::protocols::anti_entropy::{
-    CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType,
-};
+use crate::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 use aura_core::{
     semilattice::{
         Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,

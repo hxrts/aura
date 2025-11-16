@@ -1,10 +1,10 @@
-// Cryptographic Effect Handlers
-//
-// Provides context-free implementations of cryptographic operations.
+//! Cryptographic Effect Handlers
+//!
+//! Provides context-free implementations of cryptographic operations.
 
-use aura_core::effects::{CryptoEffects, CryptoError, RandomEffects};
-use aura_core::effects::crypto::{KeyDerivationContext, FrostSigningPackage};
 use async_trait::async_trait;
+use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
+use aura_core::effects::{CryptoEffects, CryptoError, RandomEffects};
 use std::sync::{Arc, Mutex};
 
 /// Mock crypto handler for deterministic testing
@@ -15,13 +15,15 @@ pub struct MockCryptoHandler {
 }
 
 impl MockCryptoHandler {
+    /// Create a new mock crypto handler with default seed (42)
     pub fn new() -> Self {
         Self {
             seed: 42,
             counter: Arc::new(Mutex::new(0)),
         }
     }
-    
+
+    /// Create a new mock crypto handler with a specific seed
     pub fn with_seed(seed: u64) -> Self {
         Self {
             seed,
@@ -37,6 +39,7 @@ pub struct RealCryptoHandler {
 }
 
 impl RealCryptoHandler {
+    /// Create a new real crypto handler
     pub fn new() -> Self {
         Self {
             _phantom: std::marker::PhantomData,
@@ -164,7 +167,7 @@ impl CryptoEffects for MockCryptoHandler {
 
     async fn frost_generate_keys(
         &self,
-        threshold: u16,
+        _threshold: u16,
         max_signers: u16,
     ) -> Result<Vec<Vec<u8>>, CryptoError> {
         // Mock implementation
@@ -209,7 +212,6 @@ impl CryptoEffects for MockCryptoHandler {
     ) -> Result<Vec<u8>, CryptoError> {
         Ok(vec![self.seed as u8; 64])
     }
-
 
     async fn frost_verify(
         &self,
@@ -286,7 +288,8 @@ impl CryptoEffects for MockCryptoHandler {
         new_max_signers: u16,
     ) -> Result<Vec<Vec<u8>>, CryptoError> {
         // Mock implementation - generate new keys
-        self.frost_generate_keys(new_threshold, new_max_signers).await
+        self.frost_generate_keys(new_threshold, new_max_signers)
+            .await
     }
 
     fn is_simulated(&self) -> bool {
@@ -412,7 +415,6 @@ impl CryptoEffects for RealCryptoHandler {
         Ok(vec![0u8; 64])
     }
 
-
     async fn frost_verify(
         &self,
         _message: &[u8],
@@ -475,7 +477,8 @@ impl CryptoEffects for RealCryptoHandler {
         new_max_signers: u16,
     ) -> Result<Vec<Vec<u8>>, CryptoError> {
         // Placeholder implementation
-        self.frost_generate_keys(new_threshold, new_max_signers).await
+        self.frost_generate_keys(new_threshold, new_max_signers)
+            .await
     }
 
     fn is_simulated(&self) -> bool {

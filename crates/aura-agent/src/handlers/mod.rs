@@ -16,6 +16,10 @@ pub use aura_protocol::handlers::agent::{
     auth::AuthenticationHandler, session::MemorySessionHandler, system::AgentEffectSystemHandler,
 };
 
+// Re-export handler types from aura-protocol that agent needs
+pub use aura_core::effects::ExecutionMode;
+pub use aura_protocol::{AuraContext, AuraHandler, AuraHandlerError, EffectType};
+
 // Re-export local agent handlers
 pub use invitations::InvitationOperations;
 pub use ota::{OtaOperations, UpgradeProposalState, UpgradeStatus};

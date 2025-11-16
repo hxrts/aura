@@ -7,6 +7,8 @@
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
 use aura_core::{ContextId, DeviceId};
 use aura_macros::choreography;
+use crate::handlers::{AuraHandlerError, EffectType, ExecutionMode};
+use crate::handlers::core::AuraHandler;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -143,7 +145,7 @@ impl WebSocketHandshakeCoordinator {
 
         let session_id = format!(
             "ws-session-{}-{}",
-            self.device_id.to_hex()[..8].to_string(),
+            format!("{:?}", self.device_id)[..8].to_string(),
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -275,47 +277,58 @@ impl WebSocketSessionCoordinator {
 }
 
 // Choreographic Protocol Definitions
-// Multi-party WebSocket handshake with capability negotiation
-choreography! {
-    #[namespace = "websocket_handshake"]
-    protocol WebSocketHandshakeProtocol {
-        roles: Initiator, Responder;
+mod websocket_handshake {
+    use super::*;
+    
+    // Multi-party WebSocket handshake with capability negotiation
+    choreography! {
+        #[namespace = "websocket_handshake"]
+        protocol WebSocketHandshakeProtocol {
+            roles: Initiator, Responder;
 
-        // Phase 1: Handshake initiation with capability advertisement
-        Initiator[guard_capability = "initiate_websocket_handshake",
-                  flow_cost = 150,
-                  journal_facts = "websocket_handshake_initiated"]
-        -> Responder: WebSocketHandshakeInit(WebSocketHandshakeInit);
+            // Phase 1: Handshake initiation with capability advertisement
+            Initiator[guard_capability = "initiate_websocket_handshake",
+                      flow_cost = 150,
+                      journal_facts = "websocket_handshake_initiated"]
+            -> Responder: WebSocketHandshakeInit(WebSocketHandshakeInit);
 
-        // Phase 2: Responder processes and responds with capability grant/deny
-        Responder[guard_capability = "respond_websocket_handshake",
-                  flow_cost = 120,
-                  journal_facts = "websocket_handshake_processed"]
-        -> Initiator: WebSocketHandshakeResponse(WebSocketHandshakeResponse);
+            // Phase 2: Responder processes and responds with capability grant/deny
+            Responder[guard_capability = "respond_websocket_handshake",
+                      flow_cost = 120,
+                      journal_facts = "websocket_handshake_processed"]
+            -> Initiator: WebSocketHandshakeResponse(WebSocketHandshakeResponse);
+        }
     }
 }
 
-// Active WebSocket session coordination
-choreography! {
-    #[namespace = "websocket_session"]
-    protocol WebSocketActiveSession {
-        roles: Peer1, Peer2;
+mod websocket_session {
+    use super::*;
+    
+    // Active WebSocket session coordination
+    choreography! {
+        #[namespace = "websocket_session"]
+        protocol WebSocketActiveSession {
+            roles: Peer1, Peer2;
 
-        // Data exchange with flow control
-        Peer1[guard_capability = "send_websocket_data",
-              flow_cost = 50,
-              journal_facts = "websocket_data_sent"]
-        -> Peer2: WebSocketSessionData(WebSocketSessionData);
+            // Data exchange with flow control
+            Peer1[guard_capability = "send_websocket_data",
+                  flow_cost = 50,
+                  journal_facts = "websocket_data_sent"]
+            -> Peer2: WebSocketSessionData(WebSocketSessionData);
 
-        Peer2[guard_capability = "send_websocket_data",
-              flow_cost = 50,
-              journal_facts = "websocket_data_sent"]
-        -> Peer1: WebSocketSessionData(WebSocketSessionData);
+            Peer2[guard_capability = "send_websocket_data",
+                  flow_cost = 50,
+                  journal_facts = "websocket_data_sent"]
+            -> Peer1: WebSocketSessionData(WebSocketSessionData);
+        }
     }
 }
 
-// Graceful WebSocket teardown coordination
-choreography! {
+mod websocket_teardown {
+    use super::*;
+    
+    // Graceful WebSocket teardown coordination
+    choreography! {
     #[namespace = "websocket_teardown"]
     protocol WebSocketTeardownProtocol {
         roles: Initiator, Responder;
@@ -332,4 +345,5 @@ choreography! {
                   journal_facts = "websocket_teardown_acknowledged"]
         -> Initiator: WebSocketTeardown(WebSocketTeardown);
     }
+}
 }

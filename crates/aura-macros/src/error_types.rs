@@ -6,7 +6,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse::Parse, Ident, LitStr, Token, Type, Visibility, Attribute};
+use syn::{parse::Parse, Attribute, Ident, LitStr, Token, Type, Visibility};
 
 /// Input specification for the aura_error_types macro
 #[derive(Clone)]
@@ -20,7 +20,7 @@ pub struct ErrorTypesInput {
 /// Specification for a single error variant
 #[derive(Clone)]
 pub struct ErrorVariant {
-    pub attributes: Vec<ErrorAttribute>,
+    pub _attributes: Vec<ErrorAttribute>,
     pub name: Ident,
     pub fields: Vec<ErrorField>,
     pub message_template: LitStr,
@@ -49,10 +49,10 @@ impl Parse for ErrorTypesInput {
         let visibility = input.parse()?;
         input.parse::<Token![enum]>()?;
         let error_name = input.parse()?;
-        
+
         let content;
         syn::braced!(content in input);
-        
+
         let mut variants = Vec::new();
         while !content.is_empty() {
             variants.push(content.parse()?);
@@ -60,7 +60,7 @@ impl Parse for ErrorTypesInput {
                 content.parse::<Token![,]>()?;
             }
         }
-        
+
         Ok(ErrorTypesInput {
             visibility,
             error_name,
@@ -73,7 +73,7 @@ impl Parse for ErrorTypesInput {
 impl Parse for ErrorVariant {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut attributes = Vec::new();
-        
+
         // Parse custom attributes like #[category = "storage"]
         while input.peek(Token![#]) {
             input.parse::<Token![#]>()?;
@@ -82,45 +82,53 @@ impl Parse for ErrorVariant {
             let attr_name = content.parse()?;
             content.parse::<Token![=]>()?;
             let attr_value = content.parse()?;
-            attributes.push(ErrorAttribute { name: attr_name, value: attr_value });
+            attributes.push(ErrorAttribute {
+                name: attr_name,
+                value: attr_value,
+            });
         }
-        
+
         let name = input.parse()?;
-        
+
         // Parse fields if present
         let mut fields = Vec::new();
         if input.peek(syn::token::Brace) {
             let content;
             syn::braced!(content in input);
-            
+
             while !content.is_empty() {
                 let field_name = content.parse()?;
                 content.parse::<Token![:]>()?;
                 let field_type = content.parse()?;
-                fields.push(ErrorField { name: field_name, field_type });
-                
+                fields.push(ErrorField {
+                    name: field_name,
+                    field_type,
+                });
+
                 if content.peek(Token![,]) {
                     content.parse::<Token![,]>()?;
                 }
             }
         }
-        
+
         // Parse message template
         input.parse::<Token![=>]>()?;
         let message_template = input.parse()?;
-        
+
         // Extract category from attributes
-        let category = attributes.iter()
+        let category = attributes
+            .iter()
             .find(|attr| attr.name == "category")
             .map(|attr| attr.value.clone());
-        
+
         // Extract error code from attributes
-        let code = attributes.iter()
+        let code = attributes
+            .iter()
             .find(|attr| attr.name == "code")
             .map(|attr| attr.value.clone());
-        
+
         Ok(ErrorVariant {
-            attributes,
+            _attributes: attributes,
             name,
             fields,
             message_template,
@@ -133,13 +141,13 @@ impl Parse for ErrorVariant {
 /// Extract derive macros from attributes
 fn extract_derives(attributes: &[Attribute]) -> syn::Result<Vec<Ident>> {
     let mut derives = Vec::new();
-    
+
     for attr in attributes {
         if attr.path().is_ident("derive") {
             attr.parse_args_with(|input: syn::parse::ParseStream| {
                 let content;
                 syn::parenthesized!(content in input);
-                
+
                 while !content.is_empty() {
                     derives.push(content.parse()?);
                     if content.peek(Token![,]) {
@@ -150,7 +158,7 @@ fn extract_derives(attributes: &[Attribute]) -> syn::Result<Vec<Ident>> {
             })?;
         }
     }
-    
+
     // Add default derives if none specified
     if derives.is_empty() {
         derives.extend([
@@ -158,7 +166,7 @@ fn extract_derives(attributes: &[Attribute]) -> syn::Result<Vec<Ident>> {
             Ident::new("Clone", proc_macro2::Span::call_site()),
         ]);
     }
-    
+
     Ok(derives)
 }
 
@@ -168,31 +176,32 @@ pub fn aura_error_types_impl(input: TokenStream) -> TokenStream {
         Ok(input) => input,
         Err(e) => return e.to_compile_error().into(),
     };
-    
+
     let error_enum = generate_error_enum(&input);
     let display_impl = generate_display_impl(&input);
     let constructor_impl = generate_constructors(&input);
     let from_conversions = generate_from_conversions(&input);
     let error_trait_impl = generate_error_trait(&input);
-    
+
     quote! {
         #error_enum
         #display_impl
         #constructor_impl
         #from_conversions
         #error_trait_impl
-    }.into()
+    }
+    .into()
 }
 
 fn generate_error_enum(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
     let vis = &input.visibility;
     let error_name = &input.error_name;
     let derives = &input.derives;
-    
+
     let variants = input.variants.iter().map(|variant| {
         let name = &variant.name;
         let fields = &variant.fields;
-        
+
         if fields.is_empty() {
             quote! { #name }
         } else {
@@ -201,11 +210,11 @@ fn generate_error_enum(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
                 let field_type = &field.field_type;
                 quote! { #field_name: #field_type }
             });
-            
+
             quote! { #name { #(#field_defs),* } }
         }
     });
-    
+
     quote! {
         #[derive(#(#derives),*)]
         #vis enum #error_name {
@@ -216,12 +225,12 @@ fn generate_error_enum(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
 
 fn generate_display_impl(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
     let error_name = &input.error_name;
-    
+
     let match_arms = input.variants.iter().map(|variant| {
         let name = &variant.name;
         let template = &variant.message_template;
         let fields = &variant.fields;
-        
+
         if fields.is_empty() {
             quote! {
                 Self::#name => write!(f, #template)
@@ -229,7 +238,7 @@ fn generate_display_impl(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
         } else {
             let field_names = fields.iter().map(|field| &field.name);
             let field_patterns = field_names.clone();
-            
+
             // Generate interpolation for the template
             let template_str = template.value();
             let interpolated = if template_str.contains('{') {
@@ -243,13 +252,13 @@ fn generate_display_impl(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
                     write!(f, #template)
                 }
             };
-            
+
             quote! {
                 Self::#name { #(#field_patterns),* } => #interpolated
             }
         }
     });
-    
+
     quote! {
         impl std::fmt::Display for #error_name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -263,17 +272,17 @@ fn generate_display_impl(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
 
 fn generate_constructors(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
     let error_name = &input.error_name;
-    
+
     let constructors = input.variants.iter().map(|variant| {
         let variant_name = &variant.name;
         let fields = &variant.fields;
-        
+
         if fields.is_empty() {
             let constructor_name = Ident::new(
                 &variant_name.to_string().to_lowercase(),
-                variant_name.span()
+                variant_name.span(),
             );
-            
+
             quote! {
                 /// Create a new error instance
                 pub fn #constructor_name() -> Self {
@@ -283,20 +292,20 @@ fn generate_constructors(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
         } else {
             let constructor_name = Ident::new(
                 &variant_name.to_string().to_lowercase(),
-                variant_name.span()
+                variant_name.span(),
             );
-            
+
             let params = fields.iter().map(|field| {
                 let name = &field.name;
                 let field_type = &field.field_type;
                 quote! { #name: impl Into<#field_type> }
             });
-            
+
             let field_assigns = fields.iter().map(|field| {
                 let name = &field.name;
                 quote! { #name: #name.into() }
             });
-            
+
             quote! {
                 /// Create a new error instance
                 pub fn #constructor_name(#(#params),*) -> Self {
@@ -307,7 +316,7 @@ fn generate_constructors(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
             }
         }
     });
-    
+
     quote! {
         impl #error_name {
             #(#constructors)*
@@ -317,7 +326,7 @@ fn generate_constructors(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
 
 fn generate_from_conversions(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
     let error_name = &input.error_name;
-    
+
     // Generate conversion to AuraError if applicable
     quote! {
         impl From<#error_name> for aura_core::AuraError {
@@ -325,40 +334,44 @@ fn generate_from_conversions(input: &ErrorTypesInput) -> proc_macro2::TokenStrea
                 aura_core::AuraError::internal(err.to_string())
             }
         }
-        
+
         impl std::error::Error for #error_name {}
     }
 }
 
 fn generate_error_trait(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
     let error_name = &input.error_name;
-    
+
     let category_arms = input.variants.iter().map(|variant| {
         let variant_name = &variant.name;
-        let category = variant.category.as_ref()
+        let category = variant
+            .category
+            .as_ref()
             .map(|c| c.value())
             .unwrap_or("general".to_string());
-        
+
         if variant.fields.is_empty() {
             quote! { Self::#variant_name => #category }
         } else {
             quote! { Self::#variant_name { .. } => #category }
         }
     });
-    
+
     let code_arms = input.variants.iter().map(|variant| {
         let variant_name = &variant.name;
-        let code = variant.code.as_ref()
+        let code = variant
+            .code
+            .as_ref()
             .map(|c| c.value())
             .unwrap_or_else(|| variant_name.to_string().to_lowercase());
-        
+
         if variant.fields.is_empty() {
             quote! { Self::#variant_name => #code }
         } else {
             quote! { Self::#variant_name { .. } => #code }
         }
     });
-    
+
     quote! {
         impl #error_name {
             /// Get the error category for this error
@@ -367,8 +380,8 @@ fn generate_error_trait(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
                     #(#category_arms),*
                 }
             }
-            
-            /// Get the error code for this error  
+
+            /// Get the error code for this error
             pub fn code(&self) -> &'static str {
                 match self {
                     #(#code_arms),*

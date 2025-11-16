@@ -15,7 +15,6 @@ mod error;
 pub mod journal_ops;
 pub mod middleware;
 mod operations;
-pub mod sync;
 mod types;
 
 // Domain modules moved from aura-core
@@ -26,12 +25,14 @@ pub mod semilattice;
 // New ratchet tree implementation (Phase 2)
 pub mod ratchet_tree;
 
+// Note: Choreographic protocols moved to aura-sync (Layer 5)
+
 // Test effects moved to aura-testkit to maintain clean domain layer
 
 // Re-exports
 pub use error::{AuraError, Result};
 pub use operations::*;
-pub use sync::*;
+// Note: Sync types moved to aura-sync (Layer 5)
 
 // Core type re-exports
 pub use aura_core::Hash32;

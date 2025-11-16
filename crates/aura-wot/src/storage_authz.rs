@@ -3,8 +3,6 @@
 //! This module provides authorization middleware for storage operations
 //! using proper capability objects and meet-semilattice intersection.
 
-use crate::CapabilitySet;
-
 /// Storage-specific operations that can be authorized
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageOperation {

@@ -24,6 +24,7 @@ aura-wot = { path = "../aura-wot" }
 aura-transport = { path = "../aura-transport" }
 aura-mpst = { path = "../aura-mpst" }
 aura-macros = { path = "../aura-macros" }
+aura-store = { path = "../aura-store" }
 # aura-frost = { path = "../aura-frost" }  # Temporarily excluded - has FROST API issues
 
 # Curve operations
@@ -66,6 +67,9 @@ hex = { workspace = true }
 chrono = { workspace = true }
 once_cell = { workspace = true }
 dirs = { workspace = true }
+parking_lot = { workspace = true }
+lru = "0.12"
+string_cache = "0.8"
 
 # Choreographic programming dependencies
 rumpsteak-aura = { workspace = true }

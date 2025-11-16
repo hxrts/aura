@@ -1,4 +1,4 @@
-# Encrypted blob store - orchestration for encrypted chunk storage
+# Domain-focused storage types and logic
 [package]
 name = "aura-store"
 version.workspace = true
@@ -6,44 +6,26 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "Storage domain types, semantics, and pure logic for Aura"
 
 [lints]
 workspace = true
 
 [dependencies]
-# Workspace crates
-aura-journal = { path = "../aura-journal" }
-aura-transport = { path = "../aura-transport" }
+# Foundation layer only
 aura-core = { path = "../aura-core" }
-# NOTE: aura-protocol removed to break circular dependency (aura-store → aura-protocol → aura-effects)
-# Storage orchestration belongs in Layer 4 or higher (aura-protocol, aura-agent)
-# This crate provides: pure storage types, content addressing, capability-based access control
-# Choreographic search protocols using storage types belong in Layer 5 feature crates
-
-# Storage
-# redb removed - not used, only MemoryStorage implementation exists
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_cbor = { workspace = true }
-bincode = { workspace = true }
-
-# Async
-async-trait = { workspace = true }
 
 # Utilities
-uuid = { workspace = true }
-time = { workspace = true }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
-rand = { workspace = true }
-hex = { workspace = true }
-# Cryptography provided through aura-core
 blake3 = { workspace = true }
-chacha20poly1305 = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
-# tokio-test = { workspace = true } # removed - unused
-tempfile = { workspace = true }
+proptest = { workspace = true }
+
+[features]
+default = []

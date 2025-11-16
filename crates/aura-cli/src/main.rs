@@ -4,8 +4,9 @@
 //! Uses the unified effect system for all operations.
 
 use anyhow::Result;
+use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+use aura_core::effects::ConsoleEffects;
 use aura_core::identifiers::DeviceId;
-use aura_protocol::{AuraEffectSystem, ConsoleEffects};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -126,9 +127,9 @@ async fn main() -> Result<()> {
 
     // Initialize effect system based on environment
     let config = if std::env::var("AURA_CLI_TEST").is_ok() {
-        aura_protocol::effects::EffectSystemConfig::for_testing(device_id)
+        EffectSystemConfig::for_testing(device_id)
     } else {
-        aura_protocol::effects::EffectSystemConfig::for_production(device_id)?
+        EffectSystemConfig::for_production(device_id)?
     };
     let effect_system = AuraEffectSystem::new(config)?;
 

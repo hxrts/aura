@@ -25,12 +25,12 @@ pub use aura_protocol::effects::{
     SessionStatus, SessionType,
 };
 
-// Re-export effect system coordinator from aura-protocol (multi-handler composition)
-// NOTE: AuraEffectSystem is correctly in aura-protocol because it:
-//   - Coordinates multiple effect handlers (composition)
+// Re-export effect system coordinator from aura-agent runtime (Layer 6)
+// NOTE: AuraEffectSystem has moved from aura-protocol to aura-agent because:
+//   - It's runtime composition infrastructure (Layer 6)
+//   - Coordinates multiple effect handlers
 //   - Maintains stateful execution context
-//   - Provides unified handler orchestration
-pub use aura_protocol::effects::AuraEffectSystem;
+pub use crate::runtime::AuraEffectSystem;
 
 // Agent-specific session types
 use aura_core::identifiers::{AccountId, DeviceId};

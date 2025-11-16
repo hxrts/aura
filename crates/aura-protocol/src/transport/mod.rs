@@ -6,23 +6,15 @@
 //! Target: Each choreographic protocol <250 lines.
 
 pub mod choreography;
-pub mod coordination;
-pub mod epoch_management;
-pub mod receipt_verification;
-pub mod secure_channel;
 
 #[cfg(test)]
 mod tests;
 
 pub use choreography::{
     ChannelEstablishmentCoordinator, ChannelTeardownCoordinator, ChoreographicConfig,
-    ChoreographicError, ReceiptCoordinationProtocol, WebSocketHandshakeCoordinator,
+    ChoreographicError, WebSocketHandshakeCoordinator,
     WebSocketSessionCoordinator,
 };
-pub use coordination::TransportCoordinator;
-pub use epoch_management::EpochRotationCoordinator;
-pub use receipt_verification::ReceiptVerificationCoordinator;
-pub use secure_channel::SecureChannelCoordinator;
 
 /// Transport coordination configuration
 #[derive(Debug, Clone)]

@@ -4,7 +4,7 @@
 //! Target: <200 lines, focus on std/tokio ecosystem.
 
 use super::{TransportError, TransportResult};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 use tokio::time::timeout;
 use url::Url;
@@ -145,58 +145,78 @@ impl BufferUtils {
 /// Transport type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportType {
+    /// TCP transport
     Tcp,
+    /// WebSocket transport
     WebSocket,
+    /// In-memory transport (testing)
     Memory,
 }
 
 /// Connection state tracking
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
+    /// Not connected
     Disconnected,
+    /// Connecting in progress
     Connecting,
+    /// Active connection
     Connected,
+    /// Disconnection in progress
     Disconnecting,
+    /// Connection error state
     Error(String),
 }
 
 /// Simple connection metrics
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionMetrics {
+    /// Total bytes sent
     pub bytes_sent: u64,
+    /// Total bytes received
     pub bytes_received: u64,
+    /// Number of messages sent
     pub messages_sent: u64,
+    /// Number of messages received
     pub messages_received: u64,
+    /// When the connection was established
     pub connection_time: Option<std::time::Instant>,
+    /// Last activity timestamp
     pub last_activity: Option<std::time::Instant>,
 }
 
 impl ConnectionMetrics {
+    /// Create new connection metrics
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Record outgoing message
     pub fn record_sent(&mut self, bytes: u64) {
         self.bytes_sent += bytes;
         self.messages_sent += 1;
         self.last_activity = Some(std::time::Instant::now());
     }
 
+    /// Record incoming message
     pub fn record_received(&mut self, bytes: u64) {
         self.bytes_received += bytes;
         self.messages_received += 1;
         self.last_activity = Some(std::time::Instant::now());
     }
 
+    /// Mark connection as established
     pub fn connected(&mut self) {
         self.connection_time = Some(std::time::Instant::now());
         self.last_activity = Some(std::time::Instant::now());
     }
 
+    /// Get total connection duration
     pub fn connection_duration(&self) -> Option<Duration> {
         self.connection_time.map(|start| start.elapsed())
     }
 
+    /// Get idle time since last activity
     pub fn idle_time(&self) -> Option<Duration> {
         self.last_activity.map(|last| last.elapsed())
     }

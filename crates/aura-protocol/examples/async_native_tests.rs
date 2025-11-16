@@ -11,7 +11,7 @@
 // use aura_macros::aura_test;
 
 use aura_core::{AuraResult, DeviceId};
-use aura_protocol::effects::AuraEffectSystemBuilder;
+use aura_agent::runtime::EffectSystemBuilder;
 use aura_protocol::ExecutionMode;
 use aura_testkit::{
     network_sim::{NetworkCondition, NetworkSimulator, NetworkTopology},

@@ -3,12 +3,11 @@
 //! This module provides the runtime support for the `#[aura_test]` macro,
 //! including automatic setup/teardown, test isolation, and utility functions.
 
-use std::sync::{Arc, Mutex, Once};
+use std::sync::Once;
 use std::time::Duration;
 
 use aura_core::{AuraError, AuraResult, DeviceId};
-use aura_protocol::effects::{AuraEffectSystem, AuraEffectSystemBuilder};
-use aura_protocol::ExecutionMode;
+use crate::foundation::{SimpleTestContext, create_mock_test_context};
 use tracing_subscriber::EnvFilter;
 
 static TRACING_INIT: Once = Once::new();
@@ -39,12 +38,10 @@ pub fn init_test_tracing() -> TestTracingGuard {
 /// Guard that ensures tracing stays active for the test duration
 pub struct TestTracingGuard;
 
-/// Test context providing access to initialized effect system
+/// Test context providing access to initialized test context
 pub struct TestContext {
-    /// The effect system for this test
-    pub effects: Arc<AuraEffectSystem>,
-    /// The device ID used for this test
-    pub device_id: DeviceId,
+    /// The foundation-based test context for this test
+    pub context: SimpleTestContext,
     /// Test-specific configuration
     pub config: TestConfig,
 }
@@ -78,22 +75,12 @@ pub async fn create_test_context() -> AuraResult<TestContext> {
     create_test_context_with_config(TestConfig::default()).await
 }
 
-/// Create a test context with custom configuration
+/// Create a test context with custom configuration  
 pub async fn create_test_context_with_config(config: TestConfig) -> AuraResult<TestContext> {
-    let device_id = DeviceId::new();
-
-    let effects = AuraEffectSystemBuilder::new()
-        .with_device_id(device_id)
-        .with_execution_mode(ExecutionMode::Testing)
-        .build()
-        .await?;
-
-    // Initialize the effect system
-    effects.initialize_lifecycle().await?;
+    let context = create_mock_test_context()?;
 
     Ok(TestContext {
-        effects: Arc::new(effects),
-        device_id,
+        context,
         config,
     })
 }
@@ -116,24 +103,24 @@ impl TestFixture {
         Ok(Self { context })
     }
 
-    /// Get the effect system
-    pub fn effects(&self) -> &Arc<AuraEffectSystem> {
-        &self.context.effects
+    /// Get the test context
+    pub fn context(&self) -> &SimpleTestContext {
+        &self.context.context
     }
 
     /// Get the device ID
     pub fn device_id(&self) -> DeviceId {
-        self.context.device_id
+        self.context.context.device_id()
     }
 
     /// Run a test with automatic cleanup
     pub async fn run_test<F, Fut, T>(&self, test_fn: F) -> AuraResult<T>
     where
-        F: FnOnce(Arc<AuraEffectSystem>) -> Fut,
+        F: FnOnce(&SimpleTestContext) -> Fut,
         Fut: std::future::Future<Output = AuraResult<T>>,
     {
         // Run the test
-        let result = test_fn(self.context.effects.clone()).await;
+        let result = test_fn(&self.context.context).await;
 
         // Cleanup is handled by Drop implementations
 
@@ -144,13 +131,8 @@ impl TestFixture {
 /// Drop implementation ensures cleanup
 impl Drop for TestFixture {
     fn drop(&mut self) {
-        // Schedule cleanup
-        let effects = self.context.effects.clone();
-
-        // We can't await in drop, so spawn a task
-        tokio::spawn(async move {
-            let _ = effects.shutdown_lifecycle().await;
-        });
+        // Foundation-based test context has lightweight cleanup
+        // No async shutdown needed for stateless handlers
     }
 }
 

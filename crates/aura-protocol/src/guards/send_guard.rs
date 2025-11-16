@@ -6,7 +6,7 @@
 
 #![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
 
-use crate::effects::AuraEffectSystem;
+use super::effect_system_trait::GuardEffectSystem;
 use crate::guards::{flow::FlowGuard, ProtocolGuard};
 use aura_core::{relationships::ContextId, AuraError, AuraResult, DeviceId, Receipt};
 use aura_wot::{Capability, EffectiveCapabilitySet};
@@ -36,7 +36,7 @@ pub struct SendGuardResult {
     pub authorized: bool,
     /// Capability check result
     pub capability_satisfied: bool,
-    /// Flow budget check result  
+    /// Flow budget check result
     pub flow_authorized: bool,
     /// Receipt from flow budget charge (if successful)
     pub receipt: Option<Receipt>,
@@ -66,7 +66,7 @@ impl SendGuardChain {
     ///
     /// # Parameters
     /// - `message_capability`: Required capability for sending this message type
-    /// - `context`: Context ID for capability and flow evaluation  
+    /// - `context`: Context ID for capability and flow evaluation
     /// - `peer`: Target device for the send
     /// - `cost`: Flow budget cost for this operation
     pub fn new(
@@ -94,14 +94,17 @@ impl SendGuardChain {
     ///
     /// This implements the formal guard chain:
     /// 1. CapGuard: Check need(m) ≤ Caps(ctx) using capability evaluation
-    /// 2. FlowGuard: Check headroom(ctx, cost) and charge flow budget  
+    /// 2. FlowGuard: Check headroom(ctx, cost) and charge flow budget
     /// 3. Return authorization decision with receipt for successful sends
     ///
     /// # Invariants Enforced
     /// - **Charge-Before-Send**: Flow budget must be charged before any transport send
     /// - **No-Observable-Without-Charge**: No send occurs without prior budget charge
     /// - **Capability-Gated**: All sends require appropriate message capabilities
-    pub async fn evaluate(&self, effect_system: &AuraEffectSystem) -> AuraResult<SendGuardResult> {
+    pub async fn evaluate<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+        &self,
+        effect_system: &E,
+    ) -> AuraResult<SendGuardResult> {
         let start_time = Instant::now();
         let operation_id = self.operation_id.as_deref().unwrap_or("unnamed_send");
 
@@ -211,9 +214,9 @@ impl SendGuardChain {
     }
 
     /// Evaluate the capability guard: need(m) ≤ Caps(ctx)
-    async fn evaluate_capability_guard(
+    async fn evaluate_capability_guard<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
         &self,
-        effect_system: &AuraEffectSystem,
+        effect_system: &E,
     ) -> AuraResult<(bool, EffectiveCapabilitySet)> {
         let guard_evaluator =
             crate::guards::evaluation::create_guard_evaluator(effect_system).await?;
@@ -234,7 +237,10 @@ impl SendGuardChain {
     }
 
     /// Evaluate the flow guard: headroom(ctx, cost)
-    async fn evaluate_flow_guard(&self, effect_system: &AuraEffectSystem) -> AuraResult<Receipt> {
+    async fn evaluate_flow_guard<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+        &self,
+        effect_system: &E,
+    ) -> AuraResult<Receipt> {
         let flow_guard = FlowGuard::new(self.context.clone(), self.peer, self.cost);
         flow_guard.authorize(effect_system).await
     }
@@ -253,15 +259,18 @@ impl SendGuardChain {
     }
 
     /// Convenience method to evaluate and return only the authorization decision
-    pub async fn is_send_authorized(&self, effect_system: &AuraEffectSystem) -> AuraResult<bool> {
+    pub async fn is_send_authorized<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+        &self,
+        effect_system: &E,
+    ) -> AuraResult<bool> {
         let result = self.evaluate(effect_system).await?;
         Ok(result.authorized)
     }
 
     /// Convenience method to evaluate and return the receipt if authorized
-    pub async fn authorize_send(
+    pub async fn authorize_send<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
         &self,
-        effect_system: &AuraEffectSystem,
+        effect_system: &E,
     ) -> AuraResult<Option<Receipt>> {
         let result = self.evaluate(effect_system).await?;
         if result.authorized {

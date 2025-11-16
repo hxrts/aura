@@ -4,7 +4,6 @@
 //! Implementations are provided by aura-protocol handlers using aura-transport.
 
 use async_trait::async_trait;
-use std::error::Error;
 use uuid::Uuid;
 
 /// Network address for peer communication
@@ -38,7 +37,7 @@ impl From<String> for NetworkAddress {
 }
 
 /// Network operation errors
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum NetworkError {
     /// Failed to send a message to the destination
     #[error("Failed to send message to {peer_id:?}: {reason}")]
@@ -70,18 +69,16 @@ pub enum NetworkError {
     #[error("Not implemented")]
     NotImplemented,
     /// Serialization failed while preparing a network payload
-    #[error("Serialization failed: {source}")]
+    #[error("Serialization failed: {error}")]
     SerializationFailed {
-        /// Underlying serialization error
-        #[source]
-        source: Box<dyn Error + Send + Sync>,
+        /// Serialization error message
+        error: String,
     },
     /// Deserialization failed while decoding a payload
-    #[error("Deserialization failed: {source}")]
+    #[error("Deserialization failed: {error}")]
     DeserializationFailed {
-        /// Underlying deserialization error
-        #[source]
-        source: Box<dyn Error + Send + Sync>,
+        /// Deserialization error message
+        error: String,
     },
     /// Operation timed out
     #[error("Operation '{operation}' timed out after {timeout_ms}ms")]

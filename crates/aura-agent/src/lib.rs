@@ -50,6 +50,10 @@ pub mod storage_keys;
 pub mod maintenance;
 pub mod ota_orchestrator;
 
+// Runtime composition (Layer 6) - moved from aura-protocol
+pub mod optimizations;
+pub mod runtime;
+
 // Unified agent effect system (DISABLED - superseded by AuraEffectSystem in aura-protocol)
 // pub mod system;
 
@@ -70,15 +74,20 @@ pub use aura_core::{
     AuraError, AuraResult,
 };
 
+// Re-export runtime types for backward compatibility
+// These were previously in aura_protocol::effects but belong in Layer 6
+pub use runtime::{
+    AuraEffectSystem, EffectExecutor, EffectSystemBuilder, EffectSystemConfig, EffectSystemState,
+    HandlerContainer, LifecycleManager, StorageConfig,
+};
+
 /// Create an agent with production effects
 ///
 /// This is a convenience function for creating an agent runtime with production
 /// effect handlers. The runtime composes real system effects into device workflows.
 pub async fn create_production_agent(device_id: DeviceId) -> AgentResult<AuraAgent> {
-    use aura_protocol::effects::AuraEffectSystem;
-
-    let config = aura_protocol::effects::EffectSystemConfig::for_production(device_id)?;
-    let core_effects = AuraEffectSystem::new(config)?;
+    let config = runtime::EffectSystemConfig::for_production(device_id)?;
+    let core_effects = aura_protocol::effects::AuraEffectSystemFactory::new(aura_protocol::effects::EffectSystemConfig { device_id })?;
 
     Ok(AuraAgent::new(core_effects, device_id))
 }
@@ -96,10 +105,8 @@ pub fn create_testing_agent(device_id: DeviceId) -> AuraAgent {
 /// This creates an agent runtime with controlled effects for simulation scenarios.
 /// The seed ensures deterministic behavior across simulation runs.
 pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AuraAgent {
-    use aura_protocol::effects::AuraEffectSystem;
-
-    let config = aura_protocol::effects::EffectSystemConfig::for_simulation(device_id, seed);
+    let config = runtime::EffectSystemConfig::for_simulation(device_id, seed);
     let core_effects =
-        AuraEffectSystem::new(config).expect("Failed to create simulation effect system");
+        aura_protocol::effects::AuraEffectSystemFactory::new(aura_protocol::effects::EffectSystemConfig { device_id }).expect("Failed to create simulation effect system");
     AuraAgent::new(core_effects, device_id)
 }

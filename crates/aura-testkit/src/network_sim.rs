@@ -10,7 +10,7 @@ use std::time::Duration;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 /// Network simulator for testing distributed scenarios
@@ -203,7 +203,7 @@ impl NetworkTopology {
     }
 
     /// Create a star topology with one central node
-    pub async fn star(mut self, center: DeviceId) -> NetworkSimulator {
+    pub async fn star(self, center: DeviceId) -> NetworkSimulator {
         for device in &self.devices {
             if *device != center {
                 // Good conditions to center
@@ -230,7 +230,7 @@ impl NetworkTopology {
     }
 
     /// Create a ring topology
-    pub async fn ring(mut self) -> NetworkSimulator {
+    pub async fn ring(self) -> NetworkSimulator {
         let n = self.devices.len();
 
         for i in 0..n {
@@ -258,7 +258,7 @@ impl NetworkTopology {
     }
 
     /// Create a fully connected mesh
-    pub async fn mesh(mut self) -> NetworkSimulator {
+    pub async fn mesh(self) -> NetworkSimulator {
         for i in 0..self.devices.len() {
             for j in i + 1..self.devices.len() {
                 self.simulator

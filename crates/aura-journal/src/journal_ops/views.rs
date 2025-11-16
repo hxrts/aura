@@ -408,7 +408,7 @@ mod tests {
     use super::super::derivation::SimpleDerivationEffects;
     use super::*;
     use crate::journal::{NodeKind, NodePolicy};
-    use aura_macros::aura_test;
+    // Tests removed as they depend on test infrastructure
 
     fn create_test_node_with_id(id_bytes: [u8; 16], kind: NodeKind, policy: NodePolicy) -> KeyNode {
         KeyNode::new(
@@ -464,7 +464,7 @@ mod tests {
         }
     }
 
-    #[aura_test]
+    #[tokio::test]
     async fn test_identity_view_materialization() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
 
@@ -510,7 +510,7 @@ mod tests {
         Ok(())
     }
 
-    #[aura_test]
+    #[tokio::test]
     async fn test_identity_with_guardians() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
 
@@ -560,7 +560,7 @@ mod tests {
         Ok(())
     }
 
-    #[aura_test]
+    #[tokio::test]
     async fn test_group_view_materialization() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
 

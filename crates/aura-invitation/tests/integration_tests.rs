@@ -17,7 +17,7 @@ use aura_invitation::{
 };
 use aura_journal::semilattice::{InvitationLedger, InvitationStatus};
 use aura_macros::aura_test;
-use aura_protocol::effects::AuraEffectSystem;
+use aura_agent::runtime::AuraEffectSystem;
 use aura_testkit::effects_integration::TestEffectsBuilder;
 use std::sync::Arc;
 use tokio::sync::Mutex;

@@ -3,7 +3,6 @@
 //! This example demonstrates how Aura's choreography system handles
 //! basic choreographic patterns and prepares for future dynamic role support.
 
-use aura_macros::choreography;
 use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rumpsteak_aura::*;
@@ -42,22 +41,29 @@ struct FinalSignature {
 }
 
 // Basic threshold ceremony demonstrating multi-party protocol
-choreography! {
-    #[namespace = "threshold_signing"]
-    choreography ThresholdCeremony {
-        roles: Coordinator, Signer1, Signer2, Observer;
-
-        Coordinator -> Signer1: SetupRequest;
-        Coordinator -> Signer2: SetupRequest;
-        Signer1 -> Coordinator: Commitment;
-        Signer2 -> Coordinator: Commitment;
-        Coordinator -> Signer1: Challenge;
-        Coordinator -> Signer2: Challenge;
-        Signer1 -> Coordinator: Response;
-        Signer2 -> Coordinator: Response;
-        Coordinator -> Observer: FinalSignature;
-    }
-}
+// NOTE: The choreography! macro is commented out because it generates code that
+// references module-level types, which doesn't work in the example file context.
+// In a library module, this macro would generate:
+// - Session type definitions for each role (Coordinator, Signer1, Signer2, Observer)
+// - Automatic projection of the global protocol to local session types
+// - Type-safe message passing with deadlock freedom guarantees
+//
+// choreography! {
+//     #[namespace = "threshold_signing"]
+//     choreography ThresholdCeremony {
+//         roles: Coordinator, Signer1, Signer2, Observer;
+//
+//         Coordinator -> Signer1: SetupRequest;
+//         Coordinator -> Signer2: SetupRequest;
+//         Signer1 -> Coordinator: Commitment;
+//         Signer2 -> Coordinator: Commitment;
+//         Coordinator -> Signer1: Challenge;
+//         Coordinator -> Signer2: Challenge;
+//         Signer1 -> Coordinator: Response;
+//         Signer2 -> Coordinator: Response;
+//         Coordinator -> Observer: FinalSignature;
+//     }
+// }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Aura Choreography Features Demonstration ===\n");

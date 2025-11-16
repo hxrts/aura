@@ -24,7 +24,7 @@ console/styles/*.rs
 *.swo
 *~
 .DS_Store
-CLAUDE.md
+# CLAUDE.md
 AGENTS.md
 .claude/
 

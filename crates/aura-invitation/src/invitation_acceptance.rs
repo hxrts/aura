@@ -9,7 +9,7 @@ use crate::{
 use aura_core::effects::{NetworkEffects, TimeEffects};
 use aura_core::{AccountId, Cap, DeviceId, RelationshipId, TrustLevel};
 use aura_journal::semilattice::InvitationLedger;
-use aura_protocol::effects::system::AuraEffectSystem;
+use aura_protocol::effects::AuraEffectSystem;
 use aura_protocol::effects::LedgerEffects;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -243,7 +243,7 @@ impl InvitationAcceptanceCoordinator {
         if cfg!(test) {
             tracing::debug!("Skipping ledger append in test mode");
         } else {
-            LedgerEffects::append_event(&self.effects, event_bytes)
+            LedgerEffects::append_event(self.effects.as_ref(), event_bytes)
                 .await
                 .map_err(|e| InvitationError::internal(e.to_string()))?;
         }
@@ -267,7 +267,7 @@ impl InvitationAcceptanceCoordinator {
         let event_bytes = serde_json::to_vec(&device_addition_event)
             .map_err(|e| InvitationError::serialization(e.to_string()))?;
 
-        LedgerEffects::append_event(&self.effects, event_bytes)
+        LedgerEffects::append_event(self.effects.as_ref(), event_bytes)
             .await
             .map_err(|e| InvitationError::internal(e.to_string()))?;
 
@@ -314,7 +314,7 @@ impl InvitationAcceptanceCoordinator {
         // Attempt delivery via rendezvous first
         let ttl_window = envelope.expires_at.saturating_sub(envelope.created_at);
         if let Err(e) = deliver_via_rendezvous(
-            &self.effects,
+            self.effects.as_ref(),
             &payload,
             envelope.invitee,
             envelope.inviter,
@@ -333,7 +333,7 @@ impl InvitationAcceptanceCoordinator {
         // Skip network sending in testing mode to avoid MockNetworkHandler connectivity issues
         use aura_protocol::handlers::ExecutionMode;
         if self.effects.execution_mode() != ExecutionMode::Testing {
-            NetworkEffects::send_to_peer(&self.effects, envelope.inviter.0, payload)
+            NetworkEffects::send_to_peer(self.effects.as_ref(), envelope.inviter.0, payload)
                 .await
                 .map_err(|err| InvitationError::network(err.to_string()))?;
         }

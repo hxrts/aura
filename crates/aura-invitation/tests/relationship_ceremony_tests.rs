@@ -2,13 +2,13 @@
 
 #![allow(clippy::disallowed_methods)]
 
+use aura_agent::runtime::AuraEffectSystem;
 use aura_core::{AccountId, ContextId, DeviceId};
 use aura_invitation::relationship_formation::{
     execute_relationship_formation, RelationshipFormationConfig, RelationshipFormationError,
     RelationshipKeys,
 };
 use aura_macros::aura_test;
-use aura_protocol::effects::AuraEffectSystem;
 // use aura_testkit::ChoreographyTestHarness; // Commented out for now
 use uuid::Uuid;
 // Note: For testing, use mock handlers from aura-effects

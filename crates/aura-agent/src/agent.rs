@@ -11,9 +11,10 @@ use crate::handlers::{
     AgentEffectSystemHandler, OtaOperations, RecoveryOperations, StorageOperations,
 };
 use crate::maintenance::{MaintenanceController, SnapshotOutcome};
+use crate::runtime::AuraEffectSystem;
 use aura_core::effects::{ConsoleEffects, StorageEffects};
 use aura_core::identifiers::{AccountId, DeviceId};
-use aura_protocol::effects::{AuraEffectSystem, SessionType};
+use aura_protocol::effects::SessionType;
 use aura_sync::WriterFence;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -114,8 +115,8 @@ impl AuraAgent {
     /// Note: This method is deprecated. Use `aura_testkit::create_test_fixture().await`
     /// and construct agent via `AuraAgent::new()` in new code.
     pub fn for_testing(device_id: DeviceId) -> Self {
-        let config = aura_protocol::effects::EffectSystemConfig::for_testing(device_id);
-        let effects = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+        let config = crate::runtime::EffectSystemConfig::for_testing(device_id);
+        let effects = aura_protocol::effects::AuraEffectSystemFactory::new(aura_protocol::effects::EffectSystemConfig { device_id }).expect("Failed to create test effect system");
         Self::new(effects, device_id)
     }
 

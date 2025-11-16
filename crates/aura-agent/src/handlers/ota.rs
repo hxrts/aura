@@ -5,7 +5,7 @@
 
 use crate::errors::Result as AgentResult;
 use aura_core::{DeviceId, Epoch};
-use aura_protocol::choreography::protocols::ota::{UpgradeConfig, UpgradeOrchestrator};
+use crate::runtime::ota_orchestration::{UpgradeConfig, UpgradeOrchestrator};
 use aura_protocol::choreography::AuraHandlerAdapter;
 #[cfg(test)]
 use aura_sync::maintenance::UpgradeKind;

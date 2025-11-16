@@ -23,7 +23,6 @@ members = [
     "crates/aura-sync",
     "crates/aura-frost",
     "crates/aura-invitation",
-    "crates/aura-storage",
     "crates/aura-recovery",
     "crates/aura-rendezvous",
     "examples/hello-crdt",

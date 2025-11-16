@@ -101,7 +101,7 @@ impl ProtocolTestFixture {
     pub async fn with_stateless_effects(
         threshold: u16,
         total_devices: u16,
-        _execution_mode: TestExecutionMode,
+        execution_mode: TestExecutionMode,
         seed: u64,
     ) -> Result<Self, StatelessFixtureError> {
         // For now, use the existing API until the stateless system is complete

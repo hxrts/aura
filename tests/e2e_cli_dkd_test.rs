@@ -19,7 +19,8 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::{timeout, Duration};
 
 use aura_cli::{create_test_cli_handler, CliHandler};
-use aura_protocol::choreography::protocols::dkd::{execute_dkd, DkdConfig, DkdResult, DkdError};
+// TODO: DKD protocol should be implemented in aura-authenticate feature crate
+// use aura_authenticate::dkd::{execute_dkd, DkdConfig, DkdResult, DkdError};
 use aura_protocol::AuraEffectSystem;
 use aura_simulator::context::SimulatorContext;
 use aura_core::{DeviceId, identifiers::SessionId, AuraResult};

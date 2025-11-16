@@ -1,35 +1,43 @@
 #![allow(clippy::disallowed_methods)]
 
-//! Bridge between AuraEffectSystem and aura-wot capability evaluation
+//! Bridge between GuardEffectSystem and aura-wot capability evaluation
 //!
 //! This module implements the bridge interface that allows aura-wot to evaluate
-//! capabilities without directly depending on aura-protocol's effect system.
+//! capabilities without directly depending on a concrete effect system implementation.
 
-use crate::effects::AuraEffectSystem;
+use super::effect_system_trait::GuardEffectSystem;
 use aura_core::DeviceId;
 use aura_wot::EffectSystemInterface;
 use std::collections::HashMap;
 
-/// Implementation of EffectSystemInterface for AuraEffectSystem
-impl EffectSystemInterface for AuraEffectSystem {
+/// Wrapper type to avoid coherence issues
+pub struct GuardEffectSystemWrapper<E>(pub E);
+
+/// Implementation of EffectSystemInterface for the wrapper
+impl<E: GuardEffectSystem> EffectSystemInterface for GuardEffectSystemWrapper<E> {
     /// Get the device ID for this effect system
     fn device_id(&self) -> DeviceId {
-        self.device_id()
+        GuardEffectSystem::device_id(&self.0)
     }
 
     /// Query metadata from the effect system
     fn get_metadata(&self, key: &str) -> Option<String> {
-        // Placeholder implementation - would query the actual effect system
-        // for metadata stored in the context or configuration
-        match key {
-            "execution_mode" => Some(format!("{:?}", self.execution_mode())),
-            "supported_effects" => Some("all".to_string()), // Would query actual supported effects
-            _ => None,
-        }
+        GuardEffectSystem::get_metadata(&self.0, key)
     }
 }
 
-/// Extension methods for AuraEffectSystem to support guard operations
+/// Implementation for the concrete type we use
+impl EffectSystemInterface for Box<dyn crate::effects::AuraEffects> {
+    fn device_id(&self) -> DeviceId {
+        GuardEffectSystem::device_id(self)
+    }
+
+    fn get_metadata(&self, key: &str) -> Option<String> {
+        GuardEffectSystem::get_metadata(self, key)
+    }
+}
+
+/// Extension methods for GuardEffectSystem to support guard operations
 pub trait GuardExtensions {
     /// Check if this effect system can perform a specific operation
     fn can_perform_operation(&self, operation: &str) -> bool;
@@ -38,14 +46,9 @@ pub trait GuardExtensions {
     fn get_security_context(&self) -> SecurityContext;
 }
 
-impl GuardExtensions for AuraEffectSystem {
+impl<E: GuardEffectSystem> GuardExtensions for E {
     fn can_perform_operation(&self, operation: &str) -> bool {
-        // Placeholder implementation - would check actual capabilities
-        // For development, allow all operations
-        match operation {
-            "send_message" | "receive_message" | "sign_data" | "verify_signature" => true,
-            _ => true, // Permissive for development
-        }
+        GuardEffectSystem::can_perform_operation(self, operation)
     }
 
     fn get_security_context(&self) -> SecurityContext {

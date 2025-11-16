@@ -158,7 +158,8 @@ pub mod assertions {
         test_fn: F,
     ) -> AuraResult<T>
     where
-        F: FnOnce() -> T,
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
     {
         freeze_time_at_epoch();
 

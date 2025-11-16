@@ -72,6 +72,7 @@
 pub mod authorization;
 pub mod console;
 pub mod context;
+/// Cryptographic effect handlers for signing, verification, and key derivation
 pub mod crypto;
 pub mod journal;
 pub mod random;
@@ -83,13 +84,11 @@ pub mod transport;
 pub use authorization::{MockAuthorizationHandler, StandardAuthorizationHandler};
 pub use console::{MockConsoleHandler, RealConsoleHandler};
 pub use context::{ExecutionContext, MockContextHandler, StandardContextHandler};
-// Crypto handlers - TODO: Fix macro generation
-// pub use crypto::{MockCryptoHandler, RealCryptoHandler};
+pub use crypto::{MockCryptoHandler, RealCryptoHandler};
 pub use journal::{MockJournalHandler, StandardJournalHandler};
 pub use random::{MockRandomHandler, RealRandomHandler};
-pub use storage::{FilesystemStorageHandler, MemoryStorageHandler};
-// Time handlers - TODO: Fix macro generation  
-// pub use time::{RealTimeHandler, SimulatedTimeHandler};
+pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler, MemoryStorageHandler};
+pub use time::{RealTimeHandler, SimulatedTimeHandler};
 // Transport effect handlers - organized by functionality
 pub mod transport_effects {
     //! Transport effect implementations - Layer 3 stateless handlers

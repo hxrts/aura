@@ -90,6 +90,9 @@ pub mod hash;
 /// Cryptographic domain types and utilities
 pub mod crypto;
 
+/// Maintenance operation types
+pub mod maintenance;
+
 // === Public API Re-exports ===
 
 // Core algebraic types
@@ -121,6 +124,9 @@ pub use errors::{AuraError, Result as AuraResult};
 pub use effects::{
     AuthorizationEffects, ChaosEffects, ConsoleEffects, CryptoEffects, JournalEffects, RandomEffects,
     ReliabilityEffects, TestingEffects, TimeEffects,
+    // Supertraits for common effect combinations
+    ChoreographyEffects, TreeEffects, SigningEffects, CrdtEffects, AntiEntropyEffects, 
+    MinimalEffects, SnapshotEffects,
 };
 
 // Cryptographic utilities
@@ -131,6 +137,9 @@ pub use crypto::{
     HpkeKeyPair, HpkePrivateKey, HpkePublicKey, IdentityKeyContext, KeyDerivationSpec,
     MerkleProof, PermissionKeyContext, SimpleMerkleProof,
 };
+
+// FROST threshold cryptography module (re-export for aura-frost compatibility)
+pub use crypto::frost;
 
 // Time and content
 pub use content::{ChunkId, ContentId, ContentSize, Hash32};
@@ -151,6 +160,9 @@ pub use tree::{
 
 // Utilities
 pub use causal_context::{CausalContext, OperationId, VectorClock};
+
+// Maintenance events
+pub use maintenance::{AdminReplaced, MaintenanceEvent};
 
 /// Standard result type for core operations
 pub type Result<T> = std::result::Result<T, AuraError>;

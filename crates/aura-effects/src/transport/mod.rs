@@ -4,18 +4,15 @@
 //! NO choreography - these are context-free effect handlers only.
 //! Target: Each file <200 lines, use mature libraries.
 
+pub mod coordination;
 pub mod framing;
 pub mod memory;
 pub mod tcp;
 pub mod utils;
 pub mod websocket;
 
-#[cfg(test)]
-mod tests;
-
+pub use coordination::{RetryingTransportManager, TransportCoordinationConfig, TransportCoordinationError, CoordinationResult};
 pub use framing::FramingHandler;
-// Facade patterns removed - see integration.rs migration notes
-// pub use integration::{RetryingTransportManager, TransportManager};
 pub use memory::InMemoryTransportHandler;
 pub use tcp::TcpTransportHandler;
 pub use utils::{AddressResolver, BufferUtils, ConnectionMetrics, TimeoutHelper, UrlValidator};
@@ -61,14 +58,19 @@ pub struct TransportConnection {
 /// Transport error types
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
+    /// Connection setup or management failed
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
+    /// Underlying IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Operation exceeded timeout
     #[error("Timeout: {0}")]
     Timeout(String),
+    /// Protocol-level error (framing, serialization format)
     #[error("Protocol error: {0}")]
     Protocol(String),
+    /// Message serialization/deserialization error
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 }

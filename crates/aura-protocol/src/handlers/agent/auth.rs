@@ -105,11 +105,11 @@ impl AuthenticationEffects for AuthenticationHandler {
         match identity_result {
             Ok(identity) if identity == self.device_id => {
                 // Device identity matches - create session token
-                let timestamp = effects.current_timestamp().await;
+                let timestamp = TimeEffects::current_timestamp(&*effects).await;
 
                 // Generate session token using crypto effects
                 let random_bytes =
-                    aura_core::effects::RandomEffects::random_bytes(&*effects, 32).await;
+                    effects.random_bytes(32).await;
 
                 let expires_at = timestamp + (15 * 60 * 1000); // 15 minutes
 
@@ -180,7 +180,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         // Check if authentication has expired
         if let Some(expires_at) = state.expires_at {
             let effects = self.core_effects.read().await;
-            let current_time = effects.current_timestamp().await;
+            let current_time = TimeEffects::current_timestamp(&*effects).await;
 
             if current_time > expires_at {
                 // Authentication expired - clear state
@@ -244,7 +244,7 @@ impl AuthenticationEffects for AuthenticationHandler {
         // TODO fix - For now, we simulate the enrollment process
 
         // Generate a biometric template (simulated)
-        let template_data = aura_core::effects::RandomEffects::random_bytes(&*effects, 64).await;
+        let template_data = effects.random_bytes(64).await;
 
         // Store the template securely
         let template_key = format!("biometric_template_{:?}", biometric_type);

@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 use aura_core::{AttestedOp, Hash32};
-use aura_journal::semilattice::OpLog;
+// use aura_journal::semilattice::OpLog;  // Temporarily disabled
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -30,6 +30,7 @@ pub struct BloomDigest {
 
 impl BloomDigest {
     /// Create a digest from an OpLog
+    /* // Temporarily disabled due to OpLog import issue
     pub fn from_oplog(oplog: &OpLog) -> Self {
         let cids = oplog
             .list_ops()
@@ -42,6 +43,7 @@ impl BloomDigest {
 
         Self { cids }
     }
+    */
 
     /// Create an empty digest
     pub fn empty() -> Self {

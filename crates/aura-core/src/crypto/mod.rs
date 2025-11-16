@@ -50,6 +50,22 @@ pub use merkle::{
 // Re-export tree signing utilities
 pub use tree_signing::*;
 
+// Create frost module for backwards compatibility with aura-frost crate
+pub mod frost {
+    //! FROST threshold cryptography compatibility module
+    //! 
+    //! This module provides backwards compatibility for the aura-frost crate
+    //! by re-exporting tree signing functionality under the frost namespace.
+    
+    pub use super::tree_signing;
+    
+    // Re-export specific types that aura-frost expects at the frost module level
+    pub use super::tree_signing::{
+        Nonce, NonceCommitment, PartialSignature, Share, SigningSession,
+        ThresholdSignature, TreeSigningContext, PublicKeyPackage,
+    };
+}
+
 /// HPKE private key - 32 bytes for X25519
 pub type HpkePrivateKey = [u8; 32];
 /// HPKE public key - 32 bytes for X25519

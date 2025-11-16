@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::immutable::AuraContext;
+use super::context::immutable::AuraContext;
 use super::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 use aura_core::LocalSessionType;
 

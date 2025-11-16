@@ -4,7 +4,6 @@
 
 use super::{TransportError, TransportResult};
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Message framing handler
@@ -42,7 +41,9 @@ pub enum FrameType {
 /// Complete frame with header and payload
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Frame {
+    /// Frame header containing type, length, and metadata
     pub header: FrameHeader,
+    /// Message payload
     pub payload: Vec<u8>,
 }
 
@@ -129,7 +130,6 @@ impl FramingHandler {
             data[cursor + 6],
             data[cursor + 7],
         ]);
-        cursor += 8;
 
         let header = FrameHeader {
             frame_type,

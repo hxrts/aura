@@ -33,7 +33,7 @@ impl StorageLocation {
 }
 
 /// Storage operation errors
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum StorageError {
     /// Failed to read data
     #[error("Failed to read: {0}")]

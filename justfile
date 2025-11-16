@@ -421,13 +421,106 @@ test-macos-keychain:
     echo "  - Use 'just status' to verify keychain integration"
     echo "  - Deploy with confidence knowing keys are hardware-protected"
 
-# Run all checks with effects enforcement (format, clippy-strict, test)
-ci: fmt-check clippy-strict test
-    @echo "All CI checks passed with effects enforcement!"
+# Run CI checks locally (dry-run of GitHub CI workflow)
+ci-dry-run:
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-# Run basic CI checks (legacy - use ci for effects enforcement)
-ci-basic: fmt-check clippy test
-    @echo "Basic CI checks passed!"
+    echo "Running CI Dry-Run (Local GitHub Workflow Simulation)"
+    echo "======================================================"
+    echo ""
+
+    # Colors for output
+    GREEN='\033[0;32m'
+    RED='\033[0;31m'
+    NC='\033[0m' # No Color
+
+    exit_code=0
+
+    # 1. Format Check
+    echo "[1/5] Running Format Check..."
+    if cargo fmt --all -- --check; then
+        echo -e "${GREEN}[OK]${NC} Format check passed"
+    else
+        echo -e "${RED}[FAIL]${NC} Format check failed"
+        exit_code=1
+    fi
+    echo ""
+
+    # 2. Clippy with Effects Enforcement
+    echo "[2/5] Running Clippy with Effects Enforcement..."
+    if cargo clippy --workspace --all-targets --verbose -- \
+        -D warnings \
+        -D clippy::disallowed_methods \
+        -D clippy::disallowed_types \
+        -D clippy::unwrap_used \
+        -D clippy::expect_used; then
+        echo -e "${GREEN}[OK]${NC} Clippy check passed"
+    else
+        echo -e "${RED}[FAIL]${NC} Clippy check failed"
+        exit_code=1
+    fi
+    echo ""
+
+    # 3. Test Suite
+    echo "[3/5] Running Test Suite..."
+    if cargo test --workspace --verbose; then
+        echo -e "${GREEN}[OK]${NC} Test suite passed"
+    else
+        echo -e "${RED}[FAIL]${NC} Test suite failed"
+        exit_code=1
+    fi
+    echo ""
+
+    # 4. Check for Effects System Violations
+    echo "[4/5] Checking for Effects System Violations..."
+    violations_found=0
+
+    # Check for direct time usage
+    if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number 2>/dev/null; then
+        echo -e "${RED}[ERROR]${NC} Found direct time usage! Use effects.now() instead."
+        violations_found=1
+    fi
+
+    # Check for direct randomness usage
+    if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number 2>/dev/null; then
+        echo -e "${RED}[ERROR]${NC} Found direct randomness usage! Use effects.random_bytes() instead."
+        violations_found=1
+    fi
+
+    # Check for direct UUID usage
+    if rg --type rust "Uuid::new_v4\(\)" crates/ --line-number 2>/dev/null; then
+        echo -e "${RED}[ERROR]${NC} Found direct UUID usage! Use effects.gen_uuid() instead."
+        violations_found=1
+    fi
+
+    if [ $violations_found -eq 0 ]; then
+        echo -e "${GREEN}[OK]${NC} No effects system violations found"
+    else
+        exit_code=1
+    fi
+    echo ""
+
+    # 5. Build Check
+    echo "[5/5] Running Build Check..."
+    if cargo build --workspace --verbose; then
+        echo -e "${GREEN}[OK]${NC} Build check passed"
+    else
+        echo -e "${RED}[FAIL]${NC} Build check failed"
+        exit_code=1
+    fi
+    echo ""
+
+    # Summary
+    echo "======================================================"
+    if [ $exit_code -eq 0 ]; then
+        echo -e "${GREEN}All CI checks passed!${NC}"
+        echo "Ready to submit PR - matches GitHub CI requirements"
+    else
+        echo -e "${RED}Some CI checks failed!${NC}"
+        echo "Please fix the issues above before submitting PR"
+        exit $exit_code
+    fi
 
 # Parse Quint file to JSON using native parser
 quint-parse input output:

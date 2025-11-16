@@ -60,10 +60,10 @@ Define domain-specific types, semantics, and pure logic without effect handlers:
 
 | Crate | Domain | Responsibility |
 |-------|--------|-----------------|
-| `aura-journal` | CRDT State | Eventually-consistent ledger, semilattice merge, ratchet tree |
+| `aura-journal` | CRDT State | CRDT domain types and semilattice operations (protocols migrated to aura-sync) |
 | `aura-wot` | Trust/Authorization | Capability refinement, meet-semilattice, trust relationships |
 | `aura-verify` | Identity | Complete identity system: cryptographic verification + device lifecycle |
-| `aura-store` | Storage Impl | Storage backend implementations |
+| `aura-store` | Storage Domain | Storage types, capabilities, and domain logic |
 | `aura-transport` | Transport | P2P communication abstractions |
 
 **Key characteristics**:
@@ -81,7 +81,7 @@ Provides semantic abstractions for Aura-specific choreographic features:
 - **Protocol types**: Abstract interfaces that define what choreographic operations must enforce
 - **Type-level guarantees**: Session type algebra for deadlock freedom and type safety
 - **No code generation**: Only traits, types, and runtime implementations
-- **Used by**: 7 crates (aura-protocol, aura-frost, aura-authenticate, aura-recovery, aura-invitation, aura-storage, aura-rendezvous)
+- **Used by**: 6 crates (aura-protocol, aura-frost, aura-authenticate, aura-recovery, aura-invitation, aura-rendezvous)
 
 #### Compile-Time Tool: `aura-macros`
 
@@ -295,8 +295,7 @@ pub async fn execute_anti_entropy(
 | `aura-invitation` | Invitation | Peer onboarding, content-addressed invitations |
 | `aura-recovery` | Recovery | Guardian recovery ceremonies, dispute escalation |
 | `aura-rendezvous` | Peer Discovery | Secret-Branded Broadcasting (SBB) and peer discovery protocols |
-| `aura-storage` | Storage | Capability-based storage with G_search and G_gc choreographies |
-| `aura-sync` | Synchronization | Journal synchronization and anti-entropy protocols |
+| `aura-sync` | Synchronization | Journal synchronization protocols, anti-entropy, and tree choreographies |
 
 **Characteristics**:
 - Implement complete business logic and protocol flows
@@ -483,16 +482,15 @@ crates/
 ├── aura-effects         Standard effect handler implementations (the standard library)
 ├── aura-frost           FROST threshold signatures and key resharing (TEMPORARILY EXCLUDED)
 ├── aura-invitation      Invitation and acceptance choreographies
-├── aura-journal         CRDT-based authenticated ledger for account state
+├── aura-journal         CRDT domain types and semilattice operations
 ├── aura-mpst            Multi-party session types and choreographic specifications
 ├── aura-protocol        Unified effect system and coordination architecture
 ├── aura-quint-api       Quint formal verification integration
 ├── aura-recovery        Guardian recovery and account recovery choreographies
 ├── aura-rendezvous      Social Bulletin Board peer discovery and routing
 ├── aura-simulator       Deterministic simulation engine with chaos testing
-├── aura-storage         High-level storage orchestration and search
-├── aura-store           Capability-driven encrypted chunk storage
-├── aura-sync            CRDT synchronization protocols and anti-entropy
+├── aura-store           Storage domain types and capability-based logic
+├── aura-sync            Journal sync protocols and tree choreographies
 ├── aura-testkit         Shared testing utilities, mocks, fixtures
 ├── aura-transport       P2P communication with effect-based architecture
 ├── aura-verify          Signature verification and identity validation
@@ -536,7 +534,6 @@ graph TD
 
     %% Application Layer
     agent[aura-agent]
-    storage[aura-storage]
 
     %% Development Tools
     testkit[aura-testkit]
@@ -657,10 +654,10 @@ graph TD
 - **aura-mpst**: Multiparty session types and choreographic protocol specifications
 
 ### Protocol Infrastructure Layer (Green)
-- **aura-journal**: CRDT-based authenticated ledger for account state
+- **aura-journal**: CRDT domain types and semilattice operations (protocols migrated to aura-sync)
 - **aura-protocol**: Unified effect system and coordination for protocol operations
 - **aura-wot**: Web of Trust capability-based authorization with meet-semilattice operations
-- **aura-sync**: Synchronization protocols and anti-entropy algorithms
+- **aura-sync**: Journal synchronization protocols and tree coordination choreographies
 
 ### Storage & Transport Layer (Yellow)
 - **aura-transport**: P2P communication with effect-based architecture
@@ -855,19 +852,19 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 ---
 
 ### aura-store
-**Purpose**: Capability-driven encrypted storage with access control
+**Purpose**: Storage domain types, capabilities, and pure logic (Layer 2)
 
 **Key Exports**:
-- **Access Control**: Capability-based access enforcement
-- **Content Processing**: Chunking, encryption, erasure coding
-- **Manifest**: Object manifest with access specifications
-- **Storage**: Chunk store and content indexing
-- **Replication**: Replication strategies
-- **Errors**: `StoreError`
+- **Capabilities**: `StorageCapability`, `StorageCapabilitySet` with meet-semilattice operations
+- **Chunk Types**: `ChunkLayout`, `ChunkManifest`, `ContentManifest`, `ErasureConfig`
+- **Search Types**: `SearchQuery`, `SearchResults`, domain-specific search logic
+- **CRDT Storage**: `StorageIndex`, `StorageOpLog` for distributed storage state
+- **Domain Functions**: `compute_chunk_layout` and other pure storage utilities
+- **Errors**: `StorageError` for domain-specific error handling
 
-**Dependencies**: `aura-journal`, `aura-core`, `aura-protocol`
+**Architecture**: Domain layer (Layer 2) - no effect handlers or coordination, pure types and logic only
 
-**Note**: `aura-transport` dependency temporarily disabled
+**Dependencies**: `aura-core` only (foundation layer)
 
 ---
 
@@ -1088,7 +1085,7 @@ The capability system intentionally uses **multiple architectural layers**, each
 ### Effect System
 - **aura-protocol**: Unified stateless effect system with handlers, guard chains, authorization bridges, and capability soundness verification
 - **aura-mpst**: Multi-party session types infrastructure with choreographic guards and journal coupling
-- **aura-journal**: CRDT-based authenticated ledger with semilattice handlers and ratchet tree compaction
+- **aura-journal**: CRDT domain types with semilattice operations (synchronization protocols in aura-sync)
 
 ### Security & Privacy
 - **aura-verify**: Identity verification and signature verification framework
@@ -1102,9 +1099,8 @@ The capability system intentionally uses **multiple architectural layers**, each
 - **aura-invitation**: Relationship formation choreographies with invitation and acceptance flows
 - **aura-recovery**: Guardian-based recovery system with multi-level dispute escalation and audit trails
 
-### Advanced Features
-- **aura-store**: Low-level encrypted storage with capability-based access control and content processing
-- **aura-storage**: High-level content management with search capabilities and garbage collection
+### Advanced Features  
+- **aura-store**: Storage domain types with capability-based access control and content addressing
 - **aura-sync**: Anti-entropy synchronization protocols with peer management and reconciliation
 - **aura-frost**: Threshold signatures and key resharing operations (temporarily excluded)
 

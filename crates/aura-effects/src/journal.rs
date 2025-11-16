@@ -4,13 +4,13 @@
 //! defined in `aura-core`. These handlers can be used by choreographic applications
 //! and other Aura components.
 
-use aura_macros::aura_effect_handlers;
 use aura_core::effects::JournalEffects;
 use aura_core::{relationships::ContextId, AuraError, DeviceId, FlowBudget, Journal};
-use async_trait::async_trait;
+use aura_macros::aura_effect_handlers;
+
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 
 // Generate both mock and real journal handlers using the macro
 aura_effect_handlers! {
@@ -27,11 +27,11 @@ aura_effect_handlers! {
             deterministic: true,
         },
         methods: {
-            merge_facts(target: &Journal, delta: &Journal) -> Result<Journal, AuraError> => {
+            merge_facts(target: &Journal, _delta: &Journal) -> Result<Journal, AuraError> => {
                 // Mock implementation - just return target
                 Ok(target.clone())
             },
-            refine_caps(target: &Journal, refinement: &Journal) -> Result<Journal, AuraError> => {
+            refine_caps(target: &Journal, _refinement: &Journal) -> Result<Journal, AuraError> => {
                 // Mock implementation - just return target
                 Ok(target.clone())
             },
@@ -56,13 +56,9 @@ aura_effect_handlers! {
                 budgets.insert((context.clone(), *peer), *budget);
                 Ok(*budget)
             },
-            charge_flow_budget(context: &ContextId, peer: &DeviceId, cost: u32) -> Result<FlowBudget, AuraError> => {
+            charge_flow_budget(_context: &ContextId, _peer: &DeviceId, _cost: u32) -> Result<FlowBudget, AuraError> => {
                 // Mock implementation - just return current budget
-                let budgets = self.flow_budgets.read().await;
-                Ok(budgets
-                    .get(&(context.clone(), *peer))
-                    .copied()
-                    .unwrap_or_default())
+                Ok(FlowBudget::default())
             },
         },
     },
@@ -75,12 +71,12 @@ aura_effect_handlers! {
             async_trait: true,
         },
         methods: {
-            merge_facts(target: &Journal, delta: &Journal) -> Result<Journal, AuraError> => {
+            merge_facts(target: &Journal, _delta: &Journal) -> Result<Journal, AuraError> => {
                 // Standard implementation would use proper CRDT merge logic
                 // For now, return target - this should be implemented with real domain logic
                 Ok(target.clone())
             },
-            refine_caps(target: &Journal, refinement: &Journal) -> Result<Journal, AuraError> => {
+            refine_caps(target: &Journal, _refinement: &Journal) -> Result<Journal, AuraError> => {
                 // Standard implementation would use meet semilattice logic
                 // For now, return target - this should be implemented with real domain logic
                 Ok(target.clone())
@@ -90,22 +86,22 @@ aura_effect_handlers! {
                 // For now, return default journal
                 Ok(Journal::default())
             },
-            persist_journal(journal: &Journal) -> Result<(), AuraError> => {
+            persist_journal(_journal: &Journal) -> Result<(), AuraError> => {
                 // Standard implementation would persist to storage backend
                 // For now, succeed without doing anything
                 Ok(())
             },
-            get_flow_budget(context: &ContextId, peer: &DeviceId) -> Result<FlowBudget, AuraError> => {
+            get_flow_budget(_context: &ContextId, _peer: &DeviceId) -> Result<FlowBudget, AuraError> => {
                 // Standard implementation would load from persistent budget store
                 // For now, return default flow budget
                 Ok(FlowBudget::default())
             },
-            update_flow_budget(context: &ContextId, peer: &DeviceId, budget: &FlowBudget) -> Result<FlowBudget, AuraError> => {
+            update_flow_budget(_context: &ContextId, _peer: &DeviceId, budget: &FlowBudget) -> Result<FlowBudget, AuraError> => {
                 // Standard implementation would persist and return merged budget using CRDT logic
                 // For now, just return the input budget
                 Ok(*budget)
             },
-            charge_flow_budget(context: &ContextId, peer: &DeviceId, cost: u32) -> Result<FlowBudget, AuraError> => {
+            charge_flow_budget(_context: &ContextId, _peer: &DeviceId, _cost: u32) -> Result<FlowBudget, AuraError> => {
                 // Standard implementation would atomically check headroom and charge
                 // For now, return default flow budget
                 Ok(FlowBudget::default())

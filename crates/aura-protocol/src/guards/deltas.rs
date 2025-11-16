@@ -6,7 +6,7 @@
 //! aura-journal's CRDT system. It ensures that protocol execution results in
 //! monotonic fact accumulation following join-semilattice laws.
 
-use crate::effects::{AuraEffectSystem, JournalEffects};
+use super::effect_system_trait::GuardEffectSystem;
 use aura_core::{AuraError, AuraResult, Fact, FactValue, Journal};
 use serde_json::Value as JsonValue;
 use std::{collections::BTreeSet, time::Instant};
@@ -17,9 +17,9 @@ use tracing::{debug, error, info, warn};
 /// This function implements the "join-only commits" principle from the formal model.
 /// Facts are accumulated monotonically in the journal CRDT, ensuring convergence
 /// across replicas while preserving join-semilattice properties.
-pub async fn apply_delta_facts(
+pub async fn apply_delta_facts<E: GuardEffectSystem>(
     delta_facts: &[JsonValue],
-    effect_system: &mut AuraEffectSystem,
+    effect_system: &mut E,
 ) -> AuraResult<Vec<JsonValue>> {
     if delta_facts.is_empty() {
         debug!("No delta facts to apply");
@@ -112,9 +112,9 @@ fn validate_delta_facts(facts: &[JsonValue]) -> AuraResult<&[JsonValue]> {
 }
 
 /// Apply a single fact to the journal
-async fn apply_single_fact(
+async fn apply_single_fact<E: GuardEffectSystem>(
     fact: &JsonValue,
-    effect_system: &mut AuraEffectSystem,
+    effect_system: &mut E,
 ) -> AuraResult<JsonValue> {
     // Convert the JSON fact to the appropriate journal operation
     let journal_operation = convert_to_journal_operation(fact)?;
@@ -241,9 +241,9 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
 }
 
 /// Rollback applied facts (best effort)
-async fn rollback_applied_facts(
+async fn rollback_applied_facts<E: GuardEffectSystem>(
     applied_facts: &[JsonValue],
-    effect_system: &mut AuraEffectSystem,
+    effect_system: &mut E,
 ) -> AuraResult<()> {
     warn!(
         facts_to_rollback = applied_facts.len(),
@@ -586,7 +586,10 @@ fn journal_from_json_fact(fact: &JsonValue) -> Journal {
     delta
 }
 
-async fn merge_json_fact(effect_system: &mut AuraEffectSystem, fact: &JsonValue) -> AuraResult<()> {
+async fn merge_json_fact<E: GuardEffectSystem>(
+    effect_system: &mut E,
+    fact: &JsonValue,
+) -> AuraResult<()> {
     let current = effect_system
         .get_journal()
         .await
@@ -606,12 +609,12 @@ async fn merge_json_fact(effect_system: &mut AuraEffectSystem, fact: &JsonValue)
     Ok(())
 }
 
-/// Extension trait for AuraEffectSystem to support journal operations
+/// Extension trait for GuardEffectSystem to support journal operations
 trait JournalOperationExt {
     async fn apply_journal_operation(&mut self, operation: JournalOperation) -> AuraResult<()>;
 }
 
-impl JournalOperationExt for AuraEffectSystem {
+impl<E: GuardEffectSystem> JournalOperationExt for E {
     async fn apply_journal_operation(&mut self, operation: JournalOperation) -> AuraResult<()> {
         debug!(operation = ?operation, "Applying journal operation");
 

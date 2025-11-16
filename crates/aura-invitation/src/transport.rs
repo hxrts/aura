@@ -3,9 +3,10 @@
 use crate::InvitationResult;
 use aura_core::effects::ConsoleEffects;
 use aura_core::identifiers::DeviceId;
+use aura_protocol::effects::AuraEffects;
 
 /// Log a rendezvous delivery intent so future transport work can hook in.
-pub async fn deliver_via_rendezvous<C: ConsoleEffects>(
+pub async fn deliver_via_rendezvous<C: AuraEffects + ?Sized>(
     console: &C,
     _payload: &[u8],
     inviter: DeviceId,

@@ -56,21 +56,21 @@
 pub mod capability;
 pub mod deltas;
 pub mod effect_system_bridge;
+pub mod effect_system_trait;
 pub mod evaluation;
 pub mod execution;
 pub mod flow;
 pub mod journal_coupler;
-// pub mod middleware; // REMOVED: Uses deprecated JournalEffects methods
 pub mod privacy;
 pub mod send_guard;
 
+pub use effect_system_trait::GuardEffectSystem;
 pub use flow::{FlowBudgetEffects, FlowGuard, FlowHint};
 pub use journal_coupler::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
 pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
-use crate::effects::AuraEffectSystem;
 use aura_core::AuraResult;
 use aura_wot::Capability;
 use std::future::Future;
@@ -119,7 +119,7 @@ pub struct GuardedExecutionResult<T> {
 pub struct ExecutionMetrics {
     /// Guard evaluation time (microseconds)
     pub guard_eval_time_us: u64,
-    /// Delta application time (microseconds)  
+    /// Delta application time (microseconds)
     pub delta_apply_time_us: u64,
     /// Total execution time (microseconds)
     pub total_execution_time_us: u64,
@@ -165,13 +165,14 @@ impl ProtocolGuard {
     }
 
     /// Execute a protocol operation with full guard enforcement
-    pub async fn execute_with_effects<T, F, Fut>(
+    pub async fn execute_with_effects<E, T, F, Fut>(
         &self,
-        effect_system: &mut AuraEffectSystem,
+        effect_system: &mut E,
         operation: F,
     ) -> AuraResult<GuardedExecutionResult<T>>
     where
-        F: FnOnce(&mut AuraEffectSystem) -> Fut,
+        E: GuardEffectSystem + aura_wot::EffectSystemInterface,
+        F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
         execution::execute_guarded_operation(self, effect_system, operation).await

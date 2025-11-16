@@ -5,8 +5,8 @@
 //! This module implements the `need(σ) ≤ C` checking required by the formal model.
 //! It bridges the protocol layer with the capability calculus implemented in aura-wot.
 
+use super::effect_system_trait::GuardEffectSystem;
 use super::ProtocolGuard;
-use crate::effects::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_wot::{Capability, CapabilityEvaluator, EffectiveCapabilitySet};
 use std::time::Instant;
@@ -52,10 +52,10 @@ impl GuardEvaluator {
     }
 
     /// Evaluate protocol guards against current capabilities
-    pub async fn evaluate_guards(
+    pub async fn evaluate_guards<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
         &self,
         guard: &ProtocolGuard,
-        effect_system: &AuraEffectSystem,
+        effect_system: &E,
     ) -> AuraResult<GuardEvaluationResult> {
         let start_time = Instant::now();
 
@@ -143,10 +143,10 @@ impl GuardEvaluator {
     }
 
     /// Batch evaluate multiple guards (optimization for complex protocols)
-    pub async fn evaluate_guards_batch(
+    pub async fn evaluate_guards_batch<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
         &self,
         guards: &[&ProtocolGuard],
-        effect_system: &AuraEffectSystem,
+        effect_system: &E,
     ) -> AuraResult<Vec<GuardEvaluationResult>> {
         // Optimize by computing effective capabilities once
         let effective_capabilities = self
@@ -190,17 +190,17 @@ impl GuardEvaluator {
 }
 
 /// Create a guard evaluator from an effect system
-pub async fn create_guard_evaluator(
-    effect_system: &AuraEffectSystem,
+pub async fn create_guard_evaluator<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+    effect_system: &E,
 ) -> AuraResult<GuardEvaluator> {
-    let device_id = effect_system.device_id();
+    let device_id = aura_wot::EffectSystemInterface::device_id(effect_system);
     Ok(GuardEvaluator::new(device_id))
 }
 
 /// Convenience function to evaluate a single guard
-pub async fn evaluate_guard(
+pub async fn evaluate_guard<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
     guard: &ProtocolGuard,
-    effect_system: &AuraEffectSystem,
+    effect_system: &E,
 ) -> AuraResult<GuardEvaluationResult> {
     let evaluator = create_guard_evaluator(effect_system).await?;
     evaluator.evaluate_guards(guard, effect_system).await

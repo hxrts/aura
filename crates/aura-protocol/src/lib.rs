@@ -103,10 +103,8 @@ pub mod effects;
 pub mod guards;
 pub mod handlers;
 pub mod messages;
-pub mod middleware;
-pub mod sync;
+pub mod state;
 pub mod transport;
-pub mod verification;
 
 // Unified AuraEffectSystem architecture only
 

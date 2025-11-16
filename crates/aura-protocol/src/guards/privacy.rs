@@ -6,8 +6,8 @@
 
 #![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
 
+use super::effect_system_trait::GuardEffectSystem;
 use super::LeakageBudget;
-use crate::effects::AuraEffectSystem;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use tracing::{debug, info, warn};
 
@@ -197,10 +197,10 @@ impl PrivacyBudgetTracker {
 }
 
 /// Track leakage consumption for an operation with persistent state management
-pub async fn track_leakage_consumption(
+pub async fn track_leakage_consumption<E: GuardEffectSystem>(
     leakage_budget: &LeakageBudget,
     operation_id: &str,
-    effect_system: &AuraEffectSystem,
+    effect_system: &E,
 ) -> AuraResult<LeakageBudget> {
     // Get current device ID from effect system
     let device_id = effect_system.device_id();
@@ -247,9 +247,9 @@ pub async fn track_leakage_consumption(
 }
 
 /// Classify which adversary classes can observe an operation
-async fn classify_operation_observability(
+async fn classify_operation_observability<E: GuardEffectSystem>(
     operation_id: &str,
-    effect_system: &AuraEffectSystem,
+    effect_system: &E,
 ) -> Vec<AdversaryClass> {
     // This is a TODO fix - Simplified classification - in practice, this would analyze
     // the operation type, network patterns, and protocol specifics
@@ -284,9 +284,9 @@ async fn classify_operation_observability(
 }
 
 /// Load privacy tracker state from persistent storage
-async fn load_privacy_tracker(
+async fn load_privacy_tracker<E: GuardEffectSystem>(
     device_id: DeviceId,
-    effect_system: &AuraEffectSystem,
+    effect_system: &E,
 ) -> AuraResult<PrivacyBudgetTracker> {
     let storage_key = format!("privacy_budget_{}", device_id);
 
@@ -325,9 +325,9 @@ async fn load_privacy_tracker(
 }
 
 /// Save privacy tracker state to persistent storage
-async fn save_privacy_tracker(
+async fn save_privacy_tracker<E: GuardEffectSystem>(
     tracker: &PrivacyBudgetTracker,
-    effect_system: &AuraEffectSystem,
+    effect_system: &E,
 ) -> AuraResult<()> {
     let storage_key = format!("privacy_budget_{}", tracker.device_id);
 
@@ -345,10 +345,10 @@ async fn save_privacy_tracker(
 }
 
 /// Check if a device can afford a specific operation using persistent state
-pub async fn can_afford_operation(
+pub async fn can_afford_operation<E: GuardEffectSystem>(
     device_id: DeviceId,
     requested_budget: &LeakageBudget,
-    effect_system: &AuraEffectSystem,
+    effect_system: &E,
 ) -> AuraResult<bool> {
     // Load current tracker state
     let tracker = load_privacy_tracker(device_id, effect_system).await?;
@@ -358,9 +358,9 @@ pub async fn can_afford_operation(
 }
 
 /// Get privacy budget status for a device using persistent storage
-pub async fn get_privacy_budget_status(
+pub async fn get_privacy_budget_status<E: GuardEffectSystem>(
     device_id: DeviceId,
-    effect_system: &AuraEffectSystem,
+    effect_system: &E,
 ) -> AuraResult<Option<PrivacyBudgetState>> {
     match load_privacy_tracker(device_id, effect_system).await {
         Ok(tracker) => {
@@ -386,10 +386,10 @@ pub async fn get_privacy_budget_status(
 }
 
 /// Reset privacy budget for a device with new limits
-pub async fn reset_privacy_budget(
+pub async fn reset_privacy_budget<E: GuardEffectSystem>(
     device_id: DeviceId,
     new_limits: LeakageBudget,
-    effect_system: &AuraEffectSystem,
+    effect_system: &E,
 ) -> AuraResult<()> {
     // Create fresh tracker with new limits
     let tracker = PrivacyBudgetTracker::new(device_id, new_limits.clone());

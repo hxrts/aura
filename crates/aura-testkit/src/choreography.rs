@@ -8,9 +8,7 @@
 
 use crate::{DeviceTestFixture, TestEffectsBuilder, TestExecutionMode};
 use aura_core::DeviceId;
-use aura_protocol::{
-    choreography::AuraHandlerAdapter, effects::AuraEffectSystem, handlers::ExecutionMode,
-};
+use crate::foundation::SimpleTestContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -18,11 +16,11 @@ use tokio::sync::RwLock;
 
 /// Multi-device test harness for choreographic protocols
 ///
-/// This harness manages multiple simulated devices with coordinated effect systems
+/// This harness manages multiple simulated devices with coordinated test contexts
 /// and provides infrastructure for testing distributed choreographic protocols.
 pub struct ChoreographyTestHarness {
-    /// Test devices with their effect systems
-    devices: Vec<(DeviceTestFixture, AuraEffectSystem)>,
+    /// Test devices with their foundation-based contexts
+    devices: Vec<(DeviceTestFixture, SimpleTestContext)>,
     /// Transport coordinator for inter-device communication
     transport: Arc<MockChoreographyTransport>,
     /// Role mappings for choreographic execution
@@ -34,15 +32,14 @@ pub struct ChoreographyTestHarness {
 impl ChoreographyTestHarness {
     /// Create a new choreography test harness with the specified number of devices
     pub fn with_devices(count: usize) -> Self {
-        let devices: Vec<(DeviceTestFixture, AuraEffectSystem)> = (0..count)
+        let devices: Vec<(DeviceTestFixture, SimpleTestContext)> = (0..count)
             .map(|i| {
                 let device_fixture = DeviceTestFixture::new(i);
                 let device_id = device_fixture.device_id();
-                let effect_system = TestEffectsBuilder::for_unit_tests(device_id)
-                    .with_execution_mode(TestExecutionMode::UnitTest)
+                let test_context = TestEffectsBuilder::for_unit_tests(device_id)
                     .build()
-                    .expect("Failed to create effect system");
-                (device_fixture, effect_system)
+                    .expect("Failed to create test context");
+                (device_fixture, test_context)
             })
             .collect();
 
@@ -63,17 +60,16 @@ impl ChoreographyTestHarness {
 
     /// Create a harness with specific device labels for easier testing
     pub fn with_labeled_devices(labels: Vec<&str>) -> Self {
-        let devices: Vec<(DeviceTestFixture, AuraEffectSystem)> = labels
+        let devices: Vec<(DeviceTestFixture, SimpleTestContext)> = labels
             .into_iter()
             .enumerate()
             .map(|(i, label)| {
                 let device_fixture = DeviceTestFixture::with_label(i, label.to_string());
                 let device_id = device_fixture.device_id();
-                let effect_system = TestEffectsBuilder::for_unit_tests(device_id)
-                    .with_execution_mode(TestExecutionMode::UnitTest)
+                let test_context = TestEffectsBuilder::for_unit_tests(device_id)
                     .build()
-                    .expect("Failed to create effect system");
-                (device_fixture, effect_system)
+                    .expect("Failed to create test context");
+                (device_fixture, test_context)
             })
             .collect();
 
@@ -116,13 +112,13 @@ impl ChoreographyTestHarness {
                 }
             };
 
-            let effect_system =
+            let test_context =
                 effects_builder
                     .build()
                     .map_err(|e| TestError::ChoreographyExecution {
-                        reason: format!("Failed to create effect system: {}", e),
+                        reason: format!("Failed to create test context: {}", e),
                     })?;
-            devices.push((fixture, effect_system));
+            devices.push((fixture, test_context));
         }
 
         let device_ids: Vec<DeviceId> = devices
@@ -145,7 +141,7 @@ impl ChoreographyTestHarness {
     /// This provides a clean interface for creating choreography harnesses with
     /// the new stateless effect system architecture.
     pub async fn new_with_stateless_effects(
-        devices: Vec<(DeviceTestFixture, AuraEffectSystem)>,
+        devices: Vec<(DeviceTestFixture, SimpleTestContext)>,
     ) -> Result<Self, TestError> {
         let device_ids: Vec<DeviceId> = devices
             .iter()
@@ -213,9 +209,9 @@ impl ChoreographyTestHarness {
         self.role_mappings.get(role_name).copied()
     }
 
-    /// Get a device's effect system by index
-    pub fn device_effects(&self, device_index: usize) -> Option<&AuraEffectSystem> {
-        self.devices.get(device_index).map(|(_, effects)| effects)
+    /// Get a device's test context by index
+    pub fn device_context(&self, device_index: usize) -> Option<&SimpleTestContext> {
+        self.devices.get(device_index).map(|(_, context)| context)
     }
 
     /// Get a device fixture by index
@@ -223,8 +219,8 @@ impl ChoreographyTestHarness {
         self.devices.get(device_index).map(|(fixture, _)| fixture)
     }
 
-    /// Create an adapter for choreographic execution on a specific device
-    pub fn create_adapter(&self, device_index: usize) -> Result<AuraHandlerAdapter, TestError> {
+    /// Get a device's test context for choreographic execution
+    pub fn get_device_context(&self, device_index: usize) -> Result<&SimpleTestContext, TestError> {
         if device_index >= self.devices.len() {
             return Err(TestError::InvalidDeviceIndex {
                 index: device_index,
@@ -232,39 +228,27 @@ impl ChoreographyTestHarness {
             });
         }
 
-        let device_id = self.devices[device_index].0.device_id();
-        let mut adapter = AuraHandlerAdapter::new(device_id, ExecutionMode::Testing);
-
-        // Configure role mappings
-        for (role_name, role_device_id) in &self.role_mappings {
-            adapter.add_role_mapping(role_name.clone(), *role_device_id);
-        }
-
-        // TODO: Connect to transport when adapter supports it
-
-        Ok(adapter)
+        Ok(&self.devices[device_index].1)
     }
 
-    /// Execute a choreography across all devices
+    /// Execute a choreography across all devices using foundation-based contexts
     pub async fn execute_choreography<F, R>(&self, choreography_fn: F) -> Result<Vec<R>, TestError>
     where
         F: Fn(
             usize,
-            AuraHandlerAdapter,
+            &SimpleTestContext,
         )
             -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<R, TestError>> + Send>>,
         R: Send,
     {
         let mut tasks = Vec::new();
 
-        for (i, _) in self.devices.iter().enumerate() {
-            let adapter = self.create_adapter(i)?;
-            let task = choreography_fn(i, adapter);
+        for (i, (_, context)) in self.devices.iter().enumerate() {
+            let task = choreography_fn(i, context);
             tasks.push(task);
         }
 
-        // Execute all device roles concurrently
-        // Execute all device roles sequentially for now
+        // Execute all device roles sequentially for now (foundation approach)
         let mut results = Vec::new();
         for task in tasks {
             results.push(task.await?);
@@ -615,8 +599,8 @@ impl std::error::Error for TransportError {}
 /// This type provides the bridge between testkit choreography infrastructure
 /// and the aura-simulator effect system.
 pub struct SimulatorCompatibleContext {
-    /// Test devices and their effect systems
-    pub devices: Vec<(DeviceTestFixture, AuraEffectSystem)>,
+    /// Test devices and their foundation test contexts
+    pub devices: Vec<(DeviceTestFixture, SimpleTestContext)>,
     /// Mock transport layer for choreography
     pub transport: Arc<MockChoreographyTransport>,
     /// Mock session coordinator
@@ -637,8 +621,8 @@ impl SimulatorCompatibleContext {
             .collect()
     }
 
-    /// Get effect system for a device
-    pub fn device_effects(&self, device_id: DeviceId) -> Option<&AuraEffectSystem> {
+    /// Get test context for a device
+    pub fn device_context(&self, device_id: DeviceId) -> Option<&SimpleTestContext> {
         self.devices
             .iter()
             .find(|(fixture, _)| fixture.device_id() == device_id)

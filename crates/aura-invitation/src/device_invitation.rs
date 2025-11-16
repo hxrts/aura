@@ -165,7 +165,7 @@ pub struct InvitationRejected {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InvitationResult {
+pub struct DeviceInvitationResult {
     pub invitation_id: String,
     pub accepted: bool,
     pub invitee: DeviceId,
@@ -173,9 +173,12 @@ pub struct InvitationResult {
 }
 
 // Device invitation creation choreography
-choreography! {
-    #[namespace = "device_invitation"]
-    protocol DeviceInvitation {
+mod device_invitation_protocol {
+    use super::*;
+
+    choreography! {
+        #[namespace = "device_invitation"]
+        protocol DeviceInvitation {
         roles: Inviter, Invitee, Coordinator;
 
         // Phase 1: Invitation Creation
@@ -206,14 +209,19 @@ choreography! {
         Coordinator[guard_capability = "notify_result",
                    flow_cost = 75,
                    journal_facts = "result_notified"]
-        -> Inviter: NotifyResult(InvitationResult);
+        -> Inviter: NotifyResult(DeviceInvitationResult);
     }
 }
 
+}
+
 // Invitation rejection choreography (alternative flow)
-choreography! {
-    #[namespace = "invitation_rejection"]
-    protocol InvitationRejection {
+mod invitation_rejection_protocol {
+    use super::*;
+
+    choreography! {
+        #[namespace = "invitation_rejection"]
+        protocol InvitationRejection {
         roles: Inviter, Invitee, Coordinator;
 
         // Rejection flow
@@ -226,8 +234,10 @@ choreography! {
         Coordinator[guard_capability = "notify_rejection",
                    flow_cost = 75,
                    journal_facts = "rejection_notified"]
-        -> Inviter: NotifyRejection(InvitationResult);
+        -> Inviter: NotifyRejection(DeviceInvitationResult);
     }
+}
+
 }
 
 /// Device invitation coordinator with in-memory ledger.
@@ -330,7 +340,7 @@ impl DeviceInvitationCoordinator {
 
         let ttl_window = envelope.expires_at.saturating_sub(envelope.created_at);
         deliver_via_rendezvous(
-            &self.effects,
+            self.effects.as_ref(),
             &payload,
             envelope.inviter,
             envelope.invitee,
@@ -341,7 +351,7 @@ impl DeviceInvitationCoordinator {
         // Skip network sending in testing mode to avoid MockNetworkHandler connectivity issues
         use aura_protocol::handlers::ExecutionMode;
         if self.effects.execution_mode() != ExecutionMode::Testing {
-            NetworkEffects::send_to_peer(&self.effects, envelope.invitee.0, payload)
+            NetworkEffects::send_to_peer(self.effects.as_ref(), envelope.invitee.0, payload)
                 .await
                 .map_err(|err| InvitationError::network(err.to_string()))?;
         }

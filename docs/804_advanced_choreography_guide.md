@@ -257,16 +257,22 @@ choreography! {
     protocol BudgetedProtocol {
         roles: Sender, Receiver;
         
-        Sender[flow_cost = 100]
+        Sender[flow_cost = 200]
         -> Receiver: HighCostMessage(LargeData);
         
         Receiver[flow_cost = 50]
         -> Sender: LowCostAck(AckData);
+        
+        // Messages with annotations but no flow_cost get default of 100
+        Sender[guard_capability = "send_data"]
+        -> Receiver: DefaultCostMessage(Data);
     }
 }
 ```
 
 Flow costs specify budget consumption per protocol operation. Higher costs indicate more expensive operations in terms of privacy or resources. Budget enforcement prevents excessive resource usage.
+
+When a message has role annotations (brackets with any Aura-specific attributes) but no explicit `flow_cost` specified, a default value of 100 is automatically applied. This ensures all annotated protocol operations have flow budget tracking without requiring explicit cost specification for every message.
 
 ### Journal Facts
 

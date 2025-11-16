@@ -100,7 +100,7 @@ impl TcpTransportHandler {
 
     /// Send data over TCP stream
     pub async fn send(&self, stream: &mut TcpStream, data: &[u8]) -> TransportResult<usize> {
-        let bytes_written = timeout(self.config.write_timeout, stream.write_all(data))
+        let _ = timeout(self.config.write_timeout, stream.write_all(data))
             .await
             .map_err(|_| TransportError::Timeout("TCP write timeout".to_string()))?
             .map_err(TransportError::Io)?;
@@ -177,15 +177,21 @@ impl NetworkEffects for TcpTransportHandler {
         // Convert UUID to socket address - this is a simplified implementation
         // In practice, you'd need a proper peer discovery/registry system
         let addr_str = format!("127.0.0.1:{}", peer_id.as_u128() % 65535 + 1024);
-        let addr: SocketAddr = addr_str.parse()
-            .map_err(|e| NetworkError::SendFailed { peer_id: Some(peer_id), reason: format!("Invalid address: {}", e) })?;
-        
+        let addr: SocketAddr = addr_str.parse().map_err(|e| NetworkError::SendFailed {
+            peer_id: Some(peer_id),
+            reason: format!("Invalid address: {}", e),
+        })?;
+
         let mut stream = TcpStream::connect(addr)
             .await
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
 
-        self.send_framed(&mut stream, &message).await
-            .map_err(|e| NetworkError::SendFailed { peer_id: Some(peer_id), reason: e.to_string() })?;
+        self.send_framed(&mut stream, &message)
+            .await
+            .map_err(|e| NetworkError::SendFailed {
+                peer_id: Some(peer_id),
+                reason: e.to_string(),
+            })?;
         Ok(())
     }
 
@@ -201,11 +207,15 @@ impl NetworkEffects for TcpTransportHandler {
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
         // TCP receiving requires a persistent connection and listener
         // This is a placeholder for stateless implementation
-        Err(NetworkError::ReceiveFailed { reason: "TCP receive requires connection management".to_string() })
+        Err(NetworkError::ReceiveFailed {
+            reason: "TCP receive requires connection management".to_string(),
+        })
     }
 
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
-        Err(NetworkError::ReceiveFailed { reason: "TCP receive_from requires connection management".to_string() })
+        Err(NetworkError::ReceiveFailed {
+            reason: "TCP receive_from requires connection management".to_string(),
+        })
     }
 
     async fn connected_peers(&self) -> Vec<Uuid> {
@@ -221,7 +231,7 @@ impl NetworkEffects for TcpTransportHandler {
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
         use futures::stream;
         use std::pin::Pin;
-        
+
         let stream = stream::empty::<PeerEvent>();
         Ok(Pin::from(Box::new(stream)))
     }

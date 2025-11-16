@@ -1,16 +1,16 @@
 //! Enhanced effect system integration for testkit
 //!
 //! This module provides builders and utilities for creating effect systems
-//! that work with the new stateless architecture defined in work/021.md.
+//! that work with the foundation-based architecture.
 //! It supports different execution modes for unit tests, integration tests,
 //! and simulation scenarios.
 
 use aura_core::{AuraResult, DeviceId};
+use aura_core::effects::ExecutionMode;
 use std::path::PathBuf;
 
-// Import the actual stateless effect system types
-use aura_protocol::effects::system::{AuraEffectSystem, EffectSystemConfig, StorageConfig};
-use aura_protocol::handlers::ExecutionMode;
+// Use foundation-based approach instead of orchestration layer
+use crate::foundation::SimpleTestContext;
 
 /// Configuration for mock handlers in test scenarios
 #[derive(Debug, Clone)]
@@ -152,30 +152,20 @@ impl TestEffectsBuilder {
         &self.mock_config
     }
 
-    /// Build the stateless effect system
-    pub fn build(self) -> AuraResult<AuraEffectSystem> {
-        let config = EffectSystemConfig {
-            device_id: self.device_id,
-            execution_mode: self.determine_execution_mode(),
-            default_flow_limit: 10_000,
-            initial_epoch: aura_core::session_epochs::Epoch::from(1),
-            storage_config: StorageConfig::for_testing(),
-        };
-
-        AuraEffectSystem::new(config)
+    /// Build the foundation-based test context
+    pub fn build(self) -> AuraResult<SimpleTestContext> {
+        Ok(SimpleTestContext::with_device_id(
+            self.determine_execution_mode(),
+            self.device_id,
+        ))
     }
 
-    /// Build the system for a specific execution mode
-    pub fn build_for_mode(self, mode: TestExecutionMode) -> AuraResult<AuraEffectSystem> {
-        let config = EffectSystemConfig {
-            device_id: self.device_id,
-            execution_mode: mode.to_execution_mode(self.seed),
-            default_flow_limit: 10_000,
-            initial_epoch: aura_core::session_epochs::Epoch::from(1),
-            storage_config: StorageConfig::for_testing(),
-        };
-
-        AuraEffectSystem::new(config)
+    /// Build the context for a specific execution mode
+    pub fn build_for_mode(self, mode: TestExecutionMode) -> AuraResult<SimpleTestContext> {
+        Ok(SimpleTestContext::with_device_id(
+            mode.to_execution_mode(self.seed),
+            self.device_id,
+        ))
     }
 
     /// Determine the appropriate execution mode from configuration
@@ -189,7 +179,7 @@ impl TestEffectsBuilder {
         }
     }
 
-    // build_placeholder() method removed - use build() for unified effect system
+    // build() method now creates foundation-based SimpleTestContext
 }
 
 /// Execution mode configuration for testkit integration

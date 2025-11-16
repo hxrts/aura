@@ -19,11 +19,10 @@
 //! where protocol operations atomically update both local state and distributed
 //! journal facts using join-semilattice operations.
 
+use super::effect_system_trait::GuardEffectSystem;
 use super::ProtocolGuard;
-use crate::effects::AuraEffectSystem;
-use crate::effects::JournalEffects;
 use aura_core::{AuraResult, Journal};
-use aura_mpst::journal_coupling::{JournalAnnotation, JournalOpType};
+use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
 use std::{collections::HashMap, future::Future, time::Instant};
 use tracing::{debug, error, info, warn};
@@ -147,14 +146,15 @@ impl JournalCoupler {
     /// 1. Execute the protocol operation
     /// 2. On success, apply journal annotations atomically
     /// 3. Return both the operation result and journal coupling result
-    pub async fn execute_with_coupling<T, F, Fut>(
+    pub async fn execute_with_coupling<E, T, F, Fut>(
         &self,
         operation_id: &str,
-        effect_system: &mut AuraEffectSystem,
+        effect_system: &mut E,
         operation: F,
     ) -> AuraResult<JournalCouplingResult<T>>
     where
-        F: FnOnce(&mut AuraEffectSystem) -> Fut,
+        E: GuardEffectSystem,
+        F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
         let coupling_start = Instant::now();
@@ -179,15 +179,16 @@ impl JournalCoupler {
     }
 
     /// Execute with optimistic journal application (apply deltas first)
-    async fn execute_optimistic<T, F, Fut>(
+    async fn execute_optimistic<E, T, F, Fut>(
         &self,
         operation_id: &str,
-        effect_system: &mut AuraEffectSystem,
+        effect_system: &mut E,
         operation: F,
         initial_journal: Journal,
     ) -> AuraResult<JournalCouplingResult<T>>
     where
-        F: FnOnce(&mut AuraEffectSystem) -> Fut,
+        E: GuardEffectSystem,
+        F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
         let application_start = Instant::now();
@@ -239,15 +240,16 @@ impl JournalCoupler {
     }
 
     /// Execute with pessimistic journal application (apply deltas after operation succeeds)
-    async fn execute_pessimistic<T, F, Fut>(
+    async fn execute_pessimistic<E, T, F, Fut>(
         &self,
         operation_id: &str,
-        effect_system: &mut AuraEffectSystem,
+        effect_system: &mut E,
         operation: F,
         initial_journal: Journal,
     ) -> AuraResult<JournalCouplingResult<T>>
     where
-        F: FnOnce(&mut AuraEffectSystem) -> Fut,
+        E: GuardEffectSystem,
+        F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
         // Phase 1: Execute the protocol operation first
@@ -281,10 +283,10 @@ impl JournalCoupler {
     }
 
     /// Apply journal annotations for an operation
-    async fn apply_annotations(
+    async fn apply_annotations<E: GuardEffectSystem>(
         &self,
         operation_id: &str,
-        effect_system: &mut AuraEffectSystem,
+        effect_system: &mut E,
         initial_journal: &Journal,
     ) -> AuraResult<(Journal, Vec<JournalOperation>)> {
         // Check if there are annotations for this operation
@@ -343,10 +345,10 @@ impl JournalCoupler {
     }
 
     /// Apply a single journal annotation
-    async fn apply_single_annotation(
+    async fn apply_single_annotation<E: GuardEffectSystem>(
         &self,
         annotation: &JournalAnnotation,
-        effect_system: &mut AuraEffectSystem,
+        effect_system: &mut E,
         current_journal: &Journal,
     ) -> AuraResult<(Journal, JournalOperation)> {
         match &annotation.op_type {
@@ -446,14 +448,15 @@ impl ProtocolGuard {
     /// Execute with journal coupling integrated into the guard chain
     ///
     /// This method provides a complete CapGuard → FlowGuard → JournalCoupler execution path
-    pub async fn execute_with_journal_coupling<T, F, Fut>(
+    pub async fn execute_with_journal_coupling<E, T, F, Fut>(
         &self,
-        effect_system: &mut AuraEffectSystem,
+        effect_system: &mut E,
         journal_coupler: &JournalCoupler,
         operation: F,
     ) -> AuraResult<JournalCouplingResult<T>>
     where
-        F: FnOnce(&mut AuraEffectSystem) -> Fut + Send,
+        E: GuardEffectSystem,
+        F: FnOnce(&mut E) -> Fut + Send,
         Fut: Future<Output = AuraResult<T>> + Send,
     {
         // For now, execute the journal coupling directly

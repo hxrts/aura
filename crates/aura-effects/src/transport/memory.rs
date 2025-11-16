@@ -15,13 +15,13 @@ use uuid::Uuid;
 /// In-memory transport handler for testing
 #[derive(Debug, Clone)]
 pub struct InMemoryTransportHandler {
-    config: TransportConfig,
+    _config: TransportConfig,
     registry: Arc<RwLock<TransportRegistry>>,
 }
 
 /// Registry for in-memory transport connections
 #[derive(Debug, Default)]
-struct TransportRegistry {
+pub struct TransportRegistry {
     /// Message channels by peer ID
     channels: HashMap<String, mpsc::UnboundedSender<Vec<u8>>>,
     /// Connection metadata
@@ -32,7 +32,7 @@ impl InMemoryTransportHandler {
     /// Create new in-memory transport handler
     pub fn new(config: TransportConfig) -> Self {
         Self {
-            config,
+            _config: config,
             registry: Arc::new(RwLock::new(TransportRegistry::default())),
         }
     }
@@ -45,7 +45,7 @@ impl InMemoryTransportHandler {
     /// Create shared registry for multiple handlers
     pub fn with_shared_registry(registry: Arc<RwLock<TransportRegistry>>) -> Self {
         Self {
-            config: TransportConfig::default(),
+            _config: TransportConfig::default(),
             registry,
         }
     }
@@ -191,8 +191,11 @@ impl InMemoryTransportHandler {
 /// Transport statistics
 #[derive(Debug, Clone)]
 pub struct TransportStats {
+    /// Total registered peers
     pub total_peers: usize,
+    /// Total established connections
     pub total_connections: usize,
+    /// Currently active message channels
     pub active_channels: usize,
 }
 
@@ -200,10 +203,11 @@ pub struct TransportStats {
 impl NetworkEffects for InMemoryTransportHandler {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         let peer_str = peer_id.to_string();
-        self.send_to_peer(&peer_str, message).await
-            .map_err(|e| NetworkError::SendFailed { 
-                peer_id: Some(peer_id), 
-                reason: e.to_string() 
+        self.send_to_peer(&peer_str, message)
+            .await
+            .map_err(|e| NetworkError::SendFailed {
+                peer_id: Some(peer_id),
+                reason: e.to_string(),
             })
     }
 
@@ -219,21 +223,23 @@ impl NetworkEffects for InMemoryTransportHandler {
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
         // For memory transport, we need to implement proper message receiving
         // This is a placeholder implementation
-        Err(NetworkError::ReceiveFailed { 
-            reason: "Not implemented for memory transport".to_string() 
+        Err(NetworkError::ReceiveFailed {
+            reason: "Not implemented for memory transport".to_string(),
         })
     }
 
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         // Placeholder implementation
-        Err(NetworkError::ReceiveFailed { 
-            reason: "Not implemented for memory transport".to_string() 
+        Err(NetworkError::ReceiveFailed {
+            reason: "Not implemented for memory transport".to_string(),
         })
     }
 
     async fn connected_peers(&self) -> Vec<Uuid> {
         let registry = self.registry.read().await;
-        registry.channels.keys()
+        registry
+            .channels
+            .keys()
             .filter_map(|k| Uuid::parse_str(k).ok())
             .collect()
     }
@@ -247,7 +253,7 @@ impl NetworkEffects for InMemoryTransportHandler {
         // Placeholder implementation for event subscription
         use futures::stream;
         use std::pin::Pin;
-        
+
         let stream = stream::empty::<PeerEvent>();
         Ok(Pin::from(Box::new(stream)))
     }

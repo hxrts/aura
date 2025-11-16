@@ -5,11 +5,9 @@
 //! Target: Each protocol <250 lines, focused on session type safety.
 
 pub mod channel_management;
-pub mod receipt_verification;
 pub mod websocket;
 
 pub use channel_management::{ChannelEstablishmentCoordinator, ChannelTeardownCoordinator};
-pub use receipt_verification::ReceiptCoordinationProtocol;
 pub use websocket::{WebSocketHandshakeCoordinator, WebSocketSessionCoordinator};
 
 /// Choreographic coordination configuration

@@ -50,6 +50,8 @@ pub mod network;
 pub mod random;
 pub mod reliability;
 pub mod storage;
+pub mod supertraits;
+pub mod system;
 pub mod testing;
 pub mod time;
 
@@ -65,8 +67,56 @@ pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerE
 pub use random::RandomEffects;
 pub use reliability::{ReliabilityEffects, ReliabilityError};
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
+pub use supertraits::{
+    AntiEntropyEffects, ChoreographyEffects, CrdtEffects, MinimalEffects, 
+    SigningEffects, SnapshotEffects, TreeEffects,
+};
+pub use system::{SystemEffects, SystemError};
 pub use testing::{TestingEffects, TestingError};
 pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 
 // Re-export unified error system
 pub use crate::AuraError;
+
+/// Execution mode controlling effect handler selection across all system layers
+///
+/// This enum controls which implementations of effect handlers are used throughout
+/// the entire Aura system, from testing to production deployments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ExecutionMode {
+    /// Testing mode: Mock implementations, deterministic behavior
+    Testing,
+    /// Production mode: Real implementations, actual system operations
+    Production,
+    /// Simulation mode: Deterministic implementations with controllable effects
+    Simulation {
+        /// Random seed for deterministic simulation
+        seed: u64,
+    },
+}
+
+impl ExecutionMode {
+    /// Check if this mode uses deterministic effects
+    pub fn is_deterministic(&self) -> bool {
+        matches!(self, Self::Testing | Self::Simulation { .. })
+    }
+
+    /// Check if this mode uses real system operations
+    pub fn is_production(&self) -> bool {
+        matches!(self, Self::Production)
+    }
+
+    /// Get the seed for deterministic modes
+    pub fn seed(&self) -> Option<u64> {
+        match self {
+            Self::Simulation { seed } => Some(*seed),
+            _ => None,
+        }
+    }
+}
+
+impl Default for ExecutionMode {
+    fn default() -> Self {
+        Self::Testing
+    }
+}

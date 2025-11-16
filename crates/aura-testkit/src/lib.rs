@@ -41,6 +41,7 @@ pub mod device;
 pub mod effects_integration;
 pub mod factories;
 pub mod fixtures;
+pub mod foundation; // New: Architecturally-compliant test infrastructure
 pub mod keys;
 pub mod ledger;
 pub mod mocks;
@@ -50,6 +51,7 @@ pub mod protocol;
 pub mod test_harness;
 pub mod time;
 pub mod transport;
+pub mod verification; // Formal property verification tools moved from aura-protocol
 
 // Re-export commonly used items
 pub use account::*;
@@ -68,11 +70,19 @@ pub use fixtures::{
     AccountTestFixture, CryptoTestFixture, ProtocolTestFixture, StatelessFixtureConfig,
     StatelessFixtureError,
 };
+pub use foundation::{
+    SimpleTestContext, TestEffectHandler, TestEffectComposer,
+    create_mock_test_context, create_simulation_context, create_integration_context,
+};
 pub use keys::KeyTestFixture;
 pub use ledger::*;
 pub use mocks::*;
 pub use protocol::*;
 pub use transport::*;
+pub use verification::{
+    CapabilitySoundnessVerifier, CapabilityState, SoundnessProperty, SoundnessReport,
+    SoundnessVerificationResult, VerificationConfig,
+};
 
 // Re-export commonly used external types for convenience
 pub use aura_core::{AccountId, DeviceId};
@@ -116,7 +126,7 @@ pub async fn create_test_fixture() -> aura_core::AuraResult<TestFixture> {
 ///
 /// This is useful for tests that need predictable device IDs.
 pub async fn create_test_fixture_with_device_id(
-    device_id: DeviceId,
+    _device_id: DeviceId,
 ) -> aura_core::AuraResult<TestFixture> {
     let config = TestConfig {
         name: "test_with_device_id".to_string(),
