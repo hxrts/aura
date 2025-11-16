@@ -25,6 +25,23 @@ use uuid::Uuid;
 // Helper Functions
 // ============================================================================
 
+/// Helper to create deterministic device IDs and UUIDs for tests
+fn test_device_id(seed: u64) -> DeviceId {
+    use aura_core::hash::hash;
+    let hash_input = format!("device-{}", seed);
+    let hash_bytes = hash(hash_input.as_bytes());
+    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    DeviceId(Uuid::from_bytes(uuid_bytes))
+}
+
+fn test_uuid(seed: u64) -> Uuid {
+    use aura_core::hash::hash;
+    let hash_input = format!("uuid-{}", seed);
+    let hash_bytes = hash(hash_input.as_bytes());
+    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    Uuid::from_bytes(uuid_bytes)
+}
+
 fn create_add_leaf_op(epoch: u64, leaf_id: u32) -> AttestedOp {
     AttestedOp {
         op: TreeOp {
@@ -33,7 +50,7 @@ fn create_add_leaf_op(epoch: u64, leaf_id: u32) -> AttestedOp {
             op: TreeOpKind::AddLeaf {
                 leaf: LeafNode {
                     leaf_id: LeafId(leaf_id),
-                    device_id: DeviceId::new(),
+                    device_id: test_device_id(leaf_id as u64),
                     role: LeafRole::Device,
                     public_key: vec![0u8; 32],
                     meta: vec![],
@@ -165,7 +182,7 @@ fn test_anti_entropy_with_50_peers() {
 
     // Create PeerView with 50 peers
     let mut view = PeerView::new();
-    let peer_ids: Vec<Uuid> = (0..50).map(|_| Uuid::new_v4()).collect();
+    let peer_ids: Vec<Uuid> = (0..50).map(|i| test_uuid(i)).collect();
 
     for peer_id in &peer_ids {
         view.add_peer(*peer_id);
@@ -319,8 +336,8 @@ fn test_combined_load() {
 
     // Create peer view with 50 peers
     let mut view = PeerView::new();
-    for _ in 0..50 {
-        view.add_peer(Uuid::new_v4());
+    for i in 0..50 {
+        view.add_peer(test_uuid(i));
     }
 
     let setup_time = start.elapsed();

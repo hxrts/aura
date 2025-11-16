@@ -42,7 +42,7 @@ fn test_initialization_performance() {
     let thresholds = PerformanceThresholds::default();
 
     rt.block_on(async {
-        let config = EffectSystemConfig::for_testing(DeviceId::new());
+        let config = EffectSystemConfig::for_testing(test_device_id(b"test"));
 
         // Measure sequential initialization
         let start = Instant::now();
@@ -97,7 +97,7 @@ fn test_effect_execution_performance() {
         let iterations = 10_000;
 
         for _ in 0..iterations {
-            let _ = system.send_to_peer(DeviceId::new(), vec![0; 256]).await;
+            let _ = system.send_to_peer(test_device_id(b"test"), vec![0; 256]).await;
         }
 
         let elapsed = start.elapsed();

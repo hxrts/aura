@@ -17,6 +17,15 @@ use aura_verify::Ed25519Signature;
 use aura_verify::{IdentityProof, VerifiedIdentity};
 use aura_wot::{CapabilitySet, TreeAuthzContext, TreeOp, TreeOpKind};
 use std::collections::BTreeSet;
+use uuid::Uuid;
+
+/// Helper to create deterministic device IDs for tests
+fn test_device_id(seed: &[u8]) -> DeviceId {
+    use aura_core::hash::hash;
+    let hash_bytes = hash(seed);
+    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    DeviceId(Uuid::from_bytes(uuid_bytes))
+}
 
 /// Test scenario: Device authentication and tree operation authorization
 #[ignore] // TODO: Fix type mismatches - DeviceId vs GuardianId, ContextId constructor signature
@@ -24,7 +33,7 @@ use std::collections::BTreeSet;
 async fn test_device_tree_operation_authorization() {
     // Setup test data
     let account_id = AccountId::from_bytes([1u8; 32]);
-    let device_id = DeviceId::new();
+    let device_id = test_device_id(b"test_device_tree_operation_authorization");
     let _context_id = ContextId::new(account_id.to_string());
 
     // Create device identity proof

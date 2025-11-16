@@ -8,13 +8,21 @@ use std::time::Duration;
 use tokio::time::timeout;
 use uuid::Uuid;
 
+/// Helper to create deterministic device IDs for tests
+fn test_device_id(seed: &[u8]) -> DeviceId {
+    use aura_core::hash::hash;
+    let hash_bytes = hash(seed);
+    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    DeviceId(Uuid::from_bytes(uuid_bytes))
+}
+
 /// Test unified choreography adapters
 mod adapter_tests {
     use super::*;
 
     #[tokio::test]
     async fn test_create_testing_adapter() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let _handler = CompositeHandler::for_testing(device_id.into());
 
         // Verify handler creation for testing (handler should be created successfully)
@@ -23,7 +31,7 @@ mod adapter_tests {
 
     #[tokio::test]
     async fn test_handler_factory_consistency() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
 
         let _testing_handler = CompositeHandler::for_testing(device_id.into());
         let _production_handler = CompositeHandler::for_production(device_id.into());
@@ -60,7 +68,7 @@ mod middleware_tests {
 
     #[tokio::test]
     async fn test_effect_composition() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         // Test that effect handlers compose properly
@@ -72,7 +80,7 @@ mod middleware_tests {
 
     #[tokio::test]
     async fn test_storage_effect_integration() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         let test_key = "test_key";
@@ -93,7 +101,7 @@ mod middleware_tests {
 
     #[tokio::test]
     async fn test_crypto_effect_integration() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         let message = b"test message to hash";
@@ -117,7 +125,7 @@ mod session_safety_tests {
 
     #[tokio::test]
     async fn test_deadlock_freedom() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         // Test that operations complete within reasonable time (no deadlocks)
@@ -132,7 +140,7 @@ mod session_safety_tests {
 
     #[tokio::test]
     async fn test_type_safety_at_compile_time() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         // These should compile without type errors (compile-time safety)
@@ -145,11 +153,11 @@ mod session_safety_tests {
 
     #[tokio::test]
     async fn test_communication_safety() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         // Test that operations are properly typed
-        let peer_id = DeviceId::new();
+        let peer_id = test_device_id(b"test");
         let message = b"test message";
 
         // Send should accept correct types
@@ -166,7 +174,7 @@ mod performance_tests {
 
     #[tokio::test]
     async fn test_zero_cost_abstractions() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         let start_epoch = TimeEffects::current_epoch(&handler).await;
@@ -185,7 +193,7 @@ mod performance_tests {
 
     #[tokio::test]
     async fn test_message_serialization_efficiency() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         let test_data = vec![0u8; 1024]; // 1KB test data
@@ -206,7 +214,7 @@ mod performance_tests {
 
     #[tokio::test]
     async fn test_parallel_composition_performance() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         let start_epoch = TimeEffects::current_epoch(&handler).await;
@@ -248,7 +256,7 @@ mod basic_functionality_tests {
 
     #[tokio::test]
     async fn test_effect_operations_termination() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         // All operations should terminate within reasonable time
@@ -264,7 +272,7 @@ mod basic_functionality_tests {
 
     #[tokio::test]
     async fn test_concurrent_handler_safety() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         // Concurrent access should be safe
@@ -288,7 +296,7 @@ mod choreographic_integration_tests {
 
     #[tokio::test]
     async fn test_choreographic_role_integration() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         // Test choreographic role identification
@@ -299,7 +307,7 @@ mod choreographic_integration_tests {
 
     #[tokio::test]
     async fn test_choreographic_broadcast() {
-        let device_id = DeviceId::new();
+        let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
         // Test choreographic broadcast
