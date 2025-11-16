@@ -133,6 +133,8 @@ pub use effects::{
     MinimalEffects, SnapshotEffects,
     // Reliability types (unified retry implementation)
     BackoffStrategy, RetryPolicy, RetryResult, RetryContext, ReliabilityError,
+    // Rate limiting types (unified rate limiting implementation)
+    RateLimitConfig, RateLimit, RateLimitResult, RateLimiter, RateLimiterStatistics,
 };
 
 // Cryptographic utilities

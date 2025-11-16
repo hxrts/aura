@@ -3,6 +3,12 @@
 ## Executive Summary
 Found **15+ major opportunities** for DRY improvements across the Aura codebase, ranging from unified error handling to shared utilities and trait abstractions.
 
+**Progress: 3/15 complete (20%)**
+- ✅ Issue #1: Error Handling (~570 lines eliminated)
+- ✅ Issue #2: Retry Logic (~450 lines eliminated)
+- ✅ Issue #3: Rate Limiting (~389 lines eliminated)
+- **Total: ~1,409 lines of duplication eliminated so far**
+
 ## 1. ERROR HANDLING - CRITICAL DUPLICATION ✅ COMPLETED
 
 ### Current Situation
@@ -74,28 +80,26 @@ impl RetryPolicy {
 
 ---
 
-## 3. RATE LIMITING - MODERATE DUPLICATION
+## 3. ✅ RATE LIMITING - MODERATE DUPLICATION [COMPLETED]
 
-### Current Situation
-- **aura-sync/infrastructure/rate_limit.rs** (467 lines)
-  - Complete token bucket implementation with per-peer tracking
-  - Integrates with FlowBudget concepts
-  
-- **aura-core/effects/reliability.rs**
-  - `with_rate_limit()` trait method (basic stub)
-  - Not integrated with flow budget system
+### Resolution
+**Consolidated rate limiting implementation from aura-sync into aura-core/effects/reliability.rs**
 
-### Opportunity Score: MEDIUM
-**~200+ lines of rate limiting code** split across two places
+**Changes made:**
+- ✅ Moved `RateLimiter`, `RateLimit`, `RateLimitConfig`, `RateLimitResult`, `RateLimiterStatistics` to aura-core
+- ✅ Added ~320 lines of unified implementation to aura-core/effects/reliability.rs
+- ✅ Fixed serialization issue with `Instant` using `#[serde(skip, default)]`
+- ✅ Updated aura-sync/infrastructure/rate_limit.rs to re-export from aura-core (467 lines → 78 lines)
+- ✅ Added backward-compatible helper functions for SyncResult integration
+- ✅ Exported new types from aura-core/src/effects/mod.rs and lib.rs
 
-### Recommendation
-Consolidate rate limiting:
-- Move `RateLimiter`, `RateLimit`, `RateLimitConfig` to aura-core or new utility crate
-- Implement trait-based integration with flow budget
-- Single configuration system
+**Files modified:**
+- ✅ `/home/user/aura/crates/aura-core/src/effects/reliability.rs` (+~320 lines)
+- ✅ `/home/user/aura/crates/aura-core/src/effects/mod.rs` (added exports)
+- ✅ `/home/user/aura/crates/aura-core/src/lib.rs` (added exports)
+- ✅ `/home/user/aura/crates/aura-sync/src/infrastructure/rate_limit.rs` (467 lines → 78 lines, -389 lines)
 
-**Files affected:**
-- `/home/user/aura/crates/aura-sync/src/infrastructure/rate_limit.rs`
+**Result:** Eliminated ~389 lines of duplicate rate limiting code, created single source of truth in aura-core with token bucket algorithm, per-peer and global limits.
 
 ---
 

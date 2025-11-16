@@ -76,6 +76,8 @@ pub use reliability::{
     ReliabilityEffects, ReliabilityError,
     // Unified retry types
     BackoffStrategy, RetryPolicy, RetryResult, RetryContext,
+    // Unified rate limiting types
+    RateLimitConfig, RateLimit, RateLimitResult, RateLimiter, RateLimiterStatistics,
 };
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
 pub use supertraits::{
