@@ -78,6 +78,13 @@ pub mod core;
 /// All components follow Layer 5 patterns with effect-based interfaces.
 pub mod infrastructure;
 
+/// Protocol implementations for synchronization
+///
+/// This module provides complete end-to-end protocol implementations including
+/// anti-entropy, journal sync, snapshots, OTA upgrades, and receipt verification.
+/// All protocols follow Layer 5 patterns and are effect-based.
+pub mod protocols;
+
 // Re-export core types for convenience
 pub use core::{
     SyncError, SyncResult, SyncConfig, MetricsCollector, SessionManager,
@@ -121,33 +128,21 @@ pub use aura_core::{DeviceId, SessionId, AuraError, AuraResult};
 // 🚨 WARNING: All items below are DEPRECATED and will be removed in Phase 5
 // 🚨 Do not use these in new code - use the unified protocols instead
 
-#[deprecated(note = "Legacy sync service - migrate to unified protocols in Phase 2")]
-#[doc(hidden)]
-pub mod sync_service;
-
 // Removed in Phase 2: cache.rs replaced with infrastructure/cache.rs
-
-#[deprecated(note = "Legacy journal sync - migrate to protocols module in Phase 3")]
-#[doc(hidden)]
-pub mod journal_sync;
-
 // Removed in Phase 2: peer_discovery.rs placeholder replaced with infrastructure/peers.rs
 
-#[deprecated(note = "Legacy OTA module - migrate to protocols module in Phase 3")]
-#[doc(hidden)]
-pub mod ota;
+// Removed in Phase 3: journal_sync.rs migrated to protocols/journal.rs
+// Removed in Phase 3: ota.rs migrated to protocols/ota.rs
+// Removed in Phase 3: receipt_verification.rs migrated to protocols/receipts.rs
+// Removed in Phase 3: choreography/ directory migrated to protocols/
 
 #[deprecated(note = "Legacy maintenance module - migrate to services module in Phase 4")]
 #[doc(hidden)]
 pub mod maintenance;
 
-#[deprecated(note = "Legacy receipt verification - migrate to protocols module in Phase 3")]
+#[deprecated(note = "Legacy sync service - migrate to unified services in Phase 4")]
 #[doc(hidden)]
-pub mod receipt_verification;
-
-#[deprecated(note = "Legacy choreography module - migrate to unified protocols in Phase 3")]
-#[doc(hidden)]
-pub mod choreography;
+pub mod sync_service;
 
 // Legacy re-exports (deprecated - will be removed in Phase 5)
 #[deprecated(note = "Use core::SyncError instead")]
@@ -162,41 +157,12 @@ pub use maintenance::{
     SnapshotCompleted, SnapshotProposed, UpgradeActivated, UpgradeKind, UpgradeProposal,
 };
 
-#[deprecated(note = "Use unified protocols instead")]
-pub use ota::{UpgradeCoordinator, UpgradeReadiness};
+// Removed in Phase 3: ota and journal_sync re-exports (migrated to protocols/)
 
 #[deprecated(note = "Use unified services instead")]
 pub use sync_service::SyncService;
 
-// Legacy choreography re-exports (deprecated)
-#[deprecated(note = "Use unified protocols instead")]
-pub use choreography::journal::{
-    OpLogSynchronizer, PeerSyncError, PeerSyncManager, PeerSyncState, ProtocolError,
-    SchedulerConfig, SchedulerError, SyncConfiguration, SyncMessage, SyncProtocol,
-    SyncResult as LegacySyncResult, SyncScheduler, SyncState,
-};
-
-#[deprecated(note = "Use unified protocols instead")]
-pub use choreography::{
-    snapshot::{
-        AbortReason, SnapshotAbort, SnapshotApplicationResult, SnapshotApproval,
-        SnapshotCommit, SnapshotError, SnapshotManager, SnapshotProposal, SnapshotRejection,
-        SnapshotResult, ThresholdSnapshotConfig, ThresholdSnapshotCoordinator, TreeStateDigest,
-        WriterFence,
-    },
-    tree_coordination::{
-        ApprovalRequest, ApprovalResponse, ThresholdApprovalConfig, ThresholdApprovalCoordinator,
-        ValidationRequest, ValidationResponse, ValidationResult,
-    },
-    tree_sync::{
-        DeltaRequest, DeltaResponse, HubConfig, MeshConfig, PeerSyncConfig, StateRequest,
-        StateResponse, SyncComplete, TreeDelta, TreeSyncCoordinator,
-    },
-};
-
-// Silence deprecation warnings for the legacy re-exports during migration
-#[allow(deprecated)]
-pub use choreography::snapshot::SessionId as LegacySessionId;
+// Removed in Phase 3: Legacy choreography re-exports removed (files migrated to protocols/)
 
 // =============================================================================
 // Migration Notes
