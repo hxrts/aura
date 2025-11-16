@@ -7,14 +7,14 @@
 
 ## Progress Summary
 
-**Overall**: 2 of 23 tasks completed (9%)
-**Status**: Phase 1 (Quick Wins) in progress
+**Overall**: 3 of 23 tasks completed (13%)
+**Status**: Phase 1 COMPLETE ✅ | Phase 2 (Layer 3) starting
 
 ---
 
 ## Completed Tasks ✅
 
-### Phase 1: Quick Wins (2/3 complete)
+### Phase 1: Quick Wins (3/3 COMPLETE ✅)
 
 #### ✅ 1. Delete unused DKD message types
 **Commit**: 720387e
@@ -31,27 +31,25 @@
 
 **Impact**: Removed incorrect layer crossing where aura-protocol was re-exporting aura-effects types. Users should import MockJournalHandler directly from aura-effects. Verified no code was using this re-export.
 
+#### ✅ 3. Move CLI effects from aura-cli to aura-protocol
+**Commit**: ebc296b
+**Files Changed**:
+- Created: `crates/aura-protocol/src/effects/cli/` directory with 4 modules
+  - mod.rs: CLI effect trait definitions
+  - handler.rs: CliEffectHandler implementation
+  - output.rs: OutputEffectHandler implementation
+  - config.rs: CliConfig and configuration types
+- Modified: `crates/aura-protocol/src/effects/mod.rs` (added CLI module exports)
+- Modified: `crates/aura-cli/src/lib.rs` (updated imports from aura-protocol)
+- Deleted: `crates/aura-cli/src/effects/` (4 files removed)
+
+**Impact**: Fixed critical Layer 7 violation. UI layer (aura-cli) was defining effect traits and handlers that belong in Layer 4 (orchestration). CLI effects now properly located in aura-protocol, allowing reuse without depending on the CLI binary.
+
 ---
 
 ## In Progress 🔄
 
-### Phase 1: Quick Wins (1 remaining)
-
-#### 🔄 3. Move CLI effects from aura-cli to aura-protocol
-**Status**: Started but not completed
-**Complexity**: Moderate - requires careful import updates across crates
-**Files to Move**:
-- `crates/aura-cli/src/effects/mod.rs` → `crates/aura-protocol/src/effects/cli/mod.rs`
-- `crates/aura-cli/src/effects/cli.rs` → `crates/aura-protocol/src/effects/cli/handler.rs`
-- `crates/aura-cli/src/effects/output.rs` → `crates/aura-protocol/src/effects/cli/output.rs`
-- `crates/aura-cli/src/effects/config.rs` → `crates/aura-protocol/src/effects/cli/config.rs`
-
-**Next Steps**:
-1. Fix imports in moved files (replace `crate::effects::Result` with `aura_core::AuraResult`)
-2. Update module exports in aura-protocol
-3. Update aura-cli to import from aura-protocol
-4. Remove effects/ directory from aura-cli
-5. Verify compilation
+### Phase 2: Layer 3 Violations (Starting Now)
 
 ---
 
