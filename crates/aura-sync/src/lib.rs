@@ -71,6 +71,13 @@
 /// management, metrics collection, and session coordination.
 pub mod core;
 
+/// Infrastructure utilities for sync operations
+///
+/// This module provides supporting infrastructure including peer management,
+/// connection pooling, retry logic, cache management, and rate limiting.
+/// All components follow Layer 5 patterns with effect-based interfaces.
+pub mod infrastructure;
+
 // Re-export core types for convenience
 pub use core::{
     SyncError, SyncResult, SyncConfig, MetricsCollector, SessionManager,
@@ -118,17 +125,13 @@ pub use aura_core::{DeviceId, SessionId, AuraError, AuraResult};
 #[doc(hidden)]
 pub mod sync_service;
 
-#[deprecated(note = "Legacy cache module - migrate to core patterns in Phase 2")]
-#[doc(hidden)]  
-pub mod cache;
+// Removed in Phase 2: cache.rs replaced with infrastructure/cache.rs
 
 #[deprecated(note = "Legacy journal sync - migrate to protocols module in Phase 3")]
 #[doc(hidden)]
 pub mod journal_sync;
 
-#[deprecated(note = "Legacy peer discovery - migrate to protocols module in Phase 3")]
-#[doc(hidden)]
-pub mod peer_discovery;
+// Removed in Phase 2: peer_discovery.rs placeholder replaced with infrastructure/peers.rs
 
 #[deprecated(note = "Legacy OTA module - migrate to protocols module in Phase 3")]
 #[doc(hidden)]
@@ -150,8 +153,8 @@ pub mod choreography;
 #[deprecated(note = "Use core::SyncError instead")]
 pub use aura_protocol::effects::SyncError as LegacySyncError;
 
-#[deprecated(note = "Use core configuration patterns instead")]
-pub use cache::CacheEpochFloors;
+#[deprecated(note = "Use infrastructure::CacheEpochTracker instead")]
+pub use infrastructure::cache::CacheEpochTracker as CacheEpochFloors;
 
 #[deprecated(note = "Use unified protocols and services instead")]
 pub use maintenance::{
