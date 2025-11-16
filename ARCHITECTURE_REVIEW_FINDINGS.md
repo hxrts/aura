@@ -182,14 +182,17 @@ Two domain crates (aura-mpst and aura-wot) contain **effect execution and coordi
 
 **Priority: CRITICAL - Major refactoring required**
 
-1. **Move all aura-mpst coordination/handler code to aura-protocol**:
-   - Create `aura-protocol/src/handlers/choreography_handler.rs` for AuraHandler implementation
-   - Create `aura-protocol/src/runtime/mpst_runtime.rs` for AuraRuntime
-   - Keep only type definitions and semantic traits in aura-mpst
+1. **Move all aura-mpst coordination/handler code to aura-protocol** (COMPLEX - DEFERRED):
+   - [ ] Create `aura-protocol/src/handlers/choreography_handler.rs` for AuraHandler implementation
+   - [ ] Create `aura-protocol/src/runtime/mpst_runtime.rs` for AuraRuntime
+   - [ ] Keep only type definitions and semantic traits in aura-mpst
+   - **Complexity**: ~884 lines, ChoreoHandler trait impl, integration tests, public API changes
+   - **Status**: Deferred due to complexity - requires careful API preservation
 
-2. **Refactor aura-wot CapabilityEvaluator**:
-   - Split into pure evaluation logic (stays in aura-wot)
-   - Move effect-dependent caching/integration logic to aura-protocol
+2. **Refactor aura-wot CapabilityEvaluator**: ✅ COMPLETED
+   - [x] ~~Split into pure evaluation logic (stays in aura-wot)~~ ✅ (Commit f6a32f0)
+   - [x] ~~Move effect-dependent caching/integration logic to aura-protocol~~ ✅ (Commit f6a32f0)
+   - **Completed**: Moved 236 lines to aura-protocol/src/wot/
 
 **Clean Crates** (No violations found):
 - ✅ aura-verify: Pure cryptographic verification
