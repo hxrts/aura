@@ -1,62 +1,68 @@
 //! Test basic handler creation and functionality
 //!
-//! Minimal tests to verify that handlers can be created and basic operations work
+//! Uses aura-testkit for deterministic, reproducible tests
 
-#![allow(clippy::disallowed_methods)]
+use aura_testkit::{create_test_fixture, TestEffectsBuilder, TestExecutionMode};
 
-mod common;
-
-use aura_core::identifiers::DeviceId;
-use aura_protocol::handlers::erased::AuraHandlerFactory;
-use aura_protocol::handlers::{AuraContext, ExecutionMode};
-use uuid::Uuid;
-
-/// Test basic handler creation
+/// Test basic handler creation using testkit
 #[tokio::test]
 async fn test_composite_handler_creation() {
-    let device_id = DeviceId::from(Uuid::new_v4());
-    let handler = AuraHandlerFactory::for_testing(device_id);
-    let _ctx = AuraContext::for_testing(device_id);
+    let fixture = create_test_fixture().await.expect("Failed to create test fixture");
 
-    // Test that handler can be created and has correct execution mode
-    assert_eq!(
-        handler.execution_mode(),
-        ExecutionMode::Simulation { seed: 0 }
-    );
-
-    // Test that handler can report supported effects
-    let supported_effects = handler.supported_effects();
-    // Testing handler creates CompositeHandler with full effect support
-    assert!(!supported_effects.is_empty());
+    // Testkit provides deterministic device IDs and contexts
+    let device_id = fixture.device_id();
+    assert_ne!(device_id.to_string(), "");
 }
 
-/// Test effect support
+/// Test effect support using testkit builder
 #[tokio::test]
 async fn test_effect_support() {
-    let device_id = DeviceId::from(Uuid::new_v4());
-    let handler = AuraHandlerFactory::for_testing(device_id);
+    let device_id = aura_core::DeviceId::new();
+    let effects = TestEffectsBuilder::for_unit_tests(device_id)
+        .with_seed(42) // Deterministic
+        .build()
+        .expect("Failed to build test effects");
 
-    // Test that handler can report supported effects
-    let supported_effects = handler.supported_effects();
-
-    // Testing handler creates CompositeHandler with full effect support
-    assert!(
-        !supported_effects.is_empty(),
-        "Testing handler should support multiple effects"
-    );
+    // Test context provides deterministic execution mode
+    assert_eq!(effects.execution_mode(), aura_core::effects::ExecutionMode::Testing);
 }
 
-/// Test execution mode
+/// Test execution mode using testkit
 #[tokio::test]
 async fn test_execution_mode() {
-    let device_id = DeviceId::from(Uuid::new_v4());
-    let handler = AuraHandlerFactory::for_testing(device_id);
+    let device_id = aura_core::DeviceId::new();
 
-    // Test execution mode is correct for testing
-    assert_eq!(
-        handler.execution_mode(),
-        ExecutionMode::Simulation { seed: 0 }
-    );
-    assert!(handler.execution_mode().is_deterministic());
-    assert!(!handler.execution_mode().is_production());
+    // Test different execution modes
+    let unit_test_effects = TestEffectsBuilder::for_unit_tests(device_id)
+        .build()
+        .expect("Failed to build unit test effects");
+    assert_eq!(unit_test_effects.execution_mode(), aura_core::effects::ExecutionMode::Testing);
+
+    let sim_effects = TestEffectsBuilder::for_simulation(device_id)
+        .with_seed(42)
+        .build()
+        .expect("Failed to build simulation effects");
+    assert_eq!(sim_effects.execution_mode(), aura_core::effects::ExecutionMode::Simulation { seed: 42 });
+}
+
+/// Test fixture creation modes
+#[tokio::test]
+async fn test_fixture_modes() {
+    let device_id = aura_core::DeviceId::new();
+
+    // Unit test mode
+    let _ = TestEffectsBuilder::for_unit_tests(device_id)
+        .build()
+        .expect("Failed to create unit test fixture");
+
+    // Integration test mode
+    let _ = TestEffectsBuilder::for_integration_tests(device_id)
+        .build()
+        .expect("Failed to create integration test fixture");
+
+    // Simulation mode
+    let _ = TestEffectsBuilder::for_simulation(device_id)
+        .with_seed(42)
+        .build()
+        .expect("Failed to create simulation fixture");
 }

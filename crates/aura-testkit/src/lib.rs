@@ -3,6 +3,22 @@
 //! This module provides common test setup functions to eliminate duplication
 //! across test modules. It includes factories for creating test accounts,
 //! devices, keys, and common test fixtures.
+//!
+//! # Architecture Constraints
+//!
+//! **IMPORTANT**: This testkit is designed for testing **Layer 4 and higher** crates only:
+//! - ✅ Layer 4: aura-protocol (orchestration)
+//! - ✅ Layer 5: aura-frost, aura-invitation, aura-recovery, aura-sync, etc. (protocols)
+//! - ✅ Layer 6: aura-agent, aura-simulator (runtime)
+//! - ✅ Layer 7: aura-cli (UI)
+//!
+//! **DO NOT use aura-testkit in foundation/specification layers** (would create circular dependencies):
+//! - ❌ Layer 1: aura-core (foundation)
+//! - ❌ Layer 2: aura-journal, aura-wot, aura-verify, aura-store, aura-transport (specification)
+//! - ❌ Layer 3: aura-effects (implementation)
+//!
+//! Foundation layers should create their own internal test utilities (e.g., `aura-core/src/test_utils.rs`)
+//! to avoid circular dependencies.
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]

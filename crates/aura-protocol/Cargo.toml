@@ -77,7 +77,10 @@ rumpsteak-aura-choreography = { workspace = true }
 
 
 [dev-dependencies]
-# tokio-test = { workspace = true } # removed - unused
+# Testing infrastructure (Layer 4 can use testkit)
+aura-testkit = { path = "../aura-testkit" }
+
+# Property testing and benchmarking
 proptest = { workspace = true }
 criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
 

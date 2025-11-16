@@ -93,6 +93,10 @@ pub mod crypto;
 /// Maintenance operation types
 pub mod maintenance;
 
+/// Internal test utilities (Layer 1 - does not use aura-testkit to avoid circular dependencies)
+#[cfg(test)]
+pub mod test_utils;
+
 // === Public API Re-exports ===
 
 // Core algebraic types
