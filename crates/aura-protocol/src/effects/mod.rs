@@ -50,6 +50,7 @@
 // Effect trait definitions
 pub mod agent;
 pub mod choreographic;
+pub mod cli;
 pub mod ledger;
 pub mod params;
 pub mod semilattice;
@@ -66,6 +67,10 @@ pub use agent::{
 pub use choreographic::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics,
+};
+pub use cli::{
+    CliConfig, CliEffectHandler, CliEffects, ConfigEffects, LoggingConfig, NetworkConfig,
+    OutputEffectHandler, OutputEffects, OutputFormat,
 };
 // Import core effects from aura-core
 pub use aura_core::effects::{

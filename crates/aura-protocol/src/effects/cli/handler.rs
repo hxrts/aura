@@ -1,9 +1,9 @@
-//! CLI Effect Implementations
+//! CLI Effect Handler Implementation
 //!
 //! Concrete implementations of CLI effects using core effect composition.
 
 use super::CliEffects;
-use crate::effects::Result;
+use aura_core::AuraResult;
 use async_trait::async_trait;
 use std::path::Path;
 
@@ -23,9 +23,9 @@ impl<E> CliEffectHandler<E> {
 #[async_trait]
 impl<E> CliEffects for CliEffectHandler<E>
 where
-    E: aura_protocol::ConsoleEffects
-        + aura_protocol::StorageEffects
-        + aura_protocol::TimeEffects
+    E: crate::ConsoleEffects
+        + crate::StorageEffects
+        + crate::TimeEffects
         + Send
         + Sync,
 {
@@ -41,7 +41,7 @@ where
         let _ = self.inner.log_error(&format!("ERROR: {}", message)).await;
     }
 
-    async fn create_dir_all(&self, path: &Path) -> Result<()> {
+    async fn create_dir_all(&self, path: &Path) -> AuraResult<()> {
         // Use storage effects for file operations
         let path_str = path.display().to_string();
 
@@ -61,7 +61,7 @@ where
             })
     }
 
-    async fn write_file(&self, path: &Path, content: &[u8]) -> Result<()> {
+    async fn write_file(&self, path: &Path, content: &[u8]) -> AuraResult<()> {
         let path_str = path.display().to_string();
         self.inner
             .store(&path_str, content.to_vec())
@@ -69,7 +69,7 @@ where
             .map_err(|e| aura_core::AuraError::invalid(format!("Failed to write file: {}", e)))
     }
 
-    async fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
+    async fn read_file(&self, path: &Path) -> AuraResult<Vec<u8>> {
         let path_str = path.display().to_string();
         match self.inner.retrieve(&path_str).await {
             Ok(Some(data)) => Ok(data),
@@ -90,7 +90,7 @@ where
     }
 
     async fn format_output(&self, data: &str) -> String {
-        // Simple formatting TODO fix - For now
+        // Simple formatting - can be enhanced later
         data.to_string()
     }
 

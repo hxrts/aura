@@ -1,7 +1,7 @@
-//! Output Effect Implementations
+//! Output Effect Handler Implementation
 
 use super::OutputEffects;
-use crate::effects::Result;
+use aura_core::AuraResult;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -21,7 +21,7 @@ impl<E> OutputEffectHandler<E> {
 #[async_trait]
 impl<E> OutputEffects for OutputEffectHandler<E>
 where
-    E: aura_protocol::ConsoleEffects + Send + Sync,
+    E: crate::ConsoleEffects + Send + Sync,
 {
     async fn display(&self, content: &str) {
         let _ = self.inner.log_info(content).await;
@@ -43,7 +43,7 @@ where
             .await;
     }
 
-    async fn format_json(&self, data: &Value) -> Result<String> {
+    async fn format_json(&self, data: &Value) -> AuraResult<String> {
         serde_json::to_string_pretty(data)
             .map_err(|e| aura_core::AuraError::invalid(format!("Failed to format JSON: {}", e)))
     }
