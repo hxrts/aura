@@ -166,25 +166,21 @@ impl TimeEffects for SimulatedTimeHandler {
     }
 }
 
-/// Context registry for managing time contexts
-#[derive(Debug, Default)]
-struct ContextRegistry {
-    contexts: HashMap<Uuid, broadcast::Sender<()>>,
-    timeouts: HashMap<Uuid, tokio::task::JoinHandle<()>>,
-}
-
 /// Real time handler using actual system time
-#[derive(Debug, Clone)]
-pub struct RealTimeHandler {
-    registry: Arc<RwLock<ContextRegistry>>,
-}
+///
+/// **Layer 3 (aura-effects)**: Stateless time operations only.
+///
+/// **Note**: Multi-context coordination methods (set_timeout with registry, register_context,
+/// notify_events_available) have been moved to `TimeoutCoordinator` in aura-protocol (Layer 4).
+/// This handler now provides only stateless time operations. For coordination capabilities,
+/// wrap this handler with `aura_protocol::handlers::TimeoutCoordinator`.
+#[derive(Debug, Clone, Default)]
+pub struct RealTimeHandler;
 
 impl RealTimeHandler {
     /// Create a new real time handler
     pub fn new() -> Self {
-        Self {
-            registry: Arc::new(RwLock::new(ContextRegistry::default())),
-        }
+        Self
     }
 
     /// Create a new real time handler
@@ -286,60 +282,40 @@ impl TimeEffects for RealTimeHandler {
     }
 
     async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
+        // Simple stateless timeout - creates a task but doesn't track it in a registry
+        // For coordinated timeout management, use TimeoutCoordinator from aura-protocol
         let handle = Uuid::new_v4();
-        let registry = Arc::clone(&self.registry);
-        let handle_clone = handle;
-        let timeout_task = tokio::spawn(async move {
+        let _timeout_task = tokio::spawn(async move {
             time::sleep(Duration::from_millis(timeout_ms)).await;
-            let mut reg = registry.write().await;
-            reg.timeouts.remove(&handle_clone);
-        });
-        let registry = Arc::clone(&self.registry);
-        tokio::spawn(async move {
-            let mut reg = registry.write().await;
-            reg.timeouts.insert(handle, timeout_task);
         });
         handle
     }
 
-    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
-        let mut registry = self.registry.write().await;
-        if let Some(task) = registry.timeouts.remove(&handle) {
-            task.abort();
-            Ok(())
-        } else {
-            Err(TimeError::TimeoutNotFound {
-                handle: handle.to_string(),
-            })
-        }
+    async fn cancel_timeout(&self, _handle: TimeoutHandle) -> Result<(), TimeError> {
+        // Stateless handler cannot track or cancel timeouts
+        // Use TimeoutCoordinator from aura-protocol for cancellation support
+        Err(TimeError::TimeoutNotFound {
+            handle: "Stateless handler - use TimeoutCoordinator for cancellation".to_string(),
+        })
     }
 
     fn is_simulated(&self) -> bool {
         false
     }
 
-    fn register_context(&self, context_id: Uuid) {
-        let registry = Arc::clone(&self.registry);
-        tokio::spawn(async move {
-            let mut reg = registry.write().await;
-            let (tx, _) = broadcast::channel(100);
-            reg.contexts.insert(context_id, tx);
-        });
+    fn register_context(&self, _context_id: Uuid) {
+        // Stateless handler - no context registry
+        // Use TimeoutCoordinator from aura-protocol for multi-context coordination
     }
 
-    fn unregister_context(&self, context_id: Uuid) {
-        let registry = Arc::clone(&self.registry);
-        tokio::spawn(async move {
-            let mut reg = registry.write().await;
-            reg.contexts.remove(&context_id);
-        });
+    fn unregister_context(&self, _context_id: Uuid) {
+        // Stateless handler - no context registry
+        // Use TimeoutCoordinator from aura-protocol for multi-context coordination
     }
 
     async fn notify_events_available(&self) {
-        let registry = self.registry.read().await;
-        for (_, sender) in registry.contexts.iter() {
-            let _ = sender.send(());
-        }
+        // Stateless handler - no registered contexts to notify
+        // Use TimeoutCoordinator from aura-protocol for event broadcasting
     }
 
     fn resolution_ms(&self) -> u64 {
