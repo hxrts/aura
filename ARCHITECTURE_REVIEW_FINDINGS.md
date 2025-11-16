@@ -333,21 +333,27 @@ The orchestration layer contains **basic single-operation handlers and effect tr
 
 **Files to move**:
 
-1. `/home/user/aura/crates/aura-protocol/src/handlers/system/logging.rs` (182 lines)
+1. [x] ~~`/home/user/aura/crates/aura-protocol/src/handlers/system/logging.rs` (666 lines)~~ ✅ (Commit 290f3c6)
    - LoggingSystemHandler implements basic logging operations
    - No coordination logic, just single-operation handler
 
-2. `/home/user/aura/crates/aura-protocol/src/handlers/system/metrics.rs` (200+ lines)
+2. [x] ~~`/home/user/aura/crates/aura-protocol/src/handlers/system/metrics.rs` (898 lines)~~ ✅ (Commit 290f3c6)
    - MetricsSystemHandler implements basic metrics collection
    - No coordination logic
 
-3. `/home/user/aura/crates/aura-protocol/src/handlers/system/monitoring.rs` (150+ lines)
+3. [x] ~~`/home/user/aura/crates/aura-protocol/src/handlers/system/monitoring.rs` (1098 lines)~~ ✅ (Commit 290f3c6)
    - MonitoringHandler implements basic health checks
    - No coordination logic
 
-4. `/home/user/aura/crates/aura-protocol/src/handlers/time_enhanced.rs` (50+ lines)
-   - EnhancedTimeHandler wraps basic time operations
-   - No coordination logic
+4. [x] ~~`/home/user/aura/crates/aura-protocol/src/handlers/time_enhanced.rs` (632 lines)~~ ✅ NO ACTION NEEDED
+   - **CORRECTION**: Initial assessment was incorrect
+   - EnhancedTimeHandler implements extensive multi-context coordination:
+     * Global context registry (line 40): `contexts: Arc<RwLock<HashMap<Uuid, Arc<Notify>>>>`
+     * Scheduled tasks coordination (line 42): `scheduled_tasks: Arc<RwLock<HashMap<Uuid, ScheduledTask>>>`
+     * Global timeout tracking (line 44): `timeouts: Arc<RwLock<HashMap<TimeoutHandle, TimeoutTask>>>`
+     * Multi-context event broadcasting (lines 436-453)
+     * Background task processor (lines 90-112)
+   - This IS coordination logic and correctly belongs in Layer 4 (aura-protocol)
 
 #### 2. Basic Effect Trait Definitions (Should be in aura-core)
 
@@ -396,11 +402,11 @@ These are **foundational effect traits**, not orchestration-specific effects.
 
 **Priority: HIGH - Clear layer violations**
 
-1. **Move to aura-effects**:
-   - [ ] Move `handlers/system/logging.rs` to aura-effects
-   - [ ] Move `handlers/system/metrics.rs` to aura-effects
-   - [ ] Move `handlers/system/monitoring.rs` to aura-effects
-   - [ ] Move `handlers/time_enhanced.rs` to aura-effects
+1. **Move to aura-effects**: ✅ COMPLETED
+   - [x] ~~Move `handlers/system/logging.rs` to aura-effects~~ ✅ (Commit 290f3c6)
+   - [x] ~~Move `handlers/system/metrics.rs` to aura-effects~~ ✅ (Commit 290f3c6)
+   - [x] ~~Move `handlers/system/monitoring.rs` to aura-effects~~ ✅ (Commit 290f3c6)
+   - [x] ~~Move `handlers/time_enhanced.rs` to aura-effects~~ ✅ NOT NEEDED (correctly placed in aura-protocol)
 
 2. **Move to aura-core**:
    - [ ] Move all 5 agent effect traits from `effects/agent.rs` to aura-core

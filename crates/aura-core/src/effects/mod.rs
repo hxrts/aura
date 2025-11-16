@@ -40,6 +40,7 @@
 //! ```
 
 // Core effect trait definitions
+pub mod agent;
 pub mod authorization;
 pub mod chaos;
 pub mod console;
@@ -56,6 +57,12 @@ pub mod testing;
 pub mod time;
 
 // Re-export core effect traits
+pub use agent::{
+    AgentEffects, AgentHealthStatus, AuthenticationEffects, AuthenticationResult, AuthMethod,
+    BiometricType, ConfigError, ConfigurationEffects, ConfigValidationError, CredentialBackup,
+    DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
+    SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
+};
 pub use authorization::{AuthorizationEffects, AuthorizationError};
 pub use chaos::{ChaosEffects, ChaosError, CorruptionType, ByzantineType, ResourceType};
 pub use console::ConsoleEffects;

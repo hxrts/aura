@@ -1,10 +1,16 @@
 //! Agent-Specific Effect Traits
 //!
+//! **Layer 1 (aura-core)**: Foundational effect trait definitions for agent operations.
+//!
 //! These effect traits define capabilities specific to device-side agent operations.
 //! They compose core system effects into higher-level device workflows.
+//!
+//! This module was moved from aura-protocol/src/effects/agent.rs (Layer 4) because
+//! these are foundational capability trait definitions, similar to CryptoEffects,
+//! NetworkEffects, etc., and belong in the interface layer.
 
 use async_trait::async_trait;
-use aura_core::{
+use crate::{
     identifiers::{AccountId, DeviceId, SessionId},
     AuraResult as Result,
 };
