@@ -85,6 +85,13 @@ pub mod infrastructure;
 /// All protocols follow Layer 5 patterns and are effect-based.
 pub mod protocols;
 
+/// Service layer for sync operations
+///
+/// This module provides high-level services that orchestrate protocols and
+/// infrastructure to provide complete synchronization functionality.
+/// All services implement the unified Service trait.
+pub mod services;
+
 // Re-export core types for convenience
 pub use core::{
     SyncError, SyncResult, SyncConfig, MetricsCollector, SessionManager,
@@ -136,13 +143,13 @@ pub use aura_core::{DeviceId, SessionId, AuraError, AuraResult};
 // Removed in Phase 3: receipt_verification.rs migrated to protocols/receipts.rs
 // Removed in Phase 3: choreography/ directory migrated to protocols/
 
-#[deprecated(note = "Legacy maintenance module - migrate to services module in Phase 4")]
+// Temporarily keep maintenance for type re-exports (will be removed in Phase 5)
+#[deprecated(note = "Use services::maintenance instead")]
 #[doc(hidden)]
 pub mod maintenance;
 
-#[deprecated(note = "Legacy sync service - migrate to unified services in Phase 4")]
-#[doc(hidden)]
-pub mod sync_service;
+// Removed in Phase 4: sync_service.rs migrated to services/sync.rs
+// Removed in Phase 4: maintenance module consolidated into services/maintenance.rs
 
 // Legacy re-exports (deprecated - will be removed in Phase 5)
 #[deprecated(note = "Use core::SyncError instead")]
