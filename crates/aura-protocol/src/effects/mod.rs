@@ -48,24 +48,29 @@
 //! ```
 
 // Effect trait definitions
-pub mod agent;
+// NOTE: Agent effect traits moved to aura-core (Layer 1) - foundational capability definitions
 pub mod choreographic;
+pub mod cli;
 pub mod ledger;
 pub mod params;
 pub mod semilattice;
 pub mod sync;
 pub mod tree;
 
-// Re-export core effect traits
-pub use agent::{
+// Re-export agent effect traits from aura-core (moved to Layer 1)
+pub use aura_core::effects::{
     AgentEffects, AgentHealthStatus, AuthMethod, AuthenticationEffects, AuthenticationResult,
-    BiometricType, ConfigValidationError, ConfigurationEffects, CredentialBackup, DeviceConfig,
-    DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
+    BiometricType, ConfigError, ConfigValidationError, ConfigurationEffects, CredentialBackup,
+    DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
     SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
 };
 pub use choreographic::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics,
+};
+pub use cli::{
+    CliConfig, CliEffectHandler, CliEffects, ConfigEffects, LoggingConfig, NetworkConfig,
+    OutputEffectHandler, OutputEffects, OutputFormat,
 };
 // Import core effects from aura-core
 pub use aura_core::effects::{

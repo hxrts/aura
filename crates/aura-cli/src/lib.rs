@@ -10,12 +10,11 @@
 //! - Following proper dependency injection patterns
 //! - Avoiding direct system access except in effect handlers
 
-pub mod effects;
 pub mod handlers;
 pub mod visualization;
 
-// Re-export key types and traits
-pub use effects::{CliConfig, CliEffects, ConfigEffects, OutputEffects};
+// Re-export key types and traits from aura-protocol (CLI effects moved to Layer 4)
+pub use aura_protocol::{CliConfig, CliEffects, ConfigEffects, OutputEffects};
 pub use handlers::CliHandler;
 
 // Action types are defined in this module and automatically available

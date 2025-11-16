@@ -465,19 +465,29 @@ mod tests {
 // Remaining handler modules  
 pub mod agent;
 pub mod storage;
-pub mod system;
+// REMOVED: pub mod system; // Moved to aura-effects (Layer 3) - basic handlers
 pub mod mock;
 
 // Flattened handlers (previously in subdirectories)
 pub mod sync_anti_entropy;
 pub use sync_anti_entropy::AntiEntropyHandler;
-pub mod sync_broadcaster; 
+pub mod sync_broadcaster;
 pub use sync_broadcaster::{BroadcastConfig, BroadcasterHandler};
 
 pub mod time_enhanced;
 pub use time_enhanced::EnhancedTimeHandler;
 
+pub mod timeout_coordinator;
+pub use timeout_coordinator::TimeoutCoordinator;
+
+pub mod transport_coordinator;
+
+pub use transport_coordinator::{
+    CoordinationResult, RetryingTransportManager, TransportCoordinator,
+    TransportCoordinationConfig, TransportCoordinationError,
+};
 
 // External re-exports
-pub use aura_effects::journal::MockJournalHandler;
+// REMOVED: Users should import MockJournalHandler directly from aura-effects
+// pub use aura_effects::journal::MockJournalHandler;
 pub use mock::MockHandler;

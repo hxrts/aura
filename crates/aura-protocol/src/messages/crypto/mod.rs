@@ -1,16 +1,17 @@
 //! Threshold cryptography protocol messages
 //!
 //! This module contains message types for distributed cryptographic protocols:
-//! - DKD (Deterministic Key Derivation)
-//! - FROST threshold signatures
+//! - FROST threshold signatures (use aura-frost crate)
 //! - Key resharing and rotation
+//!
+//! Note: DKD protocol messages removed - will be implemented in dedicated aura-dkd feature crate
 
-pub mod dkd;
+// pub mod dkd; // REMOVED: DKD messages moved to future aura-dkd feature crate
 // pub mod frost; // REMOVED: Use aura-frost crate for FROST messages
 pub mod resharing;
 
 // Re-export crypto message types
-pub use dkd::*;
+// pub use dkd::*; // REMOVED: DKD messages moved to future aura-dkd feature crate
 // pub use frost::*; // REMOVED: Use aura-frost crate
 pub use resharing::*;
 
@@ -35,8 +36,8 @@ pub struct CryptoMessage {
 /// Union of all cryptographic protocol payloads
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CryptoPayload {
-    /// DKD protocol messages
-    Dkd(DkdMessage),
+    /// DKD protocol messages - Use future aura-dkd crate for DKD operations
+    // Dkd(DkdMessage), // REMOVED: DKD messages moved to future aura-dkd feature crate
     /// FROST protocol messages - Use aura-frost crate for FROST operations
     // Frost(FrostMessage), // REMOVED: Use aura-frost crate
     /// Resharing protocol messages
@@ -64,7 +65,7 @@ impl CryptoMessage {
     /// Get the protocol type for this message
     pub fn protocol_type(&self) -> &'static str {
         match &self.payload {
-            CryptoPayload::Dkd(_) => "dkd",
+            // CryptoPayload::Dkd(_) => "dkd", // REMOVED: DKD messages moved to future aura-dkd feature crate
             // CryptoPayload::Frost(_) => "frost", // REMOVED: Use aura-frost crate
             CryptoPayload::Resharing(_) => "resharing",
         }

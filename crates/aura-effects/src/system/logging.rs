@@ -1,6 +1,12 @@
 //! Logging system handler with structured logging and audit trails
+//!
+//! **Layer 3 (aura-effects)**: Basic single-operation handler.
+//!
+//! This module was moved from aura-protocol (Layer 4) because it implements a basic
+//! SystemEffects handler with no coordination logic. It maintains per-instance state
+//! for log buffering but doesn't coordinate multiple handlers or multi-party operations.
 
-use crate::effects::{SystemEffects, SystemError};
+use aura_core::effects::{SystemEffects, SystemError};
 use async_trait::async_trait;
 use aura_core::{DeviceId, SessionId};
 use serde_json::Value;

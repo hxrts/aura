@@ -1,11 +1,17 @@
 //! Monitoring system handler for health checks, alerting, and system observability
 //!
+//! **Layer 3 (aura-effects)**: Basic single-operation handler.
+//!
+//! This module was moved from aura-protocol (Layer 4) because it implements a basic
+//! SystemEffects handler with no coordination logic. It maintains per-instance state
+//! for health monitoring but doesn't coordinate multiple handlers or multi-party operations.
+//!
 //! TODO: Refactor to use TimeEffects and RandomEffects from the effect system instead of direct
 //! calls to SystemTime::now(), Instant::now(), and Uuid::new_v4().
 
 #![allow(clippy::disallowed_methods)]
 
-use crate::effects::{SystemEffects, SystemError};
+use aura_core::effects::{SystemEffects, SystemError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
