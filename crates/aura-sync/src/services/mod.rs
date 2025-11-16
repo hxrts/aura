@@ -46,7 +46,12 @@ pub mod maintenance;
 
 // Re-export key service types
 pub use sync::{SyncService, SyncServiceConfig, SyncServiceBuilder, SyncServiceHealth};
-pub use maintenance::{MaintenanceService, MaintenanceServiceConfig, MaintenanceEvent};
+pub use maintenance::{
+    MaintenanceService, MaintenanceServiceConfig,
+    MaintenanceEvent, SnapshotProposed, SnapshotCompleted,
+    CacheInvalidated, UpgradeActivated, AdminReplaced,
+    UpgradeProposal, IdentityEpochFence, CacheKey,
+};
 
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
