@@ -129,8 +129,12 @@ pub use effects::{
     AuthorizationEffects, ChaosEffects, ConsoleEffects, CryptoEffects, JournalEffects, RandomEffects,
     ReliabilityEffects, TestingEffects, TimeEffects,
     // Supertraits for common effect combinations
-    ChoreographyEffects, TreeEffects, SigningEffects, CrdtEffects, AntiEntropyEffects, 
+    ChoreographyEffects, TreeEffects, SigningEffects, CrdtEffects, AntiEntropyEffects,
     MinimalEffects, SnapshotEffects,
+    // Reliability types (unified retry implementation)
+    BackoffStrategy, RetryPolicy, RetryResult, RetryContext, ReliabilityError,
+    // Rate limiting types (unified rate limiting implementation)
+    RateLimitConfig, RateLimit, RateLimitResult, RateLimiter, RateLimiterStatistics,
 };
 
 // Cryptographic utilities

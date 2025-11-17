@@ -3,7 +3,8 @@
 //! This module defines pure types and functions for storage search operations,
 //! capability-based result filtering, and privacy-preserving search.
 
-use crate::{StorageCapability, StorageCapabilitySet, StorageError};
+use crate::{StorageCapability, StorageCapabilitySet};
+use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -322,7 +323,7 @@ pub fn filter_search_results(
 /// Pure function to build search index from content
 pub fn build_search_index(
     content_entries: &[(String, String, Vec<StorageCapability>)],
-) -> Result<Vec<SearchIndexEntry>, StorageError> {
+) -> Result<Vec<SearchIndexEntry>, AuraError> {
     let mut index_entries = Vec::new();
 
     for (content_id, content, capabilities) in content_entries {
@@ -347,7 +348,7 @@ pub fn search_index(
     index: &[SearchIndexEntry],
     query: &SearchQuery,
     user_capabilities: &StorageCapabilitySet,
-) -> Result<SearchResults, StorageError> {
+) -> Result<SearchResults, AuraError> {
     let mut matching_items = Vec::new();
 
     for entry in index {

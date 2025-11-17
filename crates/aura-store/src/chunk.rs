@@ -7,7 +7,8 @@ use aura_core::{ChunkId, ContentId, ContentSize};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::{StorageCapability, StorageError};
+use crate::StorageCapability;
+use aura_core::AuraError;
 
 /// Configuration for erasure coding
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -67,17 +68,17 @@ impl ChunkLayout {
         chunk_sizes: Vec<u32>,
         total_size: ContentSize,
         erasure_config: ErasureConfig,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, AuraError> {
         if chunks.len() != chunk_sizes.len() {
-            return Err(StorageError::InvalidChunkLayout(
-                "Chunk count mismatch with sizes".to_string(),
+            return Err(AuraError::invalid(
+                "Chunk count mismatch with sizes",
             ));
         }
 
         let computed_total: u64 = chunk_sizes.iter().map(|&size| size as u64).sum();
         if computed_total != total_size.0 {
-            return Err(StorageError::InvalidChunkLayout(
-                "Total size mismatch".to_string(),
+            return Err(AuraError::invalid(
+                "Total size mismatch",
             ));
         }
 
@@ -174,18 +175,18 @@ impl ContentManifest {
         content_id: ContentId,
         layout: ChunkLayout,
         chunk_manifests: Vec<ChunkManifest>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, AuraError> {
         // Verify chunk manifests match layout
         if layout.chunk_count() != chunk_manifests.len() {
-            return Err(StorageError::InvalidChunkLayout(
-                "Chunk manifest count mismatch".to_string(),
+            return Err(AuraError::invalid(
+                "Chunk manifest count mismatch",
             ));
         }
 
         for (i, manifest) in chunk_manifests.iter().enumerate() {
             if let Some(expected_id) = layout.get_chunk(i) {
                 if &manifest.chunk_id != expected_id {
-                    return Err(StorageError::InvalidChunkLayout(
+                    return Err(AuraError::invalid(
                         format!("Chunk ID mismatch at index {}", i),
                     ));
                 }
@@ -240,9 +241,9 @@ impl ContentManifest {
 pub fn compute_chunk_layout(
     content: &[u8],
     erasure_config: ErasureConfig,
-) -> Result<ChunkLayout, StorageError> {
+) -> Result<ChunkLayout, AuraError> {
     if content.is_empty() {
-        return Err(StorageError::InvalidContent("Empty content".to_string()));
+        return Err(AuraError::invalid("Empty content"));
     }
 
     let chunk_size = erasure_config.max_chunk_size as usize;

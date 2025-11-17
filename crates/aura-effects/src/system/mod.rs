@@ -12,4 +12,4 @@ pub mod monitoring;
 
 pub use logging::LoggingSystemHandler;
 pub use metrics::MetricsSystemHandler;
-pub use monitoring::MonitoringHandler;
+pub use monitoring::MonitoringSystemHandler;

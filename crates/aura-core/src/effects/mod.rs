@@ -72,7 +72,13 @@ pub use journal::JournalEffects;
 // Migration utilities removed - middleware transition complete
 pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 pub use random::RandomEffects;
-pub use reliability::{ReliabilityEffects, ReliabilityError};
+pub use reliability::{
+    ReliabilityEffects, ReliabilityError,
+    // Unified retry types
+    BackoffStrategy, RetryPolicy, RetryResult, RetryContext,
+    // Unified rate limiting types
+    RateLimitConfig, RateLimit, RateLimitResult, RateLimiter, RateLimiterStatistics,
+};
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
 pub use supertraits::{
     AntiEntropyEffects, ChoreographyEffects, CrdtEffects, MinimalEffects, 
