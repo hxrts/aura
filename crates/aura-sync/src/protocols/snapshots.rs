@@ -229,7 +229,7 @@ impl SnapshotProtocol {
     ) -> SyncResult<(Option<WriterFenceGuard>, SnapshotProposal)> {
         let mut pending = self.pending.lock();
         if pending.is_some() {
-            return Err(SyncError::Coordination(
+            return Err(SyncError::protocol("sync", 
                 "snapshot proposal already in progress".to_string()
             ));
         }
@@ -238,7 +238,7 @@ impl SnapshotProtocol {
 
         let guard = if self.config.use_writer_fence {
             Some(self.fence.acquire()
-                .map_err(|e| SyncError::Coordination(e.to_string()))?)
+                .map_err(|e| SyncError::protocol("sync", e.to_string()))?)
         } else {
             None
         };
@@ -272,14 +272,14 @@ impl SnapshotProtocol {
         // Verify this is the pending proposal
         match pending.as_ref() {
             Some(p) if p.proposal_id == proposal.proposal_id => {},
-            _ => return Err(SyncError::Coordination(
+            _ => return Err(SyncError::protocol("sync", 
                 "proposal does not match pending snapshot".to_string()
             )),
         }
 
         // Verify threshold
         if approvals.len() < self.config.approval_threshold {
-            return Err(SyncError::Coordination(format!(
+            return Err(SyncError::protocol("sync", format!(
                 "insufficient approvals: {} < {}",
                 approvals.len(),
                 self.config.approval_threshold
@@ -301,7 +301,7 @@ impl SnapshotProtocol {
     pub fn abort(&self) -> SyncResult<()> {
         let mut pending = self.pending.lock();
         if pending.is_none() {
-            return Err(SyncError::Coordination(
+            return Err(SyncError::protocol("sync", 
                 "no pending snapshot to abort".to_string()
             ));
         }

@@ -218,17 +218,17 @@ impl AntiEntropyProtocol {
         operations: &[AttestedOp],
     ) -> SyncResult<JournalDigest> {
         let fact_hash = hash_serialized(&journal.facts)
-            .map_err(|e| SyncError::Internal(format!("Failed to hash facts: {}", e)))?;
+            .map_err(|e| SyncError::session(format!("Failed to hash facts: {}", e)))?;
 
         let caps_hash = hash_serialized(&journal.caps)
-            .map_err(|e| SyncError::Internal(format!("Failed to hash caps: {}", e)))?;
+            .map_err(|e| SyncError::session(format!("Failed to hash caps: {}", e)))?;
 
         let mut h = hash::hasher();
         let mut last_epoch: Option<u64> = None;
 
         for op in operations {
             let fp = fingerprint(op)
-                .map_err(|e| SyncError::Internal(format!("Failed to fingerprint op: {}", e)))?;
+                .map_err(|e| SyncError::session(format!("Failed to fingerprint op: {}", e)))?;
             h.update(&fp);
 
             let epoch = op.op.parent_epoch;
@@ -299,7 +299,7 @@ impl AntiEntropyProtocol {
         let mut seen = HashSet::with_capacity(local_ops.len());
         for op in local_ops.iter() {
             let fp = fingerprint(op)
-                .map_err(|e| SyncError::Internal(format!("Failed to fingerprint: {}", e)))?;
+                .map_err(|e| SyncError::session(format!("Failed to fingerprint: {}", e)))?;
             seen.insert(fp);
         }
 
@@ -308,7 +308,7 @@ impl AntiEntropyProtocol {
 
         for op in incoming {
             let fp = fingerprint(&op)
-                .map_err(|e| SyncError::Internal(format!("Failed to fingerprint: {}", e)))?;
+                .map_err(|e| SyncError::session(format!("Failed to fingerprint: {}", e)))?;
             if seen.insert(fp) {
                 local_ops.push(op);
                 applied += 1;

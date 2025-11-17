@@ -60,7 +60,7 @@ pub fn check_rate_limit_sync(
     cost: u32,
 ) -> SyncResult<()> {
     limiter.check_rate_limit(peer_id, cost).into_result()
-        .map_err(|e| crate::core::SyncError::RateLimited(e.to_string()))
+        .map_err(|e| crate::core::SyncError::resource_exhausted("rate_limit", e.to_string()))
 }
 
 /// Create a default rate limiter for sync operations (convenience function)

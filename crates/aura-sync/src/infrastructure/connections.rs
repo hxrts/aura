@@ -290,8 +290,9 @@ impl ConnectionPool {
         // Check limits before creating new connection
         if self.total_connections >= self.config.max_total_connections {
             self.stats.connection_limit_hits += 1;
-            return Err(SyncError::ResourceExhausted(
-                "Connection pool limit reached".to_string()
+            return Err(SyncError::resource_exhausted(
+                "connections",
+                "Connection pool limit reached"
             ));
         }
 
@@ -300,8 +301,9 @@ impl ConnectionPool {
 
         if peer_connections.len() >= self.config.max_connections_per_peer {
             self.stats.connection_limit_hits += 1;
-            return Err(SyncError::ResourceExhausted(
-                format!("Per-peer connection limit reached for {:?}", peer_id)
+            return Err(SyncError::resource_exhausted(
+                "connections",
+                &format!("Per-peer connection limit reached for {:?}", peer_id)
             ));
         }
 
@@ -322,11 +324,11 @@ impl ConnectionPool {
     pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle, now: Instant) -> SyncResult<()> {
 
         let connections = self.connections.get_mut(&peer_id)
-            .ok_or_else(|| SyncError::Internal("No connections for peer".to_string()))?;
+            .ok_or_else(|| SyncError::session("No connections for peer".to_string()))?;
 
         let conn = connections.iter_mut()
             .find(|c| c.connection_id == handle.id)
-            .ok_or_else(|| SyncError::Internal("Connection not found in pool".to_string()))?;
+            .ok_or_else(|| SyncError::session("Connection not found in pool".to_string()))?;
 
         conn.release(now);
         self.stats.connections_released += 1;
@@ -337,7 +339,7 @@ impl ConnectionPool {
     /// Close a connection
     pub fn close(&mut self, peer_id: DeviceId, connection_id: &str) -> SyncResult<()> {
         let connections = self.connections.get_mut(&peer_id)
-            .ok_or_else(|| SyncError::Internal("No connections for peer".to_string()))?;
+            .ok_or_else(|| SyncError::session("No connections for peer".to_string()))?;
 
         if let Some(pos) = connections.iter().position(|c| c.connection_id == connection_id) {
             let removed = connections.remove(pos);
@@ -349,7 +351,7 @@ impl ConnectionPool {
             // TODO: Actually close connection via aura-transport
             Ok(())
         } else {
-            Err(SyncError::Internal("Connection not found".to_string()))
+            Err(SyncError::session("Connection not found".to_string()))
         }
     }
 
