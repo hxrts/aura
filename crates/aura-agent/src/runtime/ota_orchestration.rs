@@ -33,10 +33,10 @@
 //! - Cache invalidation events synchronize protocol state
 //! - Forward compatibility for deprecated protocol versions
 
-use crate::choreography::AuraHandlerAdapter;
-use crate::effects::ChoreographyError;
-use crate::effects::TimeEffects;
-use crate::handlers::AuraHandlerError;
+use crate::runtime::AuraHandlerAdapter;
+use aura_protocol::AuraHandlerError as ChoreographyError;
+use aura_core::effects::TimeEffects;
+use aura_protocol::AuraHandlerError;
 use aura_core::{
     // maintenance::{MaintenanceEvent, UpgradeActivated, UpgradeKind, UpgradeProposal}, // TODO: Add maintenance module to aura-core
     DeviceId,
@@ -188,8 +188,11 @@ pub enum OtaError {
 
 impl From<OtaError> for ChoreographyError {
     fn from(e: OtaError) -> Self {
-        ChoreographyError::ProtocolViolation {
-            message: e.to_string(),
+        // TODO: Add ProtocolViolation variant to AuraHandlerError or use a different error type
+        // For now, use UnknownOperation as a placeholder
+        ChoreographyError::UnknownOperation {
+            effect_type: crate::handlers::EffectType::Network,
+            operation: format!("OTA error: {}", e),
         }
     }
 }

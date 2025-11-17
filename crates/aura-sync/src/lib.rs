@@ -99,6 +99,12 @@ pub use core::{
     SessionState, SessionResult,
 };
 
+// Protocol re-exports
+pub use protocols::{WriterFence, WriterFenceGuard};
+
+// Services re-exports
+pub use services::maintenance;
+
 // =============================================================================
 // Integration Documentation
 // =============================================================================

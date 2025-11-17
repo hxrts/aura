@@ -130,9 +130,17 @@ pub struct ContextAdapter<T> {
 impl<T> ContextAdapter<T> {
     /// Create a new context adapter
     pub fn new(inner: T, device_id: DeviceId) -> Self {
+        #[allow(clippy::disallowed_methods)]
+        // Migration adapter - UUID generation for default context
+        let default_context = EffectContext::new(
+            device_id,
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+        );
         Self {
             inner,
-            default_context: EffectContext::new(device_id),
+            default_context,
         }
     }
 
@@ -194,7 +202,9 @@ impl ContextPropagator {
 
     /// Create a child context for a nested operation
     pub fn child_context(&self) -> Option<EffectContext> {
-        self.current().map(|ctx| ctx.child())
+        #[allow(clippy::disallowed_methods)]
+        // Context propagation - UUID generation for child context
+        self.current().map(|ctx| ctx.child(uuid::Uuid::new_v4(), uuid::Uuid::new_v4()))
     }
 }
 
@@ -226,8 +236,12 @@ impl<'a, T> ContextualOperation<'a, T> {
     where
         F: FnOnce(T, &mut EffectContext) -> R,
     {
+        #[allow(clippy::disallowed_methods)]
+        // Deadline checking - use system time
+        let now = std::time::Instant::now();
+
         // Check deadline before execution
-        if self.context.is_deadline_exceeded() {
+        if self.context.is_deadline_exceeded(now) {
             return Err(AuraError::invalid("Operation deadline exceeded"));
         }
 
@@ -263,12 +277,16 @@ pub trait ContextualEffects:
 
     /// Create a root context for a new operation
     fn create_context(&self, device_id: DeviceId) -> EffectContext {
-        EffectContext::new(device_id)
+        #[allow(clippy::disallowed_methods)]
+        // Context creation - UUID generation for new context
+        EffectContext::new(device_id, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4())
     }
 
     /// Create a child context
     fn child_context(&self, parent: &EffectContext) -> EffectContext {
-        parent.child()
+        #[allow(clippy::disallowed_methods)]
+        // Context creation - UUID generation for child context
+        parent.child(uuid::Uuid::new_v4(), uuid::Uuid::new_v4())
     }
 }
 

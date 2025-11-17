@@ -11,7 +11,7 @@ use crate::{
     SimulatorMiddleware, SimulatorOperation,
 };
 use aura_core::DeviceId;
-use aura_protocol::effects::system::{AuraEffectSystem, EffectSystemConfig};
+use aura_agent::runtime::{AuraEffectSystem, EffectSystemBuilder, EffectSystemConfig};
 use aura_protocol::handlers::EffectType;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -46,9 +46,14 @@ impl StatelessEffectsMiddleware {
         };
 
         // Create the actual stateless effect system
-        let effect_system = Arc::new(AuraEffectSystem::new(effect_config).map_err(|e| {
-            SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
-        })?);
+        let effect_system = Arc::new(
+            EffectSystemBuilder::new()
+                .with_config(effect_config)
+                .build_sync()
+                .map_err(|e| {
+                    SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
+                })?,
+        );
 
         Ok(Self {
             device_id,

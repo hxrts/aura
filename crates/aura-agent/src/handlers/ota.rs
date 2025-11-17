@@ -4,12 +4,11 @@
 //! the choreography system with the agent runtime.
 
 use crate::errors::Result as AgentResult;
-use crate::runtime::ota_orchestration::{UpgradeConfig, UpgradeOrchestrator};
+use crate::runtime::ota_orchestration::{MaintenanceEvent, UpgradeConfig, UpgradeOrchestrator, UpgradeProposal};
+use crate::runtime::AuraHandlerAdapter;
 use aura_core::{DeviceId, Epoch};
-use aura_protocol::choreography::AuraHandlerAdapter;
 #[cfg(test)]
-use aura_sync::maintenance::UpgradeKind;
-use aura_sync::maintenance::UpgradeProposal;
+use crate::runtime::ota_orchestration::UpgradeKind;
 use serde_json;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
@@ -69,7 +68,9 @@ impl OtaOperations {
             proposal.version, proposal.package_id
         );
 
-        let proposal_id = proposal.package_id;
+        // Generate a UUID for tracking (package_id is a String, not a Uuid)
+        #[allow(clippy::disallowed_methods)]
+        let proposal_id = Uuid::new_v4();
 
         // Track the proposal
         {
@@ -223,7 +224,7 @@ impl OtaOperations {
     /// Emit maintenance event to journal for replication
     async fn emit_maintenance_event(
         adapter: &AuraHandlerAdapter,
-        event: aura_core::maintenance::MaintenanceEvent,
+        event: MaintenanceEvent,
     ) -> AgentResult<()> {
         use aura_core::effects::JournalEffects;
 

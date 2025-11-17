@@ -73,6 +73,7 @@ pub use journal::{
 pub use snapshots::{
     SnapshotProtocol, SnapshotConfig, SnapshotResult,
     SnapshotProposal, SnapshotApproval,
+    WriterFence, WriterFenceGuard,
 };
 
 pub use ota::{

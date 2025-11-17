@@ -49,9 +49,11 @@ impl RecoveryOperations {
         threshold: usize,
         context: RecoveryContext,
     ) -> Result<RecoveryResponse> {
-        let effects = self.effects.read().await;
-        let coordinator = GuardianKeyRecoveryCoordinator::new(effects.clone());
+        // TODO: Fix coordinator creation - requires refactoring to use Arc<dyn AuraEffects>
+        let _ = self.effects.read().await;
+        Err(AuraError::internal("Guardian key recovery not yet implemented - requires Arc-based effect system"))
 
+        /*
         let request = RecoveryRequest {
             requesting_device: self.device_id,
             account_id: self.account_id,
@@ -64,6 +66,7 @@ impl RecoveryOperations {
             .execute_key_recovery(request)
             .await
             .map_err(|e| AuraError::internal(format!("Recovery failed: {}", e)))
+        */
     }
 
     /// Get account ID

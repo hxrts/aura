@@ -18,7 +18,8 @@ pub use aura_protocol::handlers::agent::{
 
 // Re-export handler types from aura-protocol that agent needs
 pub use aura_core::effects::ExecutionMode;
-pub use aura_protocol::{AuraContext, AuraHandler, AuraHandlerError, EffectType};
+pub use aura_protocol::handlers::context_immutable::AuraContext;
+pub use aura_protocol::{AuraHandler, AuraHandlerError, EffectType};
 
 // Re-export local agent handlers
 pub use invitations::InvitationOperations;

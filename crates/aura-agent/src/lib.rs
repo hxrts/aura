@@ -78,7 +78,7 @@ pub use aura_core::{
 // These were previously in aura_protocol::effects but belong in Layer 6
 pub use runtime::{
     AuraEffectSystem, EffectExecutor, EffectSystemBuilder, EffectSystemConfig, EffectSystemState,
-    HandlerContainer, LifecycleManager, StorageConfig,
+    LifecycleManager, StorageConfig,
 };
 
 /// Create an agent with production effects

@@ -9,7 +9,7 @@
 use crate::middleware::SimulatorConfig;
 use crate::{Result as SimResult, SimulatorContext, SimulatorError};
 use aura_core::DeviceId;
-use aura_protocol::effects::system::{AuraEffectSystem, EffectSystemConfig};
+use aura_agent::runtime::{AuraEffectSystem, EffectSystemBuilder, EffectSystemConfig};
 use aura_testkit::{DeviceTestFixture, ProtocolTestFixture, TestExecutionMode};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,12 +33,17 @@ impl TestkitSimulatorBridge {
 
             // Create real effect system configured for simulation
             let config = EffectSystemConfig::for_simulation(device_id, seed);
-            let effect_system = Arc::new(AuraEffectSystem::new(config).map_err(|e| {
-                SimulatorError::OperationFailed(format!(
-                    "Effect system creation failed for device {}: {}",
-                    device_id, e
-                ))
-            })?);
+            let effect_system = Arc::new(
+                EffectSystemBuilder::new()
+                    .with_config(config)
+                    .build_sync()
+                    .map_err(|e| {
+                        SimulatorError::OperationFailed(format!(
+                            "Effect system creation failed for device {}: {}",
+                            device_id, e
+                        ))
+                    })?,
+            );
 
             effect_systems.push((device_id, effect_system));
         }
@@ -98,9 +103,14 @@ impl TestkitSimulatorBridge {
     ) -> SimResult<Arc<AuraEffectSystem>> {
         // Convert test harness to effect system instead of middleware stack
         let config = EffectSystemConfig::for_simulation(device_id, seed);
-        let effect_system = Arc::new(AuraEffectSystem::new(config).map_err(|e| {
-            SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
-        })?);
+        let effect_system = Arc::new(
+            EffectSystemBuilder::new()
+                .with_config(config)
+                .build_sync()
+                .map_err(|e| {
+                    SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
+                })?,
+        );
         Ok(effect_system)
     }
 }

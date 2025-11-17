@@ -75,8 +75,8 @@ pub mod testkit_bridge;
 pub use middleware::{
     ByzantineStrategy, FaultType, LogLevel, NetworkConfig, PerformanceMetrics,
     PropertyViolationType, Result, SimulationOutcome, SimulatorConfig, SimulatorContext,
-    SimulatorError, SimulatorHandler, SimulatorOperation, StateQuery, StatelessEffectsMiddleware,
-    TimeConfig, TimeControlAction,
+    SimulatorError, SimulatorHandler, SimulatorMiddleware, SimulatorOperation, StateQuery,
+    StatelessEffectsMiddleware, TimeConfig, TimeControlAction,
 };
 
 // Re-export testkit bridge

@@ -12,7 +12,14 @@ use aura_core::{
     identifiers::DeviceId,
     AuraError,
 };
-use aura_effects::*;
+use aura_effects::{
+    console::MockConsoleHandler,
+    crypto::MockCryptoHandler,
+    random::MockRandomHandler,
+    storage::MemoryStorageHandler,
+    time::SimulatedTimeHandler,
+    transport::{InMemoryTransportHandler, TransportConfig},
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -58,7 +65,7 @@ pub struct SimulationEffectSystem {
     random: MockRandomHandler,
     console: MockConsoleHandler,
     storage: MemoryStorageHandler,
-    network: MemoryNetworkHandler,
+    network: InMemoryTransportHandler,
 
     // Simulation state
     fault_injection_enabled: bool,
@@ -71,12 +78,12 @@ impl SimulationEffectSystem {
         Self {
             device_id,
             seed,
-            crypto: MockCryptoHandler::new(seed),
-            time: SimulatedTimeHandler::new(0), // Start at epoch 0
-            random: MockRandomHandler::new(seed),
+            crypto: MockCryptoHandler::new(),
+            time: SimulatedTimeHandler::new(),
+            random: MockRandomHandler::new_with_seed(seed),
             console: MockConsoleHandler::new(),
             storage: MemoryStorageHandler::new(),
-            network: MemoryNetworkHandler::new(device_id.into()),
+            network: InMemoryTransportHandler::new(TransportConfig::default()),
             fault_injection_enabled: false,
             injected_faults: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -524,11 +531,13 @@ impl NetworkEffects for SimulationEffectSystem {
             // Drop message silently on network partition
             return Ok(());
         }
-        self.network.send_to_peer(peer_id, message).await
+        // Use NetworkEffects trait method explicitly
+        NetworkEffects::send_to_peer(&self.network, peer_id, message).await
     }
 
     async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
-        self.network.broadcast(message).await
+        // Use NetworkEffects trait method explicitly
+        NetworkEffects::broadcast(&self.network, message).await
     }
 
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), NetworkError> {

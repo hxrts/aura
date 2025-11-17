@@ -28,13 +28,9 @@ impl InvitationOperations {
         &self,
         request: DeviceInvitationRequest,
     ) -> Result<DeviceInvitationResponse> {
-        let effects = self.effects.read().await;
-        let coordinator =
-            DeviceInvitationCoordinator::with_ledger(effects.clone(), shared_invitation_ledger());
-        coordinator
-            .invite_device(request)
-            .await
-            .map_err(|err| AuraError::internal(err.to_string()))
+        // TODO: Fix coordinator creation - requires refactoring to use Arc<dyn AuraEffects>
+        let _ = self.effects.read().await;
+        Err(AuraError::internal("Device invitation not yet implemented - requires Arc-based effect system"))
     }
 
     /// Accept a received invitation envelope.
@@ -42,11 +38,8 @@ impl InvitationOperations {
         &self,
         envelope: InvitationEnvelope,
     ) -> Result<InvitationAcceptance> {
-        let effects = self.effects.read().await;
-        let coordinator = InvitationAcceptanceCoordinator::new(effects.clone());
-        coordinator
-            .accept_invitation(envelope)
-            .await
-            .map_err(|err| AuraError::internal(err.to_string()))
+        // TODO: Fix coordinator creation - requires refactoring to use Arc<dyn AuraEffects>
+        let _ = self.effects.read().await;
+        Err(AuraError::internal("Invitation acceptance not yet implemented - requires Arc-based effect system"))
     }
 }

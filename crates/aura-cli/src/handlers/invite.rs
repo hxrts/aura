@@ -2,21 +2,25 @@
 
 use crate::InvitationAction;
 use anyhow::{anyhow, Context, Result};
+use aura_agent::runtime::EffectSystemBuilder;
 use aura_core::{AccountId, Cap, DeviceId};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
     invitation_acceptance::InvitationAcceptanceCoordinator,
 };
-use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects};
+use aura_protocol::effects::ConsoleEffects;
 use std::{fs, str::FromStr};
 
 /// Handle invitation-related CLI commands
 ///
 /// Processes invitation actions including create, accept, and status operations
 pub async fn handle_invitation(
-    effects: &AuraEffectSystem,
+    effects: &aura_protocol::effects::AuraEffectSystem,
     action: &InvitationAction,
 ) -> Result<()> {
+    // Get device_id from context (for now, create a temp one - this should be passed from CLI)
+    let device_id = DeviceId::new(); // TODO: Pass device_id from caller
+
     match action {
         InvitationAction::Create {
             account,
@@ -24,8 +28,14 @@ pub async fn handle_invitation(
             role,
             ttl,
         } => {
-            let request = build_request(effects, account, invitee, role, *ttl)?;
-            let coordinator = DeviceInvitationCoordinator::new(effects.clone());
+            let request = build_request(device_id, account, invitee, role, *ttl)?;
+
+            // Create fresh effect system for coordinator
+            let coord_effects = EffectSystemBuilder::new()
+                .with_device_id(device_id)
+                .build_sync()?;
+
+            let coordinator = DeviceInvitationCoordinator::new(coord_effects);
             let response = coordinator
                 .invite_device(request)
                 .await
@@ -47,7 +57,12 @@ pub async fn handle_invitation(
             let envelope: InvitationEnvelope =
                 serde_json::from_str(&contents).context("invalid invitation envelope")?;
 
-            let coordinator = InvitationAcceptanceCoordinator::new(effects.clone());
+            // Create fresh effect system for coordinator
+            let coord_effects = EffectSystemBuilder::new()
+                .with_device_id(device_id)
+                .build_sync()?;
+
+            let coordinator = InvitationAcceptanceCoordinator::new(coord_effects);
             let acceptance = coordinator
                 .accept_invitation(envelope)
                 .await
@@ -65,7 +80,7 @@ pub async fn handle_invitation(
 }
 
 fn build_request(
-    effects: &AuraEffectSystem,
+    device_id: DeviceId,
     account: &str,
     invitee: &str,
     role: &str,
@@ -77,7 +92,7 @@ fn build_request(
         .map_err(|err| anyhow!("invalid invitee device id '{}': {}", invitee, err))?;
 
     Ok(DeviceInvitationRequest {
-        inviter: effects.device_id(),
+        inviter: device_id,
         invitee: invitee_id,
         account_id,
         granted_capabilities: Cap::top(),

@@ -4,7 +4,7 @@
 //! Uses the unified effect system for all operations.
 
 use anyhow::Result;
-use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+use aura_agent::runtime::EffectSystemBuilder;
 use aura_core::effects::ConsoleEffects;
 use aura_core::identifiers::DeviceId;
 use clap::{Parser, Subcommand};
@@ -126,12 +126,9 @@ async fn main() -> Result<()> {
     let device_id = DeviceId::new();
 
     // Initialize effect system based on environment
-    let config = if std::env::var("AURA_CLI_TEST").is_ok() {
-        EffectSystemConfig::for_testing(device_id)
-    } else {
-        EffectSystemConfig::for_production(device_id)?
-    };
-    let effect_system = AuraEffectSystem::new(config)?;
+    let effect_system = EffectSystemBuilder::new()
+        .with_device_id(device_id)
+        .build_sync()?;
 
     // Initialize logging through effects
     let log_level = if cli.verbose { "debug" } else { "info" };
@@ -143,7 +140,7 @@ async fn main() -> Result<()> {
         .await;
 
     // Create CLI handler
-    let cli_handler = CliHandler::new(effect_system);
+    let cli_handler = CliHandler::new(effect_system, device_id);
 
     // Execute command through effect system
     match &cli.command {

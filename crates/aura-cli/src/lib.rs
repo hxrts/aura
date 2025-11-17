@@ -13,27 +13,28 @@
 pub mod handlers;
 pub mod visualization;
 
-// Re-export key types and traits from aura-protocol (CLI effects moved to Layer 4)
-pub use aura_protocol::{CliConfig, CliEffects, ConfigEffects, OutputEffects};
+// Re-export CLI handler
 pub use handlers::CliHandler;
 
 // Action types are defined in this module and automatically available
 
 use aura_core::{identifiers::DeviceId, AuraError};
-use aura_protocol::{effects::EffectSystemConfig, AuraEffectSystem};
+use aura_agent::runtime::EffectSystemBuilder;
 
 /// Create a CLI handler for the given device ID
 pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
-    let config = EffectSystemConfig::for_production(device_id)?;
-    let effect_system = AuraEffectSystem::new(config)?;
-    Ok(CliHandler::new(effect_system))
+    let effect_system = EffectSystemBuilder::new()
+        .with_device_id(device_id)
+        .build_sync()?;
+    Ok(CliHandler::new(effect_system, device_id))
 }
 
 /// Create a test CLI handler for the given device ID
 pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
-    let config = EffectSystemConfig::for_testing(device_id);
-    let effect_system = AuraEffectSystem::new(config)?;
-    Ok(CliHandler::new(effect_system))
+    let effect_system = EffectSystemBuilder::new()
+        .with_device_id(device_id)
+        .build_sync()?;
+    Ok(CliHandler::new(effect_system, device_id))
 }
 
 /// Create a CLI handler with a generated device ID

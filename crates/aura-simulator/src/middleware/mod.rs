@@ -18,6 +18,9 @@ pub use handler::{
 };
 pub use stateless_effects::{PerformanceMetrics, StatelessEffectsMiddleware};
 
+// Export the middleware trait (deprecated but still used)
+// pub use self::SimulatorMiddleware; // Already defined in this module
+
 /// Simulator execution context that provides runtime information
 #[derive(Debug, Clone)]
 pub struct SimulatorContext {
