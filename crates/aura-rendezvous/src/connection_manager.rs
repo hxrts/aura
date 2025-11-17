@@ -43,15 +43,23 @@ pub struct PunchSession {
 }
 
 impl PunchSession {
-    pub fn new(session_id: String, local_addr: std::net::SocketAddr, target_addr: std::net::SocketAddr) -> Self {
-        Self { session_id, local_addr, target_addr }
+    pub fn new(
+        session_id: String,
+        local_addr: std::net::SocketAddr,
+        target_addr: std::net::SocketAddr,
+    ) -> Self {
+        Self {
+            session_id,
+            local_addr,
+            target_addr,
+        }
     }
 
     // Alternative constructor that might be needed based on usage
     pub async fn from_device_and_config(
-        _device_id: aura_core::DeviceId, 
-        local_addr: std::net::SocketAddr, 
-        _config: aura_transport::PunchConfig
+        _device_id: aura_core::DeviceId,
+        local_addr: std::net::SocketAddr,
+        _config: aura_transport::PunchConfig,
     ) -> Result<Self, String> {
         Ok(Self {
             session_id: uuid::Uuid::new_v4().to_string(),
@@ -64,7 +72,10 @@ impl PunchSession {
         self.local_addr
     }
 
-    pub async fn punch_with_peer(&self, peer_addr: std::net::SocketAddr) -> Result<PunchResult, String> {
+    pub async fn punch_with_peer(
+        &self,
+        peer_addr: std::net::SocketAddr,
+    ) -> Result<PunchResult, String> {
         // TODO: Implement actual hole punching
         Ok(PunchResult::Success {
             local_addr: self.local_addr,
@@ -924,9 +935,15 @@ impl ConnectionManager {
 
         // Bind to local address for punch session
         let local_bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
-        let punch_session =
-            PunchSession::from_device_and_config(self.device_id, local_bind_addr, config.punch_config.clone()).await
-            .map_err(|e| AuraError::coordination_failed(format!("Failed to create punch session: {}", e)))?;
+        let punch_session = PunchSession::from_device_and_config(
+            self.device_id,
+            local_bind_addr,
+            config.punch_config.clone(),
+        )
+        .await
+        .map_err(|e| {
+            AuraError::coordination_failed(format!("Failed to create punch session: {}", e))
+        })?;
 
         tracing::debug!(
             local_addr = ?punch_session.local_addr(),

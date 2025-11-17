@@ -20,6 +20,94 @@ use std::time::{Duration, SystemTime};
 use tokio::time::timeout;
 
 #[cfg(test)]
+mod legacy_transport_types {
+    use super::*;
+
+    #[derive(Debug, Clone)]
+    pub struct ReceiptData {
+        pub receipt_id: String,
+        pub sender_id: DeviceId,
+        pub recipient_id: DeviceId,
+        pub message_hash: Vec<u8>,
+        pub signature: Vec<u8>,
+        pub timestamp: SystemTime,
+        pub context_id: ContextId,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum VerificationOutcome {
+        Valid { confidence: u8 },
+        Invalid { reason: String },
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct ReceiptVerificationResponse {
+        pub verification_id: String,
+        pub verifier_id: DeviceId,
+        pub verification_result: VerificationOutcome,
+        pub verification_proof: Vec<u8>,
+        pub anti_replay_token: Vec<u8>,
+        pub timestamp: SystemTime,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum WebSocketHandshakeResult {
+        Success,
+        ProtocolMismatch { reason: String },
+        CapabilityDenied { missing_capabilities: Vec<String> },
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct WebSocketHandshakeResponse {
+        pub session_id: String,
+        pub responder_id: DeviceId,
+        pub accepted_protocols: Vec<String>,
+        pub granted_capabilities: Vec<String>,
+        pub handshake_result: WebSocketHandshakeResult,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum ChannelType {
+        SecureMessaging,
+        FileTransfer,
+        StreamingData,
+        Control,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct ResourceRequirements {
+        pub bandwidth_mbps: u64,
+        pub storage_mb: u64,
+        pub cpu_cores: u64,
+        pub memory_mb: u64,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct AllocatedResources {
+        pub bandwidth_allocated: u64,
+        pub storage_allocated: u64,
+        pub cpu_allocated: u64,
+        pub memory_allocated: u64,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum ConfirmationResult {
+        Confirmed,
+        InsufficientResources { missing: ResourceRequirements },
+        CapabilityDenied { required: Vec<String> },
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct ChannelConfirmation {
+        pub channel_id: String,
+        pub participant_id: DeviceId,
+        pub confirmation_result: ConfirmationResult,
+        pub allocated_resources: AllocatedResources,
+        pub timestamp: SystemTime,
+    }
+}
+
+#[cfg(test)]
 mod coordination_tests {
     use super::*;
 
@@ -134,10 +222,10 @@ mod coordination_tests {
 
 #[cfg(test)]
 mod receipt_verification_tests {
-    use super::*;
-    use aura_transport::protocols::websocket::{
+    use super::legacy_transport_types::{
         ReceiptData, ReceiptVerificationResponse, VerificationOutcome,
     };
+    use super::*;
 
     #[test]
     fn test_receipt_coordinator_creation() {
@@ -273,10 +361,8 @@ mod receipt_verification_tests {
 
 #[cfg(test)]
 mod websocket_choreography_tests {
+    use super::legacy_transport_types::{WebSocketHandshakeResponse, WebSocketHandshakeResult};
     use super::*;
-    use aura_transport::protocols::websocket::{
-        WebSocketHandshakeInit, WebSocketHandshakeResponse, WebSocketHandshakeResult,
-    };
 
     #[test]
     fn test_websocket_handshake_coordinator() {
@@ -438,11 +524,11 @@ mod websocket_choreography_tests {
 
 #[cfg(test)]
 mod channel_management_tests {
-    use super::*;
-    use aura_transport::protocols::websocket::{
-        AllocatedResources, ChannelConfirmation, ChannelEstablishmentRequest, ChannelType,
-        ConfirmationResult,
+    use super::legacy_transport_types::{
+        AllocatedResources, ChannelConfirmation, ChannelType, ConfirmationResult,
+        ResourceRequirements,
     };
+    use super::*;
 
     #[test]
     fn test_channel_establishment_coordinator() {

@@ -192,41 +192,40 @@ mod session_creation_protocol {
     use super::*;
 
     choreography! {
-        #[namespace = "session_creation"]
-        protocol SessionCreation {
-        roles: Initiator, Participant, Coordinator;
+            #[namespace = "session_creation"]
+            protocol SessionCreation {
+            roles: Initiator, Participant, Coordinator;
 
-        // Phase 1: Session Creation Request
-        Initiator[guard_capability = "initiate_session",
-                  flow_cost = 100,
-                  journal_facts = "session_requested"]
-        -> Coordinator: CreateRequest(SessionCreateRequest);
+            // Phase 1: Session Creation Request
+            Initiator[guard_capability = "initiate_session",
+                      flow_cost = 100,
+                      journal_facts = "session_requested"]
+            -> Coordinator: CreateRequest(SessionCreateRequest);
 
-        // Phase 2: Participant Invitation
-        Coordinator[guard_capability = "invite_participant",
-                   flow_cost = 50,
-                   journal_facts = "invitation_sent"]
-        -> Participant: Invite(SessionInvitation);
+            // Phase 2: Participant Invitation
+            Coordinator[guard_capability = "invite_participant",
+                       flow_cost = 50,
+                       journal_facts = "invitation_sent"]
+            -> Participant: Invite(SessionInvitation);
 
-        // Phase 3: Participant Response
-        Participant[guard_capability = "respond_session",
-                   flow_cost = 25,
-                   journal_facts = "response_sent"]
-        -> Coordinator: Respond(SessionResponse);
+            // Phase 3: Participant Response
+            Participant[guard_capability = "respond_session",
+                       flow_cost = 25,
+                       journal_facts = "response_sent"]
+            -> Coordinator: Respond(SessionResponse);
 
-        // Phase 4: Session Establishment Notification
-        Coordinator[guard_capability = "establish_session",
-                   flow_cost = 75,
-                   journal_facts = "session_established"]
-        -> Initiator: EstablishToInitiator(SessionEstablished);
+            // Phase 4: Session Establishment Notification
+            Coordinator[guard_capability = "establish_session",
+                       flow_cost = 75,
+                       journal_facts = "session_established"]
+            -> Initiator: EstablishToInitiator(SessionEstablished);
 
-        Coordinator[guard_capability = "establish_session",
-                   flow_cost = 75,
-                   journal_facts = "session_established"]
-        -> Participant: EstablishToParticipant(SessionEstablished);
+            Coordinator[guard_capability = "establish_session",
+                       flow_cost = 75,
+                       journal_facts = "session_established"]
+            -> Participant: EstablishToParticipant(SessionEstablished);
+        }
     }
-}
-
 }
 
 // Session management choreography (for active sessions)
@@ -234,23 +233,22 @@ mod session_management_protocol {
     use super::*;
 
     choreography! {
-        #[namespace = "session_management"]
-        protocol SessionManagement {
-        roles: Initiator, Participant, Coordinator;
+            #[namespace = "session_management"]
+            protocol SessionManagement {
+            roles: Initiator, Participant, Coordinator;
 
-        // Metadata update flow
-        Initiator[guard_capability = "update_metadata",
-                 flow_cost = 50,
-                 journal_facts = "metadata_update_requested"]
-        -> Coordinator: UpdateMetadata(MetadataUpdate);
+            // Metadata update flow
+            Initiator[guard_capability = "update_metadata",
+                     flow_cost = 50,
+                     journal_facts = "metadata_update_requested"]
+            -> Coordinator: UpdateMetadata(MetadataUpdate);
 
-        Coordinator[guard_capability = "sync_metadata",
-                   flow_cost = 25,
-                   journal_facts = "metadata_synced"]
-        -> Participant: SyncMetadata(MetadataSync);
+            Coordinator[guard_capability = "sync_metadata",
+                       flow_cost = 25,
+                       journal_facts = "metadata_synced"]
+            -> Participant: SyncMetadata(MetadataSync);
+        }
     }
-}
-
 }
 
 // Session termination choreography
@@ -258,29 +256,28 @@ mod session_termination_protocol {
     use super::*;
 
     choreography! {
-        #[namespace = "session_termination"]
-        protocol SessionTermination {
-        roles: Initiator, Participant, Coordinator;
+            #[namespace = "session_termination"]
+            protocol SessionTermination {
+            roles: Initiator, Participant, Coordinator;
 
-        // Session end request
-        Initiator[guard_capability = "end_session",
-                 flow_cost = 75,
-                 journal_facts = "session_end_requested"]
-        -> Coordinator: EndSession(SessionEnd);
+            // Session end request
+            Initiator[guard_capability = "end_session",
+                     flow_cost = 75,
+                     journal_facts = "session_end_requested"]
+            -> Coordinator: EndSession(SessionEnd);
 
-        // Termination notification
-        Coordinator[guard_capability = "terminate_session",
-                   flow_cost = 50,
-                   journal_facts = "session_terminated"]
-        -> Participant: TerminateToParticipant(SessionTerminated);
+            // Termination notification
+            Coordinator[guard_capability = "terminate_session",
+                       flow_cost = 50,
+                       journal_facts = "session_terminated"]
+            -> Participant: TerminateToParticipant(SessionTerminated);
 
-        Coordinator[guard_capability = "terminate_session",
-                   flow_cost = 50,
-                   journal_facts = "session_terminated"]
-        -> Initiator: TerminateToInitiator(SessionTerminated);
+            Coordinator[guard_capability = "terminate_session",
+                       flow_cost = 50,
+                       journal_facts = "session_terminated"]
+            -> Initiator: TerminateToInitiator(SessionTerminated);
+        }
     }
-}
-
 }
 
 /// Session operations handler

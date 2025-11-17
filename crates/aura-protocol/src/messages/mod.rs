@@ -43,8 +43,8 @@
 
 // Domain-specific message modules
 pub mod crypto;
-pub mod social_types;
 pub mod social_rendezvous;
+pub mod social_types;
 
 // Shared infrastructure
 pub mod common_envelope;

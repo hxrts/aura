@@ -181,17 +181,11 @@ pub enum ChaosError {
 
     /// Failed to inject specific fault type
     #[error("Failed to inject {fault_type} fault: {reason}")]
-    InjectionFailed {
-        fault_type: String,
-        reason: String,
-    },
+    InjectionFailed { fault_type: String, reason: String },
 
     /// Chaos injection not supported in current environment
     #[error("Chaos injection '{operation}' not supported: {reason}")]
-    NotSupported {
-        operation: String,
-        reason: String,
-    },
+    NotSupported { operation: String, reason: String },
 
     /// System error during chaos operations
     #[error("Chaos system error: {0}")]

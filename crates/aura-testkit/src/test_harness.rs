@@ -6,8 +6,8 @@
 use std::sync::Once;
 use std::time::Duration;
 
+use crate::foundation::{create_mock_test_context, SimpleTestContext};
 use aura_core::{AuraError, AuraResult, DeviceId};
-use crate::foundation::{SimpleTestContext, create_mock_test_context};
 use tracing_subscriber::EnvFilter;
 
 static TRACING_INIT: Once = Once::new();
@@ -79,10 +79,7 @@ pub async fn create_test_context() -> AuraResult<TestContext> {
 pub async fn create_test_context_with_config(config: TestConfig) -> AuraResult<TestContext> {
     let context = create_mock_test_context()?;
 
-    Ok(TestContext {
-        context,
-        config,
-    })
+    Ok(TestContext { context, config })
 }
 
 /// Test fixture for common test scenarios

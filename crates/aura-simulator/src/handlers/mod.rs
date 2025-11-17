@@ -7,9 +7,11 @@ pub mod scenario;
 pub mod time_control;
 
 pub use crate::middleware::handler::CoreSimulatorHandler;
-pub use effect_composer::{SimulationEffectComposer, ComposedSimulationEnvironment};
+pub use effect_composer::{ComposedSimulationEnvironment, SimulationEffectComposer};
 pub use fault_simulation::SimulationFaultHandler;
-pub use scenario::{SimulationScenarioHandler, ScenarioDefinition, InjectionAction, TriggerCondition};
+pub use scenario::{
+    InjectionAction, ScenarioDefinition, SimulationScenarioHandler, TriggerCondition,
+};
 pub use time_control::SimulationTimeHandler;
 
 // All standard handlers moved to middleware::handler module

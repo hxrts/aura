@@ -5,9 +5,9 @@
 //! proper effect system integration.
 
 use async_trait::async_trait;
+use aura_core::effects::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use aura_core::effects::{ChaosEffects, ChaosError, CorruptionType, ByzantineType, ResourceType};
 
 /// Simulation-specific fault injection handler
 ///
@@ -83,7 +83,7 @@ impl SimulationFaultHandler {
     fn cleanup_expired_faults(&self) {
         let mut active_faults = self.active_faults.lock().unwrap();
         let now = Instant::now();
-        
+
         active_faults.retain(|_, fault| {
             match fault.duration {
                 Some(duration) => now.duration_since(fault.start_time) < duration,
@@ -113,7 +113,7 @@ impl ChaosEffects for SimulationFaultHandler {
         corruption_type: CorruptionType,
     ) -> Result<(), ChaosError> {
         self.cleanup_expired_faults();
-        
+
         if !self.can_inject_more_faults() {
             return Err(ChaosError::InjectionFailed {
                 fault_type: "message_corruption".to_string(),
@@ -143,7 +143,7 @@ impl ChaosEffects for SimulationFaultHandler {
         affected_peers: Option<Vec<String>>,
     ) -> Result<(), ChaosError> {
         self.cleanup_expired_faults();
-        
+
         if !self.can_inject_more_faults() {
             return Err(ChaosError::InjectionFailed {
                 fault_type: "network_delay".to_string(),
@@ -162,7 +162,7 @@ impl ChaosEffects for SimulationFaultHandler {
             Some(ref peers) => format!("peers: {:?}", peers),
             None => "all peers".to_string(),
         };
-        
+
         self.track_fault(
             fault_id,
             format!("NetworkDelay({:?}, {})", delay_range, peers_desc),
@@ -178,7 +178,7 @@ impl ChaosEffects for SimulationFaultHandler {
         duration: Duration,
     ) -> Result<(), ChaosError> {
         self.cleanup_expired_faults();
-        
+
         if !self.can_inject_more_faults() {
             return Err(ChaosError::InjectionFailed {
                 fault_type: "network_partition".to_string(),
@@ -208,7 +208,7 @@ impl ChaosEffects for SimulationFaultHandler {
         behavior_type: ByzantineType,
     ) -> Result<(), ChaosError> {
         self.cleanup_expired_faults();
-        
+
         if !self.can_inject_more_faults() {
             return Err(ChaosError::InjectionFailed {
                 fault_type: "byzantine_behavior".to_string(),
@@ -225,7 +225,11 @@ impl ChaosEffects for SimulationFaultHandler {
         let fault_id = format!("byzantine_{}", Instant::now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
-            format!("Byzantine({:?}, {} peers)", behavior_type, byzantine_peers.len()),
+            format!(
+                "Byzantine({:?}, {} peers)",
+                behavior_type,
+                byzantine_peers.len()
+            ),
             None,
         );
 
@@ -238,7 +242,7 @@ impl ChaosEffects for SimulationFaultHandler {
         constraint_level: f64,
     ) -> Result<(), ChaosError> {
         self.cleanup_expired_faults();
-        
+
         if !self.can_inject_more_faults() {
             return Err(ChaosError::InjectionFailed {
                 fault_type: "resource_exhaustion".to_string(),
@@ -255,7 +259,10 @@ impl ChaosEffects for SimulationFaultHandler {
         let fault_id = format!("resource_{}", Instant::now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
-            format!("ResourceExhaustion({:?}, {:.2})", resource_type, constraint_level),
+            format!(
+                "ResourceExhaustion({:?}, {:.2})",
+                resource_type, constraint_level
+            ),
             None,
         );
 
@@ -268,7 +275,7 @@ impl ChaosEffects for SimulationFaultHandler {
         clock_drift_rate: f64,
     ) -> Result<(), ChaosError> {
         self.cleanup_expired_faults();
-        
+
         if !self.can_inject_more_faults() {
             return Err(ChaosError::InjectionFailed {
                 fault_type: "timing_faults".to_string(),
@@ -285,7 +292,10 @@ impl ChaosEffects for SimulationFaultHandler {
         let fault_id = format!("timing_{}", Instant::now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
-            format!("TimingFaults(skew: {:?}, drift: {:.2})", time_skew, clock_drift_rate),
+            format!(
+                "TimingFaults(skew: {:?}, drift: {:.2})",
+                time_skew, clock_drift_rate
+            ),
             None,
         );
 
@@ -304,7 +314,8 @@ impl SimulationFaultHandler {
     pub fn get_active_faults(&self) -> Vec<String> {
         self.cleanup_expired_faults();
         let active_faults = self.active_faults.lock().unwrap();
-        active_faults.values()
+        active_faults
+            .values()
             .map(|fault| fault.fault_type.clone())
             .collect()
     }
@@ -324,10 +335,12 @@ mod tests {
     #[tokio::test]
     async fn test_message_corruption_injection() {
         let handler = SimulationFaultHandler::new(123);
-        
-        let result = handler.inject_message_corruption(0.1, CorruptionType::BitFlip).await;
+
+        let result = handler
+            .inject_message_corruption(0.1, CorruptionType::BitFlip)
+            .await;
         assert!(result.is_ok());
-        
+
         assert_eq!(handler.active_fault_count(), 1);
         assert!(handler.get_active_faults()[0].contains("MessageCorruption"));
     }
@@ -335,10 +348,12 @@ mod tests {
     #[tokio::test]
     async fn test_invalid_corruption_rate() {
         let handler = SimulationFaultHandler::new(123);
-        
-        let result = handler.inject_message_corruption(1.5, CorruptionType::BitFlip).await;
+
+        let result = handler
+            .inject_message_corruption(1.5, CorruptionType::BitFlip)
+            .await;
         assert!(result.is_err());
-        
+
         if let Err(ChaosError::InvalidConfiguration { reason }) = result {
             assert!(reason.contains("between 0.0 and 1.0"));
         } else {
@@ -349,72 +364,84 @@ mod tests {
     #[tokio::test]
     async fn test_network_delay_injection() {
         let handler = SimulationFaultHandler::new(123);
-        
+
         let delay_range = (Duration::from_millis(10), Duration::from_millis(100));
         let result = handler.inject_network_delay(delay_range, None).await;
         assert!(result.is_ok());
-        
+
         assert_eq!(handler.active_fault_count(), 1);
     }
 
     #[tokio::test]
     async fn test_network_partition() {
         let handler = SimulationFaultHandler::new(123);
-        
+
         let groups = vec![
             vec!["peer1".to_string(), "peer2".to_string()],
             vec!["peer3".to_string(), "peer4".to_string()],
         ];
-        let result = handler.inject_network_partition(groups, Duration::from_secs(10)).await;
+        let result = handler
+            .inject_network_partition(groups, Duration::from_secs(10))
+            .await;
         assert!(result.is_ok());
-        
+
         assert_eq!(handler.active_fault_count(), 1);
     }
 
     #[tokio::test]
     async fn test_byzantine_behavior() {
         let handler = SimulationFaultHandler::new(123);
-        
+
         let peers = vec!["byzantine_peer".to_string()];
-        let result = handler.inject_byzantine_behavior(peers, ByzantineType::Equivocation).await;
+        let result = handler
+            .inject_byzantine_behavior(peers, ByzantineType::Equivocation)
+            .await;
         assert!(result.is_ok());
-        
+
         assert_eq!(handler.active_fault_count(), 1);
     }
 
     #[tokio::test]
     async fn test_resource_exhaustion() {
         let handler = SimulationFaultHandler::new(123);
-        
-        let result = handler.inject_resource_exhaustion(ResourceType::Memory, 0.8).await;
+
+        let result = handler
+            .inject_resource_exhaustion(ResourceType::Memory, 0.8)
+            .await;
         assert!(result.is_ok());
-        
+
         assert_eq!(handler.active_fault_count(), 1);
     }
 
     #[tokio::test]
     async fn test_timing_faults() {
         let handler = SimulationFaultHandler::new(123);
-        
-        let result = handler.inject_timing_faults(Duration::from_millis(50), 0.1).await;
+
+        let result = handler
+            .inject_timing_faults(Duration::from_millis(50), 0.1)
+            .await;
         assert!(result.is_ok());
-        
+
         assert_eq!(handler.active_fault_count(), 1);
     }
 
     #[tokio::test]
     async fn test_stop_all_injections() {
         let handler = SimulationFaultHandler::new(123);
-        
+
         // Inject multiple faults
-        let _ = handler.inject_message_corruption(0.1, CorruptionType::BitFlip).await;
-        let _ = handler.inject_network_delay(
-            (Duration::from_millis(10), Duration::from_millis(100)), 
-            None
-        ).await;
-        
+        let _ = handler
+            .inject_message_corruption(0.1, CorruptionType::BitFlip)
+            .await;
+        let _ = handler
+            .inject_network_delay(
+                (Duration::from_millis(10), Duration::from_millis(100)),
+                None,
+            )
+            .await;
+
         assert_eq!(handler.active_fault_count(), 2);
-        
+
         // Stop all injections
         let result = handler.stop_all_injections().await;
         assert!(result.is_ok());
@@ -424,21 +451,24 @@ mod tests {
     #[tokio::test]
     async fn test_max_concurrent_faults() {
         let handler = SimulationFaultHandler::with_max_faults(123, 2);
-        
+
         // Inject up to the limit
-        let _ = handler.inject_message_corruption(0.1, CorruptionType::BitFlip).await;
-        let _ = handler.inject_network_delay(
-            (Duration::from_millis(10), Duration::from_millis(100)), 
-            None
-        ).await;
-        
+        let _ = handler
+            .inject_message_corruption(0.1, CorruptionType::BitFlip)
+            .await;
+        let _ = handler
+            .inject_network_delay(
+                (Duration::from_millis(10), Duration::from_millis(100)),
+                None,
+            )
+            .await;
+
         // Try to inject one more (should fail)
-        let result = handler.inject_byzantine_behavior(
-            vec!["peer".to_string()], 
-            ByzantineType::Silent
-        ).await;
+        let result = handler
+            .inject_byzantine_behavior(vec!["peer".to_string()], ByzantineType::Silent)
+            .await;
         assert!(result.is_err());
-        
+
         if let Err(ChaosError::InjectionFailed { reason, .. }) = result {
             assert!(reason.contains("Maximum concurrent faults reached"));
         } else {

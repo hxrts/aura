@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Property-Based Tests for CRDT Implementations
 //!
 //! This module verifies the semilattice laws for all CRDT types used in tree

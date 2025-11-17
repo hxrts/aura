@@ -27,11 +27,8 @@ pub trait TestingEffects {
     ///
     /// # Returns
     /// Success indication or error if checkpoint failed
-    async fn create_checkpoint(
-        &self,
-        checkpoint_id: &str,
-        label: &str,
-    ) -> Result<(), TestingError>;
+    async fn create_checkpoint(&self, checkpoint_id: &str, label: &str)
+        -> Result<(), TestingError>;
 
     /// Restore system state from a previous checkpoint
     ///
@@ -43,10 +40,7 @@ pub trait TestingEffects {
     ///
     /// # Returns
     /// Success indication or error if restoration failed
-    async fn restore_checkpoint(
-        &self,
-        checkpoint_id: &str,
-    ) -> Result<(), TestingError>;
+    async fn restore_checkpoint(&self, checkpoint_id: &str) -> Result<(), TestingError>;
 
     /// Inspect arbitrary system state for debugging
     ///
@@ -148,17 +142,11 @@ pub enum TestingError {
 
     /// Event recording failed
     #[error("Failed to record event '{event_type}': {reason}")]
-    EventRecordingError {
-        event_type: String,
-        reason: String,
-    },
+    EventRecordingError { event_type: String, reason: String },
 
     /// Metric recording failed
     #[error("Failed to record metric '{metric_name}': {reason}")]
-    MetricRecordingError {
-        metric_name: String,
-        reason: String,
-    },
+    MetricRecordingError { metric_name: String, reason: String },
 
     /// System error during testing
     #[error("Testing system error: {0}")]

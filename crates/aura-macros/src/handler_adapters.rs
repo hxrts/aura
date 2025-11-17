@@ -55,10 +55,10 @@ impl Parse for AdapterSpec {
         let trait_name = input.parse()?;
         input.parse::<Token![=>]>()?;
         let effect_type = input.parse()?;
-        
+
         let content;
         syn::braced!(content in input);
-        
+
         let mut operations = Vec::new();
         while !content.is_empty() {
             operations.push(content.parse()?);
@@ -82,7 +82,7 @@ impl Parse for OperationSpec {
         let operation_name = input.parse()?;
         input.parse::<Token![=>]>()?;
         let method_name = input.parse()?;
-        
+
         let param_type = if input.peek(syn::token::Paren) {
             let content;
             syn::parenthesized!(content in input);
@@ -90,14 +90,14 @@ impl Parse for OperationSpec {
         } else {
             None
         };
-        
+
         let return_type = if input.peek(Token![->]) {
             input.parse::<Token![->]>()?;
             Some(input.parse()?)
         } else {
             None
         };
-        
+
         Ok(OperationSpec {
             operation_name,
             method_name,
@@ -113,37 +113,38 @@ pub fn aura_handler_adapters_impl(input: TokenStream) -> TokenStream {
         Ok(input) => input,
         Err(e) => return e.to_compile_error().into(),
     };
-    
+
     let mut generated = Vec::new();
-    
+
     for adapter in input.adapters {
         match generate_adapter(&adapter) {
             Ok(adapter_code) => generated.push(adapter_code),
             Err(e) => return e.to_compile_error().into(),
         }
     }
-    
+
     quote! {
         use std::{collections::HashMap, error::Error, io, sync::Arc, time::Duration};
         use async_trait::async_trait;
         use serde::{de::DeserializeOwned, Serialize};
-        
+
         #(#generated)*
-    }.into()
+    }
+    .into()
 }
 
 fn generate_adapter(spec: &AdapterSpec) -> Result<proc_macro2::TokenStream, syn::Error> {
     let adapter_name = &spec.adapter_name;
     let trait_name = &spec.trait_name;
     let effect_type = &spec.effect_type;
-    
+
     let operation_matches = spec.operations.iter().map(|op| {
         let op_name = &op.operation_name;
         let method_name = &op.method_name;
-        
+
         generate_operation_match(op, op_name, method_name)
     });
-    
+
     Ok(quote! {
         /// Adapter for `#trait_name` implementations.
         pub struct #adapter_name<T> {
@@ -227,9 +228,9 @@ fn generate_operation_match(
                     Vec::new()
                 }
             }
-        },
+        }
         (Some(param_type), None) => {
-            // Has parameters, no return value  
+            // Has parameters, no return value
             quote! {
                 #op_name => {
                     let param = deserialize_with_context::<#param_type>(params, effect_type, operation)?;
@@ -241,7 +242,7 @@ fn generate_operation_match(
                     Vec::new()
                 }
             }
-        },
+        }
         (None, Some(_return_type)) => {
             // No parameters, has return value
             quote! {
@@ -250,7 +251,7 @@ fn generate_operation_match(
                     serialize_with_context(&result, effect_type, operation)?
                 }
             }
-        },
+        }
         (Some(param_type), Some(_return_type)) => {
             // Has parameters and return value
             quote! {
@@ -264,6 +265,6 @@ fn generate_operation_match(
                     serialize_with_context(&result, effect_type, operation)?
                 }
             }
-        },
+        }
     }
 }

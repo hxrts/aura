@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Scalability tests for ratchet tree implementation.
 //!
 //! These tests verify that the system handles large-scale scenarios:

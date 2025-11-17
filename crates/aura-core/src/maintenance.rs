@@ -1,5 +1,5 @@
 //! Maintenance event types
-//! 
+//!
 //! Placeholder types for maintenance operations until the maintenance module is fully implemented.
 
 use crate::{AccountId, DeviceId};

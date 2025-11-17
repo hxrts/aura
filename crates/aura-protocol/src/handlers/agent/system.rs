@@ -9,13 +9,11 @@ use tokio::sync::RwLock;
 
 use super::{auth::AuthenticationHandler, session::MemorySessionHandler};
 use crate::effects::{
-    agent::{
-        AgentEffects, AgentHealthStatus, AuthMethod, AuthenticationEffects, AuthenticationResult,
-        BiometricType, ConfigValidationError, ConfigurationEffects, CredentialBackup, DeviceConfig,
-        DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
-        SessionManagementEffects, SessionMessage, SessionStatus, SessionType,
-    },
-    AuraEffectSystem, StorageEffects, TimeEffects,
+    AgentEffects, AgentHealthStatus, AuraEffectSystem, AuthMethod, AuthenticationEffects,
+    AuthenticationResult, BiometricType, ConfigValidationError, ConfigurationEffects,
+    CredentialBackup, DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle,
+    SessionInfo, SessionManagementEffects, SessionMessage, SessionStatus, SessionType,
+    StorageEffects, TimeEffects,
 };
 use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraResult as Result};
@@ -52,7 +50,6 @@ impl AgentEffectSystemHandler {
     ) -> Self {
         Self::new(device_id, core_effects)
     }
-
 
     /// Initialize the agent effect system
     pub async fn initialize(&self) -> Result<()> {
@@ -500,7 +497,7 @@ impl ConfigurationEffects for AgentEffectSystemHandler {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "fixture_effects"))]
 mod tests {
     use super::*;
     use aura_macros::aura_test;

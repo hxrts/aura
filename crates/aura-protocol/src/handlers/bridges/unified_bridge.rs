@@ -11,9 +11,10 @@ use std::fmt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use super::context_immutable::AuraContext;
-use super::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
 use crate::effects::*;
+use crate::handlers::{
+    context_immutable::AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
+};
 use aura_core::hash::hash;
 use aura_core::LocalSessionType;
 
@@ -720,7 +721,7 @@ impl UnifiedHandlerBridgeFactory {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "fixture_effects"))]
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;

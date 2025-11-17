@@ -5,8 +5,7 @@
 
 use async_trait::async_trait;
 
-use super::context_immutable::AuraContext;
-use super::{AuraHandlerError, EffectType};
+use crate::handlers::{context_immutable::AuraContext, AuraHandlerError, EffectType};
 use aura_core::effects::ExecutionMode;
 use aura_core::LocalSessionType;
 

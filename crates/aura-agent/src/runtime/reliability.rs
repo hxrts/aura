@@ -11,7 +11,10 @@
 //! managing reliability across distributed operations.
 
 use async_trait::async_trait;
-use aura_core::{AuraError, effects::{ReliabilityEffects, ReliabilityError}};
+use aura_core::{
+    effects::{ReliabilityEffects, ReliabilityError},
+    AuraError,
+};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},

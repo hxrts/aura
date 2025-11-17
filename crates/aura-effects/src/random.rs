@@ -4,10 +4,10 @@
 //! defined in `aura-core`. These handlers can be used by choreographic applications
 //! and other Aura components.
 
-use aura_macros::aura_effect_handlers;
 use aura_core::effects::RandomEffects;
-use std::sync::{Arc, Mutex};
+use aura_macros::aura_effect_handlers;
 use rand::RngCore;
+use std::sync::{Arc, Mutex};
 
 // Generate both mock and real random handlers using the macro
 aura_effect_handlers! {

@@ -39,7 +39,10 @@ use crate::effects::TimeEffects;
 use crate::handlers::AuraHandlerError;
 use aura_core::{
     // maintenance::{MaintenanceEvent, UpgradeActivated, UpgradeKind, UpgradeProposal}, // TODO: Add maintenance module to aura-core
-    DeviceId, Epoch, Hash32, SemanticVersion,
+    DeviceId,
+    Epoch,
+    Hash32,
+    SemanticVersion,
 };
 
 // TODO: These types should be moved to aura-core maintenance module when it's created
@@ -213,7 +216,8 @@ impl UpgradeOrchestrator {
         proposal: &UpgradeProposal,
     ) -> Result<OtaResult, OtaError> {
         let device_id = adapter.device_id();
-        let proposal_id = Uuid::parse_str(&proposal.package_id).map_err(|e| OtaError::InvalidConfig(format!("Invalid package ID format: {}", e)))?;
+        let proposal_id = Uuid::parse_str(&proposal.package_id)
+            .map_err(|e| OtaError::InvalidConfig(format!("Invalid package ID format: {}", e)))?;
 
         // Validate configuration
         if self.config.participants.is_empty() {
@@ -293,10 +297,13 @@ impl UpgradeOrchestrator {
         adapter: &AuraHandlerAdapter,
         proposal: &UpgradeProposal,
     ) -> Result<(), OtaError> {
-        let timestamp = aura_core::effects::TimeEffects::current_timestamp(&**adapter.effects()).await;
+        let timestamp =
+            aura_core::effects::TimeEffects::current_timestamp(&**adapter.effects()).await;
 
         let message = UpgradeMessage {
-            proposal_id: Uuid::parse_str(&proposal.package_id).map_err(|e| OtaError::InvalidConfig(format!("Invalid package ID format: {}", e)))?,
+            proposal_id: Uuid::parse_str(&proposal.package_id).map_err(|e| {
+                OtaError::InvalidConfig(format!("Invalid package ID format: {}", e))
+            })?,
             version: proposal.version,
             kind: proposal.kind.clone(),
             checksum: proposal.checksum,
@@ -328,7 +335,8 @@ impl UpgradeOrchestrator {
         let mut responses = Vec::new();
 
         for participant in &self.config.participants {
-            let timestamp = aura_core::effects::TimeEffects::current_timestamp(&**adapter.effects()).await;
+            let timestamp =
+                aura_core::effects::TimeEffects::current_timestamp(&**adapter.effects()).await;
 
             // For this device: simulate local adoption decision
             if participant == &device_id {
@@ -360,12 +368,15 @@ impl UpgradeOrchestrator {
         proposal: &UpgradeProposal,
         quorum_count: u16,
     ) -> Result<(), OtaError> {
-        let timestamp = aura_core::effects::TimeEffects::current_timestamp(&**adapter.effects()).await;
+        let timestamp =
+            aura_core::effects::TimeEffects::current_timestamp(&**adapter.effects()).await;
 
         let activation_epoch = proposal.activation_fence;
 
         let signal = ActivationSignal {
-            proposal_id: Uuid::parse_str(&proposal.package_id).map_err(|e| OtaError::InvalidConfig(format!("Invalid package ID format: {}", e)))?,
+            proposal_id: Uuid::parse_str(&proposal.package_id).map_err(|e| {
+                OtaError::InvalidConfig(format!("Invalid package ID format: {}", e))
+            })?,
             activation_epoch,
             quorum_count,
             timestamp,

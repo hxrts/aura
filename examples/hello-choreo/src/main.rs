@@ -143,7 +143,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\n5. Testing rumpsteak-aura session types integration:");
-    
+
     // Rumpsteak session types are now integrated and available
     println!("   ✓ Rumpsteak session types module generated");
     println!("   ✓ Session type safety and choreographic projection available");

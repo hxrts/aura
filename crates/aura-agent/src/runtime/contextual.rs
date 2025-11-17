@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use aura_core::{
     effects::{NetworkError, StorageError, TimeError},
-    AuraResult, DeviceId, AuraError,
+    AuraError, AuraResult, DeviceId,
 };
 
 use super::context::EffectContext;

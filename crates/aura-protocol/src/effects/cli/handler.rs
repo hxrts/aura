@@ -3,8 +3,8 @@
 //! Concrete implementations of CLI effects using core effect composition.
 
 use super::CliEffects;
-use aura_core::AuraResult;
 use async_trait::async_trait;
+use aura_core::AuraResult;
 use std::path::Path;
 
 /// CLI effect handler that composes core effects
@@ -23,11 +23,7 @@ impl<E> CliEffectHandler<E> {
 #[async_trait]
 impl<E> CliEffects for CliEffectHandler<E>
 where
-    E: crate::ConsoleEffects
-        + crate::StorageEffects
-        + crate::TimeEffects
-        + Send
-        + Sync,
+    E: crate::ConsoleEffects + crate::StorageEffects + crate::TimeEffects + Send + Sync,
 {
     async fn log_info(&self, message: &str) {
         let _ = self.inner.log_info(&format!("INFO: {}", message)).await;

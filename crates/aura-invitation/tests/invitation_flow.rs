@@ -6,6 +6,7 @@
 #![allow(clippy::disallowed_methods)]
 #![allow(clippy::expect_used)]
 
+use aura_agent::runtime::AuraEffectSystem;
 use aura_core::{AccountId, Cap, DeviceId};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
@@ -13,7 +14,6 @@ use aura_invitation::{
 };
 use aura_journal::semilattice::InvitationLedger;
 use aura_macros::aura_test;
-use aura_agent::runtime::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;

@@ -13,8 +13,8 @@ pub mod stateless_effects;
 
 // Re-export for convenience
 pub use handler::{
-    ChaosStrategy, SimulationOutcome, SimulatorHandler, SimulatorOperation,
-    StateQuery, TimeControlAction,
+    ChaosStrategy, SimulationOutcome, SimulatorHandler, SimulatorOperation, StateQuery,
+    TimeControlAction,
 };
 pub use stateless_effects::{PerformanceMetrics, StatelessEffectsMiddleware};
 
@@ -288,7 +288,7 @@ pub enum PropertyViolationType {
 }
 
 /// Legacy middleware trait for simulator operations
-/// 
+///
 /// This trait is deprecated in favor of the effect system.
 /// Use SimulationEffectComposer and effect handlers instead.
 pub trait SimulatorMiddleware: Send + Sync {

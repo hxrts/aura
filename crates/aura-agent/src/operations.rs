@@ -71,13 +71,11 @@
 //! - **Operation Logging**: All operations should be logged with full context
 //! - **Authorization Decisions**: Record all capability evaluation results
 //! - **Error Forensics**: Include sufficient detail for security analysis
-//!
-//! **ZERO BACKWARDS COMPATIBILITY CODE. ZERO MIGRATION CODE. ZERO LEGACY CODE.**
 
 use crate::errors::{AuraError, Result as AgentResult};
 use aura_core::{AccountId, DeviceId, GuardianId};
 use aura_protocol::authorization_bridge::{
-    evaluate_authorization, AuthorizationContext, AuthorizationRequest,
+    AuthorizationContext, AuthorizationMetadata, AuthorizationRequest, AuthorizationService,
 };
 use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};
 use aura_wot::{CapabilitySet, TreeAuthzContext, TreeOp, TreeOpKind};
@@ -172,6 +170,8 @@ pub struct AuthorizedAgentOperations {
     tree_context: TreeAuthzContext,
     /// Device ID for this agent
     _device_id: DeviceId,
+    /// Unified authorization service instance
+    authorization: AuthorizationService,
 }
 
 impl AuthorizedAgentOperations {
@@ -185,6 +185,7 @@ impl AuthorizedAgentOperations {
             key_material,
             tree_context,
             _device_id: device_id,
+            authorization: AuthorizationService::new(),
         }
     }
 
@@ -314,10 +315,11 @@ impl AuthorizedAgentOperations {
             context: authz_context,
             additional_signers: BTreeSet::new(),
             guardian_signers: BTreeSet::new(),
+            metadata: AuthorizationMetadata::default(),
         };
 
         // Evaluate authorization
-        evaluate_authorization(authz_request).map_err(|e| {
+        self.authorization.authorize(authz_request).map_err(|e| {
             AuraError::permission_denied(format!("Authorization evaluation failed: {:?}", e))
         })
     }

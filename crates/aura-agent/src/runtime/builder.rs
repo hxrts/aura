@@ -296,14 +296,19 @@ impl AuraEffectSystemBuilder {
                 if !self.custom_handlers.contains_key(&EffectType::Crypto) {
                     builder = builder.with_handler(
                         EffectType::Crypto,
-                        Arc::new(CryptoHandlerAdapter::new(MockCryptoHandler::with_seed(0), mode)),
+                        Arc::new(CryptoHandlerAdapter::new(
+                            MockCryptoHandler::with_seed(0),
+                            mode,
+                        )),
                     );
                 }
                 if !self.custom_handlers.contains_key(&EffectType::Network) {
                     builder = builder.with_handler(
                         EffectType::Network,
                         Arc::new(NetworkHandlerAdapter::new(
-                            InMemoryTransportHandler::new(aura_effects::transport::TransportConfig::default()),
+                            InMemoryTransportHandler::new(
+                                aura_effects::transport::TransportConfig::default(),
+                            ),
                             mode,
                         )),
                     );

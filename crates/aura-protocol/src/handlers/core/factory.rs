@@ -348,7 +348,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
 
-use super::{EffectType, ExecutionMode};
+use crate::handlers::{EffectType, ExecutionMode};
 use aura_core::DeviceId;
 
 /// Error type for factory operations

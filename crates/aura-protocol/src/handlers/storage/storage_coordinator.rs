@@ -37,7 +37,7 @@ impl StorageBackend {
     pub fn backend_type(&self) -> &'static str {
         match self {
             StorageBackend::Memory(_) => "memory",
-            StorageBackend::Filesystem(_) => "filesystem", 
+            StorageBackend::Filesystem(_) => "filesystem",
             StorageBackend::Encrypted(_) => "encrypted",
         }
     }
@@ -45,7 +45,10 @@ impl StorageBackend {
     /// Execute storage operation on this backend
     async fn execute<F, R>(&self, operation: F) -> R
     where
-        F: for<'a> FnOnce(&'a dyn StorageEffects) -> std::pin::Pin<Box<dyn std::future::Future<Output = R> + Send + 'a>>,
+        F: for<'a> FnOnce(
+            &'a dyn StorageEffects,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = R> + Send + 'a>>,
     {
         match self {
             StorageBackend::Memory(handler) => operation(handler.as_ref()).await,
@@ -94,9 +97,9 @@ impl StorageCoordinatorBuilder {
 
     /// Build the coordinator
     pub fn build(self) -> AuraResult<StorageCoordinator> {
-        let primary = self.primary.ok_or_else(|| {
-            aura_core::AuraError::invalid("Primary storage backend is required")
-        })?;
+        let primary = self
+            .primary
+            .ok_or_else(|| aura_core::AuraError::invalid("Primary storage backend is required"))?;
 
         Ok(StorageCoordinator {
             primary,
@@ -121,9 +124,10 @@ impl StorageCoordinator {
 
     /// Create coordinator with encrypted storage
     pub fn with_encrypted(device_id: DeviceId, encryption_key: Option<Vec<u8>>) -> Self {
-        let primary = StorageBackend::Encrypted(Arc::new(
-            EncryptedStorageHandler::new("/tmp/storage".to_string(), encryption_key)
-        ));
+        let primary = StorageBackend::Encrypted(Arc::new(EncryptedStorageHandler::new(
+            "/tmp/storage".to_string(),
+            encryption_key,
+        )));
         Self {
             primary,
             replicas: Vec::new(),
@@ -158,15 +162,15 @@ impl StorageCoordinator {
     pub async fn coordinated_store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         let backend = self.select_backend(key);
         let key_owned = key.to_string();
-        
+
         // Store to selected backend
         let value_for_primary = value.clone();
-        backend.execute(|storage| {
-            let key_ref = key_owned.clone();
-            Box::pin(async move {
-                storage.store(&key_ref, value_for_primary).await
+        backend
+            .execute(|storage| {
+                let key_ref = key_owned.clone();
+                Box::pin(async move { storage.store(&key_ref, value_for_primary).await })
             })
-        }).await?;
+            .await?;
 
         // Optionally replicate to other backends
         if !self.replicas.is_empty() {
@@ -175,11 +179,13 @@ impl StorageCoordinator {
                     // Async replication (fire and forget for now)
                     let key_ref = key_owned.clone();
                     let value_for_replica = value.clone();
-                    let _ = replica.execute(|storage| {
-                        Box::pin(async move {
-                            storage.store(&key_ref, value_for_replica).await
+                    let _ = replica
+                        .execute(|storage| {
+                            Box::pin(
+                                async move { storage.store(&key_ref, value_for_replica).await },
+                            )
                         })
-                    }).await;
+                        .await;
                 }
             }
         }
@@ -191,14 +197,15 @@ impl StorageCoordinator {
     pub async fn coordinated_retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
         let primary_backend = self.select_backend(key);
         let key_owned = key.to_string();
-        
+
         // Try primary backend first
-        if let Some(data) = primary_backend.execute(|storage| {
-            let key_ref = key_owned.clone();
-            Box::pin(async move {
-                storage.retrieve(&key_ref).await
+        if let Some(data) = primary_backend
+            .execute(|storage| {
+                let key_ref = key_owned.clone();
+                Box::pin(async move { storage.retrieve(&key_ref).await })
             })
-        }).await? {
+            .await?
+        {
             return Ok(Some(data));
         }
 
@@ -206,19 +213,20 @@ impl StorageCoordinator {
         for replica in &self.replicas {
             if replica.backend_type() != primary_backend.backend_type() {
                 let key_ref = key_owned.clone();
-                if let Some(data) = replica.execute(|storage| {
-                    Box::pin(async move {
-                        storage.retrieve(&key_ref).await
-                    })
-                }).await? {
+                if let Some(data) = replica
+                    .execute(|storage| Box::pin(async move { storage.retrieve(&key_ref).await }))
+                    .await?
+                {
                     // Found in replica, update primary for future reads
                     let key_ref_for_store = key_owned.clone();
                     let data_for_store = data.clone();
-                    let _ = primary_backend.execute(|storage| {
-                        Box::pin(async move {
-                            storage.store(&key_ref_for_store, data_for_store).await
+                    let _ = primary_backend
+                        .execute(|storage| {
+                            Box::pin(async move {
+                                storage.store(&key_ref_for_store, data_for_store).await
+                            })
                         })
-                    }).await;
+                        .await;
                     return Ok(Some(data));
                 }
             }
@@ -233,12 +241,13 @@ impl StorageCoordinator {
 
         // Remove from primary
         let primary_backend = self.select_backend(key);
-        let removed = match primary_backend.execute(|storage| {
-            let key_ref = key_owned.clone();
-            Box::pin(async move {
-                storage.remove(&key_ref).await
+        let removed = match primary_backend
+            .execute(|storage| {
+                let key_ref = key_owned.clone();
+                Box::pin(async move { storage.remove(&key_ref).await })
             })
-        }).await {
+            .await
+        {
             Ok(was_removed) => was_removed,
             Err(e) => return Err(e),
         };
@@ -246,11 +255,9 @@ impl StorageCoordinator {
         // Remove from all replicas
         for replica in &self.replicas {
             let key_ref = key_owned.clone();
-            let _ = replica.execute(|storage| {
-                Box::pin(async move {
-                    storage.remove(&key_ref).await
-                })
-            }).await;
+            let _ = replica
+                .execute(|storage| Box::pin(async move { storage.remove(&key_ref).await }))
+                .await;
         }
 
         Ok(removed)
@@ -258,22 +265,19 @@ impl StorageCoordinator {
 
     /// Get combined statistics across all backends
     pub async fn combined_stats(&self) -> Result<StorageStats, StorageError> {
-        let primary_stats = self.primary.execute(|storage| {
-            Box::pin(async move {
-                storage.stats().await
-            })
-        }).await?;
+        let primary_stats = self
+            .primary
+            .execute(|storage| Box::pin(async move { storage.stats().await }))
+            .await?;
 
         let mut total_key_count = primary_stats.key_count;
         let mut total_size = primary_stats.total_size;
 
         // Add replica stats (with deduplication consideration)
         for replica in &self.replicas {
-            let replica_stats = replica.execute(|storage| {
-                Box::pin(async move {
-                    storage.stats().await
-                })
-            }).await?;
+            let replica_stats = replica
+                .execute(|storage| Box::pin(async move { storage.stats().await }))
+                .await?;
 
             // Note: This is simplified - in practice we'd need to account for duplication
             total_key_count += replica_stats.key_count;
@@ -292,35 +296,39 @@ impl StorageCoordinator {
     pub fn info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();
         info.insert("device_id".to_string(), self.device_id.to_string());
-        info.insert("primary_backend".to_string(), self.primary.backend_type().to_string());
+        info.insert(
+            "primary_backend".to_string(),
+            self.primary.backend_type().to_string(),
+        );
         info.insert("replica_count".to_string(), self.replicas.len().to_string());
-        
-        let replica_types: Vec<String> = self.replicas.iter()
+
+        let replica_types: Vec<String> = self
+            .replicas
+            .iter()
             .map(|r| r.backend_type().to_string())
             .collect();
         info.insert("replica_types".to_string(), replica_types.join(","));
-        
+
         info
     }
 
     /// Check consistency across backends
     pub async fn check_consistency(&self, key: &str) -> Result<bool, StorageError> {
         let key_owned = key.to_string();
-        
-        let primary_data = self.primary.execute(|storage| {
-            let key_ref = key_owned.clone();
-            Box::pin(async move {
-                storage.retrieve(&key_ref).await
+
+        let primary_data = self
+            .primary
+            .execute(|storage| {
+                let key_ref = key_owned.clone();
+                Box::pin(async move { storage.retrieve(&key_ref).await })
             })
-        }).await?;
+            .await?;
 
         for replica in &self.replicas {
             let key_ref = key_owned.clone();
-            let replica_data = replica.execute(|storage| {
-                Box::pin(async move {
-                    storage.retrieve(&key_ref).await
-                })
-            }).await?;
+            let replica_data = replica
+                .execute(|storage| Box::pin(async move { storage.retrieve(&key_ref).await }))
+                .await?;
 
             if primary_data != replica_data {
                 return Ok(false);
@@ -345,7 +353,10 @@ mod tests {
         let key = "test_key";
         let value = b"test_value".to_vec();
 
-        coordinator.coordinated_store(key, value.clone()).await.unwrap();
+        coordinator
+            .coordinated_store(key, value.clone())
+            .await
+            .unwrap();
         let retrieved = coordinator.coordinated_retrieve(key).await.unwrap();
         assert_eq!(retrieved, Some(value));
 
@@ -359,9 +370,11 @@ mod tests {
     async fn test_coordinator_with_replicas() {
         let device_id = DeviceId::new();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
-            .with_primary(StorageBackend::Memory(Arc::new(MemoryStorageHandler::new())))
+            .with_primary(StorageBackend::Memory(
+                Arc::new(MemoryStorageHandler::new()),
+            ))
             .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::new("/tmp/test".to_string(), None)
+                EncryptedStorageHandler::new("/tmp/test".to_string(), None),
             )))
             .build()
             .unwrap();
@@ -369,7 +382,10 @@ mod tests {
         let key = "replicated_key";
         let value = b"replicated_value".to_vec();
 
-        coordinator.coordinated_store(key, value.clone()).await.unwrap();
+        coordinator
+            .coordinated_store(key, value.clone())
+            .await
+            .unwrap();
         let retrieved = coordinator.coordinated_retrieve(key).await.unwrap();
         assert_eq!(retrieved, Some(value));
 
@@ -381,9 +397,11 @@ mod tests {
     async fn test_routing_rules() {
         let device_id = DeviceId::new();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
-            .with_primary(StorageBackend::Memory(Arc::new(MemoryStorageHandler::new())))
+            .with_primary(StorageBackend::Memory(
+                Arc::new(MemoryStorageHandler::new()),
+            ))
             .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::new("/tmp/test".to_string(), None)
+                EncryptedStorageHandler::new("/tmp/test".to_string(), None),
             )))
             .with_routing_rule("secret_".to_string(), "encrypted".to_string())
             .build()
@@ -393,9 +411,15 @@ mod tests {
         let secret_key = "secret_data";
 
         // Normal data should go to primary (memory)
-        assert_eq!(coordinator.select_backend(normal_key).backend_type(), "memory");
-        
+        assert_eq!(
+            coordinator.select_backend(normal_key).backend_type(),
+            "memory"
+        );
+
         // Secret data should go to encrypted backend
-        assert_eq!(coordinator.select_backend(secret_key).backend_type(), "encrypted");
+        assert_eq!(
+            coordinator.select_backend(secret_key).backend_type(),
+            "encrypted"
+        );
     }
 }

@@ -4,9 +4,9 @@
 //! Replaces the former TimeControlMiddleware with effect system integration.
 
 use async_trait::async_trait;
-use std::time::{Duration, SystemTime};
-use aura_core::{AuraResult, AuraError};
 use aura_core::effects::TimeEffects;
+use aura_core::{AuraError, AuraResult};
+use std::time::{Duration, SystemTime};
 
 /// Simulation-specific time control handler
 ///
@@ -71,14 +71,14 @@ impl TimeEffects for SimulationTimeHandler {
             Ok(self.time_offset.as_secs())
         } else {
             // Calculate accelerated time
-            let elapsed = self.simulation_start
+            let elapsed = self
+                .simulation_start
                 .elapsed()
                 .map_err(|e| AuraError::internal(format!("Time calculation error: {}", e)))?;
-            
-            let accelerated_elapsed = Duration::from_secs_f64(
-                elapsed.as_secs_f64() * self.acceleration
-            );
-            
+
+            let accelerated_elapsed =
+                Duration::from_secs_f64(elapsed.as_secs_f64() * self.acceleration);
+
             let total_time = self.time_offset + accelerated_elapsed;
             Ok(total_time.as_secs())
         }
@@ -91,9 +91,7 @@ impl TimeEffects for SimulationTimeHandler {
         }
 
         // Adjust sleep duration based on acceleration
-        let adjusted_duration = Duration::from_secs_f64(
-            duration.as_secs_f64() / self.acceleration
-        );
+        let adjusted_duration = Duration::from_secs_f64(duration.as_secs_f64() / self.acceleration);
 
         tokio::time::sleep(adjusted_duration).await;
         Ok(())
@@ -107,7 +105,7 @@ mod tests {
     #[tokio::test]
     async fn test_simulation_time_handler() {
         let handler = SimulationTimeHandler::new();
-        
+
         // Should provide current timestamp
         let timestamp = handler.current_timestamp().await.unwrap();
         assert!(timestamp >= 0);
@@ -117,11 +115,11 @@ mod tests {
     async fn test_time_acceleration() {
         let mut handler = SimulationTimeHandler::new();
         handler.set_acceleration(2.0);
-        
+
         let timestamp1 = handler.current_timestamp().await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         let timestamp2 = handler.current_timestamp().await.unwrap();
-        
+
         // Time should advance faster with acceleration
         assert!(timestamp2 > timestamp1);
     }
@@ -129,15 +127,15 @@ mod tests {
     #[tokio::test]
     async fn test_pause_resume() {
         let mut handler = SimulationTimeHandler::new();
-        
+
         handler.pause();
         let timestamp1 = handler.current_timestamp().await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         let timestamp2 = handler.current_timestamp().await.unwrap();
-        
+
         // Time should be frozen when paused
         assert_eq!(timestamp1, timestamp2);
-        
+
         handler.resume();
         // Time should advance again after resume
         let timestamp3 = handler.current_timestamp().await.unwrap();
@@ -147,10 +145,10 @@ mod tests {
     #[tokio::test]
     async fn test_time_jump() {
         let mut handler = SimulationTimeHandler::new();
-        
+
         let target = Duration::from_secs(3600); // Jump to 1 hour
         handler.jump_to_time(target);
-        
+
         let timestamp = handler.current_timestamp().await.unwrap();
         assert!(timestamp >= target.as_secs());
     }

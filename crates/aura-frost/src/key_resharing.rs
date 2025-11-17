@@ -25,8 +25,8 @@
 //! - **Byzantine Fault Tolerance**: Handles malicious participants during resharing
 //! - **Atomic Updates**: Either all participants get new shares or none do
 
-use aura_core::{AccountId, DeviceId};
 use aura_core::frost::PublicKeyPackage;
+use aura_core::{AccountId, DeviceId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 

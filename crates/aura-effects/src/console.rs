@@ -4,8 +4,8 @@
 //! defined in `aura-core`. These handlers can be used by choreographic applications
 //! and other Aura components.
 
-use aura_macros::aura_effect_handlers;
 use aura_core::{effects::ConsoleEffects, AuraError};
+use aura_macros::aura_effect_handlers;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 

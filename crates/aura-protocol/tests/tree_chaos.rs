@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Chaos engineering tests for tree protocols.
 //!
 //! These tests verify system correctness and resilience under adverse conditions:

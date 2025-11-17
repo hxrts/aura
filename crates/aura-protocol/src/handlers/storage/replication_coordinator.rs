@@ -93,7 +93,7 @@ impl StorageNodeInfo {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
+
         // Node is healthy if seen in last 5 minutes and has reasonable reliability
         (now - self.last_seen) < 300 && self.reliability_score > 0.5
     }
@@ -129,30 +129,41 @@ impl ReplicationCoordinator {
 
     /// Select storage nodes for chunk placement
     pub fn select_storage_nodes(&self, chunk_size: u64) -> AuraResult<Vec<DeviceId>> {
-        let healthy_nodes: Vec<&StorageNodeInfo> = self.storage_nodes
+        let healthy_nodes: Vec<&StorageNodeInfo> = self
+            .storage_nodes
             .values()
             .filter(|node| node.is_healthy() && node.available_capacity >= chunk_size)
             .collect();
 
         if healthy_nodes.is_empty() {
-            return Err(aura_core::AuraError::internal("No healthy storage nodes available"));
+            return Err(aura_core::AuraError::internal(
+                "No healthy storage nodes available",
+            ));
         }
 
         let target_count = match &self.strategy {
             ReplicationStrategy::SimpleReplication { replica_count } => *replica_count,
             ReplicationStrategy::ErasureCoding { config } => config.total_chunks() as usize,
-            ReplicationStrategy::Hybrid { critical_replicas, .. } => *critical_replicas,
+            ReplicationStrategy::Hybrid {
+                critical_replicas, ..
+            } => *critical_replicas,
         };
 
         if healthy_nodes.len() < target_count {
-            return Err(aura_core::AuraError::internal(
-                format!("Insufficient healthy nodes: need {}, have {}", target_count, healthy_nodes.len())
-            ));
+            return Err(aura_core::AuraError::internal(format!(
+                "Insufficient healthy nodes: need {}, have {}",
+                target_count,
+                healthy_nodes.len()
+            )));
         }
 
         // Sort by placement score (best first)
         let mut sorted_nodes = healthy_nodes;
-        sorted_nodes.sort_by(|a, b| b.placement_score().partial_cmp(&a.placement_score()).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_nodes.sort_by(|a, b| {
+            b.placement_score()
+                .partial_cmp(&a.placement_score())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Select top N nodes
         let selected: Vec<DeviceId> = sorted_nodes
@@ -178,13 +189,15 @@ impl ReplicationCoordinator {
         // For now, create a simple layout - in practice this would compute actual chunk layout
         use aura_store::compute_chunk_layout;
         let dummy_content = vec![0u8; content_size as usize];
-        compute_chunk_layout(&dummy_content, config)
-            .map_err(|e| aura_core::AuraError::internal(format!("Failed to plan chunk layout: {}", e)))
+        compute_chunk_layout(&dummy_content, config).map_err(|e| {
+            aura_core::AuraError::internal(format!("Failed to plan chunk layout: {}", e))
+        })
     }
 
     /// Record chunk placement
     pub fn record_chunk_placement(&mut self, chunk_id: ChunkId, nodes: Vec<DeviceId>) {
-        self.chunk_placement.insert(chunk_id, nodes.into_iter().collect());
+        self.chunk_placement
+            .insert(chunk_id, nodes.into_iter().collect());
     }
 
     /// Get nodes storing a specific chunk
@@ -197,7 +210,8 @@ impl ReplicationCoordinator {
 
     /// Check if chunk is adequately replicated
     pub fn is_chunk_replicated(&self, chunk_id: &ChunkId) -> bool {
-        let current_replicas = self.chunk_placement
+        let current_replicas = self
+            .chunk_placement
             .get(chunk_id)
             .map(|nodes| nodes.len())
             .unwrap_or(0);
@@ -205,7 +219,9 @@ impl ReplicationCoordinator {
         let required_replicas = match &self.strategy {
             ReplicationStrategy::SimpleReplication { replica_count } => *replica_count,
             ReplicationStrategy::ErasureCoding { config } => config.min_chunks() as usize,
-            ReplicationStrategy::Hybrid { critical_replicas, .. } => *critical_replicas,
+            ReplicationStrategy::Hybrid {
+                critical_replicas, ..
+            } => *critical_replicas,
         };
 
         current_replicas >= required_replicas
@@ -230,7 +246,9 @@ impl ReplicationCoordinator {
                 let required_replicas = match &self.strategy {
                     ReplicationStrategy::SimpleReplication { replica_count } => *replica_count,
                     ReplicationStrategy::ErasureCoding { config } => config.min_chunks() as usize,
-                    ReplicationStrategy::Hybrid { critical_replicas, .. } => *critical_replicas,
+                    ReplicationStrategy::Hybrid {
+                        critical_replicas, ..
+                    } => *critical_replicas,
                 };
 
                 if healthy_nodes.len() < required_replicas {
@@ -245,18 +263,23 @@ impl ReplicationCoordinator {
     /// Get replication statistics
     pub fn replication_stats(&self) -> ReplicationStats {
         let total_chunks = self.chunk_placement.len();
-        let adequately_replicated = self.chunk_placement
+        let adequately_replicated = self
+            .chunk_placement
             .keys()
             .filter(|chunk_id| self.is_chunk_replicated(chunk_id))
             .count();
-        
+
         let under_replicated = total_chunks - adequately_replicated;
 
         ReplicationStats {
             total_chunks,
             adequately_replicated,
             under_replicated,
-            healthy_nodes: self.storage_nodes.values().filter(|n| n.is_healthy()).count(),
+            healthy_nodes: self
+                .storage_nodes
+                .values()
+                .filter(|n| n.is_healthy())
+                .count(),
             total_nodes: self.storage_nodes.len(),
         }
     }
@@ -266,10 +289,22 @@ impl ReplicationCoordinator {
         let mut info = HashMap::new();
         info.insert("device_id".to_string(), self.device_id.to_string());
         info.insert("strategy".to_string(), format!("{:?}", self.strategy));
-        info.insert("total_nodes".to_string(), self.storage_nodes.len().to_string());
-        info.insert("healthy_nodes".to_string(), 
-            self.storage_nodes.values().filter(|n| n.is_healthy()).count().to_string());
-        info.insert("tracked_chunks".to_string(), self.chunk_placement.len().to_string());
+        info.insert(
+            "total_nodes".to_string(),
+            self.storage_nodes.len().to_string(),
+        );
+        info.insert(
+            "healthy_nodes".to_string(),
+            self.storage_nodes
+                .values()
+                .filter(|n| n.is_healthy())
+                .count()
+                .to_string(),
+        );
+        info.insert(
+            "tracked_chunks".to_string(),
+            self.chunk_placement.len().to_string(),
+        );
         info
     }
 }
@@ -332,7 +367,7 @@ mod tests {
         let chunk_id = ChunkId::from_bytes(b"test_chunk");
         let nodes = vec![DeviceId::new(), DeviceId::new()];
 
-        coordinator.record_chunk_placement(chunk_id, nodes.clone());
+        coordinator.record_chunk_placement(chunk_id.clone(), nodes.clone());
         let locations = coordinator.get_chunk_locations(&chunk_id);
         assert_eq!(locations.len(), 2);
     }
@@ -355,7 +390,7 @@ mod tests {
         // Add some test data
         let chunk1 = ChunkId::from_bytes(b"chunk1");
         let chunk2 = ChunkId::from_bytes(b"chunk2");
-        
+
         coordinator.record_chunk_placement(chunk1, vec![DeviceId::new(), DeviceId::new()]);
         coordinator.record_chunk_placement(chunk2, vec![DeviceId::new()]); // Under-replicated
 

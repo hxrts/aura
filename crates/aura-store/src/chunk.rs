@@ -70,16 +70,12 @@ impl ChunkLayout {
         erasure_config: ErasureConfig,
     ) -> Result<Self, AuraError> {
         if chunks.len() != chunk_sizes.len() {
-            return Err(AuraError::invalid(
-                "Chunk count mismatch with sizes",
-            ));
+            return Err(AuraError::invalid("Chunk count mismatch with sizes"));
         }
 
         let computed_total: u64 = chunk_sizes.iter().map(|&size| size as u64).sum();
         if computed_total != total_size.0 {
-            return Err(AuraError::invalid(
-                "Total size mismatch",
-            ));
+            return Err(AuraError::invalid("Total size mismatch"));
         }
 
         Ok(Self {
@@ -178,17 +174,16 @@ impl ContentManifest {
     ) -> Result<Self, AuraError> {
         // Verify chunk manifests match layout
         if layout.chunk_count() != chunk_manifests.len() {
-            return Err(AuraError::invalid(
-                "Chunk manifest count mismatch",
-            ));
+            return Err(AuraError::invalid("Chunk manifest count mismatch"));
         }
 
         for (i, manifest) in chunk_manifests.iter().enumerate() {
             if let Some(expected_id) = layout.get_chunk(i) {
                 if &manifest.chunk_id != expected_id {
-                    return Err(AuraError::invalid(
-                        format!("Chunk ID mismatch at index {}", i),
-                    ));
+                    return Err(AuraError::invalid(format!(
+                        "Chunk ID mismatch at index {}",
+                        i
+                    )));
                 }
             }
         }
@@ -307,7 +302,7 @@ mod tests {
         let config = ErasureConfig::new(2, 1, 10);
 
         let layout = compute_chunk_layout(content, config).unwrap();
-        
+
         // Should have data chunks + parity chunks
         assert!(layout.chunk_count() > 2); // At least data chunks
         assert_eq!(layout.total_size.0, content.len() as u64);

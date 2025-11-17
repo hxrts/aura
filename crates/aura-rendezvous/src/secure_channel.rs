@@ -4,7 +4,7 @@
 //! Feature crate: Complete end-to-end secure channel establishment using choreography.
 //! Target: <300 lines, focused on domain-specific transport security.
 
-use aura_core::{ContextId, DeviceId, AuraError};
+use aura_core::{AuraError, ContextId, DeviceId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -164,10 +164,7 @@ impl SecureChannelCoordinator {
             .active_channels
             .get_mut(&response.channel_id)
             .ok_or_else(|| {
-                AuraError::ValidationError(format!(
-                    "Channel not found: {}",
-                    response.channel_id
-                ))
+                AuraError::ValidationError(format!("Channel not found: {}", response.channel_id))
             })?;
 
         match &response.handshake_result {
@@ -224,7 +221,7 @@ impl SecureChannelCoordinator {
 // Choreographic Protocol Definitions
 mod secure_channel_establishment {
     use super::*;
-    
+
     // Multi-phase secure channel establishment with choices
     choreography! {
         #[namespace = "secure_channel"]
@@ -275,25 +272,25 @@ mod secure_channel_establishment {
 
 mod key_rotation {
     use super::*;
-    
+
     // Separate choreography for key rotation
     choreography! {
-    #[namespace = "key_rotation"]
-    protocol KeyRotationProtocol {
-        roles: ChannelPeer1, ChannelPeer2;
+        #[namespace = "key_rotation"]
+        protocol KeyRotationProtocol {
+            roles: ChannelPeer1, ChannelPeer2;
 
-        // Coordinated key rotation
-        ChannelPeer1[guard_capability = "rotate_keys",
-                     flow_cost = 100,
-                     journal_facts = "key_rotation_initiated"]
-        -> ChannelPeer2: KeyRotationRequest(KeyRotationRequest);
+            // Coordinated key rotation
+            ChannelPeer1[guard_capability = "rotate_keys",
+                         flow_cost = 100,
+                         journal_facts = "key_rotation_initiated"]
+            -> ChannelPeer2: KeyRotationRequest(KeyRotationRequest);
 
-        ChannelPeer2[guard_capability = "confirm_rotation",
-                     flow_cost = 80,
-                     journal_facts = "key_rotation_confirmed"]
-        -> ChannelPeer1: KeyRotationRequest(KeyRotationRequest);
+            ChannelPeer2[guard_capability = "confirm_rotation",
+                         flow_cost = 80,
+                         journal_facts = "key_rotation_confirmed"]
+            -> ChannelPeer1: KeyRotationRequest(KeyRotationRequest);
+        }
     }
-}
 }
 
 #[cfg(test)]
@@ -302,14 +299,12 @@ mod tests {
 
     #[test]
     fn test_channel_initialization() {
-        let mut coordinator = SecureChannelCoordinator::new(
-            DeviceId::from([1u8; 32]),
-            ChannelConfig::default(),
-        );
+        let mut coordinator =
+            SecureChannelCoordinator::new(DeviceId::from([1u8; 32]), ChannelConfig::default());
 
         let peer_id = DeviceId::from([2u8; 32]);
         let context_id = ContextId::new("test");
-        
+
         let result = coordinator.init_channel(peer_id, context_id);
         assert!(result.is_ok());
 
@@ -321,10 +316,8 @@ mod tests {
 
     #[test]
     fn test_handshake_acceptance() {
-        let mut coordinator = SecureChannelCoordinator::new(
-            DeviceId::from([1u8; 32]),
-            ChannelConfig::default(),
-        );
+        let mut coordinator =
+            SecureChannelCoordinator::new(DeviceId::from([1u8; 32]), ChannelConfig::default());
 
         let peer_id = DeviceId::from([2u8; 32]);
         let context_id = ContextId::new("test");

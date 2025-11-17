@@ -10,16 +10,15 @@ use std::time::Instant;
 use aura_core::AuraResult;
 
 use crate::handlers::{EffectType, ExecutionMode};
-use aura_protocol::handlers::{
-    choreographic::memory::MemoryChoreographicHandler, 
-    tree::dummy::DummyTreeHandler,
-    ledger::memory::MemoryLedgerHandler,
-};
 use aura_effects::journal::MockJournalHandler;
 use aura_effects::storage::MemoryStorageHandler;
 use aura_effects::{
     console::MockConsoleHandler, crypto::MockCryptoHandler, random::MockRandomHandler,
     time::SimulatedTimeHandler as MockTimeHandler, transport::InMemoryTransportHandler,
+};
+use aura_protocol::handlers::{
+    choreographic::memory::MemoryChoreographicHandler, ledger::memory::MemoryLedgerHandler,
+    tree::dummy::DummyTreeHandler,
 };
 
 use super::{
@@ -155,8 +154,10 @@ impl ParallelInitBuilder {
         let handler_futures = vec![
             // Crypto handler
             async move {
-                let handler = Arc::new(CryptoHandlerAdapter::new(MockCryptoHandler::with_seed(seed), mode))
-                    as Arc<dyn crate::handlers::AuraHandler>;
+                let handler = Arc::new(CryptoHandlerAdapter::new(
+                    MockCryptoHandler::with_seed(seed),
+                    mode,
+                )) as Arc<dyn crate::handlers::AuraHandler>;
                 (EffectType::Crypto, handler)
             }
             .boxed(),
@@ -192,8 +193,10 @@ impl ParallelInitBuilder {
             .boxed(),
             // Random handler
             async move {
-                let handler = Arc::new(RandomHandlerAdapter::new(MockRandomHandler::new_with_seed(seed), mode))
-                    as Arc<dyn crate::handlers::AuraHandler>;
+                let handler = Arc::new(RandomHandlerAdapter::new(
+                    MockRandomHandler::new_with_seed(seed),
+                    mode,
+                )) as Arc<dyn crate::handlers::AuraHandler>;
                 (EffectType::Random, handler)
             }
             .boxed(),
@@ -328,12 +331,21 @@ impl HandlerPool {
         let count = count.min(self.max_size);
 
         // Pre-create handlers without spawning OS threads
-        let network_futures: Vec<_> =
-            (0..count).map(|_| async { Arc::new(InMemoryTransportHandler::new(aura_effects::transport::TransportConfig::default())) }.boxed()).collect();
+        let network_futures: Vec<_> = (0..count)
+            .map(|_| {
+                async {
+                    Arc::new(InMemoryTransportHandler::new(
+                        aura_effects::transport::TransportConfig::default(),
+                    ))
+                }
+                .boxed()
+            })
+            .collect();
         let network_handlers = join_all(network_futures).await;
 
-        let storage_futures: Vec<_> =
-            (0..count).map(|_| async { Arc::new(MemoryStorageHandler::new()) }.boxed()).collect();
+        let storage_futures: Vec<_> = (0..count)
+            .map(|_| async { Arc::new(MemoryStorageHandler::new()) }.boxed())
+            .collect();
         let storage_handlers = join_all(storage_futures).await;
 
         // Add to pools
@@ -348,9 +360,11 @@ impl HandlerPool {
 
     /// Get a network handler from the pool or create new
     pub fn get_network_handler(&mut self) -> Arc<InMemoryTransportHandler> {
-        self.network_pool
-            .pop()
-            .unwrap_or_else(|| Arc::new(InMemoryTransportHandler::new(aura_effects::transport::TransportConfig::default())))
+        self.network_pool.pop().unwrap_or_else(|| {
+            Arc::new(InMemoryTransportHandler::new(
+                aura_effects::transport::TransportConfig::default(),
+            ))
+        })
     }
 
     /// Return a network handler to the pool

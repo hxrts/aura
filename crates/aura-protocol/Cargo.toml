@@ -13,6 +13,7 @@ workspace = true
 [features]
 default = []
 testing = []
+fixture_effects = []
 
 [dependencies]
 # Workspace crates

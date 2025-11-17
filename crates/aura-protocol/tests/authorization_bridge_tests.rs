@@ -5,8 +5,8 @@
 
 use aura_core::{AccountId, DeviceId, GuardianId};
 use aura_protocol::authorization_bridge::{
-    evaluate_authorization, AuthorizationContext, AuthorizationRequest, AuthorizedEvent,
-    PermissionGrant,
+    AuthorizationContext, AuthorizationMetadata, AuthorizationRequest, AuthorizationService,
+    AuthorizedEvent, PermissionGrant,
 };
 use aura_verify::Ed25519Signature;
 use aura_verify::{IdentityProof, VerifiedIdentity};
@@ -65,6 +65,7 @@ async fn test_authorization_bridge_integration() {
     tree_context.add_policy(0, tree_policy);
 
     let authz_context = AuthorizationContext::new(account_id, required_capabilities, tree_context);
+    let service = AuthorizationService::new();
 
     // Create authorization request
     let authz_request = AuthorizationRequest {
@@ -73,10 +74,11 @@ async fn test_authorization_bridge_integration() {
         context: authz_context,
         additional_signers: BTreeSet::new(),
         guardian_signers: BTreeSet::new(),
+        metadata: AuthorizationMetadata::default(),
     };
 
     // Evaluate authorization through bridge
-    let result = evaluate_authorization(authz_request).unwrap();
+    let result = service.authorize(authz_request).unwrap();
 
     assert!(
         result.authorized,
@@ -136,6 +138,7 @@ async fn test_authorization_bridge_insufficient_capabilities() {
 
     let authz_context =
         AuthorizationContext::new(account_id, insufficient_capabilities, tree_context);
+    let service = AuthorizationService::new();
 
     // Create authorization request
     let authz_request = AuthorizationRequest {
@@ -144,10 +147,11 @@ async fn test_authorization_bridge_insufficient_capabilities() {
         context: authz_context,
         additional_signers: BTreeSet::new(),
         guardian_signers: BTreeSet::new(),
+        metadata: AuthorizationMetadata::default(),
     };
 
     // Evaluate authorization - should fail
-    let result = evaluate_authorization(authz_request).unwrap();
+    let result = service.authorize(authz_request).unwrap();
 
     assert!(
         !result.authorized,
@@ -211,6 +215,7 @@ async fn test_authorization_bridge_guardian_operations() {
     tree_context.add_policy(0, tree_policy);
 
     let authz_context = AuthorizationContext::new(account_id, guardian_capabilities, tree_context);
+    let service = AuthorizationService::new();
 
     // Create authorization request
     let authz_request = AuthorizationRequest {
@@ -219,10 +224,11 @@ async fn test_authorization_bridge_guardian_operations() {
         context: authz_context,
         additional_signers: BTreeSet::new(),
         guardian_signers: BTreeSet::from([guardian_id]), // Add guardian as guardian signer
+        metadata: AuthorizationMetadata::default(),
     };
 
     // Evaluate authorization
-    let result = evaluate_authorization(authz_request).unwrap();
+    let result = service.authorize(authz_request).unwrap();
 
     assert!(
         result.authorized,
@@ -328,6 +334,7 @@ async fn test_bridge_separation_of_concerns() {
     tree_context.add_policy(0, tree_policy);
 
     let authz_context = AuthorizationContext::new(account_id, capabilities, tree_context);
+    let service = AuthorizationService::new();
 
     let authz_request = AuthorizationRequest {
         verified_identity,
@@ -335,10 +342,11 @@ async fn test_bridge_separation_of_concerns() {
         context: authz_context,
         additional_signers: BTreeSet::from([device_id]), // Add the device as a signer
         guardian_signers: BTreeSet::new(),
+        metadata: AuthorizationMetadata::default(),
     };
 
     // Bridge should only perform capability evaluation, not identity verification
-    let result = evaluate_authorization(authz_request).unwrap();
+    let result = service.authorize(authz_request).unwrap();
 
     // The fact that this succeeds means the bridge trusts the verified identity
     // and focuses only on capability evaluation
@@ -438,6 +446,7 @@ async fn test_bridge_threshold_operations() {
     tree_context.add_policy(0, tree_policy);
 
     let authz_context = AuthorizationContext::new(account_id, threshold_capabilities, tree_context);
+    let service = AuthorizationService::new();
 
     let authz_request = AuthorizationRequest {
         verified_identity,
@@ -445,11 +454,12 @@ async fn test_bridge_threshold_operations() {
         context: authz_context,
         additional_signers: BTreeSet::new(),
         guardian_signers: BTreeSet::new(),
+        metadata: AuthorizationMetadata::default(),
     };
 
     // Evaluate authorization
     println!("About to evaluate authorization for threshold test...");
-    let result = match evaluate_authorization(authz_request) {
+    let result = match service.authorize(authz_request) {
         Ok(grant) => {
             println!("Authorization successful: {:?}", grant);
             grant
@@ -513,6 +523,7 @@ async fn test_bridge_stateless_operation() {
     tree_context.add_policy(0, tree_policy);
 
     let authz_context = AuthorizationContext::new(account_id, capabilities, tree_context);
+    let service = AuthorizationService::new();
 
     let authz_request = AuthorizationRequest {
         verified_identity,
@@ -520,11 +531,12 @@ async fn test_bridge_stateless_operation() {
         context: authz_context,
         additional_signers: BTreeSet::from([device_id]), // Add the device as a signer
         guardian_signers: BTreeSet::new(),
+        metadata: AuthorizationMetadata::default(),
     };
 
     // Multiple evaluations should be independent and identical
-    let result1 = evaluate_authorization(authz_request.clone()).unwrap();
-    let result2 = evaluate_authorization(authz_request).unwrap();
+    let result1 = service.authorize(authz_request.clone()).unwrap();
+    let result2 = service.authorize(authz_request).unwrap();
 
     assert_eq!(result1.authorized, result2.authorized);
     assert_eq!(result1.denial_reason, result2.denial_reason);

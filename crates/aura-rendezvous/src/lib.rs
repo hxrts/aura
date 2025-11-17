@@ -105,6 +105,6 @@ pub use sbb::{
     EnvelopeId, FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding, SbbFloodingCoordinator,
 };
 pub use secure_channel::{
-    SecureChannelCoordinator, ChannelConfig, ChannelState, ChannelLifecycleState,
-    HandshakeInit, HandshakeResponse, HandshakeComplete, HandshakeResult, KeyRotationRequest,
+    ChannelConfig, ChannelLifecycleState, ChannelState, HandshakeComplete, HandshakeInit,
+    HandshakeResponse, HandshakeResult, KeyRotationRequest, SecureChannelCoordinator,
 };

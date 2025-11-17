@@ -36,19 +36,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct ExecutionContext {
     /// Device performing the operation
     pub device_id: DeviceId,
-    
+
     /// Account being operated on (if applicable)
     pub account_id: Option<AccountId>,
-    
+
     /// Session ID for the operation (if applicable)
     pub session_id: Option<SessionId>,
-    
+
     /// Operation type being performed
     pub operation_type: String,
-    
+
     /// Operation timestamp
     pub timestamp: u64,
-    
+
     /// Additional metadata
     pub metadata: HashMap<String, String>,
 }
@@ -184,13 +184,13 @@ impl StandardContextHandler {
     /// Merge metadata from multiple contexts
     pub fn merge_metadata(&self, contexts: &[&ExecutionContext]) -> HashMap<String, String> {
         let mut merged = HashMap::new();
-        
+
         for context in contexts {
             for (key, value) in &context.metadata {
                 merged.insert(key.clone(), value.clone());
             }
         }
-        
+
         merged
     }
 }
@@ -208,7 +208,7 @@ impl Default for StandardContextHandler {
 pub struct MockContextHandler {
     /// Fixed timestamp to use for all contexts
     fixed_timestamp: Option<u64>,
-    
+
     /// Default metadata to include in all contexts
     default_metadata: HashMap<String, String>,
 }
@@ -273,9 +273,9 @@ mod tests {
     fn test_execution_context_creation() {
         let device_id = DeviceId::new();
         let operation_type = "test_operation".to_string();
-        
+
         let context = ExecutionContext::new(device_id, operation_type.clone());
-        
+
         assert_eq!(context.device_id, device_id);
         assert_eq!(context.operation_type, operation_type);
         assert!(context.account_id.is_none());
@@ -288,13 +288,13 @@ mod tests {
         let device_id = DeviceId::new();
         let account_id = AccountId::new();
         let session_id = SessionId::new();
-        
+
         let context = ExecutionContext::new(device_id, "test".to_string())
             .with_account(account_id)
             .with_session(session_id)
             .with_metadata("key1".to_string(), "value1".to_string())
             .with_metadata("key2".to_string(), "value2".to_string());
-        
+
         assert_eq!(context.account_id, Some(account_id));
         assert_eq!(context.session_id, Some(session_id));
         assert_eq!(context.get_metadata("key1"), Some(&"value1".to_string()));
@@ -305,13 +305,13 @@ mod tests {
     fn test_context_derivation() {
         let device_id = DeviceId::new();
         let account_id = AccountId::new();
-        
+
         let original = ExecutionContext::new(device_id, "original".to_string())
             .with_account(account_id)
             .with_metadata("shared".to_string(), "data".to_string());
-        
+
         let derived = original.derive_for_operation("derived".to_string());
-        
+
         assert_eq!(derived.device_id, original.device_id);
         assert_eq!(derived.account_id, original.account_id);
         assert_eq!(derived.operation_type, "derived");
@@ -323,9 +323,9 @@ mod tests {
     fn test_standard_context_handler() {
         let handler = StandardContextHandler::new();
         let device_id = DeviceId::new();
-        
+
         let context = handler.create_execution_context(device_id, "test".to_string());
-        
+
         assert_eq!(context.device_id, device_id);
         assert_eq!(context.operation_type, "test");
     }
@@ -335,16 +335,16 @@ mod tests {
         let handler = StandardContextHandler::new();
         let device_id = DeviceId::new();
         let account_id = AccountId::new();
-        
+
         let context = ExecutionContext::new(device_id, "test".to_string())
             .with_account(account_id)
             .with_metadata("custom_field".to_string(), "value".to_string());
-        
+
         // Should pass validation for available fields
         assert!(handler.validate_context(&context, &["account_id"]));
         assert!(handler.validate_context(&context, &["custom_field"]));
         assert!(handler.validate_context(&context, &["account_id", "custom_field"]));
-        
+
         // Should fail validation for missing fields
         assert!(!handler.validate_context(&context, &["session_id"]));
         assert!(!handler.validate_context(&context, &["missing_field"]));
@@ -355,30 +355,33 @@ mod tests {
         let handler = MockContextHandler::new()
             .with_fixed_timestamp(12345)
             .with_default_metadata("test_mode".to_string(), "enabled".to_string());
-        
+
         let device_id = DeviceId::new();
         let context = handler.create_execution_context(device_id, "test".to_string());
-        
+
         assert_eq!(context.device_id, device_id);
         assert_eq!(context.timestamp, 12345);
-        assert_eq!(context.get_metadata("test_mode"), Some(&"enabled".to_string()));
+        assert_eq!(
+            context.get_metadata("test_mode"),
+            Some(&"enabled".to_string())
+        );
     }
 
     #[test]
     fn test_metadata_merging() {
         let handler = StandardContextHandler::new();
         let device_id = DeviceId::new();
-        
+
         let context1 = ExecutionContext::new(device_id, "op1".to_string())
             .with_metadata("key1".to_string(), "value1".to_string())
             .with_metadata("shared".to_string(), "from_context1".to_string());
-        
+
         let context2 = ExecutionContext::new(device_id, "op2".to_string())
             .with_metadata("key2".to_string(), "value2".to_string())
             .with_metadata("shared".to_string(), "from_context2".to_string());
-        
+
         let merged = handler.merge_metadata(&[&context1, &context2]);
-        
+
         assert_eq!(merged.get("key1"), Some(&"value1".to_string()));
         assert_eq!(merged.get("key2"), Some(&"value2".to_string()));
         // Later context should override earlier one for shared keys

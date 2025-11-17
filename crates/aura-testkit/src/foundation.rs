@@ -2,7 +2,7 @@
 //!
 //! This module provides testing utilities that comply with the 8-layer architecture
 //! by only depending on Layers 1-3 (Foundation, Specification, Implementation).
-//! 
+//!
 //! # Architecture Compliance
 //!
 //! This module only imports from:
@@ -34,10 +34,10 @@
 
 use aura_core::{
     effects::{
-        ExecutionMode, ConsoleEffects, CryptoEffects, NetworkEffects, RandomEffects, 
-        StorageEffects, TimeEffects, JournalEffects
+        ConsoleEffects, CryptoEffects, ExecutionMode, JournalEffects, NetworkEffects,
+        RandomEffects, StorageEffects, TimeEffects,
     },
-    AuraResult, DeviceId
+    AuraResult, DeviceId,
 };
 // Foundation-based test infrastructure - no Arc needed for lightweight handlers
 
@@ -82,9 +82,16 @@ impl SimpleTestContext {
 ///
 /// This trait allows tests to work with different effect handler combinations
 /// without depending on the orchestration layer.
-pub trait TestEffectHandler: 
-    CryptoEffects + NetworkEffects + StorageEffects + TimeEffects + RandomEffects + 
-    ConsoleEffects + JournalEffects + Send + Sync 
+pub trait TestEffectHandler:
+    CryptoEffects
+    + NetworkEffects
+    + StorageEffects
+    + TimeEffects
+    + RandomEffects
+    + ConsoleEffects
+    + JournalEffects
+    + Send
+    + Sync
 {
     /// Get the execution mode for this handler
     fn execution_mode(&self) -> ExecutionMode;
@@ -99,7 +106,10 @@ pub struct TestEffectComposer {
 impl TestEffectComposer {
     /// Create a new composer for the given execution mode
     pub fn new(execution_mode: ExecutionMode, device_id: DeviceId) -> Self {
-        Self { _execution_mode: execution_mode, _device_id: device_id }
+        Self {
+            _execution_mode: execution_mode,
+            _device_id: device_id,
+        }
     }
 
     /// Build a test effect handler using mock implementations
@@ -111,7 +121,7 @@ impl TestEffectComposer {
 
     /// Build a test effect handler using real implementations for integration tests
     pub fn build_real_handler(&self) -> AuraResult<Box<dyn TestEffectHandler>> {
-        // TODO: Implement using aura-effects real handlers  
+        // TODO: Implement using aura-effects real handlers
         // This would compose RealCryptoHandler, RealNetworkHandler, etc.
         todo!("Implementation pending creation of real handler implementations in aura-effects")
     }
@@ -159,9 +169,15 @@ mod tests {
         assert_eq!(mock_context.execution_mode(), ExecutionMode::Testing);
 
         let sim_context = create_simulation_context(42).unwrap();
-        assert_eq!(sim_context.execution_mode(), ExecutionMode::Simulation { seed: 42 });
+        assert_eq!(
+            sim_context.execution_mode(),
+            ExecutionMode::Simulation { seed: 42 }
+        );
 
         let integration_context = create_integration_context().unwrap();
-        assert_eq!(integration_context.execution_mode(), ExecutionMode::Production);
+        assert_eq!(
+            integration_context.execution_mode(),
+            ExecutionMode::Production
+        );
     }
 }

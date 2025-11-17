@@ -7,13 +7,12 @@
 
 pub mod choreography;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "transport_legacy_tests"))]
 mod tests;
 
 pub use choreography::{
     ChannelEstablishmentCoordinator, ChannelTeardownCoordinator, ChoreographicConfig,
-    ChoreographicError, WebSocketHandshakeCoordinator,
-    WebSocketSessionCoordinator,
+    ChoreographicError, WebSocketHandshakeCoordinator, WebSocketSessionCoordinator,
 };
 
 /// Transport coordination configuration

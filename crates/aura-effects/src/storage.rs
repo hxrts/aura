@@ -286,7 +286,7 @@ impl FilesystemStorageHandler {
 }
 
 /// Enhanced memory storage for encrypted storage use cases
-/// 
+///
 /// This handler wraps memory storage with additional features like
 /// chunk-based addressing and encryption support.
 pub struct EncryptedStorageHandler {
@@ -316,11 +316,14 @@ impl EncryptedStorageHandler {
     /// Get information about the storage configuration
     pub fn stack_info(&self) -> HashMap<String, String> {
         let runtime = tokio::runtime::Handle::current();
-        let chunk_count = runtime.block_on(async {
-            self.storage.read().await.len() as u64
-        });
+        let chunk_count = runtime.block_on(async { self.storage.read().await.len() as u64 });
         let total_bytes = runtime.block_on(async {
-            self.storage.read().await.values().map(|v| v.len() as u64).sum::<u64>()
+            self.storage
+                .read()
+                .await
+                .values()
+                .map(|v| v.len() as u64)
+                .sum::<u64>()
         });
 
         let mut info = HashMap::new();
@@ -343,21 +346,14 @@ impl EncryptedStorageHandler {
 
 #[async_trait::async_trait]
 impl StorageEffects for EncryptedStorageHandler {
-    async fn store(
-        &self,
-        key: &str,
-        value: Vec<u8>,
-    ) -> Result<(), StorageError> {
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         let mut storage = self.storage.write().await;
         let chunk_id = ChunkId::from_bytes(key.as_bytes());
         storage.insert(chunk_id, value);
         Ok(())
     }
 
-    async fn retrieve(
-        &self,
-        key: &str,
-    ) -> Result<Option<Vec<u8>>, StorageError> {
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
         let storage = self.storage.read().await;
         let chunk_id = ChunkId::from_bytes(key.as_bytes());
         Ok(storage.get(&chunk_id).cloned())
@@ -369,10 +365,7 @@ impl StorageEffects for EncryptedStorageHandler {
         Ok(storage.remove(&chunk_id).is_some())
     }
 
-    async fn list_keys(
-        &self,
-        _prefix: Option<&str>,
-    ) -> Result<Vec<String>, StorageError> {
+    async fn list_keys(&self, _prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         // For chunk-based storage, list_keys doesn't make sense since keys are derived from chunks
         Err(StorageError::ListFailed(
             "list_keys not supported in chunk-based storage".to_string(),
@@ -385,10 +378,7 @@ impl StorageEffects for EncryptedStorageHandler {
         Ok(storage.contains_key(&chunk_id))
     }
 
-    async fn store_batch(
-        &self,
-        pairs: HashMap<String, Vec<u8>>,
-    ) -> Result<(), StorageError> {
+    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
         let mut storage = self.storage.write().await;
         for (key, value) in pairs {
             let chunk_id = ChunkId::from_bytes(key.as_bytes());
@@ -418,9 +408,7 @@ impl StorageEffects for EncryptedStorageHandler {
         Ok(())
     }
 
-    async fn stats(
-        &self,
-    ) -> Result<StorageStats, StorageError> {
+    async fn stats(&self) -> Result<StorageStats, StorageError> {
         let storage = self.storage.read().await;
         let total_size: u64 = storage.values().map(|v| v.len() as u64).sum();
 

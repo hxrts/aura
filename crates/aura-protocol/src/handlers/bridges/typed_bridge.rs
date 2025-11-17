@@ -23,13 +23,11 @@
 //! let bytes = handler.random_bytes(32).await;
 //! ```
 
-use super::erased::{AuraHandler, HandlerUtils};
-use super::EffectType;
-use aura_core::effects::CryptoError;
 use crate::effects::params::{DelayParams, RandomBytesParams, RandomRangeParams};
 use crate::effects::*;
-use crate::handlers::context::immutable::AuraContext;
+use crate::handlers::{context::immutable::AuraContext, AuraHandler, EffectType, HandlerUtils};
 use async_trait::async_trait;
+use aura_core::effects::CryptoError;
 use aura_core::{AuraError, DeviceId};
 use std::sync::Arc;
 use std::time::Duration;
@@ -609,13 +607,13 @@ impl aura_core::effects::ConsoleEffects for TypedHandlerBridge {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::handlers::erased::AuraHandlerFactory;
+    use crate::handlers::core::erased::AuraHandlerFactory as ErasedAuraHandlerFactory;
     use uuid::Uuid;
 
     #[tokio::test]
     async fn test_crypto_effects_bridge() {
         let device_id = DeviceId::from(Uuid::new_v4());
-        let handler = AuraHandlerFactory::for_testing(device_id);
+        let handler = ErasedAuraHandlerFactory::for_testing(device_id);
         let ctx = crate::handlers::context_immutable::AuraContext::for_testing(device_id);
 
         // Test that we can call Random effects methods through the handler interface
@@ -643,7 +641,7 @@ mod tests {
     #[tokio::test]
     async fn test_time_effects_bridge() {
         let device_id = DeviceId::from(Uuid::new_v4());
-        let handler = AuraHandlerFactory::for_testing(device_id);
+        let handler = ErasedAuraHandlerFactory::for_testing(device_id);
         let _handler = Arc::new(RwLock::new(handler));
 
         // Test that we can create and wrap the handler
@@ -654,7 +652,7 @@ mod tests {
     #[tokio::test]
     async fn test_console_effects_bridge() {
         let device_id = DeviceId::from(Uuid::new_v4());
-        let handler = AuraHandlerFactory::for_testing(device_id);
+        let handler = ErasedAuraHandlerFactory::for_testing(device_id);
         let _handler = Arc::new(RwLock::new(handler));
 
         // Test that we can create the handler and use it for basic operations

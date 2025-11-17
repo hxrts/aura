@@ -1,7 +1,7 @@
 //! Transport Coordinator - Multi-Party Connection Management
 //!
 //! **Layer 4 (aura-protocol)**: Stateful multi-party coordination handler.
-//! 
+//!
 //! This module was moved from aura-effects (Layer 3) because it violates the Layer 3 principle
 //! of "stateless, single-party, context-free" handlers. The TransportCoordinator maintains
 //! shared state across multiple peer connections, making it multi-party coordination logic
@@ -72,17 +72,27 @@ struct TransportManagerInner {
 }
 
 impl TransportManagerInner {
-    async fn send_data(&self, _connection_id: &str, _data: Vec<u8>) -> Result<(), aura_core::effects::NetworkError> {
+    async fn send_data(
+        &self,
+        _connection_id: &str,
+        _data: Vec<u8>,
+    ) -> Result<(), aura_core::effects::NetworkError> {
         // Placeholder implementation
         Ok(())
     }
 
-    async fn _receive_data(&self, _connection_id: &str) -> Result<Vec<u8>, aura_core::effects::NetworkError> {
-        // Placeholder implementation  
+    async fn _receive_data(
+        &self,
+        _connection_id: &str,
+    ) -> Result<Vec<u8>, aura_core::effects::NetworkError> {
+        // Placeholder implementation
         Ok(Vec::new())
     }
 
-    async fn disconnect(&self, _connection_id: &str) -> Result<(), aura_core::effects::NetworkError> {
+    async fn disconnect(
+        &self,
+        _connection_id: &str,
+    ) -> Result<(), aura_core::effects::NetworkError> {
         // Placeholder implementation
         Ok(())
     }
@@ -99,14 +109,19 @@ pub struct RetryingTransportManager {
 impl RetryingTransportManager {
     /// Create new retrying transport manager
     pub fn new(config: TransportConfig, max_retries: u32) -> Self {
-        Self { 
-            inner: TransportManagerInner { _config: config.clone() },
-            _config: config, 
-            _max_retries: max_retries 
+        Self {
+            inner: TransportManagerInner {
+                _config: config.clone(),
+            },
+            _config: config,
+            _max_retries: max_retries,
         }
     }
 
-    async fn connect_with_retry(&self, address: &str) -> Result<ConnectionInfo, TransportCoordinationError> {
+    async fn connect_with_retry(
+        &self,
+        address: &str,
+    ) -> Result<ConnectionInfo, TransportCoordinationError> {
         // Placeholder implementation for compilation
         Ok(ConnectionInfo {
             connection_id: format!("conn_{}", address),
@@ -184,10 +199,7 @@ where
         }
 
         // Attempt connection with retry logic
-        let connection = self
-            .transport_manager
-            .connect_with_retry(address)
-            .await?;
+        let connection = self.transport_manager.connect_with_retry(address).await?;
 
         // Store connection state
         let connection_state = ConnectionState {
@@ -226,7 +238,9 @@ where
             .inner
             .send_data(connection_id, data)
             .await
-            .map_err(|e| TransportCoordinationError::ProtocolFailed(format!("Send failed: {}", e)))?;
+            .map_err(|e| {
+                TransportCoordinationError::ProtocolFailed(format!("Send failed: {}", e))
+            })?;
 
         Ok(())
     }
@@ -244,7 +258,9 @@ where
             .inner
             .disconnect(connection_id)
             .await
-            .map_err(|e| TransportCoordinationError::ProtocolFailed(format!("Disconnect failed: {}", e)))?;
+            .map_err(|e| {
+                TransportCoordinationError::ProtocolFailed(format!("Disconnect failed: {}", e))
+            })?;
 
         Ok(())
     }

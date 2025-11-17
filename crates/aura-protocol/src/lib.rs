@@ -160,7 +160,10 @@ pub use guards::{LeakageBudget, ProtocolGuard};
 // IntentState and PeerView removed - only used in internal tests
 
 // Only export authorization types actually used by other crates
-pub use authorization_bridge::{AuthorizationContext, AuthorizationError};
+pub use authorization_bridge::{
+    AuthorizationContext, AuthorizationError, AuthorizationMetadata, AuthorizationRequest,
+    AuthorizationService, AuthorizedEvent, PermissionGrant,
+};
 
 // Verification module removed from public API - test-only code
 // (verification module still exists for internal tests)

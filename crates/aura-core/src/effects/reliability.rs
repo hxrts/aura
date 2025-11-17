@@ -11,8 +11,8 @@
 use crate::AuraError;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 use std::future::Future;
+use std::time::Duration;
 
 /// Reliability operations for fault tolerance and graceful degradation
 ///
@@ -188,7 +188,8 @@ impl BackoffStrategy {
             }
             BackoffStrategy::ExponentialWithJitter => {
                 let base_delay = initial_delay * 2u32.saturating_pow(attempt);
-                let jitter = (base_delay.as_millis() as f64 * 0.1 * rand::thread_rng().gen::<f64>()) as u64;
+                let jitter =
+                    (base_delay.as_millis() as f64 * 0.1 * rand::thread_rng().gen::<f64>()) as u64;
                 base_delay + Duration::from_millis(jitter)
             }
         };
@@ -324,10 +325,7 @@ impl RetryPolicy {
     }
 
     /// Execute an async operation with retry logic and detailed context
-    pub async fn execute_with_context<F, Fut, T, E>(
-        &self,
-        mut operation: F,
-    ) -> RetryResult<T, E>
+    pub async fn execute_with_context<F, Fut, T, E>(&self, mut operation: F) -> RetryResult<T, E>
     where
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<T, E>>,
@@ -602,9 +600,7 @@ impl RateLimitResult {
     pub fn into_result(self) -> Result<(), AuraError> {
         match self {
             RateLimitResult::Allowed => Ok(()),
-            RateLimitResult::Denied { reason, .. } => {
-                Err(AuraError::invalid(reason))
-            }
+            RateLimitResult::Denied { reason, .. } => Err(AuraError::invalid(reason)),
         }
     }
 }
@@ -631,10 +627,7 @@ pub struct RateLimiter {
 impl RateLimiter {
     /// Create a new rate limiter
     pub fn new(config: RateLimitConfig) -> Self {
-        let global_limit = RateLimit::new(
-            config.global_ops_per_second,
-            Duration::from_secs(1),
-        );
+        let global_limit = RateLimit::new(config.global_ops_per_second, Duration::from_secs(1));
 
         Self {
             config,
@@ -653,16 +646,16 @@ impl RateLimiter {
     /// # Returns
     /// - `RateLimitResult::Allowed` if operation can proceed
     /// - `RateLimitResult::Denied` if rate limit exceeded
-    pub fn check_rate_limit(
-        &mut self,
-        peer_id: crate::DeviceId,
-        cost: u32,
-    ) -> RateLimitResult {
+    pub fn check_rate_limit(&mut self, peer_id: crate::DeviceId, cost: u32) -> RateLimitResult {
         // Check global limit first
-        if !self.global_limit.check_and_consume(cost, self.config.refill_rate) {
+        if !self
+            .global_limit
+            .check_and_consume(cost, self.config.refill_rate)
+        {
             self.stats.global_limit_hits += 1;
 
-            let retry_after = self.global_limit
+            let retry_after = self
+                .global_limit
                 .time_until_available(cost, self.config.refill_rate)
                 .unwrap_or(Duration::from_secs(1));
 
@@ -673,21 +666,16 @@ impl RateLimiter {
         }
 
         // Check per-peer limit
-        let peer_limit = self.peer_limits
-            .entry(peer_id)
-            .or_insert_with(|| {
-                RateLimit::new(
-                    self.config.peer_ops_per_second,
-                    Duration::from_secs(1),
-                )
-            });
+        let peer_limit = self.peer_limits.entry(peer_id).or_insert_with(|| {
+            RateLimit::new(self.config.peer_ops_per_second, Duration::from_secs(1))
+        });
 
         if !peer_limit.check_and_consume(cost, self.config.refill_rate) {
             self.stats.peer_limit_hits += 1;
 
             // Return tokens to global limit since peer limit blocked
-            self.global_limit.tokens = (self.global_limit.tokens + cost)
-                .min(self.config.global_ops_per_second);
+            self.global_limit.tokens =
+                (self.global_limit.tokens + cost).min(self.config.global_ops_per_second);
 
             let retry_after = peer_limit
                 .time_until_available(cost, self.config.refill_rate)
@@ -724,7 +712,8 @@ impl RateLimiter {
     pub fn available_tokens(&self, peer_id: &crate::DeviceId) -> u32 {
         let global_tokens = self.global_limit.available_tokens();
 
-        let peer_tokens = self.peer_limits
+        let peer_tokens = self
+            .peer_limits
             .get(peer_id)
             .map(|l| l.available_tokens())
             .unwrap_or(self.config.peer_ops_per_second);
@@ -739,10 +728,8 @@ impl RateLimiter {
 
     /// Reset rate limiter state
     pub fn reset(&mut self) {
-        self.global_limit = RateLimit::new(
-            self.config.global_ops_per_second,
-            Duration::from_secs(1),
-        );
+        self.global_limit =
+            RateLimit::new(self.config.global_ops_per_second, Duration::from_secs(1));
         self.peer_limits.clear();
         self.stats = RateLimiterStatistics::default();
     }

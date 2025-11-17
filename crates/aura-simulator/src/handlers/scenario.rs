@@ -5,11 +5,11 @@
 //! effect system integration.
 
 use async_trait::async_trait;
+use aura_core::effects::{TestingEffects, TestingError};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use aura_core::effects::{TestingEffects, TestingError};
 
 /// Scenario definition for dynamic injection
 #[derive(Debug, Clone)]
@@ -34,11 +34,17 @@ pub enum InjectionAction {
     /// Modify simulation parameter
     ModifyParameter { key: String, value: String },
     /// Inject custom event
-    InjectEvent { event_type: String, data: HashMap<String, String> },
+    InjectEvent {
+        event_type: String,
+        data: HashMap<String, String>,
+    },
     /// Change simulation behavior
     ModifyBehavior { component: String, behavior: String },
     /// Trigger fault injection
-    TriggerFault { fault_type: String, parameters: HashMap<String, String> },
+    TriggerFault {
+        fault_type: String,
+        parameters: HashMap<String, String>,
+    },
 }
 
 /// Conditions for triggering scenarios
@@ -129,9 +135,7 @@ impl SimulationScenarioHandler {
     /// Register a scenario for potential injection
     pub fn register_scenario(&self, scenario: ScenarioDefinition) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         state.scenarios.insert(scenario.id.clone(), scenario);
@@ -141,9 +145,7 @@ impl SimulationScenarioHandler {
     /// Enable or disable random scenario injection
     pub fn set_randomization(&self, enable: bool, probability: f64) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         state.enable_randomization = enable;
@@ -154,9 +156,7 @@ impl SimulationScenarioHandler {
     /// Manually trigger a specific scenario
     pub fn trigger_scenario(&self, scenario_id: &str) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         if state.active_injections.len() >= state.max_concurrent_injections {
@@ -166,12 +166,14 @@ impl SimulationScenarioHandler {
             });
         }
 
-        let scenario = state.scenarios.get(scenario_id).ok_or_else(|| {
-            TestingError::EventRecordingError {
-                event_type: "scenario_trigger".to_string(),
-                reason: format!("Scenario '{}' not found", scenario_id),
-            }
-        })?;
+        let scenario =
+            state
+                .scenarios
+                .get(scenario_id)
+                .ok_or_else(|| TestingError::EventRecordingError {
+                    event_type: "scenario_trigger".to_string(),
+                    reason: format!("Scenario '{}' not found", scenario_id),
+                })?;
 
         let injection = ActiveInjection {
             scenario_id: scenario_id.to_string(),
@@ -189,17 +191,30 @@ impl SimulationScenarioHandler {
     /// Get statistics about scenario injections
     pub fn get_injection_stats(&self) -> Result<HashMap<String, String>, TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         let mut stats = HashMap::new();
-        stats.insert("total_injections".to_string(), state.total_injections.to_string());
-        stats.insert("active_injections".to_string(), state.active_injections.len().to_string());
-        stats.insert("registered_scenarios".to_string(), state.scenarios.len().to_string());
-        stats.insert("randomization_enabled".to_string(), state.enable_randomization.to_string());
-        stats.insert("injection_probability".to_string(), state.injection_probability.to_string());
+        stats.insert(
+            "total_injections".to_string(),
+            state.total_injections.to_string(),
+        );
+        stats.insert(
+            "active_injections".to_string(),
+            state.active_injections.len().to_string(),
+        );
+        stats.insert(
+            "registered_scenarios".to_string(),
+            state.scenarios.len().to_string(),
+        );
+        stats.insert(
+            "randomization_enabled".to_string(),
+            state.enable_randomization.to_string(),
+        );
+        stats.insert(
+            "injection_probability".to_string(),
+            state.injection_probability.to_string(),
+        );
 
         Ok(stats)
     }
@@ -207,9 +222,7 @@ impl SimulationScenarioHandler {
     /// Clean up expired injections
     fn cleanup_expired_injections(&self) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         let now = Instant::now();
@@ -226,9 +239,7 @@ impl SimulationScenarioHandler {
     /// Check if scenario should be randomly triggered
     fn should_trigger_random_scenario(&self) -> Result<bool, TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         if !state.enable_randomization {
@@ -262,9 +273,7 @@ impl TestingEffects for SimulationScenarioHandler {
         label: &str,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         let checkpoint = ScenarioCheckpoint {
@@ -274,26 +283,25 @@ impl TestingEffects for SimulationScenarioHandler {
             state_snapshot: HashMap::new(), // TODO: Capture actual state
         };
 
-        state.checkpoints.insert(checkpoint_id.to_string(), checkpoint);
+        state
+            .checkpoints
+            .insert(checkpoint_id.to_string(), checkpoint);
         Ok(())
     }
 
-    async fn restore_checkpoint(
-        &self,
-        checkpoint_id: &str,
-    ) -> Result<(), TestingError> {
+    async fn restore_checkpoint(&self, checkpoint_id: &str) -> Result<(), TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
-        let _checkpoint = state.checkpoints.get(checkpoint_id).ok_or_else(|| {
-            TestingError::CheckpointError {
-                checkpoint_id: checkpoint_id.to_string(),
-                reason: "Checkpoint not found".to_string(),
-            }
-        })?;
+        let _checkpoint =
+            state
+                .checkpoints
+                .get(checkpoint_id)
+                .ok_or_else(|| TestingError::CheckpointError {
+                    checkpoint_id: checkpoint_id.to_string(),
+                    reason: "Checkpoint not found".to_string(),
+                })?;
 
         // TODO: Implement actual state restoration
         Ok(())
@@ -305,9 +313,7 @@ impl TestingEffects for SimulationScenarioHandler {
         path: &str,
     ) -> Result<Box<dyn Any + Send>, TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         match component {
@@ -339,7 +345,7 @@ impl TestingEffects for SimulationScenarioHandler {
                 component: component.to_string(),
                 path: path.to_string(),
                 reason: "Unknown component".to_string(),
-            })
+            }),
         }
     }
 
@@ -364,9 +370,7 @@ impl TestingEffects for SimulationScenarioHandler {
         event_data: HashMap<String, String>,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         let event = SimulationEvent {
@@ -376,7 +380,7 @@ impl TestingEffects for SimulationScenarioHandler {
         };
 
         state.events.push(event);
-        
+
         // Check for scenario triggers based on events
         if event_type == "scenario_trigger_request" {
             self.cleanup_expired_injections()?;
@@ -395,9 +399,7 @@ impl TestingEffects for SimulationScenarioHandler {
         unit: &str,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!(
-                "Lock error: {}", e
-            )))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
         let metric = MetricValue {
@@ -418,7 +420,7 @@ mod tests {
     #[tokio::test]
     async fn test_scenario_registration() {
         let handler = SimulationScenarioHandler::new(123);
-        
+
         let scenario = ScenarioDefinition {
             id: "test_scenario".to_string(),
             name: "Test Scenario".to_string(),
@@ -441,7 +443,7 @@ mod tests {
     #[tokio::test]
     async fn test_scenario_triggering() {
         let handler = SimulationScenarioHandler::new(123);
-        
+
         let scenario = ScenarioDefinition {
             id: "trigger_test".to_string(),
             name: "Trigger Test".to_string(),
@@ -452,7 +454,7 @@ mod tests {
         };
 
         handler.register_scenario(scenario).unwrap();
-        
+
         let result = handler.trigger_scenario("trigger_test");
         assert!(result.is_ok());
 
@@ -463,18 +465,20 @@ mod tests {
     #[tokio::test]
     async fn test_checkpoint_creation() {
         let handler = SimulationScenarioHandler::new(123);
-        
-        let result = handler.create_checkpoint("test_checkpoint", "Test checkpoint").await;
+
+        let result = handler
+            .create_checkpoint("test_checkpoint", "Test checkpoint")
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_state_inspection() {
         let handler = SimulationScenarioHandler::new(123);
-        
+
         let result = handler.inspect_state("scenarios", "count").await;
         assert!(result.is_ok());
-        
+
         // Should return 0 scenarios
         let count = result.unwrap().downcast::<usize>().unwrap();
         assert_eq!(*count, 0);
@@ -483,10 +487,10 @@ mod tests {
     #[tokio::test]
     async fn test_event_recording() {
         let handler = SimulationScenarioHandler::new(123);
-        
+
         let mut event_data = HashMap::new();
         event_data.insert("key".to_string(), "value".to_string());
-        
+
         let result = handler.record_event("test_event", event_data).await;
         assert!(result.is_ok());
     }
@@ -494,14 +498,14 @@ mod tests {
     #[tokio::test]
     async fn test_metric_recording() {
         let handler = SimulationScenarioHandler::new(123);
-        
+
         let result = handler.record_metric("test_metric", 42.0, "units").await;
         assert!(result.is_ok());
-        
+
         // Verify metric was recorded
         let metric_result = handler.inspect_state("metrics", "test_metric").await;
         assert!(metric_result.is_ok());
-        
+
         let metric_value = metric_result.unwrap().downcast::<f64>().unwrap();
         assert_eq!(*metric_value, 42.0);
     }
@@ -509,12 +513,15 @@ mod tests {
     #[tokio::test]
     async fn test_randomization_settings() {
         let handler = SimulationScenarioHandler::new(123);
-        
+
         let result = handler.set_randomization(true, 0.5);
         assert!(result.is_ok());
-        
+
         let stats = handler.get_injection_stats().unwrap();
-        assert_eq!(stats.get("randomization_enabled"), Some(&"true".to_string()));
+        assert_eq!(
+            stats.get("randomization_enabled"),
+            Some(&"true".to_string())
+        );
         assert_eq!(stats.get("injection_probability"), Some(&"0.5".to_string()));
     }
 }

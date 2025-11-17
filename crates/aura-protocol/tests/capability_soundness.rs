@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Capability soundness tests for guard chain verification
 
 use aura_core::{identifiers::MessageContext, journal::Journal, AuthLevel, Cap};

@@ -5,8 +5,8 @@
 //! It supports different execution modes for unit tests, integration tests,
 //! and simulation scenarios.
 
-use aura_core::{AuraResult, DeviceId};
 use aura_core::effects::ExecutionMode;
+use aura_core::{AuraResult, DeviceId};
 use std::path::PathBuf;
 
 // Use foundation-based approach instead of orchestration layer

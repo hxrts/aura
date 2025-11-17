@@ -6,11 +6,11 @@
 
 use super::{DeviceRegistry, EpochLog};
 use crate::types::{DeviceMetadata, GuardianMetadata};
+use aura_core::Ed25519VerifyingKey;
 use aura_core::{
     identifiers::{AccountId, DeviceId},
     semilattice::{Bottom, CvState, JoinSemilattice},
 };
-use aura_core::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

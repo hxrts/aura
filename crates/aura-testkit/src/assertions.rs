@@ -138,37 +138,6 @@ pub fn assert_device_metadata_valid(account_state: &AccountState, device_id: Dev
     );
 }
 
-/// Helper for eventually-consistent assertions
-///
-/// Useful for testing asynchronous operations that eventually reach a desired state.
-/// This is a placeholder - actual implementation would need runtime/async support.
-#[allow(dead_code, clippy::disallowed_methods)]
-pub fn assert_eventually<F, T>(
-    mut condition: F,
-    timeout_ms: u64,
-    check_interval_ms: u64,
-    context: &str,
-) -> bool
-where
-    F: FnMut() -> bool,
-{
-    let start = std::time::Instant::now();
-    loop {
-        if condition() {
-            return true;
-        }
-
-        if start.elapsed().as_millis() as u64 > timeout_ms {
-            panic!(
-                "Condition did not become true within {}ms: {}",
-                timeout_ms, context
-            );
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
-    }
-}
-
 /// Helper for asserting cryptographic properties
 ///
 /// Validates that cryptographic operations maintain their invariants.
@@ -293,8 +262,8 @@ where
     T: JoinSemilattice + PartialEq + std::fmt::Debug + Clone,
 {
     // Test commutativity: a ⊔ b = b ⊔ a
-    let ab = a.clone().join(b.clone());
-    let ba = b.clone().join(a.clone());
+    let ab = a.clone().join(&b.clone());
+    let ba = b.clone().join(&a.clone());
     assert_eq!(
         ab, ba,
         "Join not commutative ({}):\na ⊔ b = {:?}\nb ⊔ a = {:?}",
@@ -302,7 +271,7 @@ where
     );
 
     // Test idempotency: a ⊔ a = a
-    let aa = a.clone().join(a.clone());
+    let aa = a.clone().join(&a.clone());
     assert_eq!(
         aa, *a,
         "Join not idempotent ({}):\na ⊔ a = {:?}\na = {:?}",
@@ -333,8 +302,8 @@ where
     T: MeetSemiLattice + PartialEq + std::fmt::Debug + Clone,
 {
     // Test commutativity: a ⊓ b = b ⊓ a
-    let ab = a.clone().meet(b.clone());
-    let ba = b.clone().meet(a.clone());
+    let ab = a.clone().meet(&b.clone());
+    let ba = b.clone().meet(&a.clone());
     assert_eq!(
         ab, ba,
         "Meet not commutative ({}):\na ⊓ b = {:?}\nb ⊓ a = {:?}",
@@ -342,7 +311,7 @@ where
     );
 
     // Test idempotency: a ⊓ a = a
-    let aa = a.clone().meet(a.clone());
+    let aa = a.clone().meet(&a.clone());
     assert_eq!(
         aa, *a,
         "Meet not idempotent ({}):\na ⊓ a = {:?}\na = {:?}",
@@ -400,11 +369,9 @@ where
 macro_rules! assert_epoch {
     ($account_state:expr, $expected:expr) => {
         assert_eq!(
-            $account_state.epoch,
-            $expected,
+            $account_state.epoch, $expected,
             "Expected epoch {}, found {}",
-            $expected,
-            $account_state.epoch
+            $expected, $account_state.epoch
         )
     };
 }

@@ -12,7 +12,7 @@
 //! 1. **Verification** (aura-verify): Proves "who you are" through cryptographic identity verification
 //! 2. **Authorization** (aura-wot): Proves "what you can do" through capability-based access control
 //!
-//! The bridge ensures that both layers work together seamlessly, providing complete access control
+//! The bridge ensures that both layers work together, providing complete access control
 //! for all operations in the Aura platform.
 //!
 //! # Architecture
@@ -29,7 +29,7 @@
 //!          │                     │                     │
 //!          ▼                     ▼                     ▼
 //! ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-//! │ aura-verify       │ │   aura-wot      │   │   Tree State    │
+//! │ aura-verify     │   │   aura-wot      │   │   Tree State    │
 //! │                 │   │                 │   │                 │
 //! │ • Identity      │   │ • Capabilities  │   │ • Tree Context  │
 //! │   Verification  │   │ • Policy Meet   │   │ • Node Roles    │
@@ -58,7 +58,7 @@
 //!
 //! ```rust,no_run
 //! use aura_protocol::authorization_bridge::{
-//!     evaluate_authorization, AuthorizationRequest, AuthorizationContext,
+//!     AuthorizationContext, AuthorizationMetadata, AuthorizationRequest, AuthorizationService,
 //! };
 //! use aura_verify::{IdentityProof, VerifiedIdentity};
 //! use aura_wot::{CapabilitySet, TreeAuthzContext, TreeOp, TreeOpKind};
@@ -100,10 +100,12 @@
 //!         context: authz_context,
 //!         additional_signers: BTreeSet::new(),
 //!         guardian_signers: BTreeSet::new(),
+//!         metadata: AuthorizationMetadata::default(),
 //!     };
 //!
 //!     // 4. Evaluate authorization
-//!     let grant = evaluate_authorization(request)?;
+//!     let service = AuthorizationService::new();
+//!     let grant = service.authorize(request)?;
 //!
 //!     if grant.authorized {
 //!         println!("Operation authorized with capabilities: {:?}",
@@ -121,7 +123,7 @@
 //! ## Combined Authentication and Authorization
 //!
 //! ```rust,no_run
-//! use aura_protocol::authorization_bridge::{authenticate_and_authorize, AuthorizationContext};
+//! use aura_protocol::authorization_bridge::{AuthorizationContext, AuthorizationService};
 //! use aura_verify::{IdentityProof, KeyMaterial};
 //! use aura_wot::{CapabilitySet, TreeAuthzContext, TreeOp};
 //! use aura_core::{AccountId, DeviceId, GuardianId};
@@ -144,7 +146,8 @@
 //!     );
 //!
 //!     // Perform combined authentication and authorization
-//!     let grant = authenticate_and_authorize(
+//!     let service = AuthorizationService::new();
+//!     let grant = service.authenticate_and_authorize(
 //!         identity_proof,
 //!         operation_message,
 //!         key_material,
@@ -169,7 +172,9 @@
 //! ## Guardian-Based Recovery Authorization
 //!
 //! ```rust,no_run
-//! use aura_protocol::authorization_bridge::{AuthorizationRequest, AuthorizationContext};
+//! use aura_protocol::authorization_bridge::{
+//!     AuthorizationContext, AuthorizationMetadata, AuthorizationRequest, AuthorizationService,
+//! };
 //! use aura_verify::{IdentityProof, VerifiedIdentity};
 //! use aura_wot::{CapabilitySet, TreeAuthzContext, TreeOp, TreeOpKind};
 //! use aura_core::{AccountId, DeviceId, GuardianId};
@@ -216,9 +221,10 @@
 //!         context: authz_context,
 //!         additional_signers: BTreeSet::new(),
 //!         guardian_signers,
+//!         metadata: AuthorizationMetadata::default(),
 //!     };
-//!
-//!     let grant = evaluate_authorization(request)?;
+//!     let service = AuthorizationService::new();
+//!     let grant = service.authorize(request)?;
 //!
 //!     if grant.authorized {
 //!         println!("Recovery operation authorized by {} guardians",
@@ -233,7 +239,9 @@
 //! ## Threshold Signature Authorization
 //!
 //! ```rust,no_run
-//! use aura_protocol::authorization_bridge::{AuthorizationContext, evaluate_authorization};
+//! use aura_protocol::authorization_bridge::{
+//!     AuthorizationContext, AuthorizationMetadata, AuthorizationRequest, AuthorizationService,
+//! };
 //! use aura_verify::{IdentityProof, VerifiedIdentity, ThresholdSig};
 //! use aura_wot::{CapabilitySet, TreeAuthzContext, TreeOp};
 //! use aura_core::{AccountId, DeviceId};
@@ -275,9 +283,10 @@
 //!         context: authz_context,
 //!         additional_signers: participating_devices,
 //!         guardian_signers: BTreeSet::new(),
+//!         metadata: AuthorizationMetadata::default(),
 //!     };
-//!
-//!     let grant = evaluate_authorization(request)?;
+//!     let service = AuthorizationService::new();
+//!     let grant = service.authorize(request)?;
 //!
 //!     if grant.authorized {
 //!         println!("Threshold operation authorized");
@@ -292,7 +301,7 @@
 //! ## Policy-Based Authorization
 //!
 //! ```rust,no_run
-//! use aura_protocol::authorization_bridge::{AuthorizationContext, evaluate_authorization};
+//! use aura_protocol::authorization_bridge::AuthorizationContext;
 //! use aura_wot::{CapabilitySet, TreeAuthzContext};
 //! use aura_core::AccountId;
 //!
@@ -337,7 +346,7 @@
 //!
 //! ```rust,no_run
 //! use aura_protocol::authorization_bridge::{
-//!     authenticate_and_authorize, AuthorizationError, AuthorizationContext
+//!     AuthorizationContext, AuthorizationError, AuthorizationService
 //! };
 //! use aura_verify::IdentityProof;
 //!
@@ -346,7 +355,8 @@
 //!     message: &[u8],
 //!     // ... other parameters
 //! ) {
-//!     match authenticate_and_authorize(
+//!     let service = AuthorizationService::new();
+//!     match service.authenticate_and_authorize(
 //!         identity_proof,
 //!         message,
 //!         &key_material,
@@ -438,7 +448,7 @@
 //! For multiple operations, batch authorization requests to reduce overhead:
 //!
 //! ```rust,no_run
-//! use aura_protocol::authorization_bridge::AuthorizationRequest;
+//! use aura_protocol::authorization_bridge::{AuthorizationRequest, AuthorizationService};
 //! use aura_wot::TreeOp;
 //!
 //! async fn batch_authorize(
@@ -446,22 +456,66 @@
 //! ) -> Vec<Result<aura_protocol::authorization_bridge::PermissionGrant,
 //!                aura_protocol::authorization_bridge::AuthorizationError>> {
 //!     // Process requests in parallel where possible
+//!     let service = AuthorizationService::new();
 //!     futures::future::join_all(
-//!         requests.into_iter().map(evaluate_authorization)
+//!         requests.into_iter().map(|request| {
+//!             let svc = service.clone();
+//!             async move { svc.authorize(request) }
+//!         })
 //!     ).await
 //! }
-//! # use aura_protocol::authorization_bridge::evaluate_authorization;
+//! #
 //! ```
-//!
-//! **ZERO BACKWARDS COMPATIBILITY CODE. ZERO MIGRATION CODE. ZERO LEGACY CODE.**
 
 use aura_core::{AccountId, DeviceId, GuardianId};
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use aura_wot::{
-    evaluate_tree_operation_capabilities, CapabilityEvaluationContext, CapabilitySet, EntityId,
-    TreeAuthzContext, TreeCapabilityRequest, TreeOp, WotError,
+    evaluate_tree_operation_capabilities, Capability, CapabilityEvaluationContext, CapabilitySet,
+    EntityId, TreeAuthzContext, TreeCapabilityRequest, TreeOp, WotError,
 };
-use std::collections::BTreeSet;
+use parking_lot::RwLock;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
+use tracing::{info, warn};
+
+/// Additional metadata tracked during authorization.
+#[derive(Debug, Clone, Default)]
+pub struct AuthorizationMetadata {
+    /// Optional explicit capability requirement for auditing.
+    pub capability: Option<Capability>,
+    /// Optional flow budget cost associated with the operation.
+    pub flow_cost: Option<u32>,
+    /// Journal annotations (facts, caps, deltas) coupled with this authorization.
+    pub journal_facts: Vec<String>,
+    /// Optional operation identifier for correlating audits.
+    pub operation_id: Option<String>,
+}
+
+impl AuthorizationMetadata {
+    /// Attach a specific capability requirement to the metadata.
+    pub fn with_capability(mut self, capability: Capability) -> Self {
+        self.capability = Some(capability);
+        self
+    }
+
+    /// Attach a flow cost to the metadata.
+    pub fn with_flow_cost(mut self, flow_cost: u32) -> Self {
+        self.flow_cost = Some(flow_cost);
+        self
+    }
+
+    /// Attach journal facts for auditing.
+    pub fn with_journal_facts(mut self, facts: Vec<String>) -> Self {
+        self.journal_facts = facts;
+        self
+    }
+
+    /// Attach an operation identifier for tracing.
+    pub fn with_operation_id(mut self, operation_id: impl Into<String>) -> Self {
+        self.operation_id = Some(operation_id.into());
+        self
+    }
+}
 
 /// Authorization request connecting identity proof with operation
 #[derive(Debug, Clone)]
@@ -476,6 +530,8 @@ pub struct AuthorizationRequest {
     pub additional_signers: BTreeSet<DeviceId>,
     /// Guardian signers for recovery operations
     pub guardian_signers: BTreeSet<GuardianId>,
+    /// Optional metadata for auditing and cross-cutting checks
+    pub metadata: AuthorizationMetadata,
 }
 
 /// Context for authorization evaluation
@@ -510,6 +566,188 @@ impl AuthorizationContext {
     pub fn with_local_policy(mut self, policy: CapabilitySet) -> Self {
         self.local_policy = Some(policy);
         self
+    }
+}
+
+/// Cached authorization context keyed by account.
+#[derive(Clone, Default)]
+pub struct AuthorizationCache {
+    inner: Arc<RwLock<HashMap<AccountId, CapabilitySet>>>,
+}
+
+impl AuthorizationCache {
+    /// Create a new empty cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Store the latest capabilities for an account.
+    pub fn record_context(&self, context: &AuthorizationContext) {
+        self.inner
+            .write()
+            .insert(context.account_id, context.base_capabilities.clone());
+    }
+
+    /// Fetch cached capabilities for an account if available.
+    pub fn capabilities_for(&self, account_id: &AccountId) -> Option<CapabilitySet> {
+        self.inner.read().get(account_id).cloned()
+    }
+}
+
+type AuditSink = dyn Fn(&AuthorizationAuditEvent) + Send + Sync;
+
+/// Records authorization decisions for auditing.
+#[derive(Clone)]
+pub struct AuthorizationAuditor {
+    sink: Arc<AuditSink>,
+}
+
+impl AuthorizationAuditor {
+    /// Create a new auditor using the provided sink.
+    pub fn new<F>(sink: F) -> Self
+    where
+        F: Fn(&AuthorizationAuditEvent) + Send + Sync + 'static,
+    {
+        Self {
+            sink: Arc::new(sink),
+        }
+    }
+
+    /// Record an authorization decision.
+    pub fn record(&self, event: AuthorizationAuditEvent) {
+        (self.sink)(&event);
+    }
+}
+
+impl Default for AuthorizationAuditor {
+    fn default() -> Self {
+        Self::new(|event| {
+            if event.authorized {
+                info!(
+                    account_id = ?event.account_id,
+                    operation = %event.operation,
+                    capability = ?event.capability,
+                    flow_cost = event.flow_cost,
+                    "Authorization granted"
+                );
+            } else {
+                warn!(
+                    account_id = ?event.account_id,
+                    operation = %event.operation,
+                    capability = ?event.capability,
+                    reason = ?event.denial_reason,
+                    "Authorization denied"
+                );
+            }
+        })
+    }
+}
+
+/// Audit event emitted for every authorization decision.
+#[derive(Debug, Clone)]
+pub struct AuthorizationAuditEvent {
+    /// Account identifier for the decision.
+    pub account_id: AccountId,
+    /// Summary of the tree operation being authorized.
+    pub operation: String,
+    /// Capability metadata if provided.
+    pub capability: Option<Capability>,
+    /// Flow cost metadata if provided.
+    pub flow_cost: Option<u32>,
+    /// Whether the request was authorized.
+    pub authorized: bool,
+    /// Denial reason if authorization failed.
+    pub denial_reason: Option<String>,
+}
+
+impl AuthorizationAuditEvent {
+    fn from_request(request: &AuthorizationRequest, grant: &PermissionGrant) -> Self {
+        Self {
+            account_id: request.context.account_id,
+            operation: format!("{:?}", request.operation.op),
+            capability: request.metadata.capability.clone(),
+            flow_cost: request.metadata.flow_cost,
+            authorized: grant.authorized,
+            denial_reason: grant.denial_reason.clone(),
+        }
+    }
+}
+
+/// Unified service for authentication + authorization decisions.
+#[derive(Clone)]
+pub struct AuthorizationService {
+    cache: AuthorizationCache,
+    auditor: AuthorizationAuditor,
+}
+
+impl Default for AuthorizationService {
+    fn default() -> Self {
+        Self {
+            cache: AuthorizationCache::default(),
+            auditor: AuthorizationAuditor::default(),
+        }
+    }
+}
+
+impl AuthorizationService {
+    /// Create a new authorization service with default cache + auditor.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a service with custom cache and auditor components.
+    pub fn with_components(cache: AuthorizationCache, auditor: AuthorizationAuditor) -> Self {
+        Self { cache, auditor }
+    }
+
+    /// Evaluate authorization combining authentication metadata and capability evaluation.
+    pub fn authorize(
+        &self,
+        request: AuthorizationRequest,
+    ) -> Result<PermissionGrant, AuthorizationError> {
+        self.validate_request(&request)?;
+        let grant = evaluate_authorization_impl(&request)?;
+        self.cache.record_context(&request.context);
+        self.auditor
+            .record(AuthorizationAuditEvent::from_request(&request, &grant));
+        Ok(grant)
+    }
+
+    /// Combined authentication and authorization helper.
+    pub fn authenticate_and_authorize(
+        &self,
+        identity_proof: IdentityProof,
+        message: &[u8],
+        key_material: &KeyMaterial,
+        authz_context: AuthorizationContext,
+        operation: TreeOp,
+        additional_signers: BTreeSet<DeviceId>,
+        guardian_signers: BTreeSet<GuardianId>,
+    ) -> Result<PermissionGrant, AuthorizationError> {
+        let verified_identity =
+            aura_verify::verify_identity_proof(&identity_proof, message, key_material)
+                .map_err(AuthorizationError::AuthenticationFailed)?;
+
+        let request = AuthorizationRequest {
+            verified_identity,
+            operation,
+            context: authz_context,
+            additional_signers,
+            guardian_signers,
+            metadata: AuthorizationMetadata::default(),
+        };
+
+        self.authorize(request)
+    }
+
+    fn validate_request(&self, request: &AuthorizationRequest) -> Result<(), AuthorizationError> {
+        if request.metadata.flow_cost.is_some() && request.metadata.capability.is_none() {
+            return Err(AuthorizationError::InvalidRequest(
+                "Flow cost specified without capability metadata".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -551,27 +789,27 @@ impl PermissionGrant {
     }
 }
 
-/// Evaluate authorization combining identity proof with capability evaluation
-pub fn evaluate_authorization(
-    request: AuthorizationRequest,
+/// Core evaluation logic shared by [`AuthorizationService`].
+fn evaluate_authorization_impl(
+    request: &AuthorizationRequest,
 ) -> Result<PermissionGrant, AuthorizationError> {
     // Step 1: Extract entity ID from verified identity
     let entity_id = extract_entity_id(&request.verified_identity)?;
 
     // Step 2: Build capability evaluation context
     let capability_context = CapabilityEvaluationContext::new(
-        request.context.base_capabilities,
-        request.context.tree_context,
+        request.context.base_capabilities.clone(),
+        request.context.tree_context.clone(),
     );
 
-    let capability_context = if let Some(local_policy) = request.context.local_policy {
-        capability_context.with_local_policy(local_policy)
+    let capability_context = if let Some(local_policy) = &request.context.local_policy {
+        capability_context.with_local_policy(local_policy.clone())
     } else {
         capability_context
     };
 
     // Step 3: Create tree capability request
-    let mut signers = request.additional_signers;
+    let mut signers = request.additional_signers.clone();
 
     // Add the requesting identity as a signer
     match &request.verified_identity.proof {
@@ -588,10 +826,10 @@ pub fn evaluate_authorization(
     }
 
     let tree_request = TreeCapabilityRequest {
-        operation: request.operation,
+        operation: request.operation.clone(),
         requester: entity_id,
         signers,
-        guardian_signers: request.guardian_signers,
+        guardian_signers: request.guardian_signers.clone(),
     };
 
     // Step 4: Evaluate tree operation capabilities
@@ -602,14 +840,14 @@ pub fn evaluate_authorization(
     if evaluation_result.permitted {
         Ok(PermissionGrant::granted(
             evaluation_result.effective_capabilities,
-            request.verified_identity,
+            request.verified_identity.clone(),
         ))
     } else {
         Ok(PermissionGrant::denied(
             evaluation_result
                 .denial_reason
                 .unwrap_or_else(|| "Authorization denied for unknown reason".to_string()),
-            request.verified_identity,
+            request.verified_identity.clone(),
         ))
     }
 }
@@ -627,34 +865,6 @@ fn extract_entity_id(verified_identity: &VerifiedIdentity) -> Result<EntityId, A
             ))
         }
     }
-}
-
-/// Combined authentication and authorization in one step
-pub fn authenticate_and_authorize(
-    identity_proof: IdentityProof,
-    message: &[u8],
-    key_material: &KeyMaterial,
-    authz_context: AuthorizationContext,
-    operation: TreeOp,
-    additional_signers: BTreeSet<DeviceId>,
-    guardian_signers: BTreeSet<GuardianId>,
-) -> Result<PermissionGrant, AuthorizationError> {
-    // Step 1: Authenticate identity
-    let verified_identity =
-        aura_verify::verify_identity_proof(&identity_proof, message, key_material)
-            .map_err(AuthorizationError::AuthenticationFailed)?;
-
-    // Step 2: Create authorization request
-    let authz_request = AuthorizationRequest {
-        verified_identity,
-        operation,
-        context: authz_context,
-        additional_signers,
-        guardian_signers,
-    };
-
-    // Step 3: Evaluate authorization
-    evaluate_authorization(authz_request)
 }
 
 /// Authorization errors combining authentication and capability evaluation failures
@@ -765,6 +975,7 @@ mod tests {
             context: authz_context,
             additional_signers: BTreeSet::new(),
             guardian_signers: BTreeSet::new(),
+            metadata: AuthorizationMetadata::default(),
         };
 
         assert_eq!(request.context.account_id, account_id);

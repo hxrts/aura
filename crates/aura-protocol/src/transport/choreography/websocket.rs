@@ -5,10 +5,10 @@
 //! Target: <250 lines, focused on choreographic coordination.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
+use crate::handlers::core::AuraHandler;
+use crate::handlers::{AuraHandlerError, EffectType, ExecutionMode};
 use aura_core::{ContextId, DeviceId};
 use aura_macros::choreography;
-use crate::handlers::{AuraHandlerError, EffectType, ExecutionMode};
-use crate::handlers::core::AuraHandler;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -279,7 +279,7 @@ impl WebSocketSessionCoordinator {
 // Choreographic Protocol Definitions
 mod websocket_handshake {
     use super::*;
-    
+
     // Multi-party WebSocket handshake with capability negotiation
     choreography! {
         #[namespace = "websocket_handshake"]
@@ -303,7 +303,7 @@ mod websocket_handshake {
 
 mod websocket_session {
     use super::*;
-    
+
     // Active WebSocket session coordination
     choreography! {
         #[namespace = "websocket_session"]
@@ -326,24 +326,24 @@ mod websocket_session {
 
 mod websocket_teardown {
     use super::*;
-    
+
     // Graceful WebSocket teardown coordination
     choreography! {
-    #[namespace = "websocket_teardown"]
-    protocol WebSocketTeardownProtocol {
-        roles: Initiator, Responder;
+        #[namespace = "websocket_teardown"]
+        protocol WebSocketTeardownProtocol {
+            roles: Initiator, Responder;
 
-        // Graceful teardown initiation
-        Initiator[guard_capability = "initiate_websocket_teardown",
-                  flow_cost = 80,
-                  journal_facts = "websocket_teardown_initiated"]
-        -> Responder: WebSocketTeardown(WebSocketTeardown);
+            // Graceful teardown initiation
+            Initiator[guard_capability = "initiate_websocket_teardown",
+                      flow_cost = 80,
+                      journal_facts = "websocket_teardown_initiated"]
+            -> Responder: WebSocketTeardown(WebSocketTeardown);
 
-        // Teardown acknowledgment
-        Responder[guard_capability = "acknowledge_websocket_teardown",
-                  flow_cost = 60,
-                  journal_facts = "websocket_teardown_acknowledged"]
-        -> Initiator: WebSocketTeardown(WebSocketTeardown);
+            // Teardown acknowledgment
+            Responder[guard_capability = "acknowledge_websocket_teardown",
+                      flow_cost = 60,
+                      journal_facts = "websocket_teardown_acknowledged"]
+            -> Initiator: WebSocketTeardown(WebSocketTeardown);
+        }
     }
-}
 }

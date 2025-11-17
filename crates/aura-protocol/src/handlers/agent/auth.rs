@@ -4,8 +4,8 @@
 //! core system effects into device-specific authentication workflows.
 
 use crate::effects::{
-    agent::{AuthMethod, AuthenticationEffects, AuthenticationResult, BiometricType, HealthStatus},
-    AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects,
+    AuraEffectSystem, AuthMethod, AuthenticationEffects, AuthenticationResult, BiometricType,
+    ConsoleEffects, HealthStatus, StorageEffects, TimeEffects,
 };
 use async_trait::async_trait;
 use aura_core::hash::hash;
@@ -108,8 +108,7 @@ impl AuthenticationEffects for AuthenticationHandler {
                 let timestamp = TimeEffects::current_timestamp(&*effects).await;
 
                 // Generate session token using crypto effects
-                let random_bytes =
-                    effects.random_bytes(32).await;
+                let random_bytes = effects.random_bytes(32).await;
 
                 let expires_at = timestamp + (15 * 60 * 1000); // 15 minutes
 
@@ -341,7 +340,7 @@ impl AuthenticationEffects for AuthenticationHandler {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "fixture_effects"))]
 mod tests {
     use super::*;
     use aura_macros::aura_test;

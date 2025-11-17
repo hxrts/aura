@@ -58,13 +58,13 @@ pub mod time;
 
 // Re-export core effect traits
 pub use agent::{
-    AgentEffects, AgentHealthStatus, AuthenticationEffects, AuthenticationResult, AuthMethod,
-    BiometricType, ConfigError, ConfigurationEffects, ConfigValidationError, CredentialBackup,
+    AgentEffects, AgentHealthStatus, AuthMethod, AuthenticationEffects, AuthenticationResult,
+    BiometricType, ConfigError, ConfigValidationError, ConfigurationEffects, CredentialBackup,
     DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
     SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
 };
 pub use authorization::{AuthorizationEffects, AuthorizationError};
-pub use chaos::{ChaosEffects, ChaosError, CorruptionType, ByzantineType, ResourceType};
+pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
 pub use journal::JournalEffects;
@@ -73,16 +73,24 @@ pub use journal::JournalEffects;
 pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 pub use random::RandomEffects;
 pub use reliability::{
-    ReliabilityEffects, ReliabilityError,
     // Unified retry types
-    BackoffStrategy, RetryPolicy, RetryResult, RetryContext,
+    BackoffStrategy,
+    RateLimit,
     // Unified rate limiting types
-    RateLimitConfig, RateLimit, RateLimitResult, RateLimiter, RateLimiterStatistics,
+    RateLimitConfig,
+    RateLimitResult,
+    RateLimiter,
+    RateLimiterStatistics,
+    ReliabilityEffects,
+    ReliabilityError,
+    RetryContext,
+    RetryPolicy,
+    RetryResult,
 };
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
 pub use supertraits::{
-    AntiEntropyEffects, ChoreographyEffects, CrdtEffects, MinimalEffects, 
-    SigningEffects, SnapshotEffects, TreeEffects,
+    AntiEntropyEffects, ChoreographyEffects, CrdtEffects, MinimalEffects, SigningEffects,
+    SnapshotEffects, TreeEffects,
 };
 pub use system::{SystemEffects, SystemError};
 pub use testing::{TestingEffects, TestingError};

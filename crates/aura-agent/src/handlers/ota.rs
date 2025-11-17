@@ -4,8 +4,8 @@
 //! the choreography system with the agent runtime.
 
 use crate::errors::Result as AgentResult;
-use aura_core::{DeviceId, Epoch};
 use crate::runtime::ota_orchestration::{UpgradeConfig, UpgradeOrchestrator};
+use aura_core::{DeviceId, Epoch};
 use aura_protocol::choreography::AuraHandlerAdapter;
 #[cfg(test)]
 use aura_sync::maintenance::UpgradeKind;

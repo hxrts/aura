@@ -4,9 +4,9 @@
 //! defined in `aura-core`. These handlers can be used by choreographic applications
 //! and other Aura components.
 
+use async_trait::async_trait;
 use aura_core::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 use aura_core::AuraError;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -154,7 +154,7 @@ impl TimeEffects for SimulatedTimeHandler {
     }
 
     fn unregister_context(&self, _context_id: Uuid) {
-        // In simulation, track unregistered contexts  
+        // In simulation, track unregistered contexts
     }
 
     async fn notify_events_available(&self) {
@@ -259,7 +259,10 @@ impl TimeEffects for RealTimeHandler {
                 tokio::task::yield_now().await;
                 Ok(())
             }
-            WakeCondition::ThresholdEvents { threshold: _, timeout_ms } => {
+            WakeCondition::ThresholdEvents {
+                threshold: _,
+                timeout_ms,
+            } => {
                 tokio::time::sleep(tokio::time::Duration::from_millis(timeout_ms)).await;
                 Ok(())
             }

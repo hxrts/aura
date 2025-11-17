@@ -321,7 +321,9 @@ impl TestFixture {
             .register_singleton(|| MockCryptoHandler::with_seed(0))
             .await;
         self.container
-            .register_singleton(|| InMemoryTransportHandler::new(aura_effects::transport::TransportConfig::default()))
+            .register_singleton(|| {
+                InMemoryTransportHandler::new(aura_effects::transport::TransportConfig::default())
+            })
             .await;
         self.container
             .register_singleton(|| MemoryStorageHandler::default())

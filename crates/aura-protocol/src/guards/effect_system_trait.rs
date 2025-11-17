@@ -5,8 +5,8 @@
 
 use crate::effects::JournalEffects;
 use crate::guards::flow::FlowBudgetEffects;
-use aura_core::effects::StorageEffects;
 use async_trait::async_trait;
+use aura_core::effects::StorageEffects;
 use aura_core::DeviceId;
 
 /// Minimal interface that guards need from an effect system
@@ -16,7 +16,9 @@ use aura_core::DeviceId;
 ///
 /// Note: This trait extends JournalEffects because guards need access to journal operations
 /// for coupling protocol execution with distributed state updates.
-pub trait GuardEffectSystem: JournalEffects + StorageEffects + FlowBudgetEffects + Send + Sync {
+pub trait GuardEffectSystem:
+    JournalEffects + StorageEffects + FlowBudgetEffects + Send + Sync
+{
     /// Get the device ID for this effect system
     fn device_id(&self) -> DeviceId;
 
@@ -107,13 +109,13 @@ impl FlowBudgetEffects for Box<dyn AuraEffects> {
         use aura_core::Hash32;
         Ok(aura_core::Receipt::new(
             context.clone(),
-            DeviceId::new(), // src (dummy)
-            *peer,           // dst
+            DeviceId::new(),                          // src (dummy)
+            *peer,                                    // dst
             aura_core::session_epochs::Epoch::new(0), // epoch (dummy)
             cost,
-            0,               // nonce (dummy)
+            0,                      // nonce (dummy)
             Hash32::new([0u8; 32]), // prev (dummy)
-            Vec::new(),      // sig (empty)
+            Vec::new(),             // sig (empty)
         ))
     }
 }
@@ -149,11 +151,17 @@ impl aura_core::TimeEffects for Box<dyn AuraEffects> {
         (**self).sleep(duration_ms).await
     }
 
-    async fn yield_until(&self, condition: aura_core::effects::time::WakeCondition) -> Result<(), aura_core::effects::time::TimeError> {
+    async fn yield_until(
+        &self,
+        condition: aura_core::effects::time::WakeCondition,
+    ) -> Result<(), aura_core::effects::time::TimeError> {
         (**self).yield_until(condition).await
     }
 
-    async fn wait_until(&self, condition: aura_core::effects::time::WakeCondition) -> Result<(), aura_core::AuraError> {
+    async fn wait_until(
+        &self,
+        condition: aura_core::effects::time::WakeCondition,
+    ) -> Result<(), aura_core::AuraError> {
         (**self).wait_until(condition).await
     }
 
@@ -161,7 +169,10 @@ impl aura_core::TimeEffects for Box<dyn AuraEffects> {
         aura_core::TimeEffects::set_timeout(&**self, timeout_ms).await
     }
 
-    async fn cancel_timeout(&self, handle: aura_core::effects::time::TimeoutHandle) -> Result<(), aura_core::effects::time::TimeError> {
+    async fn cancel_timeout(
+        &self,
+        handle: aura_core::effects::time::TimeoutHandle,
+    ) -> Result<(), aura_core::effects::time::TimeError> {
         (**self).cancel_timeout(handle).await
     }
 
@@ -188,11 +199,18 @@ impl aura_core::TimeEffects for Box<dyn AuraEffects> {
 
 #[async_trait]
 impl StorageEffects for Box<dyn AuraEffects> {
-    async fn store(&self, key: &str, data: Vec<u8>) -> Result<(), aura_core::effects::StorageError> {
+    async fn store(
+        &self,
+        key: &str,
+        data: Vec<u8>,
+    ) -> Result<(), aura_core::effects::StorageError> {
         (**self).store(key, data).await
     }
 
-    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
+    async fn retrieve(
+        &self,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
         (**self).retrieve(key).await
     }
 
@@ -200,7 +218,10 @@ impl StorageEffects for Box<dyn AuraEffects> {
         (**self).remove(key).await
     }
 
-    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, aura_core::effects::StorageError> {
+    async fn list_keys(
+        &self,
+        prefix: Option<&str>,
+    ) -> Result<Vec<String>, aura_core::effects::StorageError> {
         (**self).list_keys(prefix).await
     }
 
@@ -208,11 +229,17 @@ impl StorageEffects for Box<dyn AuraEffects> {
         (**self).exists(key).await
     }
 
-    async fn store_batch(&self, pairs: std::collections::HashMap<String, Vec<u8>>) -> Result<(), aura_core::effects::StorageError> {
+    async fn store_batch(
+        &self,
+        pairs: std::collections::HashMap<String, Vec<u8>>,
+    ) -> Result<(), aura_core::effects::StorageError> {
         (**self).store_batch(pairs).await
     }
 
-    async fn retrieve_batch(&self, keys: &[String]) -> Result<std::collections::HashMap<String, Vec<u8>>, aura_core::effects::StorageError> {
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, aura_core::effects::StorageError> {
         (**self).retrieve_batch(keys).await
     }
 
@@ -220,7 +247,9 @@ impl StorageEffects for Box<dyn AuraEffects> {
         (**self).clear_all().await
     }
 
-    async fn stats(&self) -> Result<aura_core::effects::StorageStats, aura_core::effects::StorageError> {
+    async fn stats(
+        &self,
+    ) -> Result<aura_core::effects::StorageStats, aura_core::effects::StorageError> {
         (**self).stats().await
     }
 }
@@ -228,11 +257,19 @@ impl StorageEffects for Box<dyn AuraEffects> {
 // JournalEffects implementation
 #[async_trait]
 impl crate::effects::JournalEffects for Box<dyn AuraEffects> {
-    async fn merge_facts(&self, target: &aura_core::Journal, delta: &aura_core::Journal) -> Result<aura_core::Journal, aura_core::AuraError> {
+    async fn merge_facts(
+        &self,
+        target: &aura_core::Journal,
+        delta: &aura_core::Journal,
+    ) -> Result<aura_core::Journal, aura_core::AuraError> {
         (**self).merge_facts(target, delta).await
     }
 
-    async fn refine_caps(&self, target: &aura_core::Journal, refinement: &aura_core::Journal) -> Result<aura_core::Journal, aura_core::AuraError> {
+    async fn refine_caps(
+        &self,
+        target: &aura_core::Journal,
+        refinement: &aura_core::Journal,
+    ) -> Result<aura_core::Journal, aura_core::AuraError> {
         (**self).refine_caps(target, refinement).await
     }
 
@@ -240,19 +277,36 @@ impl crate::effects::JournalEffects for Box<dyn AuraEffects> {
         (**self).get_journal().await
     }
 
-    async fn persist_journal(&self, journal: &aura_core::Journal) -> Result<(), aura_core::AuraError> {
+    async fn persist_journal(
+        &self,
+        journal: &aura_core::Journal,
+    ) -> Result<(), aura_core::AuraError> {
         (**self).persist_journal(journal).await
     }
 
-    async fn get_flow_budget(&self, context: &aura_core::relationships::ContextId, peer: &DeviceId) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
+    async fn get_flow_budget(
+        &self,
+        context: &aura_core::relationships::ContextId,
+        peer: &DeviceId,
+    ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         (**self).get_flow_budget(context, peer).await
     }
 
-    async fn update_flow_budget(&self, context: &aura_core::relationships::ContextId, peer: &DeviceId, budget: &aura_core::FlowBudget) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
+    async fn update_flow_budget(
+        &self,
+        context: &aura_core::relationships::ContextId,
+        peer: &DeviceId,
+        budget: &aura_core::FlowBudget,
+    ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         (**self).update_flow_budget(context, peer, budget).await
     }
 
-    async fn charge_flow_budget(&self, context: &aura_core::relationships::ContextId, peer: &DeviceId, cost: u32) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
+    async fn charge_flow_budget(
+        &self,
+        context: &aura_core::relationships::ContextId,
+        peer: &DeviceId,
+        cost: u32,
+    ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         (**self).charge_flow_budget(context, peer, cost).await
     }
 }

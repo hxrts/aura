@@ -11,7 +11,9 @@ use crate::{
 use async_trait::async_trait;
 use aura_core::{relationships::ContextId, DeviceId, Receipt};
 use aura_wot::Capability;
-use rumpsteak_aura_choreography::effects::{ChoreoHandler, ChoreographyError, Label, Result as ChoreoResult};
+use rumpsteak_aura_choreography::effects::{
+    ChoreoHandler, ChoreographyError, Label, Result as ChoreoResult,
+};
 // Note: Endpoint type should be available from effects or another module
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;

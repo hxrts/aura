@@ -6,7 +6,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse::Parse, Ident, Token, Type, LitStr};
+use syn::{parse::Parse, Ident, LitStr, Token, Type};
 
 /// Input specification for the aura_effect_implementations macro
 #[derive(Clone)]
@@ -35,14 +35,14 @@ pub struct EffectOperation {
 impl Parse for EffectImplementationsInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut implementations = Vec::new();
-        
+
         while !input.is_empty() {
             implementations.push(input.parse()?);
             if input.peek(Token![,]) {
                 input.parse::<Token![,]>()?;
             }
         }
-        
+
         Ok(EffectImplementationsInput { implementations })
     }
 }
@@ -55,10 +55,10 @@ impl Parse for EffectTraitImpl {
         let effect_type = input.parse()?;
         input.parse::<Token![->]>()?;
         let error_type = input.parse()?;
-        
+
         let content;
         syn::braced!(content in input);
-        
+
         let mut operations = Vec::new();
         while !content.is_empty() {
             operations.push(content.parse()?);
@@ -66,7 +66,7 @@ impl Parse for EffectTraitImpl {
                 content.parse::<Token![,]>()?;
             }
         }
-        
+
         Ok(EffectTraitImpl {
             trait_name,
             effect_type,
@@ -82,7 +82,7 @@ impl Parse for EffectOperation {
         let operation_name = input.parse()?;
         input.parse::<Token![=>]>()?;
         let method_name = input.parse()?;
-        
+
         let param_type = if input.peek(syn::token::Paren) {
             let content;
             syn::parenthesized!(content in input);
@@ -94,14 +94,14 @@ impl Parse for EffectOperation {
         } else {
             None
         };
-        
+
         let return_type = if input.peek(Token![->]) {
             input.parse::<Token![->]>()?;
             Some(input.parse()?)
         } else {
             None
         };
-        
+
         Ok(EffectOperation {
             operation_name,
             method_name,
@@ -117,20 +117,20 @@ pub fn aura_effect_implementations_impl(input: TokenStream) -> TokenStream {
         Ok(input) => input,
         Err(e) => return e.to_compile_error().into(),
     };
-    
+
     let mut generated = Vec::new();
-    
+
     for implementation in input.implementations {
         match generate_trait_impl(&implementation) {
             Ok(impl_code) => generated.push(impl_code),
             Err(e) => return e.to_compile_error().into(),
         }
     }
-    
+
     quote! {
         use aura_core::AuraError;
         use serde::{de::DeserializeOwned, Serialize};
-        
+
         /// Helper to serialize parameters for effect execution
         fn serialize_effect_params<T: Serialize>(
             param: &T,
@@ -139,7 +139,7 @@ pub fn aura_effect_implementations_impl(input: TokenStream) -> TokenStream {
                 AuraError::internal(format!("Failed to serialize effect parameters: {}", e))
             })
         }
-        
+
         /// Helper to deserialize effect results
         fn deserialize_effect_result<T: DeserializeOwned>(
             bytes: &[u8],
@@ -148,20 +148,22 @@ pub fn aura_effect_implementations_impl(input: TokenStream) -> TokenStream {
                 AuraError::internal(format!("Failed to deserialize effect result: {}", e))
             })
         }
-        
+
         #(#generated)*
-    }.into()
+    }
+    .into()
 }
 
 fn generate_trait_impl(spec: &EffectTraitImpl) -> Result<proc_macro2::TokenStream, syn::Error> {
     let trait_name = &spec.trait_name;
     let effect_type = &spec.effect_type;
     let error_type = &spec.error_type;
-    
-    let methods = spec.operations.iter().map(|op| {
-        generate_method(op, effect_type, error_type)
-    });
-    
+
+    let methods = spec
+        .operations
+        .iter()
+        .map(|op| generate_method(op, effect_type, error_type));
+
     Ok(quote! {
         #[async_trait::async_trait]
         impl #trait_name for AuraEffectSystem {
@@ -177,7 +179,7 @@ fn generate_method(
 ) -> proc_macro2::TokenStream {
     let operation_name = &op.operation_name;
     let method_name = &op.method_name;
-    
+
     match (&op.param_type, &op.return_type) {
         (None, None) => {
             // No parameters, no return value
@@ -189,7 +191,7 @@ fn generate_method(
                     Ok(())
                 }
             }
-        },
+        }
         (Some(param_type), None) => {
             // Has parameters, no return value
             quote! {
@@ -201,7 +203,7 @@ fn generate_method(
                     Ok(())
                 }
             }
-        },
+        }
         (None, Some(return_type)) => {
             // No parameters, has return value
             quote! {
@@ -212,7 +214,7 @@ fn generate_method(
                     deserialize_effect_result(&result).map_err(|e| e.into())
                 }
             }
-        },
+        }
         (Some(param_type), Some(return_type)) => {
             // Has parameters and return value
             quote! {
@@ -224,6 +226,6 @@ fn generate_method(
                     deserialize_effect_result(&result).map_err(|e| e.into())
                 }
             }
-        },
+        }
     }
 }

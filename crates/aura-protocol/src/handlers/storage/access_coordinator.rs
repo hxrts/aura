@@ -98,7 +98,11 @@ impl StorageAccessCoordinator {
     }
 
     /// Register capabilities for a device
-    pub fn register_capabilities(&mut self, device_id: DeviceId, capabilities: StorageCapabilitySet) {
+    pub fn register_capabilities(
+        &mut self,
+        device_id: DeviceId,
+        capabilities: StorageCapabilitySet,
+    ) {
         self.device_capabilities.insert(device_id, capabilities);
     }
 
@@ -115,7 +119,8 @@ impl StorageAccessCoordinator {
         let effective_caps = device_caps.meet(&request.capabilities);
 
         // Determine required capability for this operation
-        let required_capability = self.get_required_capability(&request.operation, &request.resource)?;
+        let required_capability =
+            self.get_required_capability(&request.operation, &request.resource)?;
 
         // Check if effective capabilities satisfy requirement
         if effective_caps.satisfies(&required_capability) {
@@ -134,12 +139,16 @@ impl StorageAccessCoordinator {
         operation: &StorageOperation,
         resource: &StorageResource,
     ) -> AuraResult<StorageCapability> {
-        use aura_store::capabilities::{StorageResource as StoreResource};
+        use aura_store::capabilities::StorageResource as StoreResource;
 
         let store_resource = match resource {
             StorageResource::Content(content_id) => StoreResource::content(&content_id.to_string()),
-            StorageResource::Chunk(chunk_id) => StoreResource::content(&format!("chunk:{}", chunk_id)),
-            StorageResource::Namespace(account_id) => StoreResource::namespace(&account_id.to_string()),
+            StorageResource::Chunk(chunk_id) => {
+                StoreResource::content(&format!("chunk:{}", chunk_id))
+            }
+            StorageResource::Namespace(account_id) => {
+                StoreResource::namespace(&account_id.to_string())
+            }
             StorageResource::SearchIndex => StoreResource::SearchIndex,
             StorageResource::GcSystem => StoreResource::GarbageCollection,
         };
@@ -180,25 +189,29 @@ impl StorageAccessCoordinator {
     }
 
     /// Create batch access requests for multiple operations
-    pub fn check_batch_access(&self, requests: &[AccessRequest]) -> AuraResult<Vec<AccessDecision>> {
+    pub fn check_batch_access(
+        &self,
+        requests: &[AccessRequest],
+    ) -> AuraResult<Vec<AccessDecision>> {
         requests.iter().map(|req| self.check_access(req)).collect()
     }
 
     /// Update capabilities for a device (meet operation for restriction)
     pub fn update_capabilities(
-        &mut self, 
-        device_id: DeviceId, 
-        new_capabilities: StorageCapabilitySet
+        &mut self,
+        device_id: DeviceId,
+        new_capabilities: StorageCapabilitySet,
     ) -> AuraResult<()> {
-        let current_caps = self.device_capabilities
+        let current_caps = self
+            .device_capabilities
             .get(&device_id)
             .cloned()
             .unwrap_or_default();
-        
+
         // Meet operation ensures capabilities can only be refined (restricted)
         let updated_caps = current_caps.meet(&new_capabilities);
         self.device_capabilities.insert(device_id, updated_caps);
-        
+
         Ok(())
     }
 
@@ -259,7 +272,7 @@ pub enum ResourceConstraint {
 mod tests {
     use super::*;
     use aura_core::{ContentId, DeviceId, Hash32};
-    use aura_store::capabilities::{StorageResource as StoreResource};
+    use aura_store::capabilities::StorageResource as StoreResource;
 
     #[test]
     fn test_access_coordination_allow() {
@@ -311,7 +324,9 @@ mod tests {
         // Restrict to read-only
         let mut restricted_caps = StorageCapabilitySet::new();
         restricted_caps.add(StorageCapability::read(StoreResource::Global));
-        coordinator.update_capabilities(device_id, restricted_caps).unwrap();
+        coordinator
+            .update_capabilities(device_id, restricted_caps)
+            .unwrap();
 
         // Should now deny write operations
         let write_request = AccessRequest {

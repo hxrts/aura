@@ -2,8 +2,8 @@
 //!
 //! Simple merkle tree utilities using pure synchronous hashing.
 
-use crate::Result;
 use crate::hash::hash;
+use crate::Result;
 
 /// Merkle proof structure containing sibling path and directions
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

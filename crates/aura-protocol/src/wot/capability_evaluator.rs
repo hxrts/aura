@@ -37,7 +37,9 @@ pub struct EffectiveCapabilitySet {
 impl EffectiveCapabilitySet {
     /// Check if these capabilities can satisfy a requirement
     pub fn can_satisfy(&self, required: &Capability) -> bool {
-        self.capabilities.permits_capability(required)
+        self.capabilities
+            .capabilities()
+            .any(|cap| cap.implies(required))
     }
 }
 
@@ -177,7 +179,7 @@ impl CapabilityEvaluator {
         _effect_system: &dyn EffectSystemInterface,
     ) -> AuraResult<Policy> {
         // Placeholder: In actual implementation, this would query the policy from storage
-        Ok(Policy::new(HashMap::new()))
+        Ok(Policy::new())
     }
 
     async fn get_delegation_chains(

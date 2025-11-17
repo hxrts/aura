@@ -9,11 +9,11 @@
 //! these are foundational capability trait definitions, similar to CryptoEffects,
 //! NetworkEffects, etc., and belong in the interface layer.
 
-use async_trait::async_trait;
 use crate::{
     identifiers::{AccountId, DeviceId, SessionId},
     AuraResult as Result,
 };
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

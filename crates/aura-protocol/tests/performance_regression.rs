@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Performance regression tests for the effect system
 //!
 //! These tests ensure that performance optimizations don't regress
@@ -97,7 +99,9 @@ fn test_effect_execution_performance() {
         let iterations = 10_000;
 
         for _ in 0..iterations {
-            let _ = system.send_to_peer(test_device_id(b"test"), vec![0; 256]).await;
+            let _ = system
+                .send_to_peer(test_device_id(b"test"), vec![0; 256])
+                .await;
         }
 
         let elapsed = start.elapsed();

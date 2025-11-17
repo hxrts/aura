@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Tests for effect handlers
 //!
 //! This module tests the different handler implementations (real, mock, simulation)

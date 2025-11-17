@@ -87,7 +87,9 @@ pub use runtime::{
 /// effect handlers. The runtime composes real system effects into device workflows.
 pub async fn create_production_agent(device_id: DeviceId) -> AgentResult<AuraAgent> {
     let config = runtime::EffectSystemConfig::for_production(device_id)?;
-    let core_effects = aura_protocol::effects::AuraEffectSystemFactory::new(aura_protocol::effects::EffectSystemConfig { device_id })?;
+    let core_effects = aura_protocol::effects::AuraEffectSystemFactory::new(
+        aura_protocol::effects::EffectSystemConfig { device_id },
+    )?;
 
     Ok(AuraAgent::new(core_effects, device_id))
 }
@@ -106,7 +108,9 @@ pub fn create_testing_agent(device_id: DeviceId) -> AuraAgent {
 /// The seed ensures deterministic behavior across simulation runs.
 pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AuraAgent {
     let config = runtime::EffectSystemConfig::for_simulation(device_id, seed);
-    let core_effects =
-        aura_protocol::effects::AuraEffectSystemFactory::new(aura_protocol::effects::EffectSystemConfig { device_id }).expect("Failed to create simulation effect system");
+    let core_effects = aura_protocol::effects::AuraEffectSystemFactory::new(
+        aura_protocol::effects::EffectSystemConfig { device_id },
+    )
+    .expect("Failed to create simulation effect system");
     AuraAgent::new(core_effects, device_id)
 }

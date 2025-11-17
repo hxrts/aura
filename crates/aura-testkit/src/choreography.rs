@@ -6,9 +6,9 @@
 //!
 //! Enhanced for stateless effect system architecture (work/021.md).
 
+use crate::foundation::SimpleTestContext;
 use crate::{DeviceTestFixture, TestEffectsBuilder, TestExecutionMode};
 use aura_core::DeviceId;
-use crate::foundation::SimpleTestContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

@@ -100,9 +100,12 @@ impl Parse for EffectHandlerConfig {
             }
         }
 
-        let trait_name = trait_name.ok_or_else(|| Error::new(Span::call_site(), "trait_name is required"))?;
-        let mock_handler = mock_handler.ok_or_else(|| Error::new(Span::call_site(), "mock handler is required"))?;
-        let real_handler = real_handler.ok_or_else(|| Error::new(Span::call_site(), "real handler is required"))?;
+        let trait_name =
+            trait_name.ok_or_else(|| Error::new(Span::call_site(), "trait_name is required"))?;
+        let mock_handler = mock_handler
+            .ok_or_else(|| Error::new(Span::call_site(), "mock handler is required"))?;
+        let real_handler = real_handler
+            .ok_or_else(|| Error::new(Span::call_site(), "real handler is required"))?;
 
         Ok(EffectHandlerConfig {
             trait_name,
@@ -142,7 +145,8 @@ impl HandlerVariant {
                 "imports" => {
                     let content;
                     syn::bracketed!(content in input);
-                    let paths: Punctuated<Path, Comma> = content.parse_terminated(Path::parse, Token![,])?;
+                    let paths: Punctuated<Path, Comma> =
+                        content.parse_terminated(Path::parse, Token![,])?;
                     imports = paths.into_iter().collect();
                 }
                 "features" => {
@@ -164,7 +168,8 @@ impl HandlerVariant {
             }
         }
 
-        let struct_name = struct_name.ok_or_else(|| Error::new(Span::call_site(), "struct_name is required"))?;
+        let struct_name =
+            struct_name.ok_or_else(|| Error::new(Span::call_site(), "struct_name is required"))?;
 
         Ok(HandlerVariant {
             struct_name,
@@ -199,18 +204,18 @@ impl HandlerVariant {
 
         while !input.is_empty() {
             let name: Ident = input.parse()?;
-            
+
             // Parse parameters in parentheses
             let content;
             syn::parenthesized!(content in input);
             let mut params = Vec::new();
-            
+
             while !content.is_empty() {
                 let param_name: Ident = content.parse()?;
                 content.parse::<Token![:]>()?;
                 let param_type: Type = content.parse()?;
                 params.push((param_name, param_type));
-                
+
                 if content.peek(Token![,]) {
                     content.parse::<Token![,]>()?;
                 }
@@ -283,12 +288,17 @@ pub fn generate_effect_handlers(config: EffectHandlerConfig) -> TokenStream2 {
 }
 
 /// Generate implementation for a single handler variant
-fn generate_handler_impl(trait_name: &Path, handler: &HandlerVariant, is_mock: bool) -> TokenStream2 {
+fn generate_handler_impl(
+    trait_name: &Path,
+    handler: &HandlerVariant,
+    is_mock: bool,
+) -> TokenStream2 {
     let struct_name = &handler.struct_name;
     let state_fields = generate_state_fields(&handler.state_fields);
     let constructor = generate_constructor(struct_name, &handler.state_fields, is_mock);
     let default_impl = generate_default_impl(struct_name, is_mock);
-    let trait_impl = generate_trait_impl(trait_name, struct_name, &handler.methods, &handler.features);
+    let trait_impl =
+        generate_trait_impl(trait_name, struct_name, &handler.methods, &handler.features);
     let imports = generate_imports(&handler.imports);
     let feature_attrs = generate_feature_attrs(&handler.features);
 
@@ -310,11 +320,14 @@ fn generate_handler_impl(trait_name: &Path, handler: &HandlerVariant, is_mock: b
 
 /// Generate state field definitions
 fn generate_state_fields(fields: &[StateField]) -> Vec<TokenStream2> {
-    fields.iter().map(|field| {
-        let name = &field.name;
-        let field_type = &field.field_type;
-        quote! { #name: #field_type }
-    }).collect()
+    fields
+        .iter()
+        .map(|field| {
+            let name = &field.name;
+            let field_type = &field.field_type;
+            quote! { #name: #field_type }
+        })
+        .collect()
 }
 
 /// Generate constructor methods
@@ -333,7 +346,10 @@ fn generate_constructor(struct_name: &Ident, fields: &[StateField], is_mock: boo
         // Mock constructor with configurable state
         let field_names: Vec<_> = fields.iter().map(|f| &f.name).collect();
         let field_types: Vec<_> = fields.iter().map(|f| &f.field_type).collect();
-        let default_values: Vec<_> = fields.iter().map(|_| quote! { Default::default() }).collect();
+        let default_values: Vec<_> = fields
+            .iter()
+            .map(|_| quote! { Default::default() })
+            .collect();
 
         quote! {
             impl #struct_name {
@@ -360,7 +376,10 @@ fn generate_constructor(struct_name: &Ident, fields: &[StateField], is_mock: boo
     } else {
         // Real constructor
         let field_names: Vec<_> = fields.iter().map(|f| &f.name).collect();
-        let default_values: Vec<_> = fields.iter().map(|_| quote! { Default::default() }).collect();
+        let default_values: Vec<_> = fields
+            .iter()
+            .map(|_| quote! { Default::default() })
+            .collect();
 
         quote! {
             impl #struct_name {
@@ -398,30 +417,37 @@ fn generate_default_impl(struct_name: &Ident, is_mock: bool) -> TokenStream2 {
 
 /// Generate trait implementation
 fn generate_trait_impl(
-    trait_name: &Path, 
-    struct_name: &Ident, 
+    trait_name: &Path,
+    struct_name: &Ident,
     methods: &[MethodImpl],
     features: &HandlerFeatures,
 ) -> TokenStream2 {
-    let method_impls: Vec<_> = methods.iter().map(|method| {
-        let name = &method.name;
-        let params: Vec<_> = method.params.iter().map(|(param_name, param_type)| {
-            quote! { #param_name: #param_type }
-        }).collect();
-        let return_type = &method.return_type;
-        let body = &method.body;
+    let method_impls: Vec<_> = methods
+        .iter()
+        .map(|method| {
+            let name = &method.name;
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .map(|(param_name, param_type)| {
+                    quote! { #param_name: #param_type }
+                })
+                .collect();
+            let return_type = &method.return_type;
+            let body = &method.body;
 
-        if features.async_trait {
-            // For async trait, the body should be an async block or expression
-            quote! {
-                async fn #name(&self, #(#params),*) -> #return_type #body
+            if features.async_trait {
+                // For async trait, the body should be an async block or expression
+                quote! {
+                    async fn #name(&self, #(#params),*) -> #return_type #body
+                }
+            } else {
+                quote! {
+                    fn #name(&self, #(#params),*) -> #return_type #body
+                }
             }
-        } else {
-            quote! {
-                fn #name(&self, #(#params),*) -> #return_type #body
-            }
-        }
-    }).collect();
+        })
+        .collect();
 
     if features.async_trait {
         quote! {

@@ -91,7 +91,11 @@ impl TestkitSimulatorBridge {
     }
 
     /// Convert harness to effect system
-    pub fn harness_to_effects<H>(_harness: H, device_id: DeviceId, seed: u64) -> SimResult<Arc<AuraEffectSystem>> {
+    pub fn harness_to_effects<H>(
+        _harness: H,
+        device_id: DeviceId,
+        seed: u64,
+    ) -> SimResult<Arc<AuraEffectSystem>> {
         // Convert test harness to effect system instead of middleware stack
         let config = EffectSystemConfig::for_simulation(device_id, seed);
         let effect_system = Arc::new(AuraEffectSystem::new(config).map_err(|e| {

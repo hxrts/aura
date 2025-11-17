@@ -1,8 +1,8 @@
 //! Aura Macros - Proc Macro Crate
 //!
 //! This crate provides choreography and effect handler macros for the Aura project.
-//! 
-//! Following the external-demo pattern, our choreography! macro inherits ALL 
+//!
+//! Following the external-demo pattern, our choreography! macro inherits ALL
 //! rumpsteak-aura features automatically while providing a foundation for
 //! future Aura-specific enhancements.
 
@@ -10,9 +10,9 @@ use proc_macro::TokenStream;
 
 mod choreography;
 mod effect_handlers;
-mod handler_adapters;
 mod effect_system;
 mod error_types;
+mod handler_adapters;
 mod test_macros;
 
 /// Full-featured choreography! macro with complete rumpsteak-aura feature inheritance
@@ -166,7 +166,7 @@ pub fn aura_effect_implementations(input: TokenStream) -> TokenStream {
 ///         ContentNotFound { content_id: String } => "Content not found: {content_id}",
 ///         
 ///         #[category = "storage"]
-///         QuotaExceeded { requested: u64, available: u64 } => 
+///         QuotaExceeded { requested: u64, available: u64 } =>
 ///             "Storage quota exceeded: requested {requested} bytes, available {available} bytes",
 ///             
 ///         NetworkTimeout => "Network operation timed out",

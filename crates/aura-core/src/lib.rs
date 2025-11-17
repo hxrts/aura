@@ -126,24 +126,43 @@ pub use errors::{AuraError, Result as AuraResult};
 
 // Effect interfaces
 pub use effects::{
-    AuthorizationEffects, ChaosEffects, ConsoleEffects, CryptoEffects, JournalEffects, RandomEffects,
-    ReliabilityEffects, TestingEffects, TimeEffects,
-    // Supertraits for common effect combinations
-    ChoreographyEffects, TreeEffects, SigningEffects, CrdtEffects, AntiEntropyEffects,
-    MinimalEffects, SnapshotEffects,
+    AntiEntropyEffects,
+    AuthorizationEffects,
     // Reliability types (unified retry implementation)
-    BackoffStrategy, RetryPolicy, RetryResult, RetryContext, ReliabilityError,
+    BackoffStrategy,
+    ChaosEffects,
+    // Supertraits for common effect combinations
+    ChoreographyEffects,
+    ConsoleEffects,
+    CrdtEffects,
+    CryptoEffects,
+    JournalEffects,
+    MinimalEffects,
+    RandomEffects,
+    RateLimit,
     // Rate limiting types (unified rate limiting implementation)
-    RateLimitConfig, RateLimit, RateLimitResult, RateLimiter, RateLimiterStatistics,
+    RateLimitConfig,
+    RateLimitResult,
+    RateLimiter,
+    RateLimiterStatistics,
+    ReliabilityEffects,
+    ReliabilityError,
+    RetryContext,
+    RetryPolicy,
+    RetryResult,
+    SigningEffects,
+    SnapshotEffects,
+    TestingEffects,
+    TimeEffects,
+    TreeEffects,
 };
 
 // Cryptographic utilities
 pub use crypto::{
-    derive_encryption_key, derive_key_material, ed25519_verify, generate_uuid,
-    build_commitment_tree, build_merkle_root, verify_merkle_proof,
-    Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey,
-    HpkeKeyPair, HpkePrivateKey, HpkePublicKey, IdentityKeyContext, KeyDerivationSpec,
-    MerkleProof, PermissionKeyContext, SimpleMerkleProof,
+    build_commitment_tree, build_merkle_root, derive_encryption_key, derive_key_material,
+    ed25519_verify, generate_uuid, verify_merkle_proof, Ed25519Signature, Ed25519SigningKey,
+    Ed25519VerifyingKey, HpkeKeyPair, HpkePrivateKey, HpkePublicKey, IdentityKeyContext,
+    KeyDerivationSpec, MerkleProof, PermissionKeyContext, SimpleMerkleProof,
 };
 
 // FROST threshold cryptography module (re-export for aura-frost compatibility)

@@ -5,10 +5,10 @@
 //! Target: <250 lines, focused on choreographic channel lifecycle.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
+use crate::handlers::core::AuraHandler;
+use crate::handlers::{AuraHandlerError, EffectType, ExecutionMode};
 use aura_core::{ContextId, DeviceId};
 use aura_macros::choreography;
-use crate::handlers::{AuraHandlerError, EffectType, ExecutionMode};
-use crate::handlers::core::AuraHandler;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -343,7 +343,7 @@ impl ChannelTeardownCoordinator {
 // Choreographic Protocol Definitions
 mod channel_establishment {
     use super::*;
-    
+
     // Multi-phase channel establishment with resource allocation
     choreography! {
         #[namespace = "channel_establishment"]
@@ -387,7 +387,7 @@ mod channel_establishment {
 
 mod channel_teardown {
     use super::*;
-    
+
     // Coordinated channel teardown with cleanup
     choreography! {
     #[namespace = "channel_teardown"]

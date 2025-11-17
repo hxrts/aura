@@ -12,8 +12,9 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use rumpsteak_aura_choreography::{
-    extensions::ExtensionRegistry, parse_and_generate_with_extensions,
-    compiler::{parse_choreography_str, project, generate_choreography_code_with_namespacing},
+    compiler::{generate_choreography_code_with_namespacing, parse_choreography_str, project},
+    extensions::ExtensionRegistry,
+    parse_and_generate_with_extensions,
 };
 use syn::{parse::Parse, Ident, Token};
 
@@ -94,13 +95,16 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
         generate_aura_wrapper(parsed, namespace.as_deref())
     } else {
         // Fallback: generate with default Alice/Bob roles
-        generate_aura_wrapper(&ChoreographyInput {
-            _protocol_name: Ident::new("DefaultProtocol", proc_macro2::Span::call_site()),
-            roles: vec![
-                Ident::new("Alice", proc_macro2::Span::call_site()),
-                Ident::new("Bob", proc_macro2::Span::call_site()),
-            ],
-        }, None)
+        generate_aura_wrapper(
+            &ChoreographyInput {
+                _protocol_name: Ident::new("DefaultProtocol", proc_macro2::Span::call_site()),
+                roles: vec![
+                    Ident::new("Alice", proc_macro2::Span::call_site()),
+                    Ident::new("Bob", proc_macro2::Span::call_site()),
+                ],
+            },
+            None,
+        )
     };
 
     // Return both namespace-aware modules
@@ -335,7 +339,7 @@ fn choreography_impl_namespace_aware(input: TokenStream) -> Result<TokenStream, 
 
             // Generate code with namespace support
             let generated_code = generate_choreography_code_with_namespacing(&choreo, &local_types);
-            
+
             // Add necessary imports for the generated rumpsteak code
             let imports = quote! {
                 #[allow(unused_imports)]
@@ -387,7 +391,7 @@ fn choreography_impl_namespace_aware(input: TokenStream) -> Result<TokenStream, 
 /// Extract namespace from choreography input tokens
 fn extract_namespace_from_input(input: TokenStream) -> Option<String> {
     let input_str = input.to_string();
-    
+
     // Simple regex-based extraction of namespace attribute
     // Pattern: #[namespace = "namespace_name"]
     let re = regex::Regex::new(r#"#\s*\[\s*namespace\s*=\s*"([^"]+)"\s*\]"#).ok()?;

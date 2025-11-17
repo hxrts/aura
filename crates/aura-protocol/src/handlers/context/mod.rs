@@ -26,15 +26,15 @@ pub mod immutable;
 
 // Re-export from context.rs (was the original context.rs file)
 pub use context::{
-    AgentContext, AuraContext, ChoreographicContext, PlatformInfo,
-    SimulationContext, TracingContext, MetricsContext,
+    AgentContext, AuraContext, ChoreographicContext, MetricsContext, PlatformInfo,
+    SimulationContext, TracingContext,
 };
 
 // Re-export immutable context types with namespace prefix to avoid conflicts
 pub mod immutable_types {
     pub use super::immutable::{
         AgentContext, AuraContext, AuthenticationState, ChoreographicContext,
-        FaultInjectionSettings, MetricsContext, PlatformInfo,
-        PropertyCheckingConfig, SessionMetadata, SimulationContext, TracingContext,
+        FaultInjectionSettings, MetricsContext, PlatformInfo, PropertyCheckingConfig,
+        SessionMetadata, SimulationContext, TracingContext,
     };
 }

@@ -240,9 +240,7 @@ pub fn arb_small_count() -> impl Strategy<Value = usize> {
 /// }
 /// ```
 pub fn arb_threshold_config() -> impl Strategy<Value = (u16, u16)> {
-    (1u16..=10u16).prop_flat_map(|threshold| {
-        (Just(threshold), threshold..=20u16)
-    })
+    (1u16..=10u16).prop_flat_map(|threshold| (Just(threshold), threshold..=20u16))
 }
 
 // ============================================================================

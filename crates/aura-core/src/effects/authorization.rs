@@ -4,7 +4,7 @@
 //! the Aura system. These effects enable verification of permissions, delegation
 //! of authority, and enforcement of security policies.
 
-use crate::{AuraError, DeviceId, Cap};
+use crate::{AuraError, Cap, DeviceId};
 use async_trait::async_trait;
 
 /// Authorization operations for capability-based access control
@@ -58,10 +58,7 @@ pub trait AuthorizationEffects {
 pub enum AuthorizationError {
     /// The requested operation is not permitted
     #[error("Access denied: {operation} on {resource}")]
-    AccessDenied {
-        operation: String,
-        resource: String,
-    },
+    AccessDenied { operation: String, resource: String },
 
     /// The capability set is invalid or malformed
     #[error("Invalid capability set: {reason}")]

@@ -7,9 +7,12 @@
 #![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
 
 use super::effect_system_trait::GuardEffectSystem;
-use crate::guards::{flow::FlowGuard, ProtocolGuard};
+use crate::{
+    guards::{flow::FlowGuard, ProtocolGuard},
+    wot::{EffectSystemInterface, EffectiveCapabilitySet},
+};
 use aura_core::{relationships::ContextId, AuraError, AuraResult, DeviceId, Receipt};
-use aura_wot::{Capability, EffectiveCapabilitySet};
+use aura_wot::Capability;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
@@ -101,7 +104,7 @@ impl SendGuardChain {
     /// - **Charge-Before-Send**: Flow budget must be charged before any transport send
     /// - **No-Observable-Without-Charge**: No send occurs without prior budget charge
     /// - **Capability-Gated**: All sends require appropriate message capabilities
-    pub async fn evaluate<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+    pub async fn evaluate<E: GuardEffectSystem + EffectSystemInterface>(
         &self,
         effect_system: &E,
     ) -> AuraResult<SendGuardResult> {
@@ -214,7 +217,7 @@ impl SendGuardChain {
     }
 
     /// Evaluate the capability guard: need(m) ≤ Caps(ctx)
-    async fn evaluate_capability_guard<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+    async fn evaluate_capability_guard<E: GuardEffectSystem + EffectSystemInterface>(
         &self,
         effect_system: &E,
     ) -> AuraResult<(bool, EffectiveCapabilitySet)> {
@@ -237,7 +240,7 @@ impl SendGuardChain {
     }
 
     /// Evaluate the flow guard: headroom(ctx, cost)
-    async fn evaluate_flow_guard<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+    async fn evaluate_flow_guard<E: GuardEffectSystem + EffectSystemInterface>(
         &self,
         effect_system: &E,
     ) -> AuraResult<Receipt> {
@@ -259,7 +262,7 @@ impl SendGuardChain {
     }
 
     /// Convenience method to evaluate and return only the authorization decision
-    pub async fn is_send_authorized<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+    pub async fn is_send_authorized<E: GuardEffectSystem + EffectSystemInterface>(
         &self,
         effect_system: &E,
     ) -> AuraResult<bool> {
@@ -268,7 +271,7 @@ impl SendGuardChain {
     }
 
     /// Convenience method to evaluate and return the receipt if authorized
-    pub async fn authorize_send<E: GuardEffectSystem + aura_wot::EffectSystemInterface>(
+    pub async fn authorize_send<E: GuardEffectSystem + EffectSystemInterface>(
         &self,
         effect_system: &E,
     ) -> AuraResult<Option<Receipt>> {

@@ -298,9 +298,7 @@ impl TransportSender for NetworkTransportSender {
 
         // Send via network transport
         let transport = self.transport.read().await;
-        transport
-            .send(&peer, payload)
-            .await
+        transport.send(&peer, payload).await
     }
 
     async fn is_peer_reachable(&self, peer: &DeviceId) -> bool {

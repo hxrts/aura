@@ -116,7 +116,10 @@ impl AuraAgent {
     /// and construct agent via `AuraAgent::new()` in new code.
     pub fn for_testing(device_id: DeviceId) -> Self {
         let config = crate::runtime::EffectSystemConfig::for_testing(device_id);
-        let effects = aura_protocol::effects::AuraEffectSystemFactory::new(aura_protocol::effects::EffectSystemConfig { device_id }).expect("Failed to create test effect system");
+        let effects = aura_protocol::effects::AuraEffectSystemFactory::new(
+            aura_protocol::effects::EffectSystemConfig { device_id },
+        )
+        .expect("Failed to create test effect system");
         Self::new(effects, device_id)
     }
 

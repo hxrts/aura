@@ -6,8 +6,8 @@
 #![allow(missing_docs)]
 
 use crate::FrostResult;
-use aura_core::{AuraError, DeviceId};
 use aura_core::frost::{PartialSignature, ThresholdSignature};
+use aura_core::{AuraError, DeviceId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 

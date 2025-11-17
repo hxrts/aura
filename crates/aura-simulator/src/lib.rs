@@ -22,7 +22,7 @@
 //!
 //! // Create simulation-specific effect handlers
 //! let time_handler = SimulationTimeHandler::new();
-//! 
+//!
 //! // Use handlers through effect system instead of middleware
 //! let timestamp = time_handler.current_timestamp().await?;
 //! ```
@@ -74,23 +74,23 @@ pub mod testkit_bridge;
 // Re-export core types for external usage
 pub use middleware::{
     ByzantineStrategy, FaultType, LogLevel, NetworkConfig, PerformanceMetrics,
-    PropertyViolationType, Result, SimulationOutcome, SimulatorConfig,
-    SimulatorContext, SimulatorError, SimulatorHandler, SimulatorOperation,
-    StateQuery, StatelessEffectsMiddleware, TimeConfig, TimeControlAction,
+    PropertyViolationType, Result, SimulationOutcome, SimulatorConfig, SimulatorContext,
+    SimulatorError, SimulatorHandler, SimulatorOperation, StateQuery, StatelessEffectsMiddleware,
+    TimeConfig, TimeControlAction,
 };
 
 // Re-export testkit bridge
 pub use testkit_bridge::{MiddlewareConfig, TestkitSimulatorBridge};
 
 // Re-export handler implementations
-pub use middleware::handler::CoreSimulatorHandler;
 pub use handlers::{
-    SimulationEffectComposer, ComposedSimulationEnvironment,
-    SimulationTimeHandler, SimulationFaultHandler, SimulationScenarioHandler
+    ComposedSimulationEnvironment, SimulationEffectComposer, SimulationFaultHandler,
+    SimulationScenarioHandler, SimulationTimeHandler,
 };
+pub use middleware::handler::CoreSimulatorHandler;
 
 // Re-export scenario types for convenience
-pub use handlers::{ScenarioDefinition, InjectionAction, TriggerCondition};
+pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};
 
 // Re-export Duration for convenience
 pub use std::time::Duration;

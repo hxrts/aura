@@ -25,8 +25,8 @@
 //! - **Session Isolation**: Each DKG session is cryptographically isolated
 //! - **Timeout Protection**: Built-in timeout handling prevents DoS attacks
 
-use aura_core::{AccountId, DeviceId};
 use aura_core::frost::PublicKeyPackage;
+use aura_core::{AccountId, DeviceId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 

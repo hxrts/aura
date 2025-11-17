@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Comprehensive Handler Coverage and Validation Tests
 //!
 //! This test suite validates that the Aura protocol has complete handler

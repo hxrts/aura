@@ -177,42 +177,41 @@ mod device_invitation_protocol {
     use super::*;
 
     choreography! {
-        #[namespace = "device_invitation"]
-        protocol DeviceInvitation {
-        roles: Inviter, Invitee, Coordinator;
+            #[namespace = "device_invitation"]
+            protocol DeviceInvitation {
+            roles: Inviter, Invitee, Coordinator;
 
-        // Phase 1: Invitation Creation
-        Inviter[guard_capability = "create_invitation",
-               flow_cost = 200,
-               journal_facts = "invitation_created"]
-        -> Coordinator: CreateInvitation(InvitationRequest);
+            // Phase 1: Invitation Creation
+            Inviter[guard_capability = "create_invitation",
+                   flow_cost = 200,
+                   journal_facts = "invitation_created"]
+            -> Coordinator: CreateInvitation(InvitationRequest);
 
-        // Phase 2: Invitation Delivery
-        Coordinator[guard_capability = "deliver_invitation",
-                   flow_cost = 100,
-                   journal_facts = "invitation_delivered"]
-        -> Invitee: DeliverInvitation(InvitationEnvelope);
+            // Phase 2: Invitation Delivery
+            Coordinator[guard_capability = "deliver_invitation",
+                       flow_cost = 100,
+                       journal_facts = "invitation_delivered"]
+            -> Invitee: DeliverInvitation(InvitationEnvelope);
 
-        // Phase 3: Delivery Confirmation
-        Coordinator[guard_capability = "confirm_delivery",
-                   flow_cost = 50,
-                   journal_facts = "delivery_confirmed"]
-        -> Inviter: ConfirmDelivery(InvitationDelivered);
+            // Phase 3: Delivery Confirmation
+            Coordinator[guard_capability = "confirm_delivery",
+                       flow_cost = 50,
+                       journal_facts = "delivery_confirmed"]
+            -> Inviter: ConfirmDelivery(InvitationDelivered);
 
-        // Phase 4: Invitation Response
-        Invitee[guard_capability = "respond_invitation",
-               flow_cost = 150,
-               journal_facts = "invitation_responded"]
-        -> Coordinator: RespondInvitation(InvitationAccepted);
+            // Phase 4: Invitation Response
+            Invitee[guard_capability = "respond_invitation",
+                   flow_cost = 150,
+                   journal_facts = "invitation_responded"]
+            -> Coordinator: RespondInvitation(InvitationAccepted);
 
-        // Phase 5: Result Notification
-        Coordinator[guard_capability = "notify_result",
-                   flow_cost = 75,
-                   journal_facts = "result_notified"]
-        -> Inviter: NotifyResult(DeviceInvitationResult);
+            // Phase 5: Result Notification
+            Coordinator[guard_capability = "notify_result",
+                       flow_cost = 75,
+                       journal_facts = "result_notified"]
+            -> Inviter: NotifyResult(DeviceInvitationResult);
+        }
     }
-}
-
 }
 
 // Invitation rejection choreography (alternative flow)
@@ -220,24 +219,23 @@ mod invitation_rejection_protocol {
     use super::*;
 
     choreography! {
-        #[namespace = "invitation_rejection"]
-        protocol InvitationRejection {
-        roles: Inviter, Invitee, Coordinator;
+            #[namespace = "invitation_rejection"]
+            protocol InvitationRejection {
+            roles: Inviter, Invitee, Coordinator;
 
-        // Rejection flow
-        Invitee[guard_capability = "reject_invitation",
-               flow_cost = 100,
-               journal_facts = "invitation_rejected"]
-        -> Coordinator: RejectInvitation(InvitationRejected);
+            // Rejection flow
+            Invitee[guard_capability = "reject_invitation",
+                   flow_cost = 100,
+                   journal_facts = "invitation_rejected"]
+            -> Coordinator: RejectInvitation(InvitationRejected);
 
-        // Rejection result notification
-        Coordinator[guard_capability = "notify_rejection",
-                   flow_cost = 75,
-                   journal_facts = "rejection_notified"]
-        -> Inviter: NotifyRejection(DeviceInvitationResult);
+            // Rejection result notification
+            Coordinator[guard_capability = "notify_rejection",
+                       flow_cost = 75,
+                       journal_facts = "rejection_notified"]
+            -> Inviter: NotifyRejection(DeviceInvitationResult);
+        }
     }
-}
-
 }
 
 /// Device invitation coordinator with in-memory ledger.

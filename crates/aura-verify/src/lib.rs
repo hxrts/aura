@@ -90,8 +90,7 @@ pub struct KeyMaterial {
     device_keys: std::collections::HashMap<aura_core::DeviceId, aura_core::Ed25519VerifyingKey>,
 
     /// Guardian public keys indexed by GuardianId
-    guardian_keys:
-        std::collections::HashMap<aura_core::GuardianId, aura_core::Ed25519VerifyingKey>,
+    guardian_keys: std::collections::HashMap<aura_core::GuardianId, aura_core::Ed25519VerifyingKey>,
 
     /// Group public keys for threshold verification indexed by AccountId
     group_keys: std::collections::HashMap<aura_core::AccountId, aura_core::Ed25519VerifyingKey>,

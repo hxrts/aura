@@ -73,14 +73,12 @@ pub fn verify_session_ticket(
     let ticket_bytes = serialize_session_ticket(ticket)?;
 
     // Verify the signature
-    aura_core::ed25519_verify(issuer_public_key, &ticket_bytes, ticket_signature).map_err(
-        |e| {
-            AuthenticationError::InvalidSessionTicket(format!(
-                "Session ticket signature verification failed: {}",
-                e
-            ))
-        },
-    )?;
+    aura_core::ed25519_verify(issuer_public_key, &ticket_bytes, ticket_signature).map_err(|e| {
+        AuthenticationError::InvalidSessionTicket(format!(
+            "Session ticket signature verification failed: {}",
+            e
+        ))
+    })?;
 
     tracing::debug!(
         session_id = %ticket.session_id,

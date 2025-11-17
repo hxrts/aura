@@ -14,9 +14,9 @@
 //! - Broadcasts events to all registered contexts
 //! - Tracks timeout tasks globally for cancellation
 
+use async_trait::async_trait;
 use aura_core::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 use aura_core::AuraError;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

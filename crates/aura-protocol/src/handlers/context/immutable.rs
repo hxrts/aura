@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-use super::{AuraHandlerError, ExecutionMode};
+use crate::handlers::{AuraHandlerError, ExecutionMode};
 use crate::effects::choreographic::ChoreographicRole;
 use aura_core::{AccountId, DeviceId, SessionId};
 

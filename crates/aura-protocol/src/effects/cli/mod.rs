@@ -11,12 +11,12 @@ use async_trait::async_trait;
 use aura_core::AuraResult;
 use std::path::{Path, PathBuf};
 
-pub mod handler;
 pub mod config;
+pub mod handler;
 pub mod output;
 
-pub use handler::*;
 pub use config::*;
+pub use handler::*;
 pub use output::*;
 
 /// CLI-specific effects for command-line operations

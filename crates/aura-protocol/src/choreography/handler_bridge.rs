@@ -4,7 +4,9 @@
 //! This provides the interface that choreographic protocols need without
 //! depending on concrete runtime implementations.
 
+use crate::guards::LeakageBudget;
 use async_trait::async_trait;
+use aura_core::effects::ExecutionMode;
 use aura_core::{relationships::ContextId, DeviceId};
 use aura_wot::Capability;
 use rumpsteak_aura_choreography::effects::{
@@ -12,8 +14,6 @@ use rumpsteak_aura_choreography::effects::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
-use crate::guards::LeakageBudget;
-use aura_core::effects::ExecutionMode;
 
 /// Guard profile for message sending operations
 #[derive(Debug, Clone)]
@@ -38,19 +38,19 @@ impl Default for SendGuardProfile {
 }
 
 /// Trait for choreographic handler configuration
-/// 
+///
 /// This trait provides the interface that choreographic protocols need
 /// without depending on concrete runtime implementations.
 pub trait ChoreographicHandler: Send + Sync {
     /// Get the device ID
     fn device_id(&self) -> DeviceId;
-    
+
     /// Add role mapping for choreographic protocols
     fn add_role_mapping(&mut self, role_name: String, device_id: DeviceId);
-    
+
     /// Set flow context for capability tracking
     fn set_flow_context(&mut self, device_id: DeviceId, context_id: ContextId);
-    
+
     /// Configure guard profile for message types
     fn configure_guard(&mut self, message_type: &'static str, profile: SendGuardProfile);
 }
@@ -59,13 +59,13 @@ pub trait ChoreographicHandler: Send + Sync {
 pub trait ChoreographicEndpoint: Send + Sync + Clone {
     /// Create a new endpoint for the given device
     fn new(device_id: DeviceId) -> Self;
-    
+
     /// Get the device ID
     fn device_id(&self) -> DeviceId;
 }
 
 /// Generic choreographic adapter trait
-/// 
+///
 /// This combines the choreographic handler interface with rumpsteak's ChoreoHandler
 /// to provide a complete interface for choreographic protocols.
 pub trait ChoreographicAdapter: ChoreographicHandler + ChoreoHandler + Send + Sync {
@@ -82,7 +82,7 @@ impl ChoreographicEndpoint for DefaultEndpoint {
     fn new(device_id: DeviceId) -> Self {
         Self { device_id }
     }
-    
+
     fn device_id(&self) -> DeviceId {
         self.device_id
     }
@@ -110,15 +110,15 @@ impl ChoreographicHandler for MockChoreographicAdapter {
     fn device_id(&self) -> DeviceId {
         self.device_id
     }
-    
+
     fn add_role_mapping(&mut self, role_name: String, device_id: DeviceId) {
         self.role_mappings.insert(role_name, device_id);
     }
-    
+
     fn set_flow_context(&mut self, _device_id: DeviceId, _context_id: ContextId) {
         // Mock implementation - no-op
     }
-    
+
     fn configure_guard(&mut self, _message_type: &'static str, _profile: SendGuardProfile) {
         // Mock implementation - no-op
     }
@@ -146,7 +146,7 @@ impl ChoreoHandler for MockChoreographicAdapter {
         _from: Self::Role,
     ) -> ChoreoResult<M> {
         Err(ChoreographyError::Transport(
-            "Mock adapter - recv not implemented".to_string()
+            "Mock adapter - recv not implemented".to_string(),
         ))
     }
 
@@ -166,7 +166,7 @@ impl ChoreoHandler for MockChoreographicAdapter {
         _from: Self::Role,
     ) -> ChoreoResult<Label> {
         Err(ChoreographyError::Transport(
-            "Mock adapter - offer not implemented".to_string()
+            "Mock adapter - offer not implemented".to_string(),
         ))
     }
 

@@ -51,7 +51,7 @@ use aura_core::{
     semilattice::{
         Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,
     },
-    CausalContext, DeviceId, SessionId, VectorClock,
+    AuraError, CausalContext, DeviceId, SessionId, VectorClock,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
@@ -72,6 +72,12 @@ pub enum CrdtCoordinatorError {
     UnsupportedOperation(String),
     #[error("Handler error: {0}")]
     HandlerError(String),
+}
+
+impl From<CrdtCoordinatorError> for AuraError {
+    fn from(err: CrdtCoordinatorError) -> Self {
+        AuraError::internal(format!("CRDT coordinator error: {}", err))
+    }
 }
 
 /// CRDT Coordinator managing all four CRDT handler types
@@ -520,7 +526,8 @@ mod tests {
         semilattice::{Bottom, JoinSemilattice},
         AuraResult,
     };
-    use aura_testkit::{aura_test, TestFixture};
+    use aura_macros::aura_test;
+    use aura_testkit::TestFixture;
 
     // Test types for CvRDT
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]

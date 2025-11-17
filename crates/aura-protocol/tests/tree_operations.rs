@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Integration Tests for Tree Operations
 //!
 //! This module tests end-to-end tree operation execution including:

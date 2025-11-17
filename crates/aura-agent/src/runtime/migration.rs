@@ -8,14 +8,18 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use aura_core::{
-    AuraResult, AuraError, DeviceId, FlowBudget,
-    effects::{NetworkEffects, NetworkError, StorageEffects, StorageError,
-             CryptoEffects, TimeEffects, TimeError},
+    effects::{
+        CryptoEffects, NetworkEffects, NetworkError, StorageEffects, StorageError, TimeEffects,
+        TimeError,
+    },
+    AuraError, AuraResult, DeviceId, FlowBudget,
 };
 
-use super::context::{EffectContext, thread_local};
-use super::contextual::{ContextualNetworkEffects, ContextualStorageEffects,
-                        ContextualCryptoEffects, ContextualTimeEffects};
+use super::context::{thread_local, EffectContext};
+use super::contextual::{
+    ContextualCryptoEffects, ContextualNetworkEffects, ContextualStorageEffects,
+    ContextualTimeEffects,
+};
 
 /// Migration adapter that bridges between old and new effect interfaces
 pub struct MigrationAdapter<T> {
@@ -31,8 +35,7 @@ impl<T> MigrationAdapter<T> {
 
     /// Get or create context for the operation
     fn get_context(&self) -> EffectContext {
-        thread_local::current()
-            .unwrap_or_else(|| EffectContext::new(self.device_id))
+        thread_local::current().unwrap_or_else(|| EffectContext::new(self.device_id))
     }
 }
 
@@ -47,15 +50,15 @@ impl<T: NetworkEffects> ContextualNetworkEffects for MigrationAdapter<T> {
     ) -> Result<(), NetworkError> {
         // Update thread-local context
         thread_local::set(ctx.clone());
-        
+
         // Call the non-contextual method
         let result = self.inner.send_to_peer(peer_id, message).await;
-        
+
         // Charge flow if successful
         if result.is_ok() {
             let _ = ctx.charge_flow(10); // Ignore error for compatibility
         }
-        
+
         result
     }
 
@@ -65,13 +68,13 @@ impl<T: NetworkEffects> ContextualNetworkEffects for MigrationAdapter<T> {
         peer_id: DeviceId,
     ) -> Result<Vec<u8>, NetworkError> {
         thread_local::set(ctx.clone());
-        
+
         let result = self.inner.recv_from_peer(peer_id).await;
-        
+
         if result.is_ok() {
             let _ = ctx.charge_flow(10);
         }
-        
+
         result
     }
 
@@ -81,13 +84,13 @@ impl<T: NetworkEffects> ContextualNetworkEffects for MigrationAdapter<T> {
         message: Vec<u8>,
     ) -> Result<(), NetworkError> {
         thread_local::set(ctx.clone());
-        
+
         let result = self.inner.broadcast(message).await;
-        
+
         if result.is_ok() {
             let _ = ctx.charge_flow(50);
         }
-        
+
         result
     }
 }
@@ -173,8 +176,7 @@ impl MigrationTool {
 
     /// Create a context for migration
     pub fn create_context(&self) -> EffectContext {
-        EffectContext::new(self.device_id)
-            .with_metadata("migration", "true")
+        EffectContext::new(self.device_id).with_metadata("migration", "true")
     }
 
     /// Run an operation with migration context
@@ -236,20 +238,18 @@ impl MigrationGuide {
 
         if stats.completion_percentage() < 50.0 {
             recommendations.push(
-                "Consider using MigrationAdapter for automatic context propagation".to_string()
+                "Consider using MigrationAdapter for automatic context propagation".to_string(),
             );
         }
 
         if stats.migration_errors > 0 {
-            recommendations.push(
-                "Review migration errors - context may be missing in some paths".to_string()
-            );
+            recommendations
+                .push("Review migration errors - context may be missing in some paths".to_string());
         }
 
         if stats.non_contextual_calls > stats.contextual_calls {
-            recommendations.push(
-                "Prioritize migrating high-frequency call sites first".to_string()
-            );
+            recommendations
+                .push("Prioritize migrating high-frequency call sites first".to_string());
         }
 
         Self { recommendations }
@@ -264,8 +264,8 @@ impl MigrationGuide {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::{aura_test, TestFixture};
     use aura_core::effects::NetworkEffects;
+    use aura_testkit::{aura_test, TestFixture};
 
     struct MockNetworkEffects;
 
@@ -279,10 +279,7 @@ mod tests {
             Ok(())
         }
 
-        async fn recv_from_peer(
-            &self,
-            _peer_id: DeviceId,
-        ) -> Result<Vec<u8>, NetworkError> {
+        async fn recv_from_peer(&self, _peer_id: DeviceId) -> Result<Vec<u8>, NetworkError> {
             Ok(vec![])
         }
 
@@ -298,8 +295,7 @@ mod tests {
         let mock = MockNetworkEffects;
         let adapter = MigrationAdapter::new(mock, device_id);
 
-        let mut ctx = EffectContext::new(device_id)
-            .with_flow_budget(FlowBudget::new(100));
+        let mut ctx = EffectContext::new(device_id).with_flow_budget(FlowBudget::new(100));
 
         // Should work with contextual interface
         adapter.send_to_peer(&mut ctx, device_id, vec![]).await?;
@@ -310,11 +306,11 @@ mod tests {
     #[test]
     fn test_migration_stats() {
         let mut stats = MigrationStats::default();
-        
+
         stats.record_contextual();
         stats.record_contextual();
         stats.record_non_contextual();
-        
+
         assert_eq!(stats.total_calls, 3);
         assert_eq!(stats.contextual_calls, 2);
         assert_eq!(stats.completion_percentage(), 66.66666666666667);
@@ -326,7 +322,7 @@ mod tests {
         stats.non_contextual_calls = 10;
         stats.contextual_calls = 2;
         stats.total_calls = 12;
-        
+
         let guide = MigrationGuide::analyze(&stats);
         assert!(!guide.recommendations().is_empty());
     }

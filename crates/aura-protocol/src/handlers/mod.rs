@@ -69,7 +69,6 @@ pub use aura_core::effects::ExecutionMode;
 
 // Legacy module declarations removed - now organized under new structure
 
-
 /// Effect type classification for dispatch and middleware routing
 ///
 /// Categorizes all effects in the Aura system for efficient dispatch
@@ -372,27 +371,26 @@ impl EffectType {
 // Core handler infrastructure
 pub mod core;
 pub use core::{
-    CompositeHandler, AuraHandler, BoxedHandler, HandlerUtils,
-    AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, FactoryError,
-    EffectRegistry, RegistrableHandler, RegistryError,
+    AuraHandler, AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, BoxedHandler,
+    CompositeHandler, EffectRegistry, FactoryError, HandlerUtils, RegistrableHandler,
+    RegistryError,
 };
 
 // Context management
 pub mod context;
+pub mod context_immutable;
 pub use context::{
-    AgentContext, AuraContext, ChoreographicContext, PlatformInfo,
-    SimulationContext, TracingContext, MetricsContext,
+    AgentContext, AuraContext, ChoreographicContext, MetricsContext, PlatformInfo,
+    SimulationContext, TracingContext,
 };
 
-// Bridge adapters  
+// Bridge adapters
 pub mod bridges;
 pub use bridges::{TypedHandlerBridge, UnifiedAuraHandlerBridge, UnifiedHandlerBridgeFactory};
 
 // Memory-based handlers
 pub mod memory;
-pub use memory::{
-    MemoryChoreographicHandler, GuardianAuthorizationHandler, MemoryLedgerHandler,
-};
+pub use memory::{GuardianAuthorizationHandler, MemoryChoreographicHandler, MemoryLedgerHandler};
 
 // Convert AuraHandlerError to AuraError for ? operator
 impl From<AuraHandlerError> for aura_core::AuraError {
@@ -462,11 +460,12 @@ mod tests {
     }
 }
 
-// Remaining handler modules  
+// Remaining handler modules
 pub mod agent;
 pub mod storage;
 // REMOVED: pub mod system; // Moved to aura-effects (Layer 3) - basic handlers
 pub mod mock;
+pub mod tree;
 
 // Flattened handlers (previously in subdirectories)
 pub mod sync_anti_entropy;
@@ -483,8 +482,8 @@ pub use timeout_coordinator::TimeoutCoordinator;
 pub mod transport_coordinator;
 
 pub use transport_coordinator::{
-    CoordinationResult, RetryingTransportManager, TransportCoordinator,
-    TransportCoordinationConfig, TransportCoordinationError,
+    CoordinationResult, RetryingTransportManager, TransportCoordinationConfig,
+    TransportCoordinationError, TransportCoordinator,
 };
 
 // External re-exports

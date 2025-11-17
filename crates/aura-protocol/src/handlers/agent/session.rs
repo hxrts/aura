@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::effects::agent::{
+use crate::effects::{
     SessionHandle, SessionInfo, SessionManagementEffects, SessionMessage, SessionRole,
     SessionStatus, SessionType,
 };

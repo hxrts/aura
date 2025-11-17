@@ -1,7 +1,7 @@
 //! Migration infrastructure removed - middleware transition complete
 //!
-//! **MIGRATION COMPLETE**: All middleware patterns have been successfully migrated to 
-//! the unified effect system. This module previously contained temporary adapter and 
+//! **MIGRATION COMPLETE**: All middleware patterns have been successfully migrated to
+//! the unified effect system. This module previously contained temporary adapter and
 //! shim structures that are no longer needed.
 //!
 //! All middleware patterns have been replaced with:

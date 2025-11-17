@@ -5,8 +5,8 @@
 //! relationship keys that Alice and Bob can derive independently.
 
 use aura_core::hash::hasher;
-use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_core::{derive_encryption_key, IdentityKeyContext, KeyDerivationSpec};
+use aura_core::{AuraError, AuraResult, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

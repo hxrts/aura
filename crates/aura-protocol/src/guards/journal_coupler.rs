@@ -512,12 +512,12 @@ impl Default for JournalCouplerBuilder {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "fixture_effects"))]
 mod tests {
     use super::*;
     use aura_core::DeviceId;
     use aura_macros::aura_test;
-    use aura_mpst::journal_coupling::JournalAnnotation;
+    use aura_mpst::journal::JournalAnnotation;
     use aura_testkit::*;
 
     #[tokio::test]

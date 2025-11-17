@@ -2,7 +2,7 @@
 //!
 //! These tests verify that the proc macros compile and generate valid code.
 
-use aura_macros::{choreography, aura_effect_handlers};
+use aura_macros::{aura_effect_handlers, choreography};
 use serde::{Deserialize, Serialize};
 
 // Message types for choreography (matching the expected Ping/Pong pattern)
@@ -29,12 +29,12 @@ choreography! {
 #[test]
 fn test_choreography_macro_compiles() {
     // Test that both Aura choreography module and rumpsteak session types were generated
-    use aura_choreography::{AuraRole, create_handler};
-    
+    use aura_choreography::{create_handler, AuraRole};
+
     // Test Aura choreography functionality
     let alice_handler = create_handler(AuraRole::Alice, vec!["test".to_string()]);
     assert_eq!(alice_handler.get_flow_balance(), 1000);
-    
+
     // If we reach this point, the macro compiled successfully and generated working code
 }
 
@@ -72,7 +72,7 @@ fn test_effect_handlers_macro_compiles() {
     // Test that the effect handlers macro generated working code
     let mock = MockTestHandler::new();
     let real = RealTestHandler::new();
-    
+
     // Test that the generated methods work
     assert_eq!(mock.get_value(), 0); // Default value
     assert_eq!(real.get_value(), 42);

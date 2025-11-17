@@ -93,7 +93,7 @@ pub enum StoragePermission {
     /// Read-only access
     Read,
     /// Read and write access
-    Write, 
+    Write,
     /// Full administrative access (read, write, delete, metadata)
     Admin,
 }
@@ -139,9 +139,7 @@ impl StorageCapabilitySet {
 
     /// Check if this set satisfies a required capability
     pub fn satisfies(&self, required: &StorageCapability) -> bool {
-        self.capabilities
-            .iter()
-            .any(|cap| cap.satisfies(required))
+        self.capabilities.iter().any(|cap| cap.satisfies(required))
     }
 
     /// Check if this set satisfies all required capabilities
@@ -157,7 +155,7 @@ impl StorageCapabilitySet {
             .intersection(&other.capabilities)
             .cloned()
             .collect();
-        
+
         StorageCapabilitySet {
             capabilities: intersection,
         }
@@ -247,9 +245,13 @@ impl AccessRequest {
 
 /// Pure function to evaluate storage access
 pub fn evaluate_access(request: &AccessRequest) -> AccessDecision {
-    let required_capability = StorageCapability::new(request.resource.clone(), request.permission.clone());
+    let required_capability =
+        StorageCapability::new(request.resource.clone(), request.permission.clone());
 
-    if request.provided_capabilities.satisfies(&required_capability) {
+    if request
+        .provided_capabilities
+        .satisfies(&required_capability)
+    {
         AccessDecision::allow()
     } else {
         AccessDecision::deny(&format!(
@@ -261,17 +263,22 @@ pub fn evaluate_access(request: &AccessRequest) -> AccessDecision {
 
 /// Pure function to evaluate access with resource hierarchy
 pub fn evaluate_hierarchical_access(request: &AccessRequest) -> AccessDecision {
-    let required_capability = StorageCapability::new(request.resource.clone(), request.permission.clone());
+    let required_capability =
+        StorageCapability::new(request.resource.clone(), request.permission.clone());
 
     // Check direct capability match
-    if request.provided_capabilities.satisfies(&required_capability) {
+    if request
+        .provided_capabilities
+        .satisfies(&required_capability)
+    {
         return AccessDecision::allow();
     }
 
     // Check if any provided capability covers the required resource
     for provided_cap in &request.provided_capabilities.capabilities {
-        if provided_cap.resource.covers(&request.resource) 
-            && provided_cap.permission.satisfies(&request.permission) {
+        if provided_cap.resource.covers(&request.resource)
+            && provided_cap.permission.satisfies(&request.permission)
+        {
             return AccessDecision::allow();
         }
     }
@@ -290,7 +297,7 @@ mod tests {
     fn test_storage_permission_ordering() {
         assert!(StoragePermission::Admin > StoragePermission::Write);
         assert!(StoragePermission::Write > StoragePermission::Read);
-        
+
         assert!(StoragePermission::Admin.satisfies(&StoragePermission::Read));
         assert!(StoragePermission::Write.satisfies(&StoragePermission::Read));
         assert!(!StoragePermission::Read.satisfies(&StoragePermission::Write));
@@ -318,7 +325,7 @@ mod tests {
         let set2 = StorageCapabilitySet::from_capabilities(vec![cap1.clone(), cap3.clone()]);
 
         let intersection = set1.meet(&set2);
-        
+
         assert_eq!(intersection.len(), 1);
         assert!(intersection.contains(&cap1));
         assert!(!intersection.contains(&cap2));
@@ -329,7 +336,7 @@ mod tests {
     fn test_access_evaluation() {
         let cap = StorageCapability::read(StorageResource::content("test"));
         let caps = StorageCapabilitySet::from_capabilities(vec![cap]);
-        
+
         let request = AccessRequest::new(
             StorageResource::content("test"),
             StoragePermission::Read,
@@ -344,7 +351,7 @@ mod tests {
     fn test_hierarchical_access() {
         let namespace_cap = StorageCapability::write(StorageResource::namespace("user/alice"));
         let caps = StorageCapabilitySet::from_capabilities(vec![namespace_cap]);
-        
+
         let request = AccessRequest::new(
             StorageResource::content("user/alice/document1"),
             StoragePermission::Read,

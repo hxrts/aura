@@ -76,6 +76,9 @@ pub fn init_aura_extensions() -> rumpsteak_aura_choreography::extensions::Extens
     rumpsteak_aura_choreography::extensions::ExtensionRegistry::new()
 }
 
+pub use ast_extraction::{
+    extract_aura_annotations, generate_aura_choreography_code, AuraEffect, AuraExtractionError,
+};
 /// Full-featured choreography! macro with ALL rumpsteak-aura features + Aura extensions
 ///
 /// This macro provides access to ALL rumpsteak-aura features plus Aura-specific extensions:
@@ -116,12 +119,11 @@ pub fn init_aura_extensions() -> rumpsteak_aura_choreography::extensions::Extens
 ///     }
 /// }
 /// ```
-/// 
+///
 /// Note: The choreography! macro is available in the aura-macros crate.
 /// Generated code uses types from this crate.
 // Legacy API re-exports for compatibility
 pub use aura_core::{AuraError, AuraResult, Cap, DeviceId, Journal, JournalEffects};
-pub use ast_extraction::{AuraEffect, AuraExtractionError, extract_aura_annotations, generate_aura_choreography_code};
 pub use context::{ContextIsolation, ContextType};
 pub use guards::{CapabilityGuard, GuardSyntax};
 pub use journal::{JournalAnnotation, JournalCoupling};
@@ -138,32 +140,32 @@ pub type MpstResult<T> = std::result::Result<T, MpstError>;
 pub enum MpstError {
     /// Capability guard failed authorization
     #[error("Capability guard failed: {reason}")]
-    CapabilityGuardFailed { 
+    CapabilityGuardFailed {
         /// The reason for capability guard failure
-        reason: String 
+        reason: String,
     },
 
     /// Journal coupling operation failed
     #[error("Journal coupling failed: {reason}")]
-    JournalCouplingFailed { 
+    JournalCouplingFailed {
         /// The reason for journal coupling failure
-        reason: String 
+        reason: String,
     },
 
     /// Leakage budget exceeded
     #[error("Leakage budget exceeded: {consumed} > {limit}")]
-    LeakageBudgetExceeded { 
+    LeakageBudgetExceeded {
         /// Amount of budget consumed
-        consumed: u64, 
+        consumed: u64,
         /// Maximum budget limit
-        limit: u64 
+        limit: u64,
     },
 
     /// Context isolation violation
     #[error("Context isolation violated: {violation}")]
-    ContextIsolationViolated { 
+    ContextIsolationViolated {
         /// Description of the isolation violation
-        violation: String 
+        violation: String,
     },
 
     /// Core error wrapped

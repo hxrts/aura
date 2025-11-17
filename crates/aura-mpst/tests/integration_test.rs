@@ -4,9 +4,7 @@
 //! correctly with the aura-mpst runtime system.
 
 use aura_core::{Cap, ContextId, DeviceId, Journal};
-use aura_mpst::{
-    AuraEndpoint, AuraHandler, AuraRuntime, ExecutionContext, MpstResult,
-};
+use aura_mpst::{AuraEndpoint, AuraHandler, AuraRuntime, ExecutionContext, MpstResult};
 use rumpsteak_aura_choreography::extensions::ExtensionRegistry;
 
 #[tokio::test]

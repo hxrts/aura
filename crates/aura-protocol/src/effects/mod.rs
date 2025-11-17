@@ -76,7 +76,7 @@ pub use cli::{
 pub use aura_core::effects::{
     ConsoleEffects, CryptoEffects, CryptoError, JournalEffects, NetworkAddress, NetworkEffects,
     NetworkError, PeerEvent, PeerEventStream, RandomEffects, StorageEffects, StorageError,
-    StorageLocation, StorageStats, SystemEffects, SystemError, TimeEffects, TimeError, 
+    StorageLocation, StorageStats, SystemEffects, SystemError, TimeEffects, TimeError,
     TimeoutHandle, WakeCondition,
 };
 
@@ -132,7 +132,7 @@ pub trait AuraEffects:
 }
 
 /// Effect system type alias for compatibility
-/// 
+///
 /// TEMPORARY: This is currently just a trait object.
 /// In the future, this should be replaced with a concrete type from aura-agent.
 pub type AuraEffectSystem = Box<dyn AuraEffects>;
@@ -219,35 +219,62 @@ impl LedgerEffects for AuraEffectSystem {
         (**self).events_since(epoch).await
     }
 
-    async fn is_device_authorized(&self, device_id: aura_core::DeviceId, operation: &str) -> Result<bool, crate::effects::LedgerError> {
+    async fn is_device_authorized(
+        &self,
+        device_id: aura_core::DeviceId,
+        operation: &str,
+    ) -> Result<bool, crate::effects::LedgerError> {
         (**self).is_device_authorized(device_id, operation).await
     }
 
-    async fn get_device_metadata(&self, device_id: aura_core::DeviceId) -> Result<Option<crate::effects::DeviceMetadata>, crate::effects::LedgerError> {
+    async fn get_device_metadata(
+        &self,
+        device_id: aura_core::DeviceId,
+    ) -> Result<Option<crate::effects::DeviceMetadata>, crate::effects::LedgerError> {
         (**self).get_device_metadata(device_id).await
     }
 
-    async fn update_device_activity(&self, device_id: aura_core::DeviceId) -> Result<(), crate::effects::LedgerError> {
+    async fn update_device_activity(
+        &self,
+        device_id: aura_core::DeviceId,
+    ) -> Result<(), crate::effects::LedgerError> {
         (**self).update_device_activity(device_id).await
     }
 
-    async fn subscribe_to_events(&self) -> Result<crate::effects::LedgerEventStream, crate::effects::LedgerError> {
+    async fn subscribe_to_events(
+        &self,
+    ) -> Result<crate::effects::LedgerEventStream, crate::effects::LedgerError> {
         (**self).subscribe_to_events().await
     }
 
-    async fn would_create_cycle(&self, edges: &[(Vec<u8>, Vec<u8>)], new_edge: (Vec<u8>, Vec<u8>)) -> Result<bool, crate::effects::LedgerError> {
+    async fn would_create_cycle(
+        &self,
+        edges: &[(Vec<u8>, Vec<u8>)],
+        new_edge: (Vec<u8>, Vec<u8>),
+    ) -> Result<bool, crate::effects::LedgerError> {
         (**self).would_create_cycle(edges, new_edge).await
     }
 
-    async fn find_connected_components(&self, edges: &[(Vec<u8>, Vec<u8>)]) -> Result<Vec<Vec<Vec<u8>>>, crate::effects::LedgerError> {
+    async fn find_connected_components(
+        &self,
+        edges: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Vec<Vec<Vec<u8>>>, crate::effects::LedgerError> {
         (**self).find_connected_components(edges).await
     }
 
-    async fn topological_sort(&self, edges: &[(Vec<u8>, Vec<u8>)]) -> Result<Vec<Vec<u8>>, crate::effects::LedgerError> {
+    async fn topological_sort(
+        &self,
+        edges: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Vec<Vec<u8>>, crate::effects::LedgerError> {
         (**self).topological_sort(edges).await
     }
 
-    async fn shortest_path(&self, edges: &[(Vec<u8>, Vec<u8>)], start: Vec<u8>, end: Vec<u8>) -> Result<Option<Vec<Vec<u8>>>, crate::effects::LedgerError> {
+    async fn shortest_path(
+        &self,
+        edges: &[(Vec<u8>, Vec<u8>)],
+        start: Vec<u8>,
+        end: Vec<u8>,
+    ) -> Result<Option<Vec<Vec<u8>>>, crate::effects::LedgerError> {
         (**self).shortest_path(edges, start, end).await
     }
 

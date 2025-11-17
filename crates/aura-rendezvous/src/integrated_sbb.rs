@@ -8,6 +8,7 @@
 //!
 //! This is the main API for SBB peer discovery and transport offer flooding.
 
+use crate::messaging::{NetworkConfig, NetworkTransport};
 use crate::{
     capability_aware_sbb::{CapabilityAwareSbbCoordinator, SbbForwardingPolicy, TrustStatistics},
     envelope_encryption::{EnvelopeEncryption, PaddingStrategy},
@@ -16,7 +17,6 @@ use crate::{
     sbb::{FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding},
 };
 use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId};
-use crate::messaging::{NetworkTransport, NetworkConfig};
 use aura_wot::TrustLevel;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

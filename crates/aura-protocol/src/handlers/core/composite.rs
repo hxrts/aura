@@ -4,16 +4,16 @@
 
 #![allow(clippy::disallowed_methods)] // TODO: Replace direct time/UUID calls with effect system
 
-use super::{
-    context_immutable::AuraContext,
-    erased::AuraHandler,
-    tree::DummyTreeHandler,
-    {AuraHandlerError, EffectType, ExecutionMode},
+use super::erased::AuraHandler;
+use crate::handlers::{
+    context_immutable::AuraContext, tree::DummyTreeHandler, AuraHandlerError, EffectType,
+    ExecutionMode,
 };
 // Use standard effect handlers from aura-effects
 use aura_effects::{
     console::{MockConsoleHandler, RealConsoleHandler},
     crypto::{MockCryptoHandler, RealCryptoHandler},
+    journal::MockJournalHandler,
     storage::{FilesystemStorageHandler, MemoryStorageHandler},
     time::{RealTimeHandler, SimulatedTimeHandler},
     transport::{InMemoryTransportHandler, TcpTransportHandler as RealNetworkHandler},
@@ -67,7 +67,7 @@ impl CompositeHandler {
 
     /// Create a composite handler for testing with all mock/memory implementations
     pub fn for_testing(device_id: Uuid) -> Self {
-        let journal = super::super::MockJournalHandler::new();
+        let journal = MockJournalHandler::new();
         // Note: journal doesn't need to be cloned since MockJournalHandler is used directly
         use aura_effects::transport::TransportConfig;
         Self {
@@ -96,7 +96,7 @@ impl CompositeHandler {
         device_id: Uuid,
         _storage_path: std::path::PathBuf, // Unused due to macro-generated handlers
     ) -> Self {
-        let journal = super::super::MockJournalHandler::new();
+        let journal = MockJournalHandler::new();
         // Note: journal doesn't need to be cloned since MockJournalHandler is used directly
         use aura_effects::transport::TransportConfig;
         Self {
@@ -119,7 +119,7 @@ impl CompositeHandler {
 
     /// Create a composite handler for simulation with a specific seed for deterministic behavior
     pub fn for_simulation_with_seed(device_id: Uuid, _seed: u64) -> Self {
-        let journal = super::super::MockJournalHandler::new();
+        let journal = MockJournalHandler::new();
         // Note: journal doesn't need to be cloned since MockJournalHandler is used directly
         use aura_effects::transport::TransportConfig;
         Self {
@@ -573,7 +573,9 @@ impl CompositeHandlerBuilder {
             is_simulation,
             network: self.network.unwrap_or_else(|| {
                 if is_simulation {
-                    Box::new(InMemoryTransportHandler::new(aura_effects::transport::TransportConfig::default()))
+                    Box::new(InMemoryTransportHandler::new(
+                        aura_effects::transport::TransportConfig::default(),
+                    ))
                 } else {
                     // RealNetworkHandler now requires TransportConfig parameter
                     use aura_effects::transport::TransportConfig;
@@ -608,7 +610,7 @@ impl CompositeHandlerBuilder {
             }),
             journal: self
                 .journal
-                .unwrap_or_else(|| Box::new(super::super::MockJournalHandler::new())),
+                .unwrap_or_else(|| Box::new(MockJournalHandler::new())),
             tree: self
                 .tree
                 .unwrap_or_else(|| Box::new(DummyTreeHandler::new())),
@@ -894,13 +896,11 @@ impl JournalEffects for CompositeHandler {
 // Implement TreeEffects by delegating to the tree handler
 #[async_trait]
 impl TreeEffects for CompositeHandler {
-    /* // Temporarily disabled due to TreeState import issue
     async fn get_current_state(
         &self,
     ) -> Result<aura_journal::ratchet_tree::TreeState, aura_core::AuraError> {
         self.tree.get_current_state().await
     }
-    */
 
     async fn get_current_commitment(&self) -> Result<aura_core::Hash32, aura_core::AuraError> {
         self.tree.get_current_commitment().await
@@ -917,7 +917,6 @@ impl TreeEffects for CompositeHandler {
         self.tree.apply_attested_op(op).await
     }
 
-    /* // Temporarily disabled due to TreeState import issue
     async fn verify_aggregate_sig(
         &self,
         op: &aura_core::AttestedOp,
@@ -925,7 +924,6 @@ impl TreeEffects for CompositeHandler {
     ) -> Result<bool, aura_core::AuraError> {
         self.tree.verify_aggregate_sig(op, state).await
     }
-    */
 
     async fn add_leaf(
         &self,

@@ -8,8 +8,9 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use thiserror::Error;
 
-use super::context_immutable::AuraContext;
-use super::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
+use crate::handlers::{
+    context_immutable::AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
+};
 use aura_core::LocalSessionType;
 
 /// Error type for registry operations

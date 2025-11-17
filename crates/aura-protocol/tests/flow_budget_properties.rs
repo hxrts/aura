@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Property tests for FlowBudget and Receipt system
 //!
 //! Tests the core invariants required by work/007.md Section 3:

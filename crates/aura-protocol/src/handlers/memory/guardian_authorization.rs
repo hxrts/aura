@@ -528,6 +528,7 @@ impl GuardianAuthorizationHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::authorization_bridge::AuthorizationMetadata;
     use aura_verify::{Ed25519Signature, IdentityProof};
     use aura_wot::{LeafRole, TreeOp, TreeOpKind};
 
@@ -589,6 +590,7 @@ mod tests {
             ),
             additional_signers: BTreeSet::new(),
             guardian_signers: BTreeSet::from([guardian_id]),
+            metadata: AuthorizationMetadata::default(),
         };
 
         // Evaluate authorization
@@ -658,6 +660,7 @@ mod tests {
             ),
             additional_signers: BTreeSet::new(),
             guardian_signers: BTreeSet::from([guardian_id]),
+            metadata: AuthorizationMetadata::default(),
         };
 
         // Evaluate authorization - should fail due to insufficient threshold

@@ -112,12 +112,15 @@ impl ProtocolTestFixture {
         let primary_device = fixture.device_id;
         let effects_builder = match execution_mode {
             TestExecutionMode::UnitTest => TestEffectsBuilder::for_unit_tests(primary_device),
-            TestExecutionMode::Integration => TestEffectsBuilder::for_integration_tests(primary_device),
+            TestExecutionMode::Integration => {
+                TestEffectsBuilder::for_integration_tests(primary_device)
+            }
             TestExecutionMode::Simulation => TestEffectsBuilder::for_simulation(primary_device),
         };
-        let _stateless_effects = effects_builder.with_seed(seed).build().map_err(|e| 
-            StatelessFixtureError::EffectSystemError(e.to_string())
-        )?;
+        let _stateless_effects = effects_builder
+            .with_seed(seed)
+            .build()
+            .map_err(|e| StatelessFixtureError::EffectSystemError(e.to_string()))?;
 
         Ok(fixture)
     }
@@ -137,10 +140,10 @@ impl ProtocolTestFixture {
         let fixture = Self::with_config(threshold, total_devices, seed).await;
 
         // Use stateless effect system integration
-        let stateless_effects = effects_builder.build().map_err(|e|
-            StatelessFixtureError::EffectSystemError(e.to_string())
-        )?;
-        
+        let stateless_effects = effects_builder
+            .build()
+            .map_err(|e| StatelessFixtureError::EffectSystemError(e.to_string()))?;
+
         // TODO: Integrate account creation with stateless effects in future iteration
         let _account_effects = stateless_effects;
 

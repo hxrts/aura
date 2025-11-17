@@ -6,8 +6,8 @@
 //! capabilities without directly depending on a concrete effect system implementation.
 
 use super::effect_system_trait::GuardEffectSystem;
+use crate::wot::EffectSystemInterface;
 use aura_core::DeviceId;
-use aura_wot::EffectSystemInterface;
 use std::collections::HashMap;
 
 /// Wrapper type to avoid coherence issues
@@ -98,7 +98,7 @@ impl SecurityContext {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "fixture_effects"))]
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;

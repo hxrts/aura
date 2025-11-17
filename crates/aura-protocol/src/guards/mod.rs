@@ -71,6 +71,7 @@ pub use journal_coupler::{
 };
 pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
+use crate::wot::EffectSystemInterface;
 use aura_core::AuraResult;
 use aura_wot::Capability;
 use std::future::Future;
@@ -171,7 +172,7 @@ impl ProtocolGuard {
         operation: F,
     ) -> AuraResult<GuardedExecutionResult<T>>
     where
-        E: GuardEffectSystem + aura_wot::EffectSystemInterface,
+        E: GuardEffectSystem + EffectSystemInterface,
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {

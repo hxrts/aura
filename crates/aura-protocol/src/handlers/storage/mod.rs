@@ -14,6 +14,6 @@ pub mod storage_coordinator;
 pub mod replication_coordinator;
 
 // Re-export main coordination types
-pub use access_coordinator::{StorageAccessCoordinator, AccessRequest, AccessDecision};
-pub use storage_coordinator::{StorageCoordinator, StorageCoordinatorBuilder};
+pub use access_coordinator::{AccessDecision, AccessRequest, StorageAccessCoordinator};
 pub use replication_coordinator::{ReplicationCoordinator, ReplicationStrategy};
+pub use storage_coordinator::{StorageCoordinator, StorageCoordinatorBuilder};

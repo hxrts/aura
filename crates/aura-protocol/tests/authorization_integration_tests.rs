@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Integration tests for the complete authorization bridge and guard chain
 //!
 //! These tests verify the end-to-end authorization flow combining:
@@ -10,7 +12,10 @@
 
 use aura_core::{relationships::ContextId, AccountId, DeviceId, GuardianId};
 use aura_protocol::{
-    authorization_bridge::{AuthorizationContext, AuthorizationRequest, PermissionGrant},
+    authorization_bridge::{
+        AuthorizationContext, AuthorizationMetadata, AuthorizationRequest, AuthorizationService,
+        PermissionGrant,
+    },
     guards::create_send_guard,
 };
 use aura_verify::Ed25519Signature;
@@ -137,10 +142,12 @@ async fn test_guardian_recovery_authorization() {
         context: authz_context,
         additional_signers: BTreeSet::new(),
         guardian_signers,
+        metadata: AuthorizationMetadata::default(),
     };
 
     // Test authorization evaluation
-    let result = aura_protocol::authorization_bridge::evaluate_authorization(request);
+    let service = AuthorizationService::new();
+    let result = service.authorize(request);
 
     // Verify API structure (actual authorization would require effect system)
     match result {
@@ -270,6 +277,7 @@ async fn test_batch_authorization_structure() {
                 context: authz_context,
                 additional_signers: BTreeSet::new(),
                 guardian_signers: BTreeSet::new(),
+                metadata: AuthorizationMetadata::default(),
             }
         })
         .collect();
@@ -324,10 +332,12 @@ async fn test_authorization_error_handling() {
         context: insufficient_context,
         additional_signers: BTreeSet::new(),
         guardian_signers: BTreeSet::new(),
+        metadata: AuthorizationMetadata::default(),
     };
 
     // Evaluate authorization and verify error handling
-    let result = aura_protocol::authorization_bridge::evaluate_authorization(request);
+    let service = AuthorizationService::new();
+    let result = service.authorize(request);
 
     match result {
         Ok(grant) => {

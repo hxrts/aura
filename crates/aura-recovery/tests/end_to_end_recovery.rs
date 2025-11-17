@@ -5,10 +5,10 @@
 #![allow(clippy::disallowed_methods)]
 #![allow(clippy::expect_used)]
 
+use aura_agent::runtime::AuraEffectSystem;
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId, TrustLevel};
 use aura_macros::aura_test;
-use aura_agent::runtime::AuraEffectSystem;
 use aura_recovery::{
     GuardianKeyRecoveryCoordinator, GuardianMembershipCoordinator, GuardianProfile, GuardianSet,
     GuardianSetupCoordinator, MembershipChange, MembershipChangeRequest, RecoveryRequest,

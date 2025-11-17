@@ -21,10 +21,8 @@
 #![allow(missing_docs)]
 
 use crate::FrostResult;
+use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature, TreeSigningContext};
 use aura_core::{AccountId, AuraError, DeviceId, SessionId};
-use aura_core::frost::{
-    NonceCommitment, PartialSignature, ThresholdSignature, TreeSigningContext,
-};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -212,9 +210,7 @@ impl FrostCrypto {
         message: &[u8],
         signer_index: u16,
     ) -> FrostResult<PartialSignature> {
-        use aura_core::frost::tree_signing::{
-            binding_message, frost_sign_partial_with_keypackage,
-        };
+        use aura_core::frost::tree_signing::{binding_message, frost_sign_partial_with_keypackage};
         use frost_ed25519 as frost;
 
         let bound_message = binding_message(context, message);

@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Tests for individual effect traits and their implementations
 //!
 //! Uses aura-testkit for deterministic, reproducible testing
@@ -37,7 +39,10 @@ async fn test_execution_modes() {
     let unit_effects = TestEffectsBuilder::for_unit_tests(device_id)
         .build()
         .expect("Failed to create unit test effects");
-    assert_eq!(unit_effects.execution_mode(), aura_core::effects::ExecutionMode::Testing);
+    assert_eq!(
+        unit_effects.execution_mode(),
+        aura_core::effects::ExecutionMode::Testing
+    );
 
     // Simulation mode (deterministic behavior)
     let sim_effects = TestEffectsBuilder::for_simulation(device_id)
@@ -53,7 +58,10 @@ async fn test_execution_modes() {
     let int_effects = TestEffectsBuilder::for_integration_tests(device_id)
         .build()
         .expect("Failed to create integration effects");
-    assert_eq!(int_effects.execution_mode(), aura_core::effects::ExecutionMode::Testing);
+    assert_eq!(
+        int_effects.execution_mode(),
+        aura_core::effects::ExecutionMode::Testing
+    );
 }
 
 /// Test time acceleration for faster tests
@@ -67,7 +75,10 @@ async fn test_time_acceleration() {
         .expect("Failed to create accelerated effects");
 
     // Verify effects were created with time acceleration config
-    assert_eq!(effects.execution_mode(), aura_core::effects::ExecutionMode::Testing);
+    assert_eq!(
+        effects.execution_mode(),
+        aura_core::effects::ExecutionMode::Testing
+    );
 }
 
 /// Test storage configuration
@@ -80,14 +91,20 @@ async fn test_storage_config() {
         .with_mock_storage(true)
         .build()
         .expect("Failed to create mock storage effects");
-    assert_eq!(mock_effects.execution_mode(), aura_core::effects::ExecutionMode::Testing);
+    assert_eq!(
+        mock_effects.execution_mode(),
+        aura_core::effects::ExecutionMode::Testing
+    );
 
     // Test with custom storage directory
     let dir_effects = TestEffectsBuilder::for_integration_tests(device_id)
         .with_storage_dir(std::path::PathBuf::from("/tmp/aura-test"))
         .build()
         .expect("Failed to create dir storage effects");
-    assert_eq!(dir_effects.execution_mode(), aura_core::effects::ExecutionMode::Testing);
+    assert_eq!(
+        dir_effects.execution_mode(),
+        aura_core::effects::ExecutionMode::Testing
+    );
 }
 
 /// Test network mocking configuration
@@ -100,12 +117,18 @@ async fn test_network_config() {
         .with_mock_network(true)
         .build()
         .expect("Failed to create mock network effects");
-    assert_eq!(mock_effects.execution_mode(), aura_core::effects::ExecutionMode::Testing);
+    assert_eq!(
+        mock_effects.execution_mode(),
+        aura_core::effects::ExecutionMode::Testing
+    );
 
     // Test with real network (for integration)
     let real_effects = TestEffectsBuilder::for_integration_tests(device_id)
         .with_mock_network(false)
         .build()
         .expect("Failed to create real network effects");
-    assert_eq!(real_effects.execution_mode(), aura_core::effects::ExecutionMode::Testing);
+    assert_eq!(
+        real_effects.execution_mode(),
+        aura_core::effects::ExecutionMode::Testing
+    );
 }

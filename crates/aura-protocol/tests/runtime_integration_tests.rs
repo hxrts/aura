@@ -1,3 +1,5 @@
+#![cfg(feature = "fixture_effects")]
+
 //! Runtime Integration Tests for Phase 3.2
 //!
 //! Tests validating choreographic execution following unified effect system architecture

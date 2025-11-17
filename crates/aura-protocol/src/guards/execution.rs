@@ -13,6 +13,7 @@ use super::{
     deltas::apply_delta_facts, effect_system_trait::GuardEffectSystem, evaluation::evaluate_guard,
     privacy::track_leakage_consumption, ExecutionMetrics, GuardedExecutionResult, ProtocolGuard,
 };
+use crate::wot::EffectSystemInterface;
 use aura_core::{AuraError, AuraResult};
 use std::future::Future;
 use std::time::Instant;
@@ -33,7 +34,7 @@ pub async fn execute_guarded_operation<E, T, F, Fut>(
     operation: F,
 ) -> AuraResult<GuardedExecutionResult<T>>
 where
-    E: GuardEffectSystem + aura_wot::EffectSystemInterface,
+    E: GuardEffectSystem + EffectSystemInterface,
     F: FnOnce(&mut E) -> Fut,
     Fut: Future<Output = AuraResult<T>>,
 {
@@ -172,7 +173,7 @@ pub async fn execute_guarded_sequence<E, T>(
     effect_system: &mut E,
 ) -> AuraResult<Vec<GuardedExecutionResult<T>>>
 where
-    E: GuardEffectSystem + aura_wot::EffectSystemInterface,
+    E: GuardEffectSystem + EffectSystemInterface,
 {
     let sequence_start = Instant::now();
     let span = tracing::info_span!("guarded_sequence", operations = guards_and_operations.len());
