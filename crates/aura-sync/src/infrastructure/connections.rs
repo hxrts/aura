@@ -141,8 +141,14 @@ impl ConnectionMetadata {
     }
 
     /// Check if connection has been idle for too long
-    pub fn is_expired(&self, timeout: Duration) -> bool {
-        self.is_idle() && self.last_used_at.elapsed() > timeout
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    pub fn is_expired(&self, timeout: Duration, now: u64) -> bool {
+        if !self.is_idle() {
+            return false;
+        }
+        let elapsed_secs = now.saturating_sub(self.last_used_at);
+        Duration::from_secs(elapsed_secs) > timeout
     }
 
     /// Mark connection as acquired
@@ -226,8 +232,11 @@ impl ConnectionHandle {
     }
 
     /// Get connection age
-    pub fn age(&self) -> Duration {
-        self.acquired_at.elapsed()
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    pub fn age(&self, now: u64) -> Duration {
+        let elapsed_secs = now.saturating_sub(self.acquired_at);
+        Duration::from_secs(elapsed_secs)
     }
 }
 

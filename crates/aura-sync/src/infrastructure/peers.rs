@@ -427,10 +427,15 @@ impl PeerManager {
     }
 
     /// Check if discovery refresh is needed
-    pub fn needs_refresh(&self) -> bool {
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    pub fn needs_refresh(&self, now: u64) -> bool {
         match self.last_refresh {
             None => true,
-            Some(last) => last.elapsed() >= self.config.refresh_interval,
+            Some(last) => {
+                let elapsed_secs = now.saturating_sub(last);
+                elapsed_secs >= self.config.refresh_interval.as_secs()
+            }
         }
     }
 }
