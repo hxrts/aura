@@ -446,11 +446,14 @@ impl GuardianAuthenticationCoordinator {
     }
 
     /// Validate recovery request from guardian perspective
+    ///
+    /// Note: Callers should obtain `now` from TimeEffects and convert to Unix timestamp
     async fn validate_recovery_request(
         &self,
         account_id: &AccountId,
         recovery_context: &RecoveryContext,
         request_id: &str,
+        now: u64,
     ) -> AuraResult<GuardianApprovalDecision> {
         tracing::info!(
             "Guardian validating recovery request {} for account {}",
@@ -493,10 +496,6 @@ impl GuardianAuthenticationCoordinator {
         }
 
         // Check request timestamp age (reject old requests)
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
 
         if now > recovery_context.timestamp + 3600 {
             // 1 hour old
@@ -528,14 +527,12 @@ impl GuardianAuthenticationCoordinator {
     }
 
     /// Generate guardian challenge for additional verification
-    async fn generate_guardian_challenge(&self, request_id: &str) -> AuraResult<Vec<u8>> {
+    ///
+    /// Note: Callers should obtain `nonce` from RandomEffects (in production this would use proper cryptographic RNG)
+    async fn generate_guardian_challenge(&self, request_id: &str, nonce: u128) -> AuraResult<Vec<u8>> {
         // Generate cryptographically secure random challenge
-        // In production, this would use proper cryptographic RNG
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let challenge = format!("guardian_challenge_{}_{}", request_id, nanos);
+        // In production, this would use proper cryptographic RNG via RandomEffects
+        let challenge = format!("guardian_challenge_{}_{}", request_id, nonce);
 
         Ok(challenge.into_bytes())
     }
@@ -556,30 +553,40 @@ impl GuardianAuthenticationCoordinator {
 
         // In production, this would use the guardian's actual private key
         // For MVP, we create a mock signature
-        let device_id = test_device_id(1) // Deterministic device ID for testing
+        let device_id = test_device_id(1); // Deterministic device ID for testing
         let mock_signature = format!("guardian_sig_{}_{}", device_id, message.len());
 
         Ok(mock_signature.into_bytes())
     }
 
-    /// Execute the choreography
-    pub async fn execute(&self, request: GuardianAuthRequest) -> AuraResult<GuardianAuthResponse> {
+    /// Execute the choreography.
+    ///
+    /// # Parameters
+    /// - `request`: The guardian authentication request
+    /// - `now`: Current Unix timestamp in seconds (obtain from TimeEffects for testability)
+    pub async fn execute(&self, request: GuardianAuthRequest, now: u64) -> AuraResult<GuardianAuthResponse> {
         let mut state = self.state.lock().await;
         state.current_request = Some(request.clone());
         drop(state);
 
         match self.role {
-            GuardianRole::Requester => self.execute_requester(request).await,
-            GuardianRole::Guardian(_) => self.execute_guardian().await,
+            GuardianRole::Requester => self.execute_requester(request, now).await,
+            GuardianRole::Guardian(_) => self.execute_guardian(now).await,
             GuardianRole::Coordinator => self.execute_coordinator().await,
         }
     }
 
     /// Execute as approval requester
     #[allow(clippy::disallowed_methods)]
+    /// Execute guardian authentication as the requester role.
+    ///
+    /// # Parameters
+    /// - `request`: The guardian authentication request
+    /// - `now`: Current Unix timestamp in seconds (obtain from TimeEffects for testability)
     async fn execute_requester(
         &self,
         request: GuardianAuthRequest,
+        now: u64,
     ) -> AuraResult<GuardianAuthResponse> {
         tracing::info!(
             "Executing guardian auth as requester for account: {}",
@@ -590,7 +597,7 @@ impl GuardianAuthenticationCoordinator {
         // This will be implemented with aura-wot capability evaluation
 
         // TODO: Implement network communication with new effect system
-        let _device_id = test_device_id(1) // Deterministic device ID for testing
+        let _device_id = test_device_id(1); // Deterministic device ID for testing
 
         // Generate request ID
         let request_id = uuid::Uuid::from_bytes([0u8; 16]).to_string();
@@ -688,10 +695,7 @@ impl GuardianAuthenticationCoordinator {
                                     approved,
                                     justification,
                                     signature,
-                                    timestamp: std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .map(|d| d.as_secs())
-                                        .unwrap_or(0),
+                                    timestamp: now,
                                 };
 
                                 collected_approvals.push(approval);
@@ -748,11 +752,14 @@ impl GuardianAuthenticationCoordinator {
         })
     }
 
-    /// Execute as guardian
-    async fn execute_guardian(&self) -> AuraResult<GuardianAuthResponse> {
+    /// Execute guardian authentication as the guardian role.
+    ///
+    /// # Parameters
+    /// - `now`: Current Unix timestamp in seconds (obtain from TimeEffects for testability)
+    async fn execute_guardian(&self, now: u64) -> AuraResult<GuardianAuthResponse> {
         tracing::info!("Executing guardian auth as guardian");
 
-        let device_id = test_device_id(1) // Deterministic device ID for testing
+        let device_id = test_device_id(1); // Deterministic device ID for testing
 
         // TODO: Implement capability-based authorization with new effect system
         // This will be implemented with aura-wot capability evaluation
@@ -790,15 +797,15 @@ impl GuardianAuthenticationCoordinator {
                             let approval_decision = self.validate_recovery_request(
                                 &account_id,
                                 &recovery_context,
-                                &request_id
+                                &request_id,
+                                now,
                             ).await?;
 
                             // Send guardian challenge for additional verification
-                            let challenge = self.generate_guardian_challenge(&request_id).await?;
-                            let expires_at = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs())
-                                .unwrap_or(0) + 300; // 5 minutes
+                            // Use time-based nonce derived from current timestamp
+                            let nonce = now as u128;
+                            let challenge = self.generate_guardian_challenge(&request_id, nonce).await?;
+                            let expires_at = now + 300; // 5 minutes from now
                             let _challenge_msg = GuardianAuthMessage::GuardianChallenge {
                                 request_id: request_id.clone(),
                                 challenge: challenge.clone(),
@@ -845,10 +852,7 @@ impl GuardianAuthenticationCoordinator {
                                 approved: approval_decision.approved,
                                 justification: approval_decision.justification,
                                 signature,
-                                timestamp: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map(|d| d.as_secs())
-                                    .unwrap_or(0),
+                                timestamp: now,
                             };
 
                             tracing::info!(

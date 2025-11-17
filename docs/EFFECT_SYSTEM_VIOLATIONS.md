@@ -6,8 +6,8 @@ This document tracks remaining violations of the effect system architecture prin
 
 - **Total violations audited:** 133
 - **Legitimate (test code, effect implementations):** 70 (53%)
-- **Production code violations remaining:** 7 (5%) - down from 12
-- **Production code violations fixed:** 26 (20%)
+- **Production code violations remaining:** 0 (0%) - All production violations fixed! 🎉
+- **Production code violations fixed:** 33 (25%)
 - **Trait limitations (tracked):** 12 (9%)
 - **Bootstrap code (acceptable):** 18 (13%)
 
@@ -60,7 +60,7 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Renamed `_effects` field to `effects` to enable usage
 - ✅ All connection lifecycle timing now uses `self.effects.now_instant().await` for testability
 
-### Phase 7 (Completed - Current)
+### Phase 7 (Completed - Commit 58cc4ff)
 - ✅ Fixed aura-rendezvous timing violations (4 violations):
   - `aura-rendezvous/src/connection_manager.rs:503/516` - Refactored establish_connection_with_punch to accept `start_time` parameter
   - `aura-rendezvous/src/integrated_sbb.rs:282` - Refactored cleanup_expired_data to accept `current_time` parameter
@@ -69,7 +69,15 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Fixed aura-authenticate guardian verification (1 violation):
   - `aura-authenticate/src/guardian_auth.rs:355` - Refactored verify_guardian_challenge to accept `now` parameter
 
-## Remaining Production Violations (7 total)
+### Phase 8 (Completed - Current)
+- ✅ Fixed remaining aura-authenticate timing violations (4 violations):
+  - `aura-authenticate/src/guardian_auth.rs:496` - Refactored validate_recovery_request to accept `now: u64` parameter
+  - `aura-authenticate/src/guardian_auth.rs:534` - Refactored generate_guardian_challenge to accept `nonce: u128` parameter
+  - `aura-authenticate/src/guardian_auth.rs:691/798/848` - Refactored execute_requester and execute_guardian to accept `now: u64` parameter
+- ✅ Updated public execute() method to accept and propagate `now` parameter through role dispatch
+- ✅ Fixed pre-existing syntax errors (missing semicolons) encountered during refactoring
+
+## Remaining Production Violations (0 total - ALL FIXED! 🎉)
 
 ### Priority 1: CRITICAL SECURITY - Cryptographic Operations ✅ COMPLETED (Phase 4)
 
@@ -135,19 +143,17 @@ This document tracks remaining violations of the effect system architecture prin
 #### aura-rendezvous (0 violations - all fixed in Phase 7)
 - ✅ Fixed: All connection timing, SBB cleanup, and capability timing operations
 
-### Priority 3: MEDIUM - Other Infrastructure (4 violations remaining)
+### Priority 3: MEDIUM - Other Infrastructure (0 violations - all fixed in Phase 8)
 
-#### aura-authenticate (4 violations remaining)
+#### aura-authenticate (0 violations - all fixed in Phase 8)
 
-These violations are in placeholder/TODO code that requires major refactoring:
+All timing violations have been resolved by refactoring methods to accept time/nonce parameters:
 
-- `crates/aura-authenticate/src/guardian_auth.rs:496` - Request timestamp age check
-- `crates/aura-authenticate/src/guardian_auth.rs:534` - Guardian challenge generation (uses time as nonce)
-- `crates/aura-authenticate/src/guardian_auth.rs:691/798/848` - Approval/challenge timestamps in execute methods
+- ✅ `crates/aura-authenticate/src/guardian_auth.rs:496` - validate_recovery_request now accepts `now: u64` parameter
+- ✅ `crates/aura-authenticate/src/guardian_auth.rs:534` - generate_guardian_challenge now accepts `nonce: u128` parameter
+- ✅ `crates/aura-authenticate/src/guardian_auth.rs:691/798/848` - execute_requester and execute_guardian now accept `now: u64` parameter
 
-**Note**: These are in MVP placeholder code with extensive TODOs. The guardian authentication system needs comprehensive refactoring to integrate with the effect system, aura-wot capabilities, and proper network effects. Fixing individual timing calls without this broader refactoring would provide limited value.
-
-**Solution**: Defer until guardian auth system is properly implemented with effect system integration.
+**Note**: While this is MVP placeholder code with extensive TODOs, the timing violations have been fixed to align with effect system architecture. The guardian authentication system still needs comprehensive refactoring to integrate with aura-wot capabilities and proper network effects, but timing is now properly injected.
 
 #### aura-sync Snapshots (0 violations - fixed in Phase 5)
 - ✅ Fixed: Snapshot finalization now accepts UUID parameter
@@ -214,8 +220,8 @@ These have legitimate architectural constraints that require trait signature cha
 3. ~~**Phase 5**: Fix remaining aura-sync timing violations (6 violations)~~ ✅ COMPLETED
 4. ~~**Phase 6**: Fix aura-protocol transport coordinator (3 violations)~~ ✅ COMPLETED
 5. ~~**Phase 7**: Fix aura-rendezvous and verification violations (5 violations)~~ ✅ COMPLETED
-6. **Phase 8**: Address aura-authenticate placeholder code (4 violations) - Deferred pending major refactoring
-7. **Phase 9**: Address trait evolution needs (coordinated effort)
+6. ~~**Phase 8**: Address aura-authenticate timing violations (4 violations)~~ ✅ COMPLETED
+7. **Phase 9**: Address trait evolution needs (coordinated effort) - 12 violations requiring trait signature changes
 
 ## References
 
@@ -226,6 +232,7 @@ These have legitimate architectural constraints that require trait signature cha
 - Phase 4 fixes: Commit eec77f3
 - Phase 5 fixes: Commit b26b3c2
 - Phase 6 fixes: Commit e48bbda
-- Phase 7 fixes: Current commit
+- Phase 7 fixes: Commit 58cc4ff
+- Phase 8 fixes: Current commit
 - Architecture: docs/002_system_architecture.md (Effect System section)
 - FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)
