@@ -146,7 +146,10 @@ impl SyncService {
     /// Create a new sync service
     pub fn new(config: SyncServiceConfig) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        let rate_limiter = RateLimiter::new(config.rate_limit.clone());
+        // TODO: Should obtain Instant via TimeEffects
+        #[allow(clippy::disallowed_methods)]
+        let now_instant = std::time::Instant::now();
+        let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
         // TODO: Obtain actual timestamp via TimeEffects
         let now = 0u64;
         let session_manager = SessionManager::new(Default::default(), now);

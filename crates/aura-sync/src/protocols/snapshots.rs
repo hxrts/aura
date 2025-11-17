@@ -230,11 +230,13 @@ impl SnapshotProtocol {
         let mut pending = self.pending.lock();
         if pending.is_some() {
             return Err(SyncError::protocol("sync", 
-                "snapshot proposal already in progress".to_string()
+                "snapshot proposal already in progress"
             ));
         }
 
-        let proposal = SnapshotProposal::new(proposer, target_epoch, state_digest);
+        // TODO: Should obtain UUID via RandomEffects
+        let proposal_uuid = Uuid::new_v4();
+        let proposal = SnapshotProposal::new(proposer, target_epoch, state_digest, proposal_uuid);
 
         let guard = if self.config.use_writer_fence {
             Some(self.fence.acquire()
@@ -273,7 +275,7 @@ impl SnapshotProtocol {
         match pending.as_ref() {
             Some(p) if p.proposal_id == proposal.proposal_id => {},
             _ => return Err(SyncError::protocol("sync", 
-                "proposal does not match pending snapshot".to_string()
+                "proposal does not match pending snapshot"
             )),
         }
 
@@ -302,7 +304,7 @@ impl SnapshotProtocol {
         let mut pending = self.pending.lock();
         if pending.is_none() {
             return Err(SyncError::protocol("sync", 
-                "no pending snapshot to abort".to_string()
+                "no pending snapshot to abort"
             ));
         }
         *pending = None;

@@ -365,17 +365,21 @@ where
     }
 
     /// Update session protocol state
-    pub fn update_session(&mut self, session_id: SessionId, new_state: T) -> SyncResult<()> {
+    pub fn update_session(&mut self, session_id: SessionId, new_state: T) -> SyncResult<()>
+    where
+        T: std::fmt::Debug,
+    {
         let session = self.sessions.get_mut(&session_id)
             .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
 
+        // Check timeout before pattern matching to avoid borrow conflicts
+        if session.is_timed_out() {
+            self.timeout_session(session_id)?;
+            return Err(SyncError::timeout("session_update", self.config.timeout));
+        }
+
         match session {
             SessionState::Active { protocol_state, .. } => {
-                if session.is_timed_out() {
-                    self.timeout_session(session_id)?;
-                    return Err(SyncError::timeout("session_update", self.config.timeout));
-                }
-
                 *protocol_state = new_state;
                 Ok(())
             }
@@ -412,7 +416,11 @@ where
 
         // Record metrics
         if let Some(ref metrics) = self.metrics {
-            metrics.record_sync_completion(&session_id.to_string(), operations_count, bytes_transferred);
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            metrics.record_sync_completion(&session_id.to_string(), operations_count, bytes_transferred, now);
         }
 
         Ok(())
@@ -519,7 +527,10 @@ where
     /// Cleanup stale and completed sessions
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn cleanup_stale_sessions(&mut self, now: u64) -> SyncResult<usize> {
+    pub fn cleanup_stale_sessions(&mut self, now: u64) -> SyncResult<usize>
+    where
+        T: std::fmt::Debug,
+    {
         let elapsed_secs = now.saturating_sub(self.last_cleanup);
         if Duration::from_secs(elapsed_secs) < self.config.cleanup_interval {
             return Ok(0);
