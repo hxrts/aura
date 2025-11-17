@@ -102,11 +102,11 @@ pub struct ConnectionMetadata {
     /// Session ID associated with this connection
     pub session_id: Option<SessionId>,
 
-    /// When connection was established
-    pub established_at: Instant,
+    /// When connection was established (Unix timestamp in seconds)
+    pub established_at: u64,
 
-    /// Last time connection was used
-    pub last_used_at: Instant,
+    /// Last time connection was used (Unix timestamp in seconds)
+    pub last_used_at: u64,
 
     /// Number of times connection has been reused
     pub reuse_count: u64,
@@ -121,8 +121,8 @@ pub struct ConnectionMetadata {
 impl ConnectionMetadata {
     /// Create new connection metadata
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn new(connection_id: String, peer_id: DeviceId, now: Instant) -> Self {
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn new(connection_id: String, peer_id: DeviceId, now: u64) -> Self {
         Self {
             connection_id,
             peer_id,
@@ -148,7 +148,7 @@ impl ConnectionMetadata {
     /// Mark connection as acquired
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn acquire(&mut self, session_id: SessionId, now: Instant) {
+    pub fn acquire(&mut self, session_id: SessionId, now: u64) {
         self.state = ConnectionState::Active;
         self.session_id = Some(session_id);
         self.last_used_at = now;
@@ -158,7 +158,7 @@ impl ConnectionMetadata {
     /// Mark connection as released
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn release(&mut self, now: Instant) {
+    pub fn release(&mut self, now: u64) {
         self.state = ConnectionState::Idle;
         self.session_id = None;
         self.last_used_at = now;
@@ -216,7 +216,7 @@ impl ConnectionHandle {
     /// Create a new connection handle
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn new(id: String, peer_id: DeviceId, session_id: SessionId, now: Instant) -> Self {
+    pub fn new(id: String, peer_id: DeviceId, session_id: SessionId, now: u64) -> Self {
         Self {
             id,
             peer_id,
@@ -268,7 +268,7 @@ impl ConnectionPool {
     ///
     /// Tries to reuse an idle connection first, otherwise creates a new one.
     /// Returns error if pool limits are exceeded or timeout occurs.
-    pub async fn acquire(&mut self, peer_id: DeviceId, now: Instant) -> SyncResult<ConnectionHandle> {
+    pub async fn acquire(&mut self, peer_id: DeviceId, now: u64) -> SyncResult<ConnectionHandle> {
         let session_id = SessionId::new();
 
         if let Some(connections) = self.connections.get_mut(&peer_id) {
@@ -321,7 +321,7 @@ impl ConnectionPool {
     }
 
     /// Release a connection back to the pool
-    pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle, now: Instant) -> SyncResult<()> {
+    pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle, now: u64) -> SyncResult<()> {
 
         let connections = self.connections.get_mut(&peer_id)
             .ok_or_else(|| SyncError::session("No connections for peer".to_string()))?;

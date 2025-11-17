@@ -157,7 +157,7 @@ impl PeerMetadata {
     /// Update peer status
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn set_status(&mut self, status: PeerStatus, now: Instant) {
+    pub fn set_status(&mut self, status: PeerStatus, now: u64) {
         if self.status != status {
             self.status = status;
             self.last_status_change = now;
@@ -267,7 +267,7 @@ impl PeerManager {
     /// - Uses `NetworkEffects` for peer discovery
     /// - Uses `StorageEffects` to persist discovered peers
     /// - Filters by capabilities via aura-wot integration
-    pub async fn discover_peers<E>(&mut self, _effects: &E, now: Instant) -> SyncResult<Vec<DeviceId>>
+    pub async fn discover_peers<E>(&mut self, _effects: &E, now: u64) -> SyncResult<Vec<DeviceId>>
     where
         E: Send + Sync,
     {
@@ -282,7 +282,7 @@ impl PeerManager {
     }
 
     /// Add a discovered peer to tracking
-    pub fn add_peer(&mut self, device_id: DeviceId, now: Instant) -> SyncResult<()> {
+    pub fn add_peer(&mut self, device_id: DeviceId, now: u64) -> SyncResult<()> {
         if self.peers.len() >= self.config.max_tracked_peers {
             return Err(SyncError::config("sync", 
                 "Maximum tracked peers exceeded".to_string()
