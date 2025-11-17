@@ -250,12 +250,22 @@ impl ConnectionManager {
         }
     }
 
-    /// Establish connection using priority logic: direct → reflexive → relay
+    /// Establish connection using priority logic: direct → reflexive → relay.
+    ///
+    /// # Parameters
+    /// - `peer_id`: Device ID of the peer to connect to
+    /// - `offers`: Available transport descriptors
+    /// - `config`: Connection configuration
+    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
+    ///
+    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
+    /// and consistency with the effect system architecture.
     pub async fn establish_connection(
         &self,
         peer_id: DeviceId,
         offers: Vec<TransportDescriptor>,
         config: ConnectionConfig,
+        timestamp: u64,
     ) -> Result<ConnectionResult, AuraError> {
         use std::time::Duration;
 
@@ -281,7 +291,7 @@ impl ConnectionManager {
 
                 attempt_count += 1;
                 match self
-                    .try_direct_connection(offer.clone(), address, &config)
+                    .try_direct_connection(offer.clone(), address, &config, timestamp)
                     .await
                 {
                     Ok(addr) => {
@@ -473,9 +483,18 @@ impl ConnectionManager {
         })
     }
 
-    /// Establish connection with coordinated hole-punching using offer/answer exchange
+    /// Establish connection with coordinated hole-punching using offer/answer exchange.
     ///
-    /// Note: Callers should obtain `start_time` via `TimeEffects::now_instant()` and pass it to this method
+    /// # Parameters
+    /// - `peer_id`: Device ID of the peer to connect to
+    /// - `offer`: Transport offer payload
+    /// - `answer`: Transport answer payload
+    /// - `config`: Connection configuration
+    /// - `start_time`: Instant for duration tracking (obtain from TimeEffects for testability)
+    /// - `timestamp`: Unix timestamp in seconds for websocket keys (obtain from TimeEffects for testability)
+    ///
+    /// Note: Callers should obtain both `start_time` and `timestamp` from TimeEffects to maintain
+    /// testability and consistency with the effect system architecture.
     pub async fn establish_connection_with_punch(
         &self,
         peer_id: DeviceId,
@@ -483,6 +502,7 @@ impl ConnectionManager {
         answer: &TransportOfferPayload,
         config: ConnectionConfig,
         start_time: std::time::Instant,
+        timestamp: u64,
     ) -> Result<ConnectionResult, AuraError> {
         tracing::info!(
             peer_id = %peer_id.0,
@@ -497,7 +517,7 @@ impl ConnectionManager {
             _ => {
                 tracing::debug!("No coordinated punch nonces, falling back to standard connection");
                 return self
-                    .establish_connection(peer_id, offer.transports.clone(), config)
+                    .establish_connection(peer_id, offer.transports.clone(), config, timestamp)
                     .await;
             }
         };
@@ -551,16 +571,26 @@ impl ConnectionManager {
 
         // Fallback to standard connection establishment
         tracing::debug!("Hole-punch failed, falling back to standard connection methods");
-        self.establish_connection(peer_id, offer.transports.clone(), config)
+        self.establish_connection(peer_id, offer.transports.clone(), config, timestamp)
             .await
     }
 
-    /// Try direct connection to address
+    /// Try direct connection to address.
+    ///
+    /// # Parameters
+    /// - `transport`: Transport descriptor specifying the connection method
+    /// - `address`: Address to connect to
+    /// - `config`: Connection configuration
+    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
+    ///
+    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
+    /// and consistency with the effect system architecture.
     async fn try_direct_connection(
         &self,
         transport: TransportDescriptor,
         address: &str,
         config: &ConnectionConfig,
+        timestamp: u64,
     ) -> Result<SocketAddr, AuraError> {
         let addr: SocketAddr = address.parse().map_err(|e| {
             AuraError::coordination_failed(format!("Invalid address '{}': {}", address, e))
@@ -578,11 +608,14 @@ impl ConnectionManager {
             }
             TransportKind::WebSocket => {
                 // Would implement WebSocket connection
-                timeout(config.attempt_timeout, self.try_websocket_connection(addr))
-                    .await
-                    .map_err(|_| {
-                        AuraError::coordination_failed("WebSocket connection timeout".to_string())
-                    })?
+                timeout(
+                    config.attempt_timeout,
+                    self.try_websocket_connection(addr, timestamp),
+                )
+                .await
+                .map_err(|_| {
+                    AuraError::coordination_failed("WebSocket connection timeout".to_string())
+                })?
             }
             _ => Err(AuraError::coordination_failed(format!(
                 "Unsupported transport for direct connection: {:?}",
@@ -760,8 +793,19 @@ impl ConnectionManager {
         Ok(packet)
     }
 
-    /// Try WebSocket connection
-    async fn try_websocket_connection(&self, addr: SocketAddr) -> Result<SocketAddr, AuraError> {
+    /// Try WebSocket connection.
+    ///
+    /// # Parameters
+    /// - `addr`: Socket address to connect to
+    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
+    ///
+    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
+    /// and consistency with the effect system architecture.
+    async fn try_websocket_connection(
+        &self,
+        addr: SocketAddr,
+        timestamp: u64,
+    ) -> Result<SocketAddr, AuraError> {
         tracing::debug!(addr = %addr, "Attempting WebSocket connection");
 
         // Establish TCP connection first
@@ -775,7 +819,9 @@ impl ConnectionManager {
         })?;
 
         // Perform WebSocket handshake
-        let ws_connection = self.perform_websocket_handshake(std_stream, addr).await?;
+        let ws_connection = self
+            .perform_websocket_handshake(std_stream, addr, timestamp)
+            .await?;
 
         tracing::info!(
             remote_addr = %addr,
@@ -785,16 +831,25 @@ impl ConnectionManager {
         Ok(ws_connection)
     }
 
-    /// Perform WebSocket handshake
+    /// Perform WebSocket handshake.
+    ///
+    /// # Parameters
+    /// - `stream`: TCP stream for the WebSocket connection
+    /// - `addr`: Socket address of the peer
+    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
+    ///
+    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
+    /// and consistency with the effect system architecture.
     async fn perform_websocket_handshake(
         &self,
         mut stream: TcpStream,
         addr: SocketAddr,
+        timestamp: u64,
     ) -> Result<SocketAddr, AuraError> {
         use std::io::{Read, Write};
 
         // Generate WebSocket key
-        let ws_key = self.generate_websocket_key();
+        let ws_key = self.generate_websocket_key(timestamp);
 
         // Create WebSocket upgrade request
         let request = format!(
@@ -830,14 +885,18 @@ impl ConnectionManager {
         Ok(addr)
     }
 
-    /// Generate WebSocket key for handshake
-    fn generate_websocket_key(&self) -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        #[allow(clippy::disallowed_methods)]
-        let now = SystemTime::now();
-        let timestamp = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-
+    /// Generate WebSocket key for handshake.
+    ///
+    /// # Parameters
+    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
+    ///
+    /// # Note
+    /// This is a simplified implementation. Production code should use cryptographically
+    /// secure random nonces for WebSocket handshakes. Callers should obtain timestamp
+    /// from TimeEffects to maintain testability.
+    ///
+    /// TODO: Replace with proper cryptographic random nonce generation using RandomEffects.
+    fn generate_websocket_key(&self, timestamp: u64) -> String {
         // Simple key generation (real implementation would use proper randomness)
         let key_data = format!("aura-{}-{}", self.device_id, timestamp);
 
@@ -1025,9 +1084,16 @@ mod tests {
             punch_config: PunchConfig::default(),
         };
 
+        // Get current timestamp for test
+        #[allow(clippy::disallowed_methods)]
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         let peer_id = DeviceId::from("peer_device");
         let result = manager
-            .establish_connection(peer_id, offers, config)
+            .establish_connection(peer_id, offers, config, timestamp)
             .await
             .unwrap();
 
@@ -1124,9 +1190,18 @@ mod tests {
             },
         };
 
+        // Get current time values for test
+        #[allow(clippy::disallowed_methods)]
+        let start_time = std::time::Instant::now();
+        #[allow(clippy::disallowed_methods)]
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         let peer_id = DeviceId::from("peer_device");
         let result = manager
-            .establish_connection_with_punch(peer_id, &offer, &answer, config)
+            .establish_connection_with_punch(peer_id, &offer, &answer, config, start_time, timestamp)
             .await
             .unwrap();
 

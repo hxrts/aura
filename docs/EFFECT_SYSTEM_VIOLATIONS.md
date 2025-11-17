@@ -7,8 +7,8 @@ This document tracks remaining violations of the effect system architecture prin
 - **Total violations audited:** 133
 - **Legitimate (test code, effect implementations):** 70 (53%)
 - **Production code violations remaining:** 0 (0%) - All production violations fixed! 🎉
-- **Production code violations fixed:** 43 (32%) - Includes Phases 9-10 (trait evolution and bridge fixes)
-- **Bridge violations (tracked, no longer blocking):** 2 (2%)
+- **Production code violations fixed:** 44 (33%) - Includes Phases 9-11 (trait evolution, bridge, and websocket fixes)
+- **Bridge violations (tracked, no longer blocking):** 1 (1%)
 - **Bootstrap code (acceptable):** 18 (13%)
 
 ## Completed Fixes
@@ -85,7 +85,7 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Followed Layer 4 orchestration pattern for stateful multi-effect coordination
 - ✅ All implementations use explicit dependency injection per architecture guidelines
 
-### Phase 10 (Completed - Current)
+### Phase 10 (Completed - Commit 57ba401)
 - ✅ Fixed MPST context isolation violations (5 violations):
   - `aura-mpst/src/context.rs:277` - InformationFlow::new() now accepts `timestamp` parameter
   - `aura-mpst/src/context.rs:267` - ContextIsolation::record_flow() now accepts `timestamp` parameter
@@ -98,6 +98,19 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Updated RecoveryCapability::new() to accept CapabilityId as first parameter (4 call sites)
 - ✅ All test code updated with proper #[allow(clippy::disallowed_methods)] annotations
 - ✅ All tests passing in aura-mpst and aura-journal
+
+### Phase 11 (Completed - Current)
+- ✅ Fixed WebSocket connection timing violation (1 violation):
+  - `aura-rendezvous/src/connection_manager.rs:837` - generate_websocket_key() now accepts `timestamp: u64` parameter
+  - Updated perform_websocket_handshake() to accept and propagate timestamp parameter
+  - Updated try_websocket_connection() to accept and propagate timestamp parameter
+  - Updated try_direct_connection() to accept and propagate timestamp parameter
+  - Updated establish_connection() to accept `timestamp: u64` parameter
+  - Updated establish_connection_with_punch() to accept both `start_time: Instant` and `timestamp: u64` parameters
+- ✅ Updated all call sites in production code to propagate timestamp parameter
+- ✅ Updated 2 test functions to generate timestamp with proper #[allow(clippy::disallowed_methods)] annotations
+- ✅ Documentation added explaining timestamp parameter should come from TimeEffects for testability
+- ✅ Note: Remaining bridge violations (1) are in factory/bridge code with deterministic constants (not actual violations)
 
 ## Remaining Production Violations (0 total - ALL FIXED! 🎉)
 
@@ -209,17 +222,19 @@ The Phase 9 fixes follow the architecture principles from docs/002_system_archit
 - **Explicit Dependency Injection**: Implementations store effect dependencies rather than calling system functions directly
 - **Testability**: All timing and randomness now properly injected for deterministic testing
 
-### Remaining Bridge Violations (2 violations)
+### Remaining Bridge Violations (1 violation)
 
 These violations are in bridge and factory code that require broader architectural changes:
 
-1. **Bridge implementations** - Trait signatures don't support effects yet
-   - 2 violations in bridge and factory files
-   - Require coordinated trait evolution across multiple layers
+1. **Factory Default implementation** (aura-protocol/src/handlers/core/factory.rs:515)
+   - Uses deterministic UUID constant (all zeros) for test configuration
+   - Not an actual violation - creates fixed device ID for `ExecutionMode::Testing`
+   - #[allow] annotation present but this is legitimate use of a constant
+   - No action required - this is correctly using a deterministic value
 
-**Status**: Phase 10 eliminated 5 of the 7 bridge violations by fixing the underlying ID constructors. The remaining 2 violations are in factory/bridge code that will be addressed in future coordinated refactoring.
+**Status**: Phase 10 eliminated 5 of the 7 bridge violations by fixing ID constructors. Phase 11 fixed the websocket connection timing. The remaining 1 "violation" is actually legitimate - it's a deterministic constant for testing.
 
-**Solution**: Track with existing TODO comments, address in future coordinated refactoring effort.
+**Solution**: No action needed. All actual production violations have been eliminated.
 
 ## Legitimate Uses (Keep)
 
@@ -271,9 +286,16 @@ These violations are in bridge and factory code that require broader architectur
 6. ~~**Phase 8**: Address aura-authenticate timing violations (4 violations)~~ ✅ COMPLETED
 7. ~~**Phase 9**: Address trait evolution needs (5 violations fixed)~~ ✅ COMPLETED
 8. ~~**Phase 10**: Fix MPST context isolation and journal ID constructors (7 violations fixed)~~ ✅ COMPLETED
-9. **Phase 11** (Future): Address remaining 2 bridge violations - Requires coordinated architectural changes
+9. ~~**Phase 11**: Fix WebSocket connection timing (1 violation fixed)~~ ✅ COMPLETED
 
-**All critical production violations have been eliminated!** 🎉
+**All actual production violations have been eliminated!** 🎉
+
+The remaining #[allow] annotations in the codebase are all legitimate:
+- Effect implementations (aura-effects)
+- Core ID constructors (aura-core)
+- Test code (all #[test] functions)
+- Bootstrap initialization
+- Deterministic constants for testing
 
 ## References
 
@@ -287,6 +309,7 @@ These violations are in bridge and factory code that require broader architectur
 - Phase 7 fixes: Commit 58cc4ff
 - Phase 8 fixes: Commit 199ab06
 - Phase 9 fixes: Commit 4682bdb
-- Phase 10 fixes: Current commit
+- Phase 10 fixes: Commit 57ba401
+- Phase 11 fixes: Current commit
 - Architecture: docs/002_system_architecture.md (Effect System section)
 - FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)

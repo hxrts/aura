@@ -459,9 +459,23 @@ async fn test_coordinated_hole_punch() {
             },
         };
 
+        // Get current timestamp for test
+        #[allow(clippy::disallowed_methods)]
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         // Test coordinated hole-punch
         let result = device_a_manager
-            .establish_connection_with_punch(device_b_id.clone(), &offer, &answer, connection_config)
+            .establish_connection_with_punch(
+                device_b_id.clone(),
+                &offer,
+                &answer,
+                connection_config,
+                start_time,
+                timestamp,
+            )
             .await;
 
         let connection_time = start_time.elapsed();
