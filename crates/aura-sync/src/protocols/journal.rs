@@ -227,13 +227,14 @@ impl JournalSyncProtocol {
         // For now, return empty result
 
         let duration_ms = start.elapsed().as_millis() as u64;
+        let success = !peers_synced.is_empty();
 
         Ok(JournalSyncResult {
             operations_synced,
             peers_synced,
             peers_failed,
             duration_ms,
-            success: !peers_synced.is_empty(),
+            success,
         })
     }
 

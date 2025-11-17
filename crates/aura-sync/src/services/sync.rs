@@ -215,7 +215,7 @@ impl SyncService {
             ServiceState::Stopped | ServiceState::Failed => HealthStatus::Unhealthy,
         };
 
-        let session_stats = self.session_manager.read().statistics();
+        let session_stats = self.session_manager.read().get_statistics();
         let peer_stats = self.peer_manager.read().statistics();
 
         let uptime = self.started_at.read()

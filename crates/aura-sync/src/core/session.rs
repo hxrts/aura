@@ -334,11 +334,13 @@ where
         let session = self.sessions.get_mut(&session_id)
             .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
 
+        // Check timeout before pattern matching to avoid borrow conflicts
+        if session.is_timed_out() {
+            return Err(SyncError::timeout("session_activation", self.config.timeout));
+        }
+
         match session {
             SessionState::Initializing { participants, .. } => {
-                if session.is_timed_out() {
-                    return Err(SyncError::timeout("session_activation", self.config.timeout));
-                }
 
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
