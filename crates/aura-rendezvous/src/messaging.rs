@@ -157,7 +157,8 @@ impl SbbTransportBridge {
 
         // Flood through SBB
         let mut coordinator = self.flooding_coordinator.write().await;
-        let result = coordinator.flood_envelope(envelope, None).await?;
+        let now = crate::sbb::current_timestamp();
+        let result = coordinator.flood_envelope(envelope, None, now).await?;
 
         match result {
             crate::sbb::FloodResult::Forwarded { peer_count } => {
@@ -198,7 +199,8 @@ impl SbbTransportBridge {
     ) -> AuraResult<()> {
         // Process through flooding coordinator for further propagation
         let mut coordinator = self.flooding_coordinator.write().await;
-        let _result = coordinator.flood_envelope(envelope, from_peer).await?;
+        let now = crate::sbb::current_timestamp();
+        let _result = coordinator.flood_envelope(envelope, from_peer, now).await?;
 
         // TODO: If this device is interested in the offer, process it
         // For now, just propagate it
@@ -327,20 +329,21 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
         coordinator.flood_envelope(envelope, from_peer, now).await
     }
 
-    async fn get_forwarding_peers(&self, exclude: Option<DeviceId>) -> AuraResult<Vec<DeviceId>> {
+    async fn get_forwarding_peers(&self, exclude: Option<DeviceId>, now: u64) -> AuraResult<Vec<DeviceId>> {
         let coordinator = self.flooding_coordinator.read().await;
-        coordinator.get_forwarding_peers(exclude).await
+        coordinator.get_forwarding_peers(exclude, now).await
     }
 
-    async fn can_forward_to(&self, peer: &DeviceId, message_size: u64) -> AuraResult<bool> {
+    async fn can_forward_to(&self, peer: &DeviceId, message_size: u64, now: u64) -> AuraResult<bool> {
         let coordinator = self.flooding_coordinator.read().await;
-        coordinator.can_forward_to(peer, message_size).await
+        coordinator.can_forward_to(peer, message_size, now).await
     }
 
     async fn forward_to_peer(
         &mut self,
         envelope: RendezvousEnvelope,
         peer: DeviceId,
+        now: u64,
     ) -> AuraResult<()> {
         // Use transport sender if available, otherwise delegate to coordinator
         if let Some(sender) = &self.transport_sender {
@@ -352,7 +355,7 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
         } else {
             // Fallback to coordinator's placeholder implementation
             let mut coordinator = self.flooding_coordinator.write().await;
-            coordinator.forward_to_peer(envelope, peer).await
+            coordinator.forward_to_peer(envelope, peer, now).await
         }
     }
 }

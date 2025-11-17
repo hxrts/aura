@@ -135,9 +135,10 @@ impl IntegratedSbbSystem {
         peer_id: DeviceId,
         relationship_id: RelationshipId,
         trust_level: TrustLevel,
+        now: u64,
     ) {
         self.flooding_coordinator
-            .add_relationship(peer_id, relationship_id, trust_level, false);
+            .add_relationship(peer_id, relationship_id, trust_level, false, now);
         self.transport_bridge.add_friend(peer_id).await;
     }
 
@@ -147,9 +148,10 @@ impl IntegratedSbbSystem {
         peer_id: DeviceId,
         relationship_id: RelationshipId,
         trust_level: TrustLevel,
+        now: u64,
     ) {
         self.flooding_coordinator
-            .add_relationship(peer_id, relationship_id, trust_level, true);
+            .add_relationship(peer_id, relationship_id, trust_level, true, now);
         self.transport_bridge.add_guardian(peer_id).await;
     }
 
@@ -158,9 +160,10 @@ impl IntegratedSbbSystem {
         &mut self,
         peer_id: DeviceId,
         trust_level: TrustLevel,
+        now: u64,
     ) -> AuraResult<()> {
         self.flooding_coordinator
-            .update_trust_level(peer_id, trust_level)
+            .update_trust_level(peer_id, trust_level, now)
     }
 
     /// Remove relationship
@@ -197,9 +200,10 @@ impl IntegratedSbbSystem {
         let message_size = envelope.payload.len();
 
         // Flood through capability-aware coordinator
+        let now = crate::sbb::current_timestamp();
         let flood_result = self
             .flooding_coordinator
-            .flood_envelope(envelope, None)
+            .flood_envelope(envelope, None, now)
             .await?;
 
         let peers_reached = match &flood_result {
@@ -293,17 +297,17 @@ impl IntegratedSbbSystem {
     }
 
     /// Check if peer can receive SBB messages
-    pub async fn can_forward_to_peer(&self, peer_id: DeviceId, message_size: u64) -> bool {
+    pub async fn can_forward_to_peer(&self, peer_id: DeviceId, message_size: u64, now: u64) -> bool {
         self.flooding_coordinator
-            .can_forward_to(&peer_id, message_size)
+            .can_forward_to(&peer_id, message_size, now)
             .await
             .unwrap_or(false)
     }
 
     /// Get eligible peers for forwarding
-    pub async fn get_eligible_peers(&self, message_size: u64) -> AuraResult<Vec<DeviceId>> {
+    pub async fn get_eligible_peers(&self, message_size: u64, now: u64) -> AuraResult<Vec<DeviceId>> {
         self.flooding_coordinator
-            .get_capability_aware_forwarding_peers(None, message_size, &self.forwarding_policy)
+            .get_capability_aware_forwarding_peers(None, message_size, &self.forwarding_policy, now)
             .await
     }
 }

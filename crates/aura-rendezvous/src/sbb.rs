@@ -181,16 +181,17 @@ pub trait SbbFlooding: Send + Sync {
     ) -> AuraResult<FloodResult>;
 
     /// Get forwarding peers (friends + guardians, capability-filtered)
-    async fn get_forwarding_peers(&self, exclude: Option<DeviceId>) -> AuraResult<Vec<DeviceId>>;
+    async fn get_forwarding_peers(&self, exclude: Option<DeviceId>, now: u64) -> AuraResult<Vec<DeviceId>>;
 
     /// Check if can forward to specific peer (capability + flow budget)
-    async fn can_forward_to(&self, peer: &DeviceId, message_size: u64) -> AuraResult<bool>;
+    async fn can_forward_to(&self, peer: &DeviceId, message_size: u64, now: u64) -> AuraResult<bool>;
 
     /// Forward envelope to specific peer
     async fn forward_to_peer(
         &mut self,
         envelope: RendezvousEnvelope,
         peer: DeviceId,
+        now: u64,
     ) -> AuraResult<()>;
 }
 
@@ -320,6 +321,7 @@ impl SbbFlooding for SbbFloodingCoordinator {
         &mut self,
         envelope: RendezvousEnvelope,
         from_peer: Option<DeviceId>,
+        now: u64,
     ) -> AuraResult<FloodResult> {
         // Check TTL - drop if zero
         if envelope.ttl == 0 {
@@ -332,11 +334,11 @@ impl SbbFlooding for SbbFloodingCoordinator {
         }
 
         // Cache envelope for duplicate detection
-        let expires_at = current_timestamp() + 3600; // 1 hour cache
+        let expires_at = now + 3600; // 1 hour cache
         self.cache_envelope(&envelope, expires_at);
 
         // Get peers to forward to (exclude sender)
-        let forwarding_peers = self.get_forwarding_peers(from_peer).await?;
+        let forwarding_peers = self.get_forwarding_peers(from_peer, now).await?;
 
         if forwarding_peers.is_empty() {
             return Ok(FloodResult::Dropped);
@@ -352,7 +354,7 @@ impl SbbFlooding for SbbFloodingCoordinator {
         let mut successful_forwards = 0;
         for peer in &forwarding_peers {
             match self
-                .forward_to_peer(forwarded_envelope.clone(), *peer)
+                .forward_to_peer(forwarded_envelope.clone(), *peer, now)
                 .await
             {
                 Ok(()) => successful_forwards += 1,
@@ -372,12 +374,12 @@ impl SbbFlooding for SbbFloodingCoordinator {
     }
 
     /// Get forwarding peers - prefer guardians, then friends, exclude sender
-    async fn get_forwarding_peers(&self, exclude: Option<DeviceId>) -> AuraResult<Vec<DeviceId>> {
+    async fn get_forwarding_peers(&self, exclude: Option<DeviceId>, now: u64) -> AuraResult<Vec<DeviceId>> {
         let mut peers = Vec::new();
 
         // Add guardians first (preferred for reliability)
         for guardian in &self.guardians {
-            if Some(*guardian) != exclude && self.can_forward_to(guardian, SBB_MESSAGE_SIZE).await?
+            if Some(*guardian) != exclude && self.can_forward_to(guardian, SBB_MESSAGE_SIZE, now).await?
             {
                 peers.push(*guardian);
             }
@@ -385,7 +387,7 @@ impl SbbFlooding for SbbFloodingCoordinator {
 
         // Add friends if we have capacity
         for friend in &self.friends {
-            if Some(*friend) != exclude && self.can_forward_to(friend, SBB_MESSAGE_SIZE).await? {
+            if Some(*friend) != exclude && self.can_forward_to(friend, SBB_MESSAGE_SIZE, now).await? {
                 peers.push(*friend);
             }
         }
@@ -394,7 +396,7 @@ impl SbbFlooding for SbbFloodingCoordinator {
     }
 
     /// Check if can forward to peer (placeholder for capability integration)
-    async fn can_forward_to(&self, _peer: &DeviceId, _message_size: u64) -> AuraResult<bool> {
+    async fn can_forward_to(&self, _peer: &DeviceId, _message_size: u64, _now: u64) -> AuraResult<bool> {
         // TODO: Integrate with RelayCapability system and flow budgets
         // For now, allow all forwards (will be implemented in Phase 3)
         Ok(true)
@@ -405,6 +407,7 @@ impl SbbFlooding for SbbFloodingCoordinator {
         &mut self,
         _envelope: RendezvousEnvelope,
         _peer: DeviceId,
+        _now: u64,
     ) -> AuraResult<()> {
         // TODO: Integrate with transport layer (will be implemented in Task 1.3)
         // For now, simulate successful forward
@@ -413,7 +416,7 @@ impl SbbFlooding for SbbFloodingCoordinator {
 }
 
 /// Get current timestamp (placeholder - would use time effects)
-fn current_timestamp() -> u64 {
+pub(crate) fn current_timestamp() -> u64 {
     1234567890
 }
 
