@@ -251,7 +251,7 @@ impl Service for SyncService {
     async fn start(&self, now: Instant) -> SyncResult<()> {
         let mut state = self.state.write();
         if *state == ServiceState::Running {
-            return Err(SyncError::session("Service already running".to_string()));
+            return Err(SyncError::session("Service already running"));
         }
 
         *state = ServiceState::Starting;

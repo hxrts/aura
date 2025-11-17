@@ -244,8 +244,8 @@ pub struct PeerManager {
     /// Tracked peers by device ID
     peers: HashMap<DeviceId, PeerInfo>,
 
-    /// Last discovery refresh time
-    last_refresh: Option<Instant>,
+    /// Last discovery refresh time (Unix timestamp in seconds)
+    last_refresh: Option<u64>,
 }
 
 impl PeerManager {
@@ -284,8 +284,8 @@ impl PeerManager {
     /// Add a discovered peer to tracking
     pub fn add_peer(&mut self, device_id: DeviceId, now: u64) -> SyncResult<()> {
         if self.peers.len() >= self.config.max_tracked_peers {
-            return Err(SyncError::config("sync", 
-                "Maximum tracked peers exceeded".to_string()
+            return Err(SyncError::config("sync",
+                "Maximum tracked peers exceeded"
             ));
         }
 
@@ -306,7 +306,7 @@ impl PeerManager {
         F: FnOnce(&mut PeerMetadata),
     {
         let peer = self.peers.get_mut(&device_id)
-            .ok_or_else(|| SyncError::peer("operation", device_id))?;
+            .ok_or_else(|| SyncError::peer("update", "Peer not found"))?;
 
         f(&mut peer.metadata);
         Ok(())
@@ -321,7 +321,7 @@ impl PeerManager {
         capabilities: HashSet<String>,
     ) -> SyncResult<()> {
         let peer = self.peers.get_mut(&device_id)
-            .ok_or_else(|| SyncError::peer("operation", device_id))?;
+            .ok_or_else(|| SyncError::peer("update", "Peer not found"))?;
 
         // Check for sync capability
         peer.metadata.has_sync_capability = capabilities.contains("sync_journal")

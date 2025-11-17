@@ -208,8 +208,8 @@ pub struct ConnectionHandle {
     /// Session using this connection
     pub session_id: SessionId,
 
-    /// When connection was acquired
-    pub acquired_at: Instant,
+    /// When connection was acquired (Unix timestamp in seconds)
+    pub acquired_at: u64,
 }
 
 impl ConnectionHandle {
@@ -324,11 +324,11 @@ impl ConnectionPool {
     pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle, now: u64) -> SyncResult<()> {
 
         let connections = self.connections.get_mut(&peer_id)
-            .ok_or_else(|| SyncError::session("No connections for peer".to_string()))?;
+            .ok_or_else(|| SyncError::session("No connections for peer"))?;
 
         let conn = connections.iter_mut()
             .find(|c| c.connection_id == handle.id)
-            .ok_or_else(|| SyncError::session("Connection not found in pool".to_string()))?;
+            .ok_or_else(|| SyncError::session("Connection not found in pool"))?;
 
         conn.release(now);
         self.stats.connections_released += 1;
@@ -339,7 +339,7 @@ impl ConnectionPool {
     /// Close a connection
     pub fn close(&mut self, peer_id: DeviceId, connection_id: &str) -> SyncResult<()> {
         let connections = self.connections.get_mut(&peer_id)
-            .ok_or_else(|| SyncError::session("No connections for peer".to_string()))?;
+            .ok_or_else(|| SyncError::session("No connections for peer"))?;
 
         if let Some(pos) = connections.iter().position(|c| c.connection_id == connection_id) {
             let removed = connections.remove(pos);
@@ -351,7 +351,7 @@ impl ConnectionPool {
             // TODO: Actually close connection via aura-transport
             Ok(())
         } else {
-            Err(SyncError::session("Connection not found".to_string()))
+            Err(SyncError::session("Connection not found"))
         }
     }
 
