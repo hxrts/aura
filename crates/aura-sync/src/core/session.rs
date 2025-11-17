@@ -6,6 +6,7 @@
 
 
 use crate::core::{SyncError, SyncResult, SyncConfig, MetricsCollector};
+use crate::core::metrics::ErrorCategory;
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -76,7 +77,7 @@ impl<T> SessionState<T> {
                 match result {
                     SessionResult::Success { duration_ms, .. } => Some(*duration_ms),
                     SessionResult::Failure { duration_ms, .. } => Some(*duration_ms),
-                    SessionResult::Timeout { duration_ms } => Some(*duration_ms),
+                    SessionResult::Timeout { duration_ms, .. } => Some(*duration_ms),
                 }
             }
             SessionState::Initializing { created_at, .. } => Some((now - created_at) * 1000),
@@ -126,7 +127,7 @@ impl SessionResult {
         match self {
             SessionResult::Success { duration_ms, .. } => *duration_ms,
             SessionResult::Failure { duration_ms, .. } => *duration_ms,
-            SessionResult::Timeout { duration_ms } => *duration_ms,
+            SessionResult::Timeout { duration_ms, .. } => *duration_ms,
         }
     }
 
@@ -438,12 +439,12 @@ where
         // Record metrics
         if let Some(ref metrics) = self.metrics {
             let category = match error {
-                SessionError::Timeout { .. } => crate::core::ErrorCategory::Timeout,
-                SessionError::ParticipantDisconnected { .. } => crate::core::ErrorCategory::Network,
-                SessionError::ResourceLimitExceeded { .. } => crate::core::ErrorCategory::Resource,
-                SessionError::ProtocolViolation { .. } => crate::core::ErrorCategory::Protocol,
-                SessionError::CapacityExceeded { .. } => crate::core::ErrorCategory::Resource,
-                SessionError::InvalidStateTransition { .. } => crate::core::ErrorCategory::Protocol,
+                SessionError::Timeout { .. } => ErrorCategory::Timeout,
+                SessionError::ParticipantDisconnected { .. } => ErrorCategory::Network,
+                SessionError::ResourceLimitExceeded { .. } => ErrorCategory::Resource,
+                SessionError::ProtocolViolation { .. } => ErrorCategory::Protocol,
+                SessionError::CapacityExceeded { .. } => ErrorCategory::Resource,
+                SessionError::InvalidStateTransition { .. } => ErrorCategory::Protocol,
             };
             metrics.record_sync_failure(&session_id.to_string(), category, &error.to_string());
         }
@@ -470,7 +471,7 @@ where
         if let Some(ref metrics) = self.metrics {
             metrics.record_sync_failure(
                 &session_id.to_string(),
-                crate::core::ErrorCategory::Timeout,
+                ErrorCategory::Timeout,
                 "Session timeout",
             );
         }

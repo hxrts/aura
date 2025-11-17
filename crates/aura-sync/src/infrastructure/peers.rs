@@ -114,11 +114,11 @@ pub struct PeerMetadata {
     /// Current connection status
     pub status: PeerStatus,
 
-    /// When peer was first discovered
-    pub discovered_at: Instant,
+    /// When peer was first discovered (Unix timestamp in seconds)
+    pub discovered_at: u64,
 
-    /// When peer status last changed
-    pub last_status_change: Instant,
+    /// When peer status last changed (Unix timestamp in seconds)
+    pub last_status_change: u64,
 
     /// Number of successful sync sessions with this peer
     pub successful_syncs: u64,
@@ -139,8 +139,8 @@ pub struct PeerMetadata {
 impl PeerMetadata {
     /// Create new peer metadata for a discovered peer
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn new(device_id: DeviceId, now: Instant) -> Self {
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn new(device_id: DeviceId, now: u64) -> Self {
         Self {
             device_id,
             status: PeerStatus::Discovered,

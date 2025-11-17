@@ -83,7 +83,7 @@ impl JournalDigest {
 }
 
 /// Relationship between two digests
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigestStatus {
     /// Digests are identical
     Equal,
