@@ -3,7 +3,6 @@
 //! Implements guardian-specific authorization logic including threshold validation,
 //! recovery context verification, and guardian relationship checks.
 
-#![allow(clippy::disallowed_methods)]
 #![allow(clippy::unwrap_used)]
 
 use crate::authorization_bridge::{AuthorizationError, AuthorizationRequest, PermissionGrant};
@@ -94,11 +93,17 @@ impl GuardianAuthorizationHandler {
         }
     }
 
-    /// Evaluate guardian authorization request
+    /// Evaluate guardian authorization request.
+    ///
+    /// # Parameters
+    /// - `request`: Authorization request with verified identity and operation
+    /// - `guardian_context`: Guardian-specific authorization context
+    /// - `now`: Current Unix timestamp in seconds (obtain from TimeEffects for testability)
     pub async fn evaluate_guardian_authorization(
         &self,
         request: &AuthorizationRequest,
         guardian_context: &GuardianAuthorizationContext,
+        now: u64,
     ) -> Result<PermissionGrant, AuthorizationError> {
         tracing::info!(
             "Evaluating guardian authorization for operation: {:?}",
@@ -136,7 +141,7 @@ impl GuardianAuthorizationHandler {
         .await?;
 
         // Check time-based constraints
-        self.validate_time_constraints(guardian_context).await?;
+        self.validate_time_constraints(guardian_context, now).await?;
 
         // Create capability set for this guardian authorization
         let granted_capabilities = self
@@ -342,16 +347,16 @@ impl GuardianAuthorizationHandler {
         }
     }
 
-    /// Validate time-based constraints
+    /// Validate time-based constraints.
+    ///
+    /// # Parameters
+    /// - `context`: Guardian authorization context with request timestamp
+    /// - `now`: Current Unix timestamp in seconds (obtain from TimeEffects for testability)
     async fn validate_time_constraints(
         &self,
         context: &GuardianAuthorizationContext,
+        now: u64,
     ) -> Result<(), AuthorizationError> {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
         // Check if request is not too old (24 hours for emergency, 6 hours for regular)
         let max_age = if context.is_emergency {
             24 * 3600
@@ -359,10 +364,10 @@ impl GuardianAuthorizationHandler {
             6 * 3600
         };
 
-        if current_time > context.request_timestamp + max_age {
+        if now > context.request_timestamp + max_age {
             return Err(AuthorizationError::InvalidRequest(format!(
                 "Recovery request expired: {} seconds old",
-                current_time - context.request_timestamp
+                now - context.request_timestamp
             )));
         }
 
@@ -430,12 +435,19 @@ impl GuardianAuthorizationHandler {
         Ok(CapabilitySet::from_permissions(&permission_strs))
     }
 
-    /// Add guardian relationship
+    /// Add guardian relationship.
+    ///
+    /// # Parameters
+    /// - `guardian_id`: Guardian identifier
+    /// - `trust_level`: Trust level (0.0 to 1.0)
+    /// - `allowed_operations`: Operations this guardian is authorized for
+    /// - `now`: Current Unix timestamp in seconds (obtain from TimeEffects for testability)
     pub async fn add_guardian_relationship(
         &self,
         guardian_id: GuardianId,
         trust_level: f64,
         allowed_operations: Vec<RecoveryOperationType>,
+        now: u64,
     ) -> Result<(), AuthorizationError> {
         let mut relationships = self.guardian_relationships.write().unwrap();
 
@@ -443,10 +455,7 @@ impl GuardianAuthorizationHandler {
             guardian_id,
             trust_level: trust_level.clamp(0.0, 1.0), // Ensure trust level is in valid range
             allowed_operations: allowed_operations.clone(),
-            established_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            established_at: now,
             is_active: true,
         };
 
@@ -538,12 +547,20 @@ mod tests {
         let handler = GuardianAuthorizationHandler::new(device_id);
         let guardian_id = GuardianId::new();
 
+        // Get current time for test
+        #[allow(clippy::disallowed_methods)]
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         // Add guardian relationship
         handler
             .add_guardian_relationship(
                 guardian_id,
                 0.8,
                 vec![RecoveryOperationType::DeviceKeyRecovery],
+                now,
             )
             .await
             .unwrap();
@@ -553,10 +570,7 @@ mod tests {
             recovery_operation: RecoveryOperationType::DeviceKeyRecovery,
             required_threshold: 1,
             is_emergency: false,
-            request_timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            request_timestamp: now,
             context_data: std::collections::HashMap::new(),
         };
 
@@ -595,7 +609,7 @@ mod tests {
 
         // Evaluate authorization
         let result = handler
-            .evaluate_guardian_authorization(&request, &context)
+            .evaluate_guardian_authorization(&request, &context, now)
             .await;
         assert!(result.is_ok());
 
@@ -609,12 +623,20 @@ mod tests {
         let handler = GuardianAuthorizationHandler::new(device_id);
         let guardian_id = GuardianId::new();
 
+        // Get current time for test
+        #[allow(clippy::disallowed_methods)]
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         // Add guardian relationship
         handler
             .add_guardian_relationship(
                 guardian_id,
                 0.8,
                 vec![RecoveryOperationType::DeviceKeyRecovery],
+                now,
             )
             .await
             .unwrap();
@@ -624,10 +646,7 @@ mod tests {
             recovery_operation: RecoveryOperationType::DeviceKeyRecovery,
             required_threshold: 2, // Require 2 but only have 1
             is_emergency: false,
-            request_timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            request_timestamp: now,
             context_data: std::collections::HashMap::new(),
         };
 
@@ -665,7 +684,7 @@ mod tests {
 
         // Evaluate authorization - should fail due to insufficient threshold
         let result = handler
-            .evaluate_guardian_authorization(&request, &context)
+            .evaluate_guardian_authorization(&request, &context, now)
             .await;
         assert!(result.is_ok());
 

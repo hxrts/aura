@@ -7,8 +7,8 @@ This document tracks remaining violations of the effect system architecture prin
 - **Total violations audited:** 133
 - **Legitimate (test code, effect implementations):** 70 (53%)
 - **Production code violations remaining:** 0 (0%) - All production violations fixed! 🎉
-- **Production code violations fixed:** 33 (25%)
-- **Trait limitations (tracked):** 12 (9%)
+- **Production code violations fixed:** 38 (29%) - Includes Phase 9 trait evolution fixes
+- **Bridge violations (tracked for Phase 10):** 7 (5%)
 - **Bootstrap code (acceptable):** 18 (13%)
 
 ## Completed Fixes
@@ -69,13 +69,21 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Fixed aura-authenticate guardian verification (1 violation):
   - `aura-authenticate/src/guardian_auth.rs:355` - Refactored verify_guardian_challenge to accept `now` parameter
 
-### Phase 8 (Completed - Current)
+### Phase 8 (Completed - Commit 199ab06)
 - ✅ Fixed remaining aura-authenticate timing violations (4 violations):
   - `aura-authenticate/src/guardian_auth.rs:496` - Refactored validate_recovery_request to accept `now: u64` parameter
   - `aura-authenticate/src/guardian_auth.rs:534` - Refactored generate_guardian_challenge to accept `nonce: u128` parameter
   - `aura-authenticate/src/guardian_auth.rs:691/798/848` - Refactored execute_requester and execute_guardian to accept `now: u64` parameter
 - ✅ Updated public execute() method to accept and propagate `now` parameter through role dispatch
 - ✅ Fixed pre-existing syntax errors (missing semicolons) encountered during refactoring
+
+### Phase 9 (Completed - Current)
+- ✅ Fixed trait evolution violations (5 violations):
+  - `aura-agent/src/runtime/reliability.rs:353` - ReliabilityCoordinator now stores TimeEffects dependency
+  - `aura-protocol/src/handlers/memory/ledger_memory.rs:116,133` - MemoryLedgerHandler stores TimeEffects and RandomEffects
+  - `aura-protocol/src/handlers/memory/guardian_authorization.rs:350,446` - Methods accept `now` parameter
+- ✅ Followed Layer 4 orchestration pattern for stateful multi-effect coordination
+- ✅ All implementations use explicit dependency injection per architecture guidelines
 
 ## Remaining Production Violations (0 total - ALL FIXED! 🎉)
 
@@ -158,20 +166,44 @@ All timing violations have been resolved by refactoring methods to accept time/n
 #### aura-sync Snapshots (0 violations - fixed in Phase 5)
 - ✅ Fixed: Snapshot finalization now accepts UUID parameter
 
-## Trait Evolution Needed (12 violations)
+## Trait Evolution Completed (Phase 9)
 
-These have legitimate architectural constraints that require trait signature changes:
+### Fixed Violations (5 total):
 
-1. **`ReliabilityEffects` trait** - Needs TimeEffects or time parameter
-   - `aura-agent/src/runtime/reliability.rs:353`
+1. **✅ `ReliabilityEffects` trait implementation** (aura-agent/src/runtime/reliability.rs:353)
+   - Solution: ReliabilityCoordinator now stores TimeEffects dependency
+   - Uses `self.time.now_instant().await` for circuit breaker state tracking
+   - Follows Layer 4 orchestration pattern for stateful multi-effect coordination
 
-2. **Memory handlers** - Need RandomEffects/TimeEffects integration
-   - `aura-protocol/src/handlers/memory/*.rs` (multiple files)
+2. **✅ Memory ledger handler** (aura-protocol/src/handlers/memory/ledger_memory.rs)
+   - Solution: MemoryLedgerHandler now stores RandomEffects and TimeEffects dependencies
+   - `current_timestamp()` uses `self.time.current_timestamp().await`
+   - `new_uuid()` uses `self.random.random_bytes(16).await` for UUID generation
 
-3. **Bridge implementations** - Trait signatures don't support effects yet
-   - Various bridge and factory files
+3. **✅ Guardian authorization handler** (aura-protocol/src/handlers/memory/guardian_authorization.rs)
+   - Solution: Methods now accept `now: u64` parameter
+   - `evaluate_guardian_authorization()` accepts `now` parameter for time validation
+   - `add_guardian_relationship()` accepts `now` parameter for timestamp recording
+   - `validate_time_constraints()` accepts `now` parameter instead of calling SystemTime::now()
 
-**Solution**: Track with existing TODO comments, update traits in coordinated effort.
+### Architectural Approach
+
+The Phase 9 fixes follow the architecture principles from docs/002_system_architecture.md:
+
+- **Layer 3 (Implementation)**: Stateless effect handlers work in any execution context
+- **Layer 4 (Orchestration)**: Stateful coordinators store effect dependencies for multi-effect operations
+- **Explicit Dependency Injection**: Implementations store effect dependencies rather than calling system functions directly
+- **Testability**: All timing and randomness now properly injected for deterministic testing
+
+### Remaining Bridge Violations (7 violations)
+
+These violations are in bridge and factory code that require broader architectural changes:
+
+1. **Bridge implementations** - Trait signatures don't support effects yet
+   - Various bridge and factory files in multiple crates
+   - Require coordinated trait evolution across multiple layers
+
+**Solution**: Track with existing TODO comments, address in future coordinated refactoring effort.
 
 ## Legitimate Uses (Keep)
 
@@ -221,7 +253,8 @@ These have legitimate architectural constraints that require trait signature cha
 4. ~~**Phase 6**: Fix aura-protocol transport coordinator (3 violations)~~ ✅ COMPLETED
 5. ~~**Phase 7**: Fix aura-rendezvous and verification violations (5 violations)~~ ✅ COMPLETED
 6. ~~**Phase 8**: Address aura-authenticate timing violations (4 violations)~~ ✅ COMPLETED
-7. **Phase 9**: Address trait evolution needs (coordinated effort) - 12 violations requiring trait signature changes
+7. ~~**Phase 9**: Address trait evolution needs (5 violations fixed)~~ ✅ COMPLETED
+8. **Phase 10**: Address remaining bridge violations (7 violations) - Requires coordinated architectural changes
 
 ## References
 
@@ -233,6 +266,7 @@ These have legitimate architectural constraints that require trait signature cha
 - Phase 5 fixes: Commit b26b3c2
 - Phase 6 fixes: Commit e48bbda
 - Phase 7 fixes: Commit 58cc4ff
-- Phase 8 fixes: Current commit
+- Phase 8 fixes: Commit 199ab06
+- Phase 9 fixes: Current commit
 - Architecture: docs/002_system_architecture.md (Effect System section)
 - FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)

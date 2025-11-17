@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 use aura_core::{
-    effects::{ReliabilityEffects, ReliabilityError},
+    effects::{ReliabilityEffects, ReliabilityError, TimeEffects},
     AuraError,
 };
 use std::{
@@ -181,6 +181,9 @@ impl Default for RetryConfig {
 /// This coordinator manages reliability patterns across multiple effect handlers.
 /// It provides stateful coordination for retry logic, circuit breaking, and
 /// failure recovery patterns.
+///
+/// Following Layer 4 orchestration principles, this coordinator stores effect
+/// dependencies (TimeEffects) for multi-effect coordination operations.
 pub struct ReliabilityCoordinator {
     /// Circuit breakers by operation key
     circuit_breakers: Arc<Mutex<HashMap<String, CircuitBreakerState>>>,
@@ -188,24 +191,43 @@ pub struct ReliabilityCoordinator {
     retry_config: RetryConfig,
     /// Default circuit breaker configuration
     circuit_config: CircuitBreakerConfig,
+    /// Time effects for circuit breaker timestamp tracking
+    time: Arc<dyn TimeEffects>,
 }
 
 impl ReliabilityCoordinator {
-    /// Create a new reliability coordinator
-    pub fn new() -> Self {
+    /// Create a new reliability coordinator with explicit TimeEffects dependency.
+    ///
+    /// # Parameters
+    /// - `time`: TimeEffects implementation for circuit breaker state tracking
+    ///
+    /// This follows Layer 4 orchestration pattern where coordinators store effect
+    /// dependencies for stateful multi-effect operations.
+    pub fn new(time: Arc<dyn TimeEffects>) -> Self {
         Self {
             circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
             retry_config: RetryConfig::default(),
             circuit_config: CircuitBreakerConfig::default(),
+            time,
         }
     }
 
-    /// Create coordinator with custom configurations
-    pub fn with_config(retry_config: RetryConfig, circuit_config: CircuitBreakerConfig) -> Self {
+    /// Create coordinator with custom configurations and TimeEffects dependency.
+    ///
+    /// # Parameters
+    /// - `retry_config`: Configuration for retry behavior
+    /// - `circuit_config`: Configuration for circuit breaker behavior
+    /// - `time`: TimeEffects implementation for timestamp operations
+    pub fn with_config(
+        retry_config: RetryConfig,
+        circuit_config: CircuitBreakerConfig,
+        time: Arc<dyn TimeEffects>,
+    ) -> Self {
         Self {
             circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
             retry_config,
             circuit_config,
+            time,
         }
     }
 
@@ -291,11 +313,8 @@ impl ReliabilityCoordinator {
     }
 }
 
-impl Default for ReliabilityCoordinator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: No Default impl - ReliabilityCoordinator requires explicit TimeEffects dependency
+// to follow Layer 4 orchestration pattern for stateful multi-effect coordination.
 
 #[async_trait]
 impl ReliabilityEffects for ReliabilityCoordinator {
@@ -348,10 +367,8 @@ impl ReliabilityEffects for ReliabilityCoordinator {
         Fut: std::future::Future<Output = Result<T, AuraError>> + Send,
         T: Send,
     {
-        // TODO: Trait ReliabilityEffects needs to be updated to accept TimeEffects or `now` parameter
-        // For now, we must call Instant::now() here since the trait doesn't provide a way to get time
-        #[allow(clippy::disallowed_methods)]
-        let now = Instant::now();
+        // Use stored TimeEffects dependency for circuit breaker state tracking
+        let now = self.time.now_instant().await;
 
         self.execute_with_circuit_breaker(circuit_id, || operation(), now)
             .await
