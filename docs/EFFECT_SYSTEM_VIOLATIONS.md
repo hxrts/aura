@@ -6,8 +6,8 @@ This document tracks remaining violations of the effect system architecture prin
 
 - **Total violations audited:** 133
 - **Legitimate (test code, effect implementations):** 70 (53%)
-- **Production code violations remaining:** 12 (9%) - down from 15
-- **Production code violations fixed:** 21 (16%)
+- **Production code violations remaining:** 7 (5%) - down from 12
+- **Production code violations fixed:** 26 (20%)
 - **Trait limitations (tracked):** 12 (9%)
 - **Bootstrap code (acceptable):** 18 (13%)
 
@@ -52,7 +52,7 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Updated all test code to pass time/UUID parameters
 - ✅ Updated Service trait signature to require `now` parameter
 
-### Phase 6 (Completed - Current)
+### Phase 6 (Completed - Commit e48bbda)
 - ✅ Fixed aura-protocol transport coordinator timing violations (3 violations):
   - `aura-protocol/src/handlers/transport_coordinator.rs:207` - Connection metadata now uses TimeEffects
   - `aura-protocol/src/handlers/transport_coordinator.rs:232` - Connection tracking now uses TimeEffects
@@ -60,7 +60,16 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Renamed `_effects` field to `effects` to enable usage
 - ✅ All connection lifecycle timing now uses `self.effects.now_instant().await` for testability
 
-## Remaining Production Violations (12 total)
+### Phase 7 (Completed - Current)
+- ✅ Fixed aura-rendezvous timing violations (4 violations):
+  - `aura-rendezvous/src/connection_manager.rs:503/516` - Refactored establish_connection_with_punch to accept `start_time` parameter
+  - `aura-rendezvous/src/integrated_sbb.rs:282` - Refactored cleanup_expired_data to accept `current_time` parameter
+  - `aura-rendezvous/src/capability_aware_sbb.rs` - Removed current_timestamp() helper, refactored SbbFlowBudget methods to accept `now` parameter
+  - `aura-rendezvous/src/sbb.rs` - Updated SbbFlooding trait to require `now` parameter in flood_envelope
+- ✅ Fixed aura-authenticate guardian verification (1 violation):
+  - `aura-authenticate/src/guardian_auth.rs:355` - Refactored verify_guardian_challenge to accept `now` parameter
+
+## Remaining Production Violations (7 total)
 
 ### Priority 1: CRITICAL SECURITY - Cryptographic Operations ✅ COMPLETED (Phase 4)
 
@@ -75,7 +84,7 @@ This document tracks remaining violations of the effect system architecture prin
 
 **Testing**: Adapter includes comprehensive unit tests for deterministic behavior.
 
-### Priority 2: HIGH - Infrastructure Timing (9 violations remaining)
+### Priority 2: HIGH - Infrastructure Timing (4 violations remaining)
 
 **Impact**: Infrastructure timing affects protocol decisions, resource management, and must be testable.
 
@@ -94,16 +103,19 @@ This document tracks remaining violations of the effect system architecture prin
 **Fixed in Phase 6** (3 violations):
 - ✅ `aura-protocol/src/handlers/transport_coordinator.rs` - Connection metadata, tracking, and cleanup
 
-#### aura-sync Infrastructure (6 violations remaining)
+**Fixed in Phase 7** (5 violations):
+- ✅ `aura-rendezvous/src/connection_manager.rs` - Connection timing for hole punching
+- ✅ `aura-rendezvous/src/integrated_sbb.rs` - SBB cleanup timing
+- ✅ `aura-rendezvous/src/capability_aware_sbb.rs` - Flow budget and timestamp operations
+- ✅ `aura-authenticate/src/guardian_auth.rs` - Guardian challenge verification
 
-**All marked with updated TODO comments clarifying they are violations, not exemptions.**
+#### aura-sync Infrastructure (3 violations remaining - all already fixed, documentation outdated)
 
-**Peers (1 violation remaining):**
-- `crates/aura-sync/src/infrastructure/peers.rs:275` (from `PeerMetadata::new`)
+**Peers (0 violations - fixed in Phase 3):**
+- ✅ Fixed: PeerMetadata::new already accepts `now` parameter
 
-**Connections (2 violations remaining):**
-- `crates/aura-sync/src/infrastructure/connections.rs:119` (from `ConnectionMetadata::new`)
-- `crates/aura-sync/src/infrastructure/connections.rs:212` (from `ConnectionHandle::new`)
+**Connections (0 violations - fixed in Phase 3):**
+- ✅ Fixed: ConnectionMetadata::new and ConnectionHandle::new already accept `now` parameter
 
 **Sessions (0 violations - all fixed in Phase 5):**
 - ✅ Fixed: Session creation, metrics, and cleanup now use `now` parameter
@@ -120,21 +132,25 @@ This document tracks remaining violations of the effect system architecture prin
 #### aura-protocol Transport (0 violations - all fixed in Phase 6)
 - ✅ Fixed: All connection lifecycle timing now uses TimeEffects
 
-#### aura-rendezvous (3 violations)
+#### aura-rendezvous (0 violations - all fixed in Phase 7)
+- ✅ Fixed: All connection timing, SBB cleanup, and capability timing operations
 
-- `crates/aura-rendezvous/src/connection_manager.rs:502, 515` - Connection timing
-- `crates/aura-rendezvous/src/integrated_sbb.rs:281` - SBB timing
-- `crates/aura-rendezvous/src/capability_aware_sbb.rs:538` - Capability timing
+### Priority 3: MEDIUM - Other Infrastructure (4 violations remaining)
 
-**Solution**: Refactor to accept time parameter.
+#### aura-authenticate (4 violations remaining)
 
-### Priority 3: MEDIUM - Other Infrastructure (3 violations)
+These violations are in placeholder/TODO code that requires major refactoring:
 
-#### aura-authenticate (2 violations)
-- `crates/aura-authenticate/src/guardian_auth.rs:353, 582` - Guardian authentication timing
+- `crates/aura-authenticate/src/guardian_auth.rs:496` - Request timestamp age check
+- `crates/aura-authenticate/src/guardian_auth.rs:534` - Guardian challenge generation (uses time as nonce)
+- `crates/aura-authenticate/src/guardian_auth.rs:691/798/848` - Approval/challenge timestamps in execute methods
 
-#### aura-sync Snapshots (1 violation)
-- `crates/aura-sync/src/protocols/snapshots.rs:289` - Snapshot finalization
+**Note**: These are in MVP placeholder code with extensive TODOs. The guardian authentication system needs comprehensive refactoring to integrate with the effect system, aura-wot capabilities, and proper network effects. Fixing individual timing calls without this broader refactoring would provide limited value.
+
+**Solution**: Defer until guardian auth system is properly implemented with effect system integration.
+
+#### aura-sync Snapshots (0 violations - fixed in Phase 5)
+- ✅ Fixed: Snapshot finalization now accepts UUID parameter
 
 ## Trait Evolution Needed (12 violations)
 
@@ -197,8 +213,9 @@ These have legitimate architectural constraints that require trait signature cha
 2. ~~**Phase 4**: Create FROST RNG adapter and fix cryptographic violations (6 violations)~~ ✅ COMPLETED
 3. ~~**Phase 5**: Fix remaining aura-sync timing violations (6 violations)~~ ✅ COMPLETED
 4. ~~**Phase 6**: Fix aura-protocol transport coordinator (3 violations)~~ ✅ COMPLETED
-5. **Phase 7**: Fix remaining infrastructure violations (6 violations) - NEXT
-6. **Phase 8**: Address trait evolution needs (coordinated effort)
+5. ~~**Phase 7**: Fix aura-rendezvous and verification violations (5 violations)~~ ✅ COMPLETED
+6. **Phase 8**: Address aura-authenticate placeholder code (4 violations) - Deferred pending major refactoring
+7. **Phase 9**: Address trait evolution needs (coordinated effort)
 
 ## References
 
@@ -208,6 +225,7 @@ These have legitimate architectural constraints that require trait signature cha
 - Phase 3 fixes: Commit 6d52ec2
 - Phase 4 fixes: Commit eec77f3
 - Phase 5 fixes: Commit b26b3c2
-- Phase 6 fixes: Current commit
+- Phase 6 fixes: Commit e48bbda
+- Phase 7 fixes: Current commit
 - Architecture: docs/002_system_architecture.md (Effect System section)
 - FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)

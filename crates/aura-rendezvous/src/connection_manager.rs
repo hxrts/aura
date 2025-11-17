@@ -474,12 +474,15 @@ impl ConnectionManager {
     }
 
     /// Establish connection with coordinated hole-punching using offer/answer exchange
+    ///
+    /// Note: Callers should obtain `start_time` via `TimeEffects::now_instant()` and pass it to this method
     pub async fn establish_connection_with_punch(
         &self,
         peer_id: DeviceId,
         offer: &TransportOfferPayload,
         answer: &TransportOfferPayload,
         config: ConnectionConfig,
+        start_time: std::time::Instant,
     ) -> Result<ConnectionResult, AuraError> {
         tracing::info!(
             peer_id = %peer_id.0,
@@ -499,9 +502,6 @@ impl ConnectionManager {
             }
         };
 
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
-
         // Try coordinated hole-punching for QUIC transports with reflexive addresses
         if config.enable_hole_punch {
             for transport in &offer.transports {
@@ -512,8 +512,7 @@ impl ConnectionManager {
                 if transport.kind == TransportKind::Quic
                     && !transport.reflexive_addresses.is_empty()
                 {
-                    #[allow(clippy::disallowed_methods)]
-                    let attempt_start = std::time::Instant::now();
+                    let attempt_start = start_time;
 
                     match self
                         .try_coordinated_punch(

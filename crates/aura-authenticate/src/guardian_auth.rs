@@ -350,21 +350,18 @@ impl GuardianAuthState {
     }
 
     /// Verify guardian challenge
-    #[allow(clippy::disallowed_methods)]
+    ///
+    /// Note: Callers should obtain `now` from TimeEffects and convert to Unix timestamp
     pub fn verify_guardian_challenge(
         &self,
         request_id: &str,
         guardian_id: DeviceId,
+        now: u64,
     ) -> Option<&Vec<u8>> {
         self.guardian_challenges
             .get(request_id)
             .and_then(|challenges| challenges.get(&guardian_id))
             .and_then(|(challenge, expires_at)| {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-
                 if now > *expires_at {
                     None // Expired
                 } else {
