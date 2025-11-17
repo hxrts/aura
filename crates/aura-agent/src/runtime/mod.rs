@@ -25,8 +25,8 @@ pub mod propagation;
 // Runtime services
 pub mod services;
 
-// Initialization
-pub mod initialization;
+// Initialization - DISABLED: incomplete code with missing handler adapters
+// pub mod initialization;
 
 // Cross-cutting concerns
 pub mod migration;
@@ -41,32 +41,76 @@ pub mod ota_orchestration;
 // Re-export main types for convenience
 pub use builder::AuraEffectSystemBuilder as EffectSystemBuilder;
 pub use choreography_adapter::AuraHandlerAdapter;
-pub use container::HandlerContainer;
-pub use context::{EffectContext, RequestMetadata};
+pub use container::EffectContainer;
+pub use context::EffectContext;
 // Import AuraEffectSystem from aura-protocol instead of local coordinator
 pub use aura_protocol::effects::AuraEffectSystem;
+use aura_core::effects::ExecutionMode;
 
 // TODO: Define these locally or import from appropriate location
 #[derive(Debug, Clone)]
 pub struct EffectSystemConfig {
     pub device_id: crate::DeviceId,
+    pub execution_mode: ExecutionMode,
+    pub storage_config: Option<StorageConfig>,
+    pub initial_epoch: u64,
+    pub default_flow_limit: u64,
 }
 
 impl EffectSystemConfig {
     /// Create config for production
     pub fn for_production(device_id: crate::DeviceId) -> crate::errors::Result<Self> {
-        Ok(Self { device_id })
+        Ok(Self {
+            device_id,
+            execution_mode: ExecutionMode::Production,
+            storage_config: None,
+            initial_epoch: 1,
+            default_flow_limit: 10000,
+        })
     }
 
     /// Create config for simulation
-    pub fn for_simulation(device_id: crate::DeviceId, _seed: u64) -> Self {
-        Self { device_id }
+    pub fn for_simulation(device_id: crate::DeviceId, seed: u64) -> Self {
+        Self {
+            device_id,
+            execution_mode: ExecutionMode::Simulation { seed },
+            storage_config: None,
+            initial_epoch: 1,
+            default_flow_limit: 10000,
+        }
+    }
+
+    /// Create config for testing
+    pub fn for_testing(device_id: crate::DeviceId) -> Self {
+        Self {
+            device_id,
+            execution_mode: ExecutionMode::Testing,
+            storage_config: None,
+            initial_epoch: 1,
+            default_flow_limit: 10000,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
     pub storage_path: String,
+}
+
+impl StorageConfig {
+    /// Create config for testing
+    pub fn for_testing() -> Self {
+        Self {
+            storage_path: "/tmp/aura-test".to_string(),
+        }
+    }
+
+    /// Create config for simulation
+    pub fn for_simulation() -> Self {
+        Self {
+            storage_path: "/tmp/aura-sim".to_string(),
+        }
+    }
 }
 pub use executor::{EffectExecutor, EffectExecutorBuilder};
 pub use lifecycle::{EffectSystemState, LifecycleAware, LifecycleManager};

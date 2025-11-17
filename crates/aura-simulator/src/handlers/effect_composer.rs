@@ -5,9 +5,10 @@
 //! without middleware wrapper patterns.
 
 use super::{SimulationFaultHandler, SimulationScenarioHandler, SimulationTimeHandler};
+use aura_agent::runtime::{EffectSystemBuilder, EffectSystemConfig};
 use aura_core::effects::{ChaosEffects, TestingEffects, TimeEffects};
 use aura_core::DeviceId;
-use aura_protocol::effects::{AuraEffectSystem, EffectSystemConfig};
+use aura_protocol::effects::AuraEffectSystem;
 use std::sync::Arc;
 
 /// Effect-based simulation composer
@@ -48,7 +49,9 @@ impl SimulationEffectComposer {
         config: EffectSystemConfig,
     ) -> Result<Self, SimulationComposerError> {
         let effect_system = Arc::new(
-            AuraEffectSystem::new(config)
+            EffectSystemBuilder::new()
+                .with_config(config)
+                .build_sync()
                 .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?,
         );
 
@@ -164,9 +167,7 @@ impl ComposedSimulationEnvironment {
     /// Access time effects through trait
     pub async fn current_timestamp(&self) -> Result<u64, SimulationComposerError> {
         match &self.time_handler {
-            Some(handler) => handler.current_timestamp().await.map_err(|e| {
-                SimulationComposerError::EffectOperationFailed(format!("Time effect failed: {}", e))
-            }),
+            Some(handler) => Ok(handler.current_timestamp().await),
             None => Err(SimulationComposerError::MissingRequiredComponent(
                 "time_handler".to_string(),
             )),

@@ -106,8 +106,7 @@ impl EffectContext {
 
     /// Charge flow budget
     pub fn charge_flow(&mut self, amount: u64) -> AuraResult<()> {
-        if self.flow_budget.remaining() >= amount {
-            self.flow_budget = self.flow_budget.consume(amount)?;
+        if self.flow_budget.record_charge(amount) {
             Ok(())
         } else {
             Err(AuraError::invalid("Insufficient flow budget"))
@@ -130,7 +129,7 @@ impl EffectContext {
             "effect",
             request_id = %self.request_id,
             device_id = %self.device_id.0,
-            flow_budget = self.flow_budget.remaining(),
+            flow_budget = self.flow_budget.headroom(),
         );
 
         // Add trace parent if available

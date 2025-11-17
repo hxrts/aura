@@ -17,16 +17,22 @@ use aura_effects::{
     time::SimulatedTimeHandler as MockTimeHandler, transport::InMemoryTransportHandler,
 };
 use aura_protocol::handlers::{
-    choreographic::memory::MemoryChoreographicHandler, ledger::memory::MemoryLedgerHandler,
-    tree::dummy::DummyTreeHandler,
+    MemoryChoreographicHandler, MemoryLedgerHandler,
+    tree::DummyTreeHandler,
 };
 
 use super::{
     executor::{EffectExecutor, EffectExecutorBuilder},
-    handler_adapters::*,
     lifecycle::LifecycleManager,
     services::{ContextManager, FlowBudgetManager, ReceiptManager},
     AuraEffectSystem, EffectSystemConfig,
+};
+
+// Import handler adapters from crate::handlers
+use crate::handlers::{
+    ChoreographicHandlerAdapter, ConsoleHandlerAdapter, CryptoHandlerAdapter,
+    JournalHandlerAdapter, LedgerHandlerAdapter, RandomHandlerAdapter, StorageHandlerAdapter,
+    TimeHandlerAdapter, TreeHandlerAdapter,
 };
 
 /// Metrics for initialization performance

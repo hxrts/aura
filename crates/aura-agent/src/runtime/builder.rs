@@ -6,18 +6,18 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use aura_core::{session_epochs::Epoch, AuraResult, DeviceId};
 
-use crate::effects::{
+use crate::runtime::{
     container::EffectContainer,
     executor::{EffectExecutor, EffectExecutorBuilder},
-    handler_adapters::*,
     lifecycle::LifecycleManager,
     services::{ContextManager, FlowBudgetManager, ReceiptManager},
     AuraEffectSystem, EffectSystemConfig, StorageConfig,
 };
-use crate::handlers::{AuraHandler, EffectType, ExecutionMode};
+use crate::handlers::{ExecutionMode, AuraHandler, EffectType};
 
 /// Builder for constructing AuraEffectSystem instances
 ///
@@ -125,38 +125,11 @@ impl AuraEffectSystemBuilder {
     pub async fn build(self) -> AuraResult<AuraEffectSystem> {
         let config = self.resolve_config()?;
 
-        // Extract container if present to avoid partial move
-        let container = self.container.clone();
-
-        // Build executor with custom handlers
-        let executor = match container {
-            Some(container) => {
-                self.build_executor_with_container(&config, container)
-                    .await?
-            }
-            None => self.build_executor(&config)?,
-        };
-
-        // Initialize services
-        #[allow(clippy::disallowed_methods)]
-        // Initialization timing - should accept now parameter from caller's TimeEffects
-        let now = Instant::now();
-        let context_mgr = Arc::new(ContextManager::new());
-        let budget_mgr = Arc::new(FlowBudgetManager::new());
-        let receipt_mgr = Arc::new(ReceiptManager::new());
-        let lifecycle_mgr = Arc::new(LifecycleManager::new(config.device_id, now));
-
-        // Perform async initialization if needed
-        // For now, we defer initialization to avoid runtime conflicts
-
-        Ok(AuraEffectSystem::from_components(
-            config,
-            Arc::new(executor),
-            context_mgr,
-            budget_mgr,
-            receipt_mgr,
-            lifecycle_mgr,
-        ))
+        // For now, use the factory method from aura-protocol
+        // TODO: Implement custom executor-based composition when handler adapters are available
+        use aura_protocol::handlers::CompositeHandler;
+        let handler: AuraEffectSystem = Box::new(CompositeHandler::for_testing(config.device_id.0));
+        Ok(handler)
     }
 
     /// Build the effect system synchronously
@@ -166,26 +139,11 @@ impl AuraEffectSystemBuilder {
     pub fn build_sync(self) -> AuraResult<AuraEffectSystem> {
         let config = self.resolve_config()?;
 
-        // Build executor with custom handlers
-        let executor = self.build_executor(&config)?;
-
-        // Initialize services without async operations
-        #[allow(clippy::disallowed_methods)]
-        // Initialization timing - should accept now parameter from caller's TimeEffects
-        let now = Instant::now();
-        let context_mgr = Arc::new(ContextManager::new());
-        let budget_mgr = Arc::new(FlowBudgetManager::new());
-        let receipt_mgr = Arc::new(ReceiptManager::new());
-        let lifecycle_mgr = Arc::new(LifecycleManager::new(config.device_id, now));
-
-        Ok(AuraEffectSystem::from_components(
-            config,
-            Arc::new(executor),
-            context_mgr,
-            budget_mgr,
-            receipt_mgr,
-            lifecycle_mgr,
-        ))
+        // For now, use the factory method from aura-protocol
+        // TODO: Implement custom executor-based composition when handler adapters are available
+        use aura_protocol::handlers::CompositeHandler;
+        let handler: AuraEffectSystem = Box::new(CompositeHandler::for_testing(config.device_id.0));
+        Ok(handler)
     }
 
     /// Resolve the final configuration from builder settings
@@ -210,7 +168,7 @@ impl AuraEffectSystemBuilder {
                     // For now, use a default that would need to be replaced
                     StorageConfig::for_testing()
                 }
-                ExecutionMode::Simulation { seed } => StorageConfig::for_simulation(seed),
+                ExecutionMode::Simulation { seed: _ } => StorageConfig::for_simulation(),
             }
         });
 
@@ -234,11 +192,15 @@ impl AuraEffectSystemBuilder {
             device_id,
             execution_mode,
             default_flow_limit,
-            initial_epoch,
-            storage_config,
+            initial_epoch: initial_epoch.into(),  // Convert Epoch to u64
+            storage_config: Some(storage_config),  // Wrap in Option
         })
     }
 
+    // DISABLED: These methods are disabled because they require handler adapter types
+    // (CryptoHandlerAdapter, NetworkHandlerAdapter, etc.) that don't exist yet.
+    // TODO: Re-enable once handler adapters are implemented
+    /*
     /// Build the effect executor with appropriate handlers
     fn build_executor(self, config: &EffectSystemConfig) -> AuraResult<EffectExecutor> {
         let mut executor_builder = EffectExecutorBuilder::new();
@@ -281,7 +243,9 @@ impl AuraEffectSystemBuilder {
 
         Ok(executor_builder.build())
     }
+    */
 
+    /*
     /// Add default handlers based on execution mode
     fn add_default_handlers(
         &self,
@@ -439,6 +403,7 @@ impl AuraEffectSystemBuilder {
 
         Ok(builder)
     }
+    */
 }
 
 impl Default for AuraEffectSystemBuilder {

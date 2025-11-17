@@ -6,7 +6,8 @@ use crate::{
     AdminAction, InvitationAction, OtaAction, RecoveryAction, ScenarioAction, SnapshotAction,
 };
 use anyhow::Result;
-use aura_protocol::{AuraEffectSystem, ConsoleEffects};
+use aura_core::identifiers::DeviceId;
+use aura_protocol::{effects::AuraEffectSystem, effects::ConsoleEffects};
 use std::path::Path;
 
 pub mod admin;
@@ -25,12 +26,22 @@ pub mod version;
 pub struct CliHandler {
     /// The Aura effect system instance
     effect_system: AuraEffectSystem,
+    /// The device ID for this handler
+    device_id: DeviceId,
 }
 
 impl CliHandler {
-    /// Create a new CLI handler with the given effect system
-    pub fn new(effect_system: AuraEffectSystem) -> Self {
-        Self { effect_system }
+    /// Create a new CLI handler with the given effect system and device ID
+    pub fn new(effect_system: AuraEffectSystem, device_id: DeviceId) -> Self {
+        Self {
+            effect_system,
+            device_id,
+        }
+    }
+
+    /// Get the device ID for this handler
+    pub fn device_id(&self) -> DeviceId {
+        self.device_id
     }
 
     /// Handle init command through effects
@@ -65,12 +76,12 @@ impl CliHandler {
 
     /// Handle snapshot maintenance commands.
     pub async fn handle_snapshot(&self, action: &SnapshotAction) -> Result<()> {
-        snapshot::handle_snapshot(self.effect_system.clone(), action).await
+        snapshot::handle_snapshot(self.device_id, action).await
     }
 
     /// Handle admin maintenance commands.
     pub async fn handle_admin(&self, action: &AdminAction) -> Result<()> {
-        admin::handle_admin(self.effect_system.clone(), action).await
+        admin::handle_admin(self.device_id, action).await
     }
 
     /// Handle guardian recovery commands

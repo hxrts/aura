@@ -113,8 +113,8 @@ impl ReceiptVerificationProtocol {
         // TODO: Implement cryptographic verification
         // For now, basic validation
         if receipt.signature.is_empty() {
-            return Err(SyncError::Verification(
-                "Receipt has empty signature".to_string()
+            return Err(SyncError::validation(
+                "Receipt has empty signature"
             ));
         }
 

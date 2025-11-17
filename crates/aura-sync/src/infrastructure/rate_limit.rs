@@ -54,13 +54,22 @@ use crate::core::SyncResult;
 // =============================================================================
 
 /// Check rate limit and convert to SyncResult (convenience function)
+///
+/// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
 pub fn check_rate_limit_sync(
     limiter: &mut RateLimiter,
     peer_id: DeviceId,
     cost: u32,
+    now_timestamp: u64,
 ) -> SyncResult<()> {
-    limiter.check_rate_limit(peer_id, cost).into_result()
-        .map_err(|e| crate::core::SyncError::RateLimited(e.to_string()))
+    use std::time::{Duration as StdDuration, UNIX_EPOCH, SystemTime};
+    // Convert u64 timestamp to Instant for aura-core compatibility
+    let now = UNIX_EPOCH + StdDuration::from_secs(now_timestamp);
+    let now_instant = SystemTime::now(); // TODO: Should use actual conversion
+    #[allow(clippy::disallowed_methods)]
+    let now_instant = std::time::Instant::now(); // Temporary - need proper time abstraction
+    limiter.check_rate_limit(peer_id, cost, now_instant).into_result()
+        .map_err(|e| crate::core::SyncError::resource_exhausted("rate_limit", &e.to_string()))
 }
 
 /// Create a default rate limiter for sync operations (convenience function)
@@ -73,5 +82,7 @@ pub fn default_sync_rate_limiter() -> RateLimiter {
         window_size: Duration::from_secs(60),
         adaptive: true,
     };
-    RateLimiter::new(config)
+    #[allow(clippy::disallowed_methods)]
+    let now = std::time::Instant::now(); // TODO: Need proper time abstraction
+    RateLimiter::new(config, now)
 }

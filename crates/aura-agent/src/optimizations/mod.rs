@@ -7,5 +7,5 @@ pub mod allocations;
 pub mod caching;
 
 // Re-export main types
-pub use allocations::{AllocationPool, PoolConfig, PooledBuffer};
-pub use caching::{CacheConfig, CacheEntry, EffectCache};
+pub use allocations::{Arena, BufferPool, StringInterner};
+pub use caching::{CacheKey, CachingNetworkHandler, CachingStorageHandler, EffectCache};

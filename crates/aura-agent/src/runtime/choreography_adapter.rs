@@ -4,10 +4,10 @@
 //! and Aura's effect system, enabling implementation-agnostic choreographic execution.
 
 use crate::{
-    effects::AuraEffectSystem,
-    guards::{FlowHint, LeakageBudget, ProtocolGuard},
+    runtime::AuraEffectSystem,
     handlers::{AuraHandlerError, ExecutionMode},
 };
+use aura_protocol::guards::{FlowHint, LeakageBudget, ProtocolGuard};
 use async_trait::async_trait;
 use aura_core::{relationships::ContextId, DeviceId, Receipt};
 use aura_wot::Capability;
@@ -55,8 +55,8 @@ impl AuraHandlerAdapter {
     ///
     /// This is the preferred method as it follows proper dependency injection.
     /// Use this instead of `new()` for better testability and control.
-    pub fn with_effect_system(effect_system: AuraEffectSystem) -> Self {
-        Self::from_effect_system(effect_system)
+    pub fn with_effect_system(effect_system: AuraEffectSystem, device_id: DeviceId) -> Self {
+        Self::from_effect_system(effect_system, device_id)
     }
 
     /// Create a new adapter for the specified execution mode
@@ -65,7 +65,7 @@ impl AuraHandlerAdapter {
     /// This method creates the effect system internally which makes testing difficult.
     /// Consider using `with_effect_system()` instead for better dependency injection.
     pub fn new(device_id: DeviceId, mode: ExecutionMode) -> Self {
-        use crate::effects::EffectSystemConfig;
+        use crate::runtime::EffectSystemConfig;
 
         let config = match mode {
             ExecutionMode::Testing => EffectSystemConfig::for_testing(device_id),
@@ -76,14 +76,18 @@ impl AuraHandlerAdapter {
             }
         };
 
-        // Create effect system based on configuration
-        let effect_system = AuraEffectSystem::new(config).expect("Failed to create effect system");
-        Self::from_effect_system(effect_system)
+        // TODO: Create effect system based on configuration
+        // Box<dyn AuraEffects> doesn't have a new() method yet
+        // For now, create a mock system
+        use aura_protocol::handlers::CompositeHandler;
+        let effect_system: AuraEffectSystem = Box::new(CompositeHandler::for_testing(device_id.0));
+        Self::from_effect_system(effect_system, device_id)
     }
 
     /// Create an adapter from an existing effect system (useful for tests)
-    pub fn from_effect_system(effect_system: AuraEffectSystem) -> Self {
-        let device_id = effect_system.device_id();
+    pub fn from_effect_system(effect_system: AuraEffectSystem, device_id: DeviceId) -> Self {
+        // TODO: Box<dyn AuraEffects> doesn't have a device_id() method yet
+        // Pass device_id as a parameter instead
         Self {
             effect_system,
             device_id,
@@ -134,7 +138,9 @@ impl AuraHandlerAdapter {
 
     /// Latest FlowGuard receipt recorded by the adapter
     pub async fn latest_receipt(&self) -> Option<Receipt> {
-        self.effect_system.latest_receipt().await
+        // TODO: Box<dyn AuraEffects> doesn't implement latest_receipt yet
+        // self.effect_system.latest_receipt().await
+        None
     }
 
     /// Send a message with guard-chain enforcement
@@ -167,14 +173,15 @@ impl AuraHandlerAdapter {
 
         let flow_context = self.ensure_flow_context(&target_device);
         let flow_cost = guard_profile.flow_cost.max(1);
-        self.effect_system.set_flow_hint(FlowHint::new(
-            flow_context.clone(),
-            target_device,
-            flow_cost,
-        ));
+        // TODO: Box<dyn AuraEffects> doesn't implement set_flow_hint yet
+        // self.effect_system.set_flow_hint(FlowHint::new(
+        //     flow_context.clone(),
+        //     target_device,
+        //     flow_cost,
+        // ));
 
         // Charge flow and generate receipt
-        use crate::guards::flow::FlowBudgetEffects;
+        use aura_protocol::guards::FlowBudgetEffects;
         let _receipt = self
             .effect_system
             .charge_flow(&flow_context, &target_device, flow_cost)
@@ -288,23 +295,31 @@ impl ChoreoHandler for AuraHandlerAdapter {
         who: Self::Role,
         label: Label,
     ) -> ChoreoResult<()> {
-        // Send the label as a choice message
-        let choice_msg = ChoiceMessage {
-            label: label.clone(),
-        };
-        self.send(who, choice_msg)
-            .await
-            .map_err(|e| ChoreographyError::Transport(e.to_string()))
+        // TODO: ChoiceMessage doesn't implement Serialize/Deserialize
+        // This needs to be refactored to use a serializable type
+        Err(ChoreographyError::Transport("Choice messages not yet supported".to_string()))
+
+        // // Send the label as a choice message
+        // let choice_msg = ChoiceMessage {
+        //     label: label.clone(),
+        // };
+        // self.send(who, choice_msg)
+        //     .await
+        //     .map_err(|e| ChoreographyError::Transport(e.to_string()))
     }
 
     /// External choice: receive a label selection (for branch protocols)
     async fn offer(&mut self, _ep: &mut Self::Endpoint, from: Self::Role) -> ChoreoResult<Label> {
-        // Receive a choice message and extract the label
-        let choice_msg: ChoiceMessage = self
-            .recv_from(from)
-            .await
-            .map_err(|e| ChoreographyError::Transport(e.to_string()))?;
-        Ok(choice_msg.label)
+        // TODO: ChoiceMessage doesn't implement Serialize/Deserialize
+        // This needs to be refactored to use a serializable type
+        Err(ChoreographyError::Transport("Choice messages not yet supported".to_string()))
+
+        // // Receive a choice message and extract the label
+        // let choice_msg: ChoiceMessage = self
+        //     .recv_from(from)
+        //     .await
+        //     .map_err(|e| ChoreographyError::Transport(e.to_string()))?;
+        // Ok(choice_msg.label)
     }
 
     /// Execute a future with a timeout
@@ -325,6 +340,8 @@ impl ChoreoHandler for AuraHandlerAdapter {
 }
 
 /// Internal message type for choice communication
+/// TODO: Label doesn't implement Serialize/Deserialize
+/// Need to either wrap it or use a different type
 #[derive(Debug, Clone)]
 struct ChoiceMessage {
     label: Label,

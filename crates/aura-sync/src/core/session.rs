@@ -6,6 +6,7 @@
 
 
 use crate::core::{SyncError, SyncResult, SyncConfig, MetricsCollector};
+use crate::core::metrics::ErrorCategory;
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -76,7 +77,7 @@ impl<T> SessionState<T> {
                 match result {
                     SessionResult::Success { duration_ms, .. } => Some(*duration_ms),
                     SessionResult::Failure { duration_ms, .. } => Some(*duration_ms),
-                    SessionResult::Timeout { duration_ms } => Some(*duration_ms),
+                    SessionResult::Timeout { duration_ms, .. } => Some(*duration_ms),
                 }
             }
             SessionState::Initializing { created_at, .. } => Some((now - created_at) * 1000),
@@ -95,7 +96,7 @@ impl<T> SessionState<T> {
 }
 
 /// Session results with comprehensive context
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SessionResult {
     Success {
         duration_ms: u64,
@@ -126,7 +127,7 @@ impl SessionResult {
         match self {
             SessionResult::Success { duration_ms, .. } => *duration_ms,
             SessionResult::Failure { duration_ms, .. } => *duration_ms,
-            SessionResult::Timeout { duration_ms } => *duration_ms,
+            SessionResult::Timeout { duration_ms, .. } => *duration_ms,
         }
     }
 
@@ -143,7 +144,7 @@ impl SessionResult {
 }
 
 /// Partial results for failed sessions
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PartialResults {
     pub operations_completed: usize,
     pub bytes_transferred: usize,
@@ -152,7 +153,7 @@ pub struct PartialResults {
 }
 
 /// Session-specific errors
-#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, Deserialize)]
 pub enum SessionError {
     #[error("Session timeout after {duration_ms}ms")]
     Timeout { duration_ms: u64 },
@@ -251,8 +252,8 @@ pub struct SessionManager<T> {
     config: SessionConfig,
     /// Metrics collector for session telemetry
     metrics: Option<MetricsCollector>,
-    /// Last cleanup timestamp
-    last_cleanup: Instant,
+    /// Last cleanup timestamp (Unix timestamp in seconds)
+    last_cleanup: u64,
 }
 
 impl<T> SessionManager<T>
@@ -261,8 +262,8 @@ where
 {
     /// Create a new session manager
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn new(config: SessionConfig, now: Instant) -> Self {
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn new(config: SessionConfig, now: u64) -> Self {
         Self {
             sessions: HashMap::new(),
             config,
@@ -273,8 +274,8 @@ where
 
     /// Create session manager with metrics collection
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn with_metrics(config: SessionConfig, metrics: MetricsCollector, now: Instant) -> Self {
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn with_metrics(config: SessionConfig, metrics: MetricsCollector, now: u64) -> Self {
         Self {
             sessions: HashMap::new(),
             config,
@@ -286,7 +287,7 @@ where
     /// Create a new session with participants
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn create_session(&mut self, participants: Vec<DeviceId>, now: Instant) -> SyncResult<SessionId> {
+    pub fn create_session(&mut self, participants: Vec<DeviceId>, now: u64) -> SyncResult<SessionId> {
         // Validate participant count
         if participants.len() > self.config.max_participants {
             return Err(SyncError::validation(&format!(
@@ -333,11 +334,13 @@ where
         let session = self.sessions.get_mut(&session_id)
             .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
 
+        // Check timeout before pattern matching to avoid borrow conflicts
+        if session.is_timed_out() {
+            return Err(SyncError::timeout("session_activation", self.config.timeout));
+        }
+
         match session {
             SessionState::Initializing { participants, .. } => {
-                if session.is_timed_out() {
-                    return Err(SyncError::timeout("session_activation", self.config.timeout));
-                }
 
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -362,17 +365,21 @@ where
     }
 
     /// Update session protocol state
-    pub fn update_session(&mut self, session_id: SessionId, new_state: T) -> SyncResult<()> {
+    pub fn update_session(&mut self, session_id: SessionId, new_state: T) -> SyncResult<()>
+    where
+        T: std::fmt::Debug,
+    {
         let session = self.sessions.get_mut(&session_id)
             .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
 
+        // Check timeout before pattern matching to avoid borrow conflicts
+        if session.is_timed_out() {
+            self.timeout_session(session_id)?;
+            return Err(SyncError::timeout("session_update", self.config.timeout));
+        }
+
         match session {
             SessionState::Active { protocol_state, .. } => {
-                if session.is_timed_out() {
-                    self.timeout_session(session_id)?;
-                    return Err(SyncError::timeout("session_update", self.config.timeout));
-                }
-
                 *protocol_state = new_state;
                 Ok(())
             }
@@ -409,7 +416,11 @@ where
 
         // Record metrics
         if let Some(ref metrics) = self.metrics {
-            metrics.record_sync_completion(&session_id.to_string(), operations_count, bytes_transferred);
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            metrics.record_sync_completion(&session_id.to_string(), operations_count, bytes_transferred, now);
         }
 
         Ok(())
@@ -438,12 +449,12 @@ where
         // Record metrics
         if let Some(ref metrics) = self.metrics {
             let category = match error {
-                SessionError::Timeout { .. } => crate::core::ErrorCategory::Timeout,
-                SessionError::ParticipantDisconnected { .. } => crate::core::ErrorCategory::Network,
-                SessionError::ResourceLimitExceeded { .. } => crate::core::ErrorCategory::Resource,
-                SessionError::ProtocolViolation { .. } => crate::core::ErrorCategory::Protocol,
-                SessionError::CapacityExceeded { .. } => crate::core::ErrorCategory::Resource,
-                SessionError::InvalidStateTransition { .. } => crate::core::ErrorCategory::Protocol,
+                SessionError::Timeout { .. } => ErrorCategory::Timeout,
+                SessionError::ParticipantDisconnected { .. } => ErrorCategory::Network,
+                SessionError::ResourceLimitExceeded { .. } => ErrorCategory::Resource,
+                SessionError::ProtocolViolation { .. } => ErrorCategory::Protocol,
+                SessionError::CapacityExceeded { .. } => ErrorCategory::Resource,
+                SessionError::InvalidStateTransition { .. } => ErrorCategory::Protocol,
             };
             metrics.record_sync_failure(&session_id.to_string(), category, &error.to_string());
         }
@@ -452,7 +463,10 @@ where
     }
 
     /// Timeout a session
-    pub fn timeout_session(&mut self, session_id: SessionId) -> SyncResult<()> {
+    pub fn timeout_session(&mut self, session_id: SessionId) -> SyncResult<()>
+    where
+        T: std::fmt::Debug,
+    {
         let session = self.sessions.get_mut(&session_id)
             .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
 
@@ -470,7 +484,7 @@ where
         if let Some(ref metrics) = self.metrics {
             metrics.record_sync_failure(
                 &session_id.to_string(),
-                crate::core::ErrorCategory::Timeout,
+                ErrorCategory::Timeout,
                 "Session timeout",
             );
         }
@@ -513,8 +527,12 @@ where
     /// Cleanup stale and completed sessions
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn cleanup_stale_sessions(&mut self, now: Instant) -> SyncResult<usize> {
-        if now.duration_since(self.last_cleanup) < self.config.cleanup_interval {
+    pub fn cleanup_stale_sessions(&mut self, now: u64) -> SyncResult<usize>
+    where
+        T: std::fmt::Debug,
+    {
+        let elapsed_secs = now.saturating_sub(self.last_cleanup);
+        if Duration::from_secs(elapsed_secs) < self.config.cleanup_interval {
             return Ok(0);
         }
 
@@ -575,7 +593,7 @@ where
                             failed_count += 1;
                             total_duration_ms += duration_ms;
                         }
-                        SessionResult::Timeout { duration_ms } => {
+                        SessionResult::Timeout { duration_ms, .. } => {
                             timeout_count += 1;
                             total_duration_ms += duration_ms;
                         }
@@ -672,11 +690,13 @@ where
     }
 
     /// Build the session manager
-    pub fn build(self) -> SessionManager<T> {
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn build(self, now: u64) -> SessionManager<T> {
         if let Some(metrics) = self.metrics {
-            SessionManager::with_metrics(self.config, metrics)
+            SessionManager::with_metrics(self.config, metrics, now)
         } else {
-            SessionManager::new(self.config)
+            SessionManager::new(self.config, now)
         }
     }
 }

@@ -4,9 +4,10 @@
 //! Replaces the former TimeControlMiddleware with effect system integration.
 
 use async_trait::async_trait;
-use aura_core::effects::TimeEffects;
-use aura_core::{AuraError, AuraResult};
-use std::time::{Duration, SystemTime};
+use aura_core::effects::time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
+use aura_core::AuraError;
+use std::time::{Duration, Instant, SystemTime};
+use uuid::Uuid;
 
 /// Simulation-specific time control handler
 ///
@@ -68,39 +69,50 @@ impl Default for SimulationTimeHandler {
 
 #[async_trait]
 impl TimeEffects for SimulationTimeHandler {
-    async fn current_timestamp(&self) -> AuraResult<u64> {
+    async fn current_epoch(&self) -> u64 {
+        // Return epoch in milliseconds
+        self.current_timestamp_millis().await
+    }
+
+    async fn current_timestamp(&self) -> u64 {
         if self.paused {
             // Return frozen time when paused
-            Ok(self.time_offset.as_secs())
+            self.time_offset.as_secs()
         } else {
             // Calculate accelerated time
             let elapsed = self
                 .simulation_start
                 .elapsed()
-                .map_err(|e| AuraError::internal(format!("Time calculation error: {}", e)))?;
+                .unwrap_or(Duration::from_secs(0));
 
             let accelerated_elapsed =
                 Duration::from_secs_f64(elapsed.as_secs_f64() * self.acceleration);
 
             let total_time = self.time_offset + accelerated_elapsed;
-            Ok(total_time.as_secs())
+            total_time.as_secs()
         }
     }
 
-    async fn sleep(&self, duration: Duration) -> AuraResult<()> {
+    async fn current_timestamp_millis(&self) -> u64 {
         if self.paused {
-            // Don't sleep when paused
-            return Ok(());
+            // Return frozen time when paused
+            self.time_offset.as_millis() as u64
+        } else {
+            // Calculate accelerated time
+            let elapsed = self
+                .simulation_start
+                .elapsed()
+                .unwrap_or(Duration::from_secs(0));
+
+            let accelerated_elapsed =
+                Duration::from_secs_f64(elapsed.as_secs_f64() * self.acceleration);
+
+            let total_time = self.time_offset + accelerated_elapsed;
+            total_time.as_millis() as u64
         }
-
-        // Adjust sleep duration based on acceleration
-        let adjusted_duration = Duration::from_secs_f64(duration.as_secs_f64() / self.acceleration);
-
-        tokio::time::sleep(adjusted_duration).await;
-        Ok(())
     }
 
-    async fn now_instant(&self) -> std::time::Instant {
+    async fn now_instant(&self) -> Instant {
         if self.paused {
             // Return frozen instant when paused
             self.instant_base + self.time_offset
@@ -116,6 +128,88 @@ impl TimeEffects for SimulationTimeHandler {
 
             self.instant_base + self.time_offset + accelerated_elapsed
         }
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        if self.paused {
+            // Don't sleep when paused
+            return;
+        }
+
+        // Adjust sleep duration based on acceleration
+        let duration = Duration::from_millis(ms);
+        let adjusted_duration = Duration::from_secs_f64(duration.as_secs_f64() / self.acceleration);
+
+        tokio::time::sleep(adjusted_duration).await;
+    }
+
+    async fn sleep_until(&self, epoch: u64) {
+        let current = self.current_epoch().await;
+        if epoch > current {
+            let wait_ms = epoch - current;
+            self.sleep_ms(wait_ms).await;
+        }
+    }
+
+    async fn delay(&self, duration: Duration) {
+        self.sleep_ms(duration.as_millis() as u64).await;
+    }
+
+    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
+        self.sleep_ms(duration_ms).await;
+        Ok(())
+    }
+
+    async fn yield_until(&self, _condition: WakeCondition) -> Result<(), TimeError> {
+        // Simplified implementation for simulator - just yield
+        tokio::task::yield_now().await;
+        Ok(())
+    }
+
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
+        self.yield_until(condition)
+            .await
+            .map_err(|e| AuraError::internal(format!("Wait failed: {}", e)))
+    }
+
+    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
+        // Generate a timeout handle
+        // In a real implementation, this would track active timeouts
+        let handle = Uuid::new_v4();
+
+        // Spawn a background task to trigger timeout
+        let _timeout_task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
+            // In real implementation, would notify via WakeCondition::TimeoutExpired
+        });
+
+        handle
+    }
+
+    async fn cancel_timeout(&self, _handle: TimeoutHandle) -> Result<(), TimeError> {
+        // Stub implementation - in production would cancel the actual timeout
+        Ok(())
+    }
+
+    fn is_simulated(&self) -> bool {
+        true
+    }
+
+    fn register_context(&self, _context_id: Uuid) {
+        // Stub implementation - in production would track registered contexts
+    }
+
+    fn unregister_context(&self, _context_id: Uuid) {
+        // Stub implementation - in production would remove context
+    }
+
+    async fn notify_events_available(&self) {
+        // Stub implementation - in production would wake waiting contexts
+    }
+
+    fn resolution_ms(&self) -> u64 {
+        // Simulation provides millisecond resolution
+        1
     }
 }
 

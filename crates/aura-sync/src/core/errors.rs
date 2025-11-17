@@ -15,70 +15,95 @@ pub enum SyncError {
     /// Protocol-specific errors during sync execution
     #[error("Protocol error in {protocol}: {message}")]
     Protocol {
+        /// Protocol name where the error occurred
         protocol: String,
+        /// Error description
         message: String,
+        /// Optional peer device ID involved in the error
         peer: Option<DeviceId>,
     },
 
     /// Network-level communication errors
     #[error("Network error: {message}")]
     Network {
+        /// Error description
         message: String,
+        /// Optional peer device ID involved in the error
         peer: Option<DeviceId>,
+        /// Whether the operation can be retried
         retryable: bool,
     },
 
     /// Validation errors for sync data
     #[error("Validation error: {message}")]
     Validation {
+        /// Error description
         message: String,
+        /// Optional field name that failed validation
         field: Option<String>,
     },
 
     /// Session management errors
     #[error("Session error: {message}")]
     Session {
+        /// Error description
         message: String,
+        /// Optional session ID where the error occurred
         session_id: Option<uuid::Uuid>,
+        /// Whether the session can recover from this error
         recoverable: bool,
     },
 
     /// Configuration and setup errors
     #[error("Configuration error: {message}")]
     Config {
+        /// Error description
         message: String,
+        /// Component name with configuration issue
         component: String,
     },
 
     /// Peer discovery and management errors
     #[error("Peer error: {message}")]
     Peer {
+        /// Error description
         message: String,
+        /// Optional peer device ID involved in the error
         peer: Option<DeviceId>,
+        /// Operation that failed
         operation: String,
     },
 
     /// Authorization and capability errors
     #[error("Authorization error: {message}")]
     Authorization {
+        /// Error description
         message: String,
+        /// Optional capability that was required but missing
         required_capability: Option<String>,
+        /// Optional peer device ID involved in the error
         peer: Option<DeviceId>,
     },
 
     /// Timeout errors with context
     #[error("Timeout after {duration:?}: {operation}")]
     Timeout {
+        /// Operation that timed out
         operation: String,
+        /// Duration after which the timeout occurred
         duration: Duration,
+        /// Optional peer device ID involved in the timeout
         peer: Option<DeviceId>,
     },
 
     /// Resource exhaustion errors
     #[error("Resource exhausted: {resource} - {message}")]
     ResourceExhausted {
+        /// Resource type that was exhausted
         resource: String,
+        /// Error description
         message: String,
+        /// Optional limit that was hit
         limit: Option<u64>,
     },
 
@@ -89,16 +114,22 @@ pub enum SyncError {
     /// Serialization/deserialization errors
     #[error("Serialization error: {message}")]
     Serialization {
+        /// Error description
         message: String,
+        /// Data type being serialized/deserialized
         data_type: String,
     },
 
     /// State consistency errors
     #[error("Consistency error: {message}")]
     Consistency {
+        /// Error description
         message: String,
+        /// Operation where inconsistency was detected
         operation: String,
+        /// Expected state description
         expected_state: Option<String>,
+        /// Actual state description
         actual_state: Option<String>,
     },
 }

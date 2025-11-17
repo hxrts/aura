@@ -350,7 +350,7 @@ impl MaintenanceService {
         participants: BTreeSet<DeviceId>,
         threshold_signature: Vec<u8>,
     ) -> SyncResult<SnapshotCompleted> {
-        *self.last_snapshot_epoch.write() = Some(snapshot.leaf_epoch);
+        *self.last_snapshot_epoch.write() = Some(snapshot.epoch);
 
         Ok(SnapshotCompleted {
             proposal_id,
@@ -386,7 +386,10 @@ impl MaintenanceService {
     ) -> SyncResult<UpgradeProposal> {
         let mut protocol = self.ota_protocol.write();
 
+        // TODO: Should obtain UUID via RandomEffects
+        let proposal_id = Uuid::new_v4();
         let proposal = protocol.propose_upgrade(
+            proposal_id,
             package_id,
             version.to_string(),
             kind,
@@ -399,8 +402,9 @@ impl MaintenanceService {
             package_id: proposal.package_id,
             version,
             kind,
-            package_hash: proposal.package_hash,
-            activation_epoch: proposal.activation_epoch,
+            artifact_hash: proposal.package_hash,
+            artifact_uri: None, // TODO: Add URI support
+            activation_fence: None, // TODO: Map activation_epoch to IdentityEpochFence
         })
     }
 
@@ -449,7 +453,7 @@ impl Service for MaintenanceService {
     async fn start(&self, now: Instant) -> SyncResult<()> {
         let mut state = self.state.write();
         if *state == ServiceState::Running {
-            return Err(SyncError::Service("Service already running".to_string()));
+            return Err(SyncError::session("Service already running"));
         }
 
         *state = ServiceState::Starting;

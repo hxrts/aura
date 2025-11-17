@@ -102,11 +102,11 @@ pub struct ConnectionMetadata {
     /// Session ID associated with this connection
     pub session_id: Option<SessionId>,
 
-    /// When connection was established
-    pub established_at: Instant,
+    /// When connection was established (Unix timestamp in seconds)
+    pub established_at: u64,
 
-    /// Last time connection was used
-    pub last_used_at: Instant,
+    /// Last time connection was used (Unix timestamp in seconds)
+    pub last_used_at: u64,
 
     /// Number of times connection has been reused
     pub reuse_count: u64,
@@ -121,8 +121,8 @@ pub struct ConnectionMetadata {
 impl ConnectionMetadata {
     /// Create new connection metadata
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn new(connection_id: String, peer_id: DeviceId, now: Instant) -> Self {
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn new(connection_id: String, peer_id: DeviceId, now: u64) -> Self {
         Self {
             connection_id,
             peer_id,
@@ -141,14 +141,20 @@ impl ConnectionMetadata {
     }
 
     /// Check if connection has been idle for too long
-    pub fn is_expired(&self, timeout: Duration) -> bool {
-        self.is_idle() && self.last_used_at.elapsed() > timeout
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    pub fn is_expired(&self, timeout: Duration, now: u64) -> bool {
+        if !self.is_idle() {
+            return false;
+        }
+        let elapsed_secs = now.saturating_sub(self.last_used_at);
+        Duration::from_secs(elapsed_secs) > timeout
     }
 
     /// Mark connection as acquired
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn acquire(&mut self, session_id: SessionId, now: Instant) {
+    pub fn acquire(&mut self, session_id: SessionId, now: u64) {
         self.state = ConnectionState::Active;
         self.session_id = Some(session_id);
         self.last_used_at = now;
@@ -158,7 +164,7 @@ impl ConnectionMetadata {
     /// Mark connection as released
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn release(&mut self, now: Instant) {
+    pub fn release(&mut self, now: u64) {
         self.state = ConnectionState::Idle;
         self.session_id = None;
         self.last_used_at = now;
@@ -208,15 +214,15 @@ pub struct ConnectionHandle {
     /// Session using this connection
     pub session_id: SessionId,
 
-    /// When connection was acquired
-    pub acquired_at: Instant,
+    /// When connection was acquired (Unix timestamp in seconds)
+    pub acquired_at: u64,
 }
 
 impl ConnectionHandle {
     /// Create a new connection handle
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn new(id: String, peer_id: DeviceId, session_id: SessionId, now: Instant) -> Self {
+    pub fn new(id: String, peer_id: DeviceId, session_id: SessionId, now: u64) -> Self {
         Self {
             id,
             peer_id,
@@ -226,8 +232,11 @@ impl ConnectionHandle {
     }
 
     /// Get connection age
-    pub fn age(&self) -> Duration {
-        self.acquired_at.elapsed()
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    pub fn age(&self, now: u64) -> Duration {
+        let elapsed_secs = now.saturating_sub(self.acquired_at);
+        Duration::from_secs(elapsed_secs)
     }
 }
 
@@ -268,7 +277,7 @@ impl ConnectionPool {
     ///
     /// Tries to reuse an idle connection first, otherwise creates a new one.
     /// Returns error if pool limits are exceeded or timeout occurs.
-    pub async fn acquire(&mut self, peer_id: DeviceId, now: Instant) -> SyncResult<ConnectionHandle> {
+    pub async fn acquire(&mut self, peer_id: DeviceId, now: u64) -> SyncResult<ConnectionHandle> {
         let session_id = SessionId::new();
 
         if let Some(connections) = self.connections.get_mut(&peer_id) {
@@ -290,8 +299,9 @@ impl ConnectionPool {
         // Check limits before creating new connection
         if self.total_connections >= self.config.max_total_connections {
             self.stats.connection_limit_hits += 1;
-            return Err(SyncError::ResourceExhausted(
-                "Connection pool limit reached".to_string()
+            return Err(SyncError::resource_exhausted(
+                "connections",
+                "Connection pool limit reached"
             ));
         }
 
@@ -300,8 +310,9 @@ impl ConnectionPool {
 
         if peer_connections.len() >= self.config.max_connections_per_peer {
             self.stats.connection_limit_hits += 1;
-            return Err(SyncError::ResourceExhausted(
-                format!("Per-peer connection limit reached for {:?}", peer_id)
+            return Err(SyncError::resource_exhausted(
+                "connections",
+                &format!("Per-peer connection limit reached for {:?}", peer_id)
             ));
         }
 
@@ -319,14 +330,14 @@ impl ConnectionPool {
     }
 
     /// Release a connection back to the pool
-    pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle, now: Instant) -> SyncResult<()> {
+    pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle, now: u64) -> SyncResult<()> {
 
         let connections = self.connections.get_mut(&peer_id)
-            .ok_or_else(|| SyncError::Internal("No connections for peer".to_string()))?;
+            .ok_or_else(|| SyncError::session("No connections for peer"))?;
 
         let conn = connections.iter_mut()
             .find(|c| c.connection_id == handle.id)
-            .ok_or_else(|| SyncError::Internal("Connection not found in pool".to_string()))?;
+            .ok_or_else(|| SyncError::session("Connection not found in pool"))?;
 
         conn.release(now);
         self.stats.connections_released += 1;
@@ -337,7 +348,7 @@ impl ConnectionPool {
     /// Close a connection
     pub fn close(&mut self, peer_id: DeviceId, connection_id: &str) -> SyncResult<()> {
         let connections = self.connections.get_mut(&peer_id)
-            .ok_or_else(|| SyncError::Internal("No connections for peer".to_string()))?;
+            .ok_or_else(|| SyncError::session("No connections for peer"))?;
 
         if let Some(pos) = connections.iter().position(|c| c.connection_id == connection_id) {
             let removed = connections.remove(pos);
@@ -349,12 +360,14 @@ impl ConnectionPool {
             // TODO: Actually close connection via aura-transport
             Ok(())
         } else {
-            Err(SyncError::Internal("Connection not found".to_string()))
+            Err(SyncError::session("Connection not found"))
         }
     }
 
     /// Remove expired idle connections
-    pub fn evict_expired(&mut self) -> usize {
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    pub fn evict_expired(&mut self, now: u64) -> usize {
         let mut evicted = 0;
         let idle_timeout = self.config.idle_timeout;
 
@@ -362,7 +375,7 @@ impl ConnectionPool {
             let before = connections.len();
 
             connections.retain(|conn| {
-                let expired = conn.is_expired(idle_timeout);
+                let expired = conn.is_expired(idle_timeout, now);
                 if expired {
                     // TODO: Actually close connection via aura-transport
                 }

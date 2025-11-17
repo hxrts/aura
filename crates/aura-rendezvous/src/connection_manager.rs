@@ -10,7 +10,7 @@
 #![allow(clippy::unwrap_used)]
 
 use aura_core::{AuraError, DeviceId};
-use aura_protocol::messages::social::rendezvous::{
+use aura_protocol::messages::social_rendezvous::{
     TransportDescriptor, TransportKind, TransportOfferPayload,
 };
 use aura_transport::{PunchConfig, StunConfig};

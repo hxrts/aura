@@ -30,7 +30,7 @@ struct MetricsRegistry {
     /// Error tracking with categorization
     errors: Arc<Mutex<ErrorMetrics>>,
     /// Active timing measurements
-    active_timers: Arc<Mutex<HashMap<String, Instant>>>,
+    active_timers: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 /// Operational metrics following Prometheus naming conventions
@@ -178,15 +178,20 @@ impl HistogramMetric {
 /// Histogram bucket with atomic counter
 #[derive(Debug)]
 pub struct HistogramBucket {
+    /// Upper bound of this bucket
     pub upper_bound: f64,
+    /// Atomic count of observations in this bucket
     pub count: AtomicU64,
 }
 
 /// Histogram statistics snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistogramStats {
+    /// Sum of all observed values
     pub sum: u64,
+    /// Total number of observations
     pub count: u64,
+    /// Histogram buckets as (upper_bound, count) pairs
     pub buckets: Vec<(f64, u64)>,
 }
 
@@ -223,21 +228,32 @@ impl HistogramStats {
 /// Error categories for consistent classification
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ErrorCategory {
+    /// Network-related errors
     Network,
+    /// Protocol-specific errors
     Protocol,
+    /// Timeout errors
     Timeout,
+    /// Validation errors
     Validation,
+    /// Resource exhaustion errors
     Resource,
+    /// Authorization errors
     Authorization,
 }
 
 /// Comprehensive metrics snapshot for export
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncMetricsSnapshot {
+    /// Operational metrics snapshot
     pub operational: OperationalSnapshot,
+    /// Performance metrics snapshot
     pub performance: PerformanceSnapshot,
+    /// Resource usage snapshot
     pub resources: ResourceSnapshot,
+    /// Error metrics snapshot
     pub errors: ErrorSnapshot,
+    /// Snapshot timestamp (Unix seconds)
     pub timestamp: u64,
 }
 
@@ -308,8 +324,8 @@ impl MetricsCollector {
 
     /// Record sync session start
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn record_sync_start(&self, session_id: &str, now: Instant) {
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn record_sync_start(&self, session_id: &str, now: u64) {
         if let Ok(operational) = self.registry.operational.lock() {
             operational.sync_sessions_total.fetch_add(1, Ordering::Relaxed);
             operational.active_sync_sessions.fetch_add(1, Ordering::Relaxed);
@@ -322,10 +338,15 @@ impl MetricsCollector {
     }
 
     /// Record sync session completion
-    pub fn record_sync_completion(&self, session_id: &str, ops_transferred: usize, bytes_transferred: usize) {
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn record_sync_completion(&self, session_id: &str, ops_transferred: usize, bytes_transferred: usize, now: u64) {
         let duration = if let Ok(mut timers) = self.registry.active_timers.lock() {
             timers.remove(&format!("sync_session_{}", session_id))
-                .map(|start| start.elapsed())
+                .map(|start| {
+                    let elapsed_secs = now.saturating_sub(start);
+                    Duration::from_secs(elapsed_secs)
+                })
                 .unwrap_or(Duration::ZERO)
         } else {
             Duration::ZERO

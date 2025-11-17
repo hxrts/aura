@@ -1,20 +1,25 @@
 //! Snapshot maintenance command handler.
 
 use anyhow::{anyhow, Result};
-use aura_agent::AuraAgent;
-use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects};
+use aura_agent::{runtime::EffectSystemBuilder, AuraAgent};
+use aura_core::identifiers::DeviceId;
+use aura_protocol::effects::ConsoleEffects;
 
 use crate::SnapshotAction;
 
 /// Dispatch snapshot-related CLI actions.
-pub async fn handle_snapshot(effects: AuraEffectSystem, action: &SnapshotAction) -> Result<()> {
+pub async fn handle_snapshot(device_id: DeviceId, action: &SnapshotAction) -> Result<()> {
     match action {
-        SnapshotAction::Propose => propose_snapshot(effects).await,
+        SnapshotAction::Propose => propose_snapshot(device_id).await,
     }
 }
 
-async fn propose_snapshot(effects: AuraEffectSystem) -> Result<()> {
-    let device_id = effects.device_id();
+async fn propose_snapshot(device_id: DeviceId) -> Result<()> {
+    // Create effect system for this operation
+    let effects = EffectSystemBuilder::new()
+        .with_device_id(device_id)
+        .build_sync()?;
+
     let _ = effects.log_info("Starting snapshot proposal…").await;
     // Move the effect system into the agent runtime so maintenance wiring is reused.
     let agent = AuraAgent::new(effects, device_id);

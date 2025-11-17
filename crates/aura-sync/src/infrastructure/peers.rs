@@ -32,7 +32,7 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -114,11 +114,11 @@ pub struct PeerMetadata {
     /// Current connection status
     pub status: PeerStatus,
 
-    /// When peer was first discovered
-    pub discovered_at: Instant,
+    /// When peer was first discovered (Unix timestamp in seconds)
+    pub discovered_at: u64,
 
-    /// When peer status last changed
-    pub last_status_change: Instant,
+    /// When peer status last changed (Unix timestamp in seconds)
+    pub last_status_change: u64,
 
     /// Number of successful sync sessions with this peer
     pub successful_syncs: u64,
@@ -139,8 +139,8 @@ pub struct PeerMetadata {
 impl PeerMetadata {
     /// Create new peer metadata for a discovered peer
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn new(device_id: DeviceId, now: Instant) -> Self {
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn new(device_id: DeviceId, now: u64) -> Self {
         Self {
             device_id,
             status: PeerStatus::Discovered,
@@ -157,7 +157,7 @@ impl PeerMetadata {
     /// Update peer status
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn set_status(&mut self, status: PeerStatus, now: Instant) {
+    pub fn set_status(&mut self, status: PeerStatus, now: u64) {
         if self.status != status {
             self.status = status;
             self.last_status_change = now;
@@ -203,8 +203,8 @@ pub struct PeerInfo {
 /// Connection details for an active peer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionDetails {
-    /// When connection was established
-    pub connected_at: Instant,
+    /// When connection was established (Unix timestamp in seconds)
+    pub connected_at: u64,
 
     /// Connection identifier from aura-transport
     pub connection_id: String,
@@ -244,8 +244,8 @@ pub struct PeerManager {
     /// Tracked peers by device ID
     peers: HashMap<DeviceId, PeerInfo>,
 
-    /// Last discovery refresh time
-    last_refresh: Option<Instant>,
+    /// Last discovery refresh time (Unix timestamp in seconds)
+    last_refresh: Option<u64>,
 }
 
 impl PeerManager {
@@ -267,7 +267,7 @@ impl PeerManager {
     /// - Uses `NetworkEffects` for peer discovery
     /// - Uses `StorageEffects` to persist discovered peers
     /// - Filters by capabilities via aura-wot integration
-    pub async fn discover_peers<E>(&mut self, _effects: &E, now: Instant) -> SyncResult<Vec<DeviceId>>
+    pub async fn discover_peers<E>(&mut self, _effects: &E, now: u64) -> SyncResult<Vec<DeviceId>>
     where
         E: Send + Sync,
     {
@@ -282,10 +282,10 @@ impl PeerManager {
     }
 
     /// Add a discovered peer to tracking
-    pub fn add_peer(&mut self, device_id: DeviceId, now: Instant) -> SyncResult<()> {
+    pub fn add_peer(&mut self, device_id: DeviceId, now: u64) -> SyncResult<()> {
         if self.peers.len() >= self.config.max_tracked_peers {
-            return Err(SyncError::Configuration(
-                "Maximum tracked peers exceeded".to_string()
+            return Err(SyncError::config("sync",
+                "Maximum tracked peers exceeded"
             ));
         }
 
@@ -306,7 +306,7 @@ impl PeerManager {
         F: FnOnce(&mut PeerMetadata),
     {
         let peer = self.peers.get_mut(&device_id)
-            .ok_or_else(|| SyncError::PeerNotFound(device_id))?;
+            .ok_or_else(|| SyncError::peer("update", "Peer not found"))?;
 
         f(&mut peer.metadata);
         Ok(())
@@ -321,7 +321,7 @@ impl PeerManager {
         capabilities: HashSet<String>,
     ) -> SyncResult<()> {
         let peer = self.peers.get_mut(&device_id)
-            .ok_or_else(|| SyncError::PeerNotFound(device_id))?;
+            .ok_or_else(|| SyncError::peer("update", "Peer not found"))?;
 
         // Check for sync capability
         peer.metadata.has_sync_capability = capabilities.contains("sync_journal")
@@ -427,10 +427,15 @@ impl PeerManager {
     }
 
     /// Check if discovery refresh is needed
-    pub fn needs_refresh(&self) -> bool {
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    pub fn needs_refresh(&self, now: u64) -> bool {
         match self.last_refresh {
             None => true,
-            Some(last) => last.elapsed() >= self.config.refresh_interval,
+            Some(last) => {
+                let elapsed_secs = now.saturating_sub(last);
+                elapsed_secs >= self.config.refresh_interval.as_secs()
+            }
         }
     }
 }

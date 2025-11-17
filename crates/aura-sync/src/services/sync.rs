@@ -130,7 +130,7 @@ pub struct SyncService {
     rate_limiter: Arc<RwLock<RateLimiter>>,
 
     /// Session manager
-    session_manager: Arc<RwLock<SessionManager>>,
+    session_manager: Arc<RwLock<SessionManager<serde_json::Value>>>,
 
     /// Journal sync protocol
     journal_sync: Arc<RwLock<JournalSyncProtocol>>,
@@ -146,8 +146,13 @@ impl SyncService {
     /// Create a new sync service
     pub fn new(config: SyncServiceConfig) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        let rate_limiter = RateLimiter::new(config.rate_limit.clone());
-        let session_manager = SessionManager::new(Default::default());
+        // TODO: Should obtain Instant via TimeEffects
+        #[allow(clippy::disallowed_methods)]
+        let now_instant = std::time::Instant::now();
+        let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
+        // TODO: Obtain actual timestamp via TimeEffects
+        let now = 0u64;
+        let session_manager = SessionManager::new(Default::default(), now);
         let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
         let metrics = MetricsCollector::new();
 
@@ -213,7 +218,7 @@ impl SyncService {
             ServiceState::Stopped | ServiceState::Failed => HealthStatus::Unhealthy,
         };
 
-        let session_stats = self.session_manager.read().statistics();
+        let session_stats = self.session_manager.read().get_statistics();
         let peer_stats = self.peer_manager.read().statistics();
 
         let uptime = self.started_at.read()
@@ -251,7 +256,7 @@ impl Service for SyncService {
     async fn start(&self, now: Instant) -> SyncResult<()> {
         let mut state = self.state.write();
         if *state == ServiceState::Running {
-            return Err(SyncError::Service("Service already running".to_string()));
+            return Err(SyncError::session("Service already running"));
         }
 
         *state = ServiceState::Starting;

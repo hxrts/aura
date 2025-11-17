@@ -35,7 +35,16 @@ impl<T> MigrationAdapter<T> {
 
     /// Get or create context for the operation
     fn get_context(&self) -> EffectContext {
-        thread_local::current().unwrap_or_else(|| EffectContext::new(self.device_id))
+        thread_local::current().unwrap_or_else(|| {
+            #[allow(clippy::disallowed_methods)]
+            // Migration adapter - UUID generation for default context
+            EffectContext::new(
+                self.device_id,
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::new_v4(),
+            )
+        })
     }
 }
 
@@ -52,7 +61,8 @@ impl<T: NetworkEffects> ContextualNetworkEffects for MigrationAdapter<T> {
         thread_local::set(ctx.clone());
 
         // Call the non-contextual method
-        let result = self.inner.send_to_peer(peer_id, message).await;
+        // Convert DeviceId to Uuid
+        let result = self.inner.send_to_peer(peer_id.0, message).await;
 
         // Charge flow if successful
         if result.is_ok() {
@@ -69,7 +79,8 @@ impl<T: NetworkEffects> ContextualNetworkEffects for MigrationAdapter<T> {
     ) -> Result<Vec<u8>, NetworkError> {
         thread_local::set(ctx.clone());
 
-        let result = self.inner.recv_from_peer(peer_id).await;
+        // Convert DeviceId to Uuid and call receive_from
+        let result = self.inner.receive_from(peer_id.0).await;
 
         if result.is_ok() {
             let _ = ctx.charge_flow(10);
@@ -176,7 +187,14 @@ impl MigrationTool {
 
     /// Create a context for migration
     pub fn create_context(&self) -> EffectContext {
-        EffectContext::new(self.device_id).with_metadata("migration", "true")
+        #[allow(clippy::disallowed_methods)]
+        // Migration adapter - UUID generation for migration context
+        EffectContext::new(
+            self.device_id,
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+        ).with_metadata("migration", "true")
     }
 
     /// Run an operation with migration context

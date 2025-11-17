@@ -10,8 +10,11 @@ use uuid::Uuid;
 
 /// Common trait for protocol message pairs
 pub trait ProtocolMessage: Send + Sync + Clone + Debug {
+    /// Request message type
     type Request: Send + Sync + Clone + Debug + for<'de> Deserialize<'de> + Serialize;
+    /// Response message type
     type Response: Send + Sync + Clone + Debug + for<'de> Deserialize<'de> + Serialize;
+    /// Error type for protocol operations
     type Error: std::error::Error + Send + Sync;
 }
 
@@ -314,7 +317,10 @@ impl<T> BatchMessage<T> {
     /// Create batch messages from a list of items
     ///
     /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and pass them
-    pub fn create_batches(items: Vec<T>, batch_size: usize, batch_uuid: Uuid) -> Vec<BatchMessage<T>> {
+    pub fn create_batches(items: Vec<T>, batch_size: usize, batch_uuid: Uuid) -> Vec<BatchMessage<T>>
+    where
+        T: Clone,
+    {
         let total_items = items.len();
         let batch_id = batch_uuid;
         

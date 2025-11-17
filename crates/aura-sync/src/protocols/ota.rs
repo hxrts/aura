@@ -184,8 +184,8 @@ impl OTAProtocol {
         proposer: DeviceId,
     ) -> SyncResult<UpgradeProposal> {
         if self.pending_proposal.is_some() {
-            return Err(SyncError::Coordination(
-                "Upgrade proposal already pending".to_string()
+            return Err(SyncError::protocol("sync", 
+                "Upgrade proposal already pending"
             ));
         }
 
@@ -212,8 +212,8 @@ impl OTAProtocol {
         status: ReadinessStatus,
     ) -> SyncResult<()> {
         if self.pending_proposal.is_none() {
-            return Err(SyncError::Coordination(
-                "No pending upgrade proposal".to_string()
+            return Err(SyncError::protocol("sync", 
+                "No pending upgrade proposal"
             ));
         }
 
@@ -233,13 +233,13 @@ impl OTAProtocol {
     /// Activate upgrade if threshold is met
     pub fn activate(&mut self) -> SyncResult<OTAResult> {
         let proposal = self.pending_proposal.take()
-            .ok_or_else(|| SyncError::Coordination(
-                "No pending proposal to activate".to_string()
+            .ok_or_else(|| SyncError::protocol("sync", 
+                "No pending proposal to activate"
             ))?;
 
         if !self.check_threshold() {
-            return Err(SyncError::Coordination(
-                "Readiness threshold not met".to_string()
+            return Err(SyncError::protocol("sync", 
+                "Readiness threshold not met"
             ));
         }
 
@@ -269,8 +269,8 @@ impl OTAProtocol {
     /// Cancel pending proposal
     pub fn cancel(&mut self) -> SyncResult<()> {
         if self.pending_proposal.is_none() {
-            return Err(SyncError::Coordination(
-                "No pending proposal to cancel".to_string()
+            return Err(SyncError::protocol("sync", 
+                "No pending proposal to cancel"
             ));
         }
 
