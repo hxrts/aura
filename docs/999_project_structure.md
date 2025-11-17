@@ -691,7 +691,8 @@ graph TD
 - **Capabilities**: `CapabilityId`, `CapabilityScope`, `CapabilityResource`, `Permission`
 - **Content**: `ContentId`, `ChunkId`, `ManifestId`
 - **Peers**: `PeerInfo`, `RelationshipType`, `ContextType`
-- **Errors**: `AuraError`, `ErrorCode`, `ErrorSeverity`
+- **Errors**: `AuraError`, `ErrorCode`, `ErrorSeverity` (unified error handling)
+- **Reliability**: `RetryPolicy`, `BackoffStrategy`, `RateLimiter`, `RateLimitConfig` (consolidated from aura-sync)
 - **Semilattice**: `JoinSemiLattice`, `MeetSemiLattice` traits and implementations
 - **Configuration System** (`config` module):
   - **Traits**: `AuraConfig`, `ConfigDefaults`, `ConfigMerge`, `ConfigValidation` for unified configuration handling across components
@@ -713,6 +714,7 @@ graph TD
 - **Basic Handlers**: `RealCryptoHandler`, `MockNetworkHandler`, `MemoryStorageHandler`, `FilesystemStorageHandler`
 - **Testing Variants**: Mock implementations for all core effect traits
 - **Production Variants**: Real implementations using external libraries
+- **System Handlers**: `MonitoringSystemHandler`, `HealthCheckHandler` for observability (moved from aura-protocol)
 - **Context-Free Operations**: Stateless, single-party effect implementations
 
 **Dependencies**: `aura-core`, external libraries (tokio, blake3, etc.)
@@ -788,7 +790,8 @@ graph TD
 **Key Exports**:
 - **Effects**: Core effect traits (`CryptoEffects`, `TimeEffects`, `SystemEffects`)
 - **Handlers**: Effect handler registry and composition
-- **Cross-Cutting Effects**: Reliability patterns, metrics collection, and distributed tracing
+- **Cross-Cutting Effects**: Metrics collection and distributed tracing
+- **Capability Evaluation**: `CapabilityEvaluator` for authorization evaluation (moved from aura-wot)
 - **Guards**: Guard chain implementation (`SendGuardChain`, `JournalCoupler`)
 - **Context**: Protocol execution context
 - **Types**: Protocol configuration and error types
