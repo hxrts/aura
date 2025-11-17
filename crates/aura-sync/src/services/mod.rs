@@ -53,7 +53,7 @@ pub use maintenance::{
     UpgradeProposal, IdentityEpochFence, CacheKey,
 };
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::core::{SyncError, SyncResult};
@@ -104,7 +104,9 @@ pub struct HealthCheck {
 #[async_trait::async_trait]
 pub trait Service: Send + Sync {
     /// Start the service
-    async fn start(&self) -> SyncResult<()>;
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    async fn start(&self, now: Instant) -> SyncResult<()>;
 
     /// Stop the service gracefully
     async fn stop(&self) -> SyncResult<()>;

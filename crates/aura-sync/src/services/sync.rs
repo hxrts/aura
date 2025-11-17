@@ -248,16 +248,13 @@ impl SyncService {
 
 #[async_trait::async_trait]
 impl Service for SyncService {
-    async fn start(&self) -> SyncResult<()> {
+    async fn start(&self, now: Instant) -> SyncResult<()> {
         let mut state = self.state.write();
         if *state == ServiceState::Running {
             return Err(SyncError::Service("Service already running".to_string()));
         }
 
         *state = ServiceState::Starting;
-        // Note: For service lifecycle tracking, using Instant::now() is acceptable
-        #[allow(clippy::disallowed_methods)]
-        let now = Instant::now();
         *self.started_at.write() = Some(now);
 
         // TODO: Start background tasks for auto-sync

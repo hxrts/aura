@@ -172,8 +172,11 @@ impl OTAProtocol {
     }
 
     /// Propose an upgrade
+    ///
+    /// Note: Callers should obtain `proposal_id` via `RandomEffects` or use `Uuid::new_v4()` in tests
     pub fn propose_upgrade(
         &mut self,
+        proposal_id: Uuid,
         package_id: Uuid,
         version: String,
         kind: UpgradeKind,
@@ -186,10 +189,8 @@ impl OTAProtocol {
             ));
         }
 
-        #[allow(clippy::disallowed_methods)]
-        // TODO: Refactor to accept UUID parameter from RandomEffects
         let proposal = UpgradeProposal {
-            proposal_id: Uuid::new_v4(),
+            proposal_id,
             package_id,
             version,
             kind,
@@ -300,7 +301,8 @@ mod tests {
         let device = DeviceId::from_bytes([1; 32]);
 
         let proposal = protocol.propose_upgrade(
-            Uuid::new_v4(),
+            Uuid::new_v4(),  // proposal_id
+            Uuid::new_v4(),  // package_id
             "2.0.0".to_string(),
             UpgradeKind::SoftFork,
             Hash32([0; 32]),
@@ -322,7 +324,8 @@ mod tests {
         let mut protocol = OTAProtocol::new(config);
 
         protocol.propose_upgrade(
-            Uuid::new_v4(),
+            Uuid::new_v4(),  // proposal_id
+            Uuid::new_v4(),  // package_id
             "2.0.0".to_string(),
             UpgradeKind::SoftFork,
             Hash32([0; 32]),
@@ -349,7 +352,8 @@ mod tests {
         let mut protocol = OTAProtocol::default();
 
         protocol.propose_upgrade(
-            Uuid::new_v4(),
+            Uuid::new_v4(),  // proposal_id
+            Uuid::new_v4(),  // package_id
             "2.0.0".to_string(),
             UpgradeKind::SoftFork,
             Hash32([0; 32]),

@@ -284,7 +284,9 @@ where
     }
 
     /// Create a new session with participants
-    pub fn create_session(&mut self, participants: Vec<DeviceId>) -> SyncResult<SessionId> {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn create_session(&mut self, participants: Vec<DeviceId>, now: Instant) -> SyncResult<SessionId> {
         // Validate participant count
         if participants.len() > self.config.max_participants {
             return Err(SyncError::validation(&format!(
@@ -305,24 +307,22 @@ where
         }
 
         let session_id = SessionId::new();
-        let now = SystemTime::now()
+        let now_secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
 
         let session_state = SessionState::Initializing {
             participants,
-            timeout_at: now + self.config.timeout.as_secs(),
-            created_at: now,
+            timeout_at: now_secs + self.config.timeout.as_secs(),
+            created_at: now_secs,
         };
 
         self.sessions.insert(session_id, session_state);
 
-        // Record metrics
-        // Note: For test contexts, using a dummy now value is acceptable
-        #[allow(clippy::disallowed_methods)]
+        // Record metrics with the provided now parameter
         if let Some(ref metrics) = self.metrics {
-            metrics.record_sync_start(&session_id.to_string(), Instant::now());
+            metrics.record_sync_start(&session_id.to_string(), now);
         }
 
         Ok(session_id)
@@ -711,7 +711,7 @@ mod tests {
         let participants = vec![test_device_id(1), test_device_id(2)];
 
         // Create session
-        let session_id = manager.create_session(participants.clone()).unwrap();
+        let session_id = manager.create_session(participants.clone(), now).unwrap();
         assert_eq!(manager.count_active_sessions(), 0); // Not active yet
 
         // Activate session
@@ -738,7 +738,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
         let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
-        let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
+        let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
 
         let initial_state = TestProtocolState {
             phase: "test".to_string(),
@@ -770,7 +770,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
         let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
-        let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
+        let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
 
         let initial_state = TestProtocolState {
             phase: "test".to_string(),
@@ -810,8 +810,8 @@ mod tests {
         let mut manager = SessionManager::<TestProtocolState>::new(config, now);
 
         // Create and activate maximum sessions
-        let session1 = manager.create_session(vec![test_device_id(1)]).unwrap();
-        let session2 = manager.create_session(vec![test_device_id(1)]).unwrap();
+        let session1 = manager.create_session(vec![test_device_id(1)], now).unwrap();
+        let session2 = manager.create_session(vec![test_device_id(1)], now).unwrap();
 
         let state = TestProtocolState {
             phase: "test".to_string(),
@@ -821,7 +821,7 @@ mod tests {
         manager.activate_session(session2, state).unwrap();
 
         // Try to exceed limit
-        let result = manager.create_session(vec![test_device_id(1)]);
+        let result = manager.create_session(vec![test_device_id(1)], now);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SyncError::ResourceExhausted { .. }));
     }
@@ -836,7 +836,7 @@ mod tests {
         let now = Instant::now();
         let mut manager = SessionManager::<TestProtocolState>::new(config, now);
         
-        let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
+        let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
         
         // Wait for timeout
         thread::sleep(StdDuration::from_millis(150));
@@ -862,7 +862,7 @@ mod tests {
         let mut manager = SessionManager::<TestProtocolState>::new(config, now);
 
         // Create and complete a session
-        let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
+        let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
         let state = TestProtocolState {
             phase: "test".to_string(),
             data: vec![],
@@ -890,7 +890,7 @@ mod tests {
 
         // Create and complete some sessions
         for i in 0..3 {
-            let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
+            let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
             let state = TestProtocolState {
                 phase: "test".to_string(),
                 data: vec![],
