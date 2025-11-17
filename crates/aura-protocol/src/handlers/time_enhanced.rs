@@ -455,6 +455,10 @@ impl TimeEffects for EnhancedTimeHandler {
     fn resolution_ms(&self) -> u64 {
         1 // 1 millisecond resolution
     }
+
+    async fn now_instant(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
 }
 
 #[cfg(test)]

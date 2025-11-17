@@ -70,19 +70,22 @@ pub struct LeakageEvent {
 }
 
 impl LeakageEvent {
-    /// Create a new leakage event
-    #[allow(clippy::disallowed_methods)]
+    /// Create a new leakage event with explicit timestamp
+    ///
+    /// # Arguments
+    /// * `timestamp` - The timestamp when the leakage occurred (from TimeEffects)
     pub fn new(
         leak_type: LeakageType,
         cost: u64,
         observer: DeviceId,
+        timestamp: DateTime<Utc>,
         description: impl Into<String>,
     ) -> Self {
         Self {
             leak_type,
             cost,
             observer,
-            timestamp: Utc::now(),
+            timestamp,
             description: description.into(),
         }
     }
@@ -106,26 +109,36 @@ pub struct LeakageBudget {
 }
 
 impl LeakageBudget {
-    /// Create a new leakage budget
-    #[allow(clippy::disallowed_methods)]
-    pub fn new(observer: DeviceId, leak_type: LeakageType, limit: u64) -> Self {
+    /// Create a new leakage budget with explicit timestamp
+    ///
+    /// # Arguments
+    /// * `now` - Current timestamp (from TimeEffects)
+    pub fn new(
+        observer: DeviceId,
+        leak_type: LeakageType,
+        limit: u64,
+        now: DateTime<Utc>,
+    ) -> Self {
         Self {
             observer,
             leak_type,
             limit,
             consumed: 0,
             refresh_period: None,
-            last_refresh: Utc::now(),
+            last_refresh: now,
         }
     }
 
-    /// Create budget with refresh period
-    #[allow(clippy::disallowed_methods)]
+    /// Create budget with refresh period and explicit timestamp
+    ///
+    /// # Arguments
+    /// * `now` - Current timestamp (from TimeEffects)
     pub fn with_refresh(
         observer: DeviceId,
         leak_type: LeakageType,
         limit: u64,
         refresh_period: chrono::Duration,
+        now: DateTime<Utc>,
     ) -> Self {
         Self {
             observer,
@@ -133,7 +146,7 @@ impl LeakageBudget {
             limit,
             consumed: 0,
             refresh_period: Some(refresh_period),
-            last_refresh: Utc::now(),
+            last_refresh: now,
         }
     }
 
@@ -161,12 +174,14 @@ impl LeakageBudget {
     }
 
     /// Refresh budget if refresh period has elapsed
-    #[allow(clippy::disallowed_methods)]
-    pub fn maybe_refresh(&mut self) {
+    ///
+    /// # Arguments
+    /// * `now` - Current timestamp (from TimeEffects)
+    pub fn maybe_refresh(&mut self, now: DateTime<Utc>) {
         if let Some(period) = self.refresh_period {
-            if Utc::now().signed_duration_since(self.last_refresh) >= period {
+            if now.signed_duration_since(self.last_refresh) >= period {
                 self.consumed = 0;
-                self.last_refresh = Utc::now();
+                self.last_refresh = now;
             }
         }
     }
@@ -235,17 +250,21 @@ impl LeakageTracker {
     }
 
     /// Record a leakage event
+    ///
+    /// # Arguments
+    /// * `now` - Current timestamp (from TimeEffects)
     pub fn record_leakage(
         &mut self,
         leak_type: LeakageType,
         cost: u64,
         observer: DeviceId,
+        now: DateTime<Utc>,
         description: impl Into<String>,
     ) -> AuraResult<()> {
         // Check budget
         let key = (observer, leak_type.clone());
         if let Some(budget) = self.budgets.get_mut(&key) {
-            budget.maybe_refresh();
+            budget.maybe_refresh(now);
             budget.consume(cost)?;
         } else {
             // No budget defined - allow but warn
@@ -257,7 +276,7 @@ impl LeakageTracker {
         }
 
         // Record event
-        let event = LeakageEvent::new(leak_type, cost, observer, description);
+        let event = LeakageEvent::new(leak_type, cost, observer, now, description);
         self.events.push(event);
 
         // Trim events if necessary
@@ -409,8 +428,10 @@ mod tests {
 
     #[test]
     fn test_leakage_budget() {
+        #[allow(clippy::disallowed_methods)]
+        let now = Utc::now();
         let observer = DeviceId::new();
-        let mut budget = LeakageBudget::new(observer, LeakageType::Metadata, 100);
+        let mut budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now);
 
         assert!(budget.can_afford(50));
         assert!(budget.consume(50).is_ok());
@@ -420,23 +441,27 @@ mod tests {
 
     #[test]
     fn test_leakage_tracker() {
+        #[allow(clippy::disallowed_methods)]
+        let now = Utc::now();
         let observer = DeviceId::new();
         let mut tracker = LeakageTracker::new();
 
-        let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100);
+        let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now);
         tracker.add_budget(budget);
 
         assert!(tracker.check_leakage(&LeakageType::Metadata, 50, observer));
         assert!(tracker
-            .record_leakage(LeakageType::Metadata, 50, observer, "test")
+            .record_leakage(LeakageType::Metadata, 50, observer, now, "test")
             .is_ok());
         assert!(!tracker.check_leakage(&LeakageType::Metadata, 60, observer));
     }
 
     #[test]
     fn test_privacy_contract() {
+        #[allow(clippy::disallowed_methods)]
+        let now = Utc::now();
         let observer = DeviceId::new();
-        let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100);
+        let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now);
 
         let contract = PrivacyContract::new("test_contract")
             .with_description("Test privacy contract")

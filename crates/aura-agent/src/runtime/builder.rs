@@ -138,10 +138,13 @@ impl AuraEffectSystemBuilder {
         };
 
         // Initialize services
+        #[allow(clippy::disallowed_methods)]
+        // Initialization timing - should accept now parameter from caller's TimeEffects
+        let now = Instant::now();
         let context_mgr = Arc::new(ContextManager::new());
         let budget_mgr = Arc::new(FlowBudgetManager::new());
         let receipt_mgr = Arc::new(ReceiptManager::new());
-        let lifecycle_mgr = Arc::new(LifecycleManager::new(config.device_id));
+        let lifecycle_mgr = Arc::new(LifecycleManager::new(config.device_id, now));
 
         // Perform async initialization if needed
         // For now, we defer initialization to avoid runtime conflicts
@@ -167,10 +170,13 @@ impl AuraEffectSystemBuilder {
         let executor = self.build_executor(&config)?;
 
         // Initialize services without async operations
+        #[allow(clippy::disallowed_methods)]
+        // Initialization timing - should accept now parameter from caller's TimeEffects
+        let now = Instant::now();
         let context_mgr = Arc::new(ContextManager::new());
         let budget_mgr = Arc::new(FlowBudgetManager::new());
         let receipt_mgr = Arc::new(ReceiptManager::new());
-        let lifecycle_mgr = Arc::new(LifecycleManager::new(config.device_id));
+        let lifecycle_mgr = Arc::new(LifecycleManager::new(config.device_id, now));
 
         Ok(AuraEffectSystem::from_components(
             config,

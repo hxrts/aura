@@ -38,27 +38,30 @@ pub struct InitializationMetrics {
     pub parallel_speedup: f64,
 }
 
-/// Platform-specific time measurement
+/// Platform-specific time measurement type
 #[cfg(not(target_arch = "wasm32"))]
-fn now() -> Instant {
-    Instant::now()
-}
+type TimePoint = Instant;
 
 #[cfg(target_arch = "wasm32")]
-fn now() -> f64 {
+type TimePoint = f64;
+
+/// Get current time point (WASM only - native should pass Instant)
+#[cfg(target_arch = "wasm32")]
+fn now() -> TimePoint {
     web_sys::window()
         .and_then(|w| w.performance())
         .map(|p| p.now())
         .unwrap_or(0.0)
 }
 
+/// Calculate elapsed time since a time point
 #[cfg(not(target_arch = "wasm32"))]
-fn elapsed_since(start: Instant) -> std::time::Duration {
+fn elapsed_since(start: TimePoint) -> std::time::Duration {
     start.elapsed()
 }
 
 #[cfg(target_arch = "wasm32")]
-fn elapsed_since(start: f64) -> std::time::Duration {
+fn elapsed_since(start: TimePoint) -> std::time::Duration {
     let elapsed_ms = now() - start;
     std::time::Duration::from_millis(elapsed_ms as u64)
 }
@@ -85,6 +88,67 @@ impl ParallelInitBuilder {
     }
 
     /// Build the effect system with parallel initialization
+    ///
+    /// # Parameters
+    /// - `start_time`: Current time point for metrics (pass from TimeEffects on non-WASM)
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn build(self, start_time: TimePoint) -> AuraResult<(AuraEffectSystem, Option<InitializationMetrics>)> {
+        let start_time = start_time;
+        let mut metrics = if self.enable_metrics {
+            Some(InitializationMetrics {
+                total_duration: std::time::Duration::default(),
+                handler_init_duration: std::time::Duration::default(),
+                service_init_duration: std::time::Duration::default(),
+                parallel_speedup: 1.0,
+            })
+        } else {
+            None
+        };
+
+        // Phase 1: Initialize handlers in parallel
+        #[allow(clippy::disallowed_methods)]
+        // Internal timing measurement - should be replaced with TimeEffects in future async API
+        let handler_start = Instant::now();
+        let handlers = self.initialize_handlers_parallel().await?;
+
+        if let Some(ref mut m) = metrics {
+            m.handler_init_duration = elapsed_since(handler_start);
+        }
+
+        // Phase 2: Build executor with initialized handlers
+        let executor = self.build_executor_from_handlers(handlers)?;
+
+        // Phase 3: Initialize services in parallel
+        #[allow(clippy::disallowed_methods)]
+        // Internal timing measurement - should be replaced with TimeEffects in future async API
+        let service_start = Instant::now();
+        let (context_mgr, budget_mgr, receipt_mgr, lifecycle_mgr) =
+            self.initialize_services_parallel().await?;
+
+        if let Some(ref mut m) = metrics {
+            m.service_init_duration = elapsed_since(service_start);
+            m.total_duration = elapsed_since(start_time);
+
+            // Calculate speedup vs sequential
+            let sequential_estimate = m.handler_init_duration.as_millis() * 11 // 11 handlers
+                + m.service_init_duration.as_millis() * 4; // 4 services
+            m.parallel_speedup = sequential_estimate as f64 / m.total_duration.as_millis() as f64;
+        }
+
+        let system = AuraEffectSystem::from_components(
+            self.config,
+            Arc::new(executor),
+            context_mgr,
+            budget_mgr,
+            receipt_mgr,
+            lifecycle_mgr,
+        );
+
+        Ok((system, metrics))
+    }
+
+    /// Build the effect system with parallel initialization (WASM)
+    #[cfg(target_arch = "wasm32")]
     pub async fn build(self) -> AuraResult<(AuraEffectSystem, Option<InitializationMetrics>)> {
         let start_time = now();
         let mut metrics = if self.enable_metrics {
@@ -275,7 +339,12 @@ impl ParallelInitBuilder {
             async { Arc::new(ContextManager::new()) },
             async { Arc::new(FlowBudgetManager::new()) },
             async { Arc::new(ReceiptManager::new()) },
-            async { Arc::new(LifecycleManager::new(device_id)) },
+            async {
+                #[allow(clippy::disallowed_methods)]
+                // Initialization timing - should accept now parameter from caller's TimeEffects
+                let now = Instant::now();
+                Arc::new(LifecycleManager::new(device_id, now))
+            },
         );
 
         Ok((context_mgr, flow_budget_mgr, receipt_mgr, lifecycle_mgr))

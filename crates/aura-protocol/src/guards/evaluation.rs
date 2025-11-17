@@ -1,6 +1,4 @@
-#![allow(clippy::disallowed_methods)]
-
-//! Guard evaluation logic integrating with aura-wot capability system
+// Guard evaluation logic integrating with aura-wot capability system
 //!
 //! This module implements the `need(σ) ≤ C` checking required by the formal model.
 //! It bridges the protocol layer with the capability calculus implemented in aura-wot.
@@ -58,7 +56,8 @@ impl GuardEvaluator {
         guard: &ProtocolGuard,
         effect_system: &E,
     ) -> AuraResult<GuardEvaluationResult> {
-        let start_time = Instant::now();
+        use aura_core::TimeEffects;
+        let start_time = effect_system.now_instant().await;
 
         debug!(
             operation_id = %guard.operation_id,
@@ -67,7 +66,7 @@ impl GuardEvaluator {
         );
 
         // Compute effective capabilities for current context
-        let capability_start = Instant::now();
+        let capability_start = effect_system.now_instant().await;
         let effective_capabilities = self
             .capability_evaluator
             .compute_effective_capabilities(effect_system)
@@ -78,7 +77,7 @@ impl GuardEvaluator {
         let capability_time = capability_start.elapsed();
 
         // Check each required capability against effective capabilities
-        let requirement_start = Instant::now();
+        let requirement_start = effect_system.now_instant().await;
         let mut failed_requirements = Vec::new();
 
         for required_cap in &guard.required_capabilities {
@@ -149,6 +148,7 @@ impl GuardEvaluator {
         guards: &[&ProtocolGuard],
         effect_system: &E,
     ) -> AuraResult<Vec<GuardEvaluationResult>> {
+        use aura_core::TimeEffects;
         // Optimize by computing effective capabilities once
         let effective_capabilities = self
             .capability_evaluator
@@ -161,7 +161,7 @@ impl GuardEvaluator {
         let mut results = Vec::new();
 
         for guard in guards {
-            let start_time = Instant::now();
+            let start_time = effect_system.now_instant().await;
 
             let mut failed_requirements = Vec::new();
             for required_cap in &guard.required_capabilities {

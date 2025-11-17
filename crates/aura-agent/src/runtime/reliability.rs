@@ -80,8 +80,8 @@ impl CircuitBreakerState {
     }
 
     /// Record a successful operation
-    fn record_success(&mut self) {
-        self.last_success = Some(Instant::now());
+    fn record_success(&mut self, now: Instant) {
+        self.last_success = Some(now);
 
         match self.state {
             CircuitState::Closed => {
@@ -103,8 +103,8 @@ impl CircuitBreakerState {
     }
 
     /// Record a failed operation
-    fn record_failure(&mut self) {
-        self.last_failure = Some(Instant::now());
+    fn record_failure(&mut self, now: Instant) {
+        self.last_failure = Some(now);
 
         match self.state {
             CircuitState::Closed => {
@@ -124,14 +124,17 @@ impl CircuitBreakerState {
     }
 
     /// Check if circuit should allow operations
-    fn should_allow_operation(&mut self) -> bool {
+    ///
+    /// # Arguments
+    /// - `now`: Current time instant (obtain from TimeEffects in production)
+    fn should_allow_operation(&mut self, now: Instant) -> bool {
         match self.state {
             CircuitState::Closed => true,
             CircuitState::HalfOpen => true,
             CircuitState::Open => {
                 // Check if timeout has passed to transition to half-open
                 if let Some(last_failure) = self.last_failure {
-                    if last_failure.elapsed() >= self.config.timeout {
+                    if now.duration_since(last_failure) >= self.config.timeout {
                         self.state = CircuitState::HalfOpen;
                         self.success_count = 0;
                         true
@@ -207,10 +210,16 @@ impl ReliabilityCoordinator {
     }
 
     /// Execute operation with circuit breaker protection
+    ///
+    /// # Arguments
+    /// - `operation_key`: Unique identifier for this operation's circuit
+    /// - `operation`: The async operation to execute
+    /// - `now`: Current time instant (obtain from TimeEffects in production)
     pub async fn execute_with_circuit_breaker<T, F, Fut>(
         &self,
         operation_key: &str,
         operation: F,
+        now: Instant,
     ) -> Result<T, AuraError>
     where
         F: Fn() -> Fut,
@@ -222,7 +231,7 @@ impl ReliabilityCoordinator {
             let breaker = breakers
                 .entry(operation_key.to_string())
                 .or_insert_with(|| CircuitBreakerState::new(self.circuit_config.clone()));
-            breaker.should_allow_operation()
+            breaker.should_allow_operation(now)
         };
 
         if !should_allow {
@@ -238,7 +247,7 @@ impl ReliabilityCoordinator {
                 // Record success
                 let mut breakers = self.circuit_breakers.lock().unwrap();
                 if let Some(breaker) = breakers.get_mut(operation_key) {
-                    breaker.record_success();
+                    breaker.record_success(now);
                 }
                 Ok(result)
             }
@@ -246,7 +255,7 @@ impl ReliabilityCoordinator {
                 // Record failure
                 let mut breakers = self.circuit_breakers.lock().unwrap();
                 if let Some(breaker) = breakers.get_mut(operation_key) {
-                    breaker.record_failure();
+                    breaker.record_failure(now);
                 }
                 Err(error)
             }
@@ -339,7 +348,12 @@ impl ReliabilityEffects for ReliabilityCoordinator {
         Fut: std::future::Future<Output = Result<T, AuraError>> + Send,
         T: Send,
     {
-        self.execute_with_circuit_breaker(circuit_id, || operation())
+        // TODO: Trait ReliabilityEffects needs to be updated to accept TimeEffects or `now` parameter
+        // For now, we must call Instant::now() here since the trait doesn't provide a way to get time
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
+        self.execute_with_circuit_breaker(circuit_id, || operation(), now)
             .await
             .map_err(|e| ReliabilityError::OperationError(e))
     }
@@ -385,6 +399,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_circuit_breaker_failure_threshold() {
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         let coordinator = ReliabilityCoordinator::with_config(
             RetryConfig::default(),
             CircuitBreakerConfig {
@@ -402,7 +419,7 @@ mod tests {
             .execute_with_circuit_breaker("test_op", || {
                 call_count.fetch_add(1, Ordering::SeqCst);
                 async { Ok::<(), AuraError>(()) }
-            })
+            }, now)
             .await;
         assert!(result.is_ok());
 
@@ -412,7 +429,7 @@ mod tests {
                 .execute_with_circuit_breaker("test_op", || {
                     call_count.fetch_add(1, Ordering::SeqCst);
                     async { Err(AuraError::internal("Test failure")) }
-                })
+                }, now)
                 .await;
             assert!(result.is_err());
         }
@@ -422,7 +439,7 @@ mod tests {
             .execute_with_circuit_breaker("test_op", || {
                 call_count.fetch_add(1, Ordering::SeqCst);
                 async { Ok::<(), AuraError>(()) }
-            })
+            }, now)
             .await;
         assert!(result.is_err());
         assert!(result
@@ -436,6 +453,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_circuit_breaker_recovery() {
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         let coordinator = ReliabilityCoordinator::with_config(
             RetryConfig::default(),
             CircuitBreakerConfig {
@@ -450,7 +470,7 @@ mod tests {
         let result = coordinator
             .execute_with_circuit_breaker("test_op", || async {
                 Err(AuraError::internal("Test failure"))
-            })
+            }, now)
             .await;
         assert!(result.is_err());
 
@@ -463,9 +483,12 @@ mod tests {
         // Wait for timeout
         tokio::time::sleep(Duration::from_millis(20)).await;
 
+        #[allow(clippy::disallowed_methods)]
+        let now_after_sleep = Instant::now();
+
         // Next call should succeed and close circuit
         let result = coordinator
-            .execute_with_circuit_breaker("test_op", || async { Ok(42u32) })
+            .execute_with_circuit_breaker("test_op", || async { Ok(42u32) }, now_after_sleep)
             .await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
@@ -493,6 +516,7 @@ mod tests {
         let call_count = Arc::new(AtomicU32::new(0));
         let call_count_clone = call_count.clone();
 
+        // TODO: Get from TimeEffects instead of direct call
         let start = Instant::now();
         let result = coordinator
             .with_retry(

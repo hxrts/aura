@@ -3,8 +3,6 @@
 //! This module provides the `JournalCoupler` that bridges the guard chain execution
 //! with journal CRDT operations. It ensures that protocol operations that succeed
 //! capability checks properly update the distributed journal state.
-
-#![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
 //!
 //! ## Integration Flow
 //!
@@ -21,7 +19,7 @@
 
 use super::effect_system_trait::GuardEffectSystem;
 use super::ProtocolGuard;
-use aura_core::{AuraResult, Journal};
+use aura_core::{AuraResult, Journal, TimeEffects};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
 use std::{collections::HashMap, future::Future, time::Instant};
@@ -157,7 +155,7 @@ impl JournalCoupler {
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
-        let coupling_start = Instant::now();
+        let coupling_start = effect_system.now_instant().await;
 
         debug!(
             operation_id = operation_id,
@@ -191,7 +189,7 @@ impl JournalCoupler {
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
-        let application_start = Instant::now();
+        let application_start = effect_system.now_instant().await;
 
         // Phase 1: Apply journal annotations optimistically
         let (updated_journal, journal_ops) = self
@@ -256,7 +254,7 @@ impl JournalCoupler {
         let execution_result = operation(effect_system).await?;
 
         // Phase 2: Apply journal annotations only after success
-        let application_start = Instant::now();
+        let application_start = effect_system.now_instant().await;
         let (updated_journal, journal_ops) = self
             .apply_annotations(operation_id, effect_system, &initial_journal)
             .await?;

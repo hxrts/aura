@@ -138,8 +138,10 @@ pub async fn perform_frost_aggregation(
     message: &[u8],
     threshold: usize,
     total_signers: usize,
+    random_effects: &dyn aura_core::effects::RandomEffects,
 ) -> FrostResult<ThresholdSignature> {
     use aura_core::frost::tree_signing::{binding_message, frost_aggregate, TreeSigningContext};
+    use aura_effects::EffectSystemRng;
     use frost_ed25519 as frost;
     use std::collections::BTreeMap;
 
@@ -169,13 +171,12 @@ pub async fn perform_frost_aggregation(
 
     // Generate temporary public key package for aggregation
     // In production, this would come from the DKG ceremony
-    #[allow(clippy::disallowed_methods)]
-    let rng = rand::thread_rng();
+    let mut rng = EffectSystemRng::from_current_runtime(random_effects);
     let (_, pubkey_package) = frost::keys::generate_with_dealer(
         total_signers.try_into().unwrap(),
         threshold.try_into().unwrap(),
         frost::keys::IdentifierList::Default,
-        rng,
+        &mut rng,
     )
     .map_err(|e| AuraError::crypto(format!("Failed to generate key package: {}", e)))?;
 

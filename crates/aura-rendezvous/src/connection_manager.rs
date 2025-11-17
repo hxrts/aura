@@ -56,13 +56,16 @@ impl PunchSession {
     }
 
     // Alternative constructor that might be needed based on usage
+    ///
+    /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and pass them to this method
     pub async fn from_device_and_config(
         _device_id: aura_core::DeviceId,
         local_addr: std::net::SocketAddr,
         _config: aura_transport::PunchConfig,
+        session_uuid: uuid::Uuid,
     ) -> Result<Self, String> {
         Ok(Self {
-            session_id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_uuid.to_string(),
             local_addr,
             target_addr: "127.0.0.1:0".parse().unwrap(), // placeholder
         })

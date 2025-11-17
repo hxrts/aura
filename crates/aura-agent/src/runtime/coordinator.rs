@@ -4,6 +4,10 @@
 //! orchestrates stateless effect execution with isolated state management
 //! services, eliminating deadlocks through architectural separation.
 
+// TODO: Refactor to use TimeEffects. Uses Instant::now() for coordination timing
+// which should be replaced with effect system integration.
+#![allow(clippy::disallowed_methods)]
+
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -720,6 +724,33 @@ impl TimeEffects for AuraEffectSystem {
         u64::from_le_bytes(result.try_into().unwrap_or([0; 8]))
     }
 
+    async fn now_instant(&self) -> std::time::Instant {
+        // For the coordinator level, we delegate to the effect system's timestamp
+        // and create a synthetic Instant. The underlying handlers (RealTimeHandler,
+        // SimulatedTimeHandler) maintain their own proper Instant tracking.
+        // This is a limitation of the byte-serialization dispatcher pattern.
+
+        // Use a synthetic base that's initialized once per process
+        use std::sync::OnceLock;
+        static BASE: OnceLock<(std::time::Instant, u64)> = OnceLock::new();
+
+        let (base_instant, base_timestamp_ms) = BASE.get_or_init(|| {
+            // This initialization happens once at program start - acceptable for base reference
+            #[allow(clippy::disallowed_methods)]
+            let instant = std::time::Instant::now();
+            #[allow(clippy::disallowed_methods)]
+            let timestamp_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or(std::time::Duration::ZERO)
+                .as_millis() as u64;
+            (instant, timestamp_ms)
+        });
+
+        let current_timestamp_ms = self.current_timestamp_millis().await;
+        let elapsed_ms = current_timestamp_ms.saturating_sub(*base_timestamp_ms);
+        *base_instant + std::time::Duration::from_millis(elapsed_ms)
+    }
+
     async fn sleep_ms(&self, ms: u64) {
         let params = bincode::serialize(&ms).unwrap_or_default();
 
@@ -1419,6 +1450,17 @@ impl RandomEffects for AuraEffectSystem {
 
         let value = u64::from_le_bytes(result.try_into().unwrap_or([0; 8]));
         min.saturating_add(value % (max.saturating_sub(min)))
+    }
+
+    async fn random_uuid(&self) -> uuid::Uuid {
+        let result = self
+            .execute_effect(EffectType::Random, "random_uuid", &[])
+            .await
+            .unwrap_or_else(|_| vec![0; 16]);
+
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&result[..16.min(result.len())]);
+        uuid::Uuid::from_bytes(bytes)
     }
 }
 

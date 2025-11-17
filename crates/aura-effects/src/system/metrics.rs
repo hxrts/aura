@@ -495,11 +495,13 @@ impl MetricsSystemHandler {
     }
 
     /// Create a timing guard for automatic duration measurement
-    pub fn timing_guard(&self, name: String, labels: HashMap<String, String>) -> TimingGuard {
+    ///
+    /// Note: Callers should obtain `start` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn timing_guard(&self, name: String, labels: HashMap<String, String>, start: Instant) -> TimingGuard {
         TimingGuard {
             name,
             labels,
-            start: Instant::now(),
+            start,
             metrics: self.metric_sender.clone(),
         }
     }
@@ -807,8 +809,10 @@ mod tests {
         let handler = MetricsSystemHandler::new(MetricsConfig::default());
 
         {
+            #[allow(clippy::disallowed_methods)]
+            let start = Instant::now();
             let _guard =
-                handler.timing_guard("test_operation_duration".to_string(), HashMap::new());
+                handler.timing_guard("test_operation_duration".to_string(), HashMap::new(), start);
             sleep(Duration::from_millis(10)).await;
         } // Guard drops here, recording the timing
 

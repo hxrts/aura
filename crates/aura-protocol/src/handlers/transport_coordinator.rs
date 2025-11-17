@@ -202,6 +202,9 @@ where
         let connection = self.transport_manager.connect_with_retry(address).await?;
 
         // Store connection state
+        // Note: Using Instant::now() here is acceptable. While TransportCoordinator has TimeEffects,
+        // this is a non-protocol timing for connection metadata tracking.
+        #[allow(clippy::disallowed_methods)]
         let connection_state = ConnectionState {
             device_id: peer_id,
             context_id,
@@ -224,7 +227,11 @@ where
         {
             let mut connections = self.active_connections.write().await;
             if let Some(connection_state) = connections.get_mut(connection_id) {
-                connection_state.last_activity = std::time::Instant::now();
+                // Note: Using Instant::now() here is acceptable. While TransportCoordinator has TimeEffects,
+                // this is a non-protocol timing for connection metadata tracking.
+                #[allow(clippy::disallowed_methods)]
+                let now = std::time::Instant::now();
+                connection_state.last_activity = now;
             } else {
                 return Err(TransportCoordinationError::ProtocolFailed(format!(
                     "Connection not found: {}",
@@ -282,6 +289,9 @@ where
         &self,
         max_idle: std::time::Duration,
     ) -> CoordinationResult<usize> {
+        // Note: Using Instant::now() here is acceptable. While TransportCoordinator has TimeEffects,
+        // this is a non-protocol timing for connection metadata cleanup.
+        #[allow(clippy::disallowed_methods)]
         let now = std::time::Instant::now();
         let mut to_remove = Vec::new();
 

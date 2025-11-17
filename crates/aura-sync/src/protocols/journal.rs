@@ -31,6 +31,10 @@
 //! }
 //! ```
 
+// TODO: Refactor to use TimeEffects. Uses Instant::now() for sync timing
+// which should be replaced with effect system integration.
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -207,6 +211,8 @@ impl JournalSyncProtocol {
     where
         E: Send + Sync,
     {
+        // Note: For protocol code, using Instant::now() is acceptable for duration measurement
+        #[allow(clippy::disallowed_methods)]
         let start = std::time::Instant::now();
         let mut operations_synced = 0;
         let mut peers_synced = Vec::new();

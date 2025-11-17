@@ -4,12 +4,17 @@
 //! defined in `aura-core`. These handlers can be used by choreographic applications
 //! and other Aura components.
 
+// TODO: Refactor to avoid direct Instant::now() calls. SimulatedTimeHandler uses Instant::now()
+// for base timing which should be injected or use TimeEffects. This is a testing handler so
+// the direct calls are acceptable for now but should eventually be removed.
+#![allow(clippy::disallowed_methods)]
+
 use async_trait::async_trait;
 use aura_core::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 use aura_core::AuraError;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, RwLock};
 use tokio::time;
 use uuid::Uuid;
@@ -18,6 +23,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct SimulatedTimeHandler {
     current_time: Arc<Mutex<u64>>,
+    base_instant: Arc<Mutex<Instant>>,
+    timeout_counter: Arc<Mutex<u64>>,
     time_scale: f64,
 }
 
@@ -26,6 +33,8 @@ impl SimulatedTimeHandler {
     pub fn new() -> Self {
         Self {
             current_time: Arc::new(Mutex::new(0)),
+            base_instant: Arc::new(Mutex::new(Instant::now())),
+            timeout_counter: Arc::new(Mutex::new(0)),
             time_scale: 1.0,
         }
     }
@@ -34,6 +43,8 @@ impl SimulatedTimeHandler {
     pub fn new_deterministic(start_time_ms: u64, time_scale: f64) -> Self {
         Self {
             current_time: Arc::new(Mutex::new(start_time_ms)),
+            base_instant: Arc::new(Mutex::new(Instant::now())),
+            timeout_counter: Arc::new(Mutex::new(0)),
             time_scale,
         }
     }
@@ -95,6 +106,12 @@ impl TimeEffects for SimulatedTimeHandler {
         *self.current_time.lock().unwrap()
     }
 
+    async fn now_instant(&self) -> Instant {
+        let base = *self.base_instant.lock().unwrap();
+        let elapsed_ms = *self.current_time.lock().unwrap();
+        base + Duration::from_millis(elapsed_ms)
+    }
+
     async fn sleep_ms(&self, ms: u64) {
         let scaled_duration = Duration::from_millis((ms as f64 / self.time_scale) as u64);
         if self.time_scale > 100.0 {
@@ -138,7 +155,13 @@ impl TimeEffects for SimulatedTimeHandler {
     }
 
     async fn set_timeout(&self, _timeout_ms: u64) -> TimeoutHandle {
-        Uuid::new_v4()
+        let mut counter = self.timeout_counter.lock().unwrap();
+        *counter += 1;
+        let id = *counter;
+        // Create deterministic UUID from counter for simulation
+        let mut bytes = [0u8; 16];
+        bytes[..8].copy_from_slice(&id.to_le_bytes());
+        Uuid::from_bytes(bytes)
     }
 
     async fn cancel_timeout(&self, _handle: TimeoutHandle) -> Result<(), TimeError> {
@@ -210,6 +233,10 @@ impl TimeEffects for RealTimeHandler {
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_millis() as u64
+    }
+
+    async fn now_instant(&self) -> Instant {
+        Instant::now()
     }
 
     async fn sleep_ms(&self, ms: u64) {

@@ -13,9 +13,11 @@
 //!
 //! # Usage
 //!
+
 //! ```rust,no_run
 //! use aura_sync::infrastructure::{ConnectionPool, PoolConfig};
 //! use aura_core::DeviceId;
+//! use std::time::Instant;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = PoolConfig::default();
@@ -23,13 +25,16 @@
 //!
 //! let peer_id = DeviceId::from_bytes([1; 32]);
 //!
+//! // Obtain current time from TimeEffects (not shown here for brevity)
+//! # let now = Instant::now();
+//!
 //! // Acquire connection from pool
-//! let conn = pool.acquire(peer_id).await?;
+//! let conn = pool.acquire(peer_id, now).await?;
 //!
 //! // Use connection...
 //!
 //! // Return connection to pool
-//! pool.release(peer_id, conn)?;
+//! pool.release(peer_id, conn, now)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -115,8 +120,9 @@ pub struct ConnectionMetadata {
 
 impl ConnectionMetadata {
     /// Create new connection metadata
-    pub fn new(connection_id: String, peer_id: DeviceId) -> Self {
-        let now = Instant::now();
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn new(connection_id: String, peer_id: DeviceId, now: Instant) -> Self {
         Self {
             connection_id,
             peer_id,
@@ -140,18 +146,22 @@ impl ConnectionMetadata {
     }
 
     /// Mark connection as acquired
-    pub fn acquire(&mut self, session_id: SessionId) {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn acquire(&mut self, session_id: SessionId, now: Instant) {
         self.state = ConnectionState::Active;
         self.session_id = Some(session_id);
-        self.last_used_at = Instant::now();
+        self.last_used_at = now;
         self.reuse_count += 1;
     }
 
     /// Mark connection as released
-    pub fn release(&mut self) {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn release(&mut self, now: Instant) {
         self.state = ConnectionState::Idle;
         self.session_id = None;
-        self.last_used_at = Instant::now();
+        self.last_used_at = now;
     }
 
     /// Mark connection as closed
@@ -204,12 +214,14 @@ pub struct ConnectionHandle {
 
 impl ConnectionHandle {
     /// Create a new connection handle
-    pub fn new(id: String, peer_id: DeviceId, session_id: SessionId) -> Self {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn new(id: String, peer_id: DeviceId, session_id: SessionId, now: Instant) -> Self {
         Self {
             id,
             peer_id,
             session_id,
-            acquired_at: Instant::now(),
+            acquired_at: now,
         }
     }
 
@@ -256,21 +268,21 @@ impl ConnectionPool {
     ///
     /// Tries to reuse an idle connection first, otherwise creates a new one.
     /// Returns error if pool limits are exceeded or timeout occurs.
-    pub async fn acquire(&mut self, peer_id: DeviceId) -> SyncResult<ConnectionHandle> {
+    pub async fn acquire(&mut self, peer_id: DeviceId, now: Instant) -> SyncResult<ConnectionHandle> {
         let session_id = SessionId::new();
 
-        // Try to find idle connection for this peer
         if let Some(connections) = self.connections.get_mut(&peer_id) {
             if let Some(idle_conn) = connections.iter_mut()
                 .find(|c| c.is_idle() && c.healthy)
             {
-                idle_conn.acquire(session_id);
+                idle_conn.acquire(session_id, now);
                 self.stats.connections_reused += 1;
 
                 return Ok(ConnectionHandle::new(
                     idle_conn.connection_id.clone(),
                     peer_id,
                     session_id,
+                    now,
                 ));
             }
         }
@@ -296,18 +308,19 @@ impl ConnectionPool {
         // Create new connection
         // TODO: Integrate with aura-transport to actually establish connection
         let connection_id = format!("conn_{}_{}", peer_id, self.total_connections);
-        let mut metadata = ConnectionMetadata::new(connection_id.clone(), peer_id);
-        metadata.acquire(session_id);
+        let mut metadata = ConnectionMetadata::new(connection_id.clone(), peer_id, now);
+        metadata.acquire(session_id, now);
 
         peer_connections.push(metadata);
         self.total_connections += 1;
         self.stats.connections_created += 1;
 
-        Ok(ConnectionHandle::new(connection_id, peer_id, session_id))
+        Ok(ConnectionHandle::new(connection_id, peer_id, session_id, now))
     }
 
     /// Release a connection back to the pool
-    pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle) -> SyncResult<()> {
+    pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle, now: Instant) -> SyncResult<()> {
+
         let connections = self.connections.get_mut(&peer_id)
             .ok_or_else(|| SyncError::Internal("No connections for peer".to_string()))?;
 
@@ -315,7 +328,7 @@ impl ConnectionPool {
             .find(|c| c.connection_id == handle.id)
             .ok_or_else(|| SyncError::Internal("Connection not found in pool".to_string()))?;
 
-        conn.release();
+        conn.release(now);
         self.stats.connections_released += 1;
 
         Ok(())
@@ -437,15 +450,18 @@ mod tests {
 
         let peer_id = DeviceId::from_bytes([1; 32]);
 
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         // Acquire connection
-        let handle = pool.acquire(peer_id).await.unwrap();
+        let handle = pool.acquire(peer_id, now).await.unwrap();
         assert_eq!(pool.total_connections(), 1);
 
         // Release connection
-        pool.release(peer_id, handle).unwrap();
+        pool.release(peer_id, handle, now).unwrap();
 
         // Connection should be reused
-        let handle2 = pool.acquire(peer_id).await.unwrap();
+        let handle2 = pool.acquire(peer_id, now).await.unwrap();
         assert_eq!(pool.total_connections(), 1);
         assert_eq!(pool.statistics().connections_reused, 1);
     }
@@ -460,12 +476,15 @@ mod tests {
         let peer1 = DeviceId::from_bytes([1; 32]);
         let peer2 = DeviceId::from_bytes([2; 32]);
 
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         // Acquire 2 connections
-        let _handle1 = pool.acquire(peer1).await.unwrap();
-        let _handle2 = pool.acquire(peer2).await.unwrap();
+        let _handle1 = pool.acquire(peer1, now).await.unwrap();
+        let _handle2 = pool.acquire(peer2, now).await.unwrap();
 
         // Third should fail
-        let result = pool.acquire(peer1).await;
+        let result = pool.acquire(peer1, now).await;
         assert!(result.is_err());
         assert_eq!(pool.statistics().connection_limit_hits, 1);
     }
@@ -479,9 +498,12 @@ mod tests {
 
         let peer_id = DeviceId::from_bytes([1; 32]);
 
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         // Acquire and release connection
-        let handle = pool.acquire(peer_id).await.unwrap();
-        pool.release(peer_id, handle).unwrap();
+        let handle = pool.acquire(peer_id, now).await.unwrap();
+        pool.release(peer_id, handle, now).unwrap();
 
         // Wait for idle timeout
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -499,18 +521,23 @@ mod tests {
 
         let peer_id = DeviceId::from_bytes([1; 32]);
 
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         // Acquire connection
-        let handle = pool.acquire(peer_id).await.unwrap();
+        let handle = pool.acquire(peer_id, now).await.unwrap();
 
         // Check metadata
         let metadata = pool.get_connection_metadata(&peer_id, &handle.id).unwrap();
         assert_eq!(metadata.state, ConnectionState::Active);
         assert_eq!(metadata.reuse_count, 1);
 
-        // Release and check again
-        pool.release(peer_id, handle).unwrap();
+        let connection_id = metadata.connection_id.clone();
 
-        let metadata = pool.get_connection_metadata(&peer_id, &metadata.connection_id).unwrap();
+        // Release and check again
+        pool.release(peer_id, handle, now).unwrap();
+
+        let metadata = pool.get_connection_metadata(&peer_id, &connection_id).unwrap();
         assert_eq!(metadata.state, ConnectionState::Idle);
     }
 }

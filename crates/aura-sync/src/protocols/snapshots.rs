@@ -65,10 +65,12 @@ pub struct SnapshotProposal {
 
 impl SnapshotProposal {
     /// Create a new snapshot proposal
-    pub fn new(proposer: DeviceId, target_epoch: TreeEpoch, state_digest: Hash32) -> Self {
+    ///
+    /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and use `with_id()`
+    pub fn new(proposer: DeviceId, target_epoch: TreeEpoch, state_digest: Hash32, proposal_uuid: Uuid) -> Self {
         Self {
             proposer,
-            proposal_id: Uuid::new_v4(),
+            proposal_id: proposal_uuid,
             target_epoch,
             state_digest,
         }
@@ -284,6 +286,8 @@ impl SnapshotProtocol {
         // Clear pending
         *pending = None;
 
+        #[allow(clippy::disallowed_methods)]
+        // TODO: Refactor to accept UUID parameter from RandomEffects
         Ok(SnapshotResult {
             proposal,
             approvals,

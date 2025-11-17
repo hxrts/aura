@@ -325,12 +325,20 @@ impl RetryPolicy {
     }
 
     /// Execute an async operation with retry logic and detailed context
-    pub async fn execute_with_context<F, Fut, T, E>(&self, mut operation: F) -> RetryResult<T, E>
+    ///
+    /// # Arguments
+    /// - `now`: Current time instant (obtain from TimeEffects in production)
+    /// - `operation`: The async operation to retry
+    pub async fn execute_with_context<F, Fut, T, E>(
+        &self,
+        now: std::time::Instant,
+        mut operation: F,
+    ) -> RetryResult<T, E>
     where
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
-        let start = std::time::Instant::now();
+        let start = now;
         let mut attempt = 0;
         let mut total_delay = Duration::ZERO;
 
@@ -423,10 +431,14 @@ pub struct RetryContext {
 
 impl RetryContext {
     /// Create a new retry context
-    pub fn new(max_attempts: u32) -> Self {
+    ///
+    /// # Arguments
+    /// - `now`: Current time instant (obtain from TimeEffects in production)
+    /// - `max_attempts`: Maximum number of retry attempts
+    pub fn new(now: std::time::Instant, max_attempts: u32) -> Self {
         Self {
             attempt: 0,
-            started_at: std::time::Instant::now(),
+            started_at: now,
             accumulated_delay: Duration::ZERO,
             is_last_attempt: max_attempts == 0,
         }
@@ -506,37 +518,44 @@ pub struct RateLimit {
     /// Current token count (for token bucket)
     pub tokens: u32,
 
-    /// Last refill time (skipped during serialization, reinitialized on deserialization)
-    #[serde(skip, default = "instant_now")]
-    pub last_refill: std::time::Instant,
-}
-
-/// Helper function for serde default
-fn instant_now() -> std::time::Instant {
-    std::time::Instant::now()
+    /// Last refill time (skipped during serialization, must be set after deserialization)
+    #[serde(skip)]
+    pub last_refill: Option<std::time::Instant>,
 }
 
 impl RateLimit {
     /// Create a new rate limit
-    pub fn new(max_operations: u32, window: Duration) -> Self {
+    ///
+    /// # Arguments
+    /// - `max_operations`: Maximum operations per window
+    /// - `window`: Window duration
+    /// - `now`: Current time instant (obtain from TimeEffects in production)
+    pub fn new(max_operations: u32, window: Duration, now: std::time::Instant) -> Self {
         Self {
             max_operations,
             window,
             tokens: max_operations,
-            last_refill: std::time::Instant::now(),
+            last_refill: Some(now),
         }
     }
 
     /// Check if operation is allowed and consume tokens
-    pub fn check_and_consume(&mut self, cost: u32, refill_rate: u32) -> bool {
+    ///
+    /// # Arguments
+    /// - `cost`: Token cost of the operation
+    /// - `refill_rate`: Tokens per second refill rate
+    /// - `now`: Current time instant (obtain from TimeEffects in production)
+    pub fn check_and_consume(&mut self, cost: u32, refill_rate: u32, now: std::time::Instant) -> bool {
+        // Initialize last_refill if not set (after deserialization)
+        let last_refill = self.last_refill.get_or_insert(now);
+
         // Refill tokens based on elapsed time
-        let now = std::time::Instant::now();
-        let elapsed = now.duration_since(self.last_refill);
+        let elapsed = now.duration_since(*last_refill);
         let refill_tokens = (elapsed.as_secs_f64() * refill_rate as f64) as u32;
 
         if refill_tokens > 0 {
             self.tokens = (self.tokens + refill_tokens).min(self.max_operations);
-            self.last_refill = now;
+            self.last_refill = Some(now);
         }
 
         // Check if we have enough tokens
@@ -626,8 +645,12 @@ pub struct RateLimiter {
 
 impl RateLimiter {
     /// Create a new rate limiter
-    pub fn new(config: RateLimitConfig) -> Self {
-        let global_limit = RateLimit::new(config.global_ops_per_second, Duration::from_secs(1));
+    ///
+    /// # Arguments
+    /// - `config`: Rate limiter configuration
+    /// - `now`: Current time instant (obtain from TimeEffects in production)
+    pub fn new(config: RateLimitConfig, now: std::time::Instant) -> Self {
+        let global_limit = RateLimit::new(config.global_ops_per_second, Duration::from_secs(1), now);
 
         Self {
             config,
@@ -642,15 +665,16 @@ impl RateLimiter {
     /// # Arguments
     /// - `peer_id`: Peer device ID
     /// - `cost`: Operation cost in tokens
+    /// - `now`: Current time instant (obtain from TimeEffects in production)
     ///
     /// # Returns
     /// - `RateLimitResult::Allowed` if operation can proceed
     /// - `RateLimitResult::Denied` if rate limit exceeded
-    pub fn check_rate_limit(&mut self, peer_id: crate::DeviceId, cost: u32) -> RateLimitResult {
+    pub fn check_rate_limit(&mut self, peer_id: crate::DeviceId, cost: u32, now: std::time::Instant) -> RateLimitResult {
         // Check global limit first
         if !self
             .global_limit
-            .check_and_consume(cost, self.config.refill_rate)
+            .check_and_consume(cost, self.config.refill_rate, now)
         {
             self.stats.global_limit_hits += 1;
 
@@ -667,10 +691,10 @@ impl RateLimiter {
 
         // Check per-peer limit
         let peer_limit = self.peer_limits.entry(peer_id).or_insert_with(|| {
-            RateLimit::new(self.config.peer_ops_per_second, Duration::from_secs(1))
+            RateLimit::new(self.config.peer_ops_per_second, Duration::from_secs(1), now)
         });
 
-        if !peer_limit.check_and_consume(cost, self.config.refill_rate) {
+        if !peer_limit.check_and_consume(cost, self.config.refill_rate, now) {
             self.stats.peer_limit_hits += 1;
 
             // Return tokens to global limit since peer limit blocked
@@ -727,9 +751,12 @@ impl RateLimiter {
     }
 
     /// Reset rate limiter state
-    pub fn reset(&mut self) {
+    ///
+    /// # Arguments
+    /// - `now`: Current time instant (obtain from TimeEffects in production)
+    pub fn reset(&mut self, now: std::time::Instant) {
         self.global_limit =
-            RateLimit::new(self.config.global_ops_per_second, Duration::from_secs(1));
+            RateLimit::new(self.config.global_ops_per_second, Duration::from_secs(1), now);
         self.peer_limits.clear();
         self.stats = RateLimiterStatistics::default();
     }

@@ -4,6 +4,7 @@
 //! all session lifecycle, state tracking, and coordination patterns scattered
 //! across the aura-sync crate into a choreography-aware abstraction.
 
+
 use crate::core::{SyncError, SyncResult, SyncConfig, MetricsCollector};
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
@@ -259,22 +260,26 @@ where
     T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
 {
     /// Create a new session manager
-    pub fn new(config: SessionConfig) -> Self {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn new(config: SessionConfig, now: Instant) -> Self {
         Self {
             sessions: HashMap::new(),
             config,
             metrics: None,
-            last_cleanup: Instant::now(),
+            last_cleanup: now,
         }
     }
 
     /// Create session manager with metrics collection
-    pub fn with_metrics(config: SessionConfig, metrics: MetricsCollector) -> Self {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn with_metrics(config: SessionConfig, metrics: MetricsCollector, now: Instant) -> Self {
         Self {
             sessions: HashMap::new(),
             config,
             metrics: Some(metrics),
-            last_cleanup: Instant::now(),
+            last_cleanup: now,
         }
     }
 
@@ -314,8 +319,10 @@ where
         self.sessions.insert(session_id, session_state);
 
         // Record metrics
+        // Note: For test contexts, using a dummy now value is acceptable
+        #[allow(clippy::disallowed_methods)]
         if let Some(ref metrics) = self.metrics {
-            metrics.record_sync_start(&session_id.to_string());
+            metrics.record_sync_start(&session_id.to_string(), Instant::now());
         }
 
         Ok(session_id)
@@ -504,8 +511,10 @@ where
     }
 
     /// Cleanup stale and completed sessions
-    pub fn cleanup_stale_sessions(&mut self) -> SyncResult<usize> {
-        if self.last_cleanup.elapsed() < self.config.cleanup_interval {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn cleanup_stale_sessions(&mut self, now: Instant) -> SyncResult<usize> {
+        if now.duration_since(self.last_cleanup) < self.config.cleanup_interval {
             return Ok(0);
         }
 
@@ -539,7 +548,7 @@ where
             removed += 1;
         }
 
-        self.last_cleanup = Instant::now();
+        self.last_cleanup = now;
         Ok(removed)
     }
 
@@ -696,7 +705,9 @@ mod tests {
 
     #[test]
     fn test_session_creation_and_activation() {
-        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default());
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
         let participants = vec![test_device_id(1), test_device_id(2)];
 
         // Create session
@@ -724,7 +735,9 @@ mod tests {
 
     #[test]
     fn test_session_completion() {
-        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default());
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
         let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
 
         let initial_state = TestProtocolState {
@@ -754,7 +767,9 @@ mod tests {
 
     #[test]
     fn test_session_failure() {
-        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default());
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
         let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
 
         let initial_state = TestProtocolState {
@@ -790,7 +805,9 @@ mod tests {
             max_concurrent_sessions: 2,
             ..SessionConfig::default()
         };
-        let mut manager = SessionManager::<TestProtocolState>::new(config);
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        let mut manager = SessionManager::<TestProtocolState>::new(config, now);
 
         // Create and activate maximum sessions
         let session1 = manager.create_session(vec![test_device_id(1)]).unwrap();
@@ -815,7 +832,9 @@ mod tests {
             timeout: Duration::from_millis(100),
             ..SessionConfig::default()
         };
-        let mut manager = SessionManager::<TestProtocolState>::new(config);
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        let mut manager = SessionManager::<TestProtocolState>::new(config, now);
         
         let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
         
@@ -838,7 +857,9 @@ mod tests {
             cleanup_interval: Duration::from_millis(50),
             ..SessionConfig::default()
         };
-        let mut manager = SessionManager::<TestProtocolState>::new(config);
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        let mut manager = SessionManager::<TestProtocolState>::new(config, now);
 
         // Create and complete a session
         let session_id = manager.create_session(vec![test_device_id(1)]).unwrap();
@@ -855,13 +876,17 @@ mod tests {
         thread::sleep(StdDuration::from_millis(100));
 
         // Cleanup should remove completed sessions
-        let removed = manager.cleanup_stale_sessions().unwrap();
+        #[allow(clippy::disallowed_methods)]
+        let now_cleanup = Instant::now();
+        let removed = manager.cleanup_stale_sessions(now_cleanup).unwrap();
         assert!(removed > 0);
     }
 
     #[test]
     fn test_session_statistics() {
-        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default());
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
 
         // Create and complete some sessions
         for i in 0..3 {

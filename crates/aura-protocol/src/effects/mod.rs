@@ -169,6 +169,8 @@ impl AuraEffectSystemFactory {
     ) -> Result<AuraEffectSystem, aura_core::AuraError> {
         // For now, just use a mock implementation
         // TODO: Implement proper component composition
+        #[allow(clippy::disallowed_methods)]
+        // Temporary mock implementation - will be refactored when proper component composition is implemented
         let device_uuid = uuid::Uuid::new_v4();
         let mock_impl = crate::handlers::CompositeHandler::for_testing(device_uuid);
         Ok(Box::new(mock_impl))

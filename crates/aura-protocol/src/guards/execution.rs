@@ -1,4 +1,3 @@
-#![allow(clippy::disallowed_methods)]
 
 //! Guarded protocol execution orchestrating guards, deltas, and privacy tracking
 //!
@@ -14,7 +13,7 @@ use super::{
     privacy::track_leakage_consumption, ExecutionMetrics, GuardedExecutionResult, ProtocolGuard,
 };
 use crate::wot::EffectSystemInterface;
-use aura_core::{AuraError, AuraResult};
+use aura_core::{AuraError, AuraResult, TimeEffects};
 use std::future::Future;
 use std::time::Instant;
 use tracing::{debug, error, info, warn, Instrument};
@@ -38,14 +37,14 @@ where
     F: FnOnce(&mut E) -> Fut,
     Fut: Future<Output = AuraResult<T>>,
 {
-    let total_start_time = Instant::now();
+    let total_start_time = effect_system.now_instant().await;
     let span = tracing::info_span!("guarded_execution", operation_id = %guard.operation_id);
 
     async move {
         debug!("Starting guarded protocol execution");
 
         // Phase 1: Evaluate capability guards (meet-guarded preconditions)
-        let guard_start_time = Instant::now();
+        let guard_start_time = effect_system.now_instant().await;
         let guard_result = evaluate_guard(guard, effect_system).await?;
         let guard_eval_time = guard_start_time.elapsed();
 
@@ -65,7 +64,7 @@ where
         info!("All guards passed, proceeding with execution");
 
         // Phase 2: Execute the protocol operation
-        let execution_start_time = Instant::now();
+        let execution_start_time = effect_system.now_instant().await;
         let execution_result = operation(effect_system).await;
         let execution_time = execution_start_time.elapsed();
 
@@ -74,7 +73,7 @@ where
                 debug!("Protocol execution succeeded, applying deltas");
 
                 // Phase 3: Apply delta facts (join-only commits)
-                let delta_start_time = Instant::now();
+                let delta_start_time = effect_system.now_instant().await;
                 let applied_deltas = if !guard.delta_facts.is_empty() {
                     apply_delta_facts(&guard.delta_facts, effect_system)
                         .await
@@ -175,7 +174,7 @@ pub async fn execute_guarded_sequence<E, T>(
 where
     E: GuardEffectSystem + EffectSystemInterface,
 {
-    let sequence_start = Instant::now();
+    let sequence_start = effect_system.now_instant().await;
     let span = tracing::info_span!("guarded_sequence", operations = guards_and_operations.len());
 
     async move {
@@ -208,7 +207,7 @@ where
         let mut all_deltas = Vec::new();
 
         for (guard, operation) in guards_and_operations {
-            let execution_start = Instant::now();
+            let execution_start = effect_system.now_instant().await;
             let result = operation(effect_system).await;
             let execution_time = execution_start.elapsed();
 

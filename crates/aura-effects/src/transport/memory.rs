@@ -51,13 +51,17 @@ impl InMemoryTransportHandler {
     }
 
     /// Register a new peer with message channel
+    ///
+    /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()`
+    /// and pass them to this method to avoid direct `Uuid::new_v4()` calls.
     pub async fn register_peer(
         &self,
         peer_id: &str,
+        connection_uuid: Uuid,
     ) -> TransportResult<mpsc::UnboundedReceiver<Vec<u8>>> {
         let (tx, rx) = mpsc::unbounded_channel();
 
-        let connection_id = format!("mem-{}", Uuid::new_v4());
+        let connection_id = format!("mem-{}", connection_uuid);
         let local_addr = "memory://local".to_string();
         let remote_addr = format!("memory://{}", peer_id);
 

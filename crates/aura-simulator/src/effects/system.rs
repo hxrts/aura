@@ -343,6 +343,13 @@ impl RandomEffects for SimulationEffectSystem {
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         self.random.random_range(min, max).await
     }
+
+    async fn random_uuid(&self) -> uuid::Uuid {
+        let bytes = self.random_bytes(16).await;
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&bytes);
+        uuid::Uuid::from_bytes(uuid_bytes)
+    }
 }
 
 #[async_trait]
@@ -425,6 +432,10 @@ impl TimeEffects for SimulationEffectSystem {
 
     fn resolution_ms(&self) -> u64 {
         self.time.resolution_ms()
+    }
+
+    async fn now_instant(&self) -> std::time::Instant {
+        self.time.now_instant().await
     }
 }
 

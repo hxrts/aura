@@ -64,10 +64,14 @@ impl CapabilityId {
         }
     }
 
-    /// Generate a random capability ID
-    #[allow(clippy::disallowed_methods)]
-    pub fn random() -> Self {
-        let bytes = hash::hash(uuid::Uuid::new_v4().as_bytes());
+    /// Generate a random capability ID from random bytes
+    ///
+    /// # Arguments
+    /// * `random_bytes` - 16 bytes of randomness (from RandomEffects)
+    ///
+    /// The bytes are hashed to produce the final capability ID.
+    pub fn from_random_bytes(random_bytes: &[u8; 16]) -> Self {
+        let bytes = hash::hash(random_bytes);
         Self(bytes)
     }
 
@@ -573,8 +577,11 @@ mod tests {
 
     #[test]
     fn test_capability_id_generation() {
-        let id1 = CapabilityId::random();
-        let id2 = CapabilityId::random();
+        // Test code - generate random bytes for capability IDs
+        let random1: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let random2: [u8; 16] = [16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+        let id1 = CapabilityId::from_random_bytes(&random1);
+        let id2 = CapabilityId::from_random_bytes(&random2);
         assert_ne!(id1, id2);
 
         let device = aura_core::DeviceId::from_bytes(*b"device_test_id_12345678901234567");

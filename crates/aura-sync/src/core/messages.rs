@@ -135,9 +135,11 @@ pub struct RequestMessage<T> {
 
 impl<T> RequestMessage<T> {
     /// Create a new request message
-    pub fn new(from: DeviceId, to: DeviceId, payload: T) -> Self {
+    ///
+    /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and use `with_id()`
+    pub fn new(from: DeviceId, to: DeviceId, payload: T, request_uuid: Uuid) -> Self {
         Self {
-            request_id: Uuid::new_v4(),
+            request_id: request_uuid,
             from,
             to,
             payload,
@@ -310,9 +312,11 @@ impl<T> BatchMessage<T> {
     }
 
     /// Create batch messages from a list of items
-    pub fn create_batches(items: Vec<T>, batch_size: usize) -> Vec<BatchMessage<T>> {
+    ///
+    /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and pass them
+    pub fn create_batches(items: Vec<T>, batch_size: usize, batch_uuid: Uuid) -> Vec<BatchMessage<T>> {
         let total_items = items.len();
-        let batch_id = Uuid::new_v4();
+        let batch_id = batch_uuid;
         
         items
             .chunks(batch_size)
@@ -377,6 +381,7 @@ impl ProgressMessage {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use aura_core::test_utils::test_device_id;

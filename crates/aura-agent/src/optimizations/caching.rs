@@ -3,6 +3,10 @@
 //! This module provides caching layers and allocation-reducing strategies
 //! to optimize runtime performance of effect execution.
 
+// TODO: Refactor to use TimeEffects. Uses Instant::now() for cache timing
+// which should be replaced with effect system integration.
+#![allow(clippy::disallowed_methods)]
+
 // use lru::LruCache; // Removed - using HashMap instead
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -39,15 +43,15 @@ struct CachedValue<T> {
 }
 
 impl<T> CachedValue<T> {
-    fn new(value: T, ttl: Duration) -> Self {
+    fn new(value: T, ttl: Duration, now: Instant) -> Self {
         Self {
             value,
-            expires_at: Instant::now() + ttl,
+            expires_at: now + ttl,
         }
     }
 
-    fn is_expired(&self) -> bool {
-        Instant::now() > self.expires_at
+    fn is_expired(&self, now: Instant) -> bool {
+        now > self.expires_at
     }
 }
 
@@ -69,11 +73,11 @@ impl<T: Clone> EffectCache<T> {
     }
 
     /// Get a value from cache
-    pub fn get(&self, key: &CacheKey) -> Option<T> {
+    pub fn get(&self, key: &CacheKey, now: Instant) -> Option<T> {
         let mut cache = self.cache.write();
 
         if let Some(cached) = cache.get(key) {
-            if !cached.is_expired() {
+            if !cached.is_expired(now) {
                 return Some(cached.value.clone());
             } else {
                 // Remove expired entry
@@ -84,14 +88,14 @@ impl<T: Clone> EffectCache<T> {
     }
 
     /// Insert a value into cache
-    pub fn insert(&self, key: CacheKey, value: T) {
-        self.insert_with_ttl(key, value, self.default_ttl);
+    pub fn insert(&self, key: CacheKey, value: T, now: Instant) {
+        self.insert_with_ttl(key, value, self.default_ttl, now);
     }
 
     /// Insert a value with custom TTL
-    pub fn insert_with_ttl(&self, key: CacheKey, value: T, ttl: Duration) {
+    pub fn insert_with_ttl(&self, key: CacheKey, value: T, ttl: Duration, now: Instant) {
         let mut cache = self.cache.write();
-        cache.insert(key, CachedValue::new(value, ttl));
+        cache.insert(key, CachedValue::new(value, ttl, now));
     }
 
     /// Clear the entire cache
@@ -158,8 +162,11 @@ impl<H: aura_core::effects::NetworkEffects> aura_core::effects::NetworkEffects
             peer_id: DeviceId::from(peer_id),
         };
 
+        // TODO: Get current time from TimeEffects instead of direct call
+        let now = Instant::now();
+
         // Check cache first
-        if let Some(cached) = self.recv_cache.get(&cache_key) {
+        if let Some(cached) = self.recv_cache.get(&cache_key, now) {
             return Ok(cached);
         }
 
@@ -167,7 +174,7 @@ impl<H: aura_core::effects::NetworkEffects> aura_core::effects::NetworkEffects
         let result = self.inner.receive_from(peer_id).await?;
 
         // Cache successful result
-        self.recv_cache.insert(cache_key, result.clone());
+        self.recv_cache.insert(cache_key, result.clone(), now);
 
         Ok(result)
     }
@@ -219,11 +226,14 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
         // Store in inner handler
         self.inner.store(key, value.clone()).await?;
 
+        // TODO: Get current time from TimeEffects instead of direct call
+        let now = Instant::now();
+
         // Update cache with new value
         let cache_key = CacheKey::StorageRetrieve {
             key: key.to_string(),
         };
-        self.read_cache.insert(cache_key, Some(value));
+        self.read_cache.insert(cache_key, Some(value), now);
 
         // Invalidate list cache as new key was added
         self.list_cache.clear();
@@ -236,8 +246,11 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
             key: key.to_string(),
         };
 
+        // TODO: Get current time from TimeEffects instead of direct call
+        let now = Instant::now();
+
         // Check cache first
-        if let Some(cached) = self.read_cache.get(&cache_key) {
+        if let Some(cached) = self.read_cache.get(&cache_key, now) {
             return Ok(cached);
         }
 
@@ -245,7 +258,7 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
         let result = self.inner.retrieve(key).await?;
 
         // Cache result (including None for non-existent keys)
-        self.read_cache.insert(cache_key, result.clone());
+        self.read_cache.insert(cache_key, result.clone(), now);
 
         Ok(result)
     }
@@ -254,11 +267,14 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
         // Remove from inner handler
         let removed = self.inner.remove(key).await?;
 
+        // TODO: Get current time from TimeEffects instead of direct call
+        let now = Instant::now();
+
         // Remove from cache
         let cache_key = CacheKey::StorageRetrieve {
             key: key.to_string(),
         };
-        self.read_cache.insert(cache_key, None);
+        self.read_cache.insert(cache_key, None, now);
 
         // Invalidate list cache
         self.list_cache.clear();
@@ -271,8 +287,11 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
             prefix: prefix.map(|s| s.to_string()).unwrap_or_default(),
         };
 
+        // TODO: Get current time from TimeEffects instead of direct call
+        let now = Instant::now();
+
         // Check cache first
-        if let Some(cached) = self.list_cache.get(&cache_key) {
+        if let Some(cached) = self.list_cache.get(&cache_key, now) {
             return Ok(cached);
         }
 
@@ -280,7 +299,7 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
         let result = self.inner.list_keys(prefix).await?;
 
         // Cache result
-        self.list_cache.insert(cache_key, result.clone());
+        self.list_cache.insert(cache_key, result.clone(), now);
 
         Ok(result)
     }
@@ -291,7 +310,10 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
             key: key.to_string(),
         };
 
-        if let Some(cached) = self.read_cache.get(&cache_key) {
+        // TODO: Get current time from TimeEffects instead of direct call
+        let now = Instant::now();
+
+        if let Some(cached) = self.read_cache.get(&cache_key, now) {
             return Ok(cached.is_some());
         }
 
@@ -300,7 +322,7 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
 
         // If it doesn't exist, cache the None value
         if !exists {
-            self.read_cache.insert(cache_key, None);
+            self.read_cache.insert(cache_key, None, now);
         }
 
         Ok(exists)
@@ -310,10 +332,13 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
         // Store in inner handler
         self.inner.store_batch(pairs.clone()).await?;
 
+        // TODO: Get current time from TimeEffects instead of direct call
+        let now = Instant::now();
+
         // Update cache with new values
         for (key, value) in pairs {
             let cache_key = CacheKey::StorageRetrieve { key };
-            self.read_cache.insert(cache_key, Some(value));
+            self.read_cache.insert(cache_key, Some(value), now);
         }
 
         // Invalidate list cache as new keys were added
@@ -329,11 +354,14 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
         let mut result = HashMap::new();
         let mut uncached_keys = Vec::new();
 
+        // TODO: Get current time from TimeEffects instead of direct call
+        let now = Instant::now();
+
         // Check cache for each key
         for key in keys {
             let cache_key = CacheKey::StorageRetrieve { key: key.clone() };
 
-            if let Some(cached) = self.read_cache.get(&cache_key) {
+            if let Some(cached) = self.read_cache.get(&cache_key, now) {
                 if let Some(value) = cached {
                     result.insert(key.clone(), value);
                 }
@@ -349,7 +377,7 @@ impl<H: aura_core::effects::StorageEffects> aura_core::effects::StorageEffects
             // Update cache and result
             for (key, value) in uncached_results {
                 let cache_key = CacheKey::StorageRetrieve { key: key.clone() };
-                self.read_cache.insert(cache_key, Some(value.clone()));
+                self.read_cache.insert(cache_key, Some(value.clone()), now);
                 result.insert(key, value);
             }
         }
@@ -480,20 +508,23 @@ mod tests {
     #[test]
     fn test_effect_cache() {
         let cache = EffectCache::new(10, Duration::from_secs(60));
+        let now = Instant::now();
 
         // Test insertion and retrieval
         let key = CacheKey::StorageRetrieve {
             key: "test".to_string(),
         };
-        cache.insert(key.clone(), vec![1, 2, 3]);
+        cache.insert(key.clone(), vec![1, 2, 3], now);
 
-        assert_eq!(cache.get(&key), Some(vec![1, 2, 3]));
+        assert_eq!(cache.get(&key, now), Some(vec![1, 2, 3]));
 
         // Test expiration
         let cache = EffectCache::new(10, Duration::from_millis(10));
-        cache.insert(key.clone(), vec![4, 5, 6]);
+        let now = Instant::now();
+        cache.insert(key.clone(), vec![4, 5, 6], now);
         std::thread::sleep(Duration::from_millis(20));
-        assert_eq!(cache.get(&key), None);
+        let later = Instant::now();
+        assert_eq!(cache.get(&key, later), None);
     }
 
     #[test]

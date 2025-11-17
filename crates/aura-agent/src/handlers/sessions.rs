@@ -403,9 +403,6 @@ impl SessionOperations {
             .unwrap_or(SessionManagementRole::Participant(DeviceId::new(), 1));
 
         // Execute session creation using choreographic protocol simulation
-        #[allow(clippy::disallowed_methods)]
-        // Test code - UUID generation acceptable for session IDs
-        let session_id = format!("session-{}", Uuid::new_v4());
         let timestamp = LedgerEffects::current_timestamp(&*effects)
             .await
             .unwrap_or(0);
@@ -420,11 +417,11 @@ impl SessionOperations {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to create session: {}", e)))?;
 
-        let created_id = created_session_id.to_string();
+        let session_id = created_session_id.to_string();
         let _ = effects
             .log_info(&format!(
                 "Created session via choreographic protocol: {}",
-                created_id
+                session_id
             ))
             .await;
 

@@ -192,38 +192,48 @@ pub struct FrostCrypto;
 
 impl FrostCrypto {
     /// Generate a FROST nonce commitment using real cryptographic operations
-    pub async fn generate_nonce_commitment(signer_index: u16) -> FrostResult<NonceCommitment> {
+    pub async fn generate_nonce_commitment(
+        signer_index: u16,
+        random_effects: &dyn aura_core::effects::RandomEffects,
+    ) -> FrostResult<NonceCommitment> {
         use aura_core::frost::tree_signing::generate_nonce_with_share;
+        use aura_effects::EffectSystemRng;
         use frost_ed25519 as frost;
 
         // In production, this would use the actual signing share from DKG
         let signing_share = frost::keys::SigningShare::deserialize([42u8; 32])
             .map_err(|e| AuraError::crypto(format!("Failed to create signing share: {}", e)))?;
 
-        let (_, commitment) = generate_nonce_with_share(signer_index, &signing_share);
+        let mut rng = EffectSystemRng::from_current_runtime(random_effects);
+        let (_, commitment) = generate_nonce_with_share(signer_index, &signing_share, &mut rng);
         Ok(commitment)
     }
 
-    /// Generate a FROST partial signature using real cryptographic operations  
+    /// Generate a FROST partial signature using real cryptographic operations
     pub async fn generate_partial_signature(
         context: &TreeSigningContext,
         message: &[u8],
         signer_index: u16,
+        random_effects: &dyn aura_core::effects::RandomEffects,
     ) -> FrostResult<PartialSignature> {
         use aura_core::frost::tree_signing::{binding_message, frost_sign_partial_with_keypackage};
+        use aura_effects::EffectSystemRng;
         use frost_ed25519 as frost;
 
         let bound_message = binding_message(context, message);
 
-        #[allow(clippy::disallowed_methods)]
-        let rng = rand::thread_rng();
+        let mut rng = EffectSystemRng::from_current_runtime(random_effects);
         let identifier = frost::Identifier::try_from(signer_index)
             .map_err(|e| AuraError::crypto(format!("Invalid identifier: {}", e)))?;
 
         // Generate temporary key package for signing
-        let (secret_shares, pubkey_package) =
-            frost::keys::generate_with_dealer(3, 2, frost::keys::IdentifierList::Default, rng)
-                .map_err(|e| AuraError::crypto(format!("Failed to generate keys: {}", e)))?;
+        let (secret_shares, pubkey_package) = frost::keys::generate_with_dealer(
+            3,
+            2,
+            frost::keys::IdentifierList::Default,
+            &mut rng,
+        )
+        .map_err(|e| AuraError::crypto(format!("Failed to generate keys: {}", e)))?;
 
         let secret_share = secret_shares
             .get(&identifier)
@@ -246,9 +256,13 @@ impl FrostCrypto {
 
         let frost_commitments = std::collections::BTreeMap::new();
 
-        let partial_signature =
-            frost_sign_partial_with_keypackage(&key_package, &bound_message, &frost_commitments)
-                .map_err(|e| AuraError::crypto(format!("FROST partial signing failed: {}", e)))?;
+        let partial_signature = frost_sign_partial_with_keypackage(
+            &key_package,
+            &bound_message,
+            &frost_commitments,
+            &mut rng,
+        )
+        .map_err(|e| AuraError::crypto(format!("FROST partial signing failed: {}", e)))?;
 
         Ok(partial_signature)
     }
@@ -260,8 +274,10 @@ impl FrostCrypto {
         partial_signatures: &HashMap<DeviceId, PartialSignature>,
         nonce_commitments: &HashMap<DeviceId, NonceCommitment>,
         config: &ThresholdSigningConfig,
+        random_effects: &dyn aura_core::effects::RandomEffects,
     ) -> FrostResult<ThresholdSignature> {
         use aura_core::frost::tree_signing::{binding_message, frost_aggregate};
+        use aura_effects::EffectSystemRng;
         use frost_ed25519 as frost;
         use std::collections::BTreeMap;
 
@@ -287,13 +303,12 @@ impl FrostCrypto {
         }
 
         // Generate temporary key package for aggregation
-        #[allow(clippy::disallowed_methods)]
-        let rng = rand::thread_rng();
+        let mut rng = EffectSystemRng::from_current_runtime(random_effects);
         let (_, pubkey_package) = frost::keys::generate_with_dealer(
             config.total_signers.try_into().unwrap(),
             config.threshold.try_into().unwrap(),
             frost::keys::IdentifierList::Default,
-            rng,
+            &mut rng,
         )
         .map_err(|e| AuraError::crypto(format!("Failed to generate key package: {}", e)))?;
 

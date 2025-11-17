@@ -545,6 +545,8 @@ mod tests {
     async fn test_upgrade_proposal_submission() {
         let orchestrator = OtaOrchestrator::new("1.0.0".to_string());
 
+        #[allow(clippy::disallowed_methods)]
+        // Test code - UUID generation acceptable for testing
         let proposal = UpgradeProposal {
             id: Uuid::new_v4(),
             upgrade_type: UpgradeType::SoftFork {

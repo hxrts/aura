@@ -4,6 +4,7 @@
 //! all performance, operational, and resource metrics scattered across the aura-sync
 //! crate into a single, observability-focused framework.
 
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicI64, Ordering};
@@ -306,7 +307,9 @@ impl MetricsCollector {
     }
 
     /// Record sync session start
-    pub fn record_sync_start(&self, session_id: &str) {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn record_sync_start(&self, session_id: &str, now: Instant) {
         if let Ok(operational) = self.registry.operational.lock() {
             operational.sync_sessions_total.fetch_add(1, Ordering::Relaxed);
             operational.active_sync_sessions.fetch_add(1, Ordering::Relaxed);
@@ -314,7 +317,7 @@ impl MetricsCollector {
 
         // Start timing this session
         if let Ok(mut timers) = self.registry.active_timers.lock() {
-            timers.insert(format!("sync_session_{}", session_id), Instant::now());
+            timers.insert(format!("sync_session_{}", session_id), now);
         }
     }
 

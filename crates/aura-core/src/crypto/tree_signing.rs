@@ -348,6 +348,7 @@ pub fn binding_message(ctx: &TreeSigningContext, op_bytes: &[u8]) -> Vec<u8> {
 pub fn generate_nonce_with_share(
     signer_id: u16,
     signing_share: &frost::keys::SigningShare,
+    rng: &mut (impl rand::RngCore + rand::CryptoRng),
 ) -> (Nonce, NonceCommitment) {
     // Use valid identifier - if signer_id is invalid, use 1 as fallback
     let identifier = if let Ok(id) = frost::Identifier::try_from(signer_id) {
@@ -359,13 +360,11 @@ pub fn generate_nonce_with_share(
     };
 
     // Generate proper FROST nonces and commitments using the signing share
-    #[allow(clippy::disallowed_methods)]
-    let mut rng = rand::thread_rng();
-    let (frost_nonce, frost_commitment) = frost::round1::commit(signing_share, &mut rng);
+    let (frost_nonce, frost_commitment) = frost::round1::commit(signing_share, rng);
 
     // Create nonce ID for tracking
     let mut nonce_id = [0u8; 32];
-    rand::RngCore::fill_bytes(&mut rng, &mut nonce_id);
+    rand::RngCore::fill_bytes(rng, &mut nonce_id);
 
     // Note: FROST SigningNonces don't have a serialize method because they contain
     // secret data. We'll store a placeholder and reconstruct when needed.
@@ -433,14 +432,13 @@ pub fn frost_sign_partial_with_keypackage(
     key_package: &frost::keys::KeyPackage,
     msg: &[u8],
     commitments: &BTreeMap<u16, NonceCommitment>,
+    rng: &mut (impl rand::RngCore + rand::CryptoRng),
 ) -> Result<PartialSignature, String> {
     let identifier = key_package.identifier();
 
     // Generate fresh nonces for this signing operation (secure approach)
-    #[allow(clippy::disallowed_methods)]
-    let mut rng = rand::thread_rng();
     let (frost_nonce, _our_commitment) =
-        frost::round1::commit(key_package.signing_share(), &mut rng);
+        frost::round1::commit(key_package.signing_share(), rng);
 
     // Convert commitments to FROST format
     let mut frost_commitments = BTreeMap::new();
