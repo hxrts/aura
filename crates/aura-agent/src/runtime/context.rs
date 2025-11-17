@@ -4,6 +4,10 @@
 //! replacing ambient state with structured context that flows through
 //! async operations.
 
+// TODO: Refactor to use TimeEffects. Uses Instant::now() for context timing
+// which should be replaced with effect system integration.
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -33,13 +37,16 @@ pub struct EffectContext {
 }
 
 impl EffectContext {
-    /// Create a new root context
-    pub fn new(device_id: DeviceId) -> Self {
+    /// Create a new root context with generated UUIDs
+    ///
+    /// Note: Callers should use `new_with_ids()` and generate UUIDs via `RandomEffects::random_uuid()`
+    /// to avoid direct `Uuid::new_v4()` calls.
+    pub fn new(device_id: DeviceId, request_id: Uuid, trace_id: Uuid, span_id: Uuid) -> Self {
         Self {
-            request_id: Uuid::new_v4(),
+            request_id,
             device_id,
             flow_budget: FlowBudget::default(),
-            trace_context: TraceContext::new(),
+            trace_context: TraceContext::new_with_ids(trace_id, span_id),
             deadline: None,
             metadata: HashMap::new(),
             parent: None,
@@ -71,27 +78,30 @@ impl EffectContext {
     }
 
     /// Create a child context for nested operations
-    pub fn child(&self) -> Self {
+    ///
+    /// Note: Callers should use `child_with_ids()` and generate UUIDs via `RandomEffects::random_uuid()`
+    /// to avoid direct `Uuid::new_v4()` calls.
+    pub fn child(&self, request_id: Uuid, span_id: Uuid) -> Self {
         let mut child = self.clone();
         child.parent = Some(Arc::new(self.clone()));
-        child.request_id = Uuid::new_v4(); // New request ID for child
-        child.trace_context = self.trace_context.child();
+        child.request_id = request_id; // New request ID for child
+        child.trace_context = self.trace_context.child_with_id(span_id);
         child
     }
 
     /// Check if the deadline has been exceeded
-    pub fn is_deadline_exceeded(&self) -> bool {
+    pub fn is_deadline_exceeded(&self, now: Instant) -> bool {
         if let Some(deadline) = self.deadline {
-            Instant::now() > deadline
+            now > deadline
         } else {
             false
         }
     }
 
     /// Get remaining time until deadline
-    pub fn time_until_deadline(&self) -> Option<Duration> {
+    pub fn time_until_deadline(&self, now: Instant) -> Option<Duration> {
         self.deadline
-            .map(|d| d.saturating_duration_since(Instant::now()))
+            .map(|d| d.saturating_duration_since(now))
     }
 
     /// Charge flow budget
@@ -148,21 +158,27 @@ pub struct TraceContext {
 }
 
 impl TraceContext {
-    /// Create a new trace context
-    pub fn new() -> Self {
+    /// Create a new trace context with provided IDs
+    ///
+    /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()`
+    /// to avoid direct `Uuid::new_v4()` calls.
+    pub fn new_with_ids(trace_id: Uuid, span_id: Uuid) -> Self {
         Self {
             trace_parent: None,
             trace_state: None,
-            trace_id: Uuid::new_v4(),
-            span_id: Uuid::new_v4(),
+            trace_id,
+            span_id,
             sampled: true,
         }
     }
 
-    /// Create a child trace context
-    pub fn child(&self) -> Self {
+    /// Create a child trace context with provided span ID
+    ///
+    /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()`
+    /// to avoid direct `Uuid::new_v4()` calls.
+    pub fn child_with_id(&self, span_id: Uuid) -> Self {
         let mut child = self.clone();
-        child.span_id = Uuid::new_v4();
+        child.span_id = span_id;
         child.update_trace_parent();
         child
     }
@@ -215,7 +231,12 @@ impl TraceContext {
 
 impl Default for TraceContext {
     fn default() -> Self {
-        Self::new()
+        // For Default trait, we need to use a placeholder UUID
+        // Callers should use new_with_ids() when possible
+        Self::new_with_ids(
+            Uuid::from_bytes([0u8; 16]),
+            Uuid::from_bytes([0u8; 16]),
+        )
     }
 }
 
@@ -347,9 +368,16 @@ mod tests {
     #[test]
     fn test_context_creation() {
         let device_id = DeviceId::new();
-        let context = EffectContext::new(device_id)
-            .with_flow_budget(FlowBudget::new(1000))
-            .with_metadata("test", "value");
+        #[allow(clippy::disallowed_methods)]
+        // Test code - UUID generation acceptable for testing
+        let context = EffectContext::new(
+            device_id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .with_flow_budget(FlowBudget::new(1000))
+        .with_metadata("test", "value");
 
         assert_eq!(context.device_id, device_id);
         assert_eq!(context.flow_budget.remaining(), 1000);
@@ -358,8 +386,17 @@ mod tests {
 
     #[test]
     fn test_context_hierarchy() {
-        let root = EffectContext::new(DeviceId::new());
-        let child = root.child();
+        #[allow(clippy::disallowed_methods)]
+        // Test code - UUID generation acceptable for testing
+        let root = EffectContext::new(
+            DeviceId::new(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        );
+        #[allow(clippy::disallowed_methods)]
+        // Test code - UUID generation acceptable for testing
+        let child = root.child(Uuid::new_v4(), Uuid::new_v4());
 
         assert_ne!(root.request_id, child.request_id);
         assert_eq!(root.device_id, child.device_id);
@@ -368,8 +405,15 @@ mod tests {
 
     #[test]
     fn test_flow_budget_charging() {
-        let mut context =
-            EffectContext::new(DeviceId::new()).with_flow_budget(FlowBudget::new(100));
+        #[allow(clippy::disallowed_methods)]
+        // Test code - UUID generation acceptable for testing
+        let mut context = EffectContext::new(
+            DeviceId::new(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .with_flow_budget(FlowBudget::new(100));
 
         assert!(context.charge_flow(50).is_ok());
         assert_eq!(context.flow_budget.remaining(), 50);
@@ -380,17 +424,29 @@ mod tests {
 
     #[test]
     fn test_deadline_checking() {
-        let context = EffectContext::new(DeviceId::new())
-            .with_deadline(Instant::now() + Duration::from_secs(1));
+        #[allow(clippy::disallowed_methods)]
+        // Test code - UUID generation acceptable for testing
+        let now = Instant::now();
+        let context = EffectContext::new(
+            DeviceId::new(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .with_deadline(now + Duration::from_secs(1));
 
-        assert!(!context.is_deadline_exceeded());
-        assert!(context.time_until_deadline().is_some());
+        assert!(!context.is_deadline_exceeded(now));
+        assert!(context.time_until_deadline(now).is_some());
     }
 
     #[test]
     fn test_trace_context() {
-        let trace = TraceContext::new();
-        let child = trace.child();
+        #[allow(clippy::disallowed_methods)]
+        // Test code - UUID generation acceptable for testing
+        let trace = TraceContext::new_with_ids(Uuid::new_v4(), Uuid::new_v4());
+        #[allow(clippy::disallowed_methods)]
+        // Test code - UUID generation acceptable for testing
+        let child = trace.child_with_id(Uuid::new_v4());
 
         assert_eq!(trace.trace_id, child.trace_id);
         assert_ne!(trace.span_id, child.span_id);

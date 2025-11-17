@@ -236,6 +236,13 @@ impl aura_core::effects::RandomEffects for CompositeHandler {
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         self.crypto.random_range(min, max).await
     }
+
+    async fn random_uuid(&self) -> uuid::Uuid {
+        let bytes = self.random_bytes(16).await;
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&bytes);
+        uuid::Uuid::from_bytes(uuid_bytes)
+    }
 }
 
 #[async_trait]
@@ -471,6 +478,10 @@ impl TimeEffects for CompositeHandler {
 
     async fn wait_until(&self, condition: WakeCondition) -> Result<(), aura_core::AuraError> {
         self.time.wait_until(condition).await
+    }
+
+    async fn now_instant(&self) -> std::time::Instant {
+        self.time.now_instant().await
     }
 
     // timeout method removed to make TimeEffects dyn-compatible

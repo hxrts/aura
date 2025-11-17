@@ -4,6 +4,7 @@
 //! Implementations are provided in aura-protocol handlers.
 
 use async_trait::async_trait;
+use uuid::Uuid;
 
 /// Random effects interface for generating random values
 ///
@@ -25,4 +26,7 @@ pub trait RandomEffects: Send + Sync {
 
     /// Generate a random number in the specified range
     async fn random_range(&self, min: u64, max: u64) -> u64;
+
+    /// Generate a random UUID v4
+    async fn random_uuid(&self) -> Uuid;
 }

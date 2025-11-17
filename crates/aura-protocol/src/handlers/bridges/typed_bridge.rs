@@ -139,6 +139,13 @@ impl aura_core::effects::RandomEffects for TypedHandlerBridge {
         .await
         .unwrap_or(min)
     }
+
+    async fn random_uuid(&self) -> uuid::Uuid {
+        let bytes = self.random_bytes(16).await;
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&bytes);
+        uuid::Uuid::from_bytes(uuid_bytes)
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -573,6 +580,10 @@ impl TimeEffects for TypedHandlerBridge {
 
     fn resolution_ms(&self) -> u64 {
         1 // Default 1ms resolution
+    }
+
+    async fn now_instant(&self) -> std::time::Instant {
+        std::time::Instant::now()
     }
 }
 

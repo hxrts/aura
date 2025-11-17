@@ -186,6 +186,8 @@ impl OTAProtocol {
             ));
         }
 
+        #[allow(clippy::disallowed_methods)]
+        // TODO: Refactor to accept UUID parameter from RandomEffects
         let proposal = UpgradeProposal {
             proposal_id: Uuid::new_v4(),
             package_id,
@@ -288,6 +290,7 @@ impl Default for OTAProtocol {
 // =============================================================================
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

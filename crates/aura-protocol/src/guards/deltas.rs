@@ -1,4 +1,3 @@
-#![allow(clippy::disallowed_methods)]
 
 //! Delta fact application for join-semilattice updates
 //!
@@ -7,7 +6,7 @@
 //! monotonic fact accumulation following join-semilattice laws.
 
 use super::effect_system_trait::GuardEffectSystem;
-use aura_core::{AuraError, AuraResult, Fact, FactValue, Journal};
+use aura_core::{AuraError, AuraResult, Fact, FactValue, Journal, TimeEffects};
 use serde_json::Value as JsonValue;
 use std::{collections::BTreeSet, time::Instant};
 use tracing::{debug, error, info, warn};
@@ -26,7 +25,7 @@ pub async fn apply_delta_facts<E: GuardEffectSystem>(
         return Ok(Vec::new());
     }
 
-    let start_time = Instant::now();
+    let start_time = effect_system.now_instant().await;
 
     debug!(
         fact_count = delta_facts.len(),

@@ -978,6 +978,13 @@ mod tests {
         async fn random_range(&self, min: u64, max: u64) -> u64 {
             min + (max - min) / 2
         }
+
+        async fn random_uuid(&self) -> uuid::Uuid {
+            let bytes = self.random_bytes(16).await;
+            let mut uuid_bytes = [0u8; 16];
+            uuid_bytes.copy_from_slice(&bytes);
+            uuid::Uuid::from_bytes(uuid_bytes)
+        }
     }
 
     #[async_trait::async_trait]
@@ -1257,6 +1264,10 @@ mod tests {
 
         fn resolution_ms(&self) -> u64 {
             1
+        }
+
+        async fn now_instant(&self) -> std::time::Instant {
+            std::time::Instant::now()
         }
     }
 

@@ -21,6 +21,8 @@ pub struct SimulationTimeHandler {
     paused: bool,
     /// Base real-world time when simulation started
     simulation_start: SystemTime,
+    /// Synthetic instant base for deterministic testing
+    instant_base: std::time::Instant,
 }
 
 impl SimulationTimeHandler {
@@ -31,6 +33,7 @@ impl SimulationTimeHandler {
             acceleration: 1.0,
             paused: false,
             simulation_start: SystemTime::now(),
+            instant_base: std::time::Instant::now(),
         }
     }
 
@@ -95,6 +98,24 @@ impl TimeEffects for SimulationTimeHandler {
 
         tokio::time::sleep(adjusted_duration).await;
         Ok(())
+    }
+
+    async fn now_instant(&self) -> std::time::Instant {
+        if self.paused {
+            // Return frozen instant when paused
+            self.instant_base + self.time_offset
+        } else {
+            // Calculate accelerated instant
+            let elapsed = self
+                .simulation_start
+                .elapsed()
+                .unwrap_or(Duration::from_secs(0));
+
+            let accelerated_elapsed =
+                Duration::from_secs_f64(elapsed.as_secs_f64() * self.acceleration);
+
+            self.instant_base + self.time_offset + accelerated_elapsed
+        }
     }
 }
 

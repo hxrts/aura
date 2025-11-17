@@ -81,6 +81,13 @@ impl RandomEffects for MockCryptoHandler {
         let random = self.random_u64().await;
         min + (random % range)
     }
+
+    async fn random_uuid(&self) -> uuid::Uuid {
+        let bytes = self.random_bytes(16).await;
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&bytes);
+        uuid::Uuid::from_bytes(uuid_bytes)
+    }
 }
 
 // RandomEffects implementation for RealCryptoHandler
@@ -111,6 +118,13 @@ impl RandomEffects for RealCryptoHandler {
         let range = max - min;
         let random = self.random_u64().await;
         min + (random % range)
+    }
+
+    async fn random_uuid(&self) -> uuid::Uuid {
+        let bytes = self.random_bytes(16).await;
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&bytes);
+        uuid::Uuid::from_bytes(uuid_bytes)
     }
 }
 

@@ -92,6 +92,8 @@ impl<T: TimeEffects + Clone + Send + Sync> TimeEffects for TimeoutCoordinator<T>
     // Coordination methods (Layer 4)
 
     async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
+        #[allow(clippy::disallowed_methods)]
+        // TODO: Refactor to use RandomEffects for UUID generation
         let handle = Uuid::new_v4();
         let registry = Arc::clone(&self.registry);
         let handle_clone = handle;
@@ -150,5 +152,9 @@ impl<T: TimeEffects + Clone + Send + Sync> TimeEffects for TimeoutCoordinator<T>
 
     fn resolution_ms(&self) -> u64 {
         self.inner.resolution_ms()
+    }
+
+    async fn now_instant(&self) -> std::time::Instant {
+        self.inner.now_instant().await
     }
 }

@@ -5,7 +5,7 @@
 
 use crate::AuraError;
 use async_trait::async_trait;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 /// Wake conditions for cooperative yielding
@@ -104,6 +104,10 @@ pub trait TimeEffects: Send + Sync {
 
     /// Get current timestamp in milliseconds
     async fn current_timestamp_millis(&self) -> u64;
+
+    /// Get the current monotonic time instant
+    /// This is useful for deadlines and duration measurements
+    async fn now_instant(&self) -> Instant;
 
     /// Sleep for a specified number of milliseconds
     async fn sleep_ms(&self, ms: u64);

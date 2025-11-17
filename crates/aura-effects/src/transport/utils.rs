@@ -192,23 +192,29 @@ impl ConnectionMetrics {
     }
 
     /// Record outgoing message
-    pub fn record_sent(&mut self, bytes: u64) {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn record_sent(&mut self, bytes: u64, now: std::time::Instant) {
         self.bytes_sent += bytes;
         self.messages_sent += 1;
-        self.last_activity = Some(std::time::Instant::now());
+        self.last_activity = Some(now);
     }
 
     /// Record incoming message
-    pub fn record_received(&mut self, bytes: u64) {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn record_received(&mut self, bytes: u64, now: std::time::Instant) {
         self.bytes_received += bytes;
         self.messages_received += 1;
-        self.last_activity = Some(std::time::Instant::now());
+        self.last_activity = Some(now);
     }
 
     /// Mark connection as established
-    pub fn connected(&mut self) {
-        self.connection_time = Some(std::time::Instant::now());
-        self.last_activity = Some(std::time::Instant::now());
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn connected(&mut self, now: std::time::Instant) {
+        self.connection_time = Some(now);
+        self.last_activity = Some(now);
     }
 
     /// Get total connection duration

@@ -268,8 +268,9 @@ impl PropertyCache {
 
         let cached_result = CachedResult {
             result,
-            #[allow(clippy::disallowed_methods)] // Required for caching, deterministic in test context
-            cached_at: Instant::now(), // Current timestamp for caching
+            // Note: For verification caching, using Instant::now() is acceptable for cache metadata
+            #[allow(clippy::disallowed_methods)]
+            cached_at: Instant::now(),
             access_count: 1,
         };
 

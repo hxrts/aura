@@ -7,7 +7,7 @@ use crate::effects::JournalEffects;
 use crate::guards::flow::FlowBudgetEffects;
 use async_trait::async_trait;
 use aura_core::effects::StorageEffects;
-use aura_core::DeviceId;
+use aura_core::{DeviceId, TimeEffects};
 
 /// Minimal interface that guards need from an effect system
 ///
@@ -17,7 +17,7 @@ use aura_core::DeviceId;
 /// Note: This trait extends JournalEffects because guards need access to journal operations
 /// for coupling protocol execution with distributed state updates.
 pub trait GuardEffectSystem:
-    JournalEffects + StorageEffects + FlowBudgetEffects + Send + Sync
+    JournalEffects + StorageEffects + FlowBudgetEffects + TimeEffects + Send + Sync
 {
     /// Get the device ID for this effect system
     fn device_id(&self) -> DeviceId;
@@ -194,6 +194,10 @@ impl aura_core::TimeEffects for Box<dyn AuraEffects> {
 
     fn resolution_ms(&self) -> u64 {
         (**self).resolution_ms()
+    }
+
+    async fn now_instant(&self) -> std::time::Instant {
+        (**self).now_instant().await
     }
 }
 

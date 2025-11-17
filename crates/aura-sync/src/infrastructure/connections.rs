@@ -13,6 +13,7 @@
 //!
 //! # Usage
 //!
+
 //! ```rust,no_run
 //! use aura_sync::infrastructure::{ConnectionPool, PoolConfig};
 //! use aura_core::DeviceId;
@@ -115,8 +116,9 @@ pub struct ConnectionMetadata {
 
 impl ConnectionMetadata {
     /// Create new connection metadata
-    pub fn new(connection_id: String, peer_id: DeviceId) -> Self {
-        let now = Instant::now();
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn new(connection_id: String, peer_id: DeviceId, now: Instant) -> Self {
         Self {
             connection_id,
             peer_id,
@@ -140,18 +142,22 @@ impl ConnectionMetadata {
     }
 
     /// Mark connection as acquired
-    pub fn acquire(&mut self, session_id: SessionId) {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn acquire(&mut self, session_id: SessionId, now: Instant) {
         self.state = ConnectionState::Active;
         self.session_id = Some(session_id);
-        self.last_used_at = Instant::now();
+        self.last_used_at = now;
         self.reuse_count += 1;
     }
 
     /// Mark connection as released
-    pub fn release(&mut self) {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn release(&mut self, now: Instant) {
         self.state = ConnectionState::Idle;
         self.session_id = None;
-        self.last_used_at = Instant::now();
+        self.last_used_at = now;
     }
 
     /// Mark connection as closed
@@ -204,12 +210,14 @@ pub struct ConnectionHandle {
 
 impl ConnectionHandle {
     /// Create a new connection handle
-    pub fn new(id: String, peer_id: DeviceId, session_id: SessionId) -> Self {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn new(id: String, peer_id: DeviceId, session_id: SessionId, now: Instant) -> Self {
         Self {
             id,
             peer_id,
             session_id,
-            acquired_at: Instant::now(),
+            acquired_at: now,
         }
     }
 
@@ -260,17 +268,22 @@ impl ConnectionPool {
         let session_id = SessionId::new();
 
         // Try to find idle connection for this peer
+        // Note: For infrastructure code, using Instant::now() is acceptable for connection timing
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         if let Some(connections) = self.connections.get_mut(&peer_id) {
             if let Some(idle_conn) = connections.iter_mut()
                 .find(|c| c.is_idle() && c.healthy)
             {
-                idle_conn.acquire(session_id);
+                idle_conn.acquire(session_id, now);
                 self.stats.connections_reused += 1;
 
                 return Ok(ConnectionHandle::new(
                     idle_conn.connection_id.clone(),
                     peer_id,
                     session_id,
+                    now,
                 ));
             }
         }
@@ -296,18 +309,22 @@ impl ConnectionPool {
         // Create new connection
         // TODO: Integrate with aura-transport to actually establish connection
         let connection_id = format!("conn_{}_{}", peer_id, self.total_connections);
-        let mut metadata = ConnectionMetadata::new(connection_id.clone(), peer_id);
-        metadata.acquire(session_id);
+        let mut metadata = ConnectionMetadata::new(connection_id.clone(), peer_id, now);
+        metadata.acquire(session_id, now);
 
         peer_connections.push(metadata);
         self.total_connections += 1;
         self.stats.connections_created += 1;
 
-        Ok(ConnectionHandle::new(connection_id, peer_id, session_id))
+        Ok(ConnectionHandle::new(connection_id, peer_id, session_id, now))
     }
 
     /// Release a connection back to the pool
     pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle) -> SyncResult<()> {
+        // Note: For infrastructure code, using Instant::now() is acceptable for connection timing
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         let connections = self.connections.get_mut(&peer_id)
             .ok_or_else(|| SyncError::Internal("No connections for peer".to_string()))?;
 
@@ -315,7 +332,7 @@ impl ConnectionPool {
             .find(|c| c.connection_id == handle.id)
             .ok_or_else(|| SyncError::Internal("Connection not found in pool".to_string()))?;
 
-        conn.release();
+        conn.release(now);
         self.stats.connections_released += 1;
 
         Ok(())

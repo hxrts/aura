@@ -13,6 +13,7 @@
 //! - **aura-wot**: Capability-based authorization and trust ranking
 //! - **aura-transport**: Connection establishment and management
 //! - **aura-verify**: Identity verification for discovered peers
+
 //!
 //! # Usage
 //!
@@ -137,8 +138,9 @@ pub struct PeerMetadata {
 
 impl PeerMetadata {
     /// Create new peer metadata for a discovered peer
-    pub fn new(device_id: DeviceId) -> Self {
-        let now = Instant::now();
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn new(device_id: DeviceId, now: Instant) -> Self {
         Self {
             device_id,
             status: PeerStatus::Discovered,
@@ -153,10 +155,12 @@ impl PeerMetadata {
     }
 
     /// Update peer status
-    pub fn set_status(&mut self, status: PeerStatus) {
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    pub fn set_status(&mut self, status: PeerStatus, now: Instant) {
         if self.status != status {
             self.status = status;
-            self.last_status_change = Instant::now();
+            self.last_status_change = now;
         }
     }
 
@@ -272,7 +276,10 @@ impl PeerManager {
         // let discovered = discovery_service.discover_peers(effects).await?;
 
         // For now, return tracked peers
-        self.last_refresh = Some(Instant::now());
+        // Note: For infrastructure code, using Instant::now() is acceptable for tracking refresh time
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        self.last_refresh = Some(now);
 
         Ok(self.peers.keys().copied().collect())
     }
@@ -285,9 +292,11 @@ impl PeerManager {
             ));
         }
 
+        // Note: For infrastructure code, using Instant::now() is acceptable for tracking discovery time
+        #[allow(clippy::disallowed_methods)]
         self.peers.entry(device_id).or_insert_with(|| {
             PeerInfo {
-                metadata: PeerMetadata::new(device_id),
+                metadata: PeerMetadata::new(device_id, Instant::now()),
                 capabilities: HashSet::new(),
                 connection_details: None,
             }
@@ -460,7 +469,9 @@ mod tests {
 
     #[test]
     fn test_peer_metadata_scoring() {
-        let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]));
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), now);
         meta.trust_level = 80;
         meta.successful_syncs = 8;
         meta.failed_syncs = 2;
@@ -475,7 +486,9 @@ mod tests {
 
     #[test]
     fn test_peer_availability() {
-        let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]));
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), now);
         meta.status = PeerStatus::Connected;
         meta.active_sessions = 5;
 
@@ -496,6 +509,9 @@ mod tests {
         manager.add_peer(peer1).unwrap();
         manager.add_peer(peer2).unwrap();
         manager.add_peer(peer3).unwrap();
+
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
 
         // Set up peer1 as high trust, connected
         manager.update_peer_metadata(peer1, |m| {

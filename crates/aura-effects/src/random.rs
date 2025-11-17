@@ -45,6 +45,12 @@ aura_effect_handlers! {
                 let value = self.random_u64().await;
                 min + (value % (max - min + 1))
             },
+            random_uuid() -> uuid::Uuid => {
+                let bytes = self.random_bytes(16).await;
+                let mut uuid_bytes = [0u8; 16];
+                uuid_bytes.copy_from_slice(&bytes);
+                uuid::Uuid::from_bytes(uuid_bytes)
+            },
         },
     },
     real: {
@@ -71,6 +77,12 @@ aura_effect_handlers! {
             random_range(min: u64, max: u64) -> u64 => {
                 use rand::Rng;
                 rand::thread_rng().gen_range(min..=max)
+            },
+            random_uuid() -> uuid::Uuid => {
+                let bytes = self.random_bytes(16).await;
+                let mut uuid_bytes = [0u8; 16];
+                uuid_bytes.copy_from_slice(&bytes);
+                uuid::Uuid::from_bytes(uuid_bytes)
             },
         },
     },

@@ -4,8 +4,6 @@
 //! and docs/101_auth_authz.md, providing the CapGuard → FlowGuard → JournalCoupler sequence
 //! that enforces both authorization and budget constraints at every protocol send site.
 
-#![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
-
 use super::effect_system_trait::GuardEffectSystem;
 use crate::{
     guards::{flow::FlowGuard, ProtocolGuard},
@@ -108,7 +106,8 @@ impl SendGuardChain {
         &self,
         effect_system: &E,
     ) -> AuraResult<SendGuardResult> {
-        let start_time = Instant::now();
+        use aura_core::TimeEffects;
+        let start_time = effect_system.now_instant().await;
         let operation_id = self.operation_id.as_deref().unwrap_or("unnamed_send");
 
         debug!(
@@ -121,7 +120,7 @@ impl SendGuardChain {
         );
 
         // Phase 1: CapGuard - Evaluate need(m) ≤ Caps(ctx)
-        let cap_start = Instant::now();
+        let cap_start = effect_system.now_instant().await;
         let (capability_satisfied, effective_capabilities) =
             self.evaluate_capability_guard(effect_system).await?;
         let cap_time = cap_start.elapsed();
@@ -154,7 +153,7 @@ impl SendGuardChain {
         }
 
         // Phase 2: FlowGuard - Evaluate headroom(ctx, cost) and charge budget
-        let flow_start = Instant::now();
+        let flow_start = effect_system.now_instant().await;
         let flow_result = self.evaluate_flow_guard(effect_system).await;
         let flow_time = flow_start.elapsed();
 

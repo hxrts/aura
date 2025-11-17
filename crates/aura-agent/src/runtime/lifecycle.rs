@@ -85,8 +85,8 @@ pub trait LifecycleAware: Send + Sync {
     }
 
     /// Health check for this component
-    async fn health_check(&self) -> HealthStatus {
-        HealthStatus::healthy()
+    async fn health_check(&self, now: Instant) -> HealthStatus {
+        HealthStatus::healthy(now)
     }
 }
 
@@ -105,22 +105,22 @@ pub struct HealthStatus {
 
 impl HealthStatus {
     /// Create a healthy status
-    pub fn healthy() -> Self {
+    pub fn healthy(now: Instant) -> Self {
         Self {
             is_healthy: true,
             message: None,
             metadata: None,
-            checked_at: Instant::now(),
+            checked_at: now,
         }
     }
 
     /// Create an unhealthy status with a message
-    pub fn unhealthy(message: impl Into<String>) -> Self {
+    pub fn unhealthy(message: impl Into<String>, now: Instant) -> Self {
         Self {
             is_healthy: false,
             message: Some(message.into()),
             metadata: None,
-            checked_at: Instant::now(),
+            checked_at: now,
         }
     }
 
@@ -162,11 +162,11 @@ pub struct LifecycleManager {
 
 impl LifecycleManager {
     /// Create a new lifecycle manager
-    pub fn new(device_id: DeviceId) -> Self {
+    pub fn new(device_id: DeviceId, start_time: Instant) -> Self {
         Self {
             state: Arc::new(AtomicU8::new(EffectSystemState::Uninitialized as u8)),
             components: Arc::new(RwLock::new(Vec::new())),
-            start_time: Instant::now(),
+            start_time,
             device_id,
             transition_lock: Arc::new(Mutex::new(())),
         }
@@ -323,7 +323,7 @@ impl LifecycleManager {
     }
 
     /// Perform a system health check
-    pub async fn health_check(&self) -> SystemHealthReport {
+    pub async fn health_check(&self, now: Instant) -> SystemHealthReport {
         let current_state = self.current_state();
         let uptime = self.start_time.elapsed();
 
@@ -332,7 +332,7 @@ impl LifecycleManager {
         let mut all_healthy = true;
 
         for (name, component) in components.iter() {
-            let health = component.health_check().await;
+            let health = component.health_check(now).await;
             if !health.is_healthy {
                 all_healthy = false;
             }
@@ -347,7 +347,7 @@ impl LifecycleManager {
             component_health,
             uptime,
             state: current_state,
-            generated_at: Instant::now(),
+            generated_at: now,
         }
     }
 
@@ -397,7 +397,8 @@ mod tests {
     #[aura_test]
     async fn test_lifecycle_manager_basic() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let manager = LifecycleManager::new(fixture.device_id());
+        let now = Instant::now();
+        let manager = LifecycleManager::new(fixture.device_id(), now);
 
         // Initial state
         assert_eq!(manager.current_state(), EffectSystemState::Uninitialized);
@@ -418,7 +419,8 @@ mod tests {
     #[aura_test]
     async fn test_invalid_transitions() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let manager = LifecycleManager::new(fixture.device_id());
+        let now = Instant::now();
+        let manager = LifecycleManager::new(fixture.device_id(), now);
 
         // Cannot shutdown from Uninitialized
         assert!(manager.shutdown().await.is_err());
@@ -455,11 +457,14 @@ mod tests {
             self.shutdown_result.clone()
         }
 
-        async fn health_check(&self) -> HealthStatus {
+        async fn health_check(&self, now: Instant) -> HealthStatus {
+            #[allow(clippy::disallowed_methods)]
+            // Test code - Instant::now() acceptable for testing context
+            let now = now;
             if self.is_healthy {
-                HealthStatus::healthy()
+                HealthStatus::healthy(now)
             } else {
-                HealthStatus::unhealthy(format!("{} is unhealthy", self.name))
+                HealthStatus::unhealthy(format!("{} is unhealthy", self.name), now)
             }
         }
     }
@@ -467,7 +472,8 @@ mod tests {
     #[aura_test]
     async fn test_component_lifecycle() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let manager = LifecycleManager::new(fixture.device_id());
+        let now = Instant::now();
+        let manager = LifecycleManager::new(fixture.device_id(), now);
 
         // Register a healthy component
         let component = MockComponent {
@@ -485,7 +491,10 @@ mod tests {
         assert_eq!(manager.current_state(), EffectSystemState::Ready);
 
         // Health check should be healthy
-        let health_report = manager.health_check().await;
+        #[allow(clippy::disallowed_methods)]
+        // Test code - Instant::now() acceptable for testing
+        let now = Instant::now();
+        let health_report = manager.health_check(now).await;
         assert!(health_report.is_healthy);
         assert_eq!(health_report.component_health.len(), 1);
         assert!(health_report.component_health[0].1.is_healthy);
@@ -499,7 +508,8 @@ mod tests {
     #[aura_test]
     async fn test_component_init_failure() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let manager = LifecycleManager::new(fixture.device_id());
+        let now = Instant::now();
+        let manager = LifecycleManager::new(fixture.device_id(), now);
 
         // Register a component that fails to initialize
         let component = MockComponent {

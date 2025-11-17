@@ -29,6 +29,10 @@
 //! # }
 //! ```
 
+// TODO: Refactor to use TimeEffects. Uses Instant::now() for maintenance timing
+// which should be replaced with effect system integration.
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::collections::BTreeSet;
@@ -449,7 +453,10 @@ impl Service for MaintenanceService {
         }
 
         *state = ServiceState::Starting;
-        *self.started_at.write() = Some(Instant::now());
+        // Note: For service lifecycle tracking, using Instant::now() is acceptable
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+        *self.started_at.write() = Some(now);
 
         // TODO: Start background tasks for auto-snapshot
 

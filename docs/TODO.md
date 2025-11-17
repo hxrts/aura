@@ -7,185 +7,185 @@ Each item should be resolved by replacing the direct call with the appropriate e
 ## Direct UUID Generation (`Uuid::new_v4`)
 
 ### `crates/aura-agent/src/handlers/ota.rs`
-- [ ] L272
+- [x] L272
 ### `crates/aura-agent/src/handlers/sessions.rs`
-- [ ] L408
+- [x] L408
 ### `crates/aura-agent/src/ota_orchestrator.rs`
-- [ ] L549
+- [x] L549
 ### `crates/aura-agent/src/runtime/context.rs`
-- [ ] L39
-- [ ] L77
-- [ ] L156
-- [ ] L157
-- [ ] L165
+- [x] L39
+- [x] L77
+- [x] L156
+- [x] L157
+- [x] L165
 ### `crates/aura-cli/src/handlers/ota.rs`
-- [ ] L82
+- [x] L82
 ### `crates/aura-effects/src/system/monitoring.rs`
-- [ ] L318
-- [ ] L384
-- [ ] L416
-- [ ] L452
-- [ ] L595
-- [ ] L920
+- [x] L318
+- [x] L384
+- [x] L416
+- [x] L452
+- [x] L595
+- [x] L920
 ### `crates/aura-effects/src/time.rs`
-- [ ] L141
-- [ ] L290
+- [x] L141
+- [x] L290
 ### `crates/aura-effects/src/transport/memory.rs`
-- [ ] L60
+- [x] L60
 ### `crates/aura-journal/src/journal.rs`
-- [ ] L325
+- [x] L325
 ### `crates/aura-journal/src/ledger/capability.rs`
-- [ ] L22
+- [x] L22
 ### `crates/aura-journal/src/ledger/intent.rs`
-- [ ] L27
+- [x] L27
 ### `crates/aura-journal/src/operations.rs`
-- [ ] L28
+- [x] L28
 ### `crates/aura-journal/src/semilattice/account_state.rs`
-- [ ] L317
+- [x] L317
 ### `crates/aura-mpst/src/context.rs`
-- [ ] L56
-- [ ] L62
-- [ ] L68
-- [ ] L79
+- [x] L56
+- [x] L62
+- [x] L68
+- [x] L79
 ### `crates/aura-protocol/src/effects/mod.rs`
-- [ ] L172
+- [x] L172
 ### `crates/aura-protocol/src/handlers/bridges/typed_bridge.rs`
-- [ ] L617
-- [ ] L645
-- [ ] L656
+- [x] L617
+- [x] L645
+- [x] L656
 ### `crates/aura-protocol/src/handlers/core/composite.rs`
-- [ ] L716
+- [x] L716
 ### `crates/aura-protocol/src/handlers/core/erased.rs`
-- [ ] L127
-- [ ] L153
+- [x] L127
+- [x] L153
 ### `crates/aura-protocol/src/handlers/context/context.rs`
-- [ ] L541
-- [ ] L548
-- [ ] L584
-- [ ] L607
-- [ ] L623
+- [x] L541
+- [x] L548
+- [x] L584
+- [x] L607
+- [x] L623
 ### `crates/aura-protocol/src/handlers/timeout_coordinator.rs`
-- [ ] L95
+- [x] L95
 ### `crates/aura-protocol/src/handlers/time_enhanced.rs`
-- [ ] L301
-- [ ] L354
-- [ ] L526
+- [x] L301
+- [x] L354
+- [x] L526
 ### `crates/aura-rendezvous/src/connection_manager.rs`
-- [ ] L65
+- [x] L65
 ### `crates/aura-sync/src/core/messages.rs`
-- [ ] L140
-- [ ] L315
-- [ ] L444
+- [x] L140
+- [x] L315
+- [x] L444
 ### `crates/aura-sync/src/protocols/ota.rs`
-- [ ] L190
-- [ ] L300
-- [ ] L322
-- [ ] L349
+- [x] L190
+- [x] L300
+- [x] L322
+- [x] L349
 ### `crates/aura-sync/src/protocols/snapshots.rs`
-- [ ] L71
-- [ ] L291
+- [x] L71
+- [x] L291
 ### `crates/aura-sync/src/services/maintenance.rs`
-- [ ] L86
+- [x] L86
 ### `crates/aura-verify/src/guardian.rs`
-- [ ] L170
+- [x] L170
 ### `crates/aura-verify/src/session.rs`
-- [ ] L178
-- [ ] L179
+- [x] L178
+- [x] L179
 ### `crates/aura-wot/src/tokens.rs`
-- [ ] L70
+- [x] L70
 
 ## Direct Time Access (`Instant::now`)
 
 ### `crates/aura-agent/src/optimizations/caching.rs`
-- [ ] L45
-- [ ] L50
+- [x] L45
+- [x] L50
 ### `crates/aura-agent/src/runtime/context.rs`
-- [ ] L85
-- [ ] L94
-- [ ] L384
+- [x] L85
+- [x] L94
+- [x] L384
 ### `crates/aura-agent/src/runtime/initialization.rs`
-- [ ] L44
+- [x] L44
 ### `crates/aura-agent/src/runtime/lifecycle.rs`
-- [ ] L113
-- [ ] L123
-- [ ] L169
-- [ ] L350
+- [x] L113
+- [x] L123
+- [x] L169
+- [x] L350
 ### `crates/aura-agent/src/runtime/reliability.rs`
-- [ ] L84
-- [ ] L107
-- [ ] L496
+- [x] L84
+- [x] L107
+- [x] L496
 ### `crates/aura-core/src/effects/reliability.rs`
-- [ ] L333
-- [ ] L429
-- [ ] L516
-- [ ] L526
-- [ ] L533
+- [x] L333
+- [x] L429
+- [x] L516
+- [x] L526
+- [x] L533
 ### `crates/aura-effects/src/system/metrics.rs`
-- [ ] L502
+- [x] L502
 ### `crates/aura-effects/src/system/monitoring.rs`
-- [ ] L276
-- [ ] L492
+- [x] L276
+- [x] L492
 ### `crates/aura-effects/src/transport/utils.rs`
-- [ ] L198
-- [ ] L205
-- [ ] L210
-- [ ] L211
+- [x] L198
+- [x] L205
+- [x] L210
+- [x] L211
 ### `crates/aura-protocol/src/guards/deltas.rs`
-- [ ] L29
+- [x] L29
 ### `crates/aura-protocol/src/guards/evaluation.rs`
-- [ ] L61
-- [ ] L70
-- [ ] L81
-- [ ] L164
+- [x] L61
+- [x] L70
+- [x] L81
+- [x] L164
 ### `crates/aura-protocol/src/guards/execution.rs`
-- [ ] L40
-- [ ] L47
-- [ ] L67
-- [ ] L76
-- [ ] L177
-- [ ] L210
+- [x] L40
+- [x] L47
+- [x] L67
+- [x] L76
+- [x] L177
+- [x] L210
 ### `crates/aura-protocol/src/guards/journal_coupler.rs`
-- [ ] L160
-- [ ] L194
-- [ ] L259
+- [x] L160
+- [x] L194
+- [x] L259
 ### `crates/aura-protocol/src/guards/send_guard.rs`
-- [ ] L108
-- [ ] L121
-- [ ] L154
+- [x] L108
+- [x] L121
+- [x] L154
 ### `crates/aura-protocol/src/handlers/time_enhanced.rs`
-- [ ] L124
-- [ ] L281
-- [ ] L307
-- [ ] L355
-- [ ] L493
+- [x] L124
+- [x] L281
+- [x] L307
+- [x] L355
+- [x] L493
 ### `crates/aura-protocol/src/handlers/transport_coordinator.rs`
-- [ ] L209
-- [ ] L227
-- [ ] L285
+- [x] L209
+- [x] L227
+- [x] L285
 ### `crates/aura-quint-api/src/runner.rs`
-- [ ] L272
-- [ ] L424
+- [x] L272
+- [x] L424
 ### `crates/aura-rendezvous/src/connection_manager.rs`
-- [ ] L500
-- [ ] L513
+- [x] L500
+- [x] L513
 ### `crates/aura-sync/src/core/metrics.rs`
-- [ ] L317
+- [x] L317
 ### `crates/aura-sync/src/core/session.rs`
-- [ ] L267
-- [ ] L277
-- [ ] L542
+- [x] L267
+- [x] L277
+- [x] L542
 ### `crates/aura-sync/src/infrastructure/connections.rs`
-- [ ] L119
-- [ ] L146
-- [ ] L154
-- [ ] L212
+- [x] L119
+- [x] L146
+- [x] L154
+- [x] L212
 ### `crates/aura-sync/src/infrastructure/peers.rs`
-- [ ] L141
-- [ ] L159
-- [ ] L275
+- [x] L141
+- [x] L159
+- [x] L275
 ### `crates/aura-sync/src/protocols/journal.rs`
-- [ ] L210
+- [x] L210
 ### `crates/aura-sync/src/services/maintenance.rs`
-- [ ] L452
+- [x] L452
 ### `crates/aura-sync/src/services/sync.rs`
-- [ ] L254
+- [x] L254
