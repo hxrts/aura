@@ -83,11 +83,12 @@ pub struct SnapshotProposed {
 }
 
 impl SnapshotProposed {
-    /// Create a new proposal.
-    pub fn new(proposer: DeviceId, target_epoch: Epoch, state_digest: Hash32) -> Self {
+    /// Create a new proposal
+    ///
+    /// Note: Callers should generate `proposal_id` via `RandomEffects::random_uuid()` and pass it to this method
+    pub fn new(proposal_id: Uuid, proposer: DeviceId, target_epoch: Epoch, state_digest: Hash32) -> Self {
         Self {
-            #[allow(clippy::disallowed_methods)] // [VERIFIED] Acceptable in maintenance proposal ID generation
-            proposal_id: Uuid::new_v4(),
+            proposal_id,
             proposer,
             target_epoch,
             state_digest,
@@ -446,22 +447,30 @@ impl MaintenanceService {
 
 #[async_trait::async_trait]
 impl Service for MaintenanceService {
-    async fn start(&self) -> SyncResult<()> {
+    /// Start the maintenance service
+    ///
+    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    async fn start_with_time(&self, now: Instant) -> SyncResult<()> {
         let mut state = self.state.write();
         if *state == ServiceState::Running {
             return Err(SyncError::Service("Service already running".to_string()));
         }
 
         *state = ServiceState::Starting;
-        // Note: For service lifecycle tracking, using Instant::now() is acceptable
-        #[allow(clippy::disallowed_methods)]
-        let now = Instant::now();
         *self.started_at.write() = Some(now);
 
         // TODO: Start background tasks for auto-snapshot
 
         *state = ServiceState::Running;
         Ok(())
+    }
+
+    async fn start(&self) -> SyncResult<()> {
+        // Delegate to start_with_time using current time
+        // This provides backwards compatibility but should be avoided in production
+        #[allow(clippy::disallowed_methods)] // TODO: Remove this method, use start_with_time instead
+        let now = Instant::now();
+        self.start_with_time(now).await
     }
 
     async fn stop(&self) -> SyncResult<()> {

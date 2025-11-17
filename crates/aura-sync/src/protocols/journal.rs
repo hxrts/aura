@@ -25,14 +25,14 @@
 //!     let config = JournalSyncConfig::default();
 //!     let protocol = JournalSyncProtocol::new(config);
 //!
-//!     let result = protocol.sync_with_peers(effects, peers).await?;
+//!     let start = effects.now_instant().await?;
+//!     let result = protocol.sync_with_peers(effects, peers, start).await?;
 //!     println!("Synced {} operations", result.operations_synced);
 //!     Ok(())
 //! }
 //! ```
 
-// TODO: Refactor to use TimeEffects. Uses Instant::now() for sync timing
-// which should be replaced with effect system integration.
+// TimeEffects integration complete - sync timing now uses explicit parameter
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::HashMap;
@@ -203,17 +203,17 @@ impl JournalSyncProtocol {
     /// - Uses `NetworkEffects` to communicate with peers
     /// - Uses `PeerManager` from infrastructure for peer selection
     /// - Uses `RetryPolicy` for resilient operations
+    ///
+    /// Note: Callers should obtain `start` via `TimeEffects::now_instant()` and pass it to this method
     pub async fn sync_with_peers<E>(
         &mut self,
         _effects: &E,
         peers: Vec<DeviceId>,
+        start: Instant,
     ) -> SyncResult<JournalSyncResult>
     where
         E: Send + Sync,
     {
-        // Note: For protocol code, using Instant::now() is acceptable for duration measurement
-        #[allow(clippy::disallowed_methods)]
-        let start = std::time::Instant::now();
         let mut operations_synced = 0;
         let mut peers_synced = Vec::new();
         let mut peers_failed = Vec::new();
