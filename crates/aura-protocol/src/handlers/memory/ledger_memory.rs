@@ -1,7 +1,7 @@
 //! Memory-based ledger handler for testing
 
 use crate::effects::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEventStream};
-use aura_core::effects::RandomEffects;
+use aura_core::effects::{RandomEffects, TimeEffects};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -10,22 +10,35 @@ pub struct MemoryLedgerHandler {
     // TODO fix - For now, use placeholder data structures
     _events: Vec<Vec<u8>>,
     random: Arc<dyn RandomEffects>,
+    time: Arc<dyn TimeEffects>,
 }
 
 impl MemoryLedgerHandler {
-    pub fn new(random: Arc<dyn RandomEffects>) -> Self {
+    /// Create a new memory ledger handler with explicit effect dependencies.
+    ///
+    /// # Parameters
+    /// - `random`: RandomEffects implementation for UUID generation and secrets
+    /// - `time`: TimeEffects implementation for timestamp operations
+    ///
+    /// This follows Layer 4 orchestration pattern where handlers store effect dependencies
+    /// for coordinated multi-effect operations.
+    pub fn new(random: Arc<dyn RandomEffects>, time: Arc<dyn TimeEffects>) -> Self {
         Self {
             _events: Vec::new(),
             random,
+            time,
         }
     }
 }
 
 impl Default for MemoryLedgerHandler {
     fn default() -> Self {
-        // Default uses a mock random handler for testing
-        use aura_effects::MockRandomHandler;
-        Self::new(Arc::new(MockRandomHandler::new()))
+        // Default uses mock handlers for testing
+        use aura_effects::{MockRandomHandler, SimulatedTimeHandler};
+        Self::new(
+            Arc::new(MockRandomHandler::new()),
+            Arc::new(SimulatedTimeHandler::new()),
+        )
     }
 }
 
@@ -111,26 +124,24 @@ impl LedgerEffects for MemoryLedgerHandler {
         Ok(aura_core::hash::hash(data))
     }
 
-    /// TODO: Refactor to use TimeEffects from the effect system
-    #[allow(clippy::disallowed_methods)]
     async fn current_timestamp(&self) -> Result<u64, LedgerError> {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let duration =
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|_| LedgerError::Corrupted {
-                    reason: "Failed to get current time".to_string(),
-                })?;
-        Ok(duration.as_secs())
+        // Use TimeEffects for testable timestamp operations
+        let timestamp = self.time.current_timestamp().await;
+        Ok(timestamp)
     }
 
     async fn ledger_device_id(&self) -> Result<aura_core::DeviceId, LedgerError> {
         Ok(aura_core::DeviceId::new()) // Memory implementation returns a new device ID
     }
 
-    /// TODO: Refactor to use RandomEffects from the effect system
-    #[allow(clippy::disallowed_methods)]
     async fn new_uuid(&self) -> Result<uuid::Uuid, LedgerError> {
-        Ok(uuid::Uuid::from_bytes([0u8; 16]))
+        // Use RandomEffects for testable UUID generation
+        let bytes = self.random.random_bytes(16).await;
+        let uuid_bytes: [u8; 16] = bytes
+            .try_into()
+            .map_err(|_| LedgerError::CryptoOperationFailed {
+                message: "Failed to generate UUID bytes".to_string(),
+            })?;
+        Ok(uuid::Uuid::from_bytes(uuid_bytes))
     }
 }

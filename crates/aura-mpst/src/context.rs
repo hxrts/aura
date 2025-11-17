@@ -50,33 +50,57 @@ impl std::fmt::Display for ContextType {
 }
 
 impl ContextType {
-    /// Create a new relationship context
-    #[allow(clippy::disallowed_methods)]
-    pub fn new_relationship() -> Self {
-        ContextType::Relationship(Uuid::new_v4())
+    /// Create a new relationship context.
+    ///
+    /// # Parameters
+    /// - `id`: UUID for the context (obtain from RandomEffects for testability)
+    ///
+    /// Note: Callers should obtain UUID from RandomEffects to maintain testability
+    /// and consistency with the effect system architecture.
+    pub fn new_relationship(id: Uuid) -> Self {
+        ContextType::Relationship(id)
     }
 
-    /// Create a new group context
-    #[allow(clippy::disallowed_methods)]
-    pub fn new_group() -> Self {
-        ContextType::Group(Uuid::new_v4())
+    /// Create a new group context.
+    ///
+    /// # Parameters
+    /// - `id`: UUID for the context (obtain from RandomEffects for testability)
+    ///
+    /// Note: Callers should obtain UUID from RandomEffects to maintain testability
+    /// and consistency with the effect system architecture.
+    pub fn new_group(id: Uuid) -> Self {
+        ContextType::Group(id)
     }
 
-    /// Create a new key derivation context
-    #[allow(clippy::disallowed_methods)]
-    pub fn new_key_derivation() -> Self {
-        ContextType::KeyDerivation(Uuid::new_v4())
+    /// Create a new key derivation context.
+    ///
+    /// # Parameters
+    /// - `id`: UUID for the context (obtain from RandomEffects for testability)
+    ///
+    /// Note: Callers should obtain UUID from RandomEffects to maintain testability
+    /// and consistency with the effect system architecture.
+    pub fn new_key_derivation(id: Uuid) -> Self {
+        ContextType::KeyDerivation(id)
     }
 
-    /// Create a new session context
-    pub fn new_session() -> Self {
-        ContextType::Session(SessionId::new())
+    /// Create a new session context.
+    ///
+    /// # Parameters
+    /// - `session_id`: Session ID for the context
+    pub fn new_session(session_id: SessionId) -> Self {
+        ContextType::Session(session_id)
     }
 
-    /// Create a custom context
-    #[allow(clippy::disallowed_methods)]
-    pub fn custom(name: impl Into<String>) -> Self {
-        ContextType::Custom(name.into(), Uuid::new_v4())
+    /// Create a custom context.
+    ///
+    /// # Parameters
+    /// - `name`: Name of the custom context type
+    /// - `id`: UUID for the context (obtain from RandomEffects for testability)
+    ///
+    /// Note: Callers should obtain UUID from RandomEffects to maintain testability
+    /// and consistency with the effect system architecture.
+    pub fn custom(name: impl Into<String>, id: Uuid) -> Self {
+        ContextType::Custom(name.into(), id)
     }
 
     /// Get the context UUID
@@ -177,20 +201,30 @@ pub struct InformationFlow {
 }
 
 impl InformationFlow {
-    /// Create a new information flow record
-    #[allow(clippy::disallowed_methods)]
+    /// Create a new information flow record.
+    ///
+    /// # Parameters
+    /// - `from`: Source context
+    /// - `to`: Destination context
+    /// - `info_type`: Type of information flowing
+    /// - `amount`: Amount of information (for budget tracking)
+    /// - `timestamp`: When the flow occurred (obtain from TimeEffects for testability)
+    ///
+    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
+    /// and consistency with the effect system architecture.
     pub fn new(
         from: ContextType,
         to: ContextType,
         info_type: impl Into<String>,
         amount: u64,
+        timestamp: chrono::DateTime<chrono::Utc>,
     ) -> Self {
         Self {
             from,
             to,
             info_type: info_type.into(),
             amount,
-            timestamp: chrono::Utc::now(),
+            timestamp,
         }
     }
 
@@ -252,19 +286,30 @@ impl ContextIsolation {
         Ok(())
     }
 
-    /// Record an information flow
+    /// Record an information flow.
+    ///
+    /// # Parameters
+    /// - `from`: Source context
+    /// - `to`: Destination context
+    /// - `info_type`: Type of information flowing
+    /// - `amount`: Amount of information (for budget tracking)
+    /// - `timestamp`: When the flow occurred (obtain from TimeEffects for testability)
+    ///
+    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
+    /// and consistency with the effect system architecture.
     pub fn record_flow(
         &mut self,
         from: ContextType,
         to: ContextType,
         info_type: impl Into<String>,
         amount: u64,
+        timestamp: chrono::DateTime<chrono::Utc>,
     ) -> AuraResult<()> {
         // Check if flow is allowed
         self.check_flow(&from, &to)?;
 
         // Record the flow
-        let flow = InformationFlow::new(from, to, info_type, amount);
+        let flow = InformationFlow::new(from, to, info_type, amount, timestamp);
         self.flows.push(flow);
 
         // Trim flows if necessary
@@ -331,9 +376,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_context_type_creation() {
-        let rid = ContextType::new_relationship();
-        let gid = ContextType::new_group();
+        let rid = ContextType::new_relationship(Uuid::new_v4());
+        let gid = ContextType::new_group(Uuid::new_v4());
 
         assert!(matches!(rid, ContextType::Relationship(_)));
         assert!(matches!(gid, ContextType::Group(_)));
@@ -341,9 +387,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_context_barrier() {
-        let rid1 = ContextType::new_relationship();
-        let rid2 = ContextType::new_relationship();
+        let rid1 = ContextType::new_relationship(Uuid::new_v4());
+        let rid2 = ContextType::new_relationship(Uuid::new_v4());
 
         let barrier = ContextBarrier::new("Test isolation").isolate(rid1.clone());
 
@@ -352,35 +399,40 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_context_isolation() {
         let mut isolation = ContextIsolation::new();
-        let rid1 = ContextType::new_relationship();
-        let rid2 = ContextType::new_relationship();
+        let rid1 = ContextType::new_relationship(Uuid::new_v4());
+        let rid2 = ContextType::new_relationship(Uuid::new_v4());
 
         let barrier = ContextBarrier::new("Test barrier").isolate(rid1.clone());
         isolation.add_barrier(barrier);
 
         // Flow should be blocked
-        assert!(isolation.record_flow(rid1, rid2, "test_info", 100).is_err());
+        let now = chrono::Utc::now();
+        assert!(isolation.record_flow(rid1, rid2, "test_info", 100, now).is_err());
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_information_flow() {
-        let rid1 = ContextType::new_relationship();
-        let rid2 = ContextType::new_relationship();
+        let rid1 = ContextType::new_relationship(Uuid::new_v4());
+        let rid2 = ContextType::new_relationship(Uuid::new_v4());
 
-        let flow = InformationFlow::new(rid1, rid2, "metadata", 50);
+        let now = chrono::Utc::now();
+        let flow = InformationFlow::new(rid1, rid2, "metadata", 50, now);
         assert!(flow.is_cross_context());
         assert_eq!(flow.info_type, "metadata");
         assert_eq!(flow.amount, 50);
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_context_display() {
-        let rid = ContextType::new_relationship();
+        let rid = ContextType::new_relationship(Uuid::new_v4());
         assert!(rid.to_string().starts_with("RID:"));
 
-        let custom = ContextType::custom("test");
+        let custom = ContextType::custom("test", Uuid::new_v4());
         assert!(custom.to_string().starts_with("test:"));
     }
 }

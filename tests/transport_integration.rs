@@ -76,7 +76,8 @@ async fn create_test_device(device_name: &str) -> (DeviceId, ConnectionManager) 
         timeout: Duration::from_secs(3),
         retry_count: 3,
     };
-    let manager = ConnectionManager::new(device_id.clone(), stun_config);
+    let random = std::sync::Arc::new(aura_effects::MockRandomHandler::new_with_seed(12345));
+    let manager = ConnectionManager::new(device_id.clone(), stun_config, random);
     (device_id, manager)
 }
 
@@ -459,9 +460,23 @@ async fn test_coordinated_hole_punch() {
             },
         };
 
+        // Get current timestamp for test
+        #[allow(clippy::disallowed_methods)]
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         // Test coordinated hole-punch
         let result = device_a_manager
-            .establish_connection_with_punch(device_b_id.clone(), &offer, &answer, connection_config)
+            .establish_connection_with_punch(
+                device_b_id.clone(),
+                &offer,
+                &answer,
+                connection_config,
+                start_time,
+                timestamp,
+            )
             .await;
 
         let connection_time = start_time.elapsed();

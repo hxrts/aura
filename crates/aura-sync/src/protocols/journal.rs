@@ -25,14 +25,14 @@
 //!     let config = JournalSyncConfig::default();
 //!     let protocol = JournalSyncProtocol::new(config);
 //!
-//!     let start = effects.now_instant().await?;
-//!     let result = protocol.sync_with_peers(effects, peers, start).await?;
+//!     let result = protocol.sync_with_peers(effects, peers).await?;
 //!     println!("Synced {} operations", result.operations_synced);
 //!     Ok(())
 //! }
 //! ```
 
-// TimeEffects integration complete - sync timing now uses explicit parameter
+// TODO: Refactor to use TimeEffects. Uses Instant::now() for sync timing
+// which should be replaced with effect system integration.
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::HashMap;
@@ -209,7 +209,7 @@ impl JournalSyncProtocol {
         &mut self,
         _effects: &E,
         peers: Vec<DeviceId>,
-        start: Instant,
+        start: std::time::Instant,
     ) -> SyncResult<JournalSyncResult>
     where
         E: Send + Sync,

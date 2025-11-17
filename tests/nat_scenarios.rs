@@ -139,7 +139,8 @@ async fn create_nat_device(
         retry_count: 2,
     };
 
-    let manager = ConnectionManager::new(device_id.clone(), stun_config);
+    let random = std::sync::Arc::new(aura_effects::MockRandomHandler::new_with_seed(12345));
+    let manager = ConnectionManager::new(device_id.clone(), stun_config, random);
 
     // Create transports based on NAT type
     let transports = create_nat_transports(&nat_type);

@@ -395,6 +395,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_observed_remove_semantics() {
         use crate::ledger::intent::{Intent, Priority};
         use aura_core::tree::{LeafNode, TreeOpKind};
@@ -403,6 +404,7 @@ mod tests {
         let mut journal2 = JournalMap::new();
 
         let intent = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             TreeOpKind::AddLeaf {
                 leaf: LeafNode::new_device(
                     aura_core::tree::LeafId(0),

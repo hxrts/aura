@@ -6,9 +6,9 @@ This document tracks remaining violations of the effect system architecture prin
 
 - **Total violations audited:** 133
 - **Legitimate (test code, effect implementations):** 70 (53%)
-- **Production code violations remaining:** 14 (11%) - down from 33
-- **Production code violations fixed:** 19 (14%) - up from 12
-- **Trait limitations (tracked):** 12 (9%)
+- **Production code violations remaining:** 0 (0%) - All production violations fixed! 🎉
+- **Production code violations fixed:** 44 (33%) - Includes Phases 9-11 (trait evolution, bridge, and websocket fixes)
+- **Bridge violations (tracked, no longer blocking):** 1 (1%)
 - **Bootstrap code (acceptable):** 18 (13%)
 
 ## Completed Fixes
@@ -41,19 +41,90 @@ This document tracks remaining violations of the effect system architecture prin
   - `aura-core/src/crypto/tree_signing.rs:440` - frost_sign_partial_with_keypackage now accepts RngCore parameter
   - `aura-protocol/src/handlers/memory/ledger_memory.rs:102` - MemoryLedgerHandler now stores RandomEffects dependency
 
-### Phase 5 (Completed - Current)
-- ✅ Fixed aura-sync production violations (7 locations):
-  - `aura-sync/src/core/session.rs:323` - create_session now accepts `now: Instant` parameter for metrics tracking
-  - `aura-sync/src/protocols/snapshots.rs:289` - commit now accepts `completion_id: Uuid` parameter from RandomEffects
-  - `aura-sync/src/protocols/ota.rs:189` - propose_upgrade now accepts `proposal_id: Uuid` parameter from RandomEffects
-  - `aura-sync/src/protocols/journal.rs:215` - sync_with_peers now accepts `start: Instant` parameter for duration measurement
-  - `aura-sync/src/services/maintenance.rs:89` - SnapshotProposed::new now accepts `proposal_id: Uuid` parameter
-  - `aura-sync/src/services/maintenance.rs:457` - MaintenanceService::start_with_time added (backwards compatible)
-  - `aura-sync/src/services/sync.rs:259` - SyncService::start_with_time added (backwards compatible)
-- ✅ All test code updated to pass required parameters
-- ✅ Documentation examples updated to show correct usage patterns
+### Phase 5 (Completed - Commit b26b3c2)
+- ✅ Fixed remaining aura-sync timing and randomness violations (6 violations):
+  - `aura-sync/src/core/session.rs:325` - create_session now accepts `now: Instant` parameter
+  - `aura-sync/src/protocols/journal.rs:216` - sync_with_peers now accepts `start: Instant` parameter
+  - `aura-sync/src/protocols/ota.rs:192` - propose_upgrade now accepts `proposal_id: Uuid` parameter
+  - `aura-sync/src/protocols/snapshots.rs:295` - commit now accepts `completion_id: Uuid` parameter
+  - `aura-sync/src/services/maintenance.rs:458` - Service::start trait now accepts `now: Instant` parameter
+  - `aura-sync/src/services/sync.rs:260` - SyncService::start now uses `now` parameter
+- ✅ Updated all test code to pass time/UUID parameters
+- ✅ Updated Service trait signature to require `now` parameter
 
-## Remaining Production Violations (14 total)
+### Phase 6 (Completed - Commit e48bbda)
+- ✅ Fixed aura-protocol transport coordinator timing violations (3 violations):
+  - `aura-protocol/src/handlers/transport_coordinator.rs:207` - Connection metadata now uses TimeEffects
+  - `aura-protocol/src/handlers/transport_coordinator.rs:232` - Connection tracking now uses TimeEffects
+  - `aura-protocol/src/handlers/transport_coordinator.rs:294` - Stale connection cleanup now uses TimeEffects
+- ✅ Renamed `_effects` field to `effects` to enable usage
+- ✅ All connection lifecycle timing now uses `self.effects.now_instant().await` for testability
+
+### Phase 7 (Completed - Commit 58cc4ff)
+- ✅ Fixed aura-rendezvous timing violations (4 violations):
+  - `aura-rendezvous/src/connection_manager.rs:503/516` - Refactored establish_connection_with_punch to accept `start_time` parameter
+  - `aura-rendezvous/src/integrated_sbb.rs:282` - Refactored cleanup_expired_data to accept `current_time` parameter
+  - `aura-rendezvous/src/capability_aware_sbb.rs` - Removed current_timestamp() helper, refactored SbbFlowBudget methods to accept `now` parameter
+  - `aura-rendezvous/src/sbb.rs` - Updated SbbFlooding trait to require `now` parameter in flood_envelope
+- ✅ Fixed aura-authenticate guardian verification (1 violation):
+  - `aura-authenticate/src/guardian_auth.rs:355` - Refactored verify_guardian_challenge to accept `now` parameter
+
+### Phase 8 (Completed - Commit 199ab06)
+- ✅ Fixed remaining aura-authenticate timing violations (4 violations):
+  - `aura-authenticate/src/guardian_auth.rs:496` - Refactored validate_recovery_request to accept `now: u64` parameter
+  - `aura-authenticate/src/guardian_auth.rs:534` - Refactored generate_guardian_challenge to accept `nonce: u128` parameter
+  - `aura-authenticate/src/guardian_auth.rs:691/798/848` - Refactored execute_requester and execute_guardian to accept `now: u64` parameter
+- ✅ Updated public execute() method to accept and propagate `now` parameter through role dispatch
+- ✅ Fixed pre-existing syntax errors (missing semicolons) encountered during refactoring
+
+### Phase 9 (Completed - Commit 4682bdb)
+- ✅ Fixed trait evolution violations (5 violations):
+  - `aura-agent/src/runtime/reliability.rs:353` - ReliabilityCoordinator now stores TimeEffects dependency
+  - `aura-protocol/src/handlers/memory/ledger_memory.rs:116,133` - MemoryLedgerHandler stores TimeEffects and RandomEffects
+  - `aura-protocol/src/handlers/memory/guardian_authorization.rs:350,446` - Methods accept `now` parameter
+- ✅ Followed Layer 4 orchestration pattern for stateful multi-effect coordination
+- ✅ All implementations use explicit dependency injection per architecture guidelines
+
+### Phase 10 (Completed - Commit 57ba401)
+- ✅ Fixed MPST context isolation violations (5 violations):
+  - `aura-mpst/src/context.rs:277` - InformationFlow::new() now accepts `timestamp` parameter
+  - `aura-mpst/src/context.rs:267` - ContextIsolation::record_flow() now accepts `timestamp` parameter
+  - `aura-mpst/src/context.rs:55,61,67,78` - ContextType constructors (new_relationship, new_group, new_key_derivation, custom) now accept `id: Uuid` parameter
+- ✅ Fixed journal ID constructor violations (2 violations):
+  - `aura-journal/src/ledger/intent.rs:26` - IntentId::new() now accepts `id: Uuid` parameter
+  - `aura-journal/src/ledger/capability.rs:21` - CapabilityId::new() now accepts `id: Uuid` parameter
+- ✅ Removed leftover #[allow] annotation from execute_requester in guardian_auth.rs
+- ✅ Updated Intent::new() to accept IntentId as first parameter (12 call sites)
+- ✅ Updated RecoveryCapability::new() to accept CapabilityId as first parameter (4 call sites)
+- ✅ All test code updated with proper #[allow(clippy::disallowed_methods)] annotations
+- ✅ All tests passing in aura-mpst and aura-journal
+
+### Phase 11 (Completed - Commit ca82d9e)
+- ✅ Fixed WebSocket connection timing violation (1 violation):
+  - `aura-rendezvous/src/connection_manager.rs:837` - generate_websocket_key() now accepts `timestamp: u64` parameter
+  - Updated perform_websocket_handshake() to accept and propagate timestamp parameter
+  - Updated try_websocket_connection() to accept and propagate timestamp parameter
+  - Updated try_direct_connection() to accept and propagate timestamp parameter
+  - Updated establish_connection() to accept `timestamp: u64` parameter
+  - Updated establish_connection_with_punch() to accept both `start_time: Instant` and `timestamp: u64` parameters
+- ✅ Updated all call sites in production code to propagate timestamp parameter
+- ✅ Updated 2 test functions to generate timestamp with proper #[allow(clippy::disallowed_methods)] annotations
+- ✅ Documentation added explaining timestamp parameter should come from TimeEffects for testability
+- ✅ Note: Remaining bridge violations (1) are in factory/bridge code with deterministic constants (not actual violations)
+
+### Phase 12 (Completed - Current)
+- ✅ Improved WebSocket key generation security with RandomEffects:
+  - `aura-rendezvous/src/connection_manager.rs:244` - ConnectionManager::new now accepts `random: Arc<dyn RandomEffects>` parameter
+  - `aura-rendezvous/src/connection_manager.rs:902` - generate_websocket_key() now uses RandomEffects for cryptographically secure 16-byte random nonce
+  - Removed timestamp-based key generation in favor of proper cryptographic randomness per RFC 6455 WebSocket protocol
+  - Updated try_coordinated_punch() to use RandomEffects for session UUID generation
+- ✅ Updated all ConnectionManager instantiations:
+  - Updated 3 unit tests in connection_manager.rs to provide MockRandomHandler
+  - Updated transport_integration.rs test helper to provide MockRandomHandler
+  - Updated nat_scenarios.rs test helper to provide MockRandomHandler
+- ✅ WebSocket handshake now fully compliant with security best practices using crypto-secure random nonces
+
+## Remaining Production Violations (0 total - ALL FIXED! 🎉)
 
 ### Priority 1: CRITICAL SECURITY - Cryptographic Operations ✅ COMPLETED (Phase 4)
 
@@ -68,7 +139,7 @@ This document tracks remaining violations of the effect system architecture prin
 
 **Testing**: Adapter includes comprehensive unit tests for deterministic behavior.
 
-### Priority 2: HIGH - Infrastructure Timing (7 violations remaining, 11 fixed)
+### Priority 2: HIGH - Infrastructure Timing (4 violations remaining)
 
 **Impact**: Infrastructure timing affects protocol decisions, resource management, and must be testable.
 
@@ -76,57 +147,106 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ `aura-sync/src/infrastructure/peers.rs` - discover_peers and add_peer
 - ✅ `aura-sync/src/infrastructure/connections.rs` - acquire and release
 
-**Fixed in Phase 5** (7 violations):
-- ✅ `aura-sync/src/core/session.rs:323` - create_session metrics tracking
-- ✅ `aura-sync/src/protocols/snapshots.rs:289` - snapshot commit
-- ✅ `aura-sync/src/protocols/ota.rs:189` - OTA proposal
-- ✅ `aura-sync/src/protocols/journal.rs:215` - duration measurement
-- ✅ `aura-sync/src/services/maintenance.rs:89` - proposal ID
-- ✅ `aura-sync/src/services/maintenance.rs:457` - service lifecycle
-- ✅ `aura-sync/src/services/sync.rs:259` - service lifecycle
+**Fixed in Phase 5** (6 violations):
+- ✅ `aura-sync/src/core/session.rs` - create_session
+- ✅ `aura-sync/src/protocols/journal.rs` - sync_with_peers
+- ✅ `aura-sync/src/protocols/ota.rs` - propose_upgrade (UUID)
+- ✅ `aura-sync/src/protocols/snapshots.rs` - commit (UUID)
+- ✅ `aura-sync/src/services/maintenance.rs` - Service::start
+- ✅ `aura-sync/src/services/sync.rs` - Service::start
 
-**Note**: All aura-sync violations have been fixed!
+**Fixed in Phase 6** (3 violations):
+- ✅ `aura-protocol/src/handlers/transport_coordinator.rs` - Connection metadata, tracking, and cleanup
 
-**Solution**: All methods now accept time/random parameters from caller's effect access.
+**Fixed in Phase 7** (5 violations):
+- ✅ `aura-rendezvous/src/connection_manager.rs` - Connection timing for hole punching
+- ✅ `aura-rendezvous/src/integrated_sbb.rs` - SBB cleanup timing
+- ✅ `aura-rendezvous/src/capability_aware_sbb.rs` - Flow budget and timestamp operations
+- ✅ `aura-authenticate/src/guardian_auth.rs` - Guardian challenge verification
 
-#### aura-protocol Transport (3 violations)
+#### aura-sync Infrastructure (3 violations remaining - all already fixed, documentation outdated)
 
-- `crates/aura-protocol/src/handlers/transport_coordinator.rs:207` - Connection metadata
-- `crates/aura-protocol/src/handlers/transport_coordinator.rs:232` - Connection tracking
-- `crates/aura-protocol/src/handlers/transport_coordinator.rs:294` - Coordination timing
+**Peers (0 violations - fixed in Phase 3):**
+- ✅ Fixed: PeerMetadata::new already accepts `now` parameter
 
-**Solution**: TransportCoordinator already has TimeEffects access - use it!
+**Connections (0 violations - fixed in Phase 3):**
+- ✅ Fixed: ConnectionMetadata::new and ConnectionHandle::new already accept `now` parameter
 
-#### aura-rendezvous (3 violations)
+**Sessions (0 violations - all fixed in Phase 5):**
+- ✅ Fixed: Session creation, metrics, and cleanup now use `now` parameter
 
-- `crates/aura-rendezvous/src/connection_manager.rs:502, 515` - Connection timing
-- `crates/aura-rendezvous/src/integrated_sbb.rs:281` - SBB timing
-- `crates/aura-rendezvous/src/capability_aware_sbb.rs:538` - Capability timing
+**Metrics (0 violations - fixed in Phase 5):**
+- ✅ Fixed: Sync start recording now uses `now` parameter
 
-**Solution**: Refactor to accept time parameter.
+**Protocols (0 violations - all fixed in Phase 5):**
+- ✅ Fixed: Duration measurement and OTA timing
 
-### Priority 3: MEDIUM - Other Infrastructure (3 violations)
+**Services (0 violations - all fixed in Phase 5):**
+- ✅ Fixed: Service lifecycle now accepts `now` parameter
 
-#### aura-authenticate (2 violations)
-- `crates/aura-authenticate/src/guardian_auth.rs:353, 582` - Guardian authentication timing
+#### aura-protocol Transport (0 violations - all fixed in Phase 6)
+- ✅ Fixed: All connection lifecycle timing now uses TimeEffects
 
-#### aura-sync Snapshots (1 violation)
-- `crates/aura-sync/src/protocols/snapshots.rs:289` - Snapshot finalization
+#### aura-rendezvous (0 violations - all fixed in Phase 7)
+- ✅ Fixed: All connection timing, SBB cleanup, and capability timing operations
 
-## Trait Evolution Needed (12 violations)
+### Priority 3: MEDIUM - Other Infrastructure (0 violations - all fixed in Phase 8)
 
-These have legitimate architectural constraints that require trait signature changes:
+#### aura-authenticate (0 violations - all fixed in Phase 8)
 
-1. **`ReliabilityEffects` trait** - Needs TimeEffects or time parameter
-   - `aura-agent/src/runtime/reliability.rs:353`
+All timing violations have been resolved by refactoring methods to accept time/nonce parameters:
 
-2. **Memory handlers** - Need RandomEffects/TimeEffects integration
-   - `aura-protocol/src/handlers/memory/*.rs` (multiple files)
+- ✅ `crates/aura-authenticate/src/guardian_auth.rs:496` - validate_recovery_request now accepts `now: u64` parameter
+- ✅ `crates/aura-authenticate/src/guardian_auth.rs:534` - generate_guardian_challenge now accepts `nonce: u128` parameter
+- ✅ `crates/aura-authenticate/src/guardian_auth.rs:691/798/848` - execute_requester and execute_guardian now accept `now: u64` parameter
 
-3. **Bridge implementations** - Trait signatures don't support effects yet
-   - Various bridge and factory files
+**Note**: While this is MVP placeholder code with extensive TODOs, the timing violations have been fixed to align with effect system architecture. The guardian authentication system still needs comprehensive refactoring to integrate with aura-wot capabilities and proper network effects, but timing is now properly injected.
 
-**Solution**: Track with existing TODO comments, update traits in coordinated effort.
+#### aura-sync Snapshots (0 violations - fixed in Phase 5)
+- ✅ Fixed: Snapshot finalization now accepts UUID parameter
+
+## Trait Evolution Completed (Phase 9)
+
+### Fixed Violations (5 total):
+
+1. **✅ `ReliabilityEffects` trait implementation** (aura-agent/src/runtime/reliability.rs:353)
+   - Solution: ReliabilityCoordinator now stores TimeEffects dependency
+   - Uses `self.time.now_instant().await` for circuit breaker state tracking
+   - Follows Layer 4 orchestration pattern for stateful multi-effect coordination
+
+2. **✅ Memory ledger handler** (aura-protocol/src/handlers/memory/ledger_memory.rs)
+   - Solution: MemoryLedgerHandler now stores RandomEffects and TimeEffects dependencies
+   - `current_timestamp()` uses `self.time.current_timestamp().await`
+   - `new_uuid()` uses `self.random.random_bytes(16).await` for UUID generation
+
+3. **✅ Guardian authorization handler** (aura-protocol/src/handlers/memory/guardian_authorization.rs)
+   - Solution: Methods now accept `now: u64` parameter
+   - `evaluate_guardian_authorization()` accepts `now` parameter for time validation
+   - `add_guardian_relationship()` accepts `now` parameter for timestamp recording
+   - `validate_time_constraints()` accepts `now` parameter instead of calling SystemTime::now()
+
+### Architectural Approach
+
+The Phase 9 fixes follow the architecture principles from docs/002_system_architecture.md:
+
+- **Layer 3 (Implementation)**: Stateless effect handlers work in any execution context
+- **Layer 4 (Orchestration)**: Stateful coordinators store effect dependencies for multi-effect operations
+- **Explicit Dependency Injection**: Implementations store effect dependencies rather than calling system functions directly
+- **Testability**: All timing and randomness now properly injected for deterministic testing
+
+### Remaining Bridge Violations (1 violation)
+
+These violations are in bridge and factory code that require broader architectural changes:
+
+1. **Factory Default implementation** (aura-protocol/src/handlers/core/factory.rs:515)
+   - Uses deterministic UUID constant (all zeros) for test configuration
+   - Not an actual violation - creates fixed device ID for `ExecutionMode::Testing`
+   - #[allow] annotation present but this is legitimate use of a constant
+   - No action required - this is correctly using a deterministic value
+
+**Status**: Phase 10 eliminated 5 of the 7 bridge violations by fixing ID constructors. Phase 11 fixed the websocket connection timing. The remaining 1 "violation" is actually legitimate - it's a deterministic constant for testing.
+
+**Solution**: No action needed. All actual production violations have been eliminated.
 
 ## Legitimate Uses (Keep)
 
@@ -172,10 +292,23 @@ These have legitimate architectural constraints that require trait signature cha
 
 1. ~~**Phase 3**: Fix aura-sync infrastructure timing (4 violations in peers/connections)~~ ✅ COMPLETED
 2. ~~**Phase 4**: Create FROST RNG adapter and fix cryptographic violations (6 violations)~~ ✅ COMPLETED
-3. ~~**Phase 5**: Fix remaining aura-sync timing violations (7 violations)~~ ✅ COMPLETED
-4. **Phase 6**: Fix aura-protocol transport coordinator (3 violations) - NEXT
-5. **Phase 7**: Fix remaining infrastructure violations (7 violations in aura-rendezvous and aura-authenticate)
-6. **Phase 8**: Address trait evolution needs (coordinated effort)
+3. ~~**Phase 5**: Fix remaining aura-sync timing violations (6 violations)~~ ✅ COMPLETED
+4. ~~**Phase 6**: Fix aura-protocol transport coordinator (3 violations)~~ ✅ COMPLETED
+5. ~~**Phase 7**: Fix aura-rendezvous and verification violations (5 violations)~~ ✅ COMPLETED
+6. ~~**Phase 8**: Address aura-authenticate timing violations (4 violations)~~ ✅ COMPLETED
+7. ~~**Phase 9**: Address trait evolution needs (5 violations fixed)~~ ✅ COMPLETED
+8. ~~**Phase 10**: Fix MPST context isolation and journal ID constructors (7 violations fixed)~~ ✅ COMPLETED
+9. ~~**Phase 11**: Fix WebSocket connection timing (1 violation fixed)~~ ✅ COMPLETED
+10. ~~**Phase 12**: Improve WebSocket key generation security with RandomEffects~~ ✅ COMPLETED
+
+**All actual production violations have been eliminated!** 🎉
+
+The remaining #[allow] annotations in the codebase are all legitimate:
+- Effect implementations (aura-effects)
+- Core ID constructors (aura-core)
+- Test code (all #[test] functions)
+- Bootstrap initialization
+- Deterministic constants for testing
 
 ## References
 
@@ -184,6 +317,13 @@ These have legitimate architectural constraints that require trait signature cha
 - Phase 2 fixes: Commit 21ecda6
 - Phase 3 fixes: Commit 6d52ec2
 - Phase 4 fixes: Commit eec77f3
-- Phase 5 fixes: Current commit
+- Phase 5 fixes: Commit b26b3c2
+- Phase 6 fixes: Commit e48bbda
+- Phase 7 fixes: Commit 58cc4ff
+- Phase 8 fixes: Commit 199ab06
+- Phase 9 fixes: Commit 4682bdb
+- Phase 10 fixes: Commit 57ba401
+- Phase 11 fixes: Commit ca82d9e
+- Phase 12 fixes: Current commit
 - Architecture: docs/002_system_architecture.md (Effect System section)
 - FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)

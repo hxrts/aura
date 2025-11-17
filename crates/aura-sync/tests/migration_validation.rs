@@ -21,7 +21,7 @@ use aura_sync::core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 /// Test protocol state for session management tests
@@ -382,12 +382,14 @@ fn test_prometheus_export_format() {
 #[test]
 fn test_unified_session_management() {
     // Test session manager handles all sync session patterns
+    #[allow(clippy::disallowed_methods)]
+    let now = Instant::now();
     let config = SessionConfig::default();
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, now);
 
     // Test session creation and activation
     let participants = vec![DeviceId::new(), DeviceId::new()];
-    let session_id = manager.create_session(participants.clone()).unwrap();
+    let session_id = manager.create_session(participants.clone(), now).unwrap();
 
     let initial_state = TestSyncProtocolState {
         phase: "initialization".to_string(),
@@ -434,10 +436,12 @@ fn test_unified_session_management() {
 #[test]
 fn test_session_failure_handling() {
     // Test session failure scenarios
+    #[allow(clippy::disallowed_methods)]
+    let now = Instant::now();
     let config = SessionConfig::default();
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, now);
 
-    let session_id = manager.create_session(vec![DeviceId::new()]).unwrap();
+    let session_id = manager.create_session(vec![DeviceId::new()], now).unwrap();
     let state = TestSyncProtocolState {
         phase: "test".to_string(),
         operations_pending: 50,
@@ -478,16 +482,18 @@ fn test_session_failure_handling() {
 #[test]
 fn test_session_resource_limits() {
     // Test session resource management
+    #[allow(clippy::disallowed_methods)]
+    let now = Instant::now();
     let config = SessionConfig {
         max_concurrent_sessions: 2,
         max_participants: 3,
         ..SessionConfig::default()
     };
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, now);
 
     // Test participant limit
     let too_many_participants = vec![DeviceId::new(); 5];
-    let result = manager.create_session(too_many_participants);
+    let result = manager.create_session(too_many_participants, now);
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), SyncError::Validation { .. }));
 
@@ -498,13 +504,13 @@ fn test_session_resource_limits() {
         bytes_transferred: 0,
     };
 
-    let session1 = manager.create_session(vec![DeviceId::new()]).unwrap();
-    let session2 = manager.create_session(vec![DeviceId::new()]).unwrap();
+    let session1 = manager.create_session(vec![DeviceId::new()], now).unwrap();
+    let session2 = manager.create_session(vec![DeviceId::new()], now).unwrap();
     manager.activate_session(session1, state.clone()).unwrap();
     manager.activate_session(session2, state).unwrap();
 
     // Third session should exceed limit
-    let result = manager.create_session(vec![DeviceId::new()]);
+    let result = manager.create_session(vec![DeviceId::new()], now);
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -515,8 +521,10 @@ fn test_session_resource_limits() {
 #[test]
 fn test_session_statistics() {
     // Test session statistics collection
+    #[allow(clippy::disallowed_methods)]
+    let now = Instant::now();
     let config = SessionConfig::default();
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, now);
 
     // Create various session outcomes
     let state = TestSyncProtocolState {
@@ -526,14 +534,14 @@ fn test_session_statistics() {
     };
 
     // Successful session
-    let session1 = manager.create_session(vec![DeviceId::new()]).unwrap();
+    let session1 = manager.create_session(vec![DeviceId::new()], now).unwrap();
     manager.activate_session(session1, state.clone()).unwrap();
     manager
         .complete_session(session1, 50, 1000, HashMap::new())
         .unwrap();
 
     // Failed session
-    let session2 = manager.create_session(vec![DeviceId::new()]).unwrap();
+    let session2 = manager.create_session(vec![DeviceId::new()], now).unwrap();
     manager.activate_session(session2, state.clone()).unwrap();
     let error = SessionError::Timeout { duration_ms: 5000 };
     manager.fail_session(session2, error, None).unwrap();
@@ -563,7 +571,7 @@ fn test_cross_module_integration() {
 
     // Perform a complete sync session workflow
     let session_id = session_manager
-        .create_session(vec![DeviceId::new()])
+        .create_session(vec![DeviceId::new()], now)
         .unwrap();
 
     let state = TestSyncProtocolState {
@@ -633,7 +641,9 @@ fn test_backwards_compatibility_surface() {
     let _metrics = MetricsCollector::new();
 
     // Basic session management
-    let _session_manager = SessionManager::<TestSyncProtocolState>::new(SessionConfig::default());
+    #[allow(clippy::disallowed_methods)]
+    let now = Instant::now();
+    let _session_manager = SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), now);
 
     // Basic message patterns
     let _session_msg = SessionMessage::new(SessionId::new(), "test");

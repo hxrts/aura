@@ -320,7 +320,7 @@ where
 
         self.sessions.insert(session_id, session_state);
 
-        // Record metrics
+        // Record metrics with the provided now parameter
         if let Some(ref metrics) = self.metrics {
             metrics.record_sync_start(&session_id.to_string(), now);
         }
@@ -835,7 +835,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
         let mut manager = SessionManager::<TestProtocolState>::new(config, now);
-
+        
         let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
         
         // Wait for timeout

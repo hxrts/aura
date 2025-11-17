@@ -21,15 +21,11 @@
 //! let config = OTAConfig::default();
 //! let protocol = OTAProtocol::new(config);
 //!
-//! // Propose upgrade (generate IDs from RandomEffects in production)
-//! let proposal_id = effects.random_uuid().await?;
+//! // Propose upgrade
 //! let proposal = protocol.propose_upgrade(
-//!     proposal_id,
 //!     package_id,
 //!     version,
 //!     UpgradeKind::SoftFork,
-//!     package_hash,
-//!     proposer_device,
 //! )?;
 //! # Ok(())
 //! # }
@@ -177,7 +173,7 @@ impl OTAProtocol {
 
     /// Propose an upgrade
     ///
-    /// Note: Callers should generate `proposal_id` via `RandomEffects::random_uuid()` and pass it to this method
+    /// Note: Callers should obtain `proposal_id` via `RandomEffects` or use `Uuid::new_v4()` in tests
     pub fn propose_upgrade(
         &mut self,
         proposal_id: Uuid,

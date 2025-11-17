@@ -80,8 +80,9 @@ impl Default for SbbForwardingPolicy {
 
 impl SbbFlowBudget {
     /// Create new flow budget with period limits
-    pub fn new(limit: u64, period_seconds: u64) -> Self {
-        let now = current_timestamp();
+    ///
+    /// Note: Callers should obtain `now` from TimeEffects and convert to Unix timestamp
+    pub fn new(limit: u64, period_seconds: u64, now: u64) -> Self {
         Self {
             spent: 0,
             limit,
@@ -91,9 +92,9 @@ impl SbbFlowBudget {
     }
 
     /// Check if there's enough budget for a message
-    pub fn can_spend(&self, bytes: u64) -> bool {
-        let now = current_timestamp();
-
+    ///
+    /// Note: Callers should obtain `now` from TimeEffects and convert to Unix timestamp
+    pub fn can_spend(&self, bytes: u64, now: u64) -> bool {
         // If period expired, reset budget
         if now >= self.period_start + self.period_seconds {
             return bytes <= self.limit;
@@ -103,9 +104,9 @@ impl SbbFlowBudget {
     }
 
     /// Spend bytes from budget (call after can_spend check)
-    pub fn spend(&mut self, bytes: u64) -> AuraResult<()> {
-        let now = current_timestamp();
-
+    ///
+    /// Note: Callers should obtain `now` from TimeEffects and convert to Unix timestamp
+    pub fn spend(&mut self, bytes: u64, now: u64) -> AuraResult<()> {
         // Reset budget if period expired
         if now >= self.period_start + self.period_seconds {
             self.spent = 0;
@@ -124,9 +125,9 @@ impl SbbFlowBudget {
     }
 
     /// Get remaining budget in current period
-    pub fn remaining(&self) -> u64 {
-        let now = current_timestamp();
-
+    ///
+    /// Note: Callers should obtain `now` from TimeEffects and convert to Unix timestamp
+    pub fn remaining(&self, now: u64) -> u64 {
         // If period expired, full budget is available
         if now >= self.period_start + self.period_seconds {
             return self.limit;
@@ -136,12 +137,13 @@ impl SbbFlowBudget {
     }
 
     /// Get budget utilization (0.0-1.0)
-    pub fn utilization(&self) -> f64 {
+    ///
+    /// Note: Callers should obtain `now` from TimeEffects and convert to Unix timestamp
+    pub fn utilization(&self, now: u64) -> f64 {
         if self.limit == 0 {
             return 1.0;
         }
 
-        let now = current_timestamp();
         if now >= self.period_start + self.period_seconds {
             return 0.0;
         }
@@ -408,6 +410,7 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
         &mut self,
         envelope: RendezvousEnvelope,
         from_peer: Option<DeviceId>,
+        now: u64,
     ) -> AuraResult<FloodResult> {
         // Check TTL
         if envelope.ttl == 0 {
@@ -420,7 +423,7 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
         }
 
         // Cache envelope
-        let expires_at = current_timestamp() + 3600;
+        let expires_at = now + 3600;
         self.envelope_cache
             .insert(envelope.id, (envelope.clone(), expires_at));
         self.seen_envelopes.insert(envelope.id);
@@ -531,13 +534,6 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
 
         Ok(())
     }
-}
-
-/// Get current timestamp (placeholder - would use time effects)
-fn current_timestamp() -> u64 {
-    #[allow(clippy::disallowed_methods)]
-    let now = SystemTime::now();
-    now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
 #[cfg(test)]

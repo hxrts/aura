@@ -167,6 +167,7 @@ pub struct ConnectionManager {
     stun_client: StunClient,
     #[allow(dead_code)]
     connection_timeout: Duration,
+    random: std::sync::Arc<dyn aura_core::RandomEffects>,
 }
 
 /// Connection establishment result
@@ -240,22 +241,37 @@ impl Default for ConnectionConfig {
 
 impl ConnectionManager {
     /// Create new connection manager
-    pub fn new(device_id: DeviceId, stun_config: StunConfig) -> Self {
+    pub fn new(
+        device_id: DeviceId,
+        stun_config: StunConfig,
+        random: std::sync::Arc<dyn aura_core::RandomEffects>,
+    ) -> Self {
         let stun_client = StunClient::new(stun_config);
 
         Self {
             device_id,
             stun_client,
             connection_timeout: Duration::from_secs(2),
+            random,
         }
     }
 
-    /// Establish connection using priority logic: direct → reflexive → relay
+    /// Establish connection using priority logic: direct → reflexive → relay.
+    ///
+    /// # Parameters
+    /// - `peer_id`: Device ID of the peer to connect to
+    /// - `offers`: Available transport descriptors
+    /// - `config`: Connection configuration
+    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
+    ///
+    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
+    /// and consistency with the effect system architecture.
     pub async fn establish_connection(
         &self,
         peer_id: DeviceId,
         offers: Vec<TransportDescriptor>,
         config: ConnectionConfig,
+        timestamp: u64,
     ) -> Result<ConnectionResult, AuraError> {
         use std::time::Duration;
 
@@ -473,13 +489,26 @@ impl ConnectionManager {
         })
     }
 
-    /// Establish connection with coordinated hole-punching using offer/answer exchange
+    /// Establish connection with coordinated hole-punching using offer/answer exchange.
+    ///
+    /// # Parameters
+    /// - `peer_id`: Device ID of the peer to connect to
+    /// - `offer`: Transport offer payload
+    /// - `answer`: Transport answer payload
+    /// - `config`: Connection configuration
+    /// - `start_time`: Instant for duration tracking (obtain from TimeEffects for testability)
+    /// - `timestamp`: Unix timestamp in seconds for websocket keys (obtain from TimeEffects for testability)
+    ///
+    /// Note: Callers should obtain both `start_time` and `timestamp` from TimeEffects to maintain
+    /// testability and consistency with the effect system architecture.
     pub async fn establish_connection_with_punch(
         &self,
         peer_id: DeviceId,
         offer: &TransportOfferPayload,
         answer: &TransportOfferPayload,
         config: ConnectionConfig,
+        start_time: std::time::Instant,
+        timestamp: u64,
     ) -> Result<ConnectionResult, AuraError> {
         tracing::info!(
             peer_id = %peer_id.0,
@@ -494,13 +523,10 @@ impl ConnectionManager {
             _ => {
                 tracing::debug!("No coordinated punch nonces, falling back to standard connection");
                 return self
-                    .establish_connection(peer_id, offer.transports.clone(), config)
+                    .establish_connection(peer_id, offer.transports.clone(), config, timestamp)
                     .await;
             }
         };
-
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
 
         // Try coordinated hole-punching for QUIC transports with reflexive addresses
         if config.enable_hole_punch {
@@ -512,8 +538,7 @@ impl ConnectionManager {
                 if transport.kind == TransportKind::Quic
                     && !transport.reflexive_addresses.is_empty()
                 {
-                    #[allow(clippy::disallowed_methods)]
-                    let attempt_start = std::time::Instant::now();
+                    let attempt_start = start_time;
 
                     match self
                         .try_coordinated_punch(
@@ -552,11 +577,16 @@ impl ConnectionManager {
 
         // Fallback to standard connection establishment
         tracing::debug!("Hole-punch failed, falling back to standard connection methods");
-        self.establish_connection(peer_id, offer.transports.clone(), config)
+        self.establish_connection(peer_id, offer.transports.clone(), config, timestamp)
             .await
     }
 
-    /// Try direct connection to address
+    /// Try direct connection to address.
+    ///
+    /// # Parameters
+    /// - `transport`: Transport descriptor specifying the connection method
+    /// - `address`: Address to connect to
+    /// - `config`: Connection configuration
     async fn try_direct_connection(
         &self,
         transport: TransportDescriptor,
@@ -579,11 +609,14 @@ impl ConnectionManager {
             }
             TransportKind::WebSocket => {
                 // Would implement WebSocket connection
-                timeout(config.attempt_timeout, self.try_websocket_connection(addr))
-                    .await
-                    .map_err(|_| {
-                        AuraError::coordination_failed("WebSocket connection timeout".to_string())
-                    })?
+                timeout(
+                    config.attempt_timeout,
+                    self.try_websocket_connection(addr),
+                )
+                .await
+                .map_err(|_| {
+                    AuraError::coordination_failed("WebSocket connection timeout".to_string())
+                })?
             }
             _ => Err(AuraError::coordination_failed(format!(
                 "Unsupported transport for direct connection: {:?}",
@@ -761,8 +794,14 @@ impl ConnectionManager {
         Ok(packet)
     }
 
-    /// Try WebSocket connection
-    async fn try_websocket_connection(&self, addr: SocketAddr) -> Result<SocketAddr, AuraError> {
+    /// Try WebSocket connection.
+    ///
+    /// # Parameters
+    /// - `addr`: Socket address to connect to
+    async fn try_websocket_connection(
+        &self,
+        addr: SocketAddr,
+    ) -> Result<SocketAddr, AuraError> {
         tracing::debug!(addr = %addr, "Attempting WebSocket connection");
 
         // Establish TCP connection first
@@ -776,7 +815,9 @@ impl ConnectionManager {
         })?;
 
         // Perform WebSocket handshake
-        let ws_connection = self.perform_websocket_handshake(std_stream, addr).await?;
+        let ws_connection = self
+            .perform_websocket_handshake(std_stream, addr)
+            .await?;
 
         tracing::info!(
             remote_addr = %addr,
@@ -786,7 +827,11 @@ impl ConnectionManager {
         Ok(ws_connection)
     }
 
-    /// Perform WebSocket handshake
+    /// Perform WebSocket handshake.
+    ///
+    /// # Parameters
+    /// - `stream`: TCP stream for the WebSocket connection
+    /// - `addr`: Socket address of the peer
     async fn perform_websocket_handshake(
         &self,
         mut stream: TcpStream,
@@ -794,8 +839,8 @@ impl ConnectionManager {
     ) -> Result<SocketAddr, AuraError> {
         use std::io::{Read, Write};
 
-        // Generate WebSocket key
-        let ws_key = self.generate_websocket_key();
+        // Generate WebSocket key with cryptographically secure randomness
+        let ws_key = self.generate_websocket_key().await;
 
         // Create WebSocket upgrade request
         let request = format!(
@@ -831,21 +876,21 @@ impl ConnectionManager {
         Ok(addr)
     }
 
-    /// Generate WebSocket key for handshake
-    fn generate_websocket_key(&self) -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
+    /// Generate WebSocket key for handshake using cryptographically secure randomness.
+    ///
+    /// # Returns
+    /// A base64-encoded 16-byte random nonce suitable for the Sec-WebSocket-Key header.
+    ///
+    /// # Note
+    /// Uses RandomEffects to generate cryptographically secure random bytes as required
+    /// by the WebSocket protocol (RFC 6455).
+    async fn generate_websocket_key(&self) -> String {
+        // Generate 16 cryptographically secure random bytes for WebSocket key
+        let bytes = self.random.random_bytes(16).await;
 
-        #[allow(clippy::disallowed_methods)]
-        let now = SystemTime::now();
-        let timestamp = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-
-        // Simple key generation (real implementation would use proper randomness)
-        let key_data = format!("aura-{}-{}", self.device_id, timestamp);
-
-        // Simple base64 encoding implementation
-        let mut result = String::new();
-        let bytes = key_data.as_bytes();
+        // Base64 encode the random bytes
         let chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut result = String::new();
 
         for chunk in bytes.chunks(3) {
             let mut buf = [0u8; 3];
@@ -938,10 +983,15 @@ impl ConnectionManager {
 
         // Bind to local address for punch session
         let local_bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+
+        // Generate session UUID using RandomEffects
+        let session_uuid = self.random.random_uuid().await;
+
         let punch_session = PunchSession::from_device_and_config(
             self.device_id,
             local_bind_addr,
             config.punch_config.clone(),
+            session_uuid,
         )
         .await
         .map_err(|e| {
@@ -996,12 +1046,14 @@ impl ConnectionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_effects::MockRandomHandler;
 
     #[tokio::test]
     async fn test_connection_manager_creation() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let manager = ConnectionManager::new(device_id, stun_config);
+        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
+        let manager = ConnectionManager::new(device_id, stun_config, random);
 
         assert_eq!(manager.device_id, device_id);
     }
@@ -1010,7 +1062,8 @@ mod tests {
     async fn test_connection_priority_logic() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let manager = ConnectionManager::new(device_id, stun_config);
+        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
+        let manager = ConnectionManager::new(device_id, stun_config, random);
 
         let offers = vec![
             TransportDescriptor::quic("192.168.1.100:8080".to_string(), "aura".to_string()),
@@ -1026,9 +1079,16 @@ mod tests {
             punch_config: PunchConfig::default(),
         };
 
+        // Get current timestamp for test
+        #[allow(clippy::disallowed_methods)]
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         let peer_id = DeviceId::from("peer_device");
         let result = manager
-            .establish_connection(peer_id, offers, config)
+            .establish_connection(peer_id, offers, config, timestamp)
             .await
             .unwrap();
 
@@ -1089,7 +1149,8 @@ mod tests {
 
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let manager = ConnectionManager::new(device_id, stun_config);
+        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
+        let manager = ConnectionManager::new(device_id, stun_config, random);
 
         // Create transport with reflexive address
         let transport = TransportDescriptor {
@@ -1125,9 +1186,18 @@ mod tests {
             },
         };
 
+        // Get current time values for test
+        #[allow(clippy::disallowed_methods)]
+        let start_time = std::time::Instant::now();
+        #[allow(clippy::disallowed_methods)]
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         let peer_id = DeviceId::from("peer_device");
         let result = manager
-            .establish_connection_with_punch(peer_id, &offer, &answer, config)
+            .establish_connection_with_punch(peer_id, &offer, &answer, config, start_time, timestamp)
             .await
             .unwrap();
 

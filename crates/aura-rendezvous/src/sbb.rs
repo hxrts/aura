@@ -171,10 +171,13 @@ pub enum FloodResult {
 #[async_trait::async_trait]
 pub trait SbbFlooding: Send + Sync {
     /// Flood envelope through social graph
+    ///
+    /// Note: Callers should obtain `now` from TimeEffects and convert to Unix timestamp
     async fn flood_envelope(
         &mut self,
         envelope: RendezvousEnvelope,
         from_peer: Option<DeviceId>,
+        now: u64,
     ) -> AuraResult<FloodResult>;
 
     /// Get forwarding peers (friends + guardians, capability-filtered)

@@ -16,21 +16,20 @@ pub type Timestamp = u64;
 pub struct CapabilityId(pub uuid::Uuid);
 
 impl CapabilityId {
-    /// Create a new random capability ID
-    #[allow(clippy::disallowed_methods)]
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4())
+    /// Create a new capability ID.
+    ///
+    /// # Parameters
+    /// - `id`: UUID for the capability (obtain from RandomEffects for testability)
+    ///
+    /// Note: Callers should obtain UUID from RandomEffects to maintain testability
+    /// and consistency with the effect system architecture.
+    pub fn new(id: uuid::Uuid) -> Self {
+        Self(id)
     }
 
-    /// Create from a UUID
+    /// Create from a UUID (alias for new)
     pub fn from_uuid(uuid: uuid::Uuid) -> Self {
-        Self(uuid)
-    }
-}
-
-impl Default for CapabilityId {
-    fn default() -> Self {
-        Self::new()
+        Self::new(uuid)
     }
 }
 
@@ -267,9 +266,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_capability_id_creation() {
-        let id1 = CapabilityId::new();
-        let id2 = CapabilityId::new();
+        let id1 = CapabilityId::new(uuid::Uuid::new_v4());
+        let id2 = CapabilityId::new(uuid::Uuid::new_v4());
         assert_ne!(id1, id2);
     }
 
@@ -298,9 +298,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_capability_ref_expiration() {
         let cap = CapabilityRef::new(
-            CapabilityId::new(),
+            CapabilityId::new(uuid::Uuid::new_v4()),
             ResourceRef::recovery(0, 1),
             1000,
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
@@ -312,9 +313,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_capability_ref_time_until_expiration() {
         let cap = CapabilityRef::new(
-            CapabilityId::new(),
+            CapabilityId::new(uuid::Uuid::new_v4()),
             ResourceRef::recovery(0, 1),
             1000,
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
@@ -326,13 +328,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_capability_ref_with_attenuation() {
         let attenuation = Attenuation::new()
             .with_max_uses(5)
             .with_operations(vec!["read".to_string()]);
 
         let cap = CapabilityRef::new(
-            CapabilityId::new(),
+            CapabilityId::new(uuid::Uuid::new_v4()),
             ResourceRef::storage("/data"),
             1000,
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
@@ -400,10 +403,11 @@ pub struct RecoveryCapability {
 }
 
 impl RecoveryCapability {
-    /// Create a new recovery capability
+    /// Create a new recovery capability.
     ///
     /// # Arguments
     ///
+    /// * `capability_id` - Unique identifier for the capability (obtain from RandomEffects for testability)
     /// * `target_device` - Device being recovered
     /// * `issuing_guardians` - Guardians issuing this capability
     /// * `guardian_threshold` - Number of guardians required
@@ -411,7 +415,11 @@ impl RecoveryCapability {
     /// * `leaf_index` - Leaf index of recovering device
     /// * `epoch` - Current epoch
     /// * `signature` - Threshold signature from guardians
+    ///
+    /// Note: Callers should obtain capability_id from RandomEffects to maintain testability
+    /// and consistency with the effect system architecture.
     pub fn new(
+        capability_id: CapabilityId,
         target_device: DeviceId,
         issuing_guardians: Vec<DeviceId>,
         guardian_threshold: usize,
@@ -421,7 +429,7 @@ impl RecoveryCapability {
         signature: CapabilitySignature,
     ) -> Self {
         let capability = CapabilityRef::new(
-            CapabilityId::new(),
+            capability_id,
             ResourceRef::recovery(leaf_index, epoch),
             expires_at,
             signature,
@@ -468,6 +476,7 @@ mod recovery_tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_recovery_capability_creation() {
         let target = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
         let guardians = vec![
@@ -477,7 +486,16 @@ mod recovery_tests {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
 
-        let recovery_cap = RecoveryCapability::new(target, guardians.clone(), 2, 10000, 0, 1, sig);
+        let recovery_cap = RecoveryCapability::new(
+            CapabilityId::new(uuid::Uuid::new_v4()),
+            target,
+            guardians.clone(),
+            2,
+            10000,
+            0,
+            1,
+            sig,
+        );
 
         assert_eq!(recovery_cap.target_device, target);
         assert_eq!(recovery_cap.issuing_guardians.len(), 2);
@@ -486,10 +504,12 @@ mod recovery_tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_recovery_capability_expiration() {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
         let recovery_cap = RecoveryCapability::new(
+            CapabilityId::new(uuid::Uuid::new_v4()),
             DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
             vec![
                 DeviceId(uuid::Uuid::from_bytes([6u8; 16])),
@@ -507,10 +527,12 @@ mod recovery_tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_recovery_capability_insufficient_guardians() {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
         let recovery_cap = RecoveryCapability::new(
+            CapabilityId::new(uuid::Uuid::new_v4()),
             DeviceId(uuid::Uuid::from_bytes([8u8; 16])),
             vec![DeviceId(uuid::Uuid::from_bytes([9u8; 16]))], // Only 1 guardian
             2,                                                 // But need 2
@@ -525,10 +547,12 @@ mod recovery_tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_recovery_capability_with_reason() {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
         let recovery_cap = RecoveryCapability::new(
+            CapabilityId::new(uuid::Uuid::new_v4()),
             DeviceId(uuid::Uuid::from_bytes([10u8; 16])),
             vec![
                 DeviceId(uuid::Uuid::from_bytes([11u8; 16])),

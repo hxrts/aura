@@ -15,6 +15,7 @@ use aura_mpst::{
     leakage::{LeakageBudget, LeakageTracker, LeakageType, PrivacyContract},
 };
 use chrono::Duration;
+use uuid::Uuid;
 
 #[test]
 fn test_privacy_contract_creation() {
@@ -263,12 +264,14 @@ fn test_privacy_contract_application() {
 }
 
 #[test]
+#[allow(clippy::disallowed_methods)]
 fn test_context_type_differentiation() {
-    let rid = ContextType::new_relationship();
-    let gid = ContextType::new_group();
-    let dkd = ContextType::new_key_derivation();
-    let sid = ContextType::new_session();
-    let custom = ContextType::custom("test");
+    use aura_core::SessionId;
+    let rid = ContextType::new_relationship(Uuid::new_v4());
+    let gid = ContextType::new_group(Uuid::new_v4());
+    let dkd = ContextType::new_key_derivation(Uuid::new_v4());
+    let sid = ContextType::new_session(SessionId::new());
+    let custom = ContextType::custom("test", Uuid::new_v4());
 
     // Each should have unique IDs
     assert_ne!(rid.id(), gid.id());
@@ -277,7 +280,7 @@ fn test_context_type_differentiation() {
     assert_ne!(sid.id(), custom.id());
 
     // Same types should be detectable
-    let rid2 = ContextType::new_relationship();
+    let rid2 = ContextType::new_relationship(Uuid::new_v4());
     assert!(rid.same_type(&rid2));
     assert!(!rid.same_type(&gid));
 
@@ -289,17 +292,17 @@ fn test_context_type_differentiation() {
 }
 
 #[test]
+#[allow(clippy::disallowed_methods)]
 fn test_complex_privacy_scenario() {
-    #[allow(clippy::disallowed_methods)]
     let now = chrono::Utc::now();
     // Simulate a complex privacy scenario with multiple contexts and observers
     let _isolation = ContextIsolation::new();
     let mut tracker = LeakageTracker::new();
 
     // Create contexts
-    let _alice_rid = ContextType::new_relationship();
-    let _bob_rid = ContextType::new_relationship();
-    let _group_gid = ContextType::new_group();
+    let _alice_rid = ContextType::new_relationship(Uuid::new_v4());
+    let _bob_rid = ContextType::new_relationship(Uuid::new_v4());
+    let _group_gid = ContextType::new_group(Uuid::new_v4());
 
     // Create observers (relays)
     let relay1 = DeviceId::new();

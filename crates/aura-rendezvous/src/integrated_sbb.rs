@@ -277,13 +277,9 @@ impl IntegratedSbbSystem {
     }
 
     /// Clean up expired envelopes and flow budget periods
-    pub fn cleanup_expired_data(&mut self) {
-        #[allow(clippy::disallowed_methods)]
-        let now = std::time::SystemTime::now();
-        let current_time = now
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+    ///
+    /// Note: Callers should obtain `current_time` from TimeEffects and convert to Unix timestamp
+    pub fn cleanup_expired_data(&mut self, current_time: u64) {
         self.flooding_coordinator
             .cleanup_expired_envelopes(current_time);
     }
