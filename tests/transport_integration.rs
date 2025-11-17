@@ -76,7 +76,8 @@ async fn create_test_device(device_name: &str) -> (DeviceId, ConnectionManager) 
         timeout: Duration::from_secs(3),
         retry_count: 3,
     };
-    let manager = ConnectionManager::new(device_id.clone(), stun_config);
+    let random = std::sync::Arc::new(aura_effects::MockRandomHandler::new_with_seed(12345));
+    let manager = ConnectionManager::new(device_id.clone(), stun_config, random);
     (device_id, manager)
 }
 

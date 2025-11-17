@@ -99,7 +99,7 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ All test code updated with proper #[allow(clippy::disallowed_methods)] annotations
 - ✅ All tests passing in aura-mpst and aura-journal
 
-### Phase 11 (Completed - Current)
+### Phase 11 (Completed - Commit ca82d9e)
 - ✅ Fixed WebSocket connection timing violation (1 violation):
   - `aura-rendezvous/src/connection_manager.rs:837` - generate_websocket_key() now accepts `timestamp: u64` parameter
   - Updated perform_websocket_handshake() to accept and propagate timestamp parameter
@@ -111,6 +111,18 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Updated 2 test functions to generate timestamp with proper #[allow(clippy::disallowed_methods)] annotations
 - ✅ Documentation added explaining timestamp parameter should come from TimeEffects for testability
 - ✅ Note: Remaining bridge violations (1) are in factory/bridge code with deterministic constants (not actual violations)
+
+### Phase 12 (Completed - Current)
+- ✅ Improved WebSocket key generation security with RandomEffects:
+  - `aura-rendezvous/src/connection_manager.rs:244` - ConnectionManager::new now accepts `random: Arc<dyn RandomEffects>` parameter
+  - `aura-rendezvous/src/connection_manager.rs:902` - generate_websocket_key() now uses RandomEffects for cryptographically secure 16-byte random nonce
+  - Removed timestamp-based key generation in favor of proper cryptographic randomness per RFC 6455 WebSocket protocol
+  - Updated try_coordinated_punch() to use RandomEffects for session UUID generation
+- ✅ Updated all ConnectionManager instantiations:
+  - Updated 3 unit tests in connection_manager.rs to provide MockRandomHandler
+  - Updated transport_integration.rs test helper to provide MockRandomHandler
+  - Updated nat_scenarios.rs test helper to provide MockRandomHandler
+- ✅ WebSocket handshake now fully compliant with security best practices using crypto-secure random nonces
 
 ## Remaining Production Violations (0 total - ALL FIXED! 🎉)
 
@@ -287,6 +299,7 @@ These violations are in bridge and factory code that require broader architectur
 7. ~~**Phase 9**: Address trait evolution needs (5 violations fixed)~~ ✅ COMPLETED
 8. ~~**Phase 10**: Fix MPST context isolation and journal ID constructors (7 violations fixed)~~ ✅ COMPLETED
 9. ~~**Phase 11**: Fix WebSocket connection timing (1 violation fixed)~~ ✅ COMPLETED
+10. ~~**Phase 12**: Improve WebSocket key generation security with RandomEffects~~ ✅ COMPLETED
 
 **All actual production violations have been eliminated!** 🎉
 
@@ -310,6 +323,7 @@ The remaining #[allow] annotations in the codebase are all legitimate:
 - Phase 8 fixes: Commit 199ab06
 - Phase 9 fixes: Commit 4682bdb
 - Phase 10 fixes: Commit 57ba401
-- Phase 11 fixes: Current commit
+- Phase 11 fixes: Commit ca82d9e
+- Phase 12 fixes: Current commit
 - Architecture: docs/002_system_architecture.md (Effect System section)
 - FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)

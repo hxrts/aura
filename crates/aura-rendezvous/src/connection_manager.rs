@@ -167,6 +167,7 @@ pub struct ConnectionManager {
     stun_client: StunClient,
     #[allow(dead_code)]
     connection_timeout: Duration,
+    random: std::sync::Arc<dyn aura_core::RandomEffects>,
 }
 
 /// Connection establishment result
@@ -240,13 +241,18 @@ impl Default for ConnectionConfig {
 
 impl ConnectionManager {
     /// Create new connection manager
-    pub fn new(device_id: DeviceId, stun_config: StunConfig) -> Self {
+    pub fn new(
+        device_id: DeviceId,
+        stun_config: StunConfig,
+        random: std::sync::Arc<dyn aura_core::RandomEffects>,
+    ) -> Self {
         let stun_client = StunClient::new(stun_config);
 
         Self {
             device_id,
             stun_client,
             connection_timeout: Duration::from_secs(2),
+            random,
         }
     }
 
@@ -291,7 +297,7 @@ impl ConnectionManager {
 
                 attempt_count += 1;
                 match self
-                    .try_direct_connection(offer.clone(), address, &config, timestamp)
+                    .try_direct_connection(offer.clone(), address, &config)
                     .await
                 {
                     Ok(addr) => {
@@ -581,16 +587,11 @@ impl ConnectionManager {
     /// - `transport`: Transport descriptor specifying the connection method
     /// - `address`: Address to connect to
     /// - `config`: Connection configuration
-    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
-    ///
-    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
-    /// and consistency with the effect system architecture.
     async fn try_direct_connection(
         &self,
         transport: TransportDescriptor,
         address: &str,
         config: &ConnectionConfig,
-        timestamp: u64,
     ) -> Result<SocketAddr, AuraError> {
         let addr: SocketAddr = address.parse().map_err(|e| {
             AuraError::coordination_failed(format!("Invalid address '{}': {}", address, e))
@@ -610,7 +611,7 @@ impl ConnectionManager {
                 // Would implement WebSocket connection
                 timeout(
                     config.attempt_timeout,
-                    self.try_websocket_connection(addr, timestamp),
+                    self.try_websocket_connection(addr),
                 )
                 .await
                 .map_err(|_| {
@@ -797,14 +798,9 @@ impl ConnectionManager {
     ///
     /// # Parameters
     /// - `addr`: Socket address to connect to
-    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
-    ///
-    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
-    /// and consistency with the effect system architecture.
     async fn try_websocket_connection(
         &self,
         addr: SocketAddr,
-        timestamp: u64,
     ) -> Result<SocketAddr, AuraError> {
         tracing::debug!(addr = %addr, "Attempting WebSocket connection");
 
@@ -820,7 +816,7 @@ impl ConnectionManager {
 
         // Perform WebSocket handshake
         let ws_connection = self
-            .perform_websocket_handshake(std_stream, addr, timestamp)
+            .perform_websocket_handshake(std_stream, addr)
             .await?;
 
         tracing::info!(
@@ -836,20 +832,15 @@ impl ConnectionManager {
     /// # Parameters
     /// - `stream`: TCP stream for the WebSocket connection
     /// - `addr`: Socket address of the peer
-    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
-    ///
-    /// Note: Callers should obtain timestamp from TimeEffects to maintain testability
-    /// and consistency with the effect system architecture.
     async fn perform_websocket_handshake(
         &self,
         mut stream: TcpStream,
         addr: SocketAddr,
-        timestamp: u64,
     ) -> Result<SocketAddr, AuraError> {
         use std::io::{Read, Write};
 
-        // Generate WebSocket key
-        let ws_key = self.generate_websocket_key(timestamp);
+        // Generate WebSocket key with cryptographically secure randomness
+        let ws_key = self.generate_websocket_key().await;
 
         // Create WebSocket upgrade request
         let request = format!(
@@ -885,25 +876,21 @@ impl ConnectionManager {
         Ok(addr)
     }
 
-    /// Generate WebSocket key for handshake.
+    /// Generate WebSocket key for handshake using cryptographically secure randomness.
     ///
-    /// # Parameters
-    /// - `timestamp`: Unix timestamp in seconds (obtain from TimeEffects for testability)
+    /// # Returns
+    /// A base64-encoded 16-byte random nonce suitable for the Sec-WebSocket-Key header.
     ///
     /// # Note
-    /// This is a simplified implementation. Production code should use cryptographically
-    /// secure random nonces for WebSocket handshakes. Callers should obtain timestamp
-    /// from TimeEffects to maintain testability.
-    ///
-    /// TODO: Replace with proper cryptographic random nonce generation using RandomEffects.
-    fn generate_websocket_key(&self, timestamp: u64) -> String {
-        // Simple key generation (real implementation would use proper randomness)
-        let key_data = format!("aura-{}-{}", self.device_id, timestamp);
+    /// Uses RandomEffects to generate cryptographically secure random bytes as required
+    /// by the WebSocket protocol (RFC 6455).
+    async fn generate_websocket_key(&self) -> String {
+        // Generate 16 cryptographically secure random bytes for WebSocket key
+        let bytes = self.random.random_bytes(16).await;
 
-        // Simple base64 encoding implementation
-        let mut result = String::new();
-        let bytes = key_data.as_bytes();
+        // Base64 encode the random bytes
         let chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut result = String::new();
 
         for chunk in bytes.chunks(3) {
             let mut buf = [0u8; 3];
@@ -996,10 +983,15 @@ impl ConnectionManager {
 
         // Bind to local address for punch session
         let local_bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+
+        // Generate session UUID using RandomEffects
+        let session_uuid = self.random.random_uuid().await;
+
         let punch_session = PunchSession::from_device_and_config(
             self.device_id,
             local_bind_addr,
             config.punch_config.clone(),
+            session_uuid,
         )
         .await
         .map_err(|e| {
@@ -1054,12 +1046,14 @@ impl ConnectionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_effects::MockRandomHandler;
 
     #[tokio::test]
     async fn test_connection_manager_creation() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let manager = ConnectionManager::new(device_id, stun_config);
+        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
+        let manager = ConnectionManager::new(device_id, stun_config, random);
 
         assert_eq!(manager.device_id, device_id);
     }
@@ -1068,7 +1062,8 @@ mod tests {
     async fn test_connection_priority_logic() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let manager = ConnectionManager::new(device_id, stun_config);
+        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
+        let manager = ConnectionManager::new(device_id, stun_config, random);
 
         let offers = vec![
             TransportDescriptor::quic("192.168.1.100:8080".to_string(), "aura".to_string()),
@@ -1154,7 +1149,8 @@ mod tests {
 
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let manager = ConnectionManager::new(device_id, stun_config);
+        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
+        let manager = ConnectionManager::new(device_id, stun_config, random);
 
         // Create transport with reflexive address
         let transport = TransportDescriptor {
