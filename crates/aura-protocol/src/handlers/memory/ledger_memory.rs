@@ -1,26 +1,31 @@
 //! Memory-based ledger handler for testing
 
 use crate::effects::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEventStream};
+use aura_core::effects::RandomEffects;
 use async_trait::async_trait;
-use rand::RngCore;
+use std::sync::Arc;
 
 /// Memory-based ledger handler for testing
 pub struct MemoryLedgerHandler {
     // TODO fix - For now, use placeholder data structures
     _events: Vec<Vec<u8>>,
+    random: Arc<dyn RandomEffects>,
 }
 
 impl MemoryLedgerHandler {
-    pub fn new() -> Self {
+    pub fn new(random: Arc<dyn RandomEffects>) -> Self {
         Self {
             _events: Vec::new(),
+            random,
         }
     }
 }
 
 impl Default for MemoryLedgerHandler {
     fn default() -> Self {
-        Self::new()
+        // Default uses a mock random handler for testing
+        use aura_effects::MockRandomHandler;
+        Self::new(Arc::new(MockRandomHandler::new()))
     }
 }
 
@@ -98,10 +103,7 @@ impl LedgerEffects for MemoryLedgerHandler {
     }
 
     async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, LedgerError> {
-        let mut secret = vec![0u8; length];
-        #[allow(clippy::disallowed_methods)]
-        // Required for cryptographic security - should use secure random source in production
-        rand::thread_rng().fill_bytes(&mut secret);
+        let secret = self.random.random_bytes(length).await;
         Ok(secret)
     }
 

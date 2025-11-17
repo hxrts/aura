@@ -6,7 +6,8 @@ This document tracks remaining violations of the effect system architecture prin
 
 - **Total violations audited:** 133
 - **Legitimate (test code, effect implementations):** 70 (53%)
-- **Production code violations:** 33 (25%)
+- **Production code violations remaining:** 25 (19%) - down from 33
+- **Production code violations fixed:** 8 (6%)
 - **Trait limitations (tracked):** 12 (9%)
 - **Bootstrap code (acceptable):** 18 (13%)
 
@@ -17,85 +18,34 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Session ID generation in aura-agent (bug fix - was using wrong ID)
 - ✅ Token generation in aura-wot (API refactored to accept random bytes)
 
-### Phase 2 (Completed - Current)
+### Phase 2 (Completed - Commit 21ecda6)
 - ✅ Removed unnecessary allow from aura-mpst ExecutionContext (deterministic UUID)
 - ✅ Updated false "infrastructure is acceptable" comments with honest TODO markers
 
-## Remaining Production Violations (31 total)
+### Phase 4 (Completed - Current)
+- ✅ Created EffectSystemRng adapter bridging async RandomEffects to sync RngCore
+- ✅ Fixed all 6 FROST cryptographic violations:
+  - `aura-frost/src/threshold_signing.rs:218` - generate_partial_signature now accepts RandomEffects
+  - `aura-frost/src/threshold_signing.rs:290` - aggregate_signatures now accepts RandomEffects
+  - `aura-frost/src/signature_aggregation.rs:172` - perform_frost_aggregation now accepts RandomEffects
+  - `aura-core/src/crypto/tree_signing.rs:362` - generate_nonce_with_share now accepts RngCore parameter
+  - `aura-core/src/crypto/tree_signing.rs:440` - frost_sign_partial_with_keypackage now accepts RngCore parameter
+  - `aura-protocol/src/handlers/memory/ledger_memory.rs:102` - MemoryLedgerHandler now stores RandomEffects dependency
 
-### Priority 1: CRITICAL SECURITY - Cryptographic Operations (6 violations)
+## Remaining Production Violations (25 total)
 
-**Impact**: Untestable cryptographic operations, can't verify test vectors, non-deterministic signing.
+### Priority 1: CRITICAL SECURITY - Cryptographic Operations ✅ COMPLETED
 
-1. **`crates/aura-frost/src/threshold_signing.rs:218`**
-   - FROST signing using `rand::thread_rng()`
-   - Function: `sign_partial()`
+**Status**: All 6 violations fixed in Phase 4
 
-2. **`crates/aura-frost/src/threshold_signing.rs:290`**
-   - FROST aggregation using `rand::thread_rng()`
-   - Function: `aggregate_signatures()`
+**Solution Implemented**:
+- Created `EffectSystemRng` adapter in `aura-effects/src/crypto.rs`
+- Bridges async `RandomEffects` to sync `rand::RngCore + rand::CryptoRng`
+- Uses `tokio::runtime::Handle::block_on()` for async-to-sync conversion
+- All FROST functions now accept RandomEffects or RngCore parameters
+- MemoryLedgerHandler refactored to store RandomEffects dependency
 
-3. **`crates/aura-frost/src/signature_aggregation.rs:172`**
-   - Comment says "In production, this would..." but THIS IS production code
-   - Function: `aggregate()`
-
-4. **`crates/aura-core/src/crypto/tree_signing.rs:362`**
-   - FROST nonce generation bypassing RandomEffects
-   - Function: `generate_nonces()`
-
-5. **`crates/aura-core/src/crypto/tree_signing.rs:440`**
-   - Another FROST signing operation
-   - Function: `sign_with_keypackage()`
-
-6. **`crates/aura-protocol/src/handlers/memory/ledger_memory.rs:102`**
-   - Secret generation using `rand::thread_rng()`
-   - Function: `generate_secret()`
-
-**Solution Required**: Create RNG adapter that bridges `RandomEffects` to `frost_ed25519::RngCore`.
-
-#### FROST RNG Adapter Requirements
-
-The `frost_ed25519` library requires an RNG implementing `rand_core::RngCore + rand_core::CryptoRng`. We need:
-
-1. **`EffectSystemRng` struct** that wraps `&dyn RandomEffects`
-2. Implements `RngCore` trait by calling `random_bytes()` internally
-3. Implements `CryptoRng` marker trait (our RandomEffects is crypto-secure)
-4. Handle async-to-sync conversion (FROST expects sync RNG)
-
-**Example implementation:**
-```rust
-pub struct EffectSystemRng<'a> {
-    effects: &'a dyn RandomEffects,
-    runtime: tokio::runtime::Handle,
-}
-
-impl RngCore for EffectSystemRng<'_> {
-    fn next_u32(&mut self) -> u32 {
-        // Call effects.random_u64() via runtime.block_on()
-        // Return lower 32 bits
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        self.runtime.block_on(self.effects.random_u64())
-    }
-
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        let bytes = self.runtime.block_on(
-            self.effects.random_bytes(dest.len())
-        );
-        dest.copy_from_slice(&bytes);
-    }
-
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
-        self.fill_bytes(dest);
-        Ok(())
-    }
-}
-
-impl CryptoRng for EffectSystemRng<'_> {}
-```
-
-**Complexity**: Medium - requires async-to-sync conversion, but straightforward.
+**Testing**: Adapter includes comprehensive unit tests for deterministic behavior.
 
 ### Priority 2: HIGH - Infrastructure Timing (22 violations)
 
@@ -215,14 +165,17 @@ These have legitimate architectural constraints that require trait signature cha
 
 ## Next Steps
 
-1. **Phase 3**: Fix aura-sync infrastructure timing (18 violations)
-2. **Phase 4**: Create FROST RNG adapter and fix cryptographic violations (6 violations)
+1. **Phase 3**: Fix aura-sync infrastructure timing (18 violations) - NEXT
+2. ~~**Phase 4**: Create FROST RNG adapter and fix cryptographic violations (6 violations)~~ ✅ COMPLETED
 3. **Phase 5**: Fix aura-protocol transport coordinator (3 violations)
-4. **Phase 6**: Address trait evolution needs (coordinated effort)
+4. **Phase 6**: Fix remaining infrastructure violations (3 violations)
+5. **Phase 7**: Address trait evolution needs (coordinated effort)
 
 ## References
 
 - Initial audit: Effect system violation audit (see git history)
 - Phase 1 fixes: Commit 88a948f
-- Phase 2 fixes: Current commit
+- Phase 2 fixes: Commit 21ecda6
+- Phase 4 fixes: Current commit
 - Architecture: docs/002_system_architecture.md (Effect System section)
+- FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)

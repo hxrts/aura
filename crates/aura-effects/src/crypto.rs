@@ -529,3 +529,140 @@ impl CryptoEffects for RealCryptoHandler {
         // to ensure the compiler doesn't optimize away the zeroing
     }
 }
+
+/// FROST RNG Adapter for Effect System Integration
+///
+/// This adapter bridges the async RandomEffects trait to the synchronous RngCore
+/// trait required by the frost_ed25519 library. It allows FROST cryptographic
+/// operations to use the effect system's randomness source while maintaining
+/// testability and determinism.
+///
+/// # Architecture Note
+///
+/// FROST requires sync RNG (RngCore trait), but our effect system is async.
+/// This adapter uses tokio::runtime::Handle to perform async-to-sync conversion
+/// via block_on(). This is acceptable because:
+/// 1. FROST operations are already synchronous in the library's API
+/// 2. RandomEffects implementations are fast (crypto RNG or deterministic)
+/// 3. This is only used during key generation and signing ceremonies
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use aura_effects::crypto::EffectSystemRng;
+/// use aura_core::effects::RandomEffects;
+/// use frost_ed25519 as frost;
+///
+/// async fn generate_frost_keys(effects: &dyn RandomEffects) {
+///     let runtime = tokio::runtime::Handle::current();
+///     let mut rng = EffectSystemRng::new(effects, runtime);
+///
+///     let (shares, pubkey) = frost::keys::generate_with_dealer(
+///         3, 2,
+///         frost::keys::IdentifierList::Default,
+///         &mut rng
+///     )?;
+/// }
+/// ```
+pub struct EffectSystemRng<'a> {
+    effects: &'a dyn RandomEffects,
+    runtime: tokio::runtime::Handle,
+}
+
+impl<'a> EffectSystemRng<'a> {
+    /// Create a new RNG adapter from RandomEffects and a runtime handle
+    pub fn new(effects: &'a dyn RandomEffects, runtime: tokio::runtime::Handle) -> Self {
+        Self { effects, runtime }
+    }
+
+    /// Create a new RNG adapter using the current runtime
+    ///
+    /// # Panics
+    ///
+    /// Panics if called outside of a Tokio runtime context
+    pub fn from_current_runtime(effects: &'a dyn RandomEffects) -> Self {
+        let runtime = tokio::runtime::Handle::current();
+        Self::new(effects, runtime)
+    }
+}
+
+impl rand::RngCore for EffectSystemRng<'_> {
+    fn next_u32(&mut self) -> u32 {
+        // Get lower 32 bits of u64
+        (self.runtime.block_on(self.effects.random_u64()) & 0xFFFF_FFFF) as u32
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.runtime.block_on(self.effects.random_u64())
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        let bytes = self.runtime.block_on(self.effects.random_bytes(dest.len()));
+        dest.copy_from_slice(&bytes);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+
+// Mark this RNG as cryptographically secure since RandomEffects is crypto-secure
+impl rand::CryptoRng for EffectSystemRng<'_> {}
+
+#[cfg(test)]
+mod rng_adapter_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_rng_adapter_with_mock() {
+        let crypto = MockCryptoHandler::with_seed(12345);
+        let runtime = tokio::runtime::Handle::current();
+        let mut rng = EffectSystemRng::new(&crypto, runtime);
+
+        // Test next_u32
+        let val1 = rng.next_u32();
+        let val2 = rng.next_u32();
+        assert_ne!(val1, val2, "Should produce different values");
+
+        // Test next_u64
+        let val3 = rng.next_u64();
+        let val4 = rng.next_u64();
+        assert_ne!(val3, val4, "Should produce different values");
+
+        // Test fill_bytes
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        assert_ne!(bytes, [0u8; 32], "Should fill with random bytes");
+    }
+
+    #[tokio::test]
+    async fn test_rng_adapter_deterministic() {
+        // Same seed should produce same sequence
+        let crypto1 = MockCryptoHandler::with_seed(42);
+        let crypto2 = MockCryptoHandler::with_seed(42);
+
+        let runtime = tokio::runtime::Handle::current();
+        let mut rng1 = EffectSystemRng::new(&crypto1, runtime.clone());
+        let mut rng2 = EffectSystemRng::new(&crypto2, runtime);
+
+        let val1 = rng1.next_u64();
+        let val2 = rng2.next_u64();
+        assert_eq!(val1, val2, "Same seed should produce same values");
+
+        let mut bytes1 = [0u8; 16];
+        let mut bytes2 = [0u8; 16];
+        rng1.fill_bytes(&mut bytes1);
+        rng2.fill_bytes(&mut bytes2);
+        assert_eq!(bytes1, bytes2, "Same seed should produce same byte sequences");
+    }
+
+    #[tokio::test]
+    async fn test_rng_adapter_from_current_runtime() {
+        let crypto = MockCryptoHandler::new();
+        let mut rng = EffectSystemRng::from_current_runtime(&crypto);
+
+        let val = rng.next_u64();
+        assert_ne!(val, 0, "Should produce non-zero values");
+    }
+}

@@ -85,7 +85,7 @@ pub mod transport;
 pub use authorization::{MockAuthorizationHandler, StandardAuthorizationHandler};
 pub use console::{MockConsoleHandler, RealConsoleHandler};
 pub use context::{ExecutionContext, MockContextHandler, StandardContextHandler};
-pub use crypto::{MockCryptoHandler, RealCryptoHandler};
+pub use crypto::{EffectSystemRng, MockCryptoHandler, RealCryptoHandler};
 pub use journal::{MockJournalHandler, StandardJournalHandler};
 pub use random::{MockRandomHandler, RealRandomHandler};
 pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler, MemoryStorageHandler};
