@@ -576,8 +576,6 @@ impl GuardianAuthenticationCoordinator {
         }
     }
 
-    /// Execute as approval requester
-    #[allow(clippy::disallowed_methods)]
     /// Execute guardian authentication as the requester role.
     ///
     /// # Parameters

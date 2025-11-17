@@ -21,21 +21,20 @@ pub type Timestamp = u64;
 pub struct IntentId(pub uuid::Uuid);
 
 impl IntentId {
-    /// Create a new random intent ID
-    #[allow(clippy::disallowed_methods)]
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4())
+    /// Create a new intent ID.
+    ///
+    /// # Parameters
+    /// - `id`: UUID for the intent (obtain from RandomEffects for testability)
+    ///
+    /// Note: Callers should obtain UUID from RandomEffects to maintain testability
+    /// and consistency with the effect system architecture.
+    pub fn new(id: uuid::Uuid) -> Self {
+        Self(id)
     }
 
-    /// Create from a UUID
+    /// Create from a UUID (alias for new)
     pub fn from_uuid(uuid: uuid::Uuid) -> Self {
-        Self(uuid)
-    }
-}
-
-impl Default for IntentId {
-    fn default() -> Self {
-        Self::new()
+        Self::new(uuid)
     }
 }
 
@@ -150,8 +149,21 @@ pub struct Intent {
 }
 
 impl Intent {
-    /// Create a new intent
+    /// Create a new intent.
+    ///
+    /// # Parameters
+    /// - `intent_id`: Unique identifier for the intent (obtain from RandomEffects for testability)
+    /// - `op`: Tree operation to perform
+    /// - `path_span`: Path span for the operation
+    /// - `snapshot_commitment`: Snapshot commitment
+    /// - `priority`: Priority for execution
+    /// - `author`: Device that authored this intent
+    /// - `created_at`: Timestamp when this intent was created
+    ///
+    /// Note: Callers should obtain intent_id from RandomEffects to maintain testability
+    /// and consistency with the effect system architecture.
     pub fn new(
+        intent_id: IntentId,
         op: TreeOperation,
         path_span: Vec<NodeIndex>,
         snapshot_commitment: Commitment,
@@ -160,7 +172,7 @@ impl Intent {
         created_at: Timestamp,
     ) -> Self {
         Self {
-            intent_id: IntentId::new(),
+            intent_id,
             op,
             path_span,
             snapshot_commitment,
@@ -292,9 +304,10 @@ mod tests {
     // Old TreeOp variants (RotatePath, etc.) don't exist in new implementation
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_id_creation() {
-        let id1 = IntentId::new();
-        let id2 = IntentId::new();
+        let id1 = IntentId::new(uuid::Uuid::new_v4());
+        let id2 = IntentId::new(uuid::Uuid::new_v4());
         assert_ne!(id1, id2);
     }
 
@@ -305,6 +318,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_creation() {
         use aura_core::tree::LeafNode;
 
@@ -318,6 +332,7 @@ mod tests {
         };
 
         let intent = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             op,
             vec![NodeIndex(0)],
             Hash32([0u8; 32]),
@@ -331,12 +346,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_conflicts() {
         let op = TreeOperation::RotateEpoch {
             affected: vec![NodeIndex(0)],
         };
 
         let intent1 = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             op.clone(),
             vec![NodeIndex(0), NodeIndex(1)],
             Hash32([1u8; 32]),
@@ -346,6 +363,7 @@ mod tests {
         );
 
         let intent2 = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             op,
             vec![NodeIndex(1), NodeIndex(2)],
             Hash32([2u8; 32]), // Different snapshot
@@ -359,6 +377,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_no_conflict_same_snapshot() {
         let op = TreeOperation::RotateEpoch {
             affected: vec![NodeIndex(0)],
@@ -367,6 +386,7 @@ mod tests {
         let snapshot = [1u8; 32];
 
         let intent1 = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             op.clone(),
             vec![NodeIndex(0), NodeIndex(1)],
             Hash32(snapshot),
@@ -376,6 +396,7 @@ mod tests {
         );
 
         let intent2 = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             op,
             vec![NodeIndex(1), NodeIndex(2)],
             Hash32(snapshot), // Same snapshot
@@ -389,8 +410,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_is_stale() {
         let intent = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             TreeOperation::RotateEpoch {
                 affected: vec![NodeIndex(0)],
             },
@@ -406,8 +429,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_age() {
         let intent = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             TreeOperation::RemoveLeaf {
                 leaf: aura_core::tree::LeafId(0),
                 reason: 0,
@@ -424,6 +449,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_batch_add() {
         use aura_core::tree::Policy;
 
@@ -431,6 +457,7 @@ mod tests {
         let mut batch = IntentBatch::new(Hash32(snapshot));
 
         let intent1 = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             TreeOperation::ChangePolicy {
                 node: NodeIndex(0),
                 new_policy: Policy::All,
@@ -448,12 +475,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_batch_rejects_snapshot_mismatch() {
         let snapshot1 = [1u8; 32];
         let snapshot2 = [2u8; 32];
         let mut batch = IntentBatch::new(Hash32(snapshot1));
 
         let intent = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             TreeOperation::RotateEpoch {
                 affected: vec![NodeIndex(0)],
             },
@@ -469,11 +498,13 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_batch_intent_ids() {
         let snapshot = [1u8; 32];
         let mut batch = IntentBatch::new(Hash32(snapshot));
 
         let intent1 = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             TreeOperation::RotateEpoch {
                 affected: vec![NodeIndex(0)],
             },

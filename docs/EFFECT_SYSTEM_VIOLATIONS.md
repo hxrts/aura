@@ -7,8 +7,8 @@ This document tracks remaining violations of the effect system architecture prin
 - **Total violations audited:** 133
 - **Legitimate (test code, effect implementations):** 70 (53%)
 - **Production code violations remaining:** 0 (0%) - All production violations fixed! 🎉
-- **Production code violations fixed:** 38 (29%) - Includes Phase 9 trait evolution fixes
-- **Bridge violations (tracked for Phase 10):** 7 (5%)
+- **Production code violations fixed:** 43 (32%) - Includes Phases 9-10 (trait evolution and bridge fixes)
+- **Bridge violations (tracked, no longer blocking):** 2 (2%)
 - **Bootstrap code (acceptable):** 18 (13%)
 
 ## Completed Fixes
@@ -77,13 +77,27 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Updated public execute() method to accept and propagate `now` parameter through role dispatch
 - ✅ Fixed pre-existing syntax errors (missing semicolons) encountered during refactoring
 
-### Phase 9 (Completed - Current)
+### Phase 9 (Completed - Commit 4682bdb)
 - ✅ Fixed trait evolution violations (5 violations):
   - `aura-agent/src/runtime/reliability.rs:353` - ReliabilityCoordinator now stores TimeEffects dependency
   - `aura-protocol/src/handlers/memory/ledger_memory.rs:116,133` - MemoryLedgerHandler stores TimeEffects and RandomEffects
   - `aura-protocol/src/handlers/memory/guardian_authorization.rs:350,446` - Methods accept `now` parameter
 - ✅ Followed Layer 4 orchestration pattern for stateful multi-effect coordination
 - ✅ All implementations use explicit dependency injection per architecture guidelines
+
+### Phase 10 (Completed - Current)
+- ✅ Fixed MPST context isolation violations (5 violations):
+  - `aura-mpst/src/context.rs:277` - InformationFlow::new() now accepts `timestamp` parameter
+  - `aura-mpst/src/context.rs:267` - ContextIsolation::record_flow() now accepts `timestamp` parameter
+  - `aura-mpst/src/context.rs:55,61,67,78` - ContextType constructors (new_relationship, new_group, new_key_derivation, custom) now accept `id: Uuid` parameter
+- ✅ Fixed journal ID constructor violations (2 violations):
+  - `aura-journal/src/ledger/intent.rs:26` - IntentId::new() now accepts `id: Uuid` parameter
+  - `aura-journal/src/ledger/capability.rs:21` - CapabilityId::new() now accepts `id: Uuid` parameter
+- ✅ Removed leftover #[allow] annotation from execute_requester in guardian_auth.rs
+- ✅ Updated Intent::new() to accept IntentId as first parameter (12 call sites)
+- ✅ Updated RecoveryCapability::new() to accept CapabilityId as first parameter (4 call sites)
+- ✅ All test code updated with proper #[allow(clippy::disallowed_methods)] annotations
+- ✅ All tests passing in aura-mpst and aura-journal
 
 ## Remaining Production Violations (0 total - ALL FIXED! 🎉)
 
@@ -195,13 +209,15 @@ The Phase 9 fixes follow the architecture principles from docs/002_system_archit
 - **Explicit Dependency Injection**: Implementations store effect dependencies rather than calling system functions directly
 - **Testability**: All timing and randomness now properly injected for deterministic testing
 
-### Remaining Bridge Violations (7 violations)
+### Remaining Bridge Violations (2 violations)
 
 These violations are in bridge and factory code that require broader architectural changes:
 
 1. **Bridge implementations** - Trait signatures don't support effects yet
-   - Various bridge and factory files in multiple crates
+   - 2 violations in bridge and factory files
    - Require coordinated trait evolution across multiple layers
+
+**Status**: Phase 10 eliminated 5 of the 7 bridge violations by fixing the underlying ID constructors. The remaining 2 violations are in factory/bridge code that will be addressed in future coordinated refactoring.
 
 **Solution**: Track with existing TODO comments, address in future coordinated refactoring effort.
 
@@ -254,7 +270,10 @@ These violations are in bridge and factory code that require broader architectur
 5. ~~**Phase 7**: Fix aura-rendezvous and verification violations (5 violations)~~ ✅ COMPLETED
 6. ~~**Phase 8**: Address aura-authenticate timing violations (4 violations)~~ ✅ COMPLETED
 7. ~~**Phase 9**: Address trait evolution needs (5 violations fixed)~~ ✅ COMPLETED
-8. **Phase 10**: Address remaining bridge violations (7 violations) - Requires coordinated architectural changes
+8. ~~**Phase 10**: Fix MPST context isolation and journal ID constructors (7 violations fixed)~~ ✅ COMPLETED
+9. **Phase 11** (Future): Address remaining 2 bridge violations - Requires coordinated architectural changes
+
+**All critical production violations have been eliminated!** 🎉
 
 ## References
 
@@ -267,6 +286,7 @@ These violations are in bridge and factory code that require broader architectur
 - Phase 6 fixes: Commit e48bbda
 - Phase 7 fixes: Commit 58cc4ff
 - Phase 8 fixes: Commit 199ab06
-- Phase 9 fixes: Current commit
+- Phase 9 fixes: Commit 4682bdb
+- Phase 10 fixes: Current commit
 - Architecture: docs/002_system_architecture.md (Effect System section)
 - FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)

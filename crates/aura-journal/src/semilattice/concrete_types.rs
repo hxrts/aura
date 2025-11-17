@@ -397,11 +397,13 @@ mod tests {
     use aura_core::NodeIndex;
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn test_intent_pool_join_semantics() {
         let mut pool1 = IntentPool::new();
         let mut pool2 = IntentPool::new();
 
         let intent = Intent::new(
+            IntentId::new(uuid::Uuid::new_v4()),
             TreeOperation::AddLeaf {
                 leaf: LeafNode::new_device(
                     aura_core::tree::LeafId(0),
