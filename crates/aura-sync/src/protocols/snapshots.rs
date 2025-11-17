@@ -238,7 +238,7 @@ impl SnapshotProtocol {
 
         let guard = if self.config.use_writer_fence {
             Some(self.fence.acquire()
-                .map_err(|e| SyncError::protocol("sync", e.to_string()))?)
+                .map_err(|e| SyncError::protocol("sync", &e.to_string()))?)
         } else {
             None
         };
@@ -279,7 +279,7 @@ impl SnapshotProtocol {
 
         // Verify threshold
         if approvals.len() < self.config.approval_threshold {
-            return Err(SyncError::protocol("sync", format!(
+            return Err(SyncError::protocol("sync", &format!(
                 "insufficient approvals: {} < {}",
                 approvals.len(),
                 self.config.approval_threshold

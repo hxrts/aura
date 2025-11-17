@@ -365,7 +365,9 @@ impl ConnectionPool {
     }
 
     /// Remove expired idle connections
-    pub fn evict_expired(&mut self) -> usize {
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    pub fn evict_expired(&mut self, now: u64) -> usize {
         let mut evicted = 0;
         let idle_timeout = self.config.idle_timeout;
 
@@ -373,7 +375,7 @@ impl ConnectionPool {
             let before = connections.len();
 
             connections.retain(|conn| {
-                let expired = conn.is_expired(idle_timeout);
+                let expired = conn.is_expired(idle_timeout, now);
                 if expired {
                     // TODO: Actually close connection via aura-transport
                 }
