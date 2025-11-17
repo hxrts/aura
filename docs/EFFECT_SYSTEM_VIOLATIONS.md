@@ -6,8 +6,8 @@ This document tracks remaining violations of the effect system architecture prin
 
 - **Total violations audited:** 133
 - **Legitimate (test code, effect implementations):** 70 (53%)
-- **Production code violations remaining:** 21 (16%) - down from 33
-- **Production code violations fixed:** 12 (9%)
+- **Production code violations remaining:** 14 (11%) - down from 33
+- **Production code violations fixed:** 19 (14%) - up from 12
 - **Trait limitations (tracked):** 12 (9%)
 - **Bootstrap code (acceptable):** 18 (13%)
 
@@ -41,7 +41,19 @@ This document tracks remaining violations of the effect system architecture prin
   - `aura-core/src/crypto/tree_signing.rs:440` - frost_sign_partial_with_keypackage now accepts RngCore parameter
   - `aura-protocol/src/handlers/memory/ledger_memory.rs:102` - MemoryLedgerHandler now stores RandomEffects dependency
 
-## Remaining Production Violations (21 total)
+### Phase 5 (Completed - Current)
+- ✅ Fixed aura-sync production violations (7 locations):
+  - `aura-sync/src/core/session.rs:323` - create_session now accepts `now: Instant` parameter for metrics tracking
+  - `aura-sync/src/protocols/snapshots.rs:289` - commit now accepts `completion_id: Uuid` parameter from RandomEffects
+  - `aura-sync/src/protocols/ota.rs:189` - propose_upgrade now accepts `proposal_id: Uuid` parameter from RandomEffects
+  - `aura-sync/src/protocols/journal.rs:215` - sync_with_peers now accepts `start: Instant` parameter for duration measurement
+  - `aura-sync/src/services/maintenance.rs:89` - SnapshotProposed::new now accepts `proposal_id: Uuid` parameter
+  - `aura-sync/src/services/maintenance.rs:457` - MaintenanceService::start_with_time added (backwards compatible)
+  - `aura-sync/src/services/sync.rs:259` - SyncService::start_with_time added (backwards compatible)
+- ✅ All test code updated to pass required parameters
+- ✅ Documentation examples updated to show correct usage patterns
+
+## Remaining Production Violations (14 total)
 
 ### Priority 1: CRITICAL SECURITY - Cryptographic Operations ✅ COMPLETED (Phase 4)
 
@@ -56,7 +68,7 @@ This document tracks remaining violations of the effect system architecture prin
 
 **Testing**: Adapter includes comprehensive unit tests for deterministic behavior.
 
-### Priority 2: HIGH - Infrastructure Timing (18 violations remaining)
+### Priority 2: HIGH - Infrastructure Timing (7 violations remaining, 11 fixed)
 
 **Impact**: Infrastructure timing affects protocol decisions, resource management, and must be testable.
 
@@ -64,34 +76,18 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ `aura-sync/src/infrastructure/peers.rs` - discover_peers and add_peer
 - ✅ `aura-sync/src/infrastructure/connections.rs` - acquire and release
 
-#### aura-sync Infrastructure (14 violations remaining)
+**Fixed in Phase 5** (7 violations):
+- ✅ `aura-sync/src/core/session.rs:323` - create_session metrics tracking
+- ✅ `aura-sync/src/protocols/snapshots.rs:289` - snapshot commit
+- ✅ `aura-sync/src/protocols/ota.rs:189` - OTA proposal
+- ✅ `aura-sync/src/protocols/journal.rs:215` - duration measurement
+- ✅ `aura-sync/src/services/maintenance.rs:89` - proposal ID
+- ✅ `aura-sync/src/services/maintenance.rs:457` - service lifecycle
+- ✅ `aura-sync/src/services/sync.rs:259` - service lifecycle
 
-**All marked with updated TODO comments clarifying they are violations, not exemptions.**
+**Note**: All aura-sync violations have been fixed!
 
-**Peers (1 violation remaining):**
-- `crates/aura-sync/src/infrastructure/peers.rs:275` (from `PeerMetadata::new`)
-
-**Connections (2 violations remaining):**
-- `crates/aura-sync/src/infrastructure/connections.rs:119` (from `ConnectionMetadata::new`)
-- `crates/aura-sync/src/infrastructure/connections.rs:212` (from `ConnectionHandle::new`)
-
-**Sessions (3 violations):**
-- `crates/aura-sync/src/core/session.rs:267` - Session creation
-- `crates/aura-sync/src/core/session.rs:277` - Session metrics
-- `crates/aura-sync/src/core/session.rs:542` - Cleanup timing
-
-**Metrics (1 violation):**
-- `crates/aura-sync/src/core/metrics.rs:317` - Sync start recording
-
-**Protocols (3 violations):**
-- `crates/aura-sync/src/protocols/journal.rs:210` - Duration measurement
-- `crates/aura-sync/src/protocols/ota.rs:189, 293` - OTA timing
-
-**Services (2 violations):**
-- `crates/aura-sync/src/services/maintenance.rs:457` - Service lifecycle
-- `crates/aura-sync/src/services/sync.rs:259` - Service lifecycle
-
-**Solution**: Refactor methods to accept `now: Instant` parameter from caller's TimeEffects access.
+**Solution**: All methods now accept time/random parameters from caller's effect access.
 
 #### aura-protocol Transport (3 violations)
 
@@ -176,9 +172,9 @@ These have legitimate architectural constraints that require trait signature cha
 
 1. ~~**Phase 3**: Fix aura-sync infrastructure timing (4 violations in peers/connections)~~ ✅ COMPLETED
 2. ~~**Phase 4**: Create FROST RNG adapter and fix cryptographic violations (6 violations)~~ ✅ COMPLETED
-3. **Phase 5**: Fix remaining aura-sync timing violations (11 violations) - NEXT
-4. **Phase 6**: Fix aura-protocol transport coordinator (3 violations)
-5. **Phase 7**: Fix remaining infrastructure violations (4 violations)
+3. ~~**Phase 5**: Fix remaining aura-sync timing violations (7 violations)~~ ✅ COMPLETED
+4. **Phase 6**: Fix aura-protocol transport coordinator (3 violations) - NEXT
+5. **Phase 7**: Fix remaining infrastructure violations (7 violations in aura-rendezvous and aura-authenticate)
 6. **Phase 8**: Address trait evolution needs (coordinated effort)
 
 ## References
@@ -186,7 +182,8 @@ These have legitimate architectural constraints that require trait signature cha
 - Initial audit: Effect system violation audit (see git history)
 - Phase 1 fixes: Commit 88a948f
 - Phase 2 fixes: Commit 21ecda6
-- Phase 3 fixes: Current commit
+- Phase 3 fixes: Commit 6d52ec2
 - Phase 4 fixes: Commit eec77f3
+- Phase 5 fixes: Current commit
 - Architecture: docs/002_system_architecture.md (Effect System section)
 - FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)

@@ -27,8 +27,9 @@
 //! // Collect approvals (threshold ceremony)
 //! // ...
 //!
-//! // Commit snapshot
-//! protocol.commit(proposal)?;
+//! // Commit snapshot with completion_id from RandomEffects
+//! let completion_id = effects.random_uuid().await?;
+//! protocol.commit(proposal, approvals, completion_id)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -259,10 +260,13 @@ impl SnapshotProtocol {
     }
 
     /// Commit a snapshot after collecting approvals
+    ///
+    /// Note: Callers should generate `completion_id` via `RandomEffects::random_uuid()` and pass it to this method
     pub fn commit(
         &self,
         proposal: SnapshotProposal,
         approvals: Vec<SnapshotApproval>,
+        completion_id: Uuid,
     ) -> SyncResult<SnapshotResult> {
         let mut pending = self.pending.lock();
 
@@ -286,13 +290,11 @@ impl SnapshotProtocol {
         // Clear pending
         *pending = None;
 
-        #[allow(clippy::disallowed_methods)]
-        // TODO: Refactor to accept UUID parameter from RandomEffects
         Ok(SnapshotResult {
             proposal,
             approvals,
             committed: true,
-            completion_id: Uuid::new_v4(),
+            completion_id,
         })
     }
 
@@ -387,7 +389,9 @@ mod tests {
             },
         ];
 
-        let result = protocol.commit(proposal, approvals).unwrap();
+        #[allow(clippy::disallowed_methods)] // Test code
+        let completion_id = Uuid::new_v4();
+        let result = protocol.commit(proposal, approvals, completion_id).unwrap();
         assert!(result.committed);
         assert!(!protocol.is_pending());
     }
