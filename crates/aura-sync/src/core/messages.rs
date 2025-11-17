@@ -314,7 +314,10 @@ impl<T> BatchMessage<T> {
     /// Create batch messages from a list of items
     ///
     /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and pass them
-    pub fn create_batches(items: Vec<T>, batch_size: usize, batch_uuid: Uuid) -> Vec<BatchMessage<T>> {
+    pub fn create_batches(items: Vec<T>, batch_size: usize, batch_uuid: Uuid) -> Vec<BatchMessage<T>>
+    where
+        T: Clone,
+    {
         let total_items = items.len();
         let batch_id = batch_uuid;
         

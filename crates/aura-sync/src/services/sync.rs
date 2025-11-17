@@ -130,7 +130,7 @@ pub struct SyncService {
     rate_limiter: Arc<RwLock<RateLimiter>>,
 
     /// Session manager
-    session_manager: Arc<RwLock<SessionManager>>,
+    session_manager: Arc<RwLock<SessionManager<serde_json::Value>>>,
 
     /// Journal sync protocol
     journal_sync: Arc<RwLock<JournalSyncProtocol>>,
@@ -147,7 +147,9 @@ impl SyncService {
     pub fn new(config: SyncServiceConfig) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
         let rate_limiter = RateLimiter::new(config.rate_limit.clone());
-        let session_manager = SessionManager::new(Default::default());
+        // TODO: Obtain actual timestamp via TimeEffects
+        let now = 0u64;
+        let session_manager = SessionManager::new(Default::default(), now);
         let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
         let metrics = MetricsCollector::new();
 

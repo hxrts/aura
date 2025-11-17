@@ -32,7 +32,7 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -203,8 +203,8 @@ pub struct PeerInfo {
 /// Connection details for an active peer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionDetails {
-    /// When connection was established
-    pub connected_at: Instant,
+    /// When connection was established (Unix timestamp in seconds)
+    pub connected_at: u64,
 
     /// Connection identifier from aura-transport
     pub connection_id: String,

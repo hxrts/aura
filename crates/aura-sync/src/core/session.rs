@@ -96,7 +96,7 @@ impl<T> SessionState<T> {
 }
 
 /// Session results with comprehensive context
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SessionResult {
     Success {
         duration_ms: u64,
@@ -144,7 +144,7 @@ impl SessionResult {
 }
 
 /// Partial results for failed sessions
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PartialResults {
     pub operations_completed: usize,
     pub bytes_transferred: usize,
@@ -153,7 +153,7 @@ pub struct PartialResults {
 }
 
 /// Session-specific errors
-#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, Deserialize)]
 pub enum SessionError {
     #[error("Session timeout after {duration_ms}ms")]
     Timeout { duration_ms: u64 },
@@ -252,8 +252,8 @@ pub struct SessionManager<T> {
     config: SessionConfig,
     /// Metrics collector for session telemetry
     metrics: Option<MetricsCollector>,
-    /// Last cleanup timestamp
-    last_cleanup: Instant,
+    /// Last cleanup timestamp (Unix timestamp in seconds)
+    last_cleanup: u64,
 }
 
 impl<T> SessionManager<T>
@@ -262,8 +262,8 @@ where
 {
     /// Create a new session manager
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn new(config: SessionConfig, now: Instant) -> Self {
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn new(config: SessionConfig, now: u64) -> Self {
         Self {
             sessions: HashMap::new(),
             config,
@@ -274,8 +274,8 @@ where
 
     /// Create session manager with metrics collection
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn with_metrics(config: SessionConfig, metrics: MetricsCollector, now: Instant) -> Self {
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn with_metrics(config: SessionConfig, metrics: MetricsCollector, now: u64) -> Self {
         Self {
             sessions: HashMap::new(),
             config,
@@ -287,7 +287,7 @@ where
     /// Create a new session with participants
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn create_session(&mut self, participants: Vec<DeviceId>, now: Instant) -> SyncResult<SessionId> {
+    pub fn create_session(&mut self, participants: Vec<DeviceId>, now: u64) -> SyncResult<SessionId> {
         // Validate participant count
         if participants.len() > self.config.max_participants {
             return Err(SyncError::validation(&format!(
@@ -453,7 +453,10 @@ where
     }
 
     /// Timeout a session
-    pub fn timeout_session(&mut self, session_id: SessionId) -> SyncResult<()> {
+    pub fn timeout_session(&mut self, session_id: SessionId) -> SyncResult<()>
+    where
+        T: std::fmt::Debug,
+    {
         let session = self.sessions.get_mut(&session_id)
             .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
 
@@ -514,8 +517,9 @@ where
     /// Cleanup stale and completed sessions
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn cleanup_stale_sessions(&mut self, now: Instant) -> SyncResult<usize> {
-        if now.duration_since(self.last_cleanup) < self.config.cleanup_interval {
+    pub fn cleanup_stale_sessions(&mut self, now: u64) -> SyncResult<usize> {
+        let elapsed_secs = now.saturating_sub(self.last_cleanup);
+        if Duration::from_secs(elapsed_secs) < self.config.cleanup_interval {
             return Ok(0);
         }
 
@@ -576,7 +580,7 @@ where
                             failed_count += 1;
                             total_duration_ms += duration_ms;
                         }
-                        SessionResult::Timeout { duration_ms } => {
+                        SessionResult::Timeout { duration_ms, .. } => {
                             timeout_count += 1;
                             total_duration_ms += duration_ms;
                         }
@@ -673,11 +677,13 @@ where
     }
 
     /// Build the session manager
-    pub fn build(self) -> SessionManager<T> {
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    pub fn build(self, now: u64) -> SessionManager<T> {
         if let Some(metrics) = self.metrics {
-            SessionManager::with_metrics(self.config, metrics)
+            SessionManager::with_metrics(self.config, metrics, now)
         } else {
-            SessionManager::new(self.config)
+            SessionManager::new(self.config, now)
         }
     }
 }

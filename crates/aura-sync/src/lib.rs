@@ -106,7 +106,8 @@ pub use core::{
 ///
 /// Contains comprehensive documentation on how aura-sync integrates with
 /// other crates in the Aura ecosystem, following the 8-layer architecture.
-#[doc = include_str!("INTEGRATION.md")]
+// TODO: Create INTEGRATION.md file
+// #[doc = include_str!("INTEGRATION.md")]
 pub mod integration_docs {
     // This module exists only to include the integration documentation
     // in the generated rustdoc. The actual integration patterns are
