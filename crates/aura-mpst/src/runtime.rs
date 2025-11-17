@@ -252,11 +252,10 @@ pub struct ExecutionContext {
 
 impl ExecutionContext {
     /// Create a new execution context
-    #[allow(clippy::disallowed_methods)]
     pub fn new(protocol_name: impl Into<String>, participants: Vec<DeviceId>) -> Self {
         Self {
             protocol_name: protocol_name.into(),
-            session_id: uuid::Uuid::from_bytes([0u8; 16]),
+            session_id: uuid::Uuid::from_bytes([0u8; 16]), // Deterministic zero UUID
             participants,
             metadata: HashMap::new(),
         }

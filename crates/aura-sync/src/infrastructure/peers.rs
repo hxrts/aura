@@ -276,7 +276,9 @@ impl PeerManager {
         // let discovered = discovery_service.discover_peers(effects).await?;
 
         // For now, return tracked peers
-        // Note: For infrastructure code, using Instant::now() is acceptable for tracking refresh time
+        // TODO: ARCHITECTURAL VIOLATION - This should accept `now: Instant` from TimeEffects.
+        // Infrastructure timing is NOT exempt from the effect system - it affects protocol decisions
+        // and must be testable. Refactor to accept time parameter from caller.
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
         self.last_refresh = Some(now);
@@ -292,7 +294,8 @@ impl PeerManager {
             ));
         }
 
-        // Note: For infrastructure code, using Instant::now() is acceptable for tracking discovery time
+        // TODO: ARCHITECTURAL VIOLATION - Should accept `now: Instant` parameter from TimeEffects.
+        // Peer discovery timing affects protocol behavior and must be testable.
         #[allow(clippy::disallowed_methods)]
         self.peers.entry(device_id).or_insert_with(|| {
             PeerInfo {

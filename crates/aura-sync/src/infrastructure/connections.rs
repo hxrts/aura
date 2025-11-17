@@ -268,7 +268,8 @@ impl ConnectionPool {
         let session_id = SessionId::new();
 
         // Try to find idle connection for this peer
-        // Note: For infrastructure code, using Instant::now() is acceptable for connection timing
+        // TODO: ARCHITECTURAL VIOLATION - Should accept `now: Instant` parameter from TimeEffects.
+        // Connection timing affects resource management and protocol timeouts. Must be testable.
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
 
@@ -321,7 +322,8 @@ impl ConnectionPool {
 
     /// Release a connection back to the pool
     pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle) -> SyncResult<()> {
-        // Note: For infrastructure code, using Instant::now() is acceptable for connection timing
+        // TODO: ARCHITECTURAL VIOLATION - Should accept `now: Instant` parameter from TimeEffects.
+        // Connection release timing affects resource management and must be testable.
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
 
