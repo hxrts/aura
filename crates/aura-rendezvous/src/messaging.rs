@@ -321,9 +321,10 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
         &mut self,
         envelope: RendezvousEnvelope,
         from_peer: Option<DeviceId>,
+        now: u64,
     ) -> AuraResult<crate::sbb::FloodResult> {
         let mut coordinator = self.flooding_coordinator.write().await;
-        coordinator.flood_envelope(envelope, from_peer).await
+        coordinator.flood_envelope(envelope, from_peer, now).await
     }
 
     async fn get_forwarding_peers(&self, exclude: Option<DeviceId>) -> AuraResult<Vec<DeviceId>> {

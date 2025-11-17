@@ -7,14 +7,24 @@
 #![allow(clippy::unwrap_used)]
 
 use crate::{AuraError, AuraResult};
-use aura_core::{AccountId, DeviceId};
+use aura_core::{AccountId, DeviceId, hash::hash};
 use aura_macros::choreography;
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 // Guardian types from aura_wot not yet implemented, using placeholders
-use aura_protocol::{AuraEffectSystem, guards::GuardEffectSystem};
+use aura_protocol::AuraEffectSystem;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
+use uuid::Uuid;
+
+/// Create a deterministic DeviceId from a seed for testing purposes
+/// TODO: Replace with proper device ID generation from effect system
+fn test_device_id(seed: u64) -> DeviceId {
+    let hash_input = format!("device-{}", seed);
+    let hash_bytes = hash(hash_input.as_bytes());
+    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    DeviceId(Uuid::from_bytes(uuid_bytes))
+}
 
 /// Guardian authentication request
 #[derive(Debug, Clone, Serialize, Deserialize)]

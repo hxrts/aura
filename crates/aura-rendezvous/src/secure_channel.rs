@@ -128,8 +128,8 @@ impl SecureChannelCoordinator {
         context_id: ContextId,
     ) -> Result<String, AuraError> {
         if self.active_channels.len() >= self.channel_config.max_concurrent_channels {
-            return Err(AuraError::ValidationError(
-                "Maximum concurrent channels exceeded".to_string(),
+            return Err(AuraError::invalid(
+                "Maximum concurrent channels exceeded",
             ));
         }
 
@@ -164,7 +164,7 @@ impl SecureChannelCoordinator {
             .active_channels
             .get_mut(&response.channel_id)
             .ok_or_else(|| {
-                AuraError::ValidationError(format!("Channel not found: {}", response.channel_id))
+                AuraError::not_found(format!("Channel not found: {}", response.channel_id))
             })?;
 
         match &response.handshake_result {
