@@ -6,8 +6,8 @@ This document tracks remaining violations of the effect system architecture prin
 
 - **Total violations audited:** 133
 - **Legitimate (test code, effect implementations):** 70 (53%)
-- **Production code violations remaining:** 25 (19%) - down from 33
-- **Production code violations fixed:** 8 (6%)
+- **Production code violations remaining:** 21 (16%) - down from 33
+- **Production code violations fixed:** 12 (9%)
 - **Trait limitations (tracked):** 12 (9%)
 - **Bootstrap code (acceptable):** 18 (13%)
 
@@ -22,7 +22,16 @@ This document tracks remaining violations of the effect system architecture prin
 - ✅ Removed unnecessary allow from aura-mpst ExecutionContext (deterministic UUID)
 - ✅ Updated false "infrastructure is acceptable" comments with honest TODO markers
 
-### Phase 4 (Completed - Current)
+### Phase 3 (Completed - Current)
+- ✅ Fixed aura-sync infrastructure timing violations (4 locations):
+  - `aura-sync/src/infrastructure/peers.rs:270` - discover_peers now accepts `now: Instant` parameter
+  - `aura-sync/src/infrastructure/peers.rs:285` - add_peer now accepts `now: Instant` parameter
+  - `aura-sync/src/infrastructure/connections.rs:267` - acquire now accepts `now: Instant` parameter
+  - `aura-sync/src/infrastructure/connections.rs:318` - release now accepts `now: Instant` parameter
+- ✅ Updated all test code to pass `now` parameter from test fixtures
+- ✅ Updated documentation examples to show correct usage
+
+### Phase 4 (Completed - Commit eec77f3)
 - ✅ Created EffectSystemRng adapter bridging async RandomEffects to sync RngCore
 - ✅ Fixed all 6 FROST cryptographic violations:
   - `aura-frost/src/threshold_signing.rs:218` - generate_partial_signature now accepts RandomEffects
@@ -32,11 +41,11 @@ This document tracks remaining violations of the effect system architecture prin
   - `aura-core/src/crypto/tree_signing.rs:440` - frost_sign_partial_with_keypackage now accepts RngCore parameter
   - `aura-protocol/src/handlers/memory/ledger_memory.rs:102` - MemoryLedgerHandler now stores RandomEffects dependency
 
-## Remaining Production Violations (25 total)
+## Remaining Production Violations (21 total)
 
-### Priority 1: CRITICAL SECURITY - Cryptographic Operations ✅ COMPLETED
+### Priority 1: CRITICAL SECURITY - Cryptographic Operations ✅ COMPLETED (Phase 4)
 
-**Status**: All 6 violations fixed in Phase 4
+**Status**: All 6 violations fixed
 
 **Solution Implemented**:
 - Created `EffectSystemRng` adapter in `aura-effects/src/crypto.rs`
@@ -47,22 +56,22 @@ This document tracks remaining violations of the effect system architecture prin
 
 **Testing**: Adapter includes comprehensive unit tests for deterministic behavior.
 
-### Priority 2: HIGH - Infrastructure Timing (22 violations)
+### Priority 2: HIGH - Infrastructure Timing (18 violations remaining)
 
 **Impact**: Infrastructure timing affects protocol decisions, resource management, and must be testable.
 
-#### aura-sync Infrastructure (18 violations)
+**Fixed in Phase 3** (4 violations):
+- ✅ `aura-sync/src/infrastructure/peers.rs` - discover_peers and add_peer
+- ✅ `aura-sync/src/infrastructure/connections.rs` - acquire and release
+
+#### aura-sync Infrastructure (14 violations remaining)
 
 **All marked with updated TODO comments clarifying they are violations, not exemptions.**
 
-**Peers (3 violations):**
-- `crates/aura-sync/src/infrastructure/peers.rs:280` - Peer refresh tracking
-- `crates/aura-sync/src/infrastructure/peers.rs:296` - Peer discovery timing
+**Peers (1 violation remaining):**
 - `crates/aura-sync/src/infrastructure/peers.rs:275` (from `PeerMetadata::new`)
 
-**Connections (4 violations):**
-- `crates/aura-sync/src/infrastructure/connections.rs:272` - Connection acquisition
-- `crates/aura-sync/src/infrastructure/connections.rs:325` - Connection release
+**Connections (2 violations remaining):**
 - `crates/aura-sync/src/infrastructure/connections.rs:119` (from `ConnectionMetadata::new`)
 - `crates/aura-sync/src/infrastructure/connections.rs:212` (from `ConnectionHandle::new`)
 
@@ -165,17 +174,19 @@ These have legitimate architectural constraints that require trait signature cha
 
 ## Next Steps
 
-1. **Phase 3**: Fix aura-sync infrastructure timing (18 violations) - NEXT
+1. ~~**Phase 3**: Fix aura-sync infrastructure timing (4 violations in peers/connections)~~ ✅ COMPLETED
 2. ~~**Phase 4**: Create FROST RNG adapter and fix cryptographic violations (6 violations)~~ ✅ COMPLETED
-3. **Phase 5**: Fix aura-protocol transport coordinator (3 violations)
-4. **Phase 6**: Fix remaining infrastructure violations (3 violations)
-5. **Phase 7**: Address trait evolution needs (coordinated effort)
+3. **Phase 5**: Fix remaining aura-sync timing violations (11 violations) - NEXT
+4. **Phase 6**: Fix aura-protocol transport coordinator (3 violations)
+5. **Phase 7**: Fix remaining infrastructure violations (4 violations)
+6. **Phase 8**: Address trait evolution needs (coordinated effort)
 
 ## References
 
 - Initial audit: Effect system violation audit (see git history)
 - Phase 1 fixes: Commit 88a948f
 - Phase 2 fixes: Commit 21ecda6
-- Phase 4 fixes: Current commit
+- Phase 3 fixes: Current commit
+- Phase 4 fixes: Commit eec77f3
 - Architecture: docs/002_system_architecture.md (Effect System section)
 - FROST RNG Adapter: crates/aura-effects/src/crypto.rs (EffectSystemRng)

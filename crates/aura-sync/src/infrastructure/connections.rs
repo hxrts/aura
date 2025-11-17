@@ -17,6 +17,7 @@
 //! ```rust,no_run
 //! use aura_sync::infrastructure::{ConnectionPool, PoolConfig};
 //! use aura_core::DeviceId;
+//! use std::time::Instant;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = PoolConfig::default();
@@ -24,13 +25,16 @@
 //!
 //! let peer_id = DeviceId::from_bytes([1; 32]);
 //!
+//! // Obtain current time from TimeEffects (not shown here for brevity)
+//! # let now = Instant::now();
+//!
 //! // Acquire connection from pool
-//! let conn = pool.acquire(peer_id).await?;
+//! let conn = pool.acquire(peer_id, now).await?;
 //!
 //! // Use connection...
 //!
 //! // Return connection to pool
-//! pool.release(peer_id, conn)?;
+//! pool.release(peer_id, conn, now)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -264,14 +268,8 @@ impl ConnectionPool {
     ///
     /// Tries to reuse an idle connection first, otherwise creates a new one.
     /// Returns error if pool limits are exceeded or timeout occurs.
-    pub async fn acquire(&mut self, peer_id: DeviceId) -> SyncResult<ConnectionHandle> {
+    pub async fn acquire(&mut self, peer_id: DeviceId, now: Instant) -> SyncResult<ConnectionHandle> {
         let session_id = SessionId::new();
-
-        // Try to find idle connection for this peer
-        // TODO: ARCHITECTURAL VIOLATION - Should accept `now: Instant` parameter from TimeEffects.
-        // Connection timing affects resource management and protocol timeouts. Must be testable.
-        #[allow(clippy::disallowed_methods)]
-        let now = Instant::now();
 
         if let Some(connections) = self.connections.get_mut(&peer_id) {
             if let Some(idle_conn) = connections.iter_mut()
@@ -321,11 +319,7 @@ impl ConnectionPool {
     }
 
     /// Release a connection back to the pool
-    pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle) -> SyncResult<()> {
-        // TODO: ARCHITECTURAL VIOLATION - Should accept `now: Instant` parameter from TimeEffects.
-        // Connection release timing affects resource management and must be testable.
-        #[allow(clippy::disallowed_methods)]
-        let now = Instant::now();
+    pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle, now: Instant) -> SyncResult<()> {
 
         let connections = self.connections.get_mut(&peer_id)
             .ok_or_else(|| SyncError::Internal("No connections for peer".to_string()))?;
@@ -456,15 +450,18 @@ mod tests {
 
         let peer_id = DeviceId::from_bytes([1; 32]);
 
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         // Acquire connection
-        let handle = pool.acquire(peer_id).await.unwrap();
+        let handle = pool.acquire(peer_id, now).await.unwrap();
         assert_eq!(pool.total_connections(), 1);
 
         // Release connection
-        pool.release(peer_id, handle).unwrap();
+        pool.release(peer_id, handle, now).unwrap();
 
         // Connection should be reused
-        let handle2 = pool.acquire(peer_id).await.unwrap();
+        let handle2 = pool.acquire(peer_id, now).await.unwrap();
         assert_eq!(pool.total_connections(), 1);
         assert_eq!(pool.statistics().connections_reused, 1);
     }
@@ -479,12 +476,15 @@ mod tests {
         let peer1 = DeviceId::from_bytes([1; 32]);
         let peer2 = DeviceId::from_bytes([2; 32]);
 
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         // Acquire 2 connections
-        let _handle1 = pool.acquire(peer1).await.unwrap();
-        let _handle2 = pool.acquire(peer2).await.unwrap();
+        let _handle1 = pool.acquire(peer1, now).await.unwrap();
+        let _handle2 = pool.acquire(peer2, now).await.unwrap();
 
         // Third should fail
-        let result = pool.acquire(peer1).await;
+        let result = pool.acquire(peer1, now).await;
         assert!(result.is_err());
         assert_eq!(pool.statistics().connection_limit_hits, 1);
     }
@@ -498,9 +498,12 @@ mod tests {
 
         let peer_id = DeviceId::from_bytes([1; 32]);
 
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         // Acquire and release connection
-        let handle = pool.acquire(peer_id).await.unwrap();
-        pool.release(peer_id, handle).unwrap();
+        let handle = pool.acquire(peer_id, now).await.unwrap();
+        pool.release(peer_id, handle, now).unwrap();
 
         // Wait for idle timeout
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -518,18 +521,23 @@ mod tests {
 
         let peer_id = DeviceId::from_bytes([1; 32]);
 
+        #[allow(clippy::disallowed_methods)]
+        let now = Instant::now();
+
         // Acquire connection
-        let handle = pool.acquire(peer_id).await.unwrap();
+        let handle = pool.acquire(peer_id, now).await.unwrap();
 
         // Check metadata
         let metadata = pool.get_connection_metadata(&peer_id, &handle.id).unwrap();
         assert_eq!(metadata.state, ConnectionState::Active);
         assert_eq!(metadata.reuse_count, 1);
 
-        // Release and check again
-        pool.release(peer_id, handle).unwrap();
+        let connection_id = metadata.connection_id.clone();
 
-        let metadata = pool.get_connection_metadata(&peer_id, &metadata.connection_id).unwrap();
+        // Release and check again
+        pool.release(peer_id, handle, now).unwrap();
+
+        let metadata = pool.get_connection_metadata(&peer_id, &connection_id).unwrap();
         assert_eq!(metadata.state, ConnectionState::Idle);
     }
 }

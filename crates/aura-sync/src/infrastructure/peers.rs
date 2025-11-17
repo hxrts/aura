@@ -267,7 +267,7 @@ impl PeerManager {
     /// - Uses `NetworkEffects` for peer discovery
     /// - Uses `StorageEffects` to persist discovered peers
     /// - Filters by capabilities via aura-wot integration
-    pub async fn discover_peers<E>(&mut self, _effects: &E) -> SyncResult<Vec<DeviceId>>
+    pub async fn discover_peers<E>(&mut self, _effects: &E, now: Instant) -> SyncResult<Vec<DeviceId>>
     where
         E: Send + Sync,
     {
@@ -276,30 +276,22 @@ impl PeerManager {
         // let discovered = discovery_service.discover_peers(effects).await?;
 
         // For now, return tracked peers
-        // TODO: ARCHITECTURAL VIOLATION - This should accept `now: Instant` from TimeEffects.
-        // Infrastructure timing is NOT exempt from the effect system - it affects protocol decisions
-        // and must be testable. Refactor to accept time parameter from caller.
-        #[allow(clippy::disallowed_methods)]
-        let now = Instant::now();
         self.last_refresh = Some(now);
 
         Ok(self.peers.keys().copied().collect())
     }
 
     /// Add a discovered peer to tracking
-    pub fn add_peer(&mut self, device_id: DeviceId) -> SyncResult<()> {
+    pub fn add_peer(&mut self, device_id: DeviceId, now: Instant) -> SyncResult<()> {
         if self.peers.len() >= self.config.max_tracked_peers {
             return Err(SyncError::Configuration(
                 "Maximum tracked peers exceeded".to_string()
             ));
         }
 
-        // TODO: ARCHITECTURAL VIOLATION - Should accept `now: Instant` parameter from TimeEffects.
-        // Peer discovery timing affects protocol behavior and must be testable.
-        #[allow(clippy::disallowed_methods)]
         self.peers.entry(device_id).or_insert_with(|| {
             PeerInfo {
-                metadata: PeerMetadata::new(device_id, Instant::now()),
+                metadata: PeerMetadata::new(device_id, now),
                 capabilities: HashSet::new(),
                 connection_details: None,
             }
@@ -509,12 +501,12 @@ mod tests {
         let peer2 = DeviceId::from_bytes([2; 32]);
         let peer3 = DeviceId::from_bytes([3; 32]);
 
-        manager.add_peer(peer1).unwrap();
-        manager.add_peer(peer2).unwrap();
-        manager.add_peer(peer3).unwrap();
-
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
+
+        manager.add_peer(peer1, now).unwrap();
+        manager.add_peer(peer2, now).unwrap();
+        manager.add_peer(peer3, now).unwrap();
 
         // Set up peer1 as high trust, connected
         manager.update_peer_metadata(peer1, |m| {
