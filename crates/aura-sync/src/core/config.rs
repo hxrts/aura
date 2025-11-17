@@ -382,42 +382,50 @@ pub struct SyncConfigBuilder {
 }
 
 impl SyncConfigBuilder {
+    /// Create a new configuration builder with default settings
     pub fn new() -> Self {
         Self {
             config: SyncConfig::default(),
         }
     }
 
+    /// Set network configuration
     pub fn network(mut self, network: NetworkConfig) -> Self {
         self.config.network = network;
         self
     }
 
+    /// Set retry configuration
     pub fn retry(mut self, retry: RetryConfig) -> Self {
         self.config.retry = retry;
         self
     }
 
+    /// Set batching configuration
     pub fn batching(mut self, batching: BatchConfig) -> Self {
         self.config.batching = batching;
         self
     }
 
+    /// Set peer management configuration
     pub fn peer_management(mut self, peer_management: PeerManagementConfig) -> Self {
         self.config.peer_management = peer_management;
         self
     }
 
+    /// Set protocol configurations
     pub fn protocols(mut self, protocols: ProtocolConfigs) -> Self {
         self.config.protocols = protocols;
         self
     }
 
+    /// Set performance configuration
     pub fn performance(mut self, performance: PerformanceConfig) -> Self {
         self.config.performance = performance;
         self
     }
 
+    /// Build and validate the configuration
     pub fn build(self) -> Result<SyncConfig, String> {
         self.config.validate()?;
         Ok(self.config)

@@ -10,8 +10,11 @@ use uuid::Uuid;
 
 /// Common trait for protocol message pairs
 pub trait ProtocolMessage: Send + Sync + Clone + Debug {
+    /// Request message type
     type Request: Send + Sync + Clone + Debug + for<'de> Deserialize<'de> + Serialize;
+    /// Response message type
     type Response: Send + Sync + Clone + Debug + for<'de> Deserialize<'de> + Serialize;
+    /// Error type for protocol operations
     type Error: std::error::Error + Send + Sync;
 }
 

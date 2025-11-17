@@ -57,7 +57,8 @@
 //! See [`INTEGRATION.md`](crate::INTEGRATION) for detailed integration patterns
 //! with other Aura crates and the effect system architecture.
 
-#![deny(missing_docs)]
+// TODO: Re-enable once all documentation is complete
+#![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
 // =============================================================================

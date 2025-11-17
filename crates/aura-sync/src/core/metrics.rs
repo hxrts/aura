@@ -178,15 +178,20 @@ impl HistogramMetric {
 /// Histogram bucket with atomic counter
 #[derive(Debug)]
 pub struct HistogramBucket {
+    /// Upper bound of this bucket
     pub upper_bound: f64,
+    /// Atomic count of observations in this bucket
     pub count: AtomicU64,
 }
 
 /// Histogram statistics snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistogramStats {
+    /// Sum of all observed values
     pub sum: u64,
+    /// Total number of observations
     pub count: u64,
+    /// Histogram buckets as (upper_bound, count) pairs
     pub buckets: Vec<(f64, u64)>,
 }
 
@@ -223,21 +228,32 @@ impl HistogramStats {
 /// Error categories for consistent classification
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ErrorCategory {
+    /// Network-related errors
     Network,
+    /// Protocol-specific errors
     Protocol,
+    /// Timeout errors
     Timeout,
+    /// Validation errors
     Validation,
+    /// Resource exhaustion errors
     Resource,
+    /// Authorization errors
     Authorization,
 }
 
 /// Comprehensive metrics snapshot for export
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncMetricsSnapshot {
+    /// Operational metrics snapshot
     pub operational: OperationalSnapshot,
+    /// Performance metrics snapshot
     pub performance: PerformanceSnapshot,
+    /// Resource usage snapshot
     pub resources: ResourceSnapshot,
+    /// Error metrics snapshot
     pub errors: ErrorSnapshot,
+    /// Snapshot timestamp (Unix seconds)
     pub timestamp: u64,
 }
 
