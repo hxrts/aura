@@ -309,6 +309,13 @@ impl DeviceId {
         // Fill rest with zeros for consistent 32-byte format
         Ok(result)
     }
+
+    /// Convert to hex string
+    ///
+    /// Returns the UUID as a hexadecimal string (without hyphens).
+    pub fn to_hex(&self) -> String {
+        hex::encode(self.0.as_bytes())
+    }
 }
 
 impl Default for DeviceId {
@@ -350,6 +357,12 @@ impl From<&str> for DeviceId {
             let namespace = Uuid::NAMESPACE_DNS;
             DeviceId(Uuid::new_v5(&namespace, s.as_bytes()))
         })
+    }
+}
+
+impl From<[u8; 32]> for DeviceId {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self::from_bytes(bytes)
     }
 }
 
