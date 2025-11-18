@@ -237,7 +237,9 @@ impl SecurityTestFramework {
             // Malicious facts
             forged_by_attacker(true);
             bypass_security(true);
-        "#
+        "#,
+            target_account = target_account.to_string(),
+            claimed_device = claimed_device.to_string()
         )
         .build(&malicious_keypair)?;
 

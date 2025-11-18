@@ -166,7 +166,8 @@ impl LimitsTestCoordinator {
                     token_type("expired");
 
                     check if time($time), $time < {past_time};
-                "#
+                "#,
+                    past_time = past_time.to_string()
                 )
                 .build(self.fixture.account_authority.root_keypair())
                 .map_err(BiscuitError::BiscuitLib)
