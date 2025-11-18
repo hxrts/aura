@@ -937,8 +937,7 @@ impl<E: RelationshipFormationEffects> RelationshipFormationCoordinator<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::crypto::FrostSigningPackage;
-    use aura_core::effects::crypto::KeyDerivationContext;
+    use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
     use aura_core::AuraError;
 
     // Mock implementation for testing
@@ -1041,8 +1040,11 @@ mod tests {
             &self,
             _threshold: u16,
             _max_signers: u16,
-        ) -> Result<Vec<Vec<u8>>, aura_core::AuraError> {
-            Ok(vec![vec![0x11; 32], vec![0x22; 32], vec![0x33; 32]])
+        ) -> Result<FrostKeyGenResult, aura_core::AuraError> {
+            Ok(FrostKeyGenResult {
+                key_packages: vec![vec![0x11; 32], vec![0x22; 32], vec![0x33; 32]],
+                public_key_package: vec![0xaa; 32],
+            })
         }
 
         async fn frost_generate_nonces(&self) -> Result<Vec<u8>, aura_core::AuraError> {
@@ -1054,11 +1056,13 @@ mod tests {
             message: &[u8],
             _nonces: &[Vec<u8>],
             participants: &[u16],
+            public_key_package: &[u8],
         ) -> Result<FrostSigningPackage, aura_core::AuraError> {
             Ok(FrostSigningPackage {
                 message: message.to_vec(),
                 package: vec![0x55; 64],
                 participants: participants.to_vec(),
+                public_key_package: public_key_package.to_vec(),
             })
         }
 
@@ -1130,8 +1134,11 @@ mod tests {
             _old_threshold: u16,
             _new_threshold: u16,
             _new_max_signers: u16,
-        ) -> Result<Vec<Vec<u8>>, aura_core::AuraError> {
-            Ok(vec![vec![0xcc; 32], vec![0xdd; 32]])
+        ) -> Result<FrostKeyGenResult, aura_core::AuraError> {
+            Ok(FrostKeyGenResult {
+                key_packages: vec![vec![0xcc; 32], vec![0xdd; 32]],
+                public_key_package: vec![0xbb; 32],
+            })
         }
 
         fn is_simulated(&self) -> bool {

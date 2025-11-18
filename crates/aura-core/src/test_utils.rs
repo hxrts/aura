@@ -7,8 +7,6 @@
 //! These utilities should remain minimal and focused only on creating deterministic instances
 //! of core types for testing purposes.
 
-#![cfg(test)]
-
 use crate::hash::hash;
 use crate::{AccountId, DeviceId, SessionId};
 use ed25519_dalek::{SigningKey, VerifyingKey};

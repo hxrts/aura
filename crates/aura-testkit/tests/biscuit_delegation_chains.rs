@@ -7,8 +7,7 @@
 use aura_core::{AccountId, DeviceId};
 use aura_protocol::authorization::biscuit_bridge::BiscuitAuthorizationBridge;
 use aura_testkit::{
-    create_delegation_scenario, AdminOperationExt, BiscuitTestFixture, JournalOpExt,
-    RecoveryTypeExt,
+    create_delegation_scenario, BiscuitTestFixture,
 };
 use aura_wot::{
     biscuit_resources::{AdminOperation, JournalOp, RecoveryType, ResourceScope, StorageCategory},

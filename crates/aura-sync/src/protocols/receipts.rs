@@ -329,8 +329,9 @@ impl Default for ReceiptVerificationProtocol {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use aura_core::effects::{
-        CryptoError, FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
+    use aura_core::effects::CryptoError;
+    use aura_core::effects::crypto::{
+        FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
     };
 
     // Mock crypto effects for testing
@@ -339,19 +340,6 @@ mod tests {
 
     #[async_trait]
     impl CryptoEffects for MockCryptoEffects {
-        // Inherit from RandomEffects
-        async fn random_bytes(&self, len: usize) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![1; len])
-        }
-
-        async fn random_bytes_32(&self) -> Result<[u8; 32], CryptoError> {
-            Ok([1; 32])
-        }
-
-        async fn random_range(&self, min: u64, max: u64) -> Result<u64, CryptoError> {
-            Ok((min + max) / 2) // Simple deterministic value
-        }
-
         // HKDF key derivation
         async fn hkdf_derive(
             &self,
@@ -526,6 +514,21 @@ mod tests {
             for byte in data {
                 *byte = 0;
             }
+        }
+    }
+
+    #[async_trait]
+    impl aura_core::effects::RandomEffects for MockCryptoEffects {
+        async fn random_bytes(&self, len: usize) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![1; len])
+        }
+
+        async fn random_bytes_32(&self) -> Result<[u8; 32], CryptoError> {
+            Ok([1; 32])
+        }
+
+        async fn random_range(&self, min: u64, max: u64) -> Result<u64, CryptoError> {
+            Ok((min + max) / 2) // Simple deterministic value
         }
     }
 

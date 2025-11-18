@@ -60,6 +60,11 @@ pub mod simulation;
 pub mod time;
 pub mod verification;
 
+// Make privacy module available at top level for backward compatibility
+pub mod privacy {
+    pub use crate::configuration::privacy::*;
+}
+
 // Re-export commonly used items from modular structure
 pub use builders::*;
 pub use configuration::TestConfig as ConfigTestConfig;

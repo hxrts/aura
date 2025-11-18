@@ -250,15 +250,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_frost_aggregation_validation() {
+        use aura_effects::random::MockRandomHandler;
+
         // Test validation of insufficient signatures
         let insufficient_signatures = vec![PartialSignature::from_bytes(vec![1; 32]).unwrap()];
         let message = b"test message";
         let threshold = 2;
         let total_signers = 3;
+        let random_handler = MockRandomHandler::new();
 
         // This should fail with insufficient signatures
         let result =
-            perform_frost_aggregation(&insufficient_signatures, message, threshold, total_signers)
+            perform_frost_aggregation(&insufficient_signatures, message, threshold, total_signers, &random_handler)
                 .await;
         assert!(result.is_err());
 

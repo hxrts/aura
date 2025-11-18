@@ -570,6 +570,22 @@ impl Cap {
         Self::new()
     }
 
+    pub fn with_resources<I>(self, _resources: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
+    {
+        self
+    }
+
+    pub fn set_usage_limit(&mut self, _limit: u32) {
+        // Stub - actual usage limits managed via Biscuit token caveats
+    }
+
+    pub fn increment_usage(&mut self) {
+        // Stub - actual usage tracking done via Biscuit token facts
+    }
+
     pub fn add_permission(&mut self, _permission: &str) {
         // Stub - actual permission management done via Biscuit tokens
     }

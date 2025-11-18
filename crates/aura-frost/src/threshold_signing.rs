@@ -385,11 +385,14 @@ mod tests {
         // This test ensures the API is correctly defined
         fn _check_api_exists() {
             async fn _test() {
-                let _commitment = FrostCrypto::generate_nonce_commitment(1).await;
+                use aura_effects::random::MockRandomHandler;
+                let random_handler = MockRandomHandler::new();
+                let _commitment = FrostCrypto::generate_nonce_commitment(1, &random_handler).await;
                 let _signature = FrostCrypto::generate_partial_signature(
                     &aura_core::frost::TreeSigningContext::new(1, 0, [0u8; 32]),
                     b"test",
                     1,
+                    &random_handler,
                 )
                 .await;
             }
