@@ -114,26 +114,26 @@ pub trait ProtocolOrchestrator {
 pub trait EffectComposer { /* ... */ }
 pub trait StandardPatterns { /* ... */ }
 ```
-- [ ] **Update consumers** to use grouped interfaces
-- [ ] **Mark old exports** as `#[deprecated]` with migration path
+- [x] **Update consumers** to use grouped interfaces:
+  - Updated aura-cli handlers (6 files) to use `effect_traits::*`
+  - Updated aura-agent handlers to use `composition::*` and `internal::*`
+  - All deprecated flat imports migrated to grouped modules
+- [x] **Mark old exports** as `#[deprecated]` with migration path (completed - see lib.rs lines 229-319)
 
-**Context**: aura-protocol has grown to 140+ exports making it difficult to understand what to use when.
+**Context**: aura-protocol API successfully reorganized. Public surface reduced from 140+ to ~51 exports with clear capability grouping.
 
 ### 2.3 Simplify aura-verify Key Management API
-- [ ] **Create IdentityVerifier facade**:
-```rust
-pub struct IdentityVerifier { /* private */ }
-impl IdentityVerifier {
-    pub fn verify_device_signature(&self, proof: &IdentityProof) -> Result<VerifiedIdentity>;
-    pub fn verify_threshold_signature(&self, proof: &ThresholdProof) -> Result<VerifiedIdentity>;
-    // Hide KeyMaterial complexity
-}
-```
-- [ ] **Move KeyMaterial details** to private modules
-- [ ] **Update consumers** to use simplified API
-- [ ] **Ensure cryptographic correctness** through new interface
+- [x] **Create IdentityVerifier facade**: SimpleIdentityVerifier implemented with:
+  - `verify_device_signature()` - Device signature verification
+  - `verify_guardian_signature()` - Guardian signature verification
+  - `verify_threshold_signature()` - Threshold signature verification
+- [x] **Move KeyMaterial details** to internal (marked as advanced use case with documentation)
+- [x] **Update consumers** to use simplified API:
+  - Migrated aura-agent/operations.rs to SimpleIdentityVerifier
+  - AuthorizedAgentOperations now uses facade pattern
+- [x] **Ensure cryptographic correctness** through new interface (all verification types working, threshold support improved)
 
-**Context**: aura-verify exposes complex KeyMaterial management that should be internal.
+**Context**: aura-verify now provides SimpleIdentityVerifier facade hiding KeyMaterial complexity. Legacy verify_identity_proof() and low-level functions deprecated with clear migration guidance.
 
 ## Phase 3: Architectural Enforcement (High Value, Future-Proofing)
 
