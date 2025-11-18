@@ -130,7 +130,7 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
         println!("Proposal failed due to insufficient approvals");
 
         // This represents a failed upgrade scenario
-        Err(AuraError::Sync("Insufficient approvals".to_string()))
+        Err(AuraError::internal("Insufficient approvals".to_string()))
     })
     .await;
 
@@ -518,11 +518,11 @@ async fn test_ota_device_failures() -> AuraResult<()> {
             if *device != failed_device {
                 fixture
                     .network
-                    .set_condition(failed_device, *device, partition_condition.clone())
+                    .set_conditions(failed_device, *device, partition_condition.clone())
                     .await;
                 fixture
                     .network
-                    .set_condition(*device, failed_device, partition_condition.clone())
+                    .set_conditions(*device, failed_device, partition_condition.clone())
                     .await;
             }
         }

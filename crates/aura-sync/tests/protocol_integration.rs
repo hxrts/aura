@@ -89,7 +89,7 @@ fn test_journal_sync_configuration() {
 
     assert!(config.batch_size > 0);
     assert!(config.sync_timeout > std::time::Duration::ZERO);
-    assert!(config.max_retries > 0);
+    assert!(config.retry_policy.max_retries > 0);
 }
 
 #[test]

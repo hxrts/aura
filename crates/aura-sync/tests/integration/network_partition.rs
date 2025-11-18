@@ -39,11 +39,11 @@ async fn test_partition_detection() -> AuraResult<()> {
                 };
                 fixture
                     .network
-                    .set_condition(isolated, *device, partition_condition.clone())
+                    .set_conditions(isolated, *device, partition_condition.clone())
                     .await;
                 fixture
                     .network
-                    .set_condition(*device, isolated, partition_condition)
+                    .set_conditions(*device, isolated, partition_condition)
                     .await;
             }
         }
@@ -320,11 +320,11 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
             };
             fixture
                 .network
-                .set_condition(isolated1, *device, partition_condition.clone())
+                .set_conditions(isolated1, *device, partition_condition.clone())
                 .await;
             fixture
                 .network
-                .set_condition(*device, isolated1, partition_condition)
+                .set_conditions(*device, isolated1, partition_condition)
                 .await;
         }
         println!("Device {} isolated (4/5 remaining)", isolated1);
@@ -339,11 +339,11 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
             };
             fixture
                 .network
-                .set_condition(isolated2, *device, partition_condition.clone())
+                .set_conditions(isolated2, *device, partition_condition.clone())
                 .await;
             fixture
                 .network
-                .set_condition(*device, isolated2, partition_condition)
+                .set_conditions(*device, isolated2, partition_condition)
                 .await;
         }
         println!(
@@ -361,11 +361,11 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
             };
             fixture
                 .network
-                .set_condition(isolated3, *device, partition_condition.clone())
+                .set_conditions(isolated3, *device, partition_condition.clone())
                 .await;
             fixture
                 .network
-                .set_condition(*device, isolated3, partition_condition)
+                .set_conditions(*device, isolated3, partition_condition)
                 .await;
         }
         println!(
@@ -431,11 +431,11 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
             };
             fixture
                 .network
-                .set_condition(device1, device2, partition_condition.clone())
+                .set_conditions(device1, device2, partition_condition.clone())
                 .await;
             fixture
                 .network
-                .set_condition(device2, device1, partition_condition)
+                .set_conditions(device2, device1, partition_condition)
                 .await;
 
             println!("  Partition created");
@@ -444,11 +444,11 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
             // Heal partition
             fixture
                 .network
-                .set_condition(device1, device2, NetworkCondition::default())
+                .set_conditions(device1, device2, NetworkCondition::default())
                 .await;
             fixture
                 .network
-                .set_condition(device2, device1, NetworkCondition::default())
+                .set_conditions(device2, device1, NetworkCondition::default())
                 .await;
 
             println!("  Partition healed");
@@ -526,7 +526,7 @@ async fn test_partial_connectivity_partition() -> AuraResult<()> {
             };
             fixture
                 .network
-                .set_condition(from, to, partition_condition)
+                .set_conditions(from, to, partition_condition)
                 .await;
         }
 
@@ -591,11 +591,11 @@ async fn test_partition_detection_accuracy() -> AuraResult<()> {
 
         fixture
             .network
-            .set_condition(device1, device2, high_latency.clone())
+            .set_conditions(device1, device2, high_latency.clone())
             .await;
         fixture
             .network
-            .set_condition(device2, device1, high_latency)
+            .set_conditions(device2, device1, high_latency)
             .await;
 
         println!("Simulating high latency network (not partition)");
@@ -617,11 +617,11 @@ async fn test_partition_detection_accuracy() -> AuraResult<()> {
 
         fixture
             .network
-            .set_condition(device1, device2, actual_partition.clone())
+            .set_conditions(device1, device2, actual_partition.clone())
             .await;
         fixture
             .network
-            .set_condition(device2, device1, actual_partition)
+            .set_conditions(device2, device1, actual_partition)
             .await;
 
         println!("Creating actual partition");
