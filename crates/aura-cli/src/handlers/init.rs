@@ -3,7 +3,8 @@
 //! Effect-based implementation of the init command.
 
 use anyhow::Result;
-use aura_protocol::{AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects};
+use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects, TimeEffects};
+use aura_protocol::AuraEffectSystem;
 use std::path::Path;
 
 /// Handle initialization through effects

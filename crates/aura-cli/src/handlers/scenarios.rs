@@ -4,7 +4,8 @@
 
 use crate::ScenarioAction;
 use anyhow::Result;
-use aura_protocol::{AuraEffectSystem, ConsoleEffects, StorageEffects};
+use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects};
+use aura_protocol::AuraEffectSystem;
 use std::path::Path;
 
 /// Handle scenario operations through effects

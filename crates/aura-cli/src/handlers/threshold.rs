@@ -5,7 +5,8 @@
 use anyhow::Result;
 use aura_authenticate::DkdResult;
 use aura_core::DeviceId;
-use aura_protocol::{AuraEffectSystem, ConsoleEffects, StorageEffects};
+use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects};
+use aura_protocol::AuraEffectSystem;
 use std::path::PathBuf;
 use uuid::Uuid;
 
