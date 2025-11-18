@@ -481,7 +481,7 @@ async fn test_security_authorization_scenarios() -> Result<(), Box<dyn std::erro
 
 #[tokio::test]
 async fn test_authorization_error_handling() -> Result<(), Box<dyn std::error::Error>> {
-    let fixture = BiscuitTestFixture::new();
+    let mut fixture = BiscuitTestFixture::new();
     let device_id = DeviceId::new();
 
     let bridge = BiscuitAuthorizationBridge::new(fixture.root_public_key(), device_id);

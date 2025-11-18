@@ -322,9 +322,11 @@ async fn test_token_rotation_during_session() -> Result<(), Box<dyn std::error::
     let original_token = session.token.clone();
 
     // Simulate token rotation by creating a new attenuated token
-    let fixture = auth_service.get_account_fixture(&account_id).unwrap();
-    let token_manager = fixture.get_device_token(&device_id).unwrap();
-    let rotated_token = token_manager.attenuate_read("rotated_access/")?;
+    let rotated_token = {
+        let fixture = auth_service.get_account_fixture(&account_id).unwrap();
+        let token_manager = fixture.get_device_token(&device_id).unwrap();
+        token_manager.attenuate_read("rotated_access/")?
+    };
 
     // Update session with rotated token
     session.token = rotated_token.clone();
@@ -333,6 +335,7 @@ async fn test_token_rotation_during_session() -> Result<(), Box<dyn std::error::
         .insert(session.session_id.clone(), session.clone());
 
     // Verify rotated token works
+    let fixture = auth_service.get_account_fixture(&account_id).unwrap();
     let bridge = BiscuitAuthorizationBridge::new(fixture.root_public_key(), device_id);
     let storage_scope = ResourceScope::Storage {
         category: StorageCategory::Personal,
@@ -427,9 +430,11 @@ async fn test_authentication_with_attenuated_tokens() -> Result<(), Box<dyn std:
     auth_service.register_device(account_id, device_id)?;
 
     // Get the full token and create an attenuated version
-    let fixture = auth_service.get_account_fixture(&account_id).unwrap();
-    let token_manager = fixture.get_device_token(&device_id).unwrap();
-    let attenuated_token = token_manager.attenuate_read("restricted/")?;
+    let attenuated_token = {
+        let fixture = auth_service.get_account_fixture(&account_id).unwrap();
+        let token_manager = fixture.get_device_token(&device_id).unwrap();
+        token_manager.attenuate_read("restricted/")?
+    };
 
     // Create a session with the attenuated token
     let session = AuthenticatedSession::new(device_id, account_id, attenuated_token, Some(3600));
@@ -438,6 +443,7 @@ async fn test_authentication_with_attenuated_tokens() -> Result<(), Box<dyn std:
         .insert(session.session_id.clone(), session.clone());
 
     // Test that the session works for allowed operations
+    let fixture = auth_service.get_account_fixture(&account_id).unwrap();
     let bridge = BiscuitAuthorizationBridge::new(fixture.root_public_key(), device_id);
 
     let allowed_scope = ResourceScope::Storage {

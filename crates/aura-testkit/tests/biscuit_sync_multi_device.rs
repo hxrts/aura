@@ -351,13 +351,13 @@ async fn test_delegated_token_sync() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = create_delegation_scenario()?;
     let mut coordinator = SyncCoordinator::new(fixture);
 
-    // Get the delegation chain for testing
+    // Get the delegation chain and device info before mutations
     let chain = coordinator
         .account_fixture
         .get_delegation_chain("progressive_restriction")
-        .expect("Delegation chain should exist");
+        .expect("Delegation chain should exist")
+        .clone();
 
-    // Use delegated tokens for sync operations
     let device_ids: Vec<DeviceId> = coordinator
         .account_fixture
         .device_tokens

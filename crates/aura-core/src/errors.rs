@@ -135,6 +135,32 @@ impl AuraError {
             message: format!("Budget exceeded: {}", message.into()),
         }
     }
+
+    /// Check if this error is retryable
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            // Network errors are typically retryable
+            Self::Network { .. } => true,
+            // Storage errors might be retryable
+            Self::Storage { .. } => true,
+            // Other errors are not retryable
+            _ => false,
+        }
+    }
+
+    /// Get the error category as a string
+    pub fn category(&self) -> &'static str {
+        match self {
+            Self::Invalid { .. } => "invalid",
+            Self::NotFound { .. } => "not_found",
+            Self::PermissionDenied { .. } => "permission_denied",
+            Self::Crypto { .. } => "crypto",
+            Self::Network { .. } => "network",
+            Self::Serialization { .. } => "serialization",
+            Self::Storage { .. } => "storage",
+            Self::Internal { .. } => "internal",
+        }
+    }
 }
 
 /// Standard Result type for Aura operations

@@ -74,7 +74,7 @@ impl MultiDeviceTestFixture {
         to: DeviceId,
         condition: NetworkCondition,
     ) {
-        self.network.set_condition(from, to, condition).await;
+        self.network.set_conditions(from, to, condition).await;
     }
 
     /// Partition the network between two device groups
@@ -90,10 +90,10 @@ impl MultiDeviceTestFixture {
         for device1 in &group1 {
             for device2 in &group2 {
                 self.network
-                    .set_condition(*device1, *device2, partition_condition.clone())
+                    .set_conditions(*device1, *device2, partition_condition.clone())
                     .await;
                 self.network
-                    .set_condition(*device2, *device1, partition_condition.clone())
+                    .set_conditions(*device2, *device1, partition_condition.clone())
                     .await;
             }
         }
@@ -134,14 +134,14 @@ impl MultiDeviceTestFixture {
                 match status.status {
                     SessionStatus::Completed => return Ok(()),
                     SessionStatus::Failed => {
-                        return Err(AuraError::Sync("Session failed".to_string()))
+                        return Err(AuraError::internal("Session failed".to_string()))
                     }
                     _ => tokio::time::sleep(Duration::from_millis(100)).await,
                 }
             }
         })
         .await
-        .map_err(|_| AuraError::Sync("Session timeout".to_string()))?
+        .map_err(|_| AuraError::internal("Session timeout".to_string()))?
     }
 }
 
@@ -214,7 +214,7 @@ pub async fn create_divergent_journal_states(
     // For now, we simulate the setup that would create divergent states
 
     if fixture.devices.len() < 3 {
-        return Err(AuraError::Sync(
+        return Err(AuraError::internal(
             "Need at least 3 devices for divergence test".to_string(),
         ));
     }
@@ -232,19 +232,19 @@ pub async fn create_divergent_journal_states(
 
     fixture
         .network
-        .set_condition(device0, device2, partition_condition.clone())
+        .set_conditions(device0, device2, partition_condition.clone())
         .await;
     fixture
         .network
-        .set_condition(device1, device2, partition_condition.clone())
+        .set_conditions(device1, device2, partition_condition.clone())
         .await;
     fixture
         .network
-        .set_condition(device2, device0, partition_condition.clone())
+        .set_conditions(device2, device0, partition_condition.clone())
         .await;
     fixture
         .network
-        .set_condition(device2, device1, partition_condition)
+        .set_conditions(device2, device1, partition_condition)
         .await;
 
     // At this point, device0 and device1 can sync while device2 is isolated
@@ -283,8 +283,8 @@ pub async fn assert_sync_success<T>(
 ) -> AuraResult<T> {
     timeout(timeout_duration, future)
         .await
-        .map_err(|_| AuraError::Sync("Sync operation timeout".to_string()))?
-        .map_err(|e| AuraError::Sync(format!("Sync failed: {}", e)))
+        .map_err(|_| AuraError::internal("Sync operation timeout".to_string()))?
+        .map_err(|e| AuraError::internal(format!("Sync failed: {}", e)))
 }
 
 /// Assert that a sync result fails within timeout
@@ -294,10 +294,10 @@ pub async fn assert_sync_failure<T>(
 ) -> AuraResult<()> {
     let result = timeout(timeout_duration, future)
         .await
-        .map_err(|_| AuraError::Sync("Expected failure but operation timed out".to_string()))?;
+        .map_err(|_| AuraError::internal("Expected failure but operation timed out".to_string()))?;
 
     match result {
-        Ok(_) => Err(AuraError::Sync(
+        Ok(_) => Err(AuraError::internal(
             "Expected failure but operation succeeded".to_string(),
         )),
         Err(_) => Ok(()),

@@ -7,7 +7,8 @@ use crate::{
 };
 use anyhow::Result;
 use aura_core::identifiers::DeviceId;
-use aura_protocol::{effects::AuraEffectSystem, effects::ConsoleEffects};
+use aura_protocol::effect_traits::ConsoleEffects;
+use aura_protocol::AuraEffectSystem;
 use std::path::Path;
 
 pub mod admin;

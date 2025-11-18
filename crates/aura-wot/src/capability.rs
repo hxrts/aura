@@ -32,6 +32,15 @@ pub enum Capability {
     Execute { operation: String },
     /// Delegation permission with maximum depth
     Delegate { max_depth: u32 },
+    /// Relay permission with flow budget limits
+    Relay {
+        /// Maximum bytes per period
+        max_bytes_per_period: u64,
+        /// Period duration in seconds
+        period_seconds: u64,
+        /// Maximum concurrent streams
+        max_streams: u32,
+    },
     /// All permissions - represents ⊤ (top element) in the meet-semilattice
     /// Per §2.1: "type Cap // partially ordered set (≤), with meet ⊓ and top ⊤"
     All,
@@ -89,6 +98,26 @@ impl CapabilitySet {
                     Capability::Execute {
                         operation: perm.strip_prefix("execute:").unwrap().to_string(),
                     }
+                } else if perm.starts_with("relay:") {
+                    // Parse relay permission format: "relay:max_bytes:period_seconds:max_streams"
+                    let parts: Vec<&str> = perm.split(':').collect();
+                    if parts.len() >= 4 {
+                        let max_bytes_per_period = parts[1].parse().unwrap_or(0);
+                        let period_seconds = parts[2].parse().unwrap_or(3600);
+                        let max_streams = parts[3].parse().unwrap_or(10);
+                        Capability::Relay {
+                            max_bytes_per_period,
+                            period_seconds,
+                            max_streams,
+                        }
+                    } else {
+                        // Default relay capability
+                        Capability::Relay {
+                            max_bytes_per_period: 1024 * 1024, // 1MB
+                            period_seconds: 3600,
+                            max_streams: 10,
+                        }
+                    }
                 } else {
                     // Default to read permission
                     Capability::Read {
@@ -138,6 +167,28 @@ impl CapabilitySet {
                     let op = permission.strip_prefix("execute:").unwrap();
                     if op == operation {
                         return true;
+                    }
+                }
+                Capability::Relay {
+                    max_bytes_per_period,
+                    period_seconds: _,
+                    max_streams,
+                } if permission.starts_with("relay:") => {
+                    // Parse relay permission format: "relay:required_bytes:required_streams"
+                    let parts: Vec<&str> = permission.split(':').collect();
+                    if parts.len() >= 2 {
+                        let required_bytes: u64 = parts[1].parse().unwrap_or(u64::MAX);
+                        let required_streams: u32 = if parts.len() >= 3 {
+                            parts[2].parse().unwrap_or(1)
+                        } else {
+                            1
+                        };
+                        // Check if capability meets requirements
+                        if required_bytes <= *max_bytes_per_period
+                            && required_streams <= *max_streams
+                        {
+                            return true;
+                        }
                     }
                 }
                 // All capability permits everything - it's the top element ⊤

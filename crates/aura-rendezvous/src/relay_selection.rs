@@ -3,8 +3,8 @@
 //! Implements capability-aware relay selection with preference for guardians over friends.
 //! Clean, minimal implementation following "zero legacy code" principle.
 
-use aura_core::{AuraError, DeviceId};
-use aura_wot::{CapabilitySet, TrustLevel};
+use aura_core::{AuraError, DeviceId, TrustLevel};
+use aura_wot::CapabilitySet;
 use serde::{Deserialize, Serialize};
 
 /// Relay selection result
@@ -237,6 +237,7 @@ impl RelaySelector {
             TrustLevel::Low => 0.3,
             TrustLevel::Medium => 0.6,
             TrustLevel::High => 1.0,
+            TrustLevel::Full => 1.2,
         }
     }
 

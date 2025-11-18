@@ -503,7 +503,8 @@ impl Default for EffectObjectPools {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::{aura_test, TestFixture};
+    use aura_macros::aura_test;
+    use aura_testkit::{ TestFixture};
 
     #[test]
     fn test_effect_cache() {

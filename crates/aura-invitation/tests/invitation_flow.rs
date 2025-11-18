@@ -14,7 +14,7 @@ use aura_invitation::{
 };
 use aura_journal::semilattice::InvitationLedger;
 use aura_macros::aura_test;
-use aura_wot::AccountAuthority;
+use aura_wot::{AccountAuthority, SerializableBiscuit};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -24,12 +24,14 @@ fn sample_request(invitee: DeviceId) -> DeviceInvitationRequest {
     let account_id = AccountId(Uuid::new_v4());
     let authority = AccountAuthority::new(account_id);
     let device_token = authority.create_device_token(invitee).unwrap();
+    let root_key = authority.root_public_key();
+    let serializable_token = SerializableBiscuit::new(device_token, root_key);
 
     DeviceInvitationRequest {
         inviter: DeviceId(Uuid::new_v4()),
         invitee,
         account_id,
-        granted_token: device_token,
+        granted_token: serializable_token,
         device_role: "cli-device".into(),
         ttl_secs: Some(60),
     }

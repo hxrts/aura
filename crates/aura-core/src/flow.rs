@@ -42,6 +42,11 @@ impl FlowBudget {
         self.limit.saturating_sub(self.spent)
     }
 
+    /// Alias for headroom() - returns remaining budget
+    pub fn remaining(&self) -> u64 {
+        self.headroom()
+    }
+
     /// Returns true if charging `cost` would still be within the budget.
     pub fn can_charge(&self, cost: u64) -> bool {
         self.spent.saturating_add(cost) <= self.limit

@@ -539,10 +539,18 @@ mod tests {
         assert!(final_envelope.decrement_ttl().is_none());
     }
 
+    // Helper to create test effects
+    fn create_test_effects(device_id: DeviceId) -> AuraEffectSystem {
+        use aura_protocol::effects::{AuraEffectSystemFactory, EffectSystemConfig};
+        AuraEffectSystemFactory::new(EffectSystemConfig { device_id })
+            .expect("Failed to create test effects")
+    }
+
     #[test]
     fn test_flooding_coordinator_creation() {
         let device_id = DeviceId::new();
-        let coordinator = SbbFloodingCoordinator::new(device_id);
+        let effects = create_test_effects(device_id);
+        let coordinator = SbbFloodingCoordinator::new(device_id, effects);
 
         assert_eq!(coordinator.device_id, device_id);
         assert!(coordinator.friends.is_empty());
@@ -553,7 +561,8 @@ mod tests {
     #[test]
     fn test_relationship_management() {
         let device_id = DeviceId::new();
-        let mut coordinator = SbbFloodingCoordinator::new(device_id);
+        let effects = create_test_effects(device_id);
+        let mut coordinator = SbbFloodingCoordinator::new(device_id, effects);
 
         let friend_id = DeviceId::new();
         let guardian_id = DeviceId::new();
@@ -576,7 +585,8 @@ mod tests {
     #[test]
     fn test_duplicate_detection() {
         let device_id = DeviceId::new();
-        let mut coordinator = SbbFloodingCoordinator::new(device_id);
+        let effects = create_test_effects(device_id);
+        let mut coordinator = SbbFloodingCoordinator::new(device_id, effects);
 
         let payload = b"test envelope".to_vec();
         let envelope = RendezvousEnvelope::new(payload, None);
@@ -594,7 +604,8 @@ mod tests {
     #[tokio::test]
     async fn test_flood_with_zero_ttl() {
         let device_id = DeviceId::new();
-        let mut coordinator = SbbFloodingCoordinator::new(device_id);
+        let effects = create_test_effects(device_id);
+        let mut coordinator = SbbFloodingCoordinator::new(device_id, effects);
 
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(0));
@@ -609,7 +620,8 @@ mod tests {
     #[tokio::test]
     async fn test_flood_duplicate_envelope() {
         let device_id = DeviceId::new();
-        let mut coordinator = SbbFloodingCoordinator::new(device_id);
+        let effects = create_test_effects(device_id);
+        let mut coordinator = SbbFloodingCoordinator::new(device_id, effects);
 
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(2));

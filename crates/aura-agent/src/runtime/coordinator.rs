@@ -333,7 +333,8 @@ impl AuraEffectSystem {
     /// ```
     /// # use aura_protocol::orchestration::AuraEffectSystem;
     /// # use aura_core::{DeviceId, AuraResult};
-    /// # use aura_testkit::{aura_test, TestFixture};
+    /// # use aura_macros::aura_test;
+    use aura_testkit::{ TestFixture};
     /// #[aura_test]
     /// async fn test_something() -> AuraResult<()> {
     ///     let fixture = TestFixture::new().await?;

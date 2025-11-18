@@ -16,6 +16,23 @@ pub enum Policy {
 }
 
 impl Policy {
+    /// Create a new threshold policy
+    ///
+    /// # Arguments
+    /// * `m` - Minimum number of approvals required (threshold)
+    /// * `n` - Total number of participants
+    ///
+    /// For simple cases, use `Policy::All` or `Policy::Any` directly.
+    pub fn new(m: u16, n: u16) -> Self {
+        if m == 0 {
+            Policy::Any
+        } else if m == n {
+            Policy::All
+        } else {
+            Policy::Threshold { m, n }
+        }
+    }
+
     /// Check if the policy is satisfied by the given number of approvals out of total
     pub fn is_satisfied(&self, approvals: u16, total: u16) -> bool {
         match self {

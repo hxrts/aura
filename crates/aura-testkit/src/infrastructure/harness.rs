@@ -110,6 +110,34 @@ impl TestFixture {
         self.context.context.device_id()
     }
 
+    /// Create a new device ID for testing
+    ///
+    /// This is a convenience method that simply creates a new random DeviceId.
+    /// Tests should use this when they need fresh device identifiers.
+    pub fn create_device_id(&self) -> DeviceId {
+        DeviceId::new()
+    }
+
+    /// Get an effect system for testing
+    ///
+    /// This creates a mock effect system configured for testing.
+    pub fn effect_system(&self) -> aura_protocol::effects::AuraEffectSystem {
+        let config = aura_protocol::effects::EffectSystemConfig {
+            device_id: self.device_id(),
+        };
+        aura_protocol::effects::AuraEffectSystemFactory::new(config)
+            .expect("Failed to create test effect system")
+    }
+
+    /// Get a reference to the test context for effect access
+    ///
+    /// Note: The architecture has shifted to stateless effect handlers.
+    /// Tests should create handlers directly rather than using a centralized
+    /// effect system. This method returns the context for compatibility.
+    pub fn effects(&self) -> &SimpleTestContext {
+        &self.context.context
+    }
+
     /// Run a test with automatic cleanup
     pub async fn run_test<F, Fut, T>(&self, test_fn: F) -> AuraResult<T>
     where

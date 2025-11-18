@@ -414,7 +414,8 @@ impl Drop for ScopedContainer {
 mod tests {
     use super::*;
     use aura_core::AuraResult;
-    use aura_testkit::{aura_test, TestFixture};
+    use aura_macros::aura_test;
+    use aura_testkit::{ TestFixture};
 
     #[derive(Debug, Clone)]
     struct TestHandler {

@@ -64,13 +64,13 @@ pub mod secure_channel;
 mod crypto;
 
 // Re-export core types
-pub use aura_core::{AccountId, AuraError, AuraResult, Cap, DeviceId, RelationshipId};
+pub use aura_core::{AccountId, AuraError, AuraResult, Cap, DeviceId, RelationshipId, TrustLevel};
 
 // Re-export crypto placeholder types
 pub use crypto::{BlindSignature, SecretBrand, UnlinkableCredential};
 
 // Re-export WoT types for capabilities
-pub use aura_wot::{Capability, RelayPermission, TrustLevel};
+pub use aura_wot::Capability;
 
 // Re-export protocol effect system
 pub use aura_protocol::AuraEffectSystem;

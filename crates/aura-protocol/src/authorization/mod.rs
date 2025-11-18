@@ -1,3 +1,3 @@
-mod biscuit_bridge;
+pub mod biscuit_bridge;
 
 pub use biscuit_bridge::{AuthorizationResult, BiscuitAuthorizationBridge};

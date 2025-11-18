@@ -12,7 +12,7 @@ use crate::core::{
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Unified session state machine following choreographic patterns

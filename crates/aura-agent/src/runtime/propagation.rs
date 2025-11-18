@@ -228,7 +228,8 @@ where
 mod tests {
     use super::*;
     use aura_core::{AuraResult, DeviceId};
-    use aura_testkit::{aura_test, TestFixture};
+    use aura_macros::aura_test;
+    use aura_testkit::{ TestFixture};
 
     #[aura_test]
     async fn test_context_propagation() -> AuraResult<()> {

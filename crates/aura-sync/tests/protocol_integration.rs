@@ -89,7 +89,7 @@ fn test_journal_sync_configuration() {
 
     assert!(config.batch_size > 0);
     assert!(config.sync_timeout > std::time::Duration::ZERO);
-    assert!(config.max_retries > 0);
+    assert!(config.retry_policy.max_retries > 0);
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn test_epoch_rotation_initiation() {
 
     let participant1 = DeviceId::new();
     let participant2 = DeviceId::new();
-    let context_id = aura_core::ContextId::new();
+    let context_id = aura_core::ContextId::new("test_context");
 
     let result = coordinator.initiate_rotation(vec![participant1, participant2], context_id);
 
@@ -275,7 +275,7 @@ fn test_epoch_rotation_with_insufficient_participants() {
     let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
 
     let participant = DeviceId::new();
-    let context_id = aura_core::ContextId::new();
+    let context_id = aura_core::ContextId::new("test_context");
 
     let result = coordinator.initiate_rotation(vec![participant], context_id);
 
@@ -295,7 +295,7 @@ fn test_epoch_confirmation_processing() {
 
     let participant1 = DeviceId::new();
     let participant2 = DeviceId::new();
-    let context_id = aura_core::ContextId::new();
+    let context_id = aura_core::ContextId::new("test_context");
 
     let rotation_id = coordinator
         .initiate_rotation(vec![participant1, participant2], context_id)
@@ -335,7 +335,7 @@ fn test_epoch_commit() {
     let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
 
     let participants = vec![DeviceId::new(), DeviceId::new()];
-    let context_id = aura_core::ContextId::new();
+    let context_id = aura_core::ContextId::new("test_context");
 
     let rotation_id = coordinator
         .initiate_rotation(participants.clone(), context_id)
@@ -370,7 +370,7 @@ fn test_epoch_rotation_cleanup() {
     // Create and complete multiple rotations
     for i in 0..3 {
         let participants = vec![DeviceId::new(), DeviceId::new()];
-        let context_id = aura_core::ContextId::new();
+        let context_id = aura_core::ContextId::new("test_context");
 
         let rotation_id = coordinator
             .initiate_rotation(participants.clone(), context_id)
@@ -453,7 +453,7 @@ fn test_multi_device_protocol_scenarios() {
     let mut coord3 = EpochRotationCoordinator::new(device3, 0, EpochConfig::default());
 
     // Device 1 initiates rotation
-    let context = aura_core::ContextId::new();
+    let context = aura_core::ContextId::new("test_context");
     let rotation_id = coord1
         .initiate_rotation(vec![device2, device3], context)
         .unwrap();

@@ -7,7 +7,7 @@
 use aura_core::{AccountId, DeviceId, FlowBudget};
 use aura_protocol::authorization::biscuit_bridge::BiscuitAuthorizationBridge;
 use aura_testkit::{
-    create_security_test_scenario, AdminOperationExt, BiscuitTestFixture, JournalOpExt,
+    create_security_test_scenario, BiscuitTestFixture,
 };
 use aura_wot::{
     biscuit_resources::{AdminOperation, JournalOp, RecoveryType, ResourceScope, StorageCategory},
@@ -237,7 +237,9 @@ impl SecurityTestFramework {
             // Malicious facts
             forged_by_attacker(true);
             bypass_security(true);
-        "#
+        "#,
+            target_account = target_account.to_string(),
+            claimed_device = claimed_device.to_string()
         )
         .build(&malicious_keypair)?;
 

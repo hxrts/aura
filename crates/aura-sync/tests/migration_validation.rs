@@ -102,7 +102,7 @@ fn test_error_context_preservation() {
     // Test that error context (peer, operation, etc.) is preserved
     let peer_id = DeviceId::new();
 
-    let network_err = sync_network_error("Invalid protocol version", Some(peer_id));
+    let network_err = sync_network_error("Invalid protocol version");
     assert!(!network_err.is_retryable());
 
     let protocol_err = sync_protocol_with_peer("sync", "Message out of order", peer_id);
@@ -141,7 +141,7 @@ fn test_request_response_correlation() {
     let to = DeviceId::new();
     let payload = "ping".to_string();
 
-    let request = RequestMessage::new(from, to, payload);
+    let request = RequestMessage::new(from, to, payload, Uuid::new_v4());
     let response = ResponseMessage::success(&request, "pong".to_string());
 
     // Verify correlation
@@ -182,7 +182,7 @@ fn test_sync_result_pattern() {
 fn test_batch_message_functionality() {
     // Test batching for large sync operations
     let items = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    let batches = BatchMessage::create_batches(items, 3);
+    let batches = BatchMessage::create_batches(items, 3, Uuid::new_v4());
 
     assert_eq!(batches.len(), 4); // 3 + 3 + 3 + 1
     assert_eq!(batches[0].items, vec![1, 2, 3]);
@@ -321,8 +321,9 @@ fn test_unified_metrics_collection() {
     let collector = MetricsCollector::new();
 
     // Test session lifecycle metrics
-    collector.record_sync_start("test_session_1");
-    collector.record_sync_completion("test_session_1", 50, 1024);
+    let now = 1000000;
+    collector.record_sync_start("test_session_1", now);
+    collector.record_sync_completion("test_session_1", 50, 1024, now + 100);
 
     let snapshot = collector.export_snapshot();
     assert_eq!(snapshot.operational.sync_sessions_total, 1);
@@ -371,8 +372,9 @@ fn test_performance_metrics() {
 fn test_prometheus_export_format() {
     // Test Prometheus export compatibility
     let collector = MetricsCollector::new();
-    collector.record_sync_start("test");
-    collector.record_sync_completion("test", 10, 100);
+    let now = 1000000;
+    collector.record_sync_start("test", now);
+    collector.record_sync_completion("test", 10, 100, now + 50);
 
     let prometheus_output = collector.export_prometheus();
 
@@ -576,8 +578,9 @@ fn test_cross_module_integration() {
     let metrics = MetricsCollector::new();
 
     let session_config = SessionConfig::from(&config);
+    let now = 1000000;
     let mut session_manager =
-        SessionManager::<TestSyncProtocolState>::with_metrics(session_config, metrics.clone());
+        SessionManager::<TestSyncProtocolState>::with_metrics(session_config, metrics.clone(), now);
 
     // Perform a complete sync session workflow
     let session_id = session_manager

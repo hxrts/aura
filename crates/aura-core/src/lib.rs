@@ -95,7 +95,6 @@ pub mod crypto;
 pub mod maintenance;
 
 /// Internal test utilities (Layer 1 - does not use aura-testkit to avoid circular dependencies)
-#[cfg(test)]
 #[doc(hidden)]
 pub mod test_utils;
 

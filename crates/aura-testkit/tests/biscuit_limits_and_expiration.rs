@@ -91,7 +91,8 @@ impl LimitsTestCoordinator {
                     token_type("short_lived");
 
                     check if time($time), $time < {expiry_time};
-                "#
+                "#,
+                    expiry_time = expiry_time.to_string()
                 )
                 .build(self.fixture.account_authority.root_keypair())
                 .map_err(BiscuitError::BiscuitLib)
@@ -115,7 +116,8 @@ impl LimitsTestCoordinator {
                     token_type("session");
 
                     check if time($time), $time < {expiry_time};
-                "#
+                "#,
+                    expiry_time = expiry_time.to_string()
                 )
                 .build(self.fixture.account_authority.root_keypair())
                 .map_err(BiscuitError::BiscuitLib)
@@ -140,7 +142,8 @@ impl LimitsTestCoordinator {
                     token_type("persistent");
 
                     check if time($time), $time < {expiry_time};
-                "#
+                "#,
+                    expiry_time = expiry_time.to_string()
                 )
                 .build(self.fixture.account_authority.root_keypair())
                 .map_err(BiscuitError::BiscuitLib)
@@ -163,7 +166,8 @@ impl LimitsTestCoordinator {
                     token_type("expired");
 
                     check if time($time), $time < {past_time};
-                "#
+                "#,
+                    past_time = past_time.to_string()
                 )
                 .build(self.fixture.account_authority.root_keypair())
                 .map_err(BiscuitError::BiscuitLib)
@@ -223,7 +227,9 @@ impl LimitsTestCoordinator {
 
                         check if delegation_depth($d), $d <= {max_depth};
                         check if operation($op), ["read"].contains($op);
-                    "#
+                    "#,
+                        depth = depth.to_string(),
+                        max_depth = max_depth.to_string()
                     ))?;
                     tokens.push(delegated.clone());
                     current_token = delegated;
@@ -246,7 +252,9 @@ impl LimitsTestCoordinator {
                         max_delegation_depth({max_allowed});
 
                         check if delegation_depth($d), $d <= {max_allowed};
-                    "#
+                    "#,
+                        depth = depth.to_string(),
+                        max_allowed = max_allowed.to_string()
                     ))?;
                     tokens.push(delegated.clone());
                     current_token = delegated;
@@ -262,7 +270,9 @@ impl LimitsTestCoordinator {
 
                         // This should fail the check
                         check if delegation_depth($d), $d <= {max_allowed};
-                    "#
+                    "#,
+                        depth = depth.to_string(),
+                        max_allowed = max_allowed.to_string()
                     ));
 
                     match attempt_result {
@@ -294,7 +304,10 @@ impl LimitsTestCoordinator {
 
                         check if resource($res), $res.starts_with({resource_path});
                         check if delegation_depth($d), $d <= {chain_length};
-                    "#
+                    "#,
+                        i = i.to_string(),
+                        resource_path = resource_path,
+                        chain_length = chain_length.to_string()
                     ))?;
                     tokens.push(delegated.clone());
                     current_token = delegated;
@@ -618,7 +631,8 @@ async fn test_combined_expiration_and_delegation_limits() -> Result<(), Box<dyn 
 
         check if time($time), $time < {expiry_time};
         check if delegation_depth($d), $d <= 2;
-    "#
+    "#,
+        expiry_time = expiry_time.to_string()
     )
     .build(coordinator.fixture.account_authority.root_keypair())?;
 
@@ -634,7 +648,8 @@ async fn test_combined_expiration_and_delegation_limits() -> Result<(), Box<dyn 
 
         check if delegation_depth($d), $d <= 2;
         check if time($time), $time < {expiry_time};
-    "#
+    "#,
+        expiry_time = expiry_time.to_string()
     ))?;
 
     // Delegated token should work initially
@@ -696,7 +711,9 @@ async fn test_delegation_with_progressive_expiration() -> Result<(), Box<dyn std
 
             check if time($time), $time < {expiry_time};
             check if delegation_depth($d), $d <= 3;
-        "#
+        "#,
+            i = i.to_string(),
+            expiry_time = expiry_time.to_string()
         ))?;
 
         delegated_tokens.push(delegated);
@@ -754,7 +771,9 @@ async fn test_delegation_depth_with_different_paths() -> Result<(), Box<dyn std:
 
             check if resource($res), $res.starts_with("/storage/personal/documents/");
             check if delegation_depth($d), $d <= {chain1_depth};
-        "#
+        "#,
+            depth = depth.to_string(),
+            chain1_depth = chain1_depth.to_string()
         ))?;
         chain1_tokens.push(delegated.clone());
         current_token1 = delegated;
@@ -772,7 +791,9 @@ async fn test_delegation_depth_with_different_paths() -> Result<(), Box<dyn std:
 
             check if resource($res), $res.starts_with("/storage/personal/images/");
             check if delegation_depth($d), $d <= {chain2_depth};
-        "#
+        "#,
+            depth = depth.to_string(),
+            chain2_depth = chain2_depth.to_string()
         ))?;
         chain2_tokens.push(delegated.clone());
         current_token2 = delegated;

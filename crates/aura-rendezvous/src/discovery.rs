@@ -4,8 +4,8 @@
 //! points and unlinkable credentials for anonymous peer finding.
 
 use crate::UnlinkableCredential;
-use aura_core::{AuraResult, DeviceId, RelationshipId};
-use aura_wot::{Capability, TrustLevel};
+use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
+use aura_wot::Capability;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

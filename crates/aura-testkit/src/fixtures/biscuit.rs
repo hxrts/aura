@@ -22,6 +22,7 @@ pub struct BiscuitTestFixture {
 }
 
 /// Represents a chain of token delegations for testing attenuation
+#[derive(Clone)]
 pub struct DelegatedTokenChain {
     pub chain_id: String,
     pub original_token: Biscuit,

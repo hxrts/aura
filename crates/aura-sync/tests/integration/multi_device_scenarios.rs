@@ -321,11 +321,11 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
                 };
                 fixture
                     .network
-                    .set_condition(failed_device, *device, partition_condition.clone())
+                    .set_conditions(failed_device, *device, partition_condition.clone())
                     .await;
                 fixture
                     .network
-                    .set_condition(*device, failed_device, partition_condition)
+                    .set_conditions(*device, failed_device, partition_condition)
                     .await;
             }
         }
@@ -392,11 +392,11 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
             if *device != failed_device {
                 fixture
                     .network
-                    .set_condition(failed_device, *device, NetworkCondition::default())
+                    .set_conditions(failed_device, *device, NetworkCondition::default())
                     .await;
                 fixture
                     .network
-                    .set_condition(*device, failed_device, NetworkCondition::default())
+                    .set_conditions(*device, failed_device, NetworkCondition::default())
                     .await;
             }
         }

@@ -129,6 +129,16 @@ pub struct CausalContext {
 }
 
 impl CausalContext {
+    /// Create an empty causal context with no actor
+    /// Useful for testing or initializing contexts that will be merged later
+    pub fn empty() -> Self {
+        Self {
+            clock: VectorClock::new(),
+            dependencies: BTreeSet::new(),
+            actor: DeviceId::placeholder(),
+        }
+    }
+
     /// Create a new causal context for an actor
     pub fn new(actor: ActorId) -> Self {
         Self {

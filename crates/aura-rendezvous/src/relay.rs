@@ -5,8 +5,8 @@
 
 #![allow(clippy::unwrap_used)]
 
-use aura_core::{AuraResult, DeviceId, RelationshipId};
-use aura_wot::{Capability, CapabilitySet, RelayPermission, TrustLevel};
+use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
+use aura_wot::{Capability, CapabilitySet};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -393,7 +393,7 @@ pub struct PolicyActions {
     /// Excluded relay nodes
     pub excluded_relays: Option<Vec<DeviceId>>,
     /// Required relay capabilities
-    pub required_relay_capabilities: Option<Vec<RelayPermission>>,
+    pub required_relay_capabilities: Option<Vec<Capability>>,
     /// Override routing preferences
     pub override_preferences: Option<RoutingPreferences>,
 }
