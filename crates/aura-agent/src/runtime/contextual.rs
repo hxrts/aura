@@ -299,7 +299,8 @@ pub trait ContextualEffects:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::{aura_test, TestFixture};
+    use aura_macros::aura_test;
+    use aura_testkit::{ TestFixture};
 
     struct MockContextualEffects {
         device_id: DeviceId,

@@ -284,7 +284,8 @@ impl MigrationGuide {
 mod tests {
     use super::*;
     use aura_core::effects::NetworkEffects;
-    use aura_testkit::{aura_test, TestFixture};
+    use aura_macros::aura_test;
+    use aura_testkit::{ TestFixture};
 
     struct MockNetworkEffects;
 

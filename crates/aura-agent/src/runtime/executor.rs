@@ -116,7 +116,8 @@ mod tests {
     use super::*;
     use crate::handlers::MockHandler;
     use aura_core::AuraResult;
-    use aura_testkit::{aura_test, TestFixture};
+    use aura_macros::aura_test;
+    use aura_testkit::{ TestFixture};
 
     #[aura_test]
     async fn test_executor_dispatch() -> AuraResult<()> {
