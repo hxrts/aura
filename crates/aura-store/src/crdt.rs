@@ -187,10 +187,7 @@ impl StorageOperation {
         Self {
             op_type,
             counter,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            timestamp: aura_core::time::current_unix_timestamp(),
             actor,
         }
     }
@@ -343,16 +340,11 @@ impl ChunkAvailability {
     pub fn add_chunk(&mut self, chunk_id: ChunkId, node_id: String) {
         self.chunk_locations
             .entry(chunk_id)
-            .or_insert_with(BTreeSet::new)
+            .or_default()
             .insert(node_id.clone());
 
-        self.node_timestamps.insert(
-            node_id,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-        );
+        self.node_timestamps
+            .insert(node_id, aura_core::time::current_unix_timestamp());
     }
 
     /// Remove chunk from a node
@@ -394,7 +386,7 @@ impl JoinSemilattice for ChunkAvailability {
         for (chunk_id, other_nodes) in &other.chunk_locations {
             merged_locations
                 .entry(chunk_id.clone())
-                .or_insert_with(BTreeSet::new)
+                .or_default()
                 .extend(other_nodes.iter().cloned());
         }
 

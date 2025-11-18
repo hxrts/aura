@@ -333,7 +333,7 @@ impl LoggingSystemHandler {
         self.log_buffer.read().await.get_recent(count)
     }
 
-    /// Get recent audit entries  
+    /// Get recent audit entries
     pub async fn get_recent_audit_logs(&self, count: usize) -> Vec<LogEntry> {
         self.audit_buffer.read().await.get_recent(count)
     }

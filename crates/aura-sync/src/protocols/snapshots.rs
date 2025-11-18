@@ -33,15 +33,15 @@
 //! # }
 //! ```
 
-use std::sync::Arc;
 use parking_lot::{Mutex, RwLock};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use aura_core::{DeviceId, Hash32, AuraError, AuraResult};
+use crate::core::{sync_protocol_error, SyncResult};
 use aura_core::tree::Epoch as TreeEpoch;
-use crate::core::{SyncError, SyncResult};
+use aura_core::{AuraError, AuraResult, DeviceId, Hash32};
 
 // =============================================================================
 // Types
@@ -67,7 +67,12 @@ impl SnapshotProposal {
     /// Create a new snapshot proposal
     ///
     /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and use `with_id()`
-    pub fn new(proposer: DeviceId, target_epoch: TreeEpoch, state_digest: Hash32, proposal_uuid: Uuid) -> Self {
+    pub fn new(
+        proposer: DeviceId,
+        target_epoch: TreeEpoch,
+        state_digest: Hash32,
+        proposal_uuid: Uuid,
+    ) -> Self {
         Self {
             proposer,
             proposal_id: proposal_uuid,
@@ -229,8 +234,9 @@ impl SnapshotProtocol {
     ) -> SyncResult<(Option<WriterFenceGuard>, SnapshotProposal)> {
         let mut pending = self.pending.lock();
         if pending.is_some() {
-            return Err(SyncError::protocol("sync", 
-                "snapshot proposal already in progress"
+            return Err(sync_protocol_error(
+                "sync",
+                "snapshot proposal already in progress",
             ));
         }
 
@@ -239,8 +245,11 @@ impl SnapshotProtocol {
         let proposal = SnapshotProposal::new(proposer, target_epoch, state_digest, proposal_uuid);
 
         let guard = if self.config.use_writer_fence {
-            Some(self.fence.acquire()
-                .map_err(|e| SyncError::protocol("sync", &e.to_string()))?)
+            Some(
+                self.fence
+                    .acquire()
+                    .map_err(|e| sync_protocol_error("sync", &e.to_string()))?,
+            )
         } else {
             None
         };
@@ -273,19 +282,25 @@ impl SnapshotProtocol {
 
         // Verify this is the pending proposal
         match pending.as_ref() {
-            Some(p) if p.proposal_id == proposal.proposal_id => {},
-            _ => return Err(SyncError::protocol("sync", 
-                "proposal does not match pending snapshot"
-            )),
+            Some(p) if p.proposal_id == proposal.proposal_id => {}
+            _ => {
+                return Err(sync_protocol_error(
+                    "sync",
+                    "proposal does not match pending snapshot",
+                ))
+            }
         }
 
         // Verify threshold
         if approvals.len() < self.config.approval_threshold {
-            return Err(SyncError::protocol("sync", &format!(
-                "insufficient approvals: {} < {}",
-                approvals.len(),
-                self.config.approval_threshold
-            )));
+            return Err(sync_protocol_error(
+                "sync",
+                &format!(
+                    "insufficient approvals: {} < {}",
+                    approvals.len(),
+                    self.config.approval_threshold
+                ),
+            ));
         }
 
         // Clear pending
@@ -303,9 +318,7 @@ impl SnapshotProtocol {
     pub fn abort(&self) -> SyncResult<()> {
         let mut pending = self.pending.lock();
         if pending.is_none() {
-            return Err(SyncError::protocol("sync", 
-                "no pending snapshot to abort"
-            ));
+            return Err(sync_protocol_error("sync", "no pending snapshot to abort"));
         }
         *pending = None;
         Ok(())
@@ -348,14 +361,13 @@ mod tests {
 
         assert!(!protocol.is_pending());
 
-        let (_guard, proposal) = protocol.propose(
-            device,
-            10,
-            Hash32([0; 32]),
-        ).unwrap();
+        let (_guard, proposal) = protocol.propose(device, 10, Hash32([0; 32])).unwrap();
 
         assert!(protocol.is_pending());
-        assert_eq!(protocol.get_pending().unwrap().proposal_id, proposal.proposal_id);
+        assert_eq!(
+            protocol.get_pending().unwrap().proposal_id,
+            proposal.proposal_id
+        );
 
         // Second proposal should fail
         assert!(protocol.propose(device, 11, Hash32([0; 32])).is_err());
@@ -371,11 +383,7 @@ mod tests {
         let protocol = SnapshotProtocol::new(config);
         let device = DeviceId::from_bytes([1; 32]);
 
-        let (_guard, proposal) = protocol.propose(
-            device,
-            10,
-            Hash32([0; 32]),
-        ).unwrap();
+        let (_guard, proposal) = protocol.propose(device, 10, Hash32([0; 32])).unwrap();
 
         let approvals = vec![
             SnapshotApproval {
@@ -390,7 +398,9 @@ mod tests {
             },
         ];
 
-        let result = protocol.commit(proposal, approvals, Uuid::new_v4()).unwrap();
+        let result = protocol
+            .commit(proposal, approvals, Uuid::new_v4())
+            .unwrap();
         assert!(result.committed);
         assert!(!protocol.is_pending());
     }

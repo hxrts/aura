@@ -9,11 +9,16 @@
 
 #![allow(clippy::unwrap_used)]
 
+use aura_core::effects::NetworkEffects;
 use aura_core::{AuraError, DeviceId};
 use aura_protocol::messages::social_rendezvous::{
     TransportDescriptor, TransportKind, TransportOfferPayload,
 };
+use aura_transport::protocols::stun::{StunAttribute, StunMessage};
 use aura_transport::{PunchConfig, StunConfig};
+use base64::prelude::*;
+use sha1::{Digest, Sha1};
+use std::sync::Arc;
 
 // Only create the types that don't exist yet in aura-transport
 #[derive(Debug, Clone)]
@@ -75,40 +80,256 @@ impl PunchSession {
         self.local_addr
     }
 
-    pub async fn punch_with_peer(
+    /// Perform UDP hole punching with peer
+    pub async fn punch_with_peer<N: NetworkEffects>(
         &self,
         peer_addr: std::net::SocketAddr,
-    ) -> Result<PunchResult, String> {
-        // TODO: Implement actual hole punching
-        Ok(PunchResult::Success {
-            local_addr: self.local_addr,
-            remote_addr: peer_addr,
-        })
+        network: Arc<N>,
+        config: &PunchConfig,
+    ) -> Result<PunchResult, AuraError> {
+        tracing::debug!(
+            "Attempting hole punch from {} to {}",
+            self.local_addr,
+            peer_addr
+        );
+
+        // Perform simultaneous UDP packet exchange for hole punching
+        let punch_result = self
+            .perform_udp_hole_punch(peer_addr, network, config)
+            .await;
+
+        match punch_result {
+            Ok(_) => {
+                tracing::info!(
+                    "Hole punching successful: {} <-> {}",
+                    self.local_addr,
+                    peer_addr
+                );
+                Ok(PunchResult::Success {
+                    local_addr: self.local_addr,
+                    remote_addr: peer_addr,
+                })
+            }
+            Err(e) => {
+                tracing::warn!("Hole punching failed: {}", e);
+                Ok(PunchResult::Failure {
+                    reason: e.to_string(),
+                })
+            }
+        }
+    }
+
+    /// Perform actual UDP hole punching protocol
+    async fn perform_udp_hole_punch<N: NetworkEffects>(
+        &self,
+        peer_addr: SocketAddr,
+        network: Arc<N>,
+        config: &PunchConfig,
+    ) -> Result<(), AuraError> {
+        // Create hole punch message
+        let punch_message = format!("PUNCH:{}", self.session_id);
+        let message_data = punch_message.as_bytes();
+
+        let mut last_error = None;
+
+        // Try multiple times with increasing intervals
+        for attempt in 1..=config.max_attempts {
+            match network
+                .send_to_peer(
+                    format!("{}", peer_addr).parse().unwrap_or_default(),
+                    message_data.to_vec(),
+                )
+                .await
+            {
+                Ok(_) => {
+                    tracing::debug!(
+                        "UDP hole punch packet sent successfully (attempt {})",
+                        attempt
+                    );
+
+                    // Wait a brief moment for the punch to take effect
+                    tokio::time::sleep(config.punch_interval).await;
+
+                    // Try to verify the connection by sending a test packet
+                    match self.verify_hole_punch_connection(peer_addr, &network).await {
+                        Ok(_) => return Ok(()),
+                        Err(e) => {
+                            tracing::debug!("Hole punch verification failed: {}", e);
+                            last_error = Some(e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("UDP hole punch send failed (attempt {}): {}", attempt, e);
+                    last_error = Some(AuraError::network(format!("Network error: {}", e)));
+                }
+            }
+
+            // Exponential backoff for retries
+            if attempt < config.max_attempts {
+                let delay = config.punch_interval * attempt as u32;
+                tokio::time::sleep(delay).await;
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            AuraError::coordination_failed("Hole punching failed after all attempts".to_string())
+        }))
+    }
+
+    /// Verify hole punch connection by sending test packet
+    async fn verify_hole_punch_connection<N: NetworkEffects>(
+        &self,
+        peer_addr: SocketAddr,
+        network: &Arc<N>,
+    ) -> Result<(), AuraError> {
+        let test_message = format!("TEST:{}", self.session_id);
+        let test_data = test_message.as_bytes();
+
+        // Send test packet - simplified since send_udp_with_response doesn't exist
+        network
+            .send_to_peer(
+                format!("{}", peer_addr).parse().unwrap_or_default(),
+                test_data.to_vec(),
+            )
+            .await
+            .map_err(|e| AuraError::network(format!("Failed to send test packet: {}", e)))?;
+
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct StunClient {
+#[derive(Debug)]
+pub struct StunClient<N: NetworkEffects> {
     pub config: StunConfig,
+    network: Arc<N>,
 }
 
-impl StunClient {
-    pub fn new(config: StunConfig) -> Self {
-        Self { config }
+impl<N: NetworkEffects> StunClient<N> {
+    pub fn new(config: StunConfig, network: Arc<N>) -> Self {
+        Self { config, network }
     }
 
-    pub async fn discover_external_addr(&self) -> Result<std::net::SocketAddr, String> {
-        // TODO: Implement actual STUN discovery using aura_transport types
-        Ok("127.0.0.1:0".parse().unwrap())
+    /// Discover external address via STUN binding request
+    pub async fn discover_external_addr(&self) -> Result<std::net::SocketAddr, AuraError> {
+        // Try each STUN server until one succeeds
+        for server_addr in &self.config.servers {
+            match self.perform_stun_binding(*server_addr).await {
+                Ok(addr) => {
+                    tracing::debug!(
+                        "STUN discovery successful via server {}: {}",
+                        server_addr,
+                        addr
+                    );
+                    return Ok(addr);
+                }
+                Err(e) => {
+                    tracing::warn!("STUN discovery failed for server {}: {}", server_addr, e);
+                    continue;
+                }
+            }
+        }
+
+        Err(AuraError::coordination_failed(
+            "All STUN servers failed during external address discovery".to_string(),
+        ))
     }
 
-    pub async fn discover_reflexive_address(&self) -> Result<StunResult, String> {
-        // TODO: Implement actual STUN reflexive address discovery
-        let addr = "127.0.0.1:0".parse().unwrap();
+    /// Perform actual STUN binding request to discover reflexive address
+    async fn perform_stun_binding(&self, server_addr: SocketAddr) -> Result<SocketAddr, AuraError> {
+        // Create STUN binding request
+        let request = StunMessage::binding_request();
+        let transaction_id = request.transaction_id;
+
+        // Serialize STUN message to JSON for transport
+        // TODO: In production, this should be binary STUN encoding per RFC 5389
+        let request_data = serde_json::to_vec(&request).map_err(|e| {
+            AuraError::serialization(format!("Failed to serialize STUN request: {}", e))
+        })?;
+
+        // Send UDP packet to STUN server via network effects
+        // Note: Using send_to_peer and receive since send_udp_with_response doesn't exist in NetworkEffects
+        self.network
+            .send_to_peer(
+                format!("{}", server_addr).parse().unwrap_or_default(),
+                request_data,
+            )
+            .await
+            .map_err(|e| AuraError::network(format!("Failed to send STUN request: {}", e)))?;
+
+        let (_, response_data) =
+            self.network.receive().await.map_err(|e| {
+                AuraError::network(format!("Failed to receive STUN response: {}", e))
+            })?;
+
+        // Parse STUN response
+        let response: StunMessage = serde_json::from_slice(&response_data).map_err(|e| {
+            AuraError::serialization(format!("Failed to parse STUN response: {}", e))
+        })?;
+
+        // Verify transaction ID matches
+        if response.transaction_id != transaction_id {
+            return Err(AuraError::coordination_failed(
+                "STUN response transaction ID mismatch".to_string(),
+            ));
+        }
+
+        // Extract mapped address from response
+        for attribute in &response.attributes {
+            match attribute {
+                StunAttribute::XorMappedAddress(addr) => return Ok(*addr),
+                StunAttribute::MappedAddress(addr) => return Ok(*addr),
+                StunAttribute::ErrorCode { code, reason } => {
+                    return Err(AuraError::coordination_failed(format!(
+                        "STUN server error {}: {}",
+                        code, reason
+                    )));
+                }
+                _ => continue,
+            }
+        }
+
+        Err(AuraError::coordination_failed(
+            "STUN response missing mapped address".to_string(),
+        ))
+    }
+
+    /// Discover reflexive address with retry logic
+    pub async fn discover_reflexive_address(&self) -> Result<StunResult, AuraError> {
+        let mut last_error = None;
+
+        for attempt in 1..=self.config.max_retries {
+            match self.discover_external_addr().await {
+                Ok(external_addr) => {
+                    return Ok(StunResult {
+                        external_addr,
+                        reflexive_address: external_addr, // For STUN binding, these are the same
+                        success: true,
+                    });
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < self.config.max_retries {
+                        tracing::debug!(
+                            "STUN discovery attempt {} failed, retrying in {:?}",
+                            attempt,
+                            self.config.retry_interval
+                        );
+                        tokio::time::sleep(self.config.retry_interval).await;
+                    }
+                }
+            }
+        }
+
+        // Return error result if all retries failed
+        let _error_msg = last_error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "Unknown STUN discovery failure".to_string());
+
         Ok(StunResult {
-            external_addr: addr,
-            reflexive_address: addr,
-            success: true,
+            external_addr: "0.0.0.0:0".parse().unwrap(),
+            reflexive_address: "0.0.0.0:0".parse().unwrap(),
+            success: false,
         })
     }
 }
@@ -129,6 +350,17 @@ impl StunResult {
             Ok(self)
         } else {
             Err(f())
+        }
+    }
+
+    /// Convert to Result for error handling
+    pub fn into_result(self) -> Result<SocketAddr, AuraError> {
+        if self.success {
+            Ok(self.external_addr)
+        } else {
+            Err(AuraError::coordination_failed(
+                "STUN discovery was not successful".to_string(),
+            ))
         }
     }
 }
@@ -162,9 +394,9 @@ impl Default for QuicConfig {
 }
 
 /// Connection priority manager for NAT traversal
-pub struct ConnectionManager {
+pub struct ConnectionManager<N: NetworkEffects> {
     device_id: DeviceId,
-    stun_client: StunClient,
+    stun_client: StunClient<N>,
     #[allow(dead_code)]
     connection_timeout: Duration,
     random: std::sync::Arc<dyn aura_core::RandomEffects>,
@@ -239,14 +471,15 @@ impl Default for ConnectionConfig {
     }
 }
 
-impl ConnectionManager {
+impl<N: NetworkEffects> ConnectionManager<N> {
     /// Create new connection manager
     pub fn new(
         device_id: DeviceId,
         stun_config: StunConfig,
+        network: Arc<N>,
         random: std::sync::Arc<dyn aura_core::RandomEffects>,
     ) -> Self {
-        let stun_client = StunClient::new(stun_config);
+        let stun_client = StunClient::new(stun_config, network);
 
         Self {
             device_id,
@@ -271,7 +504,7 @@ impl ConnectionManager {
         peer_id: DeviceId,
         offers: Vec<TransportDescriptor>,
         config: ConnectionConfig,
-        timestamp: u64,
+        _timestamp: u64,
     ) -> Result<ConnectionResult, AuraError> {
         use std::time::Duration;
 
@@ -609,14 +842,11 @@ impl ConnectionManager {
             }
             TransportKind::WebSocket => {
                 // Would implement WebSocket connection
-                timeout(
-                    config.attempt_timeout,
-                    self.try_websocket_connection(addr),
-                )
-                .await
-                .map_err(|_| {
-                    AuraError::coordination_failed("WebSocket connection timeout".to_string())
-                })?
+                timeout(config.attempt_timeout, self.try_websocket_connection(addr))
+                    .await
+                    .map_err(|_| {
+                        AuraError::coordination_failed("WebSocket connection timeout".to_string())
+                    })?
             }
             _ => Err(AuraError::coordination_failed(format!(
                 "Unsupported transport for direct connection: {:?}",
@@ -798,10 +1028,7 @@ impl ConnectionManager {
     ///
     /// # Parameters
     /// - `addr`: Socket address to connect to
-    async fn try_websocket_connection(
-        &self,
-        addr: SocketAddr,
-    ) -> Result<SocketAddr, AuraError> {
+    async fn try_websocket_connection(&self, addr: SocketAddr) -> Result<SocketAddr, AuraError> {
         tracing::debug!(addr = %addr, "Attempting WebSocket connection");
 
         // Establish TCP connection first
@@ -815,9 +1042,7 @@ impl ConnectionManager {
         })?;
 
         // Perform WebSocket handshake
-        let ws_connection = self
-            .perform_websocket_handshake(std_stream, addr)
-            .await?;
+        let ws_connection = self.perform_websocket_handshake(std_stream, addr).await?;
 
         tracing::info!(
             remote_addr = %addr,
@@ -920,7 +1145,7 @@ impl ConnectionManager {
     fn validate_websocket_response(
         &self,
         response: &str,
-        _expected_key: &str,
+        expected_key: &str,
     ) -> Result<(), AuraError> {
         // Check for proper HTTP 101 Switching Protocols
         if !response.contains("HTTP/1.1 101 Switching Protocols") {
@@ -943,9 +1168,57 @@ impl ConnectionManager {
             ));
         }
 
-        // In a real implementation, would verify Sec-WebSocket-Accept header
+        // Verify Sec-WebSocket-Accept header according to RFC 6455
+        let expected_accept = self.compute_websocket_accept(expected_key)?;
+
+        // Parse response headers to find Sec-WebSocket-Accept
+        let mut websocket_accept = None;
+        for line in response.lines() {
+            if line.to_lowercase().starts_with("sec-websocket-accept:") {
+                websocket_accept = line.split(':').nth(1).map(|s| s.trim());
+                break;
+            }
+        }
+
+        match websocket_accept {
+            Some(actual_accept) => {
+                if actual_accept != expected_accept {
+                    return Err(AuraError::coordination_failed(format!(
+                        "Invalid WebSocket response: Sec-WebSocket-Accept mismatch. Expected: {}, Got: {}",
+                        expected_accept, actual_accept
+                    )));
+                }
+            }
+            None => {
+                return Err(AuraError::coordination_failed(
+                    "Invalid WebSocket response: missing Sec-WebSocket-Accept header".to_string(),
+                ));
+            }
+        }
+
         tracing::debug!("WebSocket response validation successful");
         Ok(())
+    }
+
+    /// Compute the WebSocket accept value according to RFC 6455 Section 4.2.2
+    ///
+    /// The server takes the value of the Sec-WebSocket-Key header, appends the
+    /// GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", applies SHA-1 hashing,
+    /// and base64 encodes the result.
+    fn compute_websocket_accept(&self, websocket_key: &str) -> Result<String, AuraError> {
+        // WebSocket GUID as defined in RFC 6455
+        const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+        // Concatenate the key with the GUID
+        let concat = format!("{}{}", websocket_key, WEBSOCKET_GUID);
+
+        // Compute SHA-1 hash
+        let mut hasher = Sha1::new();
+        hasher.update(concat.as_bytes());
+        let hash = hasher.finalize();
+
+        // Base64 encode the hash
+        Ok(BASE64_STANDARD.encode(&hash))
     }
 
     /// Try coordinated hole-punching using offer/answer nonces
@@ -1007,7 +1280,11 @@ impl ConnectionManager {
         // Perform simultaneous punch with timeout
         let punch_result = timeout(
             config.attempt_timeout,
-            punch_session.punch_with_peer(peer_addr),
+            punch_session.punch_with_peer(
+                peer_addr,
+                self.stun_client.network.clone(),
+                &config.punch_config,
+            ),
         )
         .await
         .map_err(|_| AuraError::coordination_failed("Punch session timeout".to_string()))?
@@ -1143,7 +1420,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_coordinated_hole_punch() {
-        use aura_protocol::messages::social::rendezvous::{
+        use aura_protocol::messages::social_rendezvous::{
             TransportDescriptor, TransportKind, TransportOfferPayload,
         };
 
@@ -1197,7 +1474,9 @@ mod tests {
 
         let peer_id = DeviceId::from("peer_device");
         let result = manager
-            .establish_connection_with_punch(peer_id, &offer, &answer, config, start_time, timestamp)
+            .establish_connection_with_punch(
+                peer_id, &offer, &answer, config, start_time, timestamp,
+            )
             .await
             .unwrap();
 
@@ -1216,7 +1495,7 @@ mod tests {
 
     #[test]
     fn test_transport_offer_punch_nonce() {
-        use aura_protocol::messages::social::rendezvous::TransportOfferPayload;
+        use aura_protocol::messages::social_rendezvous::TransportOfferPayload;
 
         let punch_nonce = [42u8; 32];
         let offer = TransportOfferPayload::new_offer_with_punch(vec![], vec![], punch_nonce);

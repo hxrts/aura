@@ -194,7 +194,8 @@ impl MigrationTool {
             uuid::Uuid::new_v4(),
             uuid::Uuid::new_v4(),
             uuid::Uuid::new_v4(),
-        ).with_metadata("migration", "true")
+        )
+        .with_metadata("migration", "true")
     }
 
     /// Run an operation with migration context

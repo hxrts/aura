@@ -1,421 +1,280 @@
-//! Unified error hierarchy for aura-sync
+//! Unified error handling for aura-sync using core error system
 //!
-//! This module provides a comprehensive error taxonomy for all sync operations,
-//! following the architectural principle of having zero backwards compatibility.
+//! **CLEANUP**: Replaced custom SyncError enum (389 lines with 11+ variants) with
+//! unified AuraError from aura-core. This eliminates redundant error definitions while
+//! preserving essential error information through structured messages.
+//!
+//! Following the pattern established by aura-store, all sync errors now use
+//! AuraError with appropriate variant selection and rich error messages.
 
 use aura_core::{AuraError, DeviceId};
 use std::time::Duration;
 
-/// Unified result type for all sync operations
-pub type SyncResult<T> = Result<T, SyncError>;
+/// Unified result type for all sync operations using core error system
+pub type SyncResult<T> = Result<T, AuraError>;
 
-/// Comprehensive error hierarchy for sync operations
-#[derive(Debug, thiserror::Error)]
-pub enum SyncError {
-    /// Protocol-specific errors during sync execution
-    #[error("Protocol error in {protocol}: {message}")]
-    Protocol {
-        /// Protocol name where the error occurred
-        protocol: String,
-        /// Error description
-        message: String,
-        /// Optional peer device ID involved in the error
-        peer: Option<DeviceId>,
-    },
+/// Convenience type alias for backward compatibility
+pub type SyncError = AuraError;
 
-    /// Network-level communication errors
-    #[error("Network error: {message}")]
-    Network {
-        /// Error description
-        message: String,
-        /// Optional peer device ID involved in the error
-        peer: Option<DeviceId>,
-        /// Whether the operation can be retried
-        retryable: bool,
-    },
+/// Convenience functions for sync-specific error types.
+/// These now map to unified AuraError variants.
 
-    /// Validation errors for sync data
-    #[error("Validation error: {message}")]
-    Validation {
-        /// Error description
-        message: String,
-        /// Optional field name that failed validation
-        field: Option<String>,
-    },
-
-    /// Session management errors
-    #[error("Session error: {message}")]
-    Session {
-        /// Error description
-        message: String,
-        /// Optional session ID where the error occurred
-        session_id: Option<uuid::Uuid>,
-        /// Whether the session can recover from this error
-        recoverable: bool,
-    },
-
-    /// Configuration and setup errors
-    #[error("Configuration error: {message}")]
-    Config {
-        /// Error description
-        message: String,
-        /// Component name with configuration issue
-        component: String,
-    },
-
-    /// Peer discovery and management errors
-    #[error("Peer error: {message}")]
-    Peer {
-        /// Error description
-        message: String,
-        /// Optional peer device ID involved in the error
-        peer: Option<DeviceId>,
-        /// Operation that failed
-        operation: String,
-    },
-
-    /// Authorization and capability errors
-    #[error("Authorization error: {message}")]
-    Authorization {
-        /// Error description
-        message: String,
-        /// Optional capability that was required but missing
-        required_capability: Option<String>,
-        /// Optional peer device ID involved in the error
-        peer: Option<DeviceId>,
-    },
-
-    /// Timeout errors with context
-    #[error("Timeout after {duration:?}: {operation}")]
-    Timeout {
-        /// Operation that timed out
-        operation: String,
-        /// Duration after which the timeout occurred
-        duration: Duration,
-        /// Optional peer device ID involved in the timeout
-        peer: Option<DeviceId>,
-    },
-
-    /// Resource exhaustion errors
-    #[error("Resource exhausted: {resource} - {message}")]
-    ResourceExhausted {
-        /// Resource type that was exhausted
-        resource: String,
-        /// Error description
-        message: String,
-        /// Optional limit that was hit
-        limit: Option<u64>,
-    },
-
-    /// Integration errors with other Aura crates
-    #[error("Aura core error: {0}")]
-    Core(#[from] AuraError),
-
-    /// Serialization/deserialization errors
-    #[error("Serialization error: {message}")]
-    Serialization {
-        /// Error description
-        message: String,
-        /// Data type being serialized/deserialized
-        data_type: String,
-    },
-
-    /// State consistency errors
-    #[error("Consistency error: {message}")]
-    Consistency {
-        /// Error description
-        message: String,
-        /// Operation where inconsistency was detected
-        operation: String,
-        /// Expected state description
-        expected_state: Option<String>,
-        /// Actual state description
-        actual_state: Option<String>,
-    },
+/// Create a protocol error (maps to Internal).
+pub fn sync_protocol_error(protocol: impl Into<String>, message: impl Into<String>) -> AuraError {
+    AuraError::internal(format!(
+        "Protocol error in {}: {}",
+        protocol.into(),
+        message.into()
+    ))
 }
 
-impl SyncError {
-    /// Create a protocol error
-    pub fn protocol(protocol: &str, message: &str) -> Self {
-        Self::Protocol {
-            protocol: protocol.to_string(),
-            message: message.to_string(),
-            peer: None,
-        }
-    }
+/// Create a protocol error with peer context (maps to Internal).
+pub fn sync_protocol_with_peer(
+    protocol: impl Into<String>,
+    message: impl Into<String>,
+    peer: DeviceId,
+) -> AuraError {
+    AuraError::internal(format!(
+        "Protocol error in {} with peer {}: {}",
+        protocol.into(),
+        peer,
+        message.into()
+    ))
+}
 
-    /// Create a protocol error with peer context
-    pub fn protocol_with_peer(protocol: &str, message: &str, peer: DeviceId) -> Self {
-        Self::Protocol {
-            protocol: protocol.to_string(),
-            message: message.to_string(),
-            peer: Some(peer),
-        }
-    }
+/// Create a sync network error (maps to Network).
+pub fn sync_network_error(message: impl Into<String>) -> AuraError {
+    AuraError::network(format!("Sync network error: {}", message.into()))
+}
 
-    /// Create a network error
-    pub fn network(message: &str) -> Self {
-        Self::Network {
-            message: message.to_string(),
-            peer: None,
-            retryable: true,
-        }
-    }
+/// Create a sync network error with peer context (maps to Network).
+pub fn sync_network_with_peer(message: impl Into<String>, peer: DeviceId) -> AuraError {
+    AuraError::network(format!(
+        "Sync network error with peer {}: {}",
+        peer,
+        message.into()
+    ))
+}
 
-    /// Create a non-retryable network error
-    pub fn network_permanent(message: &str, peer: Option<DeviceId>) -> Self {
-        Self::Network {
-            message: message.to_string(),
-            peer,
-            retryable: false,
-        }
-    }
+/// Create a sync validation error (maps to Invalid).
+pub fn sync_validation_error(message: impl Into<String>) -> AuraError {
+    AuraError::invalid(format!("Sync validation error: {}", message.into()))
+}
 
-    /// Create a validation error
-    pub fn validation(message: &str) -> Self {
-        Self::Validation {
-            message: message.to_string(),
-            field: None,
-        }
-    }
+/// Create a sync validation error for a specific field (maps to Invalid).
+pub fn sync_validation_field_error(
+    message: impl Into<String>,
+    field: impl Into<String>,
+) -> AuraError {
+    AuraError::invalid(format!(
+        "Sync validation error in field '{}': {}",
+        field.into(),
+        message.into()
+    ))
+}
 
-    /// Create a validation error for a specific field
-    pub fn validation_field(message: &str, field: &str) -> Self {
-        Self::Validation {
-            message: message.to_string(),
-            field: Some(field.to_string()),
-        }
-    }
+/// Create a sync session error (maps to Internal).
+pub fn sync_session_error(message: impl Into<String>) -> AuraError {
+    AuraError::internal(format!("Sync session error: {}", message.into()))
+}
 
-    /// Create a session error
-    pub fn session(message: &str) -> Self {
-        Self::Session {
-            message: message.to_string(),
-            session_id: None,
-            recoverable: true,
-        }
-    }
+/// Create a sync session error with session ID (maps to Internal).
+pub fn sync_session_with_id(message: impl Into<String>, session_id: uuid::Uuid) -> AuraError {
+    AuraError::internal(format!(
+        "Sync session error {}: {}",
+        session_id,
+        message.into()
+    ))
+}
 
-    /// Create an unrecoverable session error
-    pub fn session_fatal(message: &str, session_id: uuid::Uuid) -> Self {
-        Self::Session {
-            message: message.to_string(),
-            session_id: Some(session_id),
-            recoverable: false,
-        }
-    }
+/// Create a sync configuration error (maps to Invalid).
+pub fn sync_config_error(component: impl Into<String>, message: impl Into<String>) -> AuraError {
+    AuraError::invalid(format!(
+        "Sync configuration error in {}: {}",
+        component.into(),
+        message.into()
+    ))
+}
 
-    /// Create a configuration error
-    pub fn config(component: &str, message: &str) -> Self {
-        Self::Config {
-            message: message.to_string(),
-            component: component.to_string(),
-        }
-    }
+/// Create a sync peer error (maps to Internal).
+pub fn sync_peer_error(operation: impl Into<String>, message: impl Into<String>) -> AuraError {
+    AuraError::internal(format!(
+        "Sync peer error during '{}': {}",
+        operation.into(),
+        message.into()
+    ))
+}
 
-    /// Create a peer error
-    pub fn peer(operation: &str, message: &str) -> Self {
-        Self::Peer {
-            message: message.to_string(),
-            peer: None,
-            operation: operation.to_string(),
-        }
-    }
+/// Create a sync peer error with device ID (maps to Internal).
+pub fn sync_peer_with_device(
+    operation: impl Into<String>,
+    message: impl Into<String>,
+    peer: DeviceId,
+) -> AuraError {
+    AuraError::internal(format!(
+        "Sync peer error during '{}' with {}: {}",
+        operation.into(),
+        peer,
+        message.into()
+    ))
+}
 
-    /// Create a peer error with peer context
-    pub fn peer_with_device(operation: &str, message: &str, peer: DeviceId) -> Self {
-        Self::Peer {
-            message: message.to_string(),
-            peer: Some(peer),
-            operation: operation.to_string(),
-        }
-    }
+/// Create a sync authorization error (maps to PermissionDenied).
+pub fn sync_authorization_error(message: impl Into<String>) -> AuraError {
+    AuraError::permission_denied(format!("Sync authorization error: {}", message.into()))
+}
 
-    /// Create an authorization error
-    pub fn authorization(message: &str) -> Self {
-        Self::Authorization {
-            message: message.to_string(),
-            required_capability: None,
-            peer: None,
-        }
-    }
+/// Create a sync authorization error with capability context (maps to PermissionDenied).
+pub fn sync_authorization_capability(
+    message: impl Into<String>,
+    capability: impl Into<String>,
+    peer: DeviceId,
+) -> AuraError {
+    AuraError::permission_denied(format!(
+        "Sync authorization error with peer {}, capability '{}': {}",
+        peer,
+        capability.into(),
+        message.into()
+    ))
+}
 
-    /// Create an authorization error with capability context
-    pub fn authorization_capability(message: &str, capability: &str, peer: DeviceId) -> Self {
-        Self::Authorization {
-            message: message.to_string(),
-            required_capability: Some(capability.to_string()),
-            peer: Some(peer),
-        }
-    }
+/// Create a sync authorization error from Biscuit token evaluation (maps to PermissionDenied).
+pub fn sync_biscuit_authorization_error(message: impl Into<String>, peer: DeviceId) -> AuraError {
+    AuraError::permission_denied(format!(
+        "Sync Biscuit authorization error with peer {}: {}",
+        peer,
+        message.into()
+    ))
+}
 
-    /// Create a timeout error
-    pub fn timeout(operation: &str, duration: Duration) -> Self {
-        Self::Timeout {
-            operation: operation.to_string(),
-            duration,
-            peer: None,
-        }
-    }
+/// Create a sync authorization error from Biscuit guard evaluation error.
+pub fn sync_biscuit_guard_error(
+    guard_capability: impl Into<String>,
+    peer: DeviceId,
+    error: aura_protocol::guards::GuardError,
+) -> AuraError {
+    AuraError::permission_denied(format!(
+        "Sync Biscuit guard error with peer {}, capability '{}': {}",
+        peer,
+        guard_capability.into(),
+        error
+    ))
+}
 
-    /// Create a timeout error with peer context
-    pub fn timeout_with_peer(operation: &str, duration: Duration, peer: DeviceId) -> Self {
-        Self::Timeout {
-            operation: operation.to_string(),
-            duration,
-            peer: Some(peer),
-        }
-    }
+/// Create a sync timeout error (maps to Internal).
+pub fn sync_timeout_error(operation: impl Into<String>, duration: Duration) -> AuraError {
+    AuraError::internal(format!(
+        "Sync operation '{}' timed out after {:?}",
+        operation.into(),
+        duration
+    ))
+}
 
-    /// Create a resource exhausted error
-    pub fn resource_exhausted(resource: &str, message: &str) -> Self {
-        Self::ResourceExhausted {
-            resource: resource.to_string(),
-            message: message.to_string(),
-            limit: None,
-        }
-    }
+/// Create a sync timeout error with peer context (maps to Internal).
+pub fn sync_timeout_with_peer(
+    operation: impl Into<String>,
+    duration: Duration,
+    peer: DeviceId,
+) -> AuraError {
+    AuraError::internal(format!(
+        "Sync operation '{}' with peer {} timed out after {:?}",
+        operation.into(),
+        peer,
+        duration
+    ))
+}
 
-    /// Create a resource exhausted error with limit
-    pub fn resource_exhausted_with_limit(resource: &str, message: &str, limit: u64) -> Self {
-        Self::ResourceExhausted {
-            resource: resource.to_string(),
-            message: message.to_string(),
-            limit: Some(limit),
-        }
-    }
+/// Create a sync resource exhaustion error (maps to Internal).
+pub fn sync_resource_exhausted(
+    resource: impl Into<String>,
+    message: impl Into<String>,
+) -> AuraError {
+    AuraError::internal(format!(
+        "Sync resource '{}' exhausted: {}",
+        resource.into(),
+        message.into()
+    ))
+}
 
-    /// Create a serialization error
-    pub fn serialization(data_type: &str, message: &str) -> Self {
-        Self::Serialization {
-            message: message.to_string(),
-            data_type: data_type.to_string(),
-        }
-    }
+/// Create a sync resource exhaustion error with limit (maps to Internal).
+pub fn sync_resource_with_limit(
+    resource: impl Into<String>,
+    message: impl Into<String>,
+    limit: u64,
+) -> AuraError {
+    AuraError::internal(format!(
+        "Sync resource '{}' exhausted (limit {}): {}",
+        resource.into(),
+        limit,
+        message.into()
+    ))
+}
 
-    /// Create a consistency error
-    pub fn consistency(operation: &str, message: &str) -> Self {
-        Self::Consistency {
-            message: message.to_string(),
-            operation: operation.to_string(),
-            expected_state: None,
-            actual_state: None,
-        }
-    }
+/// Create a sync serialization error (maps to Serialization).
+pub fn sync_serialization_error(
+    data_type: impl Into<String>,
+    message: impl Into<String>,
+) -> AuraError {
+    AuraError::serialization(format!(
+        "Sync serialization error for {}: {}",
+        data_type.into(),
+        message.into()
+    ))
+}
 
-    /// Check if this error is retryable
-    pub fn is_retryable(&self) -> bool {
-        match self {
-            Self::Network { retryable, .. } => *retryable,
-            Self::Session { recoverable, .. } => *recoverable,
-            Self::Timeout { .. } => true,
-            Self::ResourceExhausted { .. } => true,
-            Self::Protocol { .. } => false,
-            Self::Validation { .. } => false,
-            Self::Config { .. } => false,
-            Self::Authorization { .. } => false,
-            Self::Core(_) => false,
-            Self::Serialization { .. } => false,
-            Self::Consistency { .. } => false,
-            Self::Peer { .. } => true, // Peer issues are often transient
-        }
-    }
-
-    /// Get error category for metrics and logging
-    pub fn category(&self) -> &'static str {
-        match self {
-            Self::Protocol { .. } => "protocol",
-            Self::Network { .. } => "network",
-            Self::Validation { .. } => "validation",
-            Self::Session { .. } => "session",
-            Self::Config { .. } => "config",
-            Self::Peer { .. } => "peer",
-            Self::Authorization { .. } => "authorization",
-            Self::Timeout { .. } => "timeout",
-            Self::ResourceExhausted { .. } => "resource",
-            Self::Core(_) => "core",
-            Self::Serialization { .. } => "serialization",
-            Self::Consistency { .. } => "consistency",
-        }
-    }
-
-    /// Get a user-friendly error message
-    pub fn user_message(&self) -> String {
-        match self {
-            Self::Protocol { protocol, message, peer } => {
-                if let Some(peer) = peer {
-                    format!("Sync protocol '{}' failed with peer {}: {}", protocol, peer, message)
-                } else {
-                    format!("Sync protocol '{}' failed: {}", protocol, message)
-                }
-            }
-            Self::Network { peer, .. } => {
-                if let Some(peer) = peer {
-                    format!("Network communication with peer {} failed", peer)
-                } else {
-                    "Network communication failed".to_string()
-                }
-            }
-            Self::Validation { field, .. } => {
-                if let Some(field) = field {
-                    format!("Invalid data in field '{}'", field)
-                } else {
-                    "Invalid sync data".to_string()
-                }
-            }
-            Self::Session { .. } => "Sync session error".to_string(),
-            Self::Config { component, .. } => format!("Configuration error in {}", component),
-            Self::Peer { operation, peer, .. } => {
-                if let Some(peer) = peer {
-                    format!("Peer operation '{}' failed for {}", operation, peer)
-                } else {
-                    format!("Peer operation '{}' failed", operation)
-                }
-            }
-            Self::Authorization { .. } => "Insufficient permissions for sync operation".to_string(),
-            Self::Timeout { operation, .. } => format!("Operation '{}' timed out", operation),
-            Self::ResourceExhausted { resource, .. } => {
-                format!("Resource '{}' exhausted", resource)
-            }
-            Self::Core(err) => format!("System error: {}", err),
-            Self::Serialization { data_type, .. } => {
-                format!("Failed to serialize/deserialize {}", data_type)
-            }
-            Self::Consistency { operation, .. } => {
-                format!("Consistency error during '{}'", operation)
-            }
-        }
-    }
+/// Create a sync consistency error (maps to Internal).
+pub fn sync_consistency_error(
+    operation: impl Into<String>,
+    message: impl Into<String>,
+) -> AuraError {
+    AuraError::internal(format!(
+        "Sync consistency error during '{}': {}",
+        operation.into(),
+        message.into()
+    ))
 }
 
 #[cfg(test)]
-    use aura_core::test_utils::test_device_id;
 mod tests {
     use super::*;
+    #[cfg(test)]
+    use aura_core::test_utils::test_device_id;
 
     #[test]
-    fn test_error_creation() {
-        let err = SyncError::protocol("anti_entropy", "sync failed");
-        assert_eq!(err.category(), "protocol");
-        assert!(!err.is_retryable());
+    fn test_sync_error_creation() {
+        let err = sync_protocol_error("anti_entropy", "sync failed");
+        assert!(err
+            .to_string()
+            .contains("Protocol error in anti_entropy: sync failed"));
     }
 
     #[test]
-    fn test_network_error_retryable() {
-        let err = SyncError::network("connection refused");
-        assert!(err.is_retryable());
-
-        let err = SyncError::network_permanent("invalid protocol", None);
-        assert!(!err.is_retryable());
+    fn test_sync_network_error() {
+        let err = sync_network_error("connection refused");
+        assert!(err
+            .to_string()
+            .contains("Sync network error: connection refused"));
     }
 
     #[test]
-    fn test_user_messages() {
-        let err = SyncError::timeout("journal_sync", Duration::from_secs(30));
-        assert!(err.user_message().contains("timed out"));
+    fn test_sync_timeout() {
+        let err = sync_timeout_error("journal_sync", Duration::from_secs(30));
+        assert!(err.to_string().contains("journal_sync"));
+        assert!(err.to_string().contains("timed out"));
 
         let peer = test_device_id(1);
-        let err = SyncError::peer_with_device("discovery", "unreachable", peer);
-        assert!(err.user_message().contains(&peer.to_string()));
+        let err = sync_timeout_with_peer("discovery", Duration::from_secs(30), peer);
+        assert!(err.to_string().contains(&peer.to_string()));
+    }
+
+    #[test]
+    fn test_sync_result_type() {
+        fn test_function() -> SyncResult<i32> {
+            Ok(42)
+        }
+
+        let result = test_function();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 42);
     }
 }

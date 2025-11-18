@@ -5,10 +5,10 @@
 //! without middleware wrapper patterns.
 
 use super::{SimulationFaultHandler, SimulationScenarioHandler, SimulationTimeHandler};
-use aura_agent::runtime::{EffectSystemBuilder, EffectSystemConfig};
 use aura_core::effects::{ChaosEffects, TestingEffects, TimeEffects};
 use aura_core::DeviceId;
-use aura_protocol::effects::AuraEffectSystem;
+use aura_protocol::orchestration::AuraEffectSystem;
+use aura_protocol::standard_patterns::EffectRegistry;
 use std::sync::Arc;
 
 /// Effect-based simulation composer
@@ -43,15 +43,13 @@ impl SimulationEffectComposer {
         self
     }
 
-    /// Add core effect system
-    pub fn with_effect_system(
-        mut self,
-        config: EffectSystemConfig,
-    ) -> Result<Self, SimulationComposerError> {
+    /// Add core effect system using new EffectRegistry pattern
+    pub fn with_effect_system(mut self) -> Result<Self, SimulationComposerError> {
         let effect_system = Arc::new(
-            EffectSystemBuilder::new()
-                .with_config(config)
-                .build_sync()
+            EffectRegistry::simulation(self.seed)
+                .with_device_id(self.device_id)
+                .with_logging()
+                .build()
                 .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?,
         );
 
@@ -65,7 +63,7 @@ impl SimulationEffectComposer {
         self
     }
 
-    /// Add fault injection capabilities  
+    /// Add fault injection capabilities
     pub fn with_fault_injection(mut self) -> Self {
         self.fault_handler = Some(Arc::new(SimulationFaultHandler::new(self.seed)));
         self
@@ -98,11 +96,9 @@ impl SimulationEffectComposer {
     pub fn for_testing(
         device_id: DeviceId,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        let config = EffectSystemConfig::for_testing(device_id);
-
         Self::new(device_id)
             .with_seed(42) // Deterministic for testing
-            .with_effect_system(config)?
+            .with_effect_system()?
             .with_time_control()
             .with_fault_injection()
             .with_scenario_management()
@@ -114,11 +110,9 @@ impl SimulationEffectComposer {
         device_id: DeviceId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        let config = EffectSystemConfig::for_simulation(device_id, seed);
-
         Self::new(device_id)
             .with_seed(seed)
-            .with_effect_system(config)?
+            .with_effect_system()?
             .with_time_control()
             .with_fault_injection()
             .with_scenario_management()

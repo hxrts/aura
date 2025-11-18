@@ -4,11 +4,13 @@
 //! the choreography system with the agent runtime.
 
 use crate::errors::Result as AgentResult;
-use crate::runtime::ota_orchestration::{MaintenanceEvent, UpgradeConfig, UpgradeOrchestrator, UpgradeProposal};
-use crate::runtime::AuraHandlerAdapter;
-use aura_core::{DeviceId, Epoch};
 #[cfg(test)]
 use crate::runtime::ota_orchestration::UpgradeKind;
+use crate::runtime::ota_orchestration::{
+    MaintenanceEvent, UpgradeConfig, UpgradeOrchestrator, UpgradeProposal,
+};
+use crate::runtime::AuraHandlerAdapter;
+use aura_core::{DeviceId, Epoch};
 use serde_json;
 use std::collections::HashMap;
 use tokio::sync::RwLock;

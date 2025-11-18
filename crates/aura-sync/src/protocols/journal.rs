@@ -40,10 +40,15 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use aura_core::{DeviceId, AccountId, Journal, AttestedOp};
-use crate::core::{SyncError, SyncResult};
-use crate::protocols::anti_entropy::{JournalDigest, AntiEntropyProtocol, AntiEntropyConfig};
-use crate::infrastructure::{RetryPolicy, PeerManager};
+use crate::core::{sync_biscuit_guard_error, sync_session_error, sync_timeout_error, SyncResult};
+use crate::infrastructure::RetryPolicy;
+use crate::protocols::anti_entropy::{AntiEntropyConfig, AntiEntropyProtocol, JournalDigest};
+use aura_core::effects::{JournalEffects, NetworkEffects};
+use aura_core::{AccountId, AttestedOp, DeviceId, Journal};
+use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
+use aura_wot::{BiscuitTokenManager, ResourceScope};
+use biscuit_auth::Biscuit;
+use futures;
 
 // =============================================================================
 // Types
@@ -84,15 +89,10 @@ pub enum SyncMessage {
     DigestRequest,
 
     /// Response with journal digest
-    DigestResponse {
-        digest: JournalDigest,
-    },
+    DigestResponse { digest: JournalDigest },
 
     /// Request operations starting from index
-    OperationsRequest {
-        from_index: usize,
-        max_ops: usize,
-    },
+    OperationsRequest { from_index: usize, max_ops: usize },
 
     /// Response with operations
     OperationsResponse {
@@ -101,9 +101,7 @@ pub enum SyncMessage {
     },
 
     /// Acknowledge successful sync
-    SyncComplete {
-        operations_applied: usize,
-    },
+    SyncComplete { operations_applied: usize },
 }
 
 /// Journal synchronization result
@@ -162,8 +160,7 @@ impl Default for JournalSyncConfig {
             max_concurrent_syncs: 5,
             sync_timeout: Duration::from_secs(30),
             retry_enabled: true,
-            retry_policy: RetryPolicy::exponential()
-                .with_max_attempts(3),
+            retry_policy: RetryPolicy::exponential().with_max_attempts(3),
             anti_entropy: AntiEntropyConfig::default(),
         }
     }
@@ -178,6 +175,8 @@ impl Default for JournalSyncConfig {
 /// Provides complete journal synchronization using anti-entropy algorithms
 /// and CRDT merge semantics. Integrates with infrastructure for peer
 /// management, retry logic, and connection pooling.
+///
+/// Supports Biscuit token-based authorization for sync operations.
 pub struct JournalSyncProtocol {
     config: JournalSyncConfig,
     anti_entropy: AntiEntropyProtocol,
@@ -188,6 +187,25 @@ impl JournalSyncProtocol {
     /// Create a new journal sync protocol
     pub fn new(config: JournalSyncConfig) -> Self {
         let anti_entropy = AntiEntropyProtocol::new(config.anti_entropy.clone());
+
+        Self {
+            config,
+            anti_entropy,
+            peer_states: HashMap::new(),
+        }
+    }
+
+    /// Create a new journal sync protocol with Biscuit authorization support
+    pub fn with_biscuit_authorization(
+        config: JournalSyncConfig,
+        token_manager: BiscuitTokenManager,
+        guard_evaluator: BiscuitGuardEvaluator,
+    ) -> Self {
+        let anti_entropy = AntiEntropyProtocol::with_biscuit_authorization(
+            config.anti_entropy.clone(),
+            token_manager,
+            guard_evaluator,
+        );
 
         Self {
             config,
@@ -207,27 +225,95 @@ impl JournalSyncProtocol {
     /// Note: Callers should obtain `start` via `TimeEffects::now_instant()` and pass it to this method
     pub async fn sync_with_peers<E>(
         &mut self,
-        _effects: &E,
+        effects: &E,
         peers: Vec<DeviceId>,
         start: std::time::Instant,
     ) -> SyncResult<JournalSyncResult>
     where
-        E: Send + Sync,
+        E: JournalEffects + NetworkEffects + Send + Sync,
     {
         let mut operations_synced = 0;
         let mut peers_synced = Vec::new();
         let mut peers_failed = Vec::new();
+
+        tracing::info!(
+            "Starting journal synchronization with {} peers",
+            peers.len()
+        );
 
         // Mark all peers as syncing
         for peer in &peers {
             self.peer_states.insert(*peer, SyncState::Syncing);
         }
 
-        // TODO: Implement actual sync using effect system
-        // For now, return empty result
+        // Limit concurrent syncs to prevent overwhelming the system
+        let chunks = peers.chunks(self.config.max_concurrent_syncs);
+
+        for chunk in chunks {
+            // Create futures for this batch of peers
+            let sync_futures: Vec<_> = chunk
+                .iter()
+                .map(|&peer| Box::pin(self.sync_with_peer_impl(effects, peer)))
+                .collect();
+
+            // Wait for all syncs in this batch to complete
+            let results = futures::future::join_all(sync_futures).await;
+
+            // Process results
+            for (i, result) in results.into_iter().enumerate() {
+                let peer = chunk[i];
+                match result {
+                    Ok(ops_count) => {
+                        operations_synced += ops_count;
+                        peers_synced.push(peer);
+
+                        // Update peer state to synced
+                        let sync_time = start.elapsed().as_secs();
+                        self.peer_states.insert(
+                            peer,
+                            SyncState::Synced {
+                                last_sync: sync_time,
+                                operations: ops_count,
+                            },
+                        );
+
+                        tracing::info!(
+                            "Successfully synced {} operations with peer {}",
+                            ops_count,
+                            peer
+                        );
+                    }
+                    Err(e) => {
+                        peers_failed.push(peer);
+
+                        // Update peer state to failed
+                        let failed_time = start.elapsed().as_secs();
+                        self.peer_states.insert(
+                            peer,
+                            SyncState::Failed {
+                                error: e.to_string(),
+                                failed_at: failed_time,
+                            },
+                        );
+
+                        tracing::warn!("Failed to sync with peer {}: {}", peer, e);
+                    }
+                }
+            }
+
+            // Small delay between batches to prevent overwhelming network
+            if chunk.len() == self.config.max_concurrent_syncs {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
 
         let duration_ms = start.elapsed().as_millis() as u64;
         let success = !peers_synced.is_empty();
+
+        tracing::info!(
+            "Journal synchronization completed: {} operations synced across {} peers ({} failed) in {}ms",
+            operations_synced, peers_synced.len(), peers_failed.len(), duration_ms
+        );
 
         Ok(JournalSyncResult {
             operations_synced,
@@ -239,23 +325,60 @@ impl JournalSyncProtocol {
     }
 
     /// Synchronize with a single peer
-    pub async fn sync_with_peer<E>(
-        &mut self,
-        _effects: &E,
-        peer: DeviceId,
-    ) -> SyncResult<usize>
+    pub async fn sync_with_peer<E>(&mut self, effects: &E, peer: DeviceId) -> SyncResult<usize>
     where
-        E: Send + Sync,
+        E: JournalEffects + NetworkEffects + Send + Sync,
     {
         self.peer_states.insert(peer, SyncState::Syncing);
+        self.sync_with_peer_impl(effects, peer).await
+    }
 
-        // TODO: Implement using effect system and anti-entropy protocol
-        // 1. Exchange digests
-        // 2. Plan reconciliation
-        // 3. Transfer operations
-        // 4. Merge using CRDT semantics
+    /// Internal implementation of peer synchronization
+    async fn sync_with_peer_impl<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<usize>
+    where
+        E: JournalEffects + NetworkEffects + Send + Sync,
+    {
+        tracing::debug!("Starting synchronization with peer {}", peer);
 
-        Ok(0)
+        // Apply timeout to the entire sync operation
+        let sync_future =
+            async {
+                // Use anti-entropy protocol for the actual synchronization
+                let result = self
+                    .anti_entropy
+                    .execute(effects, peer)
+                    .await
+                    .map_err(|e| sync_session_error(&format!("Anti-entropy sync failed: {}", e)))?;
+
+                tracing::debug!(
+                "Anti-entropy sync with peer {} completed: {} applied, {} duplicates, {} rounds",
+                peer, result.applied, result.duplicates, result.rounds
+            );
+
+                // Apply additional journal-specific processing if needed
+                if result.applied > 0 {
+                    // Update local journal state after successful sync
+                    // In a full implementation, this would trigger journal rebuilding
+                    // or other post-sync processing
+
+                    tracing::info!(
+                        "Journal sync with peer {} applied {} new operations",
+                        peer,
+                        result.applied
+                    );
+                }
+
+                Ok(result.applied)
+            };
+
+        tokio::time::timeout(self.config.sync_timeout, sync_future)
+            .await
+            .map_err(|_| {
+                sync_timeout_error(
+                    &format!("Sync with peer {}", peer),
+                    self.config.sync_timeout,
+                )
+            })?
     }
 
     /// Get synchronization state for a peer
@@ -276,13 +399,19 @@ impl JournalSyncProtocol {
     /// Get statistics about synchronization
     pub fn statistics(&self) -> JournalSyncStatistics {
         let total = self.peer_states.len();
-        let syncing = self.peer_states.values()
+        let syncing = self
+            .peer_states
+            .values()
             .filter(|s| matches!(s, SyncState::Syncing))
             .count();
-        let synced = self.peer_states.values()
+        let synced = self
+            .peer_states
+            .values()
             .filter(|s| matches!(s, SyncState::Synced { .. }))
             .count();
-        let failed = self.peer_states.values()
+        let failed = self
+            .peer_states
+            .values()
             .filter(|s| matches!(s, SyncState::Failed { .. }))
             .count();
 
@@ -347,10 +476,13 @@ mod tests {
             Some(SyncState::Syncing)
         ));
 
-        protocol.update_peer_state(peer, SyncState::Synced {
-            last_sync: 100,
-            operations: 42,
-        });
+        protocol.update_peer_state(
+            peer,
+            SyncState::Synced {
+                last_sync: 100,
+                operations: 42,
+            },
+        );
         assert!(matches!(
             protocol.get_peer_state(&peer),
             Some(SyncState::Synced { operations: 42, .. })
@@ -366,14 +498,20 @@ mod tests {
         let peer3 = DeviceId::from_bytes([3; 32]);
 
         protocol.update_peer_state(peer1, SyncState::Syncing);
-        protocol.update_peer_state(peer2, SyncState::Synced {
-            last_sync: 100,
-            operations: 10,
-        });
-        protocol.update_peer_state(peer3, SyncState::Failed {
-            error: "timeout".to_string(),
-            failed_at: 200,
-        });
+        protocol.update_peer_state(
+            peer2,
+            SyncState::Synced {
+                last_sync: 100,
+                operations: 10,
+            },
+        );
+        protocol.update_peer_state(
+            peer3,
+            SyncState::Failed {
+                error: "timeout".to_string(),
+                failed_at: 200,
+            },
+        );
 
         let stats = protocol.statistics();
         assert_eq!(stats.total_peers, 3);

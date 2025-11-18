@@ -204,7 +204,8 @@ impl ContextPropagator {
     pub fn child_context(&self) -> Option<EffectContext> {
         #[allow(clippy::disallowed_methods)]
         // Context propagation - UUID generation for child context
-        self.current().map(|ctx| ctx.child(uuid::Uuid::new_v4(), uuid::Uuid::new_v4()))
+        self.current()
+            .map(|ctx| ctx.child(uuid::Uuid::new_v4(), uuid::Uuid::new_v4()))
     }
 }
 
@@ -279,7 +280,12 @@ pub trait ContextualEffects:
     fn create_context(&self, device_id: DeviceId) -> EffectContext {
         #[allow(clippy::disallowed_methods)]
         // Context creation - UUID generation for new context
-        EffectContext::new(device_id, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4())
+        EffectContext::new(
+            device_id,
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+        )
     }
 
     /// Create a child context

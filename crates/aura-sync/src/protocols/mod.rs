@@ -52,36 +52,32 @@
 //! - Statistics and metrics
 
 pub mod anti_entropy;
+pub mod epochs;
 pub mod journal;
-pub mod snapshots;
 pub mod ota;
 pub mod receipts;
-
-// Note: epochs.rs will be added when migrated from aura-protocol
+pub mod snapshots;
 
 // Re-export key types for convenience
 pub use anti_entropy::{
-    AntiEntropyProtocol, AntiEntropyConfig, AntiEntropyResult,
-    JournalDigest, DigestStatus, AntiEntropyRequest,
+    AntiEntropyConfig, AntiEntropyProtocol, AntiEntropyRequest, AntiEntropyResult, DigestStatus,
+    JournalDigest,
 };
 
 pub use journal::{
-    JournalSyncProtocol, JournalSyncConfig, JournalSyncResult,
-    SyncState, SyncMessage,
+    JournalSyncConfig, JournalSyncProtocol, JournalSyncResult, SyncMessage, SyncState,
 };
 
 pub use snapshots::{
-    SnapshotProtocol, SnapshotConfig, SnapshotResult,
-    SnapshotProposal, SnapshotApproval,
+    SnapshotApproval, SnapshotConfig, SnapshotProposal, SnapshotProtocol, SnapshotResult,
     WriterFence, WriterFenceGuard,
 };
 
-pub use ota::{
-    OTAProtocol, OTAConfig, OTAResult,
-    UpgradeProposal, UpgradeKind,
-};
+pub use ota::{OTAConfig, OTAProtocol, OTAResult, UpgradeKind, UpgradeProposal};
 
-pub use receipts::{
-    ReceiptVerificationProtocol, ReceiptVerificationConfig,
-    VerificationResult,
+pub use receipts::{ReceiptVerificationConfig, ReceiptVerificationProtocol, VerificationResult};
+
+pub use epochs::{
+    EpochCommit, EpochConfig, EpochConfirmation, EpochRotation, EpochRotationCoordinator,
+    EpochRotationProposal, RotationStatus,
 };

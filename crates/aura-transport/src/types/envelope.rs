@@ -30,7 +30,7 @@ pub struct Envelope {
 pub struct ScopedEnvelope {
     /// Base envelope
     pub envelope: Envelope,
-    /// Required relationship context  
+    /// Required relationship context
     pub relationship_id: RelationshipId,
     /// Sender within relationship context
     pub scoped_sender: DeviceId,
@@ -60,7 +60,7 @@ pub enum FrameType {
     Clear,
     /// Capability-scoped message frame
     CapabilityScoped,
-    /// Relationship-scoped message frame  
+    /// Relationship-scoped message frame
     RelationshipScoped,
     /// Fully blinded message frame
     Blinded,

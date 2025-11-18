@@ -4,13 +4,15 @@
 //! all session lifecycle, state tracking, and coordination patterns scattered
 //! across the aura-sync crate into a choreography-aware abstraction.
 
-
-use crate::core::{SyncError, SyncResult, SyncConfig, MetricsCollector};
 use crate::core::metrics::ErrorCategory;
+use crate::core::{
+    sync_resource_with_limit, sync_session_error, sync_timeout_error, sync_validation_error,
+    MetricsCollector, SyncConfig, SyncResult,
+};
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Unified session state machine following choreographic patterns
@@ -49,7 +51,9 @@ impl<T> SessionState<T> {
         match self {
             SessionState::Initializing { timeout_at, .. } => now >= *timeout_at,
             SessionState::Active { timeout_at, .. } => now >= *timeout_at,
-            SessionState::Terminating { cleanup_deadline, .. } => now >= *cleanup_deadline,
+            SessionState::Terminating {
+                cleanup_deadline, ..
+            } => now >= *cleanup_deadline,
             SessionState::Completed(_) => false,
         }
     }
@@ -134,10 +138,13 @@ impl SessionResult {
     /// Get operations count for successful sessions
     pub fn operations_count(&self) -> usize {
         match self {
-            SessionResult::Success { operations_count, .. } => *operations_count,
-            SessionResult::Failure { partial_results: Some(partial), .. } => {
-                partial.operations_completed
-            }
+            SessionResult::Success {
+                operations_count, ..
+            } => *operations_count,
+            SessionResult::Failure {
+                partial_results: Some(partial),
+                ..
+            } => partial.operations_completed,
             _ => 0,
         }
     }
@@ -157,19 +164,19 @@ pub struct PartialResults {
 pub enum SessionError {
     #[error("Session timeout after {duration_ms}ms")]
     Timeout { duration_ms: u64 },
-    
+
     #[error("Participant {participant} disconnected")]
     ParticipantDisconnected { participant: DeviceId },
-    
+
     #[error("Resource limit exceeded: {limit_type}")]
     ResourceLimitExceeded { limit_type: String },
-    
+
     #[error("Protocol constraint violation: {constraint}")]
     ProtocolViolation { constraint: String },
-    
+
     #[error("Session capacity exceeded: {current}/{max}")]
     CapacityExceeded { current: usize, max: usize },
-    
+
     #[error("Invalid session state transition: {from} -> {to}")]
     InvalidStateTransition { from: String, to: String },
 }
@@ -227,7 +234,7 @@ pub struct SessionResourceLimits {
 impl Default for SessionResourceLimits {
     fn default() -> Self {
         Self {
-            max_memory_per_session: 10 * 1024 * 1024, // 10 MB
+            max_memory_per_session: 10 * 1024 * 1024,        // 10 MB
             max_session_duration: Duration::from_secs(3600), // 1 hour
             max_operations_per_session: 10000,
         }
@@ -238,7 +245,7 @@ impl From<&crate::core::PerformanceConfig> for SessionResourceLimits {
     fn from(perf_config: &crate::core::PerformanceConfig) -> Self {
         Self {
             max_memory_per_session: perf_config.memory_limit / 10, // 1/10th of total limit
-            max_session_duration: Duration::from_secs(3600), // 1 hour
+            max_session_duration: Duration::from_secs(3600),       // 1 hour
             max_operations_per_session: 10000,
         }
     }
@@ -287,10 +294,14 @@ where
     /// Create a new session with participants
     ///
     /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn create_session(&mut self, participants: Vec<DeviceId>, now: u64) -> SyncResult<SessionId> {
+    pub fn create_session(
+        &mut self,
+        participants: Vec<DeviceId>,
+        now: u64,
+    ) -> SyncResult<SessionId> {
         // Validate participant count
         if participants.len() > self.config.max_participants {
-            return Err(SyncError::validation(&format!(
+            return Err(sync_validation_error(&format!(
                 "Too many participants: {} > {}",
                 participants.len(),
                 self.config.max_participants
@@ -300,7 +311,7 @@ where
         // Check concurrent session limit
         let active_count = self.count_active_sessions();
         if active_count >= self.config.max_concurrent_sessions {
-            return Err(SyncError::resource_exhausted_with_limit(
+            return Err(sync_resource_with_limit(
                 "concurrent_sessions",
                 "Maximum concurrent sessions exceeded",
                 self.config.max_concurrent_sessions as u64,
@@ -331,17 +342,21 @@ where
 
     /// Activate a session with initial protocol state
     pub fn activate_session(&mut self, session_id: SessionId, protocol_state: T) -> SyncResult<()> {
-        let session = self.sessions.get_mut(&session_id)
-            .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
+        let session = self
+            .sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
         if session.is_timed_out() {
-            return Err(SyncError::timeout("session_activation", self.config.timeout));
+            return Err(sync_timeout_error(
+                "session_activation",
+                self.config.timeout,
+            ));
         }
 
         match session {
             SessionState::Initializing { participants, .. } => {
-
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -357,7 +372,7 @@ where
 
                 Ok(())
             }
-            _ => Err(SyncError::session(&format!(
+            _ => Err(sync_session_error(&format!(
                 "Session {} is not in initializing state",
                 session_id
             ))),
@@ -369,13 +384,15 @@ where
     where
         T: std::fmt::Debug,
     {
-        let session = self.sessions.get_mut(&session_id)
-            .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
+        let session = self
+            .sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
         if session.is_timed_out() {
             self.timeout_session(session_id)?;
-            return Err(SyncError::timeout("session_update", self.config.timeout));
+            return Err(sync_timeout_error("session_update", self.config.timeout));
         }
 
         match session {
@@ -383,7 +400,7 @@ where
                 *protocol_state = new_state;
                 Ok(())
             }
-            _ => Err(SyncError::session(&format!(
+            _ => Err(sync_session_error(&format!(
                 "Session {} is not active",
                 session_id
             ))),
@@ -398,8 +415,10 @@ where
         bytes_transferred: usize,
         metadata: HashMap<String, String>,
     ) -> SyncResult<()> {
-        let session = self.sessions.get_mut(&session_id)
-            .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
+        let session = self
+            .sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
 
         let duration_ms = session.duration_ms().unwrap_or(0);
         let participants = session.participants().to_vec();
@@ -420,7 +439,12 @@ where
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            metrics.record_sync_completion(&session_id.to_string(), operations_count, bytes_transferred, now);
+            metrics.record_sync_completion(
+                &session_id.to_string(),
+                operations_count,
+                bytes_transferred,
+                now,
+            );
         }
 
         Ok(())
@@ -433,8 +457,10 @@ where
         error: SessionError,
         partial_results: Option<PartialResults>,
     ) -> SyncResult<()> {
-        let session = self.sessions.get_mut(&session_id)
-            .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
+        let session = self
+            .sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
 
         let duration_ms = session.duration_ms().unwrap_or(0);
 
@@ -467,8 +493,10 @@ where
     where
         T: std::fmt::Debug,
     {
-        let session = self.sessions.get_mut(&session_id)
-            .ok_or_else(|| SyncError::session(&format!("Session {} not found", session_id)))?;
+        let session = self
+            .sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
 
         let duration_ms = session.duration_ms().unwrap_or(0);
         let last_known_state = format!("{:?}", session);
@@ -516,12 +544,18 @@ where
 
     /// Count active sessions
     pub fn count_active_sessions(&self) -> usize {
-        self.sessions.values().filter(|state| state.is_active()).count()
+        self.sessions
+            .values()
+            .filter(|state| state.is_active())
+            .count()
     }
 
     /// Count completed sessions
     pub fn count_completed_sessions(&self) -> usize {
-        self.sessions.values().filter(|state| state.is_terminal()).count()
+        self.sessions
+            .values()
+            .filter(|state| state.is_terminal())
+            .count()
     }
 
     /// Cleanup stale and completed sessions
@@ -582,23 +616,25 @@ where
         for session in self.sessions.values() {
             match session {
                 SessionState::Active { .. } => active_count += 1,
-                SessionState::Completed(result) => {
-                    match result {
-                        SessionResult::Success { duration_ms, operations_count, .. } => {
-                            completed_count += 1;
-                            total_duration_ms += duration_ms;
-                            total_operations += operations_count;
-                        }
-                        SessionResult::Failure { duration_ms, .. } => {
-                            failed_count += 1;
-                            total_duration_ms += duration_ms;
-                        }
-                        SessionResult::Timeout { duration_ms, .. } => {
-                            timeout_count += 1;
-                            total_duration_ms += duration_ms;
-                        }
+                SessionState::Completed(result) => match result {
+                    SessionResult::Success {
+                        duration_ms,
+                        operations_count,
+                        ..
+                    } => {
+                        completed_count += 1;
+                        total_duration_ms += duration_ms;
+                        total_operations += operations_count;
                     }
-                }
+                    SessionResult::Failure { duration_ms, .. } => {
+                        failed_count += 1;
+                        total_duration_ms += duration_ms;
+                    }
+                    SessionResult::Timeout { duration_ms, .. } => {
+                        timeout_count += 1;
+                        total_duration_ms += duration_ms;
+                    }
+                },
                 _ => {} // Ignore initializing/terminating for stats
             }
         }
@@ -739,13 +775,19 @@ mod tests {
             phase: "initialization".to_string(),
             data: vec![1, 2, 3],
         };
-        manager.activate_session(session_id, initial_state.clone()).unwrap();
+        manager
+            .activate_session(session_id, initial_state.clone())
+            .unwrap();
         assert_eq!(manager.count_active_sessions(), 1);
 
         // Verify session state
         let session = manager.get_session(&session_id).unwrap();
         match session {
-            SessionState::Active { protocol_state, participants: session_participants, .. } => {
+            SessionState::Active {
+                protocol_state,
+                participants: session_participants,
+                ..
+            } => {
                 assert_eq!(protocol_state, &initial_state);
                 assert_eq!(session_participants, &participants);
             }
@@ -758,7 +800,9 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
         let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
-        let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
+        let session_id = manager
+            .create_session(vec![test_device_id(1)], now)
+            .unwrap();
 
         let initial_state = TestProtocolState {
             phase: "test".to_string(),
@@ -769,15 +813,21 @@ mod tests {
         // Complete session
         let mut metadata = HashMap::new();
         metadata.insert("test_key".to_string(), "test_value".to_string());
-        
-        manager.complete_session(session_id, 100, 1024, metadata).unwrap();
+
+        manager
+            .complete_session(session_id, 100, 1024, metadata)
+            .unwrap();
         assert_eq!(manager.count_active_sessions(), 0);
         assert_eq!(manager.count_completed_sessions(), 1);
 
         // Verify result
         let session = manager.get_session(&session_id).unwrap();
         match session {
-            SessionState::Completed(SessionResult::Success { operations_count, bytes_transferred, .. }) => {
+            SessionState::Completed(SessionResult::Success {
+                operations_count,
+                bytes_transferred,
+                ..
+            }) => {
                 assert_eq!(*operations_count, 100);
                 assert_eq!(*bytes_transferred, 1024);
             }
@@ -790,7 +840,9 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
         let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
-        let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
+        let session_id = manager
+            .create_session(vec![test_device_id(1)], now)
+            .unwrap();
 
         let initial_state = TestProtocolState {
             phase: "test".to_string(),
@@ -802,19 +854,22 @@ mod tests {
         let error = SessionError::ProtocolViolation {
             constraint: "test constraint".to_string(),
         };
-        manager.fail_session(session_id, error.clone(), None).unwrap();
+        manager
+            .fail_session(session_id, error.clone(), None)
+            .unwrap();
 
         // Verify failure
         let session = manager.get_session(&session_id).unwrap();
         match session {
-            SessionState::Completed(SessionResult::Failure { error: session_error, .. }) => {
-                match session_error {
-                    SessionError::ProtocolViolation { constraint } => {
-                        assert_eq!(constraint, "test constraint");
-                    }
-                    _ => panic!("Wrong error type"),
+            SessionState::Completed(SessionResult::Failure {
+                error: session_error,
+                ..
+            }) => match session_error {
+                SessionError::ProtocolViolation { constraint } => {
+                    assert_eq!(constraint, "test constraint");
                 }
-            }
+                _ => panic!("Wrong error type"),
+            },
             _ => panic!("Session should be completed with failure"),
         }
     }
@@ -830,8 +885,12 @@ mod tests {
         let mut manager = SessionManager::<TestProtocolState>::new(config, now);
 
         // Create and activate maximum sessions
-        let session1 = manager.create_session(vec![test_device_id(1)], now).unwrap();
-        let session2 = manager.create_session(vec![test_device_id(1)], now).unwrap();
+        let session1 = manager
+            .create_session(vec![test_device_id(1)], now)
+            .unwrap();
+        let session2 = manager
+            .create_session(vec![test_device_id(1)], now)
+            .unwrap();
 
         let state = TestProtocolState {
             phase: "test".to_string(),
@@ -843,7 +902,10 @@ mod tests {
         // Try to exceed limit
         let result = manager.create_session(vec![test_device_id(1)], now);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SyncError::ResourceExhausted { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            SyncError::ResourceExhausted { .. }
+        ));
     }
 
     #[test]
@@ -855,12 +917,14 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         let now = Instant::now();
         let mut manager = SessionManager::<TestProtocolState>::new(config, now);
-        
-        let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
-        
+
+        let session_id = manager
+            .create_session(vec![test_device_id(1)], now)
+            .unwrap();
+
         // Wait for timeout
         thread::sleep(StdDuration::from_millis(150));
-        
+
         // Try to activate - should fail due to timeout
         let state = TestProtocolState {
             phase: "test".to_string(),
@@ -882,13 +946,17 @@ mod tests {
         let mut manager = SessionManager::<TestProtocolState>::new(config, now);
 
         // Create and complete a session
-        let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
+        let session_id = manager
+            .create_session(vec![test_device_id(1)], now)
+            .unwrap();
         let state = TestProtocolState {
             phase: "test".to_string(),
             data: vec![],
         };
         manager.activate_session(session_id, state).unwrap();
-        manager.complete_session(session_id, 0, 0, HashMap::new()).unwrap();
+        manager
+            .complete_session(session_id, 0, 0, HashMap::new())
+            .unwrap();
 
         assert_eq!(manager.sessions.len(), 1);
 
@@ -910,15 +978,19 @@ mod tests {
 
         // Create and complete some sessions
         for i in 0..3 {
-            let session_id = manager.create_session(vec![test_device_id(1)], now).unwrap();
+            let session_id = manager
+                .create_session(vec![test_device_id(1)], now)
+                .unwrap();
             let state = TestProtocolState {
                 phase: "test".to_string(),
                 data: vec![],
             };
             manager.activate_session(session_id, state).unwrap();
-            
+
             if i < 2 {
-                manager.complete_session(session_id, 10 * (i + 1), 100 * (i + 1), HashMap::new()).unwrap();
+                manager
+                    .complete_session(session_id, 10 * (i + 1), 100 * (i + 1), HashMap::new())
+                    .unwrap();
             } else {
                 let error = SessionError::ProtocolViolation {
                     constraint: "test".to_string(),

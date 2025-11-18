@@ -31,17 +31,19 @@
 // sync timing metrics and should be replaced with effect system integration.
 #![allow(clippy::disallowed_methods)]
 
+use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use parking_lot::RwLock;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 use serde::{Deserialize, Serialize};
 
+use super::{HealthCheck, HealthStatus, Service, ServiceMetrics, ServiceState};
+use crate::core::{sync_session_error, MetricsCollector, SessionManager, SyncResult};
+use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
+use crate::protocols::{JournalSyncConfig, JournalSyncProtocol};
 use aura_core::DeviceId;
-use crate::core::{SyncError, SyncResult, SessionManager, MetricsCollector};
-use crate::infrastructure::{PeerManager, PeerDiscoveryConfig, RateLimiter, RateLimitConfig};
-use crate::protocols::{JournalSyncProtocol, JournalSyncConfig, AntiEntropyProtocol};
-use super::{Service, HealthStatus, HealthCheck, ServiceState, ServiceMetrics};
 
 // =============================================================================
 // Configuration
@@ -140,6 +142,10 @@ pub struct SyncService {
 
     /// Service start time
     started_at: Arc<RwLock<Option<Instant>>>,
+    /// Background task shutdown signal
+    shutdown_tx: Arc<RwLock<Option<watch::Sender<bool>>>>,
+    /// Background task handles
+    task_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
 }
 
 impl SyncService {
@@ -165,6 +171,8 @@ impl SyncService {
             journal_sync: Arc::new(RwLock::new(journal_sync)),
             metrics: Arc::new(RwLock::new(metrics)),
             started_at: Arc::new(RwLock::new(None)),
+            shutdown_tx: Arc::new(RwLock::new(None)),
+            task_handles: Arc::new(RwLock::new(Vec::new())),
         })
     }
 
@@ -221,7 +229,9 @@ impl SyncService {
         let session_stats = self.session_manager.read().get_statistics();
         let peer_stats = self.peer_manager.read().statistics();
 
-        let uptime = self.started_at.read()
+        let uptime = self
+            .started_at
+            .read()
             .map(|t| t.elapsed())
             .unwrap_or(Duration::ZERO);
 
@@ -240,7 +250,9 @@ impl SyncService {
         let metrics = self.metrics.read();
 
         ServiceMetrics {
-            uptime_seconds: self.started_at.read()
+            uptime_seconds: self
+                .started_at
+                .read()
                 .map(|t| t.elapsed().as_secs())
                 .unwrap_or(0),
             requests_processed: 0, // TODO: From metrics
@@ -249,37 +261,207 @@ impl SyncService {
             last_operation_at: None,
         }
     }
+
+    // =============================================================================
+    // Background Task Management
+    // =============================================================================
+
+    /// Start the automatic synchronization background task
+    async fn start_auto_sync_task(&self) -> SyncResult<()> {
+        // Create shutdown signal channel
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        *self.shutdown_tx.write() = Some(shutdown_tx);
+
+        // Clone necessary data for the task
+        let interval = self.config.auto_sync_interval;
+        let peer_manager = Arc::clone(&self.peer_manager);
+        let session_manager = Arc::clone(&self.session_manager);
+        let journal_sync = Arc::clone(&self.journal_sync);
+        let rate_limiter = Arc::clone(&self.rate_limiter);
+        let max_concurrent = self.config.max_concurrent_syncs;
+
+        // Spawn the background auto-sync task
+        let handle = tokio::spawn(async move {
+            let mut interval_timer = tokio::time::interval(interval);
+            interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                tokio::select! {
+                    // Check for shutdown signal
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            break;
+                        }
+                    }
+
+                    // Handle interval tick for auto-sync
+                    _ = interval_timer.tick() => {
+                        if let Err(e) = Self::perform_auto_sync(
+                            &peer_manager,
+                            &session_manager,
+                            &journal_sync,
+                            &rate_limiter,
+                            max_concurrent,
+                        ).await {
+                            eprintln!("Auto-sync failed: {}", e);
+                        }
+                    }
+                }
+            }
+        });
+
+        // Store the task handle
+        self.task_handles.write().push(handle);
+
+        Ok(())
+    }
+
+    /// Perform one round of automatic synchronization
+    async fn perform_auto_sync(
+        peer_manager: &Arc<RwLock<PeerManager>>,
+        session_manager: &Arc<RwLock<SessionManager<serde_json::Value>>>,
+        journal_sync: &Arc<RwLock<JournalSyncProtocol>>,
+        rate_limiter: &Arc<RwLock<RateLimiter>>,
+        max_concurrent: usize,
+    ) -> SyncResult<()> {
+        // Get available peers for synchronization
+        let peers = {
+            let manager = peer_manager.read();
+            manager.select_sync_peers(max_concurrent)
+        };
+
+        if peers.is_empty() {
+            return Ok(());
+        }
+
+        // Check rate limits before proceeding
+        {
+            let mut limiter = rate_limiter.write();
+            #[allow(clippy::disallowed_methods)]
+            let now = std::time::Instant::now(); // TODO: Should use TimeEffects
+            for peer in &peers {
+                match limiter.check_rate_limit(*peer, 100, now) {
+                    aura_core::RateLimitResult::Allowed { .. } => continue,
+                    aura_core::RateLimitResult::Denied { .. } => {
+                        return Ok(()); // Rate limited, skip this round
+                    }
+                }
+            }
+        }
+
+        // Get current active session count
+        let active_sessions = {
+            let manager = session_manager.read();
+            manager.get_statistics().active_sessions
+        };
+
+        // Respect max concurrent limit
+        if active_sessions >= max_concurrent {
+            return Ok(());
+        }
+
+        // TODO: Implement actual peer synchronization using journal_sync
+        // This would involve:
+        // 1. Select best peers based on priority and health scores
+        // 2. Initiate sync sessions with selected peers
+        // 3. Execute anti-entropy and journal sync protocols
+        // 4. Update peer scores based on sync results
+        // 5. Track metrics and update session states
+
+        // For now, just log that auto-sync is working
+        println!("Auto-sync: checking {} available peers", peers.len());
+
+        Ok(())
+    }
+
+    /// Stop all background tasks
+    async fn stop_background_tasks(&self) -> SyncResult<()> {
+        // Send shutdown signal
+        if let Some(tx) = self.shutdown_tx.write().take() {
+            let _ = tx.send(true);
+        }
+
+        // Wait for all tasks to complete
+        let handles = {
+            let mut task_handles = self.task_handles.write();
+            std::mem::take(&mut *task_handles)
+        };
+
+        for handle in handles {
+            let _ = handle.await;
+        }
+
+        Ok(())
+    }
+
+    /// Wait for active sessions to complete with timeout
+    async fn wait_for_sessions_to_complete(&self) -> SyncResult<()> {
+        let timeout = Duration::from_secs(30); // 30 second timeout
+        let check_interval = Duration::from_millis(100);
+        let start = Instant::now();
+
+        while start.elapsed() < timeout {
+            let active_sessions = {
+                let manager = self.session_manager.read();
+                manager.get_statistics().active_sessions
+            };
+
+            if active_sessions == 0 {
+                break;
+            }
+
+            tokio::time::sleep(check_interval).await;
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
 impl Service for SyncService {
     async fn start(&self, now: Instant) -> SyncResult<()> {
-        let mut state = self.state.write();
-        if *state == ServiceState::Running {
-            return Err(SyncError::session("Service already running"));
+        {
+            let mut state = self.state.write();
+            if *state == ServiceState::Running {
+                return Err(sync_session_error("Service already running"));
+            }
+
+            *state = ServiceState::Starting;
+            *self.started_at.write() = Some(now);
+        } // Drop state lock before await
+
+        // Start background auto-sync task if enabled
+        if self.config.auto_sync_enabled {
+            self.start_auto_sync_task().await?;
         }
 
-        *state = ServiceState::Starting;
-        *self.started_at.write() = Some(now);
-
-        // TODO: Start background tasks for auto-sync
-
-        *state = ServiceState::Running;
+        {
+            let mut state = self.state.write();
+            *state = ServiceState::Running;
+        }
         Ok(())
     }
 
     async fn stop(&self) -> SyncResult<()> {
-        let mut state = self.state.write();
-        if *state == ServiceState::Stopped {
-            return Ok(());
+        {
+            let mut state = self.state.write();
+            if *state == ServiceState::Stopped {
+                return Ok(());
+            }
+
+            *state = ServiceState::Stopping;
+        } // Drop state lock before await
+
+        // Stop background tasks
+        self.stop_background_tasks().await?;
+
+        // Wait for active sessions to complete with timeout
+        self.wait_for_sessions_to_complete().await?;
+
+        {
+            let mut state = self.state.write();
+            *state = ServiceState::Stopped;
         }
-
-        *state = ServiceState::Stopping;
-
-        // TODO: Stop background tasks
-        // TODO: Wait for active sessions to complete
-
-        *state = ServiceState::Stopped;
         Ok(())
     }
 
@@ -287,10 +469,22 @@ impl Service for SyncService {
         let health = self.get_health();
         let mut details = std::collections::HashMap::new();
 
-        details.insert("active_sessions".to_string(), health.active_sessions.to_string());
-        details.insert("tracked_peers".to_string(), health.tracked_peers.to_string());
-        details.insert("available_peers".to_string(), health.available_peers.to_string());
-        details.insert("uptime".to_string(), format!("{}s", health.uptime.as_secs()));
+        details.insert(
+            "active_sessions".to_string(),
+            health.active_sessions.to_string(),
+        );
+        details.insert(
+            "tracked_peers".to_string(),
+            health.tracked_peers.to_string(),
+        );
+        details.insert(
+            "available_peers".to_string(),
+            health.available_peers.to_string(),
+        );
+        details.insert(
+            "uptime".to_string(),
+            format!("{}s", health.uptime.as_secs()),
+        );
 
         Ok(HealthCheck {
             status: health.status,
@@ -331,13 +525,17 @@ impl SyncServiceBuilder {
 
     /// Set auto-sync enabled
     pub fn with_auto_sync(mut self, enabled: bool) -> Self {
-        self.config.get_or_insert_with(Default::default).auto_sync_enabled = enabled;
+        self.config
+            .get_or_insert_with(Default::default)
+            .auto_sync_enabled = enabled;
         self
     }
 
     /// Set auto-sync interval
     pub fn with_sync_interval(mut self, interval: Duration) -> Self {
-        self.config.get_or_insert_with(Default::default).auto_sync_interval = interval;
+        self.config
+            .get_or_insert_with(Default::default)
+            .auto_sync_interval = interval;
         self
     }
 

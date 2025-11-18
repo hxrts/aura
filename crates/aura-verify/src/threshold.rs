@@ -29,7 +29,8 @@ pub fn verify_threshold_signature(
     group_public_key: &Ed25519VerifyingKey,
     min_signers: usize,
 ) -> Result<()> {
-    // TODO fix - For now, Ed25519 represents a single signer (until full FROST is implemented)
+    // FROST threshold verification is implemented in aura-effects CryptoEffects trait
+    // This function provides a fallback for simple Ed25519 verification
     // Check if we have enough signers
     if min_signers > 1 {
         return Err(AuthenticationError::InvalidThresholdSignature(format!(

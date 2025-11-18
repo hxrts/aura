@@ -5,7 +5,7 @@
 //!
 //! This file previously contained:
 //! - StateHandler: 86 lines removed - replaced by JournalEffects implementation in aura-effects
-//! - JournalHandler trait: migrated to effect trait in aura-core  
+//! - JournalHandler trait: migrated to effect trait in aura-core
 //! - NoOpHandler: 15 lines removed - replaced by MockJournalHandler in aura-effects
 //!
 //! Essential state manipulation logic has been preserved and moved to the effect system where

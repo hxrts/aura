@@ -6,6 +6,7 @@
 //! - Gossip ticking for periodic synchronization
 
 use aura_core::identifiers::{DeviceId, SessionId};
+use aura_journal::CausalContext;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -130,73 +131,6 @@ pub enum GossipStrategy {
 
     /// All-to-all gossip (for small networks)
     All,
-}
-
-/// Causal ordering context for operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CausalContext {
-    /// Vector clock representation
-    pub vector_clock: std::collections::BTreeMap<DeviceId, u64>,
-    /// Direct dependencies (optional)
-    pub dependencies: Option<Vec<String>>,
-}
-
-impl CausalContext {
-    /// Create empty causal context
-    pub fn empty() -> Self {
-        Self {
-            vector_clock: std::collections::BTreeMap::new(),
-            dependencies: None,
-        }
-    }
-
-    /// Create causal context with vector clock
-    pub fn with_vector_clock(vector_clock: std::collections::BTreeMap<DeviceId, u64>) -> Self {
-        Self {
-            vector_clock,
-            dependencies: None,
-        }
-    }
-
-    /// Check if this context happens before another
-    pub fn happens_before(&self, other: &CausalContext) -> bool {
-        // Simple vector clock comparison
-        for (device, &clock) in &self.vector_clock {
-            if let Some(&other_clock) = other.vector_clock.get(device) {
-                if clock > other_clock {
-                    return false;
-                }
-            } else if clock > 0 {
-                return false;
-            }
-        }
-
-        // Check if at least one clock is strictly less
-        self.vector_clock.iter().any(|(device, &clock)| {
-            other
-                .vector_clock
-                .get(device)
-                .is_some_and(|&other_clock| clock < other_clock)
-        })
-    }
-
-    /// Check if contexts are concurrent (neither happens before the other)
-    pub fn is_concurrent_with(&self, other: &CausalContext) -> bool {
-        !self.happens_before(other) && !other.happens_before(self)
-    }
-
-    /// Increment clock for a device
-    pub fn increment(&mut self, device: DeviceId) {
-        *self.vector_clock.entry(device).or_insert(0) += 1;
-    }
-
-    /// Merge with another context (take maximum of all clocks)
-    pub fn merge(&mut self, other: &CausalContext) {
-        for (&device, &other_clock) in &other.vector_clock {
-            let entry = self.vector_clock.entry(device).or_insert(0);
-            *entry = (*entry).max(other_clock);
-        }
-    }
 }
 
 /// Delivery guarantee level

@@ -14,7 +14,7 @@ use crate::maintenance::{MaintenanceController, SnapshotOutcome};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::{ConsoleEffects, StorageEffects};
 use aura_core::identifiers::{AccountId, DeviceId};
-use aura_protocol::effects::SessionType;
+use aura_core::SessionType;
 use aura_sync::WriterFence;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -115,11 +115,11 @@ impl AuraAgent {
     /// Note: This method is deprecated. Use `aura_testkit::create_test_fixture().await`
     /// and construct agent via `AuraAgent::new()` in new code.
     pub fn for_testing(device_id: DeviceId) -> Self {
-        let config = crate::runtime::EffectSystemConfig::for_testing(device_id);
-        let effects = aura_protocol::effects::AuraEffectSystemFactory::new(
-            aura_protocol::effects::EffectSystemConfig { device_id },
-        )
-        .expect("Failed to create test effect system");
+        // Use new EffectRegistry pattern for standardized testing setup
+        let effects = aura_protocol::effects::EffectRegistry::testing()
+            .with_device_id(device_id)
+            .build()
+            .expect("Failed to create test effect system");
         Self::new(effects, device_id)
     }
 
@@ -322,10 +322,31 @@ impl AuraAgent {
     }
 
     /// Verify capability through effects
-    pub async fn verify_capability(&self, _capability: &str) -> AgentResult<bool> {
-        // TODO: Implement proper capability verification through effects
-        // TODO fix - For now, return false as placeholder (deny by default)
-        Ok(false)
+    pub async fn verify_capability(&self, capability: &str) -> AgentResult<bool> {
+        // Get current journal state to check capabilities
+        let core_effects = self.core_effects.read().await;
+        let journal_result = core_effects.get_journal().await;
+        let journal = match journal_result {
+            Ok(journal) => journal,
+            Err(e) => {
+                tracing::error!("Failed to get journal for capability verification: {:?}", e);
+                return Ok(false); // Deny by default on error
+            }
+        };
+
+        // Check if current capabilities allow this operation
+        let resource = "agent:operations"; // Default resource scope for agent operations
+        let permission = format!("{}:{}", resource, capability);
+        let authorized = journal.caps.allows(&permission);
+
+        tracing::debug!(
+            capability = capability,
+            resource = resource,
+            authorized = authorized,
+            "Agent capability verification"
+        );
+
+        Ok(authorized)
     }
 
     /// Sync with distributed journal through effects

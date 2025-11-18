@@ -164,10 +164,22 @@ fn test_unlinkability_property() {
 
     // Record pattern leakage
     assert!(tracker
-        .record_leakage(LeakageType::Patterns, 100, observer, now, "access pattern 1")
+        .record_leakage(
+            LeakageType::Patterns,
+            100,
+            observer,
+            now,
+            "access pattern 1"
+        )
         .is_ok());
     assert!(tracker
-        .record_leakage(LeakageType::Patterns, 150, observer, now, "access pattern 2")
+        .record_leakage(
+            LeakageType::Patterns,
+            150,
+            observer,
+            now,
+            "access pattern 2"
+        )
         .is_ok());
 
     // Verify budget consumption

@@ -205,7 +205,7 @@ impl GuardSyntax {
         // Build the capability requirement
         let mut cap = Cap::new();
         for permission in permissions {
-            cap.add_permission(permission);
+            cap.add_permission(&permission);
         }
 
         Ok(match description {

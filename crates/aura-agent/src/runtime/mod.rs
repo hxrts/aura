@@ -44,8 +44,8 @@ pub use choreography_adapter::AuraHandlerAdapter;
 pub use container::EffectContainer;
 pub use context::EffectContext;
 // Import AuraEffectSystem from aura-protocol instead of local coordinator
-pub use aura_protocol::effects::AuraEffectSystem;
 use aura_core::effects::ExecutionMode;
+pub use aura_protocol::orchestration::AuraEffectSystem;
 
 // TODO: Define these locally or import from appropriate location
 #[derive(Debug, Clone)]

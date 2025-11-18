@@ -38,24 +38,17 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     println!("1. Creating Aura handlers with capabilities:");
 
-    let mut alice_handler = create_handler(
-        AuraRole::Alice,
-        vec!["send_ping".to_string(), "initiate_protocol".to_string()],
-    );
-
-    let mut bob_handler = create_handler(
-        AuraRole::Bob,
-        vec!["send_pong".to_string(), "respond_to_ping".to_string()],
-    );
+    let mut alice_handler = create_simple_handler(AuraRole::Alice);
+    let mut bob_handler = create_simple_handler(AuraRole::Bob);
 
     println!(
-        "   Alice: capabilities = {:?}, balance = {}",
-        alice_handler.capabilities,
+        "   Alice: role = {:?}, balance = {}",
+        alice_handler.role,
         alice_handler.get_flow_balance()
     );
     println!(
-        "   Bob: capabilities = {:?}, balance = {}",
-        bob_handler.capabilities,
+        "   Bob: role = {:?}, balance = {}",
+        bob_handler.role,
         bob_handler.get_flow_balance()
     );
 
@@ -69,10 +62,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let ping_pong_protocol = builder()
         .audit_log("protocol_start", start_metadata)
-        .validate_capability(AuraRole::Alice, "send_ping")
+        .validate_guard(AuraRole::Alice, "send_ping", "network")
         .charge_flow_cost(AuraRole::Alice, 150)
         .send(AuraRole::Alice, AuraRole::Bob, "ping_message")
-        .validate_capability(AuraRole::Bob, "send_pong")
+        .validate_guard(AuraRole::Bob, "send_pong", "network")
         .charge_flow_cost(AuraRole::Bob, 100)
         .send(AuraRole::Bob, AuraRole::Alice, "pong_message")
         .audit_log("protocol_complete", end_metadata)
@@ -119,10 +112,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("\n4. Testing example choreography:");
 
     let example_protocol = example_aura_choreography();
-    let mut alice_example_handler = create_handler(
-        AuraRole::Alice,
-        vec!["send_money".to_string(), "manage_account".to_string()],
-    );
+    let mut alice_example_handler = create_simple_handler(AuraRole::Alice);
     let mut alice_endpoint = ();
     let example_result = execute(
         &mut alice_example_handler,
@@ -173,9 +163,9 @@ mod tests {
     async fn test_choreography_execution() {
         use aura_choreography::*;
 
-        let mut handler = create_handler(AuraRole::Alice, vec!["test".to_string()]);
+        let mut handler = create_simple_handler(AuraRole::Alice);
         let program = builder()
-            .validate_capability(AuraRole::Alice, "test")
+            .validate_guard(AuraRole::Alice, "test", "storage")
             .charge_flow_cost(AuraRole::Alice, 50)
             .end();
 
@@ -194,10 +184,7 @@ mod tests {
         use aura_choreography::*;
 
         let example = example_aura_choreography();
-        let mut handler = create_handler(
-            AuraRole::Alice,
-            vec!["send_money".to_string(), "process_payment".to_string()],
-        );
+        let mut handler = create_simple_handler(AuraRole::Alice);
         let mut endpoint = ();
 
         let result = execute(&mut handler, &mut endpoint, example).await;

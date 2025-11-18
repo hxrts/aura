@@ -4,14 +4,14 @@
 //!
 //! This crate implements simulation functionality through effect system composition:
 //! - Scenario injection and dynamic test modifications
-//! - Fault simulation and error injection  
+//! - Fault simulation and error injection
 //! - Time control and temporal operations
 //! - Deterministic simulation environments
 //!
 //! All simulation functionality is implemented as effect handlers
 //! following Aura's unified effect system architecture.
 //!
-//! # Effect System Architecture  
+//! # Effect System Architecture
 //!
 //! The simulator uses composable effect handlers where each handler provides specific
 //! simulation capabilities through the unified effect system:
@@ -30,17 +30,21 @@
 //! # Example Usage
 //!
 //! ```rust,ignore
-//! use aura_simulator::*;
+//! use aura_simulator::handlers::SimulationEffectComposer;
+//! use aura_protocol::standard_patterns::EffectRegistry;
 //! use std::time::Duration;
 //!
-//! // Create simulation context
-//! let context = SimulatorContext::new("test_scenario".to_string(), "run_1".to_string())
-//!     .with_participants(5, 3)
-//!     .with_seed(42);
+//! // NEW: Create simulation environment using EffectRegistry + composer pattern
+//! let environment = SimulationEffectComposer::for_testing(device_id)?;
+//!
+//! // Or customize simulation effects
+//! let effects = EffectRegistry::simulation(42)
+//!     .with_device_id(device_id)
+//!     .with_logging()
+//!     .build()?;
 //!
 //! // Execute simulation through effect composition
-//! let environment = SimulationEffectComposer::for_testing(device_id)?;
-//! let timestamp = environment.current_timestamp().await?;
+//! let timestamp = environment.time_handler.as_ref().unwrap().current_timestamp().await?;
 //! ```
 #![allow(clippy::disallowed_methods)]
 

@@ -320,10 +320,7 @@ impl CounterexampleGenerator {
 
         // Parse result to extract counterexample
         let parsed_result: Value = serde_json::from_str(&result).map_err(|e| {
-            crate::error::QuintError::ParseError(format!(
-                "Failed to parse simulation result: {}",
-                e
-            ))
+            crate::error::AuraError::invalid(format!("Failed to parse simulation result: {}", e))
         })?;
 
         if let Some(counterexample) = parsed_result.get("counterexample") {
@@ -478,7 +475,7 @@ impl QuintRunner {
             self.evaluator.parse_file(&spec.spec_file),
         )
         .await
-        .map_err(|_| crate::error::QuintError::EvaluationError("Verification timeout".to_string()))?
+        .map_err(|_| crate::error::AuraError::internal("Verification timeout".to_string()))?
         .map_err(|e| {
             error!("Failed to parse Quint file: {}", e);
             e
@@ -491,7 +488,7 @@ impl QuintRunner {
             self.run_enhanced_simulation(&json_ir, spec),
         )
         .await
-        .map_err(|_| crate::error::QuintError::EvaluationError("Simulation timeout".to_string()))?
+        .map_err(|_| crate::error::AuraError::internal("Simulation timeout".to_string()))?
         .map_err(|e| {
             error!("Simulation failed: {}", e);
             e
@@ -538,10 +535,7 @@ impl QuintRunner {
 
         // Parse the simulation result
         let simulation_result: Value = serde_json::from_str(&result_json).map_err(|e| {
-            crate::error::QuintError::ParseError(format!(
-                "Failed to parse simulation result: {}",
-                e
-            ))
+            crate::error::AuraError::invalid(format!("Failed to parse simulation result: {}", e))
         })?;
 
         debug!("Simulation completed successfully");
@@ -556,7 +550,7 @@ impl QuintRunner {
     ) -> QuintResult<String> {
         // Parse the JSON IR to add enhanced simulation parameters
         let mut ir_value: Value = serde_json::from_str(json_ir).map_err(|e| {
-            crate::error::QuintError::ParseError(format!("Failed to parse JSON IR: {}", e))
+            crate::error::AuraError::invalid(format!("Failed to parse JSON IR: {}", e))
         })?;
 
         // Add enhanced simulation configuration
@@ -585,10 +579,7 @@ impl QuintRunner {
         }
 
         serde_json::to_string(&ir_value).map_err(|e| {
-            crate::error::QuintError::ParseError(format!(
-                "Failed to serialize enhanced JSON IR: {}",
-                e
-            ))
+            crate::error::AuraError::invalid(format!("Failed to serialize enhanced JSON IR: {}", e))
         })
     }
 
@@ -778,7 +769,7 @@ impl QuintRunner {
 
         // Validate file exists
         if !Path::new(file_path).exists() {
-            return Err(crate::error::QuintError::ParseError(format!(
+            return Err(crate::error::AuraError::invalid(format!(
                 "Specification file not found: {}",
                 file_path
             )));
@@ -790,11 +781,11 @@ impl QuintRunner {
             self.evaluator.parse_file(file_path),
         )
         .await
-        .map_err(|_| crate::error::QuintError::ParseError("Parse timeout".to_string()))??;
+        .map_err(|_| crate::error::AuraError::invalid("Parse timeout".to_string()))??;
 
         // Parse the JSON IR to extract specification info
         let parsed_ir: Value = serde_json::from_str(&json_ir).map_err(|e| {
-            crate::error::QuintError::ParseError(format!("Failed to parse JSON IR: {}", e))
+            crate::error::AuraError::invalid(format!("Failed to parse JSON IR: {}", e))
         })?;
 
         // Extract module information
@@ -853,7 +844,7 @@ impl QuintRunner {
             self.evaluator.parse_file(file_path),
         )
         .await
-        .map_err(|_| crate::error::QuintError::EvaluationError("Parse timeout".to_string()))??;
+        .map_err(|_| crate::error::AuraError::internal("Parse timeout".to_string()))??;
 
         // Enhance JSON IR with simulation parameters
         let enhanced_ir = self.prepare_simulation_parameters(&json_ir, steps, samples, traces)?;
@@ -864,18 +855,13 @@ impl QuintRunner {
             self.evaluator.simulate_via_evaluator(&enhanced_ir),
         )
         .await
-        .map_err(|_| {
-            crate::error::QuintError::EvaluationError("Simulation timeout".to_string())
-        })??;
+        .map_err(|_| crate::error::AuraError::internal("Simulation timeout".to_string()))??;
 
         let duration = Duration::from_millis(0); // Fixed duration for deterministic testing
 
         // Parse and enhance simulation results
         let mut result: Value = serde_json::from_str(&simulation_result).map_err(|e| {
-            crate::error::QuintError::ParseError(format!(
-                "Failed to parse simulation result: {}",
-                e
-            ))
+            crate::error::AuraError::invalid(format!("Failed to parse simulation result: {}", e))
         })?;
 
         // Add metadata about the simulation run
@@ -918,7 +904,7 @@ impl QuintRunner {
         n_traces: usize,
     ) -> QuintResult<String> {
         let mut ir_value: Value = serde_json::from_str(json_ir).map_err(|e| {
-            crate::error::QuintError::ParseError(format!("Failed to parse JSON IR: {}", e))
+            crate::error::AuraError::invalid(format!("Failed to parse JSON IR: {}", e))
         })?;
 
         // Add simulation configuration
@@ -937,10 +923,7 @@ impl QuintRunner {
         }
 
         serde_json::to_string(&ir_value).map_err(|e| {
-            crate::error::QuintError::ParseError(format!(
-                "Failed to serialize enhanced JSON IR: {}",
-                e
-            ))
+            crate::error::AuraError::invalid(format!("Failed to serialize enhanced JSON IR: {}", e))
         })
     }
 
@@ -1056,7 +1039,7 @@ impl QuintRunner {
     fn involves_capability_operations(&self, spec: &PropertySpec) -> QuintResult<bool> {
         // Read the spec file and check for capability-related patterns
         let spec_content = std::fs::read_to_string(&spec.spec_file).map_err(|e| {
-            crate::error::QuintError::ParseError(format!("Failed to read spec file: {}", e))
+            crate::error::AuraError::invalid(format!("Failed to read spec file: {}", e))
         })?;
 
         let capability_patterns = [
@@ -1081,7 +1064,7 @@ impl QuintRunner {
     fn involves_privacy_operations(&self, spec: &PropertySpec) -> QuintResult<bool> {
         // Read the spec file and check for privacy-related patterns
         let spec_content = std::fs::read_to_string(&spec.spec_file).map_err(|e| {
-            crate::error::QuintError::ParseError(format!("Failed to read spec file: {}", e))
+            crate::error::AuraError::invalid(format!("Failed to read spec file: {}", e))
         })?;
 
         let privacy_patterns = [

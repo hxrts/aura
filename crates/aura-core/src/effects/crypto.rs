@@ -27,6 +27,15 @@ pub struct KeyDerivationContext {
     pub device_id: DeviceId,
 }
 
+/// FROST key generation result containing both individual key packages and the group public key
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrostKeyGenResult {
+    /// Individual key packages for each participant
+    pub key_packages: Vec<Vec<u8>>,
+    /// Group public key package needed for signature aggregation and verification
+    pub public_key_package: Vec<u8>,
+}
+
 /// FROST signing package for threshold signatures
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrostSigningPackage {
@@ -36,6 +45,8 @@ pub struct FrostSigningPackage {
     pub package: Vec<u8>,
     /// Participant identifiers
     pub participants: Vec<u16>,
+    /// Public key package needed for aggregation
+    pub public_key_package: Vec<u8>,
 }
 
 /// Cryptographic effects interface
@@ -49,6 +60,9 @@ pub struct FrostSigningPackage {
 ///
 /// CryptoEffects inherits from RandomEffects to ensure all randomness is deterministic
 /// and controllable for simulation purposes.
+///
+/// # Stability: STABLE
+/// This is a core stable API with semver guarantees. Breaking changes require major version bump.
 #[async_trait]
 pub trait CryptoEffects: RandomEffects + Send + Sync {
     // Note: Hashing is NOT an algebraic effect - it's a pure operation.
@@ -103,7 +117,7 @@ pub trait CryptoEffects: RandomEffects + Send + Sync {
         &self,
         threshold: u16,
         max_signers: u16,
-    ) -> Result<Vec<Vec<u8>>, CryptoError>;
+    ) -> Result<FrostKeyGenResult, CryptoError>;
 
     /// Generate FROST signing nonces
     async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError>;
@@ -114,6 +128,7 @@ pub trait CryptoEffects: RandomEffects + Send + Sync {
         message: &[u8],
         nonces: &[Vec<u8>],
         participants: &[u16],
+        public_key_package: &[u8],
     ) -> Result<FrostSigningPackage, CryptoError>;
 
     /// Generate FROST signature share
@@ -185,7 +200,7 @@ pub trait CryptoEffects: RandomEffects + Send + Sync {
         old_threshold: u16,
         new_threshold: u16,
         new_max_signers: u16,
-    ) -> Result<Vec<Vec<u8>>, CryptoError>;
+    ) -> Result<FrostKeyGenResult, CryptoError>;
 
     // ====== Utility Methods ======
 

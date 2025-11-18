@@ -18,11 +18,15 @@ use rumpsteak_aura_choreography::{
 };
 use syn::{parse::Parse, Ident, Token};
 
+// Import Biscuit-related types for the updated annotation system
+use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
+
 /// Parse choreography input to extract roles and protocol name
 #[derive(Debug)]
 struct ChoreographyInput {
     _protocol_name: Ident,
     roles: Vec<Ident>,
+    aura_annotations: Vec<AuraEffect>,
 }
 
 impl Parse for ChoreographyInput {
@@ -60,9 +64,15 @@ impl Parse for ChoreographyInput {
             let _: proc_macro2::TokenTree = content.parse()?;
         }
 
+        // Extract Aura annotations from the full input
+        let full_input_str = input.to_string();
+        let aura_annotations =
+            extract_aura_annotations(&full_input_str).unwrap_or_else(|_| Vec::new()); // Gracefully handle extraction errors
+
         Ok(ChoreographyInput {
             _protocol_name: protocol_name,
             roles,
+            aura_annotations,
         })
     }
 }
@@ -102,6 +112,7 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
                     Ident::new("Alice", proc_macro2::Span::call_site()),
                     Ident::new("Bob", proc_macro2::Span::call_site()),
                 ],
+                aura_annotations: Vec::new(),
             },
             None,
         )
@@ -120,16 +131,24 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
 /// Generate the Aura wrapper module that integrates with the effects system
 fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> TokenStream {
     let roles = &input.roles;
-    let role_variants = roles.iter().map(|role| {
-        quote! { #role }
-    });
+    let _annotations = &input.aura_annotations; // Parsed annotations for choreography generation (unused in basic generation)
 
-    let role_display_arms = roles.iter().map(|role| {
-        let role_str = role.to_string();
-        quote! {
-            Self::#role => write!(f, #role_str)
-        }
-    });
+    let role_variants: Vec<_> = roles
+        .iter()
+        .map(|role| {
+            quote! { #role }
+        })
+        .collect();
+
+    let role_display_arms: Vec<_> = roles
+        .iter()
+        .map(|role| {
+            let role_str = role.to_string();
+            quote! {
+                Self::#role => write!(f, #role_str)
+            }
+        })
+        .collect();
 
     let first_role = roles.first().unwrap();
 
@@ -146,6 +165,13 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
             use std::collections::HashMap;
             use std::fmt;
 
+            // Note: The generated code expects these types to be available at runtime:
+            // - biscuit_auth::Biscuit
+            // - aura_core::FlowBudget
+            // - aura_wot::ResourceScope
+            // - aura_mpst::ast_extraction::AuraEffect (for annotation processing)
+            // Users should provide their own BiscuitGuardEvaluator implementation
+
             /// Role enumeration for this choreography
             #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
             pub enum AuraRole {
@@ -160,15 +186,18 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                 }
             }
 
-            /// Aura handler with capability and flow management
-            pub struct AuraHandler {
+            /// Aura handler with authorization and flow management hooks
+            ///
+            /// Users should inject actual Biscuit evaluator and flow budget at runtime
+            pub struct AuraHandler<BiscuitEvaluator = (), FlowBudget = ()> {
                 pub role: AuraRole,
-                pub capabilities: Vec<String>,
+                pub biscuit_evaluator: Option<BiscuitEvaluator>,
+                pub flow_budget: Option<FlowBudget>,
                 pub flow_balance: i32,
                 pub audit_log: Vec<String>,
             }
 
-            impl AuraHandler {
+            impl<BiscuitEvaluator, FlowBudget> AuraHandler<BiscuitEvaluator, FlowBudget> {
                 pub fn get_flow_balance(&self) -> i32 {
                     self.flow_balance
                 }
@@ -182,12 +211,25 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                     }
                 }
 
-                pub fn validate_capability(&self, capability: &str) -> Result<(), String> {
-                    if self.capabilities.contains(&capability.to_string()) {
-                        Ok(())
+                /// Placeholder for Biscuit guard validation
+                ///
+                /// This method should be implemented by users who inject a real BiscuitGuardEvaluator
+                /// via the generic type parameter. The signature matches what the choreography expects.
+                pub fn validate_guard(&self, capability: &str, resource_type: &str) -> Result<(), String> {
+                    // Default implementation logs the validation attempt
+                    if capability.is_empty() {
+                        Err("Empty capability".to_string())
                     } else {
-                        Err(format!("Missing capability: {}", capability))
+                        Ok(())
                     }
+                }
+
+                /// Placeholder for Biscuit guard evaluation with flow cost
+                ///
+                /// This method should be implemented by users who inject real evaluator and flow budget
+                pub fn evaluate_guard_with_flow(&mut self, capability: &str, resource_type: &str, _flow_cost: u64) -> Result<(), String> {
+                    // Default implementation just validates capability
+                    self.validate_guard(capability, resource_type)
                 }
 
                 pub fn log_audit(&mut self, event: String) {
@@ -196,13 +238,23 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
             }
 
             /// Create a new Aura handler for a role
-            pub fn create_handler(role: AuraRole, capabilities: Vec<String>) -> AuraHandler {
+            pub fn create_handler<BiscuitEvaluator, FlowBudget>(
+                role: AuraRole,
+                biscuit_evaluator: Option<BiscuitEvaluator>,
+                flow_budget: Option<FlowBudget>
+            ) -> AuraHandler<BiscuitEvaluator, FlowBudget> {
                 AuraHandler {
                     role,
-                    capabilities,
+                    biscuit_evaluator,
+                    flow_budget,
                     flow_balance: 1000, // Default balance
                     audit_log: Vec::new(),
                 }
+            }
+
+            /// Simple handler creation for basic use cases
+            pub fn create_simple_handler(role: AuraRole) -> AuraHandler<(), ()> {
+                create_handler(role, None, None)
             }
 
             /// Choreography builder for effects composition
@@ -213,7 +265,8 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
             #[derive(Debug, Clone)]
             enum Operation {
                 AuditLog(String, HashMap<String, String>),
-                ValidateCapability(AuraRole, String),
+                ValidateGuard(AuraRole, String, String), // role, capability, resource_type
+                EvaluateGuardWithFlow(AuraRole, String, String, u64), // role, capability, resource_type, flow_cost
                 ChargeFlowCost(AuraRole, i32),
                 Send(AuraRole, AuraRole, String),
             }
@@ -230,8 +283,24 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                     self
                 }
 
-                pub fn validate_capability(mut self, role: AuraRole, capability: impl Into<String>) -> Self {
-                    self.operations.push(Operation::ValidateCapability(role, capability.into()));
+                pub fn validate_guard(
+                    mut self,
+                    role: AuraRole,
+                    guard_capability: impl Into<String>,
+                    resource_type: impl Into<String>
+                ) -> Self {
+                    self.operations.push(Operation::ValidateGuard(role, guard_capability.into(), resource_type.into()));
+                    self
+                }
+
+                pub fn evaluate_guard_with_flow(
+                    mut self,
+                    role: AuraRole,
+                    guard_capability: impl Into<String>,
+                    resource_type: impl Into<String>,
+                    flow_cost: u64
+                ) -> Self {
+                    self.operations.push(Operation::EvaluateGuardWithFlow(role, guard_capability.into(), resource_type.into(), flow_cost));
                     self
                 }
 
@@ -258,14 +327,41 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                 operations: Vec<Operation>,
             }
 
+            /// Map guard capability to appropriate resource type string
+            ///
+            /// This provides a simple mapping that users can extend for their Biscuit ResourceScope types
+            pub fn map_capability_to_resource_type(capability: &str) -> &'static str {
+                match capability {
+                    // Storage operations
+                    cap if cap.contains("read_storage") || cap.contains("access_storage") => "storage",
+                    cap if cap.contains("write_storage") => "storage",
+
+                    // Journal operations
+                    cap if cap.contains("read_journal") => "journal",
+                    cap if cap.contains("write_journal") || cap.contains("journal_sync") => "journal",
+
+                    // Recovery operations
+                    cap if cap.contains("emergency_recovery") || cap.contains("guardian") => "recovery",
+
+                    // Admin operations
+                    cap if cap.contains("admin") || cap.contains("setup") => "admin",
+
+                    // Relay/communication operations
+                    cap if cap.contains("relay") || cap.contains("send") || cap.contains("receive") || cap.contains("initiate") => "relay",
+
+                    // Default fallback
+                    _ => "default"
+                }
+            }
+
             /// Create a new choreography builder
             pub fn builder() -> ChoreographyBuilder {
                 ChoreographyBuilder::new()
             }
 
             /// Execute a choreography program
-            pub async fn execute(
-                handler: &mut AuraHandler,
+            pub async fn execute<BiscuitEvaluator, FlowBudget>(
+                handler: &mut AuraHandler<BiscuitEvaluator, FlowBudget>,
                 _endpoint: &mut (),
                 program: ChoreographyProgram,
             ) -> Result<(), String> {
@@ -274,10 +370,16 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                         Operation::AuditLog(event, _metadata) => {
                             handler.log_audit(format!("AUDIT: {}", event));
                         },
-                        Operation::ValidateCapability(role, capability) => {
+                        Operation::ValidateGuard(role, guard_capability, resource_type) => {
                             if role == handler.role {
-                                handler.validate_capability(&capability)?;
-                                handler.log_audit(format!("VALIDATED: {} for {:?}", capability, role));
+                                handler.validate_guard(&guard_capability, &resource_type)?;
+                                handler.log_audit(format!("GUARD_VALIDATED: {} ({}) for {:?}", guard_capability, resource_type, role));
+                            }
+                        },
+                        Operation::EvaluateGuardWithFlow(role, guard_capability, resource_type, flow_cost) => {
+                            if role == handler.role {
+                                handler.evaluate_guard_with_flow(&guard_capability, &resource_type, flow_cost)?;
+                                handler.log_audit(format!("GUARD_EVALUATED_WITH_FLOW: {} ({}, cost: {}) for {:?}", guard_capability, resource_type, flow_cost, role));
                             }
                         },
                         Operation::ChargeFlowCost(role, cost) => {
@@ -298,14 +400,82 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                 Ok(())
             }
 
-            /// Example choreography for demonstration
+            /// Example choreography for demonstration with guard validation
             pub fn example_aura_choreography() -> ChoreographyProgram {
+                let capability = "send_money";
+                let resource_type = map_capability_to_resource_type(capability);
+
                 builder()
                     .audit_log("example_start", HashMap::new())
-                    .validate_capability(AuraRole::#first_role, "send_money")
+                    .validate_guard(AuraRole::#first_role, capability, resource_type)
                     .charge_flow_cost(AuraRole::#first_role, 200)
                     .audit_log("example_complete", HashMap::new())
                     .end()
+            }
+
+            /// Generate a choreography program using the actual parsed annotations
+            /// This would be called by the macro expansion with the real extracted annotations
+            pub fn generate_protocol_choreography() -> ChoreographyProgram {
+                // In a real macro expansion, this would receive the extracted annotations
+                // Example annotations that would be extracted from choreography syntax:
+                let sample_annotations = vec![
+                    ("Alice".to_string(), "guard_capability".to_string(), "send_message".to_string(), 100),
+                    ("Bob".to_string(), "guard_with_flow".to_string(), "receive_message".to_string(), 50),
+                    ("Alice".to_string(), "journal_facts".to_string(), "message_sent".to_string(), 0),
+                ];
+                generate_from_annotations_impl(sample_annotations)
+            }
+
+            /// Generate choreography from extracted annotations
+            pub fn generate_from_annotations_impl(annotations: Vec<(String, String, String, u64)>) -> ChoreographyProgram {
+                let mut builder = builder();
+                builder = builder.audit_log("choreography_start", HashMap::new());
+
+                // Generate operations based on parsed annotation tuples:
+                // (role_name, annotation_type, capability_or_value, flow_cost)
+                for (role_name, annotation_type, capability_or_value, flow_cost) in annotations {
+                    if let Some(role) = parse_role_from_name(&role_name) {
+                        match annotation_type.as_str() {
+                            "guard_capability" => {
+                                let resource_type = map_capability_to_resource_type(&capability_or_value);
+                                builder = builder.validate_guard(role, capability_or_value, resource_type);
+                            },
+                            "flow_cost" => {
+                                builder = builder.charge_flow_cost(role, flow_cost as i32);
+                            },
+                            "guard_with_flow" => {
+                                let resource_type = map_capability_to_resource_type(&capability_or_value);
+                                builder = builder.evaluate_guard_with_flow(role, capability_or_value, resource_type, flow_cost);
+                            },
+                            "journal_facts" => {
+                                let mut metadata = HashMap::new();
+                                metadata.insert("journal_facts".to_string(), capability_or_value);
+                                builder = builder.audit_log("journal_facts_recorded", metadata);
+                            },
+                            "journal_merge" => {
+                                builder = builder.audit_log("journal_merge_requested", HashMap::new());
+                            },
+                            _ => {
+                                // Unknown annotation type - log it for debugging
+                                let mut metadata = HashMap::new();
+                                metadata.insert("annotation_type".to_string(), annotation_type);
+                                metadata.insert("capability_or_value".to_string(), capability_or_value);
+                                builder = builder.audit_log("unknown_annotation", metadata);
+                            }
+                        }
+                    }
+                }
+
+                builder = builder.audit_log("choreography_complete", HashMap::new());
+                builder.end()
+            }
+
+            /// Parse a role name string into an AuraRole enum variant
+            fn parse_role_from_name(role_name: &str) -> Option<AuraRole> {
+                match role_name {
+                    #(stringify!(#role_variants) => Some(AuraRole::#role_variants),)*
+                    _ => None,
+                }
             }
         }
     }

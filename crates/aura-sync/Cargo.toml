@@ -11,6 +11,7 @@ repository.workspace = true
 aura-core = { path = "../aura-core" }
 aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../aura-journal" }
+aura-wot = { path = "../aura-wot" }
 
 # Note: aura-macros and aura-mpst intentionally omitted
 # This crate demonstrates semantic library independence by using
@@ -27,11 +28,42 @@ blake3 = { workspace = true }
 bincode = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
+biscuit-auth = { workspace = true }
 
 [dev-dependencies]
 # Testing infrastructure (Layer 5 can use testkit)
 aura-testkit = { path = "../aura-testkit" }
 tokio = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[[bench]]
+name = "sync_throughput"
+harness = false
+
+[[bench]]
+name = "memory_usage"
+harness = false
+
+[[bench]]
+name = "protocol_latency"
+harness = false
+
+[[bench]]
+name = "scaling_behavior"
+harness = false
+
+[[bench]]
+name = "performance_report"
+harness = false
+
+[[bench]]
+name = "protocol_performance"
+harness = false
+
+[[bench]]
+name = "simple_benchmarks"
+harness = false
 
 [lints]
 workspace = true

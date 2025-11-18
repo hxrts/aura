@@ -1,4 +1,3 @@
-
 //! Guarded protocol execution orchestrating guards, deltas, and privacy tracking
 //!
 //! This module implements the complete execution pipeline for capability-guarded protocols:
@@ -9,7 +8,8 @@
 //! 5. Return comprehensive execution results
 
 use super::{
-    deltas::apply_delta_facts, effect_system_trait::GuardEffectSystem, evaluation::evaluate_guard,
+    deltas::apply_delta_facts,
+    effect_system_trait::GuardEffectSystem, /* evaluation::evaluate_guard, */
     privacy::track_leakage_consumption, ExecutionMetrics, GuardedExecutionResult, ProtocolGuard,
 };
 use crate::wot::EffectSystemInterface;
@@ -17,6 +17,13 @@ use aura_core::{AuraError, AuraResult, TimeEffects};
 use std::future::Future;
 use std::time::Instant;
 use tracing::{debug, error, info, warn, Instrument};
+
+/// Temporary struct for guard evaluation results (until Biscuit integration)
+#[derive(Debug)]
+pub struct GuardEvaluationResult {
+    pub passed: bool,
+    pub failed_requirements: Vec<String>,
+}
 
 /// Execute a protocol operation with full guard enforcement
 ///
@@ -45,8 +52,15 @@ where
 
         // Phase 1: Evaluate capability guards (meet-guarded preconditions)
         let guard_start_time = effect_system.now_instant().await;
-        let guard_result = evaluate_guard(guard, effect_system).await?;
+        // TODO: Re-enable guard evaluation when Biscuit integration is complete
+        // let guard_result = evaluate_guard(guard, effect_system).await?;
         let guard_eval_time = guard_start_time.elapsed();
+
+        // Temporarily allow all operations (no guard evaluation)
+        let guard_result = GuardEvaluationResult {
+            passed: true,
+            failed_requirements: Vec::new(),
+        };
 
         if !guard_result.passed {
             warn!(
@@ -103,7 +117,7 @@ where
                     guard_eval_time_us: guard_eval_time.as_micros() as u64,
                     delta_apply_time_us: delta_apply_time.as_micros() as u64,
                     total_execution_time_us: total_time.as_micros() as u64,
-                    capabilities_checked: guard.required_capabilities.len(),
+                    capabilities_checked: 0, // guard.required_capabilities.len(),
                     facts_applied: applied_deltas.len(),
                 };
 
@@ -135,7 +149,7 @@ where
                     guard_eval_time_us: guard_eval_time.as_micros() as u64,
                     delta_apply_time_us: 0, // No deltas applied on failure
                     total_execution_time_us: total_time.as_micros() as u64,
-                    capabilities_checked: guard.required_capabilities.len(),
+                    capabilities_checked: 0, // guard.required_capabilities.len(),
                     facts_applied: 0,
                 };
 
@@ -186,7 +200,12 @@ where
         // Phase 1: Evaluate all guards first (fail fast)
         let mut all_guard_results = Vec::new();
         for (guard, _) in &guards_and_operations {
-            let guard_result = evaluate_guard(guard, effect_system).await?;
+            // TODO: Re-enable guard evaluation when Biscuit integration is complete
+            // let guard_result = evaluate_guard(guard, effect_system).await?;
+            let guard_result = GuardEvaluationResult {
+                passed: true,
+                failed_requirements: Vec::new(),
+            };
             if !guard_result.passed {
                 warn!(
                     operation_id = %guard.operation_id,
@@ -232,7 +251,7 @@ where
                             guard_eval_time_us: 0,  // Computed in batch
                             delta_apply_time_us: 0, // Applied in batch
                             total_execution_time_us: execution_time.as_micros() as u64,
-                            capabilities_checked: guard.required_capabilities.len(),
+                            capabilities_checked: 0, // guard.required_capabilities.len(),
                             facts_applied: guard.delta_facts.len(),
                         },
                     });

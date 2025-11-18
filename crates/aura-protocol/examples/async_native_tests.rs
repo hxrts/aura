@@ -20,6 +20,7 @@ use aura_testkit::{
 };
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing_subscriber;
 
 #[tokio::main]
 async fn main() -> AuraResult<()> {
@@ -162,9 +163,8 @@ async fn example_test_fixture() -> AuraResult<()> {
 
     // Run test with automatic cleanup
     let result = fixture
-        .run_test(|effects| async move {
+        .run_test(|_effects| async move {
             println!("  Running test with effect system");
-            println!("  Device ID: {:?}", effects.device_id());
 
             // Your test logic here
             sleep(Duration::from_millis(100)).await;

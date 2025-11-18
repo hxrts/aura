@@ -6,7 +6,7 @@
 //!
 //! This file previously contained:
 //! - EffectSystemHandler: 100 lines removed - replaced by JournalEffects
-//! - JournalHandlerBuilder: 120 lines removed - replaced by effect dependency injection  
+//! - JournalHandlerBuilder: 120 lines removed - replaced by effect dependency injection
 //! - DefaultEffectProcessor: 87 lines removed - replaced by JournalHandler in aura-effects
 //! - Middleware stack composition: 68 lines removed - replaced by explicit effect composition
 //!

@@ -11,5 +11,5 @@ pub mod websocket;
 // Internal API only - protocols are implementation details
 // Note: These are available for future choreographic implementations
 // pub(crate) use stun::{StunMessage, StunMethod, StunClass, StunAttribute};
-// pub(crate) use hole_punch::{HolePunchMessage};  
+// pub(crate) use hole_punch::{HolePunchMessage};
 // pub(crate) use websocket::{WebSocketMessage};

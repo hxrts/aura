@@ -38,6 +38,45 @@
           targets = [ "wasm32-unknown-unknown" ];
         };
 
+        # Apalache package from pre-built release
+        apalache = pkgs.stdenv.mkDerivation rec {
+          pname = "apalache";
+          version = "0.45.4";
+
+          src = pkgs.fetchurl {
+            url = "https://github.com/apalache-mc/apalache/releases/download/v${version}/apalache-${version}.tgz";
+            sha256 = "sha256-neJbVEIAqOrfuP/4DR2MEhLJdnthxNx4KVoCyoGVdQ4=";
+          };
+
+          nativeBuildInputs = with pkgs; [ makeWrapper ];
+          buildInputs = with pkgs; [ jre ];
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin
+            
+            # Copy the entire apalache directory
+            cp -r . $out/lib-apalache
+            
+            # Make the apalache-mc script executable
+            chmod +x $out/lib-apalache/bin/apalache-mc
+            
+            # Create wrapper script
+            makeWrapper $out/lib-apalache/bin/apalache-mc $out/bin/apalache-mc \
+              --set JAVA_HOME ${pkgs.jre} \
+              --prefix PATH : ${pkgs.jre}/bin
+            
+            runHook postInstall
+          '';
+
+          meta = with pkgs.lib; {
+            description = "Symbolic model checker for TLA+ specifications";
+            homepage = "https://apalache-mc.github.io/apalache/";
+            license = licenses.asl20;
+            platforms = platforms.unix;
+          };
+        };
+
         # Import generated Cargo.nix with CC crate fix and other overrides
         cargoNix = import ./Cargo.nix {
           inherit pkgs;
@@ -143,8 +182,10 @@
 
             # Formal verification and protocol modeling
             quint
+            apalache
+            tlaplus # TLA+ tools from nixpkgs
             nodejs_20
-            jre # Java Runtime Environment for ANTLR4TS
+            jre # For ANTLR4TS and Apalache
 
             # Nix tools and formatting
             nixpkgs-fmt
@@ -159,6 +200,8 @@
               echo "Rust version: $(rustc --version)"
               echo "Cargo version: $(cargo --version)"
               echo "Quint version: $(quint --version 2>/dev/null || echo 'available')"
+              echo "Apalache version: $(apalache-mc version 2>/dev/null | head -1 || echo 'available')"
+              echo "TLA+ tools: $(tlc2 2>&1 | head -1 | grep -o 'Version.*' || echo 'available')"
               echo "Node.js version: $(node --version)"
               echo ""
               echo "Available commands:"
@@ -169,6 +212,7 @@
               echo "  just quint-parse     Parse Quint files to JSON"
               echo "  trunk serve          Serve console with hot reload (in console/)"
               echo "  quint --help         Formal verification with Quint"
+              echo "  apalache-mc --help   Model checking with Apalache"  
               echo "  crate2nix --help     Generate hermetic Nix builds"
               echo ""
               echo "Hermetic builds:"

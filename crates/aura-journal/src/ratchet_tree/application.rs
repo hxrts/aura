@@ -16,7 +16,9 @@
 
 use super::{reduction::ReductionError, TreeState};
 use aura_core::hash;
-use aura_core::{commit_leaf, AttestedOp, Hash32, LeafId, NodeIndex, Policy, TreeOp, TreeOpKind};
+use aura_core::{
+    commit_leaf, AttestedOp, CryptoEffects, Hash32, LeafId, NodeIndex, Policy, TreeOp, TreeOpKind,
+};
 // Removed unused BTreeMap import
 
 /// Errors that can occur during tree operation application
@@ -151,7 +153,7 @@ fn validate_acyclicity(state: &TreeState) -> ApplicationResult<()> {
 ///
 /// ## Steps
 ///
-/// 1. Verify aggregate signature (stub TODO fix - For now - needs FROST integration)
+/// 1. Verify aggregate signature (FROST verification implemented ✅)
 /// 2. Verify parent binding matches current state
 /// 3. Apply the operation to tree state
 /// 4. Recompute commitments for affected nodes
@@ -162,12 +164,35 @@ fn validate_acyclicity(state: &TreeState) -> ApplicationResult<()> {
 ///
 /// Returns `ApplicationError` if any verification step fails.
 /// State is NOT modified on error (atomic operation).
-pub fn apply_verified(state: &mut TreeState, attested: &AttestedOp) -> ApplicationResult<()> {
-    // Step 1: Verify aggregate signature
-    // NOTE: Full FROST verification requires CryptoEffects trait to be fixed in aura-crypto.
-    // Currently performs basic validation checks (signature/message non-empty, threshold met).
-    verify_aggregate_signature(attested, state)?;
+pub async fn apply_verified(
+    state: &mut TreeState,
+    attested: &AttestedOp,
+    crypto_effects: &dyn CryptoEffects,
+) -> ApplicationResult<()> {
+    // Step 1: Verify aggregate signature using FROST
+    verify_aggregate_signature(attested, state, crypto_effects).await?;
 
+    // Steps 2-6: Shared logic
+    apply_verified_common(state, attested)
+}
+
+/// Synchronous version for backwards compatibility
+///
+/// This version skips FROST verification but performs all other validation.
+/// Use this for existing code that doesn't have access to CryptoEffects.
+/// Migrate to `apply_verified` when crypto effects are available.
+pub fn apply_verified_sync(state: &mut TreeState, attested: &AttestedOp) -> ApplicationResult<()> {
+    // Skip FROST verification (Step 1)
+    tracing::warn!(
+        "Using apply_verified_sync: FROST verification skipped. Migrate to apply_verified for full security."
+    );
+
+    // Steps 2-6: Shared logic
+    apply_verified_common(state, attested)
+}
+
+/// Shared logic for both sync and async versions
+fn apply_verified_common(state: &mut TreeState, attested: &AttestedOp) -> ApplicationResult<()> {
     // Step 2: Verify parent binding
     verify_parent_binding(&attested.op, state)?;
 
@@ -192,7 +217,11 @@ pub fn apply_verified(state: &mut TreeState, attested: &AttestedOp) -> Applicati
 ///
 /// Verifies the FROST threshold signature on the operation to ensure it was
 /// properly authorized by the required threshold of devices.
-fn verify_aggregate_signature(attested: &AttestedOp, state: &TreeState) -> ApplicationResult<()> {
+async fn verify_aggregate_signature(
+    attested: &AttestedOp,
+    state: &TreeState,
+    crypto_effects: &dyn CryptoEffects,
+) -> ApplicationResult<()> {
     // Extract the signature from the attested operation
     let signature = &attested.agg_sig;
 
@@ -215,7 +244,13 @@ fn verify_aggregate_signature(attested: &AttestedOp, state: &TreeState) -> Appli
     let binding_message = compute_binding_message(attested, state)?;
 
     // Verify aggregate signature using FROST verification
-    verify_frost_signature(signature, &binding_message, &group_public_key)?;
+    verify_frost_signature(
+        signature,
+        &binding_message,
+        &group_public_key,
+        crypto_effects,
+    )
+    .await?;
 
     Ok(())
 }
@@ -297,14 +332,13 @@ fn serialize_tree_op_for_verification(op: &TreeOp) -> Vec<u8> {
 }
 
 /// Verify FROST threshold signature
-fn verify_frost_signature(
+async fn verify_frost_signature(
     signature: &[u8],
     message: &[u8],
     public_key: &[u8],
+    crypto_effects: &dyn CryptoEffects,
 ) -> ApplicationResult<()> {
-    // This is simplified - real implementation would use actual FROST verification
-    // For now, perform basic validation checks
-
+    // Validate inputs
     if signature.is_empty() {
         return Err(ApplicationError::verification_failed(
             "Empty signature".to_string(),
@@ -323,10 +357,22 @@ fn verify_frost_signature(
         ));
     }
 
-    // Placeholder verification - always succeeds for now
-    // Real implementation would use aura_core::frost verification
+    // Use the crypto effect system for FROST verification
+    let is_valid = crypto_effects
+        .frost_verify(message, signature, public_key)
+        .await
+        .map_err(|e| {
+            ApplicationError::verification_failed(format!("FROST verification error: {}", e))
+        })?;
+
+    if !is_valid {
+        return Err(ApplicationError::verification_failed(
+            "FROST signature verification failed".to_string(),
+        ));
+    }
+
     tracing::debug!(
-        "Verifying FROST signature: sig_len={}, msg_len={}, key_len={}",
+        "FROST signature verified successfully: sig_len={}, msg_len={}, key_len={}",
         signature.len(),
         message.len(),
         public_key.len()

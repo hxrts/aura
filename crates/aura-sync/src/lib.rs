@@ -8,7 +8,7 @@
 //!
 //! Aura-sync provides reusable protocol building blocks for:
 //! - Journal state synchronization using CRDT semantics
-//! - Anti-entropy protocols for state reconciliation  
+//! - Anti-entropy protocols for state reconciliation
 //! - OTA upgrade coordination with threshold approval
 //! - Session-based peer synchronization
 //! - Receipt verification for distributed protocols
@@ -95,8 +95,8 @@ pub mod services;
 
 // Re-export core types for convenience
 pub use core::{
-    SyncError, SyncResult, SyncConfig, MetricsCollector, SessionManager,
-    SessionState, SessionResult,
+    MetricsCollector, SessionManager, SessionResult, SessionState, SyncConfig, SyncError,
+    SyncResult,
 };
 
 // Protocol re-exports
@@ -126,7 +126,7 @@ pub mod integration_docs {
 // =============================================================================
 
 // Re-export essential foundation types from Layer 1 (aura-core)
-pub use aura_core::{DeviceId, SessionId, AuraError, AuraResult};
+pub use aura_core::{AuraError, AuraResult, DeviceId, SessionId};
 
 // Note: Other layer dependencies are imported as needed but not re-exported
 // to maintain clean API boundaries and avoid dependency pollution.

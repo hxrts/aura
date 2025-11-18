@@ -3,12 +3,14 @@
 //! This module implements distributed session ticket creation and validation
 //! using choreographic programming principles with the rumpsteak-aura framework.
 
-use crate::AuraResult;
-use aura_core::{AccountId, DeviceId};
+use crate::{AuraResult, BiscuitGuardEvaluator, ResourceScope};
+use aura_core::{AccountId, DeviceId, FlowBudget};
 use aura_macros::choreography;
 use aura_protocol::AuraEffectSystem;
 use aura_verify::session::{SessionScope, SessionTicket};
 use aura_verify::VerifiedIdentity;
+use aura_wot::BiscuitTokenManager;
+use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
 
 /// Session creation request
@@ -206,12 +208,33 @@ pub fn get_session_creation_choreography() {
 pub struct SessionCreationCoordinator {
     /// Local effect system
     effect_system: AuraEffectSystem,
+    /// Biscuit token manager for authorization
+    token_manager: Option<BiscuitTokenManager>,
+    /// Biscuit guard evaluator for permission checks
+    guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
 impl SessionCreationCoordinator {
     /// Create new session creation coordinator
     pub fn new(effect_system: AuraEffectSystem) -> Self {
-        Self { effect_system }
+        Self {
+            effect_system,
+            token_manager: None,
+            guard_evaluator: None,
+        }
+    }
+
+    /// Create new session creation coordinator with Biscuit authorization
+    pub fn new_with_biscuit(
+        effect_system: AuraEffectSystem,
+        token_manager: BiscuitTokenManager,
+        guard_evaluator: BiscuitGuardEvaluator,
+    ) -> Self {
+        Self {
+            effect_system,
+            token_manager: Some(token_manager),
+            guard_evaluator: Some(guard_evaluator),
+        }
     }
 
     /// Create session using choreographic protocol

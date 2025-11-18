@@ -128,6 +128,13 @@ impl AuraError {
             message: format!("Coordination failed: {}", message.into()),
         }
     }
+
+    /// Create a budget exceeded error
+    pub fn budget_exceeded(message: impl Into<String>) -> Self {
+        Self::PermissionDenied {
+            message: format!("Budget exceeded: {}", message.into()),
+        }
+    }
 }
 
 /// Standard Result type for Aura operations

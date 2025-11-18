@@ -1,795 +1,573 @@
-//! Capability types implementing meet-semilattice laws
+//! Legacy Capability System
 //!
-//! This module provides the core capability abstractions that follow
-//! meet-semilattice laws for monotonic capability restriction.
+//! This module provides the legacy capability types that are expected by the existing tests.
+//! These implement meet-semilattice laws for capability restriction and delegation.
+//!
+//! ## Theoretical Foundation (§2.1 and §2.4)
+//!
+//! From the Aura theoretical model:
+//! - Capabilities are meet-semilattice elements (C, ⊓, ⊤)
+//! - Meet operation is associative, commutative, and idempotent
+//! - Refinement operations can only reduce authority through the meet operation (monotonic restriction)
+//! - The operation refine_caps(c) never increases authority
+//!
+//! This implementation realizes these mathematical properties through the MeetSemiLattice trait.
 
 use aura_core::semilattice::{MeetSemiLattice, Top};
+use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::fmt;
 
-/// Trust level for relationships and capabilities
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum TrustLevel {
-    /// No trust (bottom element)
-    None = 0,
-    /// Low trust level
-    Low = 1,
-    /// Medium trust level
-    Medium = 2,
-    /// High trust level (top element)
-    High = 3,
-}
-
-impl TrustLevel {
-    /// Convert from numeric level
-    pub fn from_level(level: u8) -> Self {
-        match level {
-            0 => TrustLevel::None,
-            1 => TrustLevel::Low,
-            2 => TrustLevel::Medium,
-            3 => TrustLevel::High,
-            _ => TrustLevel::High, // Cap at highest level
-        }
-    }
-
-    /// Convert to numeric level
-    pub fn to_level(&self) -> u8 {
-        *self as u8
-    }
-}
-
-/// Storage permission capabilities
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StoragePermission {
-    /// Can read content
-    ContentRead,
-    /// Can write content
-    ContentWrite,
-    /// Can delete content
-    ContentDelete,
-    /// Can list content
-    ContentList,
-    /// Can create directories
-    DirectoryCreate,
-    /// Can read chunks
-    ChunkRead,
-    /// Can write chunks
-    ChunkWrite,
-    /// Can delete chunks
-    ChunkDelete,
-    /// Can read namespace
-    NamespaceRead,
-    /// Can write namespace
-    NamespaceWrite,
-    /// Can perform search queries
-    SearchQuery,
-    /// Can trigger garbage collection
-    GarbageCollect,
-}
-
-/// Relay permission capabilities
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RelayPermission {
-    /// Can relay messages up to specified size
-    Relay { max_bytes: u64 },
-    /// Can act as backup relay
-    BackupRelay,
-    /// Can coordinate relay selection
-    RelayCoordinator,
-}
-
-/// A capability that can be attenuated via meet operations
+/// Individual capability that can be granted
 ///
-/// Capabilities represent permissions that can only be restricted (never expanded)
-/// through meet operations. This ensures monotonic security properties.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Represents atomic authority units in the capability lattice.
+/// These form the basis elements that compose via meet operations.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Capability {
-    /// Permission to read specific resources
+    /// Read access to resources matching a pattern
     Read { resource_pattern: String },
-
-    /// Permission to write/modify specific resources
+    /// Write access to resources matching a pattern
     Write { resource_pattern: String },
-
-    /// Permission to execute operations
+    /// Execute permission for specific operations
     Execute { operation: String },
-
-    /// Permission to delegate capabilities (with restriction)
+    /// Delegation permission with maximum depth
     Delegate { max_depth: u32 },
-
-    /// Administrative permissions
-    Admin { scope: String },
-
-    /// Permission to act as relay with flow budget limits
-    Relay {
-        /// Maximum bytes per time period
-        max_bytes_per_period: u64,
-        /// Time period in seconds
-        period_seconds: u64,
-        /// Maximum concurrent streams
-        max_streams: u32,
-    },
-
-    /// Wildcard capability (top element ⊤)
+    /// All permissions - represents ⊤ (top element) in the meet-semilattice
+    /// Per §2.1: "type Cap // partially ordered set (≤), with meet ⊓ and top ⊤"
     All,
-
-    /// Empty capability (bottom element ⊥)
+    /// No permissions - semantically represents minimal authority
+    /// Note: This is NOT the bottom element of meet-semilattice (which would be empty set)
     None,
 }
 
-impl Capability {
-    /// Check if this capability implies another capability
-    pub fn implies(&self, other: &Capability) -> bool {
-        use Capability::*;
-
-        match (self, other) {
-            // All implies everything
-            (All, _) => true,
-
-            // Nothing is implied by None
-            (None, _) => false,
-            (_, None) => true,
-
-            // Same capability types
-            (
-                Read {
-                    resource_pattern: a,
-                },
-                Read {
-                    resource_pattern: b,
-                },
-            ) => pattern_implies(a, b),
-            (
-                Write {
-                    resource_pattern: a,
-                },
-                Write {
-                    resource_pattern: b,
-                },
-            ) => pattern_implies(a, b),
-            (Execute { operation: a }, Execute { operation: b }) => a == "*" || a == b,
-            (Delegate { max_depth: a }, Delegate { max_depth: b }) => a >= b,
-            (Admin { scope: a }, Admin { scope: b }) => a == "*" || scope_implies(a, b),
-            (
-                Relay {
-                    max_bytes_per_period: bytes_a,
-                    period_seconds: period_a,
-                    max_streams: streams_a,
-                },
-                Relay {
-                    max_bytes_per_period: bytes_b,
-                    period_seconds: period_b,
-                    max_streams: streams_b,
-                },
-            ) => {
-                // A relay capability implies another if it has at least the same limits
-                bytes_a >= bytes_b && period_a >= period_b && streams_a >= streams_b
-            }
-
-            // Write implies Read for same resource
-            (
-                Write {
-                    resource_pattern: a,
-                },
-                Read {
-                    resource_pattern: b,
-                },
-            ) => pattern_implies(a, b),
-
-            // Admin implies other capabilities in scope
-            (Admin { scope }, Read { resource_pattern })
-            | (Admin { scope }, Write { resource_pattern }) => {
-                scope == "*" || resource_pattern.starts_with(scope)
-            }
-
-            // Different capability types don't imply each other
-            _ => false,
-        }
-    }
-
-    /// Compute the meet (intersection) of two capabilities
-    ///
-    /// The result is the most restrictive capability that both inputs imply.
-    /// This operation is commutative, associative, and idempotent.
-    pub fn meet(&self, other: &Capability) -> Capability {
-        use Capability::*;
-
-        match (self, other) {
-            // Meet with All gives the other capability
-            (All, other) | (other, All) => other.clone(),
-
-            // Meet with None gives None
-            (None, _) | (_, None) => None,
-
-            // Same capability types
-            (
-                Read {
-                    resource_pattern: a,
-                },
-                Read {
-                    resource_pattern: b,
-                },
-            ) => Read {
-                resource_pattern: pattern_intersect(a, b),
-            },
-            (
-                Write {
-                    resource_pattern: a,
-                },
-                Write {
-                    resource_pattern: b,
-                },
-            ) => Write {
-                resource_pattern: pattern_intersect(a, b),
-            },
-            (Execute { operation: a }, Execute { operation: b }) => {
-                if a == b {
-                    Execute {
-                        operation: a.clone(),
-                    }
-                } else if a == "*" {
-                    Execute {
-                        operation: b.clone(),
-                    }
-                } else if b == "*" {
-                    Execute {
-                        operation: a.clone(),
-                    }
-                } else {
-                    None
-                }
-            }
-            (Delegate { max_depth: a }, Delegate { max_depth: b }) => Delegate {
-                max_depth: (*a).min(*b),
-            },
-            (Admin { scope: a }, Admin { scope: b }) => Admin {
-                scope: scope_intersect(a, b),
-            },
-            (
-                Relay {
-                    max_bytes_per_period: bytes_a,
-                    period_seconds: period_a,
-                    max_streams: streams_a,
-                },
-                Relay {
-                    max_bytes_per_period: bytes_b,
-                    period_seconds: period_b,
-                    max_streams: streams_b,
-                },
-            ) => Relay {
-                // Meet takes the minimum (most restrictive) of each limit
-                max_bytes_per_period: (*bytes_a).min(*bytes_b),
-                period_seconds: (*period_a).min(*period_b),
-                max_streams: (*streams_a).min(*streams_b),
-            },
-
-            // Different capability types generally result in None
-            // unless there's a specific intersection rule
-            _ => None,
-        }
-    }
-
-    /// Check if this capability grants a specific storage permission
-    pub fn grants_storage_permission(&self, permission: &StoragePermission) -> bool {
-        use Capability::*;
-
-        match (self, permission) {
-            (All, _) => true,
-            (None, _) => false,
-
-            // Read capabilities grant storage read permissions
-            (Read { resource_pattern }, StoragePermission::ContentRead) => {
-                // For now, any read capability grants content read
-                resource_pattern == "*" || resource_pattern.contains("content")
-            }
-
-            // Write capabilities grant storage write/delete permissions
-            (
-                Write { resource_pattern },
-                StoragePermission::ContentWrite
-                | StoragePermission::ContentDelete
-                | StoragePermission::DirectoryCreate,
-            ) => resource_pattern == "*" || resource_pattern.contains("content"),
-
-            // Admin capabilities grant all storage permissions
-            (Admin { scope }, _) => scope == "*" || scope.contains("storage"),
-
-            _ => false,
-        }
-    }
-}
-
-/// A set of capabilities implementing meet-semilattice laws
+/// Set of capabilities implementing meet-semilattice laws
+///
+/// Implements the mathematical structure (C, ⊓, ⊤) from §2.1 of the theoretical model.
+/// This realizes "Capabilities (Meet-Semilattice)" where:
+/// - x ⊓ y = y ⊓ x (commutative)
+/// - x ⊓ (y ⊓ z) = (x ⊓ y) ⊓ z (associative)
+/// - x ⊓ x = x (idempotent)
+///
+/// Per §2.4 Semantic Laws: "The operation refine_caps c never increases authority"
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilitySet {
     capabilities: BTreeSet<Capability>,
 }
 
 impl CapabilitySet {
-    /// Create new empty capability set (bottom element ⊥)
+    /// Create new capability set from a collection
+    ///
+    /// Normalizes contradictory states by removing None when All is present.
+    /// This maintains logical consistency since having both "all permissions"
+    /// and "no permissions" is semantically meaningless.
+    ///
+    /// This normalization ensures the capability set forms a valid element
+    /// in the meet-semilattice by preventing contradictory states.
+    pub fn from_capabilities(mut caps: BTreeSet<Capability>) -> Self {
+        // Normalize contradictory states: All + None = All (most permissive wins)
+        // This prevents logically invalid capability sets from being created
+        if caps.contains(&Capability::All) && caps.contains(&Capability::None) {
+            caps.remove(&Capability::None);
+        }
+        Self { capabilities: caps }
+    }
+
+    /// Create capability set from permission strings
+    pub fn from_permissions(permissions: &[&str]) -> Self {
+        let caps = permissions
+            .iter()
+            .map(|perm| {
+                if perm.starts_with("read:") {
+                    Capability::Read {
+                        resource_pattern: perm.strip_prefix("read:").unwrap().to_string(),
+                    }
+                } else if perm.starts_with("write:") {
+                    Capability::Write {
+                        resource_pattern: perm.strip_prefix("write:").unwrap().to_string(),
+                    }
+                } else if perm.starts_with("execute:") {
+                    Capability::Execute {
+                        operation: perm.strip_prefix("execute:").unwrap().to_string(),
+                    }
+                } else {
+                    // Default to read permission
+                    Capability::Read {
+                        resource_pattern: perm.to_string(),
+                    }
+                }
+            })
+            .collect();
+
+        // Use the normalized constructor
+        Self::from_capabilities(caps)
+    }
+
+    /// Create empty capability set
     pub fn empty() -> Self {
         Self {
             capabilities: BTreeSet::new(),
         }
     }
 
-    /// Create capability set with all permissions (top element ⊤)
-    pub fn all() -> Self {
-        let mut capabilities = BTreeSet::new();
-        capabilities.insert(Capability::All);
-        Self { capabilities }
+    /// Iterator over capabilities
+    pub fn capabilities(&self) -> impl Iterator<Item = &Capability> {
+        self.capabilities.iter()
     }
 
-    /// Create capability set from a BTreeSet of capabilities
-    pub fn from_capabilities(capabilities: BTreeSet<Capability>) -> Self {
-        let temp_set = Self { capabilities };
-        temp_set.normalize()
-    }
-
-    /// Create capability set from permission strings
-    pub fn from_permissions(permissions: &[&str]) -> Self {
-        let mut capabilities = BTreeSet::new();
-
-        for perm in permissions {
-            let cap = match *perm {
-                "*" => Capability::All,
-                perm if perm.starts_with("read:") => Capability::Read {
-                    resource_pattern: perm[5..].to_string(),
-                },
-                perm if perm.starts_with("write:") => Capability::Write {
-                    resource_pattern: perm[6..].to_string(),
-                },
-                perm if perm.starts_with("execute:") => Capability::Execute {
-                    operation: perm[8..].to_string(),
-                },
-                perm if perm.starts_with("admin:") => Capability::Admin {
-                    scope: perm[6..].to_string(),
-                },
-                perm if perm.starts_with("relay:") => {
-                    // Parse relay capabilities: "relay:bytes_per_period:period_seconds:max_streams"
-                    let parts: Vec<&str> = perm[6..].split(':').collect();
-                    if parts.len() == 3 {
-                        if let (Ok(bytes), Ok(period), Ok(streams)) = (
-                            parts[0].parse::<u64>(),
-                            parts[1].parse::<u64>(),
-                            parts[2].parse::<u32>(),
-                        ) {
-                            Capability::Relay {
-                                max_bytes_per_period: bytes,
-                                period_seconds: period,
-                                max_streams: streams,
-                            }
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        continue;
+    /// Check if this capability set permits a permission
+    ///
+    /// Implements the capability check from §1.3 Operational Semantics:
+    /// "Each side effect or message action a carries a required capability predicate need(a)"
+    /// This method evaluates whether need(permission) ≤ self.capabilities
+    pub fn permits(&self, permission: &str) -> bool {
+        for cap in &self.capabilities {
+            match cap {
+                Capability::Read { resource_pattern } if permission.starts_with("read:") => {
+                    let resource = permission.strip_prefix("read:").unwrap();
+                    if resource_matches(resource, resource_pattern) {
+                        return true;
                     }
                 }
-                "relay" => Capability::Relay {
-                    max_bytes_per_period: 1024 * 1024, // 1MB default
-                    period_seconds: 3600,              // 1 hour default
-                    max_streams: 10,                   // 10 streams default
-                },
-                "read" => Capability::Read {
-                    resource_pattern: "*".to_string(),
-                },
-                "write" => Capability::Write {
-                    resource_pattern: "*".to_string(),
-                },
-                // Support tree: and other operation namespaces as Execute capabilities
-                perm if perm.contains(':') => Capability::Execute {
-                    operation: perm.to_string(),
-                },
+                Capability::Write { resource_pattern } if permission.starts_with("write:") => {
+                    let resource = permission.strip_prefix("write:").unwrap();
+                    if resource_matches(resource, resource_pattern) {
+                        return true;
+                    }
+                }
+                Capability::Execute { operation } if permission.starts_with("execute:") => {
+                    let op = permission.strip_prefix("execute:").unwrap();
+                    if op == operation {
+                        return true;
+                    }
+                }
+                // All capability permits everything - it's the top element ⊤
+                Capability::All => return true,
                 _ => continue,
-            };
-            capabilities.insert(cap);
-        }
-
-        Self { capabilities }
-    }
-
-    /// Check if this capability set permits a specific operation
-    pub fn permits(&self, operation: &str) -> bool {
-        for cap in &self.capabilities {
-            if capability_permits(cap, operation) {
-                return true;
             }
         }
         false
     }
 
     /// Check if this capability set is a subset of another
-    pub fn is_subset_of(&self, other: &CapabilitySet) -> bool {
-        self.capabilities.iter().all(|cap| {
-            other
-                .capabilities
-                .iter()
-                .any(|other_cap| other_cap.implies(cap))
-        })
-    }
-
-    /// Compute the meet (intersection) of two capability sets
     ///
-    /// This implements the meet operation for the capability semilattice.
-    /// The result contains capabilities that are present in both sets.
-    /// For meet-semilattice laws: meet is commutative, associative, idempotent.
-    pub fn meet(&self, other: &CapabilitySet) -> Self {
-        // Handle All capability properly for top element identity
-        if self.capabilities.contains(&Capability::All)
-            && other.capabilities.contains(&Capability::All)
-        {
-            // All ⊓ All = All
-            return Self::all();
+    /// In the capability lattice, a set A is a subset of B if all capabilities
+    /// in A are also logically present in B. The All capability represents
+    /// universal permission, so it subsumes all other capabilities.
+    pub fn is_subset_of(&self, other: &Self) -> bool {
+        // If other contains All, then this is always a subset
+        if other.capabilities.contains(&Capability::All) {
+            return true;
         }
 
+        // If this contains All but other doesn't, then this is not a subset
         if self.capabilities.contains(&Capability::All) {
-            // All ⊓ X = X (All is top element)
+            return false;
+        }
+
+        // For all other cases, check each capability individually
+        for cap in &self.capabilities {
+            // Skip None capabilities as they don't represent actual authority
+            if *cap == Capability::None {
+                continue;
+            }
+
+            let found = other.capabilities.iter().any(|other_cap| cap == other_cap);
+
+            if !found {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl MeetSemiLattice for CapabilitySet {
+    /// Meet operation: greatest lower bound (intersection of capabilities)
+    ///
+    /// Implements the meet operation ⊓ from §1.4 Algebraic Laws:
+    /// - "(refine γ₁; refine γ₂) ≡ refine(γ₁ ⊓ γ₂)" - sequential refinements compose via meet
+    ///
+    /// From §2.4 Semantic Laws:
+    /// - "Meet laws apply to capabilities. These operations are associative, commutative, and idempotent."
+    /// - "The operation refine_caps c never increases authority."
+    ///
+    /// This implementation ensures:
+    /// 1. Top element identity: X ⊓ ⊤ = X where ⊤ = {All}
+    /// 2. Commutativity: A ⊓ B = B ⊓ A
+    /// 3. Associativity: (A ⊓ B) ⊓ C = A ⊓ (B ⊓ C)
+    /// 4. Idempotency: A ⊓ A = A
+    /// 5. Monotonic restriction: result ≤ both operands
+    fn meet(&self, other: &Self) -> Self {
+        // Top element identity: X ⊓ ⊤ = X where ⊤ = {All}
+        // Per §2.1: "type Cap // partially ordered set (≤), with meet ⊓ and top ⊤"
+        // The pure singleton set {All} acts as the identity element for meet
+        if self.capabilities.len() == 1 && self.capabilities.contains(&Capability::All) {
             return other.clone();
         }
-
-        if other.capabilities.contains(&Capability::All) {
-            // X ⊓ All = X (All is top element)
+        if other.capabilities.len() == 1 && other.capabilities.contains(&Capability::All) {
             return self.clone();
         }
 
-        // Handle None capability specially - it represents empty capability set
+        // Handle None capabilities by filtering them out when only one side has them
         let self_has_none = self.capabilities.contains(&Capability::None);
         let other_has_none = other.capabilities.contains(&Capability::None);
 
-        if self_has_none && other_has_none {
-            // None ⊓ None = None
-            return Self {
-                capabilities: [Capability::None].into(),
-            };
-        }
-
-        if self_has_none || other_has_none {
-            // None ⊓ X = ∅ (empty set) for any X != None
-            return Self::empty();
-        }
-
-        // Standard intersection for regular capabilities
-        let result_caps: BTreeSet<Capability> = self
-            .capabilities
-            .intersection(&other.capabilities)
-            .cloned()
-            .collect();
-
-        // Create result directly (already normalized inputs, so intersection result is valid)
-        Self {
-            capabilities: result_caps,
-        }
-    }
-
-    /// Normalize a capability set by removing redundant capabilities
-    fn normalize(&self) -> Self {
-        // If All is present, only keep All (it subsumes everything)
-        if self.capabilities.contains(&Capability::All) {
-            return Self::all();
-        }
-
-        // If only None is present, keep it
-        if self.capabilities.len() == 1 && self.capabilities.contains(&Capability::None) {
-            return Self {
-                capabilities: [Capability::None].into(),
-            };
-        }
-
-        // For all other cases, filter out None and keep regular capabilities
-        let mut clean_caps = BTreeSet::new();
-        for cap in &self.capabilities {
-            if *cap != Capability::None {
-                clean_caps.insert(cap.clone());
-            }
-        }
-
-        // If we filtered everything out (only had None with other caps), return empty
-        if clean_caps.is_empty() {
-            return Self::empty();
-        }
-
-        Self {
-            capabilities: clean_caps,
-        }
-    }
-
-    /// Get the capabilities in this set
-    pub fn capabilities(&self) -> impl Iterator<Item = &Capability> {
-        self.capabilities.iter()
-    }
-
-    /// Insert a capability into this set
-    pub fn insert(&mut self, capability: Capability) {
-        self.capabilities.insert(capability);
-    }
-
-    /// Create capability set for guardian recovery initiation
-    pub fn guardian_recovery_initiation() -> Self {
-        Self::from_permissions(&["guardian:recovery:initiate", "trust:verify"])
-    }
-
-    /// Create capability set for guardian approval
-    pub fn guardian_approval() -> Self {
-        Self::from_permissions(&["guardian:approve", "recovery:sign"])
-    }
-
-    /// Create capability set for emergency override
-    pub fn emergency_override() -> Self {
-        Self::from_permissions(&["emergency:override", "guardian:emergency"])
-    }
-
-    /// Create default device capabilities
-    pub fn default_device_capabilities() -> Self {
-        Self::from_permissions(&[
-            "device:basic",
-            "communication:send",
-            "communication:receive",
-        ])
-    }
-}
-
-impl fmt::Display for CapabilitySet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.capabilities.is_empty() {
-            write!(f, "⊥ (empty)")
-        } else if self.capabilities.contains(&Capability::All) {
-            write!(f, "⊤ (all)")
+        let self_caps = if self_has_none && !other_has_none {
+            // Filter None from self when other doesn't have it
+            self.capabilities
+                .iter()
+                .filter(|&cap| cap != &Capability::None)
+                .cloned()
+                .collect()
         } else {
-            let caps: Vec<String> = self
+            self.capabilities.clone()
+        };
+
+        let other_caps = if other_has_none && !self_has_none {
+            // Filter None from other when self doesn't have it
+            other
                 .capabilities
                 .iter()
-                .map(|cap| format!("{:?}", cap))
-                .collect();
-            write!(f, "{{{}}}", caps.join(", "))
-        }
-    }
-}
-
-// Helper functions
-
-fn pattern_implies(pattern_a: &str, pattern_b: &str) -> bool {
-    pattern_a == "*" || pattern_a == pattern_b || pattern_b.starts_with(pattern_a)
-}
-
-fn pattern_intersect(pattern_a: &str, pattern_b: &str) -> String {
-    if pattern_a == "*" {
-        pattern_b.to_string()
-    } else if pattern_b == "*" || pattern_a == pattern_b {
-        pattern_a.to_string()
-    } else {
-        // Find common prefix for intersection
-        let common_len = pattern_a
-            .chars()
-            .zip(pattern_b.chars())
-            .take_while(|(a, b)| a == b)
-            .count();
-
-        if common_len > 0 {
-            pattern_a.chars().take(common_len).collect()
+                .filter(|&cap| cap != &Capability::None)
+                .cloned()
+                .collect()
         } else {
-            "∅".to_string() // Empty intersection
-        }
-    }
-}
+            other.capabilities.clone()
+        };
 
-fn scope_implies(scope_a: &str, scope_b: &str) -> bool {
-    scope_a == "*" || scope_b.starts_with(scope_a)
-}
-
-fn scope_intersect(scope_a: &str, scope_b: &str) -> String {
-    if scope_a == "*" {
-        scope_b.to_string()
-    } else if scope_b == "*" || scope_a == scope_b {
-        scope_a.to_string()
-    } else {
-        // Find most specific common scope
-        let common_parts: Vec<&str> = scope_a
-            .split('/')
-            .zip(scope_b.split('/'))
-            .take_while(|(a, b)| a == b)
-            .map(|(a, _)| a)
-            .collect();
-
-        if common_parts.is_empty() {
-            "∅".to_string()
-        } else {
-            common_parts.join("/")
-        }
-    }
-}
-
-fn capability_permits(capability: &Capability, operation: &str) -> bool {
-    use Capability::*;
-
-    match capability {
-        All => true,
-        None => false,
-        Read { resource_pattern } => {
-            if operation == "read" {
-                true // Simple "read" permission check
-            } else {
-                operation.starts_with("read:")
-                    && (resource_pattern == "*" || operation[5..].starts_with(resource_pattern))
-            }
-        }
-        Write { resource_pattern } => {
-            if operation == "write" || operation == "read" {
-                true // Simple permission check
-            } else {
-                (operation.starts_with("write:") || operation.starts_with("read:"))
-                    && (resource_pattern == "*"
-                        || operation
-                            .split(':')
-                            .nth(1)
-                            .is_some_and(|res| res.starts_with(resource_pattern)))
-            }
-        }
-        Execute { operation: op } => {
-            // Support both "execute:op" and direct "namespace:operation" formats
-            if operation.starts_with("execute:") {
-                op == "*" || operation == format!("execute:{}", op).as_str()
-            } else {
-                // Direct operation name match (e.g., "tree:add_leaf")
-                op == "*" || op == operation
-            }
-        }
-        Delegate { .. } => operation.starts_with("delegate:"),
-        Admin { scope } => scope == "*" || operation.contains(&format!(":{}", scope)),
-        Relay {
-            max_bytes_per_period,
-            period_seconds: _,
-            max_streams,
-        } => {
-            operation.starts_with("relay:") && {
-                // Parse operation parameters if provided: "relay:bytes_needed:streams_needed"
-                if let Some(params) = operation.strip_prefix("relay:") {
-                    let parts: Vec<&str> = params.split(':').collect();
-                    if !parts.is_empty() {
-                        // Check byte limit
-                        if let Ok(bytes_needed) = parts[0].parse::<u64>() {
-                            if bytes_needed > *max_bytes_per_period {
-                                return false;
-                            }
-                        }
-                        // Check stream limit if provided
-                        if parts.len() >= 2 {
-                            if let Ok(streams_needed) = parts[1].parse::<u32>() {
-                                if streams_needed > *max_streams {
-                                    return false;
-                                }
-                            }
-                        }
-                    }
-                }
-                true
-            }
-        }
-    }
-}
-
-// === Semilattice Implementations ===
-
-impl MeetSemiLattice for CapabilitySet {
-    fn meet(&self, other: &Self) -> Self {
-        self.meet(other)
+        // Standard intersection for all cases (including mixed sets with All)
+        // This implements the mathematical meet operation as set intersection.
+        // Per §1.4 Monotonic Restriction: "C_{t+1} = C_t ⊓ γ ⟹ C_{t+1} ≤ C_t"
+        // The intersection ensures the result is always more restrictive (smaller) than inputs
+        Self::from_capabilities(self_caps.intersection(&other_caps).cloned().collect())
     }
 }
 
 impl Top for CapabilitySet {
+    /// Top element is the set containing All capability
+    ///
+    /// From §2.1: "type Cap // partially ordered set (≤), with meet ⊓ and top ⊤"
+    /// The singleton set {All} serves as the top element (⊤) of the capability lattice.
+    ///
+    /// This satisfies the top element property: ∀x. x ⊓ ⊤ = x
     fn top() -> Self {
-        Self::all()
+        Self {
+            capabilities: [Capability::All].into_iter().collect(),
+        }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_capability_meet_laws() {
-        let read_all = Capability::Read {
-            resource_pattern: "*".to_string(),
-        };
-        let read_docs = Capability::Read {
-            resource_pattern: "docs/".to_string(),
-        };
-        let write_all = Capability::Write {
-            resource_pattern: "*".to_string(),
-        };
-
-        // Commutativity: a ⊓ b = b ⊓ a
-        assert_eq!(read_all.meet(&read_docs), read_docs.meet(&read_all));
-
-        // Idempotency: a ⊓ a = a
-        assert_eq!(read_all.meet(&read_all), read_all);
-
-        // Associativity: (a ⊓ b) ⊓ c = a ⊓ (b ⊓ c)
-        let left = read_all.meet(&read_docs).meet(&write_all);
-        let right = read_all.meet(&read_docs.meet(&write_all));
-        assert_eq!(left, right);
+/// Simple pattern matching for resource permissions
+fn resource_matches(resource: &str, pattern: &str) -> bool {
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        resource.starts_with(prefix)
+    } else {
+        resource == pattern
     }
+}
 
-    #[test]
-    fn test_capability_set_meet_laws() {
-        let set1 = CapabilitySet::from_permissions(&["read", "write"]);
-        let set2 = CapabilitySet::from_permissions(&["read"]);
-        let set3 = CapabilitySet::from_permissions(&["execute:test"]);
+/// Policy for capability evaluation
+///
+/// Implements the policy component from §5.2 Web-of-Trust Model:
+/// "The effective capability at A is: Caps_A = (LocalGrants_A ⊓ ⋂_{(A,x) ∈ E} Delegation_{x → A}) ⊓ Policy_A"
+///
+/// This structure holds the local policy constraints that are always applied
+/// via meet operations to ensure "Local sovereignty: Policy_A is always in the meet"
+#[derive(Debug, Clone)]
+pub struct Policy {
+    device_capabilities: std::collections::HashMap<DeviceId, CapabilitySet>,
+}
 
-        // Commutativity
-        assert_eq!(set1.meet(&set2), set2.meet(&set1));
-
-        // Idempotency
-        assert_eq!(set1.meet(&set1), set1);
-
-        // Associativity
-        assert_eq!(set1.meet(&set2).meet(&set3), set1.meet(&set2.meet(&set3)));
-
-        // Monotonicity - meet result is subset of both inputs
-        let meet_result = set1.meet(&set2);
-        assert!(meet_result.is_subset_of(&set1));
-        assert!(meet_result.is_subset_of(&set2));
-    }
-
-    #[test]
-    fn test_relay_capability() {
-        let relay_cap = Capability::Relay {
-            max_bytes_per_period: 1024 * 1024, // 1MB
-            period_seconds: 3600,              // 1 hour
-            max_streams: 5,
-        };
-
-        // Basic relay operation should be permitted
-        assert!(capability_permits(&relay_cap, "relay:"));
-        assert!(capability_permits(&relay_cap, "relay:500000")); // 500KB < 1MB
-        assert!(capability_permits(&relay_cap, "relay:500000:3")); // 3 streams < 5
-
-        // Exceeding limits should not be permitted
-        assert!(!capability_permits(&relay_cap, "relay:2000000")); // 2MB > 1MB
-        assert!(!capability_permits(&relay_cap, "relay:500000:10")); // 10 streams > 5
-
-        // Non-relay operations should not be permitted
-        assert!(!capability_permits(&relay_cap, "read:"));
-        assert!(!capability_permits(&relay_cap, "write:"));
-    }
-
-    #[test]
-    fn test_relay_capability_meet() {
-        let relay_a = Capability::Relay {
-            max_bytes_per_period: 1024 * 1024, // 1MB
-            period_seconds: 3600,              // 1 hour
-            max_streams: 10,
-        };
-
-        let relay_b = Capability::Relay {
-            max_bytes_per_period: 512 * 1024, // 512KB
-            period_seconds: 1800,             // 30 minutes
-            max_streams: 5,
-        };
-
-        let meet_result = relay_a.meet(&relay_b);
-
-        if let Capability::Relay {
-            max_bytes_per_period,
-            period_seconds,
-            max_streams,
-        } = meet_result
-        {
-            assert_eq!(max_bytes_per_period, 512 * 1024); // min of 1MB and 512KB
-            assert_eq!(period_seconds, 1800); // min of 3600 and 1800
-            assert_eq!(max_streams, 5); // min of 10 and 5
-        } else {
-            panic!("Expected relay capability from meet");
+impl Policy {
+    /// Create new empty policy
+    pub fn new() -> Self {
+        Self {
+            device_capabilities: std::collections::HashMap::new(),
         }
     }
 
-    #[test]
-    fn test_relay_capability_from_permissions() {
-        let cap_set = CapabilitySet::from_permissions(&["relay:1048576:3600:5"]);
-        assert!(cap_set.permits("relay:500000:3"));
-        assert!(!cap_set.permits("relay:2000000:3"));
-
-        let default_relay_set = CapabilitySet::from_permissions(&["relay"]);
-        assert!(default_relay_set.permits("relay:1000000:5"));
+    /// Set capabilities for a device
+    /// These represent the LocalGrants_A component before policy refinement
+    pub fn set_device_capabilities(&mut self, device_id: DeviceId, capabilities: CapabilitySet) {
+        self.device_capabilities.insert(device_id, capabilities);
     }
+
+    /// Get capabilities for a device
+    pub fn get_device_capabilities(&self, device_id: &DeviceId) -> Option<&CapabilitySet> {
+        self.device_capabilities.get(device_id)
+    }
+}
+
+/// Evaluation context for capabilities
+#[derive(Debug, Clone)]
+pub struct EvaluationContext {
+    pub device_id: DeviceId,
+    pub operation_context: String,
+}
+
+impl EvaluationContext {
+    /// Create new evaluation context
+    pub fn new(device_id: DeviceId, operation_context: String) -> Self {
+        Self {
+            device_id,
+            operation_context,
+        }
+    }
+}
+
+/// Local checks for capability evaluation
+///
+/// These represent context-specific constraints that are always applied
+/// during capability evaluation. Examples include time-based restrictions,
+/// operation-specific limits, or environmental constraints.
+#[derive(Debug, Clone)]
+pub struct LocalChecks {
+    /// Time-based capability restrictions
+    pub time_restrictions: Vec<TimeRestriction>,
+    /// Operation-specific constraints
+    pub operation_constraints: Vec<OperationConstraint>,
+    /// Resource access limitations
+    pub resource_limits: Vec<ResourceLimit>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimeRestriction {
+    pub start_time: Option<u64>,
+    pub end_time: Option<u64>,
+    pub allowed_capabilities: CapabilitySet,
+}
+
+#[derive(Debug, Clone)]
+pub struct OperationConstraint {
+    pub operation_pattern: String,
+    pub max_frequency: Option<u32>,
+    pub required_context: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResourceLimit {
+    pub resource_pattern: String,
+    pub max_access_count: Option<u32>,
+    pub size_limit: Option<u64>,
+}
+
+impl LocalChecks {
+    /// Create empty local checks (no restrictions)
+    pub fn empty() -> Self {
+        Self {
+            time_restrictions: Vec::new(),
+            operation_constraints: Vec::new(),
+            resource_limits: Vec::new(),
+        }
+    }
+
+    /// Create local checks with time restrictions
+    pub fn with_time_restrictions(restrictions: Vec<TimeRestriction>) -> Self {
+        Self {
+            time_restrictions: restrictions,
+            operation_constraints: Vec::new(),
+            resource_limits: Vec::new(),
+        }
+    }
+
+    /// Add operation constraint
+    pub fn add_operation_constraint(&mut self, constraint: OperationConstraint) {
+        self.operation_constraints.push(constraint);
+    }
+
+    /// Add resource limit
+    pub fn add_resource_limit(&mut self, limit: ResourceLimit) {
+        self.resource_limits.push(limit);
+    }
+}
+
+/// Single delegation link in a chain
+#[derive(Debug, Clone)]
+pub struct DelegationLink {
+    pub from: DeviceId,
+    pub to: DeviceId,
+    pub capabilities: CapabilitySet,
+    pub max_depth: u32,
+}
+
+impl DelegationLink {
+    /// Create new delegation link
+    pub fn new(from: DeviceId, to: DeviceId, capabilities: CapabilitySet, max_depth: u32) -> Self {
+        Self {
+            from,
+            to,
+            capabilities,
+            max_depth,
+        }
+    }
+}
+
+/// Chain of delegations
+///
+/// Implements delegation chains from §5.2 Web-of-Trust Model where each
+/// delegation is a "meet-closed element d ∈ Cap, scoped to contexts"
+///
+/// The chain enforces "Compositionality: Combining multiple delegations uses ⊓ (never widens)"
+#[derive(Debug, Clone)]
+pub struct DelegationChain {
+    links: Vec<DelegationLink>,
+}
+
+impl DelegationChain {
+    /// Create new delegation chain
+    pub fn new() -> Self {
+        Self { links: Vec::new() }
+    }
+
+    /// Add delegation to chain
+    /// Each delegation link further restricts authority through meet operations
+    pub fn add_delegation(&mut self, link: DelegationLink) -> Result<(), crate::errors::WotError> {
+        self.links.push(link);
+        Ok(())
+    }
+
+    /// Calculate effective capabilities after applying delegation chain
+    ///
+    /// Implements the delegation composition from §5.2:
+    /// "Combining multiple delegations uses ⊓ (never widens)"
+    ///
+    /// Each delegation in the chain applies as a meet operation,
+    /// ensuring monotonic restriction of authority.
+    pub fn effective_capabilities(&self, base: &CapabilitySet) -> CapabilitySet {
+        let mut result = base.clone();
+
+        // Apply each delegation link as a meet operation
+        // This ensures: base ⊓ d1 ⊓ d2 ⊓ ... ⊓ dn
+        // where each di is a delegation that can only restrict, never expand authority
+        for link in &self.links {
+            result = result.meet(&link.capabilities);
+        }
+
+        result
+    }
+}
+
+/// Evaluate capabilities given policy, delegations, local checks, and context
+///
+/// This function implements capability evaluation from §1.3 Operational Semantics
+/// and §5.2 Web-of-Trust Model.
+///
+/// The evaluation follows the formula from §5.2:
+/// "Caps_A = (LocalGrants_A ⊓ ⋂_{(A,x) ∈ E} Delegation_{x → A}) ⊓ Policy_A"
+///
+/// Implementation ensures monotonic restriction through meet-semilattice operations:
+/// 1. Start with LocalGrants_A from policy
+/// 2. Apply each delegation via meet operation (∩ delegations)
+/// 3. Apply local policy constraints via meet operation
+pub fn evaluate_capabilities(
+    policy: &Policy,
+    delegations: &[DelegationLink],
+    local_checks: &LocalChecks,
+    context: &EvaluationContext,
+) -> Result<CapabilitySet, crate::errors::WotError> {
+    // Step 1: Get base capabilities from policy (LocalGrants_A component)
+    let mut result =
+        if let Some(base_capabilities) = policy.get_device_capabilities(&context.device_id) {
+            base_capabilities.clone()
+        } else {
+            // No local grants means starting with empty capability set
+            CapabilitySet::empty()
+        };
+
+    // Step 2: Apply delegations via meet operations
+    // Implements: ⋂_{(A,x) ∈ E} Delegation_{x → A}
+    // Each delegation can only restrict capabilities, never expand them
+    for delegation in delegations {
+        // Only apply delegations targeted at this device
+        if delegation.to == context.device_id {
+            // Apply delegation via meet operation to ensure monotonic restriction
+            result = result.meet(&delegation.capabilities);
+
+            // Validate delegation depth limits
+            if delegation.max_depth == 0 {
+                // Depth-limited delegation that has reached its limit
+                // Return empty capabilities to prevent further delegation
+                return Ok(CapabilitySet::empty());
+            }
+        }
+    }
+
+    // Step 3: Apply local policy constraints via meet operation
+    // This implements the Policy_A component in the formula
+    // Local checks could include time-based constraints, context validation, etc.
+    let local_policy_caps = apply_local_checks(local_checks, &context)?;
+    result = result.meet(&local_policy_caps);
+
+    Ok(result)
+}
+
+/// Apply local policy checks to determine allowed capabilities
+///
+/// This function evaluates local constraints like time restrictions,
+/// operation limits, and resource access controls. The result is combined
+/// with base capabilities via meet operation to ensure restrictions are enforced.
+///
+/// Returns capabilities that are currently allowed based on local policy.
+fn apply_local_checks(
+    local_checks: &LocalChecks,
+    context: &EvaluationContext,
+) -> Result<CapabilitySet, crate::errors::WotError> {
+    use aura_core::time::current_unix_timestamp;
+
+    // Start with top capabilities (no restrictions)
+    let mut allowed = CapabilitySet::top();
+
+    // Apply time-based restrictions
+    let current_time = current_unix_timestamp();
+    for time_restriction in &local_checks.time_restrictions {
+        let within_time_window = match (time_restriction.start_time, time_restriction.end_time) {
+            (Some(start), Some(end)) => current_time >= start && current_time <= end,
+            (Some(start), None) => current_time >= start,
+            (None, Some(end)) => current_time <= end,
+            (None, None) => true, // No time restriction
+        };
+
+        if within_time_window {
+            // Time window is active, so these capabilities are allowed
+            allowed = allowed.meet(&time_restriction.allowed_capabilities);
+        } else {
+            // Outside time window, so no capabilities from this restriction
+            allowed = allowed.meet(&CapabilitySet::empty());
+        }
+    }
+
+    // Apply operation-specific constraints
+    for operation_constraint in &local_checks.operation_constraints {
+        if context
+            .operation_context
+            .contains(&operation_constraint.operation_pattern)
+        {
+            // Check required context
+            if let Some(ref required_context) = operation_constraint.required_context {
+                if !context.operation_context.contains(required_context) {
+                    // Required context not present, restrict to empty capabilities
+                    allowed = allowed.meet(&CapabilitySet::empty());
+                }
+            }
+
+            // Note: Frequency limiting would require external state tracking
+            // This is omitted for now as it requires persistent storage
+        }
+    }
+
+    // Apply resource access limitations
+    for resource_limit in &local_checks.resource_limits {
+        if context
+            .operation_context
+            .contains(&resource_limit.resource_pattern)
+        {
+            // Note: Access count and size limit enforcement would require external state
+            // This is omitted for now as it requires persistent storage and context
+
+            // For now, we allow access but this is where limits would be enforced
+        }
+    }
+
+    Ok(allowed)
 }

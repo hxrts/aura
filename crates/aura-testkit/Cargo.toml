@@ -16,7 +16,8 @@ aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
 aura-journal = { path = "../aura-journal" }
 aura-transport = { path = "../aura-transport" }
-# aura-protocol dependency removed - migrated to foundation-based testing
+aura-protocol = { path = "../aura-protocol" }
+aura-wot = { path = "../aura-wot" }
 
 # Async runtime
 async-trait = { workspace = true }
@@ -43,6 +44,9 @@ serde = { workspace = true }
 
 # Property testing
 proptest = { workspace = true }
+
+# Authorization system
+biscuit-auth = { workspace = true }
 
 [dev-dependencies]
 # For testing the test utilities themselves

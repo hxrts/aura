@@ -43,11 +43,11 @@ use std::time::Duration;
 
 // Re-export unified rate limiting types from aura-core
 pub use aura_core::{
-    RateLimitConfig, RateLimit, RateLimitResult, RateLimiter, RateLimiterStatistics,
+    RateLimit, RateLimitConfig, RateLimitResult, RateLimiter, RateLimiterStatistics,
 };
 
+use crate::core::{sync_resource_exhausted, SyncResult};
 use aura_core::DeviceId;
-use crate::core::SyncResult;
 
 // =============================================================================
 // Helper Functions (preserved for backward compatibility)
@@ -62,14 +62,16 @@ pub fn check_rate_limit_sync(
     cost: u32,
     now_timestamp: u64,
 ) -> SyncResult<()> {
-    use std::time::{Duration as StdDuration, UNIX_EPOCH, SystemTime};
+    use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
     // Convert u64 timestamp to Instant for aura-core compatibility
     let now = UNIX_EPOCH + StdDuration::from_secs(now_timestamp);
     let now_instant = SystemTime::now(); // TODO: Should use actual conversion
     #[allow(clippy::disallowed_methods)]
     let now_instant = std::time::Instant::now(); // Temporary - need proper time abstraction
-    limiter.check_rate_limit(peer_id, cost, now_instant).into_result()
-        .map_err(|e| crate::core::SyncError::resource_exhausted("rate_limit", &e.to_string()))
+    limiter
+        .check_rate_limit(peer_id, cost, now_instant)
+        .into_result()
+        .map_err(|e| sync_resource_exhausted("rate_limit", &e.to_string()))
 }
 
 /// Create a default rate limiter for sync operations (convenience function)

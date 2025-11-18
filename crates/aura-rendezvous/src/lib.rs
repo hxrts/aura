@@ -27,7 +27,7 @@ pub mod sbb;
 /// Privacy-preserving peer discovery
 pub mod discovery;
 
-/// Anonymous messaging with relationship isolation  
+/// Anonymous messaging with relationship isolation
 pub mod messaging;
 
 /// Relay coordination and capability-based routing

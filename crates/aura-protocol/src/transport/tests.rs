@@ -240,7 +240,7 @@ mod receipt_verification_tests {
         let coordinator_id = DeviceId::new();
         let verifier1_id = DeviceId::new();
         let verifier2_id = DeviceId::new();
-        let context_id = ContextId::new();
+        let context_id = ContextId::new("test_context");
 
         let config = ChoreographicConfig::default();
         let mut coordinator = ReceiptVerificationCoordinator::new(coordinator_id, config);
@@ -281,7 +281,7 @@ mod receipt_verification_tests {
             message_hash: vec![0x05, 0x06, 0x07, 0x08],
             signature: vec![0xEE, 0xFF, 0x00, 0x11],
             timestamp: SystemTime::now(),
-            context_id: ContextId::new(),
+            context_id: ContextId::new("test_context"),
         };
 
         let verification_id = coordinator
@@ -328,7 +328,7 @@ mod receipt_verification_tests {
             message_hash: vec![0xDE, 0xAD, 0xBE, 0xEF], // Same hash for replay test
             signature: vec![0x12, 0x34, 0x56, 0x78],
             timestamp: SystemTime::now(),
-            context_id: ContextId::new(),
+            context_id: ContextId::new("test_context"),
         };
 
         // First verification should succeed
@@ -351,7 +351,7 @@ mod receipt_verification_tests {
             message_hash: vec![0xDE, 0xAD, 0xBE, 0xEF], // Same hash but after cleanup
             signature: vec![0x12, 0x34, 0x56, 0x78],
             timestamp: SystemTime::now(),
-            context_id: ContextId::new(),
+            context_id: ContextId::new("test_context"),
         };
 
         let result3 = coordinator.initiate_verification(receipt_data_new, vec![DeviceId::new()]);
@@ -377,7 +377,7 @@ mod websocket_choreography_tests {
     async fn test_websocket_handshake_initiation() {
         let initiator_id = DeviceId::new();
         let peer_id = DeviceId::new();
-        let context_id = ContextId::new();
+        let context_id = ContextId::new("test_context");
 
         let config = ChoreographicConfig::default();
         let mut coordinator = WebSocketHandshakeCoordinator::new(initiator_id, config);
@@ -402,7 +402,7 @@ mod websocket_choreography_tests {
     async fn test_websocket_handshake_response_processing() {
         let initiator_id = DeviceId::new();
         let responder_id = DeviceId::new();
-        let context_id = ContextId::new();
+        let context_id = ContextId::new("test_context");
 
         let config = ChoreographicConfig::default();
         let mut coordinator = WebSocketHandshakeCoordinator::new(initiator_id, config);
@@ -447,7 +447,7 @@ mod websocket_choreography_tests {
             .initiate_handshake(
                 responder_id,
                 "ws://test.example.com/socket".to_string(),
-                ContextId::new(),
+                ContextId::new("test_context"),
             )
             .unwrap();
 
@@ -495,14 +495,14 @@ mod websocket_choreography_tests {
         let session1 = coordinator.initiate_handshake(
             DeviceId::new(),
             "ws://peer1.example.com/socket".to_string(),
-            ContextId::new(),
+            ContextId::new("test_context"),
         );
         assert!(session1.is_ok());
 
         let session2 = coordinator.initiate_handshake(
             DeviceId::new(),
             "ws://peer2.example.com/socket".to_string(),
-            ContextId::new(),
+            ContextId::new("test_context"),
         );
         assert!(session2.is_ok());
 
@@ -512,7 +512,7 @@ mod websocket_choreography_tests {
         let session3 = coordinator.initiate_handshake(
             DeviceId::new(),
             "ws://peer3.example.com/socket".to_string(),
-            ContextId::new(),
+            ContextId::new("test_context"),
         );
         assert!(session3.is_err());
 
@@ -544,7 +544,7 @@ mod channel_management_tests {
         let coordinator_id = DeviceId::new();
         let participant1 = DeviceId::new();
         let participant2 = DeviceId::new();
-        let context_id = ContextId::new();
+        let context_id = ContextId::new("test_context");
 
         let config = ChoreographicConfig::default();
         let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, config);
@@ -569,7 +569,7 @@ mod channel_management_tests {
     async fn test_channel_confirmation_processing() {
         let coordinator_id = DeviceId::new();
         let participant_id = DeviceId::new();
-        let context_id = ContextId::new();
+        let context_id = ContextId::new("test_context");
 
         let config = ChoreographicConfig::default();
         let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, config);
@@ -603,7 +603,7 @@ mod channel_management_tests {
     async fn test_channel_resource_allocation() {
         let coordinator_id = DeviceId::new();
         let participants = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
-        let context_id = ContextId::new();
+        let context_id = ContextId::new("test_context");
 
         let config = ChoreographicConfig::default();
         let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, config);
@@ -657,7 +657,7 @@ mod channel_management_tests {
     async fn test_channel_establishment_failure_scenarios() {
         let coordinator_id = DeviceId::new();
         let participant_id = DeviceId::new();
-        let context_id = ContextId::new();
+        let context_id = ContextId::new("test_context");
 
         let config = ChoreographicConfig::default();
         let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, config);
@@ -776,7 +776,7 @@ mod choreographic_integration_tests {
         let session_id = ws_coordinator.initiate_handshake(
             DeviceId::new(),
             "ws://test.example.com/socket".to_string(),
-            ContextId::new(),
+            ContextId::new("test_context"),
         );
         assert!(session_id.is_ok());
 

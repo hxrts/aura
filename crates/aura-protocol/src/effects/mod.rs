@@ -51,6 +51,8 @@
 // NOTE: Agent effect traits moved to aura-core (Layer 1) - foundational capability definitions
 pub mod choreographic;
 pub mod cli;
+pub mod effect_builder; // New compile-time effect composition builder
+pub mod effect_registry; // New standardized effect registry pattern
 pub mod ledger;
 pub mod params;
 pub mod semilattice;
@@ -79,6 +81,13 @@ pub use aura_core::effects::{
     StorageLocation, StorageStats, SystemEffects, SystemError, TimeEffects, TimeError,
     TimeoutHandle, WakeCondition,
 };
+
+// Re-export new effect registry pattern
+pub use effect_builder::{
+    BasicProtocolBundle, EffectBuilder, EffectBundle, ProductionBundle, ProtocolRequirements,
+    QuickBuilder, TestingBundle,
+};
+pub use effect_registry::{EffectRegistry, EffectRegistryError, EffectRegistryExt};
 
 // Import crypto-specific types from crypto module
 pub use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};

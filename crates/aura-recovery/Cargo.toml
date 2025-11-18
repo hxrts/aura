@@ -30,6 +30,9 @@ futures = { workspace = true }
 tokio = { workspace = true }
 once_cell = { workspace = true }
 
+# Biscuit token authorization
+biscuit-auth = { workspace = true }
+
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -7,12 +7,13 @@ use crate::{
     types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
     RecoveryResult,
 };
-use aura_authenticate::guardian_auth::RecoveryContext;
+use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::TimeEffects;
 use aura_core::frost::ThresholdSignature;
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
 use aura_macros::choreography;
-use aura_protocol::AuraEffectSystem;
+use aura_protocol::{guards::BiscuitGuardEvaluator, AuraEffectSystem};
+use aura_wot::{BiscuitTokenManager, ResourceScope};
 use serde::{Deserialize, Serialize};
 
 /// Guardian setup invitation data
@@ -129,6 +130,10 @@ choreography! {
 /// Guardian setup coordinator
 pub struct GuardianSetupCoordinator {
     _effect_system: AuraEffectSystem,
+    /// Optional token manager for Biscuit authorization
+    token_manager: Option<BiscuitTokenManager>,
+    /// Optional guard evaluator for Biscuit authorization
+    guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
 impl GuardianSetupCoordinator {
@@ -136,6 +141,21 @@ impl GuardianSetupCoordinator {
     pub fn new(effect_system: AuraEffectSystem) -> Self {
         Self {
             _effect_system: effect_system,
+            token_manager: None,
+            guard_evaluator: None,
+        }
+    }
+
+    /// Create new coordinator with Biscuit authorization
+    pub fn new_with_biscuit(
+        effect_system: AuraEffectSystem,
+        token_manager: BiscuitTokenManager,
+        guard_evaluator: BiscuitGuardEvaluator,
+    ) -> Self {
+        Self {
+            _effect_system: effect_system,
+            token_manager: Some(token_manager),
+            guard_evaluator: Some(guard_evaluator),
         }
     }
 
@@ -144,6 +164,18 @@ impl GuardianSetupCoordinator {
         &self,
         request: RecoveryRequest,
     ) -> RecoveryResult<RecoveryResponse> {
+        // Check authorization using Biscuit tokens
+        if let Err(auth_error) = self.check_setup_authorization(&request).await {
+            return Ok(RecoveryResponse {
+                success: false,
+                error: Some(format!("Authorization failed: {}", auth_error)),
+                key_material: None,
+                guardian_shares: Vec::new(),
+                evidence: self.create_failed_evidence(&request),
+                signature: self.create_empty_signature(),
+            });
+        }
+
         let setup_id = self.generate_setup_id(&request);
 
         // Validate that we have guardians
@@ -364,5 +396,32 @@ impl GuardianSetupCoordinator {
 
     fn create_empty_signature(&self) -> ThresholdSignature {
         ThresholdSignature::new(vec![0; 64], vec![])
+    }
+
+    /// Check if the setup request is authorized using Biscuit tokens
+    async fn check_setup_authorization(&self, request: &RecoveryRequest) -> Result<(), String> {
+        let (token_manager, guard_evaluator) = match (&self.token_manager, &self.guard_evaluator) {
+            (Some(tm), Some(ge)) => (tm, ge),
+            _ => return Err("Biscuit authorization components not available".to_string()),
+        };
+
+        let token = token_manager.current_token();
+
+        let resource_scope = ResourceScope::Recovery {
+            recovery_type: aura_wot::RecoveryType::GuardianSet,
+        };
+
+        // Check authorization for guardian setup initiation
+        let authorized = guard_evaluator
+            .check_guard(token, "initiate_guardian_setup", &resource_scope)
+            .map_err(|e| format!("Biscuit authorization error: {}", e))?;
+
+        if !authorized {
+            return Err(
+                "Biscuit token does not grant permission to initiate guardian setup".to_string(),
+            );
+        }
+
+        Ok(())
     }
 }

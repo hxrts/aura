@@ -8,9 +8,10 @@ use crate::{
 };
 use aura_core::effects::{NetworkEffects, TimeEffects};
 use aura_core::hash;
-use aura_core::{AccountId, Cap, DeviceId};
+use aura_core::{AccountId, DeviceId};
 use aura_journal::semilattice::{InvitationLedger, InvitationRecord};
 use aura_macros::choreography;
+use biscuit_auth::Biscuit;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -29,8 +30,8 @@ pub struct DeviceInvitationRequest {
     pub invitee: DeviceId,
     /// Account for device addition
     pub account_id: AccountId,
-    /// Capabilities to grant to new device
-    pub granted_capabilities: Cap,
+    /// Capabilities to grant to new device (as Biscuit token)
+    pub granted_token: Biscuit,
     /// Device role description
     pub device_role: String,
     /// Invitation TTL in seconds (optional override)
@@ -59,8 +60,8 @@ pub struct InvitationEnvelope {
     pub invitee: DeviceId,
     /// Account context
     pub account_id: AccountId,
-    /// Capabilities being granted
-    pub granted_capabilities: Cap,
+    /// Capabilities being granted (as Biscuit token)
+    pub granted_token: Biscuit,
     /// Role assigned to invitee
     pub device_role: String,
     /// Creation timestamp
@@ -88,7 +89,7 @@ impl InvitationEnvelope {
             inviter: request.inviter,
             invitee: request.invitee,
             account_id: request.account_id,
-            granted_capabilities: request.granted_capabilities.clone(),
+            granted_token: request.granted_token.clone(),
             device_role: request.device_role.clone(),
             created_at,
             expires_at,
@@ -135,7 +136,7 @@ pub struct InvitationRequest {
     pub inviter: DeviceId,
     pub invitee: DeviceId,
     pub account_id: AccountId,
-    pub granted_capabilities: Cap,
+    pub granted_token: Biscuit,
     pub device_role: String,
     pub ttl_secs: u64,
     pub invitation_id: String,
@@ -173,6 +174,9 @@ pub struct DeviceInvitationResult {
 }
 
 // Device invitation creation choreography
+// Note: These choreographies can be executed with BiscuitGuardEvaluator
+// for token-based authorization instead of the legacy capability system.
+// The guard_capability annotations are checked against Biscuit tokens.
 mod device_invitation_protocol {
     use super::*;
 
@@ -215,6 +219,7 @@ mod device_invitation_protocol {
 }
 
 // Invitation rejection choreography (alternative flow)
+// Note: Uses BiscuitGuardEvaluator for token-based guard authorization
 mod invitation_rejection_protocol {
     use super::*;
 

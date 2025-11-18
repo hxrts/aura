@@ -6,7 +6,8 @@
 
 use anyhow::{Context, Result};
 use aura_core::{Hash32, SemanticVersion};
-use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects};
+use aura_protocol::orchestration::AuraEffectSystem;
+use aura_protocol::effect_traits::ConsoleEffects;
 use aura_sync::maintenance::UpgradeProposal;
 use aura_sync::protocols::ota::UpgradeKind;
 use uuid::Uuid;

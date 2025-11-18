@@ -52,7 +52,7 @@ async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>>
 
     let initiator_id = DeviceId::new();
     let responder_id = DeviceId::new();
-    let context_id = ContextId::new();
+    let context_id = ContextId::new("example_context");
 
     // Create choreographic configuration
     let choreo_config = ChoreographicConfig {
@@ -126,7 +126,7 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
     let coordinator_id = DeviceId::new();
     let participant1_id = DeviceId::new();
     let participant2_id = DeviceId::new();
-    let context_id = ContextId::new();
+    let context_id = ContextId::new("example_context");
 
     let choreo_config = ChoreographicConfig {
         max_concurrent_protocols: 5,
@@ -208,7 +208,7 @@ async fn receipt_verification_example() -> Result<(), Box<dyn std::error::Error>
     let coordinator_id = DeviceId::new();
     let verifier1_id = DeviceId::new();
     let verifier2_id = DeviceId::new();
-    let context_id = ContextId::new();
+    let context_id = ContextId::new("example_context");
 
     let choreo_config = ChoreographicConfig {
         max_concurrent_protocols: 15,

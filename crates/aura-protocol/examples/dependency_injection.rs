@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::info;
+use tracing_subscriber;
 
 /// Custom crypto handler for demonstration
 #[derive(Clone)]

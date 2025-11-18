@@ -98,7 +98,8 @@ impl CacheEpochTracker {
     /// Updates epoch floors for the specified keys, ensuring monotonicity.
     pub fn apply_invalidation(&mut self, invalidation: &CacheInvalidation) {
         for key in &invalidation.keys {
-            let floor = self.floors
+            let floor = self
+                .floors
                 .entry(key.clone())
                 .or_insert(invalidation.epoch_floor);
 
@@ -324,7 +325,10 @@ mod tests {
         let invalidation = CacheInvalidation::new(vec!["test".into()], 5_u64)
             .with_reason("OTA upgrade to version 2.0");
 
-        assert_eq!(invalidation.reason, Some("OTA upgrade to version 2.0".to_string()));
+        assert_eq!(
+            invalidation.reason,
+            Some("OTA upgrade to version 2.0".to_string())
+        );
     }
 
     #[test]

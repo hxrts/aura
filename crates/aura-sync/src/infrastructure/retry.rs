@@ -33,7 +33,7 @@
 use std::time::Duration;
 
 // Re-export unified retry types from aura-core
-pub use aura_core::{BackoffStrategy, RetryPolicy, RetryResult, RetryContext};
+pub use aura_core::{BackoffStrategy, RetryContext, RetryPolicy, RetryResult};
 
 use crate::core::SyncResult;
 
@@ -42,10 +42,7 @@ use crate::core::SyncResult;
 // =============================================================================
 
 /// Execute an operation with exponential backoff retry (convenience function)
-pub async fn with_exponential_backoff<F, Fut, T>(
-    operation: F,
-    max_attempts: u32,
-) -> SyncResult<T>
+pub async fn with_exponential_backoff<F, Fut, T>(operation: F, max_attempts: u32) -> SyncResult<T>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = SyncResult<T>>,

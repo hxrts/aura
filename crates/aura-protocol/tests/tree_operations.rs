@@ -10,7 +10,9 @@
 
 use aura_core::tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOp, TreeOpKind};
 use aura_core::DeviceId;
-use aura_journal::ratchet_tree::{apply_verified, reduce, validate_invariants};
+use aura_journal::ratchet_tree::{
+    apply_verified_sync as apply_verified, reduce, validate_invariants,
+};
 use aura_journal::semilattice::OpLog;
 use aura_macros::aura_test;
 use aura_protocol::effects::TreeEffects;

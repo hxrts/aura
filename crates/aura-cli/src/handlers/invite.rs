@@ -8,7 +8,7 @@ use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
     invitation_acceptance::InvitationAcceptanceCoordinator,
 };
-use aura_protocol::effects::ConsoleEffects;
+use aura_protocol::effect_traits::ConsoleEffects;
 use std::{fs, str::FromStr};
 
 /// Handle invitation-related CLI commands

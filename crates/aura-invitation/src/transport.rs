@@ -1,9 +1,9 @@
 //! Rendezvous/SBB delivery placeholder used until the full transport stack lands.
 
 use crate::InvitationResult;
-use aura_core::effects::ConsoleEffects;
+// use aura_core::effects::ConsoleEffects; // Unused
 use aura_core::identifiers::DeviceId;
-use aura_protocol::effects::AuraEffects;
+use aura_protocol::orchestration::AuraEffects;
 
 /// Log a rendezvous delivery intent so future transport work can hook in.
 pub async fn deliver_via_rendezvous<C: AuraEffects + ?Sized>(

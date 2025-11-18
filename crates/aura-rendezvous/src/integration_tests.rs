@@ -9,6 +9,7 @@
 
 #![allow(clippy::disallowed_methods)]
 
+use crate::messaging::{NetworkConfig, NetworkTransport};
 use crate::{
     capability_aware_sbb::SbbForwardingPolicy,
     envelope_encryption::PaddingStrategy,
@@ -16,12 +17,12 @@ use crate::{
     messaging::{TransportMethod, TransportOfferPayload},
 };
 use aura_core::{AuraResult, DeviceId, RelationshipId};
-use aura_transport::{NetworkConfig, NetworkTransport};
 use aura_wot::TrustLevel;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Duration;
+use tracing_subscriber;
 
 /// End-to-end test scenario configuration
 #[derive(Debug, Clone)]
@@ -151,14 +152,15 @@ impl TestDevice {
         is_guardian: bool,
     ) -> AuraResult<()> {
         let relationship_id = RelationshipId::new([0u8; 32]);
+        let now = crate::sbb::current_timestamp();
 
         if is_guardian {
             self.sbb_system
-                .add_guardian(peer_device.device_id, relationship_id, trust_level)
+                .add_guardian(peer_device.device_id, relationship_id, trust_level, now)
                 .await;
         } else {
             self.sbb_system
-                .add_friend(peer_device.device_id, relationship_id, trust_level)
+                .add_friend(peer_device.device_id, relationship_id, trust_level, now)
                 .await;
         }
 
@@ -197,14 +199,15 @@ impl TestDevice {
         is_guardian: bool,
     ) -> AuraResult<()> {
         let relationship_id = RelationshipId::new([0u8; 32]);
+        let now = crate::sbb::current_timestamp();
 
         if is_guardian {
             self.sbb_system
-                .add_guardian(peer_info.device_id, relationship_id, trust_level)
+                .add_guardian(peer_info.device_id, relationship_id, trust_level, now)
                 .await;
         } else {
             self.sbb_system
-                .add_friend(peer_info.device_id, relationship_id, trust_level)
+                .add_friend(peer_info.device_id, relationship_id, trust_level, now)
                 .await;
         }
 

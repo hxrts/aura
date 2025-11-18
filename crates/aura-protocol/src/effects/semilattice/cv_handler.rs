@@ -77,10 +77,10 @@
 //!     peers: Vec<DeviceId>,
 //! ) -> Result<(), Box<dyn std::error::Error>> {
 //!     let session_id = SessionId::new();
-//!     
+//!
 //!     // Execute anti-entropy protocol
 //!     execution::execute_cv_sync(handler, peers, session_id).await?;
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
@@ -96,27 +96,27 @@
 //! #[derive(Debug, Clone, PartialEq)]
 //! struct ORSet<T> {
 //!     added: HashMap<T, u64>,   // element -> unique add tag
-//!     removed: HashMap<T, u64>, // element -> unique remove tag  
+//!     removed: HashMap<T, u64>, // element -> unique remove tag
 //! }
 //!
 //! impl<T: Clone + std::hash::Hash + Eq> JoinSemilattice for ORSet<T> {
 //!     fn join(&self, other: &Self) -> Self {
 //!         let mut added = self.added.clone();
 //!         let mut removed = self.removed.clone();
-//!         
+//!
 //!         // Union of add/remove operations
 //!         for (elem, tag) in &other.added {
 //!             added.entry(elem.clone())
 //!                  .and_modify(|t| *t = (*t).max(*tag))
 //!                  .or_insert(*tag);
 //!         }
-//!         
+//!
 //!         for (elem, tag) in &other.removed {
 //!             removed.entry(elem.clone())
 //!                    .and_modify(|t| *t = (*t).max(*tag))
 //!                    .or_insert(*tag);
 //!         }
-//!         
+//!
 //!         ORSet { added, removed }
 //!     }
 //! }
@@ -173,19 +173,19 @@
 //!             metrics: HandlerMetrics::default(),
 //!         }
 //!     }
-//!     
+//!
 //!     pub fn on_recv(&mut self, msg: StateMsg<S>) {
 //!         self.metrics.messages_received += 1;
 //!         self.metrics.join_operations += 1;
 //!         self.metrics.last_update = Some(Instant::now());
-//!         
+//!
 //!         self.inner.on_recv(msg);
 //!     }
-//!     
+//!
 //!     pub fn get_state(&self) -> &S {
 //!         self.inner.get_state()
 //!     }
-//!     
+//!
 //!     pub fn get_metrics(&self) -> &HandlerMetrics {
 //!         &self.metrics
 //!     }
@@ -211,19 +211,19 @@
 //!             validation_enabled: true,
 //!         }
 //!     }
-//!     
+//!
 //!     pub fn on_recv_validated(&mut self, msg: StateMsg<S>) -> Result<(), String> {
 //!         if self.validation_enabled {
 //!             // Verify message doesn't violate monotonicity
 //!             let old_state = self.handler.get_state().clone();
 //!             let new_state = old_state.join(&msg.payload);
-//!             
+//!
 //!             // In a proper CvRDT, new_state should be >= old_state
 //!             if new_state < old_state {
 //!                 return Err("Join operation violated monotonicity".to_string());
 //!             }
 //!         }
-//!         
+//!
 //!         self.handler.on_recv(msg);
 //!         Ok(())
 //!     }
@@ -287,27 +287,27 @@
 //!     fn test_crdt_convergence_property() {
 //!         let mut handler1 = CvHandler::<Counter>::new();
 //!         let mut handler2 = CvHandler::<Counter>::new();
-//!         
+//!
 //!         // Different sequences of operations
 //!         handler1.update_state(Counter(5));
 //!         handler1.update_state(Counter(3));
-//!         
+//!
 //!         handler2.update_state(Counter(3));
 //!         handler2.update_state(Counter(5));
-//!         
+//!
 //!         // Should converge to same state
 //!         assert_eq!(handler1.get_state(), handler2.get_state());
 //!     }
-//!     
+//!
 //!     #[test]
 //!     fn test_idempotency_property() {
 //!         let mut handler = CvHandler::with_state(Counter(42));
 //!         let original_state = handler.get_state().clone();
-//!         
+//!
 //!         // Applying same state multiple times should be idempotent
 //!         handler.on_recv(StateMsg::new(Counter(42)));
 //!         handler.on_recv(StateMsg::new(Counter(42)));
-//!         
+//!
 //!         assert_eq!(handler.get_state(), &original_state);
 //!     }
 //! }

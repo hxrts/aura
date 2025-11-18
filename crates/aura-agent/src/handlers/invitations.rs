@@ -8,7 +8,7 @@ use aura_invitation::{
     },
     invitation_acceptance::{InvitationAcceptance, InvitationAcceptanceCoordinator},
 };
-use aura_protocol::effects::AuraEffectSystem;
+use aura_protocol::orchestration::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -30,7 +30,9 @@ impl InvitationOperations {
     ) -> Result<DeviceInvitationResponse> {
         // TODO: Fix coordinator creation - requires refactoring to use Arc<dyn AuraEffects>
         let _ = self.effects.read().await;
-        Err(AuraError::internal("Device invitation not yet implemented - requires Arc-based effect system"))
+        Err(AuraError::internal(
+            "Device invitation not yet implemented - requires Arc-based effect system",
+        ))
     }
 
     /// Accept a received invitation envelope.
@@ -40,6 +42,8 @@ impl InvitationOperations {
     ) -> Result<InvitationAcceptance> {
         // TODO: Fix coordinator creation - requires refactoring to use Arc<dyn AuraEffects>
         let _ = self.effects.read().await;
-        Err(AuraError::internal("Invitation acceptance not yet implemented - requires Arc-based effect system"))
+        Err(AuraError::internal(
+            "Invitation acceptance not yet implemented - requires Arc-based effect system",
+        ))
     }
 }

@@ -37,7 +37,7 @@ mod test_macros;
 ///     #[namespace = "threshold_ceremony"]
 ///     choreography ThresholdExample {
 ///         roles: Coordinator, Signer[N];
-///         
+///
 ///         Coordinator -> Signer[*]: StartRequest;
 ///         Signer[*] -> Coordinator: Commitment;
 ///     }
@@ -164,11 +164,11 @@ pub fn aura_effect_implementations(input: TokenStream) -> TokenStream {
 ///     pub enum StorageError {
 ///         #[category = "not_found"]
 ///         ContentNotFound { content_id: String } => "Content not found: {content_id}",
-///         
+///
 ///         #[category = "storage"]
 ///         QuotaExceeded { requested: u64, available: u64 } =>
 ///             "Storage quota exceeded: requested {requested} bytes, available {available} bytes",
-///             
+///
 ///         NetworkTimeout => "Network operation timed out",
 ///     }
 /// }

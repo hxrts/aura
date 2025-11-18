@@ -5,7 +5,7 @@
 //! and other Aura components.
 
 use aura_core::effects::JournalEffects;
-use aura_core::{relationships::ContextId, AuraError, DeviceId, FlowBudget, Journal};
+use aura_core::{relationships::ContextId, AuraError, DeviceId, Epoch, FlowBudget, Journal};
 use aura_macros::aura_effect_handlers;
 
 use std::collections::HashMap;
@@ -56,9 +56,33 @@ aura_effect_handlers! {
                 budgets.insert((context.clone(), *peer), *budget);
                 Ok(*budget)
             },
-            charge_flow_budget(_context: &ContextId, _peer: &DeviceId, _cost: u32) -> Result<FlowBudget, AuraError> => {
-                // Mock implementation - just return current budget
-                Ok(FlowBudget::default())
+            charge_flow_budget(context: &ContextId, peer: &DeviceId, cost: u32) -> Result<FlowBudget, AuraError> => {
+                let mut budgets = self.flow_budgets.write().await;
+                let budget_key = (context.clone(), *peer);
+                let mut budget = budgets.get(&budget_key).copied().unwrap_or_default();
+
+                // Check headroom
+                if budget.spent + cost as u64 > budget.limit {
+                    return Err(AuraError::budget_exceeded(format!(
+                        "Flow budget exceeded: spent={}, cost={}, limit={}",
+                        budget.spent, cost, budget.limit
+                    )));
+                }
+
+                // Charge the budget
+                budget.spent += cost as u64;
+                budgets.insert(budget_key, budget);
+
+                tracing::debug!(
+                    context = ?context,
+                    peer = ?peer,
+                    cost = cost,
+                    new_spent = budget.spent,
+                    limit = budget.limit,
+                    "Flow budget charged in mock handler"
+                );
+
+                Ok(budget)
             },
         },
     },
@@ -101,10 +125,51 @@ aura_effect_handlers! {
                 // For now, just return the input budget
                 Ok(*budget)
             },
-            charge_flow_budget(_context: &ContextId, _peer: &DeviceId, _cost: u32) -> Result<FlowBudget, AuraError> => {
-                // Standard implementation would atomically check headroom and charge
-                // For now, return default flow budget
-                Ok(FlowBudget::default())
+            charge_flow_budget(context: &ContextId, peer: &DeviceId, cost: u32) -> Result<FlowBudget, AuraError> => {
+                // Standard implementation with atomic headroom check and charge
+                // In production, this would use persistent storage and proper CRDT merging
+
+                // For now, simulate the operation with in-memory state
+                // In production, this would:
+                // 1. Load current budget from persistent store
+                // 2. Check headroom atomically
+                // 3. Apply the charge using CRDT merge
+                // 4. Persist the updated budget
+
+                let default_limit = 10000u32; // Default flow budget limit
+                let mut budget = FlowBudget {
+                    limit: default_limit as u64,
+                    spent: 0,
+                    epoch: Epoch(1),
+                };
+
+                // Load existing budget (simulated)
+                // In production: budget = load_from_storage(context, peer)?;
+
+                // Check headroom
+                if budget.spent + cost as u64 > budget.limit {
+                    return Err(AuraError::budget_exceeded(format!(
+                        "Flow budget exceeded: spent={}, cost={}, limit={}",
+                        budget.spent, cost, budget.limit
+                    )));
+                }
+
+                // Charge the budget
+                budget.spent += cost as u64;
+
+                // Persist updated budget (simulated)
+                // In production: persist_to_storage(context, peer, &budget)?;
+
+                tracing::info!(
+                    context = ?context,
+                    peer = ?peer,
+                    cost = cost,
+                    new_spent = budget.spent,
+                    limit = budget.limit,
+                    "Flow budget charged in standard handler"
+                );
+
+                Ok(budget)
             },
         },
     },

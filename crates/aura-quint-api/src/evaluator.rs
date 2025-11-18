@@ -10,7 +10,7 @@ use tokio::process::Command;
 
 // Note: We import these types but don't expose them directly to avoid serialization issues
 
-use crate::error::{QuintError, QuintResult};
+use crate::error::{AuraError, QuintResult};
 
 /// Native Quint evaluator that uses the Rust evaluation engine directly
 pub struct QuintEvaluator {
@@ -36,18 +36,18 @@ impl QuintEvaluator {
             .stderr(Stdio::piped())
             .output()
             .await
-            .map_err(|e| QuintError::ParseError(format!("Failed to execute quint: {}", e)))?;
+            .map_err(|e| AuraError::invalid(format!("Failed to execute quint: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(QuintError::ParseError(format!(
+            return Err(AuraError::invalid(format!(
                 "Quint parsing failed: {}",
                 stderr
             )));
         }
 
         let json_output = String::from_utf8(output.stdout)
-            .map_err(|e| QuintError::ParseError(format!("Invalid UTF-8 in quint output: {}", e)))?;
+            .map_err(|e| AuraError::invalid(format!("Invalid UTF-8 in quint output: {}", e)))?;
 
         Ok(json_output)
     }
@@ -63,36 +63,34 @@ impl QuintEvaluator {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| {
-                QuintError::EvaluationError(format!("Failed to spawn evaluator: {}", e))
-            })?;
+            .map_err(|e| AuraError::internal(format!("Failed to spawn evaluator: {}", e)))?;
 
         // Send JSON IR to stdin
         if let Some(stdin) = child.stdin.take() {
             let mut stdin = stdin;
-            stdin.write_all(json_ir.as_bytes()).await.map_err(|e| {
-                QuintError::EvaluationError(format!("Failed to write to stdin: {}", e))
-            })?;
-            stdin.shutdown().await.map_err(|e| {
-                QuintError::EvaluationError(format!("Failed to close stdin: {}", e))
-            })?;
+            stdin
+                .write_all(json_ir.as_bytes())
+                .await
+                .map_err(|e| AuraError::internal(format!("Failed to write to stdin: {}", e)))?;
+            stdin
+                .shutdown()
+                .await
+                .map_err(|e| AuraError::internal(format!("Failed to close stdin: {}", e)))?;
         }
 
         // Read output from stdout
-        let output = child.wait_with_output().await.map_err(|e| {
-            QuintError::EvaluationError(format!("Failed to read evaluator output: {}", e))
-        })?;
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to read evaluator output: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(QuintError::EvaluationError(format!(
-                "Evaluator failed: {}",
-                stderr
-            )));
+            return Err(AuraError::internal(format!("Evaluator failed: {}", stderr)));
         }
 
         let result_json = String::from_utf8(output.stdout).map_err(|e| {
-            QuintError::EvaluationError(format!("Invalid UTF-8 in evaluator output: {}", e))
+            AuraError::internal(format!("Invalid UTF-8 in evaluator output: {}", e))
         })?;
 
         Ok(result_json)

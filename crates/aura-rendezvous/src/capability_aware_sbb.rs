@@ -193,7 +193,12 @@ impl SbbRelationship {
     }
 
     /// Check if peer can forward SBB message of given size
-    pub fn can_forward_sbb(&self, message_size: u64, policy: &SbbForwardingPolicy, now: u64) -> bool {
+    pub fn can_forward_sbb(
+        &self,
+        message_size: u64,
+        policy: &SbbForwardingPolicy,
+        now: u64,
+    ) -> bool {
         // Check trust level requirement
         if self.trust_level < policy.min_trust_level {
             return false;
@@ -236,7 +241,8 @@ impl CapabilityAwareSbbCoordinator {
         is_guardian: bool,
         now: u64,
     ) {
-        let relationship = SbbRelationship::new(peer_id, relationship_id, trust_level, is_guardian, now);
+        let relationship =
+            SbbRelationship::new(peer_id, relationship_id, trust_level, is_guardian, now);
         self.relationships.insert(peer_id, relationship);
     }
 
@@ -478,13 +484,22 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
         }
     }
 
-    async fn get_forwarding_peers(&self, exclude: Option<DeviceId>, now: u64) -> AuraResult<Vec<DeviceId>> {
+    async fn get_forwarding_peers(
+        &self,
+        exclude: Option<DeviceId>,
+        now: u64,
+    ) -> AuraResult<Vec<DeviceId>> {
         let policy = SbbForwardingPolicy::default();
         self.get_capability_aware_forwarding_peers(exclude, SBB_MESSAGE_SIZE, &policy, now)
             .await
     }
 
-    async fn can_forward_to(&self, peer: &DeviceId, message_size: u64, now: u64) -> AuraResult<bool> {
+    async fn can_forward_to(
+        &self,
+        peer: &DeviceId,
+        message_size: u64,
+        now: u64,
+    ) -> AuraResult<bool> {
         match self.relationships.get(peer) {
             Some(relationship) => {
                 let policy = SbbForwardingPolicy::default();

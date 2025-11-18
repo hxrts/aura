@@ -42,8 +42,12 @@ pub mod operations;
 pub mod reduction;
 /// Ratchet tree state representation
 pub mod state;
+/// Tree types (re-exported from aura-core during transition)
+pub mod tree_types;
 
-pub use application::{apply_verified, validate_invariants, ApplicationError, ApplicationResult};
+pub use application::{
+    apply_verified, apply_verified_sync, validate_invariants, ApplicationError, ApplicationResult,
+};
 pub use compaction::{compact, CompactionError}; // TODO: Fix verify_join_preserving, verify_retraction exports
 pub use operations::{
     BatchProcessor, OperationProcessorError, ProcessedOperation, ProcessingStats,
@@ -51,3 +55,4 @@ pub use operations::{
 };
 pub use reduction::{reduce, ReductionError};
 pub use state::{TreeState, TreeStateError};
+pub use tree_types::*;

@@ -34,9 +34,7 @@
 //! - Forward compatibility for deprecated protocol versions
 
 use crate::runtime::AuraHandlerAdapter;
-use aura_protocol::AuraHandlerError as ChoreographyError;
 use aura_core::effects::TimeEffects;
-use aura_protocol::AuraHandlerError;
 use aura_core::{
     // maintenance::{MaintenanceEvent, UpgradeActivated, UpgradeKind, UpgradeProposal}, // TODO: Add maintenance module to aura-core
     DeviceId,
@@ -44,6 +42,8 @@ use aura_core::{
     Hash32,
     SemanticVersion,
 };
+use aura_protocol::AuraHandlerError as ChoreographyError;
+use aura_protocol::AuraHandlerError;
 
 // TODO: These types should be moved to aura-core maintenance module when it's created
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

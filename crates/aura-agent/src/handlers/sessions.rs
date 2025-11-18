@@ -16,9 +16,9 @@ use crate::{
 use aura_core::effects::ConsoleEffects;
 use aura_core::{AccountId, DeviceId};
 use aura_macros::choreography;
-use aura_protocol::effects::{
-    ChoreographicRole, LedgerEffects, SessionManagementEffects, SessionType,
-};
+use aura_protocol::effect_traits::LedgerEffects;
+use aura_protocol::orchestration::ChoreographicRole;
+use aura_protocol::effects::{SessionManagementEffects, SessionType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

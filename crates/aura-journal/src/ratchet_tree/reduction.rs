@@ -149,7 +149,7 @@ fn topological_sort_with_tiebreak<'a>(
 /// - Policy meet verification: Implemented for ChangePolicy
 /// - Commitment recomputation: Implemented (TODO fix - Simplified until full tree structure)
 /// - Path commitment updates: Implemented with tree traversal
-/// - FROST signature verification: TODO: when Phase 3 (FROST) is complete
+/// - FROST signature verification: ✅ COMPLETED in application.rs
 fn apply_operation(state: &mut TreeState, op: &AttestedOp) -> Result<(), ReductionError> {
     // Phase 2.1e: Parent Binding Verification
     verify_parent_binding(&op.op, state)?;

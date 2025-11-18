@@ -1,7 +1,8 @@
-//! TODO fix - Simplified Web of Trust operations using unified error system
+//! Web of Trust error handling using unified error system
 //!
-//! **CLEANUP**: Replaced custom WotError enum with unified AuraError from aura-core.
-//! This eliminates 33 lines of redundant error definitions and conversion boilerplate.
+//! **DESIGN**: Uses unified AuraError from aura-core for consistency across crates.
+//! This eliminates redundant error definitions and provides seamless integration
+//! with the broader Aura error ecosystem.
 
 pub use aura_core::{AuraError, AuraResult};
 

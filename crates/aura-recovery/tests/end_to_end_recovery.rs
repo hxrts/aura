@@ -9,10 +9,12 @@ use aura_agent::runtime::AuraEffectSystem;
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId, TrustLevel};
 use aura_macros::aura_test;
+use aura_protocol::{authorization::BiscuitAuthorizationBridge, guards::BiscuitGuardEvaluator};
 use aura_recovery::{
     GuardianKeyRecoveryCoordinator, GuardianMembershipCoordinator, GuardianProfile, GuardianSet,
     GuardianSetupCoordinator, MembershipChange, MembershipChangeRequest, RecoveryRequest,
 };
+use aura_wot::{AccountAuthority, BiscuitTokenManager};
 use std::time::SystemTime;
 
 /// Helper to create guardian profile
@@ -39,10 +41,34 @@ fn create_recovery_context() -> RecoveryContext {
     }
 }
 
+/// Helper to create Biscuit token manager and evaluator for testing
+fn create_biscuit_components(
+    device_id: DeviceId,
+    account_id: AccountId,
+) -> (BiscuitTokenManager, BiscuitGuardEvaluator) {
+    let authority = AccountAuthority::new(account_id);
+    let token = authority
+        .create_device_token(device_id)
+        .expect("Failed to create device token");
+    let token_manager = BiscuitTokenManager::new(device_id, token);
+
+    let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key());
+    let guard_evaluator = BiscuitGuardEvaluator::new(bridge);
+
+    (token_manager, guard_evaluator)
+}
+
 #[aura_test]
 async fn test_guardian_setup() -> aura_core::AuraResult<()> {
     let fixture = aura_testkit::create_test_fixture().await?;
-    let coordinator = GuardianSetupCoordinator::new(fixture.effect_system());
+    let device_id = DeviceId::new();
+    let account_id = AccountId::new();
+    let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
+    let coordinator = GuardianSetupCoordinator::new_with_biscuit(
+        fixture.effect_system(),
+        token_manager,
+        guard_evaluator,
+    );
 
     // Create guardian set
     let guardians = vec![
@@ -54,11 +80,12 @@ async fn test_guardian_setup() -> aura_core::AuraResult<()> {
 
     // Create setup request
     let request = RecoveryRequest {
-        requesting_device: DeviceId::new(),
-        account_id: AccountId::new(),
+        requesting_device: device_id,
+        account_id,
         context: create_recovery_context(),
         threshold: 2,
         guardians: guardian_set,
+        auth_token: None, // Let the coordinator use its own token
     };
 
     // Execute setup
@@ -77,7 +104,14 @@ async fn test_guardian_setup() -> aura_core::AuraResult<()> {
 #[aura_test]
 async fn test_guardian_key_recovery() -> aura_core::AuraResult<()> {
     let fixture = aura_testkit::create_test_fixture().await?;
-    let coordinator = GuardianKeyRecoveryCoordinator::new(fixture.effect_system());
+    let device_id = DeviceId::new();
+    let account_id = AccountId::new();
+    let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
+    let coordinator = GuardianKeyRecoveryCoordinator::new_with_biscuit(
+        fixture.effect_system(),
+        token_manager,
+        guard_evaluator,
+    );
 
     // Create guardian set
     let guardians = vec![
@@ -89,11 +123,12 @@ async fn test_guardian_key_recovery() -> aura_core::AuraResult<()> {
 
     // Create recovery request
     let request = RecoveryRequest {
-        requesting_device: DeviceId::new(),
-        account_id: AccountId::new(),
+        requesting_device: device_id,
+        account_id,
         context: create_recovery_context(),
         threshold: 2,
         guardians: guardian_set,
+        auth_token: None, // Let the coordinator use its own token
     };
 
     // Execute key recovery
@@ -116,7 +151,14 @@ async fn test_guardian_key_recovery() -> aura_core::AuraResult<()> {
 #[aura_test]
 async fn test_guardian_membership_add() -> aura_core::AuraResult<()> {
     let fixture = aura_testkit::create_test_fixture().await?;
-    let coordinator = GuardianMembershipCoordinator::new(fixture.effect_system());
+    let device_id = DeviceId::new();
+    let account_id = AccountId::new();
+    let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
+    let coordinator = GuardianMembershipCoordinator::new_with_biscuit(
+        fixture.effect_system(),
+        token_manager,
+        guard_evaluator,
+    );
 
     // Create initial guardian set
     let initial_guardians = vec![
@@ -131,11 +173,12 @@ async fn test_guardian_membership_add() -> aura_core::AuraResult<()> {
     // Create membership change request
     let request = MembershipChangeRequest {
         base: RecoveryRequest {
-            requesting_device: DeviceId::new(),
-            account_id: AccountId::new(),
+            requesting_device: device_id,
+            account_id,
             context: create_recovery_context(),
             threshold: 2,
             guardians: guardian_set,
+            auth_token: None, // Let the coordinator use its own token
         },
         change: MembershipChange::AddGuardian {
             guardian: new_guardian,
@@ -159,7 +202,14 @@ async fn test_guardian_membership_add() -> aura_core::AuraResult<()> {
 #[aura_test]
 async fn test_guardian_membership_remove() -> aura_core::AuraResult<()> {
     let fixture = aura_testkit::create_test_fixture().await?;
-    let coordinator = GuardianMembershipCoordinator::new(fixture.effect_system());
+    let device_id = DeviceId::new();
+    let account_id = AccountId::new();
+    let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
+    let coordinator = GuardianMembershipCoordinator::new_with_biscuit(
+        fixture.effect_system(),
+        token_manager,
+        guard_evaluator,
+    );
 
     // Create initial guardian set
     let guardians = vec![
@@ -173,11 +223,12 @@ async fn test_guardian_membership_remove() -> aura_core::AuraResult<()> {
     // Create membership change request
     let request = MembershipChangeRequest {
         base: RecoveryRequest {
-            requesting_device: DeviceId::new(),
-            account_id: AccountId::new(),
+            requesting_device: device_id,
+            account_id,
             context: create_recovery_context(),
             threshold: 2,
             guardians: guardian_set,
+            auth_token: None, // Let the coordinator use its own token
         },
         change: MembershipChange::RemoveGuardian {
             guardian_id: guardian_to_remove,
@@ -201,7 +252,14 @@ async fn test_guardian_membership_remove() -> aura_core::AuraResult<()> {
 #[aura_test]
 async fn test_insufficient_threshold_failure() -> aura_core::AuraResult<()> {
     let fixture = aura_testkit::create_test_fixture().await?;
-    let coordinator = GuardianKeyRecoveryCoordinator::new(fixture.effect_system());
+    let device_id = DeviceId::new();
+    let account_id = AccountId::new();
+    let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
+    let coordinator = GuardianKeyRecoveryCoordinator::new_with_biscuit(
+        fixture.effect_system(),
+        token_manager,
+        guard_evaluator,
+    );
 
     // Create guardian set with only 2 guardians
     let guardians = vec![
@@ -212,11 +270,12 @@ async fn test_insufficient_threshold_failure() -> aura_core::AuraResult<()> {
 
     // Request threshold of 3 (more than available guardians)
     let request = RecoveryRequest {
-        requesting_device: DeviceId::new(),
-        account_id: AccountId::new(),
+        requesting_device: device_id,
+        account_id,
         context: create_recovery_context(),
         threshold: 3, // More than the 2 available guardians
         guardians: guardian_set,
+        auth_token: None, // Let the coordinator use its own token
     };
 
     // Execute key recovery

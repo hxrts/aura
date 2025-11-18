@@ -26,7 +26,7 @@
 //! - Complete FROST ceremonies → `aura-frost` (Layer 5)
 
 // Domain modules - pure functions and types only
-pub mod key_derivation;
+pub mod key_derivation_types;
 pub mod merkle;
 pub mod tree_signing;
 
@@ -36,11 +36,8 @@ pub use ed25519_dalek::{
     VerifyingKey as Ed25519VerifyingKey,
 };
 
-// Re-export key derivation functions and types
-pub use key_derivation::{
-    derive_encryption_key, derive_key_material, IdentityKeyContext, KeyDerivationSpec,
-    PermissionKeyContext,
-};
+// Re-export key derivation types
+pub use key_derivation_types::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyContext};
 
 // Re-export merkle utilities
 pub use merkle::{

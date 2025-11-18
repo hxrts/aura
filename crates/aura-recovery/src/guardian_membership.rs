@@ -12,7 +12,8 @@ use aura_core::effects::TimeEffects;
 use aura_core::frost::ThresholdSignature;
 use aura_core::{identifiers::GuardianId, AccountId, AuraError, DeviceId};
 use aura_macros::choreography;
-use aura_protocol::AuraEffectSystem;
+use aura_protocol::{guards::BiscuitGuardEvaluator, AuraEffectSystem};
+use aura_wot::{BiscuitTokenManager, ResourceScope};
 use serde::{Deserialize, Serialize};
 
 /// Type of membership change
@@ -146,6 +147,10 @@ choreography! {
 /// Guardian membership coordinator
 pub struct GuardianMembershipCoordinator {
     _effect_system: AuraEffectSystem,
+    /// Optional token manager for Biscuit authorization
+    token_manager: Option<BiscuitTokenManager>,
+    /// Optional guard evaluator for Biscuit authorization
+    guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
 /// Extended request for membership changes
@@ -164,6 +169,21 @@ impl GuardianMembershipCoordinator {
     pub fn new(effect_system: AuraEffectSystem) -> Self {
         Self {
             _effect_system: effect_system,
+            token_manager: None,
+            guard_evaluator: None,
+        }
+    }
+
+    /// Create new coordinator with Biscuit authorization
+    pub fn new_with_biscuit(
+        effect_system: AuraEffectSystem,
+        token_manager: BiscuitTokenManager,
+        guard_evaluator: BiscuitGuardEvaluator,
+    ) -> Self {
+        Self {
+            _effect_system: effect_system,
+            token_manager: Some(token_manager),
+            guard_evaluator: Some(guard_evaluator),
         }
     }
 
@@ -172,6 +192,18 @@ impl GuardianMembershipCoordinator {
         &self,
         request: MembershipChangeRequest,
     ) -> RecoveryResult<RecoveryResponse> {
+        // Check authorization using Biscuit tokens
+        if let Err(auth_error) = self.check_membership_authorization(&request).await {
+            return Ok(RecoveryResponse {
+                success: false,
+                error: Some(format!("Authorization failed: {}", auth_error)),
+                key_material: None,
+                guardian_shares: Vec::new(),
+                evidence: self.create_failed_evidence(&request),
+                signature: self.create_empty_signature(),
+            });
+        }
+
         let change_id = self.generate_change_id(&request);
 
         // Convert generic request to choreography-specific proposal
@@ -466,5 +498,35 @@ impl GuardianMembershipCoordinator {
 
     fn create_empty_signature(&self) -> ThresholdSignature {
         ThresholdSignature::new(vec![0; 64], vec![])
+    }
+
+    /// Check if the membership change request is authorized using Biscuit tokens
+    async fn check_membership_authorization(
+        &self,
+        request: &MembershipChangeRequest,
+    ) -> Result<(), String> {
+        let (token_manager, guard_evaluator) = match (&self.token_manager, &self.guard_evaluator) {
+            (Some(tm), Some(ge)) => (tm, ge),
+            _ => return Err("Biscuit authorization components not available".to_string()),
+        };
+
+        let token = token_manager.current_token();
+
+        let resource_scope = ResourceScope::Recovery {
+            recovery_type: aura_wot::RecoveryType::GuardianSet,
+        };
+
+        // Check authorization for membership change initiation
+        let authorized = guard_evaluator
+            .check_guard(token, "initiate_membership_change", &resource_scope)
+            .map_err(|e| format!("Biscuit authorization error: {}", e))?;
+
+        if !authorized {
+            return Err(
+                "Biscuit token does not grant permission to initiate membership change".to_string(),
+            );
+        }
+
+        Ok(())
     }
 }

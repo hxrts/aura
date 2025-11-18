@@ -11,9 +11,7 @@ use aura_core::{
 use aura_sync::choreography::anti_entropy::{
     execute_as_requester, AntiEntropyConfig,
 };
-use aura_protocol::effects::{
-    semilattice::CrdtCoordinator,
-};
+use aura_protocol::effects::semilattice::CrdtCoordinator;
 use aura_macros::aura_test;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

@@ -9,24 +9,53 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use aura_core::{
-    hash_canonical,
-    maintenance::{AdminReplaced, MaintenanceEvent},
-    serialization::to_vec,
-    tree::{Epoch as TreeEpoch, LeafId, NodeIndex, Policy, Snapshot},
-    AccountId, AuraError, DeviceId, Hash32,
-};
-use aura_protocol::effects::{
-    AuraEffectSystem, ConsoleEffects, LedgerEffects, StorageEffects, TreeEffects,
-};
-use aura_sync::protocols::WriterFence;
+use aura_core::{hash_canonical, serialization::to_vec, AccountId, AuraError, DeviceId, Hash32};
+use aura_protocol::orchestration::AuraEffectSystem;
+use aura_protocol::effect_traits::{ConsoleEffects, LedgerEffects, StorageEffects};
+use aura_protocol::effects::TreeEffects;
 use aura_sync::protocols::snapshots::{SnapshotConfig, SnapshotProtocol as SnapshotManager};
+use aura_sync::protocols::WriterFence;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, RwLock};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::errors::Result;
+
+/// Admin replacement event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminReplaced {
+    pub account_id: AccountId,
+    pub replaced_by: DeviceId,
+    pub new_admin: DeviceId,
+    pub activation_epoch: u64,
+}
+
+impl AdminReplaced {
+    /// Create new admin replacement record
+    pub fn new(
+        account_id: AccountId,
+        replaced_by: DeviceId,
+        new_admin: DeviceId,
+        activation_epoch: u64,
+    ) -> Self {
+        Self {
+            account_id,
+            replaced_by,
+            new_admin,
+            activation_epoch,
+        }
+    }
+}
+
+/// Placeholder for maintenance event until fully implemented
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MaintenanceEvent {
+    /// Admin replacement event
+    AdminReplaced(AdminReplaced),
+    /// Cache invalidation event
+    CacheInvalidation(CacheInvalidationEvent),
+}
 
 /// Cache invalidation event types for distributed maintenance
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -313,7 +342,11 @@ impl MaintenanceController {
 
         let (fence_guard, proposed) = self
             .snapshot_manager
-            .propose(self.device_id, target_epoch as TreeEpoch, Hash32(state_digest))
+            .propose(
+                self.device_id,
+                target_epoch as TreeEpoch,
+                Hash32(state_digest),
+            )
             .map_err(|e| AuraError::coordination_failed(e.to_string()))?;
 
         // TODO: Fix append_event to accept SnapshotProposal or convert to MaintenanceEvent

@@ -54,6 +54,7 @@ hmac = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
 aes-gcm = { workspace = true }
+chacha20 = { workspace = true }
 getrandom = { workspace = true }
 
 # Utilities

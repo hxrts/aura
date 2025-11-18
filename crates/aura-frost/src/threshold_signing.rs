@@ -227,13 +227,9 @@ impl FrostCrypto {
             .map_err(|e| AuraError::crypto(format!("Invalid identifier: {}", e)))?;
 
         // Generate temporary key package for signing
-        let (secret_shares, pubkey_package) = frost::keys::generate_with_dealer(
-            3,
-            2,
-            frost::keys::IdentifierList::Default,
-            &mut rng,
-        )
-        .map_err(|e| AuraError::crypto(format!("Failed to generate keys: {}", e)))?;
+        let (secret_shares, pubkey_package) =
+            frost::keys::generate_with_dealer(3, 2, frost::keys::IdentifierList::Default, &mut rng)
+                .map_err(|e| AuraError::crypto(format!("Failed to generate keys: {}", e)))?;
 
         let secret_share = secret_shares
             .get(&identifier)

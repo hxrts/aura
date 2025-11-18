@@ -1,8 +1,8 @@
 //! Memory-based ledger handler for testing
 
 use crate::effects::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEventStream};
-use aura_core::effects::{RandomEffects, TimeEffects};
 use async_trait::async_trait;
+use aura_core::effects::{RandomEffects, TimeEffects};
 use std::sync::Arc;
 
 /// Memory-based ledger handler for testing
@@ -137,11 +137,12 @@ impl LedgerEffects for MemoryLedgerHandler {
     async fn new_uuid(&self) -> Result<uuid::Uuid, LedgerError> {
         // Use RandomEffects for testable UUID generation
         let bytes = self.random.random_bytes(16).await;
-        let uuid_bytes: [u8; 16] = bytes
-            .try_into()
-            .map_err(|_| LedgerError::CryptoOperationFailed {
-                message: "Failed to generate UUID bytes".to_string(),
-            })?;
+        let uuid_bytes: [u8; 16] =
+            bytes
+                .try_into()
+                .map_err(|_| LedgerError::CryptoOperationFailed {
+                    message: "Failed to generate UUID bytes".to_string(),
+                })?;
         Ok(uuid::Uuid::from_bytes(uuid_bytes))
     }
 }

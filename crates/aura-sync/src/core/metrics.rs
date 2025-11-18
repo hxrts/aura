@@ -4,13 +4,12 @@
 //! all performance, operational, and resource metrics scattered across the aura-sync
 //! crate into a single, observability-focused framework.
 
-
+use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use aura_core::DeviceId;
 
 /// Unified metrics collector following observability best practices
 #[derive(Debug, Clone)]
@@ -135,13 +134,26 @@ impl Default for HistogramMetric {
 impl HistogramMetric {
     /// Create default latency buckets (ms): 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, +Inf
     fn default_buckets() -> Vec<HistogramBucket> {
-        [1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, f64::INFINITY]
-            .iter()
-            .map(|&upper_bound| HistogramBucket {
-                upper_bound,
-                count: AtomicU64::new(0),
-            })
-            .collect()
+        [
+            1.0,
+            5.0,
+            10.0,
+            25.0,
+            50.0,
+            100.0,
+            250.0,
+            500.0,
+            1000.0,
+            2500.0,
+            5000.0,
+            f64::INFINITY,
+        ]
+        .iter()
+        .map(|&upper_bound| HistogramBucket {
+            upper_bound,
+            count: AtomicU64::new(0),
+        })
+        .collect()
     }
 
     /// Observe a value in the histogram
@@ -167,7 +179,10 @@ impl HistogramMetric {
             sum: self.sum.load(Ordering::Relaxed),
             count: self.count.load(Ordering::Relaxed),
             buckets: if let Ok(buckets) = self.buckets.lock() {
-                buckets.iter().map(|b| (b.upper_bound, b.count.load(Ordering::Relaxed))).collect()
+                buckets
+                    .iter()
+                    .map(|b| (b.upper_bound, b.count.load(Ordering::Relaxed)))
+                    .collect()
             } else {
                 vec![]
             },
@@ -327,8 +342,12 @@ impl MetricsCollector {
     /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
     pub fn record_sync_start(&self, session_id: &str, now: u64) {
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.sync_sessions_total.fetch_add(1, Ordering::Relaxed);
-            operational.active_sync_sessions.fetch_add(1, Ordering::Relaxed);
+            operational
+                .sync_sessions_total
+                .fetch_add(1, Ordering::Relaxed);
+            operational
+                .active_sync_sessions
+                .fetch_add(1, Ordering::Relaxed);
         }
 
         // Start timing this session
@@ -340,9 +359,16 @@ impl MetricsCollector {
     /// Record sync session completion
     ///
     /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
-    pub fn record_sync_completion(&self, session_id: &str, ops_transferred: usize, bytes_transferred: usize, now: u64) {
+    pub fn record_sync_completion(
+        &self,
+        session_id: &str,
+        ops_transferred: usize,
+        bytes_transferred: usize,
+        now: u64,
+    ) {
         let duration = if let Ok(mut timers) = self.registry.active_timers.lock() {
-            timers.remove(&format!("sync_session_{}", session_id))
+            timers
+                .remove(&format!("sync_session_{}", session_id))
                 .map(|start| {
                     let elapsed_secs = now.saturating_sub(start);
                     Duration::from_secs(elapsed_secs)
@@ -353,15 +379,25 @@ impl MetricsCollector {
         };
 
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.sync_sessions_completed_total.fetch_add(1, Ordering::Relaxed);
-            operational.active_sync_sessions.fetch_sub(1, Ordering::Relaxed);
-            operational.sync_operations_transferred_total.fetch_add(ops_transferred as u64, Ordering::Relaxed);
-            operational.sync_bytes_transferred_total.fetch_add(bytes_transferred as u64, Ordering::Relaxed);
+            operational
+                .sync_sessions_completed_total
+                .fetch_add(1, Ordering::Relaxed);
+            operational
+                .active_sync_sessions
+                .fetch_sub(1, Ordering::Relaxed);
+            operational
+                .sync_operations_transferred_total
+                .fetch_add(ops_transferred as u64, Ordering::Relaxed);
+            operational
+                .sync_bytes_transferred_total
+                .fetch_add(bytes_transferred as u64, Ordering::Relaxed);
         }
 
         if let Ok(performance) = self.registry.performance.lock() {
-            performance.sync_duration_histogram.observe(duration.as_millis() as f64);
-            
+            performance
+                .sync_duration_histogram
+                .observe(duration.as_millis() as f64);
+
             // Update average duration (simple moving average)
             let current_avg = performance.average_sync_duration_ms.load(Ordering::Relaxed);
             let new_avg = if current_avg == 0 {
@@ -369,7 +405,9 @@ impl MetricsCollector {
             } else {
                 (current_avg * 9 + duration.as_millis() as u64) / 10 // Simple moving average
             };
-            performance.average_sync_duration_ms.store(new_avg, Ordering::Relaxed);
+            performance
+                .average_sync_duration_ms
+                .store(new_avg, Ordering::Relaxed);
         }
     }
 
@@ -381,8 +419,12 @@ impl MetricsCollector {
         }
 
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.sync_sessions_failed_total.fetch_add(1, Ordering::Relaxed);
-            operational.active_sync_sessions.fetch_sub(1, Ordering::Relaxed);
+            operational
+                .sync_sessions_failed_total
+                .fetch_add(1, Ordering::Relaxed);
+            operational
+                .active_sync_sessions
+                .fetch_sub(1, Ordering::Relaxed);
         }
 
         self.record_error(category, details);
@@ -402,13 +444,17 @@ impl MetricsCollector {
                     errors.timeout_errors_total.fetch_add(1, Ordering::Relaxed);
                 }
                 ErrorCategory::Validation => {
-                    errors.validation_errors_total.fetch_add(1, Ordering::Relaxed);
+                    errors
+                        .validation_errors_total
+                        .fetch_add(1, Ordering::Relaxed);
                 }
                 ErrorCategory::Resource => {
                     errors.resource_errors_total.fetch_add(1, Ordering::Relaxed);
                 }
                 ErrorCategory::Authorization => {
-                    errors.authorization_errors_total.fetch_add(1, Ordering::Relaxed);
+                    errors
+                        .authorization_errors_total
+                        .fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
@@ -417,51 +463,69 @@ impl MetricsCollector {
     /// Record network latency measurement
     pub fn record_network_latency(&self, peer: DeviceId, latency: Duration) {
         if let Ok(performance) = self.registry.performance.lock() {
-            performance.network_latency_histogram.observe(latency.as_millis() as f64);
+            performance
+                .network_latency_histogram
+                .observe(latency.as_millis() as f64);
         }
     }
 
     /// Record operation processing time
     pub fn record_operation_processing_time(&self, operation: &str, duration: Duration) {
         if let Ok(performance) = self.registry.performance.lock() {
-            performance.operation_processing_histogram.observe(duration.as_micros() as f64);
+            performance
+                .operation_processing_histogram
+                .observe(duration.as_micros() as f64);
         }
     }
 
     /// Record compression ratio achieved
     pub fn record_compression_ratio(&self, ratio: f32) {
         if let Ok(performance) = self.registry.performance.lock() {
-            performance.compression_ratio_histogram.observe(ratio as f64);
+            performance
+                .compression_ratio_histogram
+                .observe(ratio as f64);
         }
     }
 
     /// Update resource usage metrics
     pub fn update_resource_usage(&self, cpu_percent: u32, memory_bytes: u64, network_bps: u64) {
         if let Ok(resources) = self.registry.resources.lock() {
-            resources.cpu_usage_percent.store(cpu_percent as i64, Ordering::Relaxed);
-            resources.memory_usage_bytes.store(memory_bytes, Ordering::Relaxed);
-            resources.network_bandwidth_bps.store(network_bps, Ordering::Relaxed);
+            resources
+                .cpu_usage_percent
+                .store(cpu_percent as i64, Ordering::Relaxed);
+            resources
+                .memory_usage_bytes
+                .store(memory_bytes, Ordering::Relaxed);
+            resources
+                .network_bandwidth_bps
+                .store(network_bps, Ordering::Relaxed);
         }
     }
 
     /// Update peer connection count
     pub fn update_peer_count(&self, count: usize) {
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.connected_peers.store(count as i64, Ordering::Relaxed);
+            operational
+                .connected_peers
+                .store(count as i64, Ordering::Relaxed);
         }
     }
 
     /// Update queue depth
     pub fn update_queue_depth(&self, depth: usize) {
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.queue_depth.store(depth as i64, Ordering::Relaxed);
+            operational
+                .queue_depth
+                .store(depth as i64, Ordering::Relaxed);
         }
     }
 
     /// Record rate limit violation
     pub fn record_rate_limit_violation(&self, peer: DeviceId) {
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.rate_limit_violations_total.fetch_add(1, Ordering::Relaxed);
+            operational
+                .rate_limit_violations_total
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -469,7 +533,9 @@ impl MetricsCollector {
     pub fn export_snapshot(&self) -> SyncMetricsSnapshot {
         let operational_snapshot = if let Ok(operational) = self.registry.operational.lock() {
             let total_sessions = operational.sync_sessions_total.load(Ordering::Relaxed);
-            let completed_sessions = operational.sync_sessions_completed_total.load(Ordering::Relaxed);
+            let completed_sessions = operational
+                .sync_sessions_completed_total
+                .load(Ordering::Relaxed);
             let success_rate = if total_sessions > 0 {
                 (completed_sessions as f64 / total_sessions as f64) * 100.0
             } else {
@@ -479,13 +545,21 @@ impl MetricsCollector {
             OperationalSnapshot {
                 sync_sessions_total: total_sessions,
                 sync_sessions_completed_total: completed_sessions,
-                sync_sessions_failed_total: operational.sync_sessions_failed_total.load(Ordering::Relaxed),
-                sync_operations_transferred_total: operational.sync_operations_transferred_total.load(Ordering::Relaxed),
-                sync_bytes_transferred_total: operational.sync_bytes_transferred_total.load(Ordering::Relaxed),
+                sync_sessions_failed_total: operational
+                    .sync_sessions_failed_total
+                    .load(Ordering::Relaxed),
+                sync_operations_transferred_total: operational
+                    .sync_operations_transferred_total
+                    .load(Ordering::Relaxed),
+                sync_bytes_transferred_total: operational
+                    .sync_bytes_transferred_total
+                    .load(Ordering::Relaxed),
                 active_sync_sessions: operational.active_sync_sessions.load(Ordering::Relaxed),
                 connected_peers: operational.connected_peers.load(Ordering::Relaxed),
                 queue_depth: operational.queue_depth.load(Ordering::Relaxed),
-                rate_limit_violations_total: operational.rate_limit_violations_total.load(Ordering::Relaxed),
+                rate_limit_violations_total: operational
+                    .rate_limit_violations_total
+                    .load(Ordering::Relaxed),
                 success_rate_percent: success_rate,
             }
         } else {
@@ -510,18 +584,36 @@ impl MetricsCollector {
                 operation_processing_stats: performance.operation_processing_histogram.stats(),
                 operations_per_second: performance.operations_per_second.load(Ordering::Relaxed),
                 bytes_per_second: performance.bytes_per_second.load(Ordering::Relaxed),
-                average_sync_duration_ms: performance.average_sync_duration_ms.load(Ordering::Relaxed),
+                average_sync_duration_ms: performance
+                    .average_sync_duration_ms
+                    .load(Ordering::Relaxed),
                 compression_ratio_stats: performance.compression_ratio_histogram.stats(),
             }
         } else {
             PerformanceSnapshot {
-                sync_duration_stats: HistogramStats { sum: 0, count: 0, buckets: vec![] },
-                network_latency_stats: HistogramStats { sum: 0, count: 0, buckets: vec![] },
-                operation_processing_stats: HistogramStats { sum: 0, count: 0, buckets: vec![] },
+                sync_duration_stats: HistogramStats {
+                    sum: 0,
+                    count: 0,
+                    buckets: vec![],
+                },
+                network_latency_stats: HistogramStats {
+                    sum: 0,
+                    count: 0,
+                    buckets: vec![],
+                },
+                operation_processing_stats: HistogramStats {
+                    sum: 0,
+                    count: 0,
+                    buckets: vec![],
+                },
                 operations_per_second: 0,
                 bytes_per_second: 0,
                 average_sync_duration_ms: 0,
-                compression_ratio_stats: HistogramStats { sum: 0, count: 0, buckets: vec![] },
+                compression_ratio_stats: HistogramStats {
+                    sum: 0,
+                    count: 0,
+                    buckets: vec![],
+                },
             }
         };
 
@@ -530,7 +622,9 @@ impl MetricsCollector {
                 cpu_usage_percent: resources.cpu_usage_percent.load(Ordering::Relaxed),
                 memory_usage_bytes: resources.memory_usage_bytes.load(Ordering::Relaxed),
                 network_bandwidth_bps: resources.network_bandwidth_bps.load(Ordering::Relaxed),
-                peer_connection_pool_size: resources.peer_connection_pool_size.load(Ordering::Relaxed),
+                peer_connection_pool_size: resources
+                    .peer_connection_pool_size
+                    .load(Ordering::Relaxed),
                 message_queue_size: resources.message_queue_size.load(Ordering::Relaxed),
                 active_timers_count: resources.active_timers_count.load(Ordering::Relaxed),
             }
@@ -559,7 +653,9 @@ impl MetricsCollector {
                 timeout_errors_total: errors.timeout_errors_total.load(Ordering::Relaxed),
                 validation_errors_total: errors.validation_errors_total.load(Ordering::Relaxed),
                 resource_errors_total: errors.resource_errors_total.load(Ordering::Relaxed),
-                authorization_errors_total: errors.authorization_errors_total.load(Ordering::Relaxed),
+                authorization_errors_total: errors
+                    .authorization_errors_total
+                    .load(Ordering::Relaxed),
                 error_rate_percent: errors.error_rate_percent.load(Ordering::Relaxed),
                 total_errors,
             }
@@ -591,7 +687,7 @@ impl MetricsCollector {
     /// Export metrics in Prometheus format
     pub fn export_prometheus(&self) -> String {
         let snapshot = self.export_snapshot();
-        
+
         format!(
             "# HELP aura_sync_sessions_total Total number of sync sessions initiated\n\
             # TYPE aura_sync_sessions_total counter\n\
@@ -653,7 +749,7 @@ mod tests {
     fn test_metrics_collector_creation() {
         let collector = MetricsCollector::new();
         let snapshot = collector.export_snapshot();
-        
+
         assert_eq!(snapshot.operational.sync_sessions_total, 0);
         assert_eq!(snapshot.operational.connected_peers, 0);
         assert_eq!(snapshot.errors.total_errors, 0);
@@ -662,12 +758,12 @@ mod tests {
     #[test]
     fn test_sync_session_lifecycle() {
         let collector = MetricsCollector::new();
-        
+
         collector.record_sync_start("test_session_1");
         let snapshot1 = collector.export_snapshot();
         assert_eq!(snapshot1.operational.sync_sessions_total, 1);
         assert_eq!(snapshot1.operational.active_sync_sessions, 1);
-        
+
         collector.record_sync_completion("test_session_1", 50, 1024);
         let snapshot2 = collector.export_snapshot();
         assert_eq!(snapshot2.operational.sync_sessions_completed_total, 1);
@@ -679,11 +775,11 @@ mod tests {
     #[test]
     fn test_error_recording() {
         let collector = MetricsCollector::new();
-        
+
         collector.record_error(ErrorCategory::Network, "Connection failed");
         collector.record_error(ErrorCategory::Protocol, "Invalid message");
         collector.record_error(ErrorCategory::Timeout, "Operation timed out");
-        
+
         let snapshot = collector.export_snapshot();
         assert_eq!(snapshot.errors.network_errors_total, 1);
         assert_eq!(snapshot.errors.protocol_errors_total, 1);
@@ -694,11 +790,11 @@ mod tests {
     #[test]
     fn test_histogram_functionality() {
         let histogram = HistogramMetric::default();
-        
+
         histogram.observe(50.0);
         histogram.observe(150.0);
         histogram.observe(1500.0);
-        
+
         let stats = histogram.stats();
         assert_eq!(stats.count, 3);
         assert_eq!(stats.sum, 1700);
@@ -710,7 +806,7 @@ mod tests {
         let collector = MetricsCollector::new();
         collector.record_sync_start("test");
         collector.record_sync_completion("test", 10, 100);
-        
+
         let prometheus_output = collector.export_prometheus();
         assert!(prometheus_output.contains("aura_sync_sessions_total 1"));
         assert!(prometheus_output.contains("aura_sync_sessions_completed_total 1"));
@@ -721,7 +817,7 @@ mod tests {
     fn test_concurrent_access() {
         let collector = Arc::new(MetricsCollector::new());
         let mut handles = vec![];
-        
+
         for i in 0..10 {
             let collector_clone = collector.clone();
             let handle = thread::spawn(move || {
@@ -730,11 +826,11 @@ mod tests {
             });
             handles.push(handle);
         }
-        
+
         for handle in handles {
             handle.join().unwrap();
         }
-        
+
         let snapshot = collector.export_snapshot();
         assert_eq!(snapshot.operational.sync_sessions_total, 10);
         assert_eq!(snapshot.operational.sync_sessions_completed_total, 10);

@@ -36,6 +36,7 @@ thiserror = { workspace = true }
 # Async support
 async-trait = { workspace = true }
 futures = { workspace = true }
+tokio = { workspace = true }
 
 # Identifiers and time
 uuid = { workspace = true }

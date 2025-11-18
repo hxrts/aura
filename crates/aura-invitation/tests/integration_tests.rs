@@ -8,7 +8,7 @@
 
 use aura_agent::runtime::AuraEffectSystem;
 use aura_core::effects::TimeEffects;
-use aura_core::{AccountId, Cap, DeviceId, TrustLevel};
+use aura_core::{AccountId, DeviceId, TrustLevel};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
     invitation_acceptance::{AcceptanceProtocolConfig, InvitationAcceptanceCoordinator},
@@ -19,6 +19,7 @@ use aura_invitation::{
 use aura_journal::semilattice::{InvitationLedger, InvitationStatus};
 use aura_macros::aura_test;
 use aura_testkit::effects_integration::TestEffectsBuilder;
+use aura_wot::AccountAuthority;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -86,11 +87,15 @@ impl InvitationIntegrationTest {
     }
 
     fn create_invitation_request(&self, role: &str, ttl: Option<u64>) -> DeviceInvitationRequest {
+        // Create an account authority and device token for testing
+        let authority = AccountAuthority::new(self.account_id);
+        let device_token = authority.create_device_token(self.invitee_device).unwrap();
+
         DeviceInvitationRequest {
             inviter: self.inviter_device,
             invitee: self.invitee_device,
             account_id: self.account_id,
-            granted_capabilities: Cap::top(),
+            granted_token: device_token,
             device_role: role.to_string(),
             ttl_secs: ttl,
         }
@@ -409,11 +414,14 @@ async fn test_error_handling_integration() -> aura_core::AuraResult<()> {
     let test = InvitationIntegrationTest::new_with_seed(60);
 
     // Test invalid invitation creation
+    let authority = AccountAuthority::new(test.account_id);
+    let device_token = authority.create_device_token(test.invitee_device).unwrap();
+
     let invalid_request = DeviceInvitationRequest {
         inviter: test.inviter_device,
         invitee: test.invitee_device,
         account_id: test.account_id,
-        granted_capabilities: Cap::top(),
+        granted_token: device_token,
         device_role: "test".to_string(),
         ttl_secs: Some(0), // Invalid TTL
     };

@@ -66,6 +66,9 @@ pub mod content;
 /// Protocol type definitions
 pub mod protocols;
 
+/// API stability annotations
+pub mod stability;
+
 /// Relationship and web-of-trust types
 pub mod relationships;
 
@@ -78,11 +81,9 @@ pub mod tree;
 /// FlowBudget primitives
 pub mod flow;
 
-/// Type conversion utilities
+/// Type conversion utilities (internal helpers)
+#[doc(hidden)]
 pub mod conversions;
-
-/// Causal context and vector clocks for CRDT ordering
-pub mod causal_context;
 
 /// Pure synchronous hash trait for content addressing
 pub mod hash;
@@ -95,33 +96,41 @@ pub mod maintenance;
 
 /// Internal test utilities (Layer 1 - does not use aura-testkit to avoid circular dependencies)
 #[cfg(test)]
+#[doc(hidden)]
 pub mod test_utils;
 
 // === Public API Re-exports ===
 
 // Core algebraic types
+#[doc = "stable: Core journal types with semver guarantees"]
 pub use journal::{AuthLevel, Cap, Fact, FactValue, Journal};
+#[doc = "internal: Semilattice traits are implementation details, use Journal API instead"]
 pub use semilattice::{
     Bottom, CmState, CvState, DeltaState, JoinSemilattice, MeetSemiLattice, MvState, Top,
 };
 
 // Identifiers and contexts
+#[doc = "unstable: Context derivation system is under active development"]
 pub use context_derivation::{
     ContextDerivationService, ContextParams, DkdContextDerivation, GroupConfiguration,
     GroupContextDerivation, RelayContextDerivation,
 };
+#[doc = "stable: Core identifier types with semver guarantees"]
 pub use identifiers::*;
 
 // Messages and versioning
+#[doc = "stable: Core message types with semver guarantees"]
 pub use messages::{
     AuthStrength, AuthTag, MessageValidation, MessageValidator, Msg, SemanticVersion, TypedMessage,
 };
+#[doc = "stable: Canonical serialization with semver guarantees"]
 pub use serialization::{
     from_slice, hash_canonical, to_vec, SemanticVersion as SerVersion, SerializationError,
     VersionedMessage,
 };
 
 // Errors
+#[doc = "stable: Error types with semver guarantees"]
 pub use errors::{AuraError, Result as AuraResult};
 
 // Effect interfaces
@@ -158,27 +167,38 @@ pub use effects::{
 };
 
 // Cryptographic utilities
+#[doc = "stable: Core cryptographic utilities with semver guarantees"]
 pub use crypto::{
-    build_commitment_tree, build_merkle_root, derive_encryption_key, derive_key_material,
-    ed25519_verify, generate_uuid, verify_merkle_proof, Ed25519Signature, Ed25519SigningKey,
-    Ed25519VerifyingKey, HpkeKeyPair, HpkePrivateKey, HpkePublicKey, IdentityKeyContext,
-    KeyDerivationSpec, MerkleProof, PermissionKeyContext, SimpleMerkleProof,
+    build_commitment_tree, build_merkle_root, ed25519_verify, generate_uuid, verify_merkle_proof,
+    Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey, HpkeKeyPair, HpkePrivateKey,
+    HpkePublicKey, IdentityKeyContext, KeyDerivationSpec, MerkleProof, PermissionKeyContext,
+    SimpleMerkleProof,
 };
 
 // FROST threshold cryptography module (re-export for aura-frost compatibility)
+#[doc = "unstable: FROST implementation may change significantly"]
 pub use crypto::frost;
 
 // Time and content
+#[doc = "stable: Content addressing types with semver guarantees"]
 pub use content::{ChunkId, ContentId, ContentSize, Hash32};
+#[doc = "stable: Time utilities with semver guarantees"]
 pub use time::{
     current_system_time, current_unix_timestamp, current_unix_timestamp_millis, LamportTimestamp,
 };
 
 // Protocol and session types (temporary - will move to app layer)
+#[doc = "unstable: FlowBudget API is experimental and may change"]
 pub use flow::{FlowBudget, Receipt};
+#[doc = "internal: Protocol types are moving to higher layers"]
 pub use protocols::*;
+#[doc = "unstable: Relationship types are under active development"]
 pub use relationships::*;
+#[doc = "internal: Session epoch management is moving to aura-agent"]
 pub use session_epochs::*;
+#[deprecated(
+    note = "Tree types moved to aura-journal::ratchet_tree. Use `aura_journal::{AttestedOp, TreeOp, etc}` instead"
+)]
 pub use tree::{
     commit_branch, commit_leaf, compute_root_commitment, policy_hash, AttestedOp, BranchNode,
     Epoch, LeafId, LeafNode, LeafRole, NodeIndex, NodeKind, Policy, TreeCommitment, TreeOp,
@@ -186,9 +206,12 @@ pub use tree::{
 };
 
 // Utilities
-pub use causal_context::{CausalContext, OperationId, VectorClock};
+// Note: CausalContext, OperationId, VectorClock moved to aura-journal
 
 // Maintenance events
+#[deprecated(
+    note = "Maintenance types moved to aura-agent::maintenance. Use `aura_agent::{AdminReplaced, MaintenanceEvent}` instead"
+)]
 pub use maintenance::{AdminReplaced, MaintenanceEvent};
 
 /// Standard result type for core operations

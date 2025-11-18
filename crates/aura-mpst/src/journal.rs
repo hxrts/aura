@@ -26,7 +26,7 @@
 //! ```
 
 use async_trait::async_trait;
-use aura_core::{AuraError, AuraResult, Journal, JournalEffects};
+use aura_core::{AuraError, AuraResult, Fact, FactValue, Journal, JournalEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -127,6 +127,36 @@ impl JournalAnnotation {
                 Ok(target.clone())
             }
         }
+    }
+}
+
+/// Parse a journal fact from a string representation
+pub fn parse_journal_fact(fact_str: &str) -> AuraResult<Fact> {
+    // Parse different fact formats
+    if fact_str.starts_with("operation:") {
+        let operation_type = fact_str.strip_prefix("operation:").unwrap_or("");
+        Ok(Fact::with_value(
+            "operation_type",
+            FactValue::String(operation_type.to_string()),
+        ))
+    } else if fact_str.starts_with("message:") {
+        let message_type = fact_str.strip_prefix("message:").unwrap_or("");
+        Ok(Fact::with_value(
+            "message_type",
+            FactValue::String(message_type.to_string()),
+        ))
+    } else if fact_str.starts_with("event:") {
+        let event_type = fact_str.strip_prefix("event:").unwrap_or("");
+        Ok(Fact::with_value(
+            "event",
+            FactValue::String(event_type.to_string()),
+        ))
+    } else {
+        // Default: treat as a general fact
+        Ok(Fact::with_value(
+            "general",
+            FactValue::String(fact_str.to_string()),
+        ))
     }
 }
 

@@ -1,87 +1,74 @@
-//! Example demonstrating various ways to use the AuraEffectSystemBuilder
+//! Example demonstrating various ways to use the EffectRegistry
 
-use aura_core::{session_epochs::Epoch, AuraResult, DeviceId};
-use aura_protocol::effects::{AuraEffectSystemBuilder, StorageConfig};
-use aura_protocol::ExecutionMode;
+use aura_core::{AuraResult, DeviceId};
+use aura_protocol::effects::EffectRegistry;
 
 #[tokio::main]
 async fn main() -> AuraResult<()> {
     // Example 1: Simple test configuration
     println!("Example 1: Simple test configuration");
     let device_id = DeviceId::new();
-    let system = AuraEffectSystemBuilder::new()
+    let system = EffectRegistry::testing()
         .with_device_id(device_id)
-        .with_execution_mode(ExecutionMode::Testing)
-        .build_sync()?;
+        .build()?;
 
-    println!("Created test system for device: {:?}", system.device_id());
+    println!("Created test system for device: {:?}", device_id);
 
     // Example 2: Custom configuration with specific settings
     println!("\nExample 2: Custom configuration");
     let device_id = DeviceId::new();
-    let system = AuraEffectSystemBuilder::new()
+    let system = EffectRegistry::testing()
         .with_device_id(device_id)
-        .with_execution_mode(ExecutionMode::Testing)
-        .with_default_flow_limit(5000)
-        .with_initial_epoch(Epoch::from(10))
-        .build_sync()?;
+        .build()?;
 
-    println!("Created system with custom flow limit and epoch");
+    println!("Created system with custom configuration");
 
     // Example 3: Production configuration
     println!("\nExample 3: Production-like configuration");
     let device_id = DeviceId::new();
-    let storage_config = StorageConfig {
-        base_path: std::env::temp_dir().join("aura_example"),
-        master_key: [0u8; 32], // In production, use secure key management
-        enable_compression: true,
-        max_file_size: 50 * 1024 * 1024, // 50MB
-    };
-
-    let system = AuraEffectSystemBuilder::new()
+    let system = EffectRegistry::production()
         .with_device_id(device_id)
-        .with_execution_mode(ExecutionMode::Production)
-        .with_storage_config(storage_config)
-        .build_sync()?;
+        .with_logging()
+        .with_metrics()
+        .build()?;
 
-    println!("Created production-like system");
+    println!("Created production system");
 
     // Example 4: Simulation mode with deterministic seed
     println!("\nExample 4: Simulation mode");
     let device_id = DeviceId::new();
     let seed = 12345u64;
-    let system = AuraEffectSystemBuilder::new()
+    let system = EffectRegistry::simulation(seed)
         .with_device_id(device_id)
-        .with_execution_mode(ExecutionMode::Simulation { seed })
-        .build_sync()?;
+        .with_logging()
+        .build()?;
 
     println!("Created simulation system with seed: {}", seed);
 
-    // Example 5: Async initialization
-    println!("\nExample 5: Async initialization");
+    // Example 5: Standard configurations
+    println!("\nExample 5: Standard configurations");
     let device_id = DeviceId::new();
-    let system = AuraEffectSystemBuilder::new()
+    let system = EffectRegistry::testing()
         .with_device_id(device_id)
-        .with_execution_mode(ExecutionMode::Testing)
-        .build()
-        .await?;
+        .build()?;
 
-    println!("Created system using async initialization");
+    println!("Created system using standard testing configuration");
 
-    // Example 6: Using with custom handlers (commented out as it requires handler implementation)
-    /*
-    use aura_effects::crypto::MockCryptoHandler;
-    use aura_protocol::effects::{EffectType, handler_adapters::CryptoHandlerAdapter};
+    // Example 6: Multiple environments
+    println!("\nExample 6: Multiple environments");
+    let device_id = DeviceId::new();
 
-    let custom_crypto = MockCryptoHandler::new(99999);
-    let system = AuraEffectSystemBuilder::new()
+    let _test_system = EffectRegistry::testing()
         .with_device_id(device_id)
-        .with_handler(
-            EffectType::Crypto,
-            Box::new(CryptoHandlerAdapter::new(custom_crypto, ExecutionMode::Testing)),
-        )
-        .build_sync()?;
-    */
+        .build()?;
+    let _prod_system = EffectRegistry::production()
+        .with_device_id(device_id)
+        .build()?;
+    let _sim_system = EffectRegistry::simulation(42)
+        .with_device_id(device_id)
+        .build()?;
+
+    println!("Created systems for different environments");
 
     println!("\nAll examples completed successfully!");
     Ok(())

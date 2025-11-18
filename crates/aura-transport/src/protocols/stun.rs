@@ -210,7 +210,7 @@ impl StunMessage {
     }
 }
 
-/// Configuration for STUN operations  
+/// Configuration for STUN operations
 #[derive(Debug, Clone)]
 pub struct StunConfig {
     /// STUN server addresses

@@ -331,7 +331,7 @@ impl AuraEffectSystem {
     ///
     /// # Example
     /// ```
-    /// # use aura_protocol::effects::AuraEffectSystem;
+    /// # use aura_protocol::orchestration::AuraEffectSystem;
     /// # use aura_core::{DeviceId, AuraResult};
     /// # use aura_testkit::{aura_test, TestFixture};
     /// #[aura_test]

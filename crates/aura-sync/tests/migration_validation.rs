@@ -8,7 +8,12 @@
 use aura_core::{DeviceId, SessionId};
 use aura_sync::core::{
     config::{BatchConfig, NetworkConfig, RetryConfig, SyncConfig},
-    errors::{SyncError, SyncResult},
+    errors::{
+        sync_authorization_error, sync_biscuit_authorization_error, sync_biscuit_guard_error,
+        sync_consistency_error, sync_network_error, sync_protocol_error, sync_protocol_with_peer,
+        sync_resource_with_limit, sync_serialization_error, sync_session_error, sync_timeout_error,
+        sync_timeout_with_peer, sync_validation_field_error, SyncError, SyncResult,
+    },
     messages::{
         BatchMessage, ProgressMessage, RequestMessage, ResponseMessage, SessionMessage,
         SyncResult as MessageSyncResult,
@@ -41,48 +46,53 @@ fn test_unified_error_hierarchy_compatibility() {
     // Test that new error system provides all error categories needed by existing code
 
     // Network errors (common in sync operations)
-    let network_err = SyncError::network("Connection failed");
+    let network_err = sync_network_error("Connection failed");
     assert_eq!(network_err.category(), "network");
     assert!(network_err.is_retryable());
     assert!(network_err.user_message().contains("Network"));
 
     // Protocol errors (choreographic violations)
-    let protocol_err = SyncError::protocol("anti_entropy", "Invalid digest");
+    let protocol_err = sync_protocol_error("anti_entropy", "Invalid digest");
     assert_eq!(protocol_err.category(), "protocol");
     assert!(!protocol_err.is_retryable());
 
     // Session errors (state management)
-    let session_err = SyncError::session("Invalid state transition");
+    let session_err = sync_session_error("Invalid state transition");
     assert_eq!(session_err.category(), "session");
     assert!(session_err.is_retryable());
 
     // Authorization errors (capability violations)
-    let auth_err = SyncError::authorization("Insufficient permissions");
+    let auth_err = sync_authorization_error("Insufficient permissions");
     assert_eq!(auth_err.category(), "authorization");
     assert!(!auth_err.is_retryable());
 
+    // Biscuit authorization errors (token-based access control)
+    let biscuit_auth_err = sync_biscuit_authorization_error("Token expired", DeviceId::new());
+    assert_eq!(biscuit_auth_err.category(), "authorization");
+    assert!(!biscuit_auth_err.is_retryable());
+
     // Timeout errors (common in distributed systems)
-    let timeout_err = SyncError::timeout("journal_sync", Duration::from_secs(30));
+    let timeout_err = sync_timeout_error("journal_sync", Duration::from_secs(30));
     assert_eq!(timeout_err.category(), "timeout");
     assert!(timeout_err.is_retryable());
 
     // Resource exhaustion (memory, bandwidth limits)
-    let resource_err = SyncError::resource_exhausted_with_limit("memory", "Buffer overflow", 1024);
+    let resource_err = sync_resource_with_limit("memory", "Buffer overflow", 1024);
     assert_eq!(resource_err.category(), "resource");
     assert!(resource_err.is_retryable());
 
     // Validation errors (data integrity)
-    let validation_err = SyncError::validation_field("Invalid timestamp", "created_at");
+    let validation_err = sync_validation_field_error("Invalid timestamp", "created_at");
     assert_eq!(validation_err.category(), "validation");
     assert!(!validation_err.is_retryable());
 
     // Serialization errors (message format issues)
-    let ser_err = SyncError::serialization("SyncMessage", "Invalid JSON");
+    let ser_err = sync_serialization_error("SyncMessage", "Invalid JSON");
     assert_eq!(ser_err.category(), "serialization");
     assert!(!ser_err.is_retryable());
 
     // Consistency errors (CRDT violations)
-    let consistency_err = SyncError::consistency("journal_merge", "Conflicting operations");
+    let consistency_err = sync_consistency_error("journal_merge", "Conflicting operations");
     assert_eq!(consistency_err.category(), "consistency");
     assert!(!consistency_err.is_retryable());
 }
@@ -92,13 +102,13 @@ fn test_error_context_preservation() {
     // Test that error context (peer, operation, etc.) is preserved
     let peer_id = DeviceId::new();
 
-    let network_err = SyncError::network_permanent("Invalid protocol version", Some(peer_id));
+    let network_err = sync_network_error("Invalid protocol version", Some(peer_id));
     assert!(!network_err.is_retryable());
 
-    let protocol_err = SyncError::protocol_with_peer("sync", "Message out of order", peer_id);
+    let protocol_err = sync_protocol_with_peer("sync", "Message out of order", peer_id);
     assert!(protocol_err.to_string().contains(&peer_id.to_string()));
 
-    let timeout_err = SyncError::timeout_with_peer("handshake", Duration::from_secs(10), peer_id);
+    let timeout_err = sync_timeout_with_peer("handshake", Duration::from_secs(10), peer_id);
     assert!(timeout_err.to_string().contains("10s"));
     assert!(timeout_err.to_string().contains(&peer_id.to_string()));
 }
@@ -621,7 +631,7 @@ fn test_error_propagation_consistency() {
     };
 
     // Verify error can be converted/wrapped appropriately
-    let sync_error = SyncError::session(&session_error.to_string());
+    let sync_error = sync_session_error(&session_error.to_string());
     assert_eq!(sync_error.category(), "session");
     assert!(sync_error.is_retryable());
 }
@@ -632,7 +642,7 @@ fn test_backwards_compatibility_surface() {
     // This test should pass both before and after refactoring
 
     // Basic error creation
-    let _error = SyncError::network("test");
+    let _error = sync_network_error("test");
 
     // Basic configuration
     let _config = SyncConfig::default();
@@ -643,7 +653,8 @@ fn test_backwards_compatibility_surface() {
     // Basic session management
     #[allow(clippy::disallowed_methods)]
     let now = Instant::now();
-    let _session_manager = SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), now);
+    let _session_manager =
+        SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), now);
 
     // Basic message patterns
     let _session_msg = SessionMessage::new(SessionId::new(), "test");

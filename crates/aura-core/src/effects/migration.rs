@@ -6,13 +6,13 @@
 //!
 //! All middleware patterns have been replaced with:
 //! - AuthorizationEffects trait and handlers in aura-effects
-//! - ReliabilityEffects trait for coordination in aura-protocol  
+//! - ReliabilityEffects trait for coordination in aura-protocol
 //! - TestingEffects and ChaosEffects for simulation scenarios
 //! - Explicit context propagation replacing ambient middleware context
 //!
 //! The migration was completed in phases:
 //! - Phase 1: Foundation layer effect traits
-//! - Phase 2: Domain layer middleware removal  
+//! - Phase 2: Domain layer middleware removal
 //! - Phase 3: Storage & journal layer cleanup
 //! - Phase 4: Implementation layer handler creation
 //!

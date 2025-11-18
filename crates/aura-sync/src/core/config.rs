@@ -81,7 +81,7 @@ impl RetryConfig {
         let clamped_delay = jittered_delay.min(self.max_delay.as_millis() as f64);
         Duration::from_millis(clamped_delay as u64)
     }
-    
+
     /// Check if should retry for given attempt number
     pub fn should_retry(&self, attempt: u32) -> bool {
         attempt < self.max_retries
@@ -265,7 +265,8 @@ impl PerformanceConfig {
         if self.max_network_bandwidth == 0 {
             return Err("max_network_bandwidth must be > 0".to_string());
         }
-        if self.memory_limit < 1024 * 1024 { // 1MB minimum
+        if self.memory_limit < 1024 * 1024 {
+            // 1MB minimum
             return Err("memory_limit must be >= 1MB".to_string());
         }
         Ok(())
@@ -323,11 +324,11 @@ impl SyncConfig {
         Self {
             network: NetworkConfig {
                 base_sync_interval: Duration::from_secs(60), // Less frequent in prod
-                sync_timeout: Duration::from_secs(300), // Longer timeout
+                sync_timeout: Duration::from_secs(300),      // Longer timeout
                 ..NetworkConfig::default()
             },
             retry: RetryConfig {
-                max_retries: 5, // More retries in production
+                max_retries: 5,                     // More retries in production
                 max_delay: Duration::from_secs(60), // Longer max delay
                 ..RetryConfig::default()
             },
@@ -467,13 +468,13 @@ mod tests {
     #[test]
     fn test_retry_config_delay_calculation() {
         let retry_config = RetryConfig::default();
-        
+
         let delay1 = retry_config.delay_for_attempt(0);
         let delay2 = retry_config.delay_for_attempt(1);
-        
+
         // Second attempt should have longer delay (exponential backoff)
         assert!(delay2 > delay1);
-        
+
         // Should not exceed max delay
         let delay_long = retry_config.delay_for_attempt(10);
         assert!(delay_long <= retry_config.max_delay);
@@ -482,17 +483,17 @@ mod tests {
     #[test]
     fn test_config_validation() {
         let mut config = SyncConfig::default();
-        
+
         // Test invalid CPU usage
         config.performance.max_cpu_usage = 150;
         assert!(config.validate().is_err());
-        
+
         config.performance.max_cpu_usage = 80;
-        
+
         // Test invalid jitter factor
         config.retry.jitter_factor = 2.0;
         assert!(config.validate().is_err());
-        
+
         config.retry.jitter_factor = 0.1;
         assert!(config.validate().is_ok());
     }
@@ -506,7 +507,7 @@ mod tests {
             })
             .build()
             .unwrap();
-        
+
         assert_eq!(config.retry.max_retries, 10);
     }
 
@@ -518,7 +519,7 @@ mod tests {
                 ..PerformanceConfig::default()
             })
             .build();
-        
+
         assert!(result.is_err());
     }
 }

@@ -11,7 +11,7 @@ use aura_agent::handlers::ota::OtaOperations;
 use aura_agent::maintenance::MaintenanceController;
 use aura_core::{AccountId, DeviceId, SemanticVersion, AuraResult};
 use aura_macros::aura_test;
-use aura_protocol::effects::AuraEffectSystem;
+use aura_protocol::orchestration::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

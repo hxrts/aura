@@ -27,6 +27,7 @@ use crate::effects::{
     TimeEffects, TimeError, TimeoutHandle, TreeEffects, WakeCondition,
 };
 use async_trait::async_trait;
+use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
 use aura_core::effects::JournalEffects;
 use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, relationships::ContextId, FlowBudget, LocalSessionType};
@@ -304,7 +305,7 @@ impl CryptoEffects for CompositeHandler {
         &self,
         threshold: u16,
         max_signers: u16,
-    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+    ) -> Result<FrostKeyGenResult, CryptoError> {
         self.crypto
             .frost_generate_keys(threshold, max_signers)
             .await
@@ -319,9 +320,10 @@ impl CryptoEffects for CompositeHandler {
         message: &[u8],
         nonces: &[Vec<u8>],
         participants: &[u16],
+        public_key_package: &[u8],
     ) -> Result<aura_core::effects::crypto::FrostSigningPackage, CryptoError> {
         self.crypto
-            .frost_create_signing_package(message, nonces, participants)
+            .frost_create_signing_package(message, nonces, participants, public_key_package)
             .await
     }
 
@@ -399,7 +401,7 @@ impl CryptoEffects for CompositeHandler {
         old_threshold: u16,
         new_threshold: u16,
         new_max_signers: u16,
-    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+    ) -> Result<FrostKeyGenResult, CryptoError> {
         self.crypto
             .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
             .await

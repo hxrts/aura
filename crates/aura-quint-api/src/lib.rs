@@ -18,14 +18,14 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let mut runner = QuintRunner::new()?;
-//!     
+//!
 //!     let property = PropertySpec::new("always safety")
 //!         .with_invariant("counter >= 0")
 //!         .with_context("counter", "Int");
-//!     
+//!
 //!     let result = runner.verify_property(&property).await?;
 //!     println!("Verification result: {:?}", result);
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```

@@ -8,8 +8,9 @@
 
 use crate::middleware::SimulatorConfig;
 use crate::{Result as SimResult, SimulatorContext, SimulatorError};
+use aura_agent::runtime::AuraEffectSystem;
 use aura_core::DeviceId;
-use aura_agent::runtime::{AuraEffectSystem, EffectSystemBuilder, EffectSystemConfig};
+use aura_protocol::standard_patterns::EffectRegistry;
 use aura_testkit::{DeviceTestFixture, ProtocolTestFixture, TestExecutionMode};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,11 +33,11 @@ impl TestkitSimulatorBridge {
             let device_id = fixture.device_id();
 
             // Create real effect system configured for simulation
-            let config = EffectSystemConfig::for_simulation(device_id, seed);
             let effect_system = Arc::new(
-                EffectSystemBuilder::new()
-                    .with_config(config)
-                    .build_sync()
+                EffectRegistry::simulation(seed)
+                    .with_device_id(device_id)
+                    .with_logging()
+                    .build()
                     .map_err(|e| {
                         SimulatorError::OperationFailed(format!(
                             "Effect system creation failed for device {}: {}",
@@ -102,11 +103,11 @@ impl TestkitSimulatorBridge {
         seed: u64,
     ) -> SimResult<Arc<AuraEffectSystem>> {
         // Convert test harness to effect system instead of middleware stack
-        let config = EffectSystemConfig::for_simulation(device_id, seed);
         let effect_system = Arc::new(
-            EffectSystemBuilder::new()
-                .with_config(config)
-                .build_sync()
+            EffectRegistry::simulation(seed)
+                .with_device_id(device_id)
+                .with_logging()
+                .build()
                 .map_err(|e| {
                     SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
                 })?,

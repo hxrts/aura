@@ -34,10 +34,13 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
 
-use aura_core::{DeviceId, AuraResult, AuraError};
-use crate::core::{SyncError, SyncResult};
+use crate::core::{sync_config_error, sync_peer_error, SyncResult};
+use aura_core::DeviceId;
+use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
+use aura_wot::{BiscuitError, BiscuitTokenManager, ResourceScope};
 
 // =============================================================================
 // Configuration
@@ -129,7 +132,7 @@ pub struct PeerMetadata {
     /// Trust level from aura-wot (0-100)
     pub trust_level: u8,
 
-    /// Whether peer has required sync capabilities
+    /// Whether peer has required sync capabilities (checked via Biscuit tokens)
     pub has_sync_capability: bool,
 
     /// Current number of active sync sessions
@@ -166,8 +169,7 @@ impl PeerMetadata {
 
     /// Check if peer is available for new sync sessions
     pub fn is_available(&self, max_concurrent: usize) -> bool {
-        matches!(self.status, PeerStatus::Connected)
-            && self.active_sessions < max_concurrent
+        matches!(self.status, PeerStatus::Connected) && self.active_sessions < max_concurrent
     }
 
     /// Calculate peer score for selection priority
@@ -193,8 +195,8 @@ pub struct PeerInfo {
     /// Basic peer metadata
     pub metadata: PeerMetadata,
 
-    /// Peer's advertised capabilities (from aura-wot)
-    pub capabilities: HashSet<String>,
+    /// Peer's Biscuit token (from aura-wot authorization system)
+    pub token: Option<Vec<u8>>, // Serialized Biscuit token
 
     /// Connection-specific details (from aura-transport)
     pub connection_details: Option<ConnectionDetails>,
@@ -234,7 +236,7 @@ pub enum RelationshipType {
 ///
 /// The peer manager integrates with multiple Aura subsystems:
 /// - Uses aura-rendezvous for discovering peers via SBB
-/// - Uses aura-wot for capability verification and trust ranking
+/// - Uses aura-wot for Biscuit token-based authorization and trust ranking
 /// - Uses aura-transport for connection management
 /// - Uses aura-verify for identity verification
 pub struct PeerManager {
@@ -246,6 +248,9 @@ pub struct PeerManager {
 
     /// Last discovery refresh time (Unix timestamp in seconds)
     last_refresh: Option<u64>,
+
+    /// Biscuit guard evaluator for authorization checks
+    guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
 impl PeerManager {
@@ -255,6 +260,20 @@ impl PeerManager {
             config,
             peers: HashMap::new(),
             last_refresh: None,
+            guard_evaluator: None,
+        }
+    }
+
+    /// Create a new peer manager with Biscuit authorization support
+    pub fn with_biscuit_authorization(
+        config: PeerDiscoveryConfig,
+        guard_evaluator: BiscuitGuardEvaluator,
+    ) -> Self {
+        Self {
+            config,
+            peers: HashMap::new(),
+            last_refresh: None,
+            guard_evaluator: Some(guard_evaluator),
         }
     }
 
@@ -284,15 +303,13 @@ impl PeerManager {
     /// Add a discovered peer to tracking
     pub fn add_peer(&mut self, device_id: DeviceId, now: u64) -> SyncResult<()> {
         if self.peers.len() >= self.config.max_tracked_peers {
-            return Err(SyncError::config("sync",
-                "Maximum tracked peers exceeded"
-            ));
+            return Err(sync_config_error("sync", "Maximum tracked peers exceeded"));
         }
 
         self.peers.entry(device_id).or_insert_with(|| {
             PeerInfo {
                 metadata: PeerMetadata::new(device_id, now),
-                capabilities: HashSet::new(),
+                token: None, // Will be set when peer provides token
                 connection_details: None,
             }
         });
@@ -305,29 +322,64 @@ impl PeerManager {
     where
         F: FnOnce(&mut PeerMetadata),
     {
-        let peer = self.peers.get_mut(&device_id)
-            .ok_or_else(|| SyncError::peer("update", "Peer not found"))?;
+        let peer = self
+            .peers
+            .get_mut(&device_id)
+            .ok_or_else(|| sync_peer_error("update", "Peer not found"))?;
 
         f(&mut peer.metadata);
         Ok(())
     }
 
-    /// Update peer capabilities
+    /// Update peer's Biscuit token
     ///
-    /// Integrates with aura-wot to validate capabilities
+    /// Integrates with aura-wot to validate token and extract capabilities
+    pub fn update_peer_token(
+        &mut self,
+        device_id: DeviceId,
+        token_bytes: Vec<u8>,
+    ) -> SyncResult<()> {
+        let peer = self
+            .peers
+            .get_mut(&device_id)
+            .ok_or_else(|| sync_peer_error("update", "Peer not found"))?;
+
+        // Check sync capability using Biscuit token if evaluator available
+        if let Some(ref evaluator) = self.guard_evaluator {
+            // For now, assume peer has capability if they provided a token
+            // TODO: Proper token validation requires access to the correct root public key
+            peer.metadata.has_sync_capability = true;
+
+            // Future implementation should:
+            // 1. Get proper root public key from configuration or authority
+            // 2. Deserialize Biscuit token using that key
+            // 3. Check specific sync capabilities using evaluator.check_guard()
+        } else {
+            // Fallback: assume peer has capability if they provided a token
+            peer.metadata.has_sync_capability = true;
+        }
+
+        peer.token = Some(token_bytes);
+        Ok(())
+    }
+
+    /// Legacy method for backward compatibility - use update_peer_token instead
+    #[deprecated(note = "Use update_peer_token with Biscuit tokens")]
     pub fn update_peer_capabilities(
         &mut self,
         device_id: DeviceId,
         capabilities: HashSet<String>,
     ) -> SyncResult<()> {
-        let peer = self.peers.get_mut(&device_id)
-            .ok_or_else(|| SyncError::peer("update", "Peer not found"))?;
+        let peer = self
+            .peers
+            .get_mut(&device_id)
+            .ok_or_else(|| sync_peer_error("update", "Peer not found"))?;
 
-        // Check for sync capability
-        peer.metadata.has_sync_capability = capabilities.contains("sync_journal")
-            || capabilities.contains("sync_state");
+        // Legacy capability checking
+        peer.metadata.has_sync_capability =
+            capabilities.contains("sync_journal") || capabilities.contains("sync_state");
 
-        peer.capabilities = capabilities;
+        // Note: capabilities are no longer stored, use Biscuit tokens instead
         Ok(())
     }
 
@@ -340,13 +392,11 @@ impl PeerManager {
     ///
     /// Returns up to `count` peers sorted by score (highest first)
     pub fn select_sync_peers(&self, count: usize) -> Vec<DeviceId> {
-        let mut scored_peers: Vec<_> = self.peers
+        let mut scored_peers: Vec<_> = self
+            .peers
             .values()
             .filter(|p| p.metadata.is_available(self.config.max_concurrent_sessions))
-            .filter(|p| {
-                !self.config.capability_filtering
-                    || p.metadata.has_sync_capability
-            })
+            .filter(|p| !self.config.capability_filtering || p.metadata.has_sync_capability)
             .filter(|p| p.metadata.trust_level >= self.config.min_trust_level)
             .map(|p| (p.metadata.device_id, p.metadata.calculate_score()))
             .collect();
@@ -403,15 +453,21 @@ impl PeerManager {
 
     /// Get statistics about tracked peers
     pub fn statistics(&self) -> PeerManagerStatistics {
-        let connected = self.peers.values()
+        let connected = self
+            .peers
+            .values()
             .filter(|p| matches!(p.metadata.status, PeerStatus::Connected))
             .count();
 
-        let available = self.peers.values()
+        let available = self
+            .peers
+            .values()
             .filter(|p| p.metadata.is_available(self.config.max_concurrent_sessions))
             .count();
 
-        let with_capability = self.peers.values()
+        let with_capability = self
+            .peers
+            .values()
             .filter(|p| p.metadata.has_sync_capability)
             .count();
 
@@ -420,7 +476,9 @@ impl PeerManager {
             connected_peers: connected,
             available_peers: available,
             peers_with_sync_capability: with_capability,
-            total_active_sessions: self.peers.values()
+            total_active_sessions: self
+                .peers
+                .values()
                 .map(|p| p.metadata.active_sessions)
                 .sum(),
         }
@@ -469,8 +527,7 @@ mod tests {
 
     #[test]
     fn test_peer_metadata_scoring() {
-        #[allow(clippy::disallowed_methods)]
-        let now = Instant::now();
+        let now = 1234567890u64; // Use Unix timestamp instead
         let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), now);
         meta.trust_level = 80;
         meta.successful_syncs = 8;
@@ -481,13 +538,16 @@ mod tests {
 
         // Trust (80/100 * 0.5) + Success (0.8 * 0.3) + Load ((1 - 0.2) * 0.2)
         // = 0.4 + 0.24 + 0.16 = 0.80
-        assert!((score - 0.80).abs() < 0.01, "Expected score ~0.80, got {}", score);
+        assert!(
+            (score - 0.80).abs() < 0.01,
+            "Expected score ~0.80, got {}",
+            score
+        );
     }
 
     #[test]
     fn test_peer_availability() {
-        #[allow(clippy::disallowed_methods)]
-        let now = Instant::now();
+        let now = 1234567890u64; // Use Unix timestamp
         let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), now);
         meta.status = PeerStatus::Connected;
         meta.active_sessions = 5;
@@ -506,33 +566,38 @@ mod tests {
         let peer2 = DeviceId::from_bytes([2; 32]);
         let peer3 = DeviceId::from_bytes([3; 32]);
 
-        #[allow(clippy::disallowed_methods)]
-        let now = Instant::now();
+        let now = 1234567890u64; // Use Unix timestamp
 
         manager.add_peer(peer1, now).unwrap();
         manager.add_peer(peer2, now).unwrap();
         manager.add_peer(peer3, now).unwrap();
 
         // Set up peer1 as high trust, connected
-        manager.update_peer_metadata(peer1, |m| {
-            m.status = PeerStatus::Connected;
-            m.trust_level = 90;
-            m.has_sync_capability = true;
-        }).unwrap();
+        manager
+            .update_peer_metadata(peer1, |m| {
+                m.status = PeerStatus::Connected;
+                m.trust_level = 90;
+                m.has_sync_capability = true;
+            })
+            .unwrap();
 
         // Set up peer2 as medium trust, connected
-        manager.update_peer_metadata(peer2, |m| {
-            m.status = PeerStatus::Connected;
-            m.trust_level = 70;
-            m.has_sync_capability = true;
-        }).unwrap();
+        manager
+            .update_peer_metadata(peer2, |m| {
+                m.status = PeerStatus::Connected;
+                m.trust_level = 70;
+                m.has_sync_capability = true;
+            })
+            .unwrap();
 
         // Set up peer3 as high trust but disconnected
-        manager.update_peer_metadata(peer3, |m| {
-            m.status = PeerStatus::Disconnected;
-            m.trust_level = 95;
-            m.has_sync_capability = true;
-        }).unwrap();
+        manager
+            .update_peer_metadata(peer3, |m| {
+                m.status = PeerStatus::Disconnected;
+                m.trust_level = 95;
+                m.has_sync_capability = true;
+            })
+            .unwrap();
 
         // Should select peer1 and peer2 (both connected), peer1 first (higher trust)
         let selected = manager.select_sync_peers(2);

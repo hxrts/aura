@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use aura_core::{session_epochs::Epoch, AuraResult, DeviceId};
 
+use crate::handlers::{AuraHandler, EffectType, ExecutionMode};
 use crate::runtime::{
     container::EffectContainer,
     executor::{EffectExecutor, EffectExecutorBuilder},
@@ -17,7 +18,6 @@ use crate::runtime::{
     services::{ContextManager, FlowBudgetManager, ReceiptManager},
     AuraEffectSystem, EffectSystemConfig, StorageConfig,
 };
-use crate::handlers::{ExecutionMode, AuraHandler, EffectType};
 
 /// Builder for constructing AuraEffectSystem instances
 ///
@@ -27,7 +27,8 @@ use crate::handlers::{ExecutionMode, AuraHandler, EffectType};
 ///
 /// # Example
 /// ```no_run
-/// # use aura_protocol::effects::{AuraEffectSystemBuilder, ExecutionMode};
+/// # use aura_protocol::composition::{AuraEffectSystemBuilder};
+/// # use aura_protocol::orchestration::ExecutionMode;
 /// # use aura_core::DeviceId;
 /// # async fn example() -> aura_core::AuraResult<()> {
 /// let device_id = DeviceId::new();
@@ -192,8 +193,8 @@ impl AuraEffectSystemBuilder {
             device_id,
             execution_mode,
             default_flow_limit,
-            initial_epoch: initial_epoch.into(),  // Convert Epoch to u64
-            storage_config: Some(storage_config),  // Wrap in Option
+            initial_epoch: initial_epoch.into(), // Convert Epoch to u64
+            storage_config: Some(storage_config), // Wrap in Option
         })
     }
 

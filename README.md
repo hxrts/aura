@@ -14,6 +14,17 @@ Aura uses choreographic programming with session types to coordinate distributed
 
 The system coordinates multi-device threshold protocols through choreographic programming. Session types provide compile-time safety for distributed state machines while runtime witnesses verify global conditions like quorum thresholds. A unified CRDT ledger maintains eventual consistency across all devices without requiring centralized coordination.
 
+### Authorization Model
+
+Aura uses **Biscuit tokens** for distributed authorization - cryptographically-verified tokens that carry authorization policies without requiring centralized validation. Biscuit tokens enable:
+
+- **Capability-based access control**: Fine-grained permissions that can be attenuated (restricted) but never escalated
+- **Distributed verification**: Tokens can be validated locally without contacting authorization servers
+- **Social delegation**: Authority can be safely delegated between trusted devices and guardians
+- **Mathematically guaranteed security**: Meet-semilattice operations ensure privilege escalation is impossible
+
+This replaces traditional role-based access control with a more flexible, distributed system suited to peer-to-peer environments.
+
 ### Session Types & Choreographic Programming:
 
 These complementary techniques provide both local and global protocol safety. Choreographic programming describes protocols from a global viewpoint across all participants, automatically generating deadlock-free coordination patterns and local projections for each device. Session types then enforce local protocol correctness through typestate, ensuring individual devices follow their projected protocol steps correctly at compile-time (e.g., preventing message sends before prerequisite states are reached). Runtime witnesses verify distributed invariants that span multiple participants, such as threshold quorum requirements or epoch synchronization.

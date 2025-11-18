@@ -30,7 +30,7 @@ pub enum HolePunchMessage {
         session_id: Uuid,
         /// Source device
         source: DeviceId,
-        /// Target device  
+        /// Target device
         target: DeviceId,
         /// Sequence number for this punch attempt
         sequence: u32,

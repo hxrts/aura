@@ -30,7 +30,10 @@ pub struct SessionMessage<T> {
 impl<T> SessionMessage<T> {
     /// Create a new session message
     pub fn new(session_id: SessionId, payload: T) -> Self {
-        Self { session_id, payload }
+        Self {
+            session_id,
+            payload,
+        }
     }
 
     /// Extract the payload, consuming the wrapper
@@ -304,7 +307,13 @@ pub struct BatchMessage<T> {
 
 impl<T> BatchMessage<T> {
     /// Create a new batch message
-    pub fn new(batch_id: Uuid, items: Vec<T>, total_items: usize, sequence: usize, is_final: bool) -> Self {
+    pub fn new(
+        batch_id: Uuid,
+        items: Vec<T>,
+        total_items: usize,
+        sequence: usize,
+        is_final: bool,
+    ) -> Self {
         Self {
             batch_id,
             items,
@@ -317,25 +326,23 @@ impl<T> BatchMessage<T> {
     /// Create batch messages from a list of items
     ///
     /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and pass them
-    pub fn create_batches(items: Vec<T>, batch_size: usize, batch_uuid: Uuid) -> Vec<BatchMessage<T>>
+    pub fn create_batches(
+        items: Vec<T>,
+        batch_size: usize,
+        batch_uuid: Uuid,
+    ) -> Vec<BatchMessage<T>>
     where
         T: Clone,
     {
         let total_items = items.len();
         let batch_id = batch_uuid;
-        
+
         items
             .chunks(batch_size)
             .enumerate()
             .map(|(sequence, chunk)| {
                 let is_final = (sequence + 1) * batch_size >= total_items;
-                BatchMessage::new(
-                    batch_id,
-                    chunk.to_vec(),
-                    total_items,
-                    sequence,
-                    is_final,
-                )
+                BatchMessage::new(batch_id, chunk.to_vec(), total_items, sequence, is_final)
             })
             .collect()
     }
@@ -396,10 +403,10 @@ mod tests {
     fn test_session_message() {
         let session_id = SessionId::new();
         let msg = SessionMessage::new(session_id, "test data".to_string());
-        
+
         assert_eq!(msg.session_id, session_id);
         assert_eq!(msg.payload(), "test data");
-        
+
         let mapped = msg.map(|s| s.len());
         assert_eq!(mapped.payload, 9);
     }
@@ -408,7 +415,7 @@ mod tests {
     fn test_timestamped_message() {
         let msg = TimestampedMessage::new("test".to_string());
         assert!(msg.age_seconds() < 1); // Should be very recent
-        
+
         let old_msg = TimestampedMessage::with_timestamp(0, "old".to_string());
         assert!(old_msg.age_seconds() > 1000); // Very old
     }
@@ -417,10 +424,10 @@ mod tests {
     fn test_request_response_flow() {
         let from = test_device_id(1);
         let to = test_device_id(2);
-        
+
         let request = RequestMessage::new(from, to, "ping".to_string());
         let response = ResponseMessage::success(&request, "pong".to_string());
-        
+
         assert_eq!(response.request_id, request.request_id);
         assert_eq!(response.from, to);
         assert_eq!(response.to, from);
@@ -433,7 +440,7 @@ mod tests {
         let result = SyncResult::success(5, Some("data".to_string()), 1000);
         assert!(result.success);
         assert_eq!(result.operations_synced, 5);
-        
+
         let mapped = result.map(|s| s.len());
         assert_eq!(mapped.data, Some(4));
     }
@@ -442,7 +449,7 @@ mod tests {
     fn test_batch_creation() {
         let items = vec![1, 2, 3, 4, 5, 6, 7];
         let batches = BatchMessage::create_batches(items, 3);
-        
+
         assert_eq!(batches.len(), 3);
         assert_eq!(batches[0].items, vec![1, 2, 3]);
         assert_eq!(batches[1].items, vec![4, 5, 6]);
@@ -456,7 +463,7 @@ mod tests {
         let progress = ProgressMessage::new(op_id, 0.5, "Processing".to_string())
             .with_eta(300)
             .with_metadata("items", "100");
-        
+
         assert_eq!(progress.progress, 0.5);
         assert!(!progress.is_complete());
         assert_eq!(progress.eta_seconds, Some(300));

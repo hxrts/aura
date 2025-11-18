@@ -16,13 +16,23 @@ pub use aura_core::effects::{
     TimeEffects,
 };
 
-// Re-export agent-specific effects from aura-protocol (orchestration layer)
+// Re-export individual effect traits
+pub use aura_protocol::effect_traits::{
+    LedgerEffects,
+};
+
+// Re-export orchestration types
+pub use aura_protocol::orchestration::{
+    ChoreographicEffects,
+};
+
+// Re-export agent-specific effects from aura-protocol (will be moved to aura-core in future)
 pub use aura_protocol::effects::{
     AgentEffects, AgentHealthStatus, AuthMethod, AuthenticationEffects, AuthenticationResult,
-    BiometricType, ChoreographicEffects, ConfigValidationError, ConfigurationEffects,
-    CredentialBackup, DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, LedgerEffects,
+    BiometricType, ConfigValidationError, ConfigurationEffects,
+    CredentialBackup, DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus,
     SessionHandle, SessionInfo, SessionManagementEffects, SessionMessage, SessionRole,
-    SessionStatus, SessionType,
+    SessionStatus,
 };
 
 // Re-export effect system coordinator from aura-agent runtime (Layer 6)
@@ -60,4 +70,5 @@ pub enum SessionUpdate {
 }
 
 // Re-export for convenience
-pub use aura_protocol::effects::ChoreographicRole;
+// Import ChoreographicRole from orchestration module
+pub use aura_protocol::orchestration::ChoreographicRole;

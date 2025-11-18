@@ -30,7 +30,7 @@ impl StorageCapability {
         Self::new(resource, StoragePermission::Read)
     }
 
-    /// Create write capability for a resource  
+    /// Create write capability for a resource
     pub fn write(resource: StorageResource) -> Self {
         Self::new(resource, StoragePermission::Write)
     }
@@ -88,7 +88,7 @@ impl StorageResource {
 }
 
 /// Storage permission levels (ordered from least to most permissive)
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum StoragePermission {
     /// Read-only access
     Read,

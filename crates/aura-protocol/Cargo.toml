@@ -76,6 +76,9 @@ string_cache = "0.8"
 rumpsteak-aura = { workspace = true }
 rumpsteak-aura-choreography = { workspace = true }
 
+# Authorization tokens
+biscuit-auth = { workspace = true }
+
 
 [dev-dependencies]
 # Testing infrastructure (Layer 4 can use testkit)

@@ -91,7 +91,7 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 - **Session Types**: Compile-time safety for protocol state transitions. Typestate prevents invalid operations.
 - **Unified State Model**: Single Journal CRDT for account, storage, and communication state. Atomic consistency across subsystems.
 - **Threshold Cryptography**: FROST-based M-of-N signatures. No single device can compromise account.
-- **Capability-Based Access Control**: Unified system for storage access, relay permissions, and trust evaluation.
+- **Capability-Based Access Control**: Unified system for storage access, relay permissions, and trust evaluation. Supports both traditional capability-based authorization and **Biscuit tokens** for cryptographically verifiable, attenuated delegation.
 
 ## Distributed Protocols
 
@@ -193,6 +193,107 @@ Aura uses semilattice CRDTs for distributed state management with eventual consi
   - `CrdtCoordinator::with_mv_state()` for meet-semilattice constraints
 
 - **Key property**: The Journal combines both: facts grow (⊔), capabilities shrink (⊓), providing atomic consistency across subsystems
+
+## Authorization Systems
+
+Aura provides two complementary authorization systems that can be used independently or together:
+
+### Traditional Capability-Based Authorization
+
+Located in `aura-wot` crate, provides semilattice-based capability evaluation:
+
+```rust
+use aura_wot::{Capability, CapabilitySet, evaluate_capabilities};
+
+// Check if device has required capabilities
+let required = CapabilitySet::single(Capability::Write);
+if device_caps.contains_all(&required) {
+    // Authorized to write
+}
+```
+
+**Use Cases**: Device-to-device operations, local authorization decisions, simple capability checks
+**Key Features**: Meet-semilattice properties, delegation chains, storage permissions
+
+### Biscuit Token Authorization
+
+Located in `aura-wot/src/biscuit_*` and `aura-protocol/src/authorization/biscuit_*`, provides cryptographically verifiable tokens:
+
+```rust
+use aura_wot::biscuit_token::{AccountAuthority, BiscuitTokenManager};
+use aura_protocol::authorization::BiscuitAuthorizationBridge;
+
+// Create root authority
+let authority = AccountAuthority::new(account_id);
+let device_token = authority.create_device_token(device_id)?;
+
+// Create attenuated delegation
+let manager = BiscuitTokenManager::new(device_id, device_token);
+let read_token = manager.attenuate_read("documents/shared/")?;
+
+// Verify authorization
+let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), device_id);
+let result = bridge.authorize(&read_token, "read", &resource_scope)?;
+```
+
+**Use Cases**: Cross-network delegation, offline authorization, audit trails, fine-grained resource access
+**Key Features**: Cryptographic verification, attenuation-only delegation, resource-specific authorization
+
+### Integration with Guard System
+
+Both authorization systems integrate with Aura's guard evaluation:
+
+```rust
+use aura_protocol::guards::biscuit_evaluator::BiscuitGuardEvaluator;
+
+// Biscuit guards with flow budget
+let evaluator = BiscuitGuardEvaluator::new(biscuit_bridge);
+let result = evaluator.evaluate_guard(&token, "write", &resource, 50, &mut flow_budget)?;
+
+// Traditional capability guards
+if device_caps.contains(&Capability::Write) && flow_budget.can_charge(50) {
+    // Execute operation
+}
+```
+
+### Authorization Guidelines
+
+1. **Choose the Right System**:
+   - Use **traditional capabilities** for direct device operations and simple authorization
+   - Use **Biscuit tokens** for delegation, cross-network authorization, and audit requirements
+
+2. **Security Best Practices**:
+   - Always use least-privilege principles (minimal required capabilities/token scope)
+   - Implement flow budget limits to prevent abuse
+   - Validate token integrity before authorization decisions
+   - Use resource scopes for fine-grained access control
+
+3. **Integration Patterns**:
+   - Combine both systems for defense-in-depth (require both to authorize)
+   - Use capabilities for local checks, Biscuit for remote delegation
+   - Implement caching for performance-critical authorization paths
+
+4. **Resource Scope Patterns**:
+   ```rust
+   // Storage access
+   ResourceScope::Storage { 
+       category: StorageCategory::Personal, 
+       path: "documents/private/" 
+   }
+   
+   // Journal operations
+   ResourceScope::Journal { 
+       account_id: account.to_string(), 
+       operation: JournalOp::Write 
+   }
+   
+   // Recovery operations
+   ResourceScope::Recovery { 
+       recovery_type: RecoveryType::DeviceKey 
+   }
+   ```
+
+See `work/authorization_patterns.md` for comprehensive usage patterns and examples.
 
 ## Documentation
 

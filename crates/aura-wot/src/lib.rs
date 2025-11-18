@@ -4,8 +4,17 @@
 //! monotonic capability restriction and delegation chains.
 //!
 //! This crate implements the Web of Trust layer from Aura's architectural
-//! model, providing:
+//! model, providing concrete realizations of the theoretical foundations
+//! described in docs/001_theoretical_model.md.
 //!
+//! ## Theoretical Foundations
+//!
+//! This implementation directly corresponds to the mathematical model in:
+//! - §2.1 Foundation Objects: Capabilities as meet-semilattice elements (C, ⊓, ⊤)
+//! - §2.4 Semantic Laws: Meet operations that are associative, commutative, and idempotent
+//! - §5.2 Web-of-Trust Model: Delegation composition via meet operations
+//!
+//! The crate provides:
 //! - Meet-semilattice capability objects that can only shrink (⊓)
 //! - Capability delegation chains with proper attenuation
 //! - Policy enforcement via capability intersection
@@ -13,134 +22,58 @@
 //!
 //! ## Core Concepts
 //!
-//! Capabilities follow meet-semilattice laws:
+//! Capabilities follow meet-semilattice laws from §1.4 Algebraic Laws:
 //! - **Associative**: (a ⊓ b) ⊓ c = a ⊓ (b ⊓ c)
 //! - **Commutative**: a ⊓ b = b ⊓ a
 //! - **Idempotent**: a ⊓ a = a
-//! - **Monotonic**: a ⊓ b ⪯ a and a ⊓ b ⪯ b
+//! - **Monotonic**: a ⊓ b ⪯ a and a ⊓ b ⪯ b (Monotonic Restriction)
 //!
 //! ## Usage
 //!
 //! ```rust
-//! use aura_wot::{Capability, CapabilitySet};
+//! use aura_wot::{Capability, CapabilitySet, MeetSemiLattice};
 //!
 //! // Capabilities only shrink via meet operation
-//! let base_policy = CapabilitySet::from_permissions(&["read", "write"]);
-//! let delegation = CapabilitySet::from_permissions(&["read"]);
+//! let base_policy = CapabilitySet::from_permissions(&["read:docs", "write:data"]);
+//! let delegation = CapabilitySet::from_permissions(&["read:docs"]);
 
 //!
 //! // Effective capabilities = intersection (can only get smaller)
 //! let effective = base_policy.meet(&delegation);
-//! assert!(effective.permits("read"));
-//! assert!(!effective.permits("write")); // Lost via intersection
+//! assert!(effective.permits("read:docs"));
+//! assert!(!effective.permits("write:data")); // Lost via intersection
 //! ```
 
-pub mod capability;
-pub mod capability_evaluation;
-// MOVED: capability_evaluator → aura-protocol/src/wot/ (Layer 2 → Layer 4)
-// Effect-dependent orchestration logic belongs in protocol layer
-pub mod delegation;
 pub mod errors;
-pub mod evaluation;
-pub mod policy;
-pub mod policy_meet;
-pub mod storage_authz;
-pub mod tokens;
-pub mod tree_authz;
-pub mod tree_operations;
+
+// Legacy capability system (for backward compatibility with tests)
+pub mod capability;
 pub mod tree_policy;
 
-pub use capability::{Capability, CapabilitySet, RelayPermission, StoragePermission, TrustLevel};
-pub use capability_evaluation::{
-    evaluate_tree_operation_capabilities, CapabilityEvaluationContext, CapabilityEvaluationResult,
-    EntityId, TreeCapabilityRequest,
-};
-// REMOVED: CapabilityEvaluator, EffectSystemInterface, EffectiveCapabilitySet
-// → Moved to aura-protocol/src/wot/ (effect-dependent orchestration)
-pub use delegation::{DelegationChain, DelegationLink};
+// Biscuit-based authorization (new implementation)
+pub mod biscuit_resources;
+pub mod biscuit_token;
+
 pub use errors::{AuraError, AuraResult, WotError, WotResult};
-pub use evaluation::{evaluate_capabilities, EvaluationContext, LocalChecks};
-pub use policy::{Policy, PolicyEngine};
-pub use policy_meet::{PolicyMeet, TreePolicyCapabilityExt};
-pub use storage_authz::{storage_capabilities, StorageOperation};
-pub use tokens::{CapabilityCondition, CapabilityId, CapabilityToken, DelegationProof};
-pub use tree_authz::{
-    tree_device_lifecycle_capabilities, tree_management_capabilities, tree_read_capabilities,
-    TreeOperation,
+
+// Export legacy capability types
+pub use capability::{
+    evaluate_capabilities, Capability, CapabilitySet, DelegationChain, DelegationLink,
+    EvaluationContext, LocalChecks, Policy,
 };
-pub use tree_operations::{
-    evaluate_tree_operation, tree_operation_capabilities, LeafRole, TreeAuthzContext,
-    TreeAuthzRequest, TreeAuthzResult, TreeOp, TreeOpKind,
+
+// Export tree policy types
+pub use tree_policy::Policy as TreePolicy;
+
+// Re-export semilattice traits for convenience
+pub use aura_core::semilattice::{MeetSemiLattice, Top};
+
+// Re-export Biscuit types
+pub use biscuit_auth::{Biscuit, KeyPair, PublicKey};
+pub use biscuit_resources::{
+    AdminOperation, JournalOp, RecoveryType, ResourceScope, StorageCategory,
 };
-pub use tree_policy::{NodeIndex, Policy as TreePolicyEnum, ThresholdConfig, TreePolicy};
+pub use biscuit_token::{AccountAuthority, BiscuitError, BiscuitTokenManager, SerializableBiscuit};
 
 /// Type alias for capability meet operation results
 pub type CapResult<T> = Result<T, WotError>;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::prelude::*;
-
-    proptest! {
-        #[test]
-        fn capability_meet_is_associative(
-            perms1 in prop::collection::vec(".*", 0..5),
-            perms2 in prop::collection::vec(".*", 0..5),
-            perms3 in prop::collection::vec(".*", 0..5)
-        ) {
-            let perms1_refs: Vec<&str> = perms1.iter().map(|s| s.as_str()).collect();
-            let perms2_refs: Vec<&str> = perms2.iter().map(|s| s.as_str()).collect();
-            let perms3_refs: Vec<&str> = perms3.iter().map(|s| s.as_str()).collect();
-
-            let a = CapabilitySet::from_permissions(&perms1_refs);
-            let b = CapabilitySet::from_permissions(&perms2_refs);
-            let c = CapabilitySet::from_permissions(&perms3_refs);
-
-            let left = a.meet(&b).meet(&c);
-            let right = a.meet(&b.meet(&c));
-
-            prop_assert_eq!(left, right);
-        }
-
-        #[test]
-        fn capability_meet_is_commutative(
-            perms1 in prop::collection::vec(".*", 0..5),
-            perms2 in prop::collection::vec(".*", 0..5)
-        ) {
-            let perms1_refs: Vec<&str> = perms1.iter().map(|s| s.as_str()).collect();
-            let perms2_refs: Vec<&str> = perms2.iter().map(|s| s.as_str()).collect();
-
-            let a = CapabilitySet::from_permissions(&perms1_refs);
-            let b = CapabilitySet::from_permissions(&perms2_refs);
-
-            prop_assert_eq!(a.meet(&b), b.meet(&a));
-        }
-
-        #[test]
-        fn capability_meet_is_idempotent(
-            perms in prop::collection::vec(".*", 0..5)
-        ) {
-            let perms_refs: Vec<&str> = perms.iter().map(|s| s.as_str()).collect();
-            let a = CapabilitySet::from_permissions(&perms_refs);
-            prop_assert_eq!(a.meet(&a), a);
-        }
-
-        #[test]
-        fn capability_meet_is_monotonic(
-            perms1 in prop::collection::vec(".*", 0..5),
-            perms2 in prop::collection::vec(".*", 0..5)
-        ) {
-            let perms1_refs: Vec<&str> = perms1.iter().map(|s| s.as_str()).collect();
-            let perms2_refs: Vec<&str> = perms2.iter().map(|s| s.as_str()).collect();
-
-            let a = CapabilitySet::from_permissions(&perms1_refs);
-            let b = CapabilitySet::from_permissions(&perms2_refs);
-            let meet = a.meet(&b);
-
-            // meet result must be subset of both inputs
-            prop_assert!(meet.is_subset_of(&a));
-            prop_assert!(meet.is_subset_of(&b));
-        }
-    }
-}

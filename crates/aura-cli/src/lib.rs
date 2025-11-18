@@ -18,8 +18,8 @@ pub use handlers::CliHandler;
 
 // Action types are defined in this module and automatically available
 
-use aura_core::{identifiers::DeviceId, AuraError};
 use aura_agent::runtime::EffectSystemBuilder;
+use aura_core::{identifiers::DeviceId, AuraError};
 
 /// Create a CLI handler for the given device ID
 pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {

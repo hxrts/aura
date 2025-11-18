@@ -51,8 +51,9 @@ use aura_core::{
     semilattice::{
         Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,
     },
-    AuraError, CausalContext, DeviceId, SessionId, VectorClock,
+    AuraError, DeviceId, SessionId,
 };
+use aura_journal::{CausalContext, VectorClock};
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 

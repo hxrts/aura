@@ -2,8 +2,15 @@
 //!
 //! This example demonstrates how to use the aura-wot capability system
 //! for authorization decisions following meet-semilattice laws.
+//!
+//! The example shows practical application of the theoretical model from
+//! docs/001_theoretical_model.md, particularly:
+//! - §2.1: Capabilities as meet-semilattice elements
+//! - §2.4: Meet operations that monotonically restrict authority
+//! - §5.2: Web-of-Trust delegation composition
 
 use aura_core::identifiers::DeviceId;
+use aura_core::semilattice::MeetSemiLattice;
 use aura_wot::{
     evaluate_capabilities, Capability, CapabilitySet, DelegationChain, DelegationLink,
     EvaluationContext, LocalChecks, Policy,
@@ -51,6 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Delegation restrictions: {:#?}\n", delegation);
 
     // 3. Apply meet-semilattice intersection (capabilities can only shrink)
+    // This demonstrates §2.4: "The operation refine_caps c never increases authority"
     let effective_capabilities = base_capabilities.meet(&delegation);
 
     println!(
@@ -127,6 +135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Capability Delegation Chain ===");
 
     // 8. Demonstrate delegation chains with proper attenuation
+    // This implements §5.2: "Combining multiple delegations uses ⊓ (never widens)"
     let mut delegation_chain = DelegationChain::new();
 
     // Add delegation link that further restricts capabilities

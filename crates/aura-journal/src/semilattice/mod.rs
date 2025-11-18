@@ -5,6 +5,7 @@
 //! traits and can participate in choreographic synchronization.
 
 pub use account_state::{AccountState as ModernAccountState, GuardianRegistry, MaxCounter};
+pub use capability::{BudgetDecayPolicy, RelayCapability};
 pub use concrete_types::{DeviceRegistry, EpochLog, IntentPool};
 pub use invitations::{InvitationLedger, InvitationRecord, InvitationStatus};
 pub use journal_map::JournalMap;
@@ -14,6 +15,7 @@ pub use meet_types::{
 pub use op_log::{OpLog, OpLogSummary};
 
 pub mod account_state;
+pub mod capability;
 pub mod concrete_types;
 pub mod invitations;
 pub mod journal_map;

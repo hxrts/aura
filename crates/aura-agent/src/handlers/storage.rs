@@ -8,7 +8,10 @@
 use crate::{errors::Result, operations::*};
 use aura_core::AuraError;
 use aura_core::DeviceId;
-use aura_protocol::effects::{AuraEffectSystem, ConsoleEffects, StorageEffects, TimeEffects};
+use aura_protocol::{
+    orchestration::AuraEffectSystem,
+    effect_traits::{ConsoleEffects, StorageEffects, TimeEffects},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -467,7 +470,7 @@ mod tests {
     use super::*;
     use aura_core::DeviceId;
     use aura_macros::aura_test;
-    use aura_protocol::effects::AuraEffectSystem;
+    use aura_protocol::orchestration::AuraEffectSystem;
 
     #[aura_test]
     async fn test_storage_operations() -> aura_core::AuraResult<()> {

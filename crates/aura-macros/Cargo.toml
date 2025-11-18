@@ -23,6 +23,9 @@ regex = "1.0"
 # Async trait support for generated code  
 async-trait = "0.1"
 
+# Aura crate dependencies for Biscuit integration (minimal to avoid cycles)
+aura-mpst = { path = "../aura-mpst" }
+
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

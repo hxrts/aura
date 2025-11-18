@@ -7,15 +7,16 @@ use crate::{
     types::{GuardianProfile, RecoveryRequest, RecoveryResponse, RecoveryShare},
     RecoveryResult,
 };
-use aura_authenticate::guardian_auth::RecoveryContext;
-use aura_core::crypto::key_derivation::{
-    derive_key_material, IdentityKeyContext, KeyDerivationSpec,
-};
+use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
+use aura_core::crypto::{IdentityKeyContext, KeyDerivationSpec};
 use aura_core::effects::TimeEffects;
 use aura_core::frost::ThresholdSignature;
-use aura_core::{hash, identifiers::GuardianId, AccountId, AuraError, DeviceId};
+use aura_core::{hash, identifiers::GuardianId, AccountId, AuraError, DeviceId, FlowBudget};
+use aura_effects::crypto::derive_key_material;
 use aura_macros::choreography;
-use aura_protocol::AuraEffectSystem;
+use aura_protocol::{guards::BiscuitGuardEvaluator, AuraEffectSystem};
+use aura_wot::{BiscuitTokenManager, ResourceScope};
+use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
 
 /// Guardian key recovery request data
@@ -119,6 +120,10 @@ choreography! {
 /// Guardian key recovery coordinator
 pub struct GuardianKeyRecoveryCoordinator {
     _effect_system: AuraEffectSystem,
+    /// Optional token manager for Biscuit authorization
+    token_manager: Option<BiscuitTokenManager>,
+    /// Optional guard evaluator for Biscuit authorization
+    guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
 impl GuardianKeyRecoveryCoordinator {
@@ -126,6 +131,21 @@ impl GuardianKeyRecoveryCoordinator {
     pub fn new(effect_system: AuraEffectSystem) -> Self {
         Self {
             _effect_system: effect_system,
+            token_manager: None,
+            guard_evaluator: None,
+        }
+    }
+
+    /// Create new coordinator with Biscuit authorization
+    pub fn new_with_biscuit(
+        effect_system: AuraEffectSystem,
+        token_manager: BiscuitTokenManager,
+        guard_evaluator: BiscuitGuardEvaluator,
+    ) -> Self {
+        Self {
+            _effect_system: effect_system,
+            token_manager: Some(token_manager),
+            guard_evaluator: Some(guard_evaluator),
         }
     }
 
@@ -134,6 +154,18 @@ impl GuardianKeyRecoveryCoordinator {
         &self,
         request: RecoveryRequest,
     ) -> RecoveryResult<RecoveryResponse> {
+        // Check authorization using Biscuit tokens if available
+        if let Err(auth_error) = self.check_recovery_authorization(&request).await {
+            return Ok(RecoveryResponse {
+                success: false,
+                error: Some(format!("Authorization failed: {}", auth_error)),
+                key_material: None,
+                guardian_shares: Vec::new(),
+                evidence: self.create_failed_evidence(&request),
+                signature: self.create_empty_signature(),
+            });
+        }
+
         let recovery_id = self.generate_recovery_id(&request);
 
         // Convert generic request to choreography-specific request
@@ -309,11 +341,9 @@ impl GuardianKeyRecoveryCoordinator {
         combined_material.extend_from_slice(request.account_id.0.as_bytes());
         combined_material.extend_from_slice(request.requesting_device.0.as_bytes());
 
-        // Use proper key derivation
-        let context = IdentityKeyContext::GuardianKeys {
-            guardian_id: format!("recovery_{}", request.account_id).into_bytes(),
-        };
-        let spec = KeyDerivationSpec::identity_only(context);
+        // Use proper key derivation for guardian keys
+        let guardian_id_bytes = format!("recovery_{}", request.account_id).into_bytes();
+        let spec = KeyDerivationSpec::guardian_keys(guardian_id_bytes, 1);
 
         derive_key_material(&combined_material, &spec, 32)
             .map_err(|e| AuraError::crypto(format!("Key derivation failed: {}", e)))
@@ -383,5 +413,47 @@ impl GuardianKeyRecoveryCoordinator {
 
     fn create_empty_signature(&self) -> ThresholdSignature {
         ThresholdSignature::new(vec![0; 64], vec![])
+    }
+
+    /// Check if the recovery request is authorized using Biscuit tokens
+    async fn check_recovery_authorization(&self, request: &RecoveryRequest) -> Result<(), String> {
+        let (token_manager, guard_evaluator) = match (&self.token_manager, &self.guard_evaluator) {
+            (Some(tm), Some(ge)) => (tm, ge),
+            _ => return Err("Biscuit authorization components not available".to_string()),
+        };
+
+        let token = token_manager.current_token();
+
+        // Map recovery operation type to resource scope
+        let resource_scope = match request.context.operation_type {
+            RecoveryOperationType::DeviceKeyRecovery => ResourceScope::Recovery {
+                recovery_type: aura_wot::RecoveryType::DeviceKey,
+            },
+            RecoveryOperationType::AccountAccessRecovery => ResourceScope::Recovery {
+                recovery_type: aura_wot::RecoveryType::AccountAccess,
+            },
+            RecoveryOperationType::GuardianSetModification => ResourceScope::Recovery {
+                recovery_type: aura_wot::RecoveryType::GuardianSet,
+            },
+            RecoveryOperationType::EmergencyFreeze | RecoveryOperationType::AccountUnfreeze => {
+                ResourceScope::Recovery {
+                    recovery_type: aura_wot::RecoveryType::EmergencyFreeze,
+                }
+            }
+        };
+
+        // Check authorization for emergency recovery initiation
+        let authorized = guard_evaluator
+            .check_guard(token, "initiate_emergency_recovery", &resource_scope)
+            .map_err(|e| format!("Biscuit authorization error: {}", e))?;
+
+        if !authorized {
+            return Err(
+                "Biscuit token does not grant permission to initiate emergency recovery"
+                    .to_string(),
+            );
+        }
+
+        Ok(())
     }
 }

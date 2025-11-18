@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use aura_core::{
     effects::{
-        crypto::{FrostSigningPackage, KeyDerivationContext},
+        crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext},
         *,
     },
     identifiers::DeviceId,
@@ -211,7 +211,7 @@ impl CryptoEffects for SimulationEffectSystem {
         &self,
         threshold: u16,
         max_signers: u16,
-    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+    ) -> Result<FrostKeyGenResult, CryptoError> {
         self.crypto
             .frost_generate_keys(threshold, max_signers)
             .await
@@ -226,9 +226,10 @@ impl CryptoEffects for SimulationEffectSystem {
         message: &[u8],
         nonces: &[Vec<u8>],
         participants: &[u16],
+        public_key_package: &[u8],
     ) -> Result<FrostSigningPackage, CryptoError> {
         self.crypto
-            .frost_create_signing_package(message, nonces, participants)
+            .frost_create_signing_package(message, nonces, participants, public_key_package)
             .await
     }
 
@@ -310,7 +311,7 @@ impl CryptoEffects for SimulationEffectSystem {
         old_threshold: u16,
         new_threshold: u16,
         new_max_signers: u16,
-    ) -> Result<Vec<Vec<u8>>, CryptoError> {
+    ) -> Result<FrostKeyGenResult, CryptoError> {
         self.crypto
             .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
             .await
@@ -562,25 +563,36 @@ impl NetworkEffects for SimulationEffectSystem {
 }
 
 /// Factory for creating simulation effect systems
+///
+/// NOTE: This factory is deprecated. Use `aura_protocol::effects::EffectRegistry::simulation(seed)`
+/// and `aura_simulator::handlers::SimulationEffectComposer` for new code.
 pub struct SimulationEffectSystemFactory;
 
 impl SimulationEffectSystemFactory {
     /// Create a simulation effect system with basic configuration
+    ///
+    /// NOTE: Deprecated. Use `EffectRegistry::simulation(seed).with_device_id(device_id).build()` instead.
     pub fn create(device_id: DeviceId, seed: u64) -> SimulationEffectSystem {
         SimulationEffectSystem::new(device_id, seed)
     }
 
     /// Create a simulation effect system for testing (deterministic seed)
+    ///
+    /// NOTE: Deprecated. Use `EffectRegistry::testing().with_device_id(device_id).build()` instead.
     pub fn for_testing(device_id: DeviceId) -> SimulationEffectSystem {
         Self::create(device_id, 42)
     }
 
     /// Create a simulation effect system with fault injection enabled
+    ///
+    /// NOTE: Deprecated. Use `SimulationEffectComposer::for_simulation(device_id, seed)` instead.
     pub fn for_simulation_with_faults(device_id: DeviceId, seed: u64) -> SimulationEffectSystem {
         SimulationEffectSystem::with_fault_injection(device_id, seed)
     }
 
     /// Create multiple simulation systems for distributed testing
+    ///
+    /// NOTE: Deprecated. Use `EffectRegistry` and `SimulationEffectComposer` in a loop instead.
     pub fn create_network(device_count: usize, base_seed: u64) -> Vec<SimulationEffectSystem> {
         (0..device_count)
             .map(|i| {

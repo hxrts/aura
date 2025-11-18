@@ -33,19 +33,19 @@
 // which should be replaced with effect system integration.
 #![allow(clippy::disallowed_methods)]
 
+use parking_lot::RwLock;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::collections::BTreeSet;
-use parking_lot::RwLock;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use aura_core::{DeviceId, Hash32, SemanticVersion, tree::Snapshot, AccountId, Epoch};
-use crate::core::{SyncError, SyncResult};
+use super::{HealthCheck, HealthStatus, Service, ServiceState};
+use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
-use crate::protocols::{SnapshotProtocol, SnapshotConfig, OTAProtocol, OTAConfig, UpgradeKind};
-use super::{Service, HealthStatus, HealthCheck, ServiceState};
+use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
+use aura_core::{tree::Snapshot, AccountId, DeviceId, Epoch, Hash32, SemanticVersion};
 
 // =============================================================================
 // Maintenance Event Types
@@ -329,7 +329,7 @@ impl MaintenanceService {
         target_epoch: u64,
         state_digest: Hash32,
     ) -> SyncResult<SnapshotProposed> {
-        let mut protocol = self.snapshot_protocol.write();
+        let protocol = self.snapshot_protocol.write();
 
         let (_guard, proposal) = protocol.propose(proposer, target_epoch, state_digest)?;
 
@@ -369,10 +369,7 @@ impl MaintenanceService {
         let mut cache = self.cache_manager.write();
         cache.invalidate_keys(&keys, epoch_floor);
 
-        Ok(CacheInvalidated {
-            keys,
-            epoch_floor,
-        })
+        Ok(CacheInvalidated { keys, epoch_floor })
     }
 
     /// Propose OTA upgrade
@@ -403,7 +400,7 @@ impl MaintenanceService {
             version,
             kind,
             artifact_hash: proposal.package_hash,
-            artifact_uri: None, // TODO: Add URI support
+            artifact_uri: None,     // TODO: Add URI support
             activation_fence: None, // TODO: Map activation_epoch to IdentityEpochFence
         })
     }
@@ -416,7 +413,8 @@ impl MaintenanceService {
     ) -> SyncResult<UpgradeActivated> {
         // TODO: Verify threshold signature
 
-        let activation_fence = proposal.activation_fence
+        let activation_fence = proposal
+            .activation_fence
             .unwrap_or_else(|| IdentityEpochFence::new(account_id, 0));
 
         Ok(UpgradeActivated {
@@ -434,15 +432,14 @@ impl MaintenanceService {
 
         match *self.last_snapshot_epoch.read() {
             None => true, // First snapshot
-            Some(last) => {
-                current_epoch >= last + self.config.min_snapshot_interval_epochs
-            }
+            Some(last) => current_epoch >= last + self.config.min_snapshot_interval_epochs,
         }
     }
 
     /// Get service uptime
     pub fn uptime(&self) -> Duration {
-        self.started_at.read()
+        self.started_at
+            .read()
             .map(|t| t.elapsed())
             .unwrap_or(Duration::ZERO)
     }
@@ -453,7 +450,7 @@ impl Service for MaintenanceService {
     async fn start(&self, now: Instant) -> SyncResult<()> {
         let mut state = self.state.write();
         if *state == ServiceState::Running {
-            return Err(SyncError::session("Service already running"));
+            return Err(sync_session_error("Service already running"));
         }
 
         *state = ServiceState::Starting;
@@ -492,15 +489,21 @@ impl Service for MaintenanceService {
         let mut details = std::collections::HashMap::new();
 
         let snapshot_protocol = self.snapshot_protocol.read();
-        details.insert("snapshot_pending".to_string(),
-            snapshot_protocol.is_pending().to_string());
+        details.insert(
+            "snapshot_pending".to_string(),
+            snapshot_protocol.is_pending().to_string(),
+        );
 
         let ota_protocol = self.ota_protocol.read();
-        details.insert("ota_pending".to_string(),
-            ota_protocol.get_pending().is_some().to_string());
+        details.insert(
+            "ota_pending".to_string(),
+            ota_protocol.get_pending().is_some().to_string(),
+        );
 
-        details.insert("uptime".to_string(),
-            format!("{}s", self.uptime().as_secs()));
+        details.insert(
+            "uptime".to_string(),
+            format!("{}s", self.uptime().as_secs()),
+        );
 
         Ok(HealthCheck {
             status,
@@ -554,10 +557,9 @@ mod tests {
     async fn test_cache_invalidation() {
         let service = MaintenanceService::new(Default::default()).unwrap();
 
-        let result = service.invalidate_cache(
-            vec!["key1".to_string(), "key2".to_string()],
-            10,
-        ).unwrap();
+        let result = service
+            .invalidate_cache(vec!["key1".to_string(), "key2".to_string()], 10)
+            .unwrap();
 
         assert_eq!(result.keys.len(), 2);
         assert_eq!(result.epoch_floor, 10);
@@ -577,6 +579,6 @@ mod tests {
         // After setting last snapshot
         *service.last_snapshot_epoch.write() = Some(50);
         assert!(!service.is_snapshot_due(100)); // 100 - 50 = 50 < 100
-        assert!(service.is_snapshot_due(151));  // 151 - 50 = 101 >= 100
+        assert!(service.is_snapshot_due(151)); // 151 - 50 = 101 >= 100
     }
 }

@@ -5,7 +5,7 @@
 //! until causal dependencies are satisfied, then applies them idempotently.
 
 use aura_core::semilattice::{CausalOp, CmApply, Dedup, OpWithCtx};
-use aura_core::{CausalContext, OperationId, VectorClock};
+use aura_journal::{CausalContext, OperationId, VectorClock};
 use std::collections::{HashMap, VecDeque};
 
 /// Operation-based CRDT effect handler with proper causal ordering

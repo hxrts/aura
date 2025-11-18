@@ -213,7 +213,99 @@ pub struct VerifiedIdentity {
     pub message_hash: [u8; 32],
 }
 
-/// Verify an identity proof against a message
+/// Simplified identity verifier facade
+/// 
+/// This hides the complexity of KeyMaterial and provides a clean interface
+/// for common verification operations.
+pub struct SimpleIdentityVerifier {
+    key_material: KeyMaterial,
+}
+
+impl SimpleIdentityVerifier {
+    /// Create a new identity verifier
+    pub fn new() -> Self {
+        Self {
+            key_material: KeyMaterial::new(),
+        }
+    }
+
+    /// Create from existing key material
+    pub fn from_key_material(key_material: KeyMaterial) -> Self {
+        Self { key_material }
+    }
+
+    /// Add a device key for verification
+    pub fn add_device_key(&mut self, device_id: aura_core::DeviceId, public_key: Ed25519VerifyingKey) {
+        self.key_material.add_device_key(device_id, public_key);
+    }
+
+    /// Add a guardian key for verification
+    pub fn add_guardian_key(&mut self, guardian_id: aura_core::GuardianId, public_key: Ed25519VerifyingKey) {
+        self.key_material.add_guardian_key(guardian_id, public_key);
+    }
+
+    /// Add a group key for threshold verification
+    pub fn add_group_key(&mut self, account_id: aura_core::AccountId, group_key: Ed25519VerifyingKey) {
+        self.key_material.add_group_key(account_id, group_key);
+    }
+
+    /// Verify a device signature
+    pub fn verify_device_signature(&self, proof: &IdentityProof) -> Result<VerifiedIdentity> {
+        match proof {
+            IdentityProof::Device { device_id, signature } => {
+                // For device signatures, we use the device_id as the message
+                let message = device_id.0.as_bytes();
+                let message_hash = hash(message);
+                let public_key = self.key_material.get_device_public_key(device_id)?;
+                verify_device_signature(*device_id, message, signature, public_key)?;
+                Ok(VerifiedIdentity {
+                    proof: proof.clone(),
+                    message_hash,
+                })
+            }
+            _ => Err(AuthenticationError::InvalidDeviceSignature(
+                "Proof is not a device signature".to_string()
+            ))
+        }
+    }
+
+    /// Verify a threshold signature
+    pub fn verify_threshold_signature(&self, proof: &IdentityProof, account_id: aura_core::AccountId) -> Result<VerifiedIdentity> {
+        match proof {
+            IdentityProof::Threshold(threshold_sig) => {
+                // Use account_id as the message context for threshold verification
+                let message = account_id.0.as_bytes();
+                let message_hash = hash(message);
+                let group_key = self.key_material.get_group_public_key(&account_id)?;
+                
+                // Calculate minimum signers from the signature shares
+                let min_signers = threshold_sig.signers.len().max(1);
+                
+                verify_threshold_signature(message, &threshold_sig.signature, group_key, min_signers)?;
+                Ok(VerifiedIdentity {
+                    proof: proof.clone(),
+                    message_hash,
+                })
+            }
+            _ => Err(AuthenticationError::InvalidThresholdSignature(
+                "Proof is not a threshold signature".to_string()
+            ))
+        }
+    }
+
+    /// Get access to the underlying key material (for advanced use cases)
+    pub fn key_material(&self) -> &KeyMaterial {
+        &self.key_material
+    }
+}
+
+impl Default for SimpleIdentityVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Verify an identity proof against a message (legacy function - prefer SimpleIdentityVerifier)
 pub fn verify_identity_proof(
     proof: &IdentityProof,
     message: &[u8],

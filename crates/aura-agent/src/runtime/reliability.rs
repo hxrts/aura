@@ -149,32 +149,11 @@ impl CircuitBreakerState {
     }
 }
 
-/// Retry configuration for orchestration patterns
-#[derive(Debug, Clone)]
-pub struct RetryConfig {
-    /// Maximum number of retry attempts
-    pub max_attempts: u32,
-    /// Base delay between retries
-    pub base_delay: Duration,
-    /// Maximum delay between retries
-    pub max_delay: Duration,
-    /// Multiplier for exponential backoff
-    pub backoff_multiplier: f64,
-    /// Jitter percentage (0.0 to 1.0)
-    pub jitter: f64,
-}
+// Re-export unified retry types from aura-core
+pub use aura_core::{BackoffStrategy, RetryContext, RetryPolicy, RetryResult};
 
-impl Default for RetryConfig {
-    fn default() -> Self {
-        Self {
-            max_attempts: 3,
-            base_delay: Duration::from_millis(100),
-            max_delay: Duration::from_secs(5),
-            backoff_multiplier: 2.0,
-            jitter: 0.1,
-        }
-    }
-}
+/// Convenience type alias for backward compatibility
+pub type RetryConfig = RetryPolicy;
 
 /// Reliability coordinator for Layer 4 orchestration
 ///
@@ -187,8 +166,8 @@ impl Default for RetryConfig {
 pub struct ReliabilityCoordinator {
     /// Circuit breakers by operation key
     circuit_breakers: Arc<Mutex<HashMap<String, CircuitBreakerState>>>,
-    /// Default retry configuration
-    retry_config: RetryConfig,
+    /// Default retry policy (unified from aura-core)
+    retry_policy: RetryPolicy,
     /// Default circuit breaker configuration
     circuit_config: CircuitBreakerConfig,
     /// Time effects for circuit breaker timestamp tracking
@@ -206,7 +185,7 @@ impl ReliabilityCoordinator {
     pub fn new(time: Arc<dyn TimeEffects>) -> Self {
         Self {
             circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
-            retry_config: RetryConfig::default(),
+            retry_policy: RetryPolicy::default(),
             circuit_config: CircuitBreakerConfig::default(),
             time,
         }
@@ -215,17 +194,17 @@ impl ReliabilityCoordinator {
     /// Create coordinator with custom configurations and TimeEffects dependency.
     ///
     /// # Parameters
-    /// - `retry_config`: Configuration for retry behavior
+    /// - `retry_policy`: Unified retry policy for retry behavior
     /// - `circuit_config`: Configuration for circuit breaker behavior
     /// - `time`: TimeEffects implementation for timestamp operations
     pub fn with_config(
-        retry_config: RetryConfig,
+        retry_policy: RetryPolicy,
         circuit_config: CircuitBreakerConfig,
         time: Arc<dyn TimeEffects>,
     ) -> Self {
         Self {
             circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
-            retry_config,
+            retry_policy,
             circuit_config,
             time,
         }
@@ -284,22 +263,9 @@ impl ReliabilityCoordinator {
         }
     }
 
-    /// Calculate retry delay with exponential backoff and jitter
+    /// Calculate retry delay using unified retry policy
     fn calculate_retry_delay(&self, attempt: u32) -> Duration {
-        let base_delay_ms = self.retry_config.base_delay.as_millis() as f64;
-        let delay_ms = base_delay_ms * self.retry_config.backoff_multiplier.powi(attempt as i32);
-
-        // Apply maximum delay cap
-        let capped_delay_ms = delay_ms.min(self.retry_config.max_delay.as_millis() as f64);
-
-        // Apply jitter
-        // TODO: Add rand crate dependency and use proper random jitter
-        // For now, use deterministic jitter based on attempt number
-        let jitter_amount = capped_delay_ms * self.retry_config.jitter;
-        let jitter_factor = ((attempt as f64 % 10.0) / 10.0 - 0.5) * 2.0; // -1.0 to 1.0 range
-        let jittered_delay_ms = capped_delay_ms + jitter_factor * jitter_amount;
-
-        Duration::from_millis(jittered_delay_ms.max(0.0) as u64)
+        self.retry_policy.calculate_delay(attempt)
     }
 
     /// Get circuit breaker state for monitoring
@@ -411,8 +377,39 @@ impl ReliabilityEffects for ReliabilityCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+
+    // Mock TimeEffects for testing
+    struct MockTimeEffects;
+
+    #[async_trait]
+    impl TimeEffects for MockTimeEffects {
+        async fn now(&self) -> Result<u64, AuraError> {
+            Ok(0) // Simplified for testing
+        }
+
+        async fn sleep(&self, _duration: Duration) -> Result<(), AuraError> {
+            Ok(())
+        }
+
+        async fn timeout<T: Send>(
+            &self,
+            _duration: Duration,
+            _future: impl std::future::Future<Output = T> + Send,
+        ) -> Result<T, AuraError> {
+            unimplemented!("Not needed for these tests")
+        }
+
+        async fn measure<T: Send>(
+            &self,
+            f: impl std::future::Future<Output = T> + Send,
+        ) -> Result<(T, Duration), AuraError> {
+            let result = f.await;
+            Ok((result, Duration::ZERO))
+        }
+    }
 
     #[tokio::test]
     async fn test_circuit_breaker_failure_threshold() {
@@ -420,43 +417,56 @@ mod tests {
         let now = Instant::now();
 
         let coordinator = ReliabilityCoordinator::with_config(
-            RetryConfig::default(),
+            RetryPolicy::default(),
             CircuitBreakerConfig {
                 failure_threshold: 2,
                 success_threshold: 1,
                 timeout: Duration::from_millis(100),
                 failure_window: Duration::from_secs(60),
             },
+            Arc::new(MockTimeEffects),
         );
 
         let call_count = Arc::new(AtomicU32::new(0));
 
         // First call should succeed
         let result = coordinator
-            .execute_with_circuit_breaker("test_op", || {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                async { Ok::<(), AuraError>(()) }
-            }, now)
+            .execute_with_circuit_breaker(
+                "test_op",
+                || {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    async { Ok::<(), AuraError>(()) }
+                },
+                now,
+            )
             .await;
         assert!(result.is_ok());
 
         // Next two calls should fail and open the circuit
         for _ in 0..2 {
             let result = coordinator
-                .execute_with_circuit_breaker("test_op", || {
-                    call_count.fetch_add(1, Ordering::SeqCst);
-                    async { Err(AuraError::internal("Test failure")) }
-                }, now)
+                .execute_with_circuit_breaker(
+                    "test_op",
+                    || {
+                        call_count.fetch_add(1, Ordering::SeqCst);
+                        async { Err(AuraError::internal("Test failure")) }
+                    },
+                    now,
+                )
                 .await;
             assert!(result.is_err());
         }
 
         // Circuit should now be open - next call should fail fast
         let result = coordinator
-            .execute_with_circuit_breaker("test_op", || {
-                call_count.fetch_add(1, Ordering::SeqCst);
-                async { Ok::<(), AuraError>(()) }
-            }, now)
+            .execute_with_circuit_breaker(
+                "test_op",
+                || {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    async { Ok::<(), AuraError>(()) }
+                },
+                now,
+            )
             .await;
         assert!(result.is_err());
         assert!(result
@@ -474,20 +484,23 @@ mod tests {
         let now = Instant::now();
 
         let coordinator = ReliabilityCoordinator::with_config(
-            RetryConfig::default(),
+            RetryPolicy::default(),
             CircuitBreakerConfig {
                 failure_threshold: 1,
                 success_threshold: 1,
                 timeout: Duration::from_millis(10),
                 failure_window: Duration::from_secs(60),
             },
+            Arc::new(MockTimeEffects),
         );
 
         // Fail to open circuit
         let result = coordinator
-            .execute_with_circuit_breaker("test_op", || async {
-                Err(AuraError::internal("Test failure"))
-            }, now)
+            .execute_with_circuit_breaker(
+                "test_op",
+                || async { Err(AuraError::internal("Test failure")) },
+                now,
+            )
             .await;
         assert!(result.is_err());
 
@@ -520,14 +533,13 @@ mod tests {
     #[tokio::test]
     async fn test_retry_with_exponential_backoff() {
         let coordinator = ReliabilityCoordinator::with_config(
-            RetryConfig {
-                max_attempts: 3,
-                base_delay: Duration::from_millis(1), // Fast for testing
-                max_delay: Duration::from_millis(10),
-                backoff_multiplier: 2.0,
-                jitter: 0.0, // No jitter for predictable testing
-            },
+            RetryPolicy::exponential()
+                .with_max_attempts(3)
+                .with_initial_delay(Duration::from_millis(1)) // Fast for testing
+                .with_max_delay(Duration::from_millis(10))
+                .with_jitter(false), // No jitter for predictable testing
             CircuitBreakerConfig::default(),
+            Arc::new(MockTimeEffects),
         );
 
         let call_count = Arc::new(AtomicU32::new(0));

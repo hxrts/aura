@@ -15,7 +15,7 @@ use aura_core::AuraError;
 pub struct ErasureConfig {
     /// Data chunks (k)
     pub data_chunks: u8,
-    /// Parity chunks (m)  
+    /// Parity chunks (m)
     pub parity_chunks: u8,
     /// Maximum chunk size in bytes
     pub max_chunk_size: u32,
@@ -128,10 +128,7 @@ impl ChunkManifest {
             chunk_id,
             size,
             required_capabilities,
-            created_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            created_at: aura_core::time::current_unix_timestamp(),
             metadata: BTreeMap::new(),
         }
     }
@@ -193,10 +190,7 @@ impl ContentManifest {
             layout,
             chunk_manifests,
             metadata: BTreeMap::new(),
-            created_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            created_at: aura_core::time::current_unix_timestamp(),
         })
     }
 

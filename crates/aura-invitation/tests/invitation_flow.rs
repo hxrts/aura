@@ -7,24 +7,29 @@
 #![allow(clippy::expect_used)]
 
 use aura_agent::runtime::AuraEffectSystem;
-use aura_core::{AccountId, Cap, DeviceId};
+use aura_core::{AccountId, DeviceId};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
     invitation_acceptance::InvitationAcceptanceCoordinator,
 };
 use aura_journal::semilattice::InvitationLedger;
 use aura_macros::aura_test;
+use aura_wot::AccountAuthority;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 // Note: For testing, use mock handlers from aura-effects
 
 fn sample_request(invitee: DeviceId) -> DeviceInvitationRequest {
+    let account_id = AccountId(Uuid::new_v4());
+    let authority = AccountAuthority::new(account_id);
+    let device_token = authority.create_device_token(invitee).unwrap();
+
     DeviceInvitationRequest {
         inviter: DeviceId(Uuid::new_v4()),
         invitee,
-        account_id: AccountId(Uuid::new_v4()),
-        granted_capabilities: Cap::top(),
+        account_id,
+        granted_token: device_token,
         device_role: "cli-device".into(),
         ttl_secs: Some(60),
     }

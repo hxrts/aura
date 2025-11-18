@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error, info};
+use tracing_subscriber;
 
 /// Example lifecycle-aware component
 struct DatabaseConnection {

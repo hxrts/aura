@@ -113,12 +113,7 @@ impl LeakageBudget {
     ///
     /// # Arguments
     /// * `now` - Current timestamp (from TimeEffects)
-    pub fn new(
-        observer: DeviceId,
-        leak_type: LeakageType,
-        limit: u64,
-        now: DateTime<Utc>,
-    ) -> Self {
+    pub fn new(observer: DeviceId, leak_type: LeakageType, limit: u64, now: DateTime<Utc>) -> Self {
         Self {
             observer,
             leak_type,

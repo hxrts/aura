@@ -53,34 +53,37 @@
 //! }).await?;
 //! ```
 
-pub mod capability;
+// pub mod capability; // Removed - replaced by biscuit_evaluator
 pub mod deltas;
 pub mod effect_system_bridge;
 pub mod effect_system_trait;
-pub mod evaluation;
+// pub mod evaluation; // Disabled - needs Capability type rewrite
 pub mod execution;
 pub mod flow;
 pub mod journal_coupler;
 pub mod privacy;
-pub mod send_guard;
+// pub mod send_guard; // Disabled - needs Capability type rewrite
+
+// Biscuit-based guards (new implementation)
+pub mod biscuit_evaluator;
 
 pub use effect_system_trait::GuardEffectSystem;
 pub use flow::{FlowBudgetEffects, FlowGuard, FlowHint};
 pub use journal_coupler::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
-pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
+// pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult}; // Disabled
 
 use crate::wot::EffectSystemInterface;
 use aura_core::AuraResult;
-use aura_wot::Capability;
+// use aura_wot::Capability; // Removed
 use std::future::Future;
 
 /// Protocol execution guard combining capability checking, delta application, and privacy tracking
 #[derive(Debug, Clone)]
 pub struct ProtocolGuard {
-    /// Required capabilities for this operation
-    pub required_capabilities: Vec<Capability>,
+    /// Required capabilities for this operation (temporarily disabled)
+    // pub required_capabilities: Vec<Capability>,
     /// Facts to be merged into the journal after successful execution
     pub delta_facts: Vec<serde_json::Value>, // Placeholder for actual fact types
     /// Privacy leakage budget for this operation
@@ -134,24 +137,24 @@ impl ProtocolGuard {
     /// Create a new protocol guard with no requirements
     pub fn new(operation_id: impl Into<String>) -> Self {
         Self {
-            required_capabilities: Vec::new(),
+            // required_capabilities: Vec::new(),
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
             operation_id: operation_id.into(),
         }
     }
 
-    /// Add a required capability to this guard
-    pub fn require_capability(mut self, cap: Capability) -> Self {
-        self.required_capabilities.push(cap);
-        self
-    }
+    /// Add a required capability to this guard (temporarily disabled)
+    // pub fn require_capability(mut self, cap: Capability) -> Self {
+    //     self.required_capabilities.push(cap);
+    //     self
+    // }
 
-    /// Add multiple required capabilities to this guard
-    pub fn require_capabilities(mut self, caps: Vec<Capability>) -> Self {
-        self.required_capabilities.extend(caps);
-        self
-    }
+    /// Add multiple required capabilities to this guard (temporarily disabled)
+    // pub fn require_capabilities(mut self, caps: Vec<Capability>) -> Self {
+    //     self.required_capabilities.extend(caps);
+    //     self
+    // }
 
     /// Add delta facts to be applied after successful execution
     pub fn delta_facts(mut self, facts: Vec<serde_json::Value>) -> Self {
@@ -212,21 +215,16 @@ impl LeakageBudget {
     }
 }
 
-/// Convenience macro for creating protocol guards
+/// Convenience macro for creating protocol guards (temporarily simplified)
 #[macro_export]
 macro_rules! guard {
     (
         operation: $op:expr,
-        $(capabilities: [$($cap:expr),*],)?
         $(deltas: [$($delta:expr),*],)?
         $(leakage: ($ext:expr, $ngh:expr, $grp:expr),)?
     ) => {
         {
             let mut guard = $crate::guards::ProtocolGuard::new($op);
-
-            $(
-                guard = guard.require_capabilities(vec![$($cap),*]);
-            )?
 
             $(
                 guard = guard.delta_facts(vec![$($delta),*]);
@@ -242,11 +240,14 @@ macro_rules! guard {
 }
 
 // Re-export submodules
-pub use capability::*;
+// pub use capability::*; // Removed - replaced by biscuit_evaluator
 pub use deltas::*;
 pub use effect_system_bridge::*;
-pub use evaluation::*;
+// pub use evaluation::*; // Disabled - needs Capability type rewrite
 pub use execution::*;
 // pub use middleware::*; // REMOVED: Uses deprecated JournalEffects methods
 pub use privacy::*;
-pub use send_guard::*;
+// pub use send_guard::*; // Disabled - needs Capability type rewrite
+
+// Re-export Biscuit guard types
+pub use biscuit_evaluator::{BiscuitGuardEvaluator, GuardError, GuardResult};

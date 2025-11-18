@@ -7,10 +7,11 @@ use crate::{
     InvitationError, InvitationResult,
 };
 use aura_core::effects::{NetworkEffects, TimeEffects};
-use aura_core::{AccountId, Cap, DeviceId, RelationshipId, TrustLevel};
+use aura_core::{AccountId, DeviceId, RelationshipId, TrustLevel};
 use aura_journal::semilattice::InvitationLedger;
-use aura_protocol::effects::AuraEffectSystem;
-use aura_protocol::effects::LedgerEffects;
+use aura_protocol::orchestration::AuraEffectSystem;
+use aura_protocol::effect_traits::LedgerEffects;
+use aura_wot::SerializableBiscuit;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -26,8 +27,8 @@ pub struct InvitationAcceptance {
     pub inviter: DeviceId,
     /// Account ID
     pub account_id: AccountId,
-    /// Granted capabilities
-    pub granted_capabilities: Cap,
+    /// Granted capabilities (as Biscuit token)
+    pub granted_token: SerializableBiscuit,
     /// Device role
     pub device_role: String,
     /// Timestamp of acceptance
@@ -131,7 +132,7 @@ impl InvitationAcceptanceCoordinator {
                 invitee: envelope.invitee,
                 inviter: envelope.inviter,
                 account_id: envelope.account_id,
-                granted_capabilities: envelope.granted_capabilities,
+                granted_token: envelope.granted_token.clone(),
                 device_role: envelope.device_role,
                 accepted_at: now,
                 relationship_id: None,
@@ -151,7 +152,7 @@ impl InvitationAcceptanceCoordinator {
             invitee: envelope.invitee,
             inviter: envelope.inviter,
             account_id: envelope.account_id,
-            granted_capabilities: envelope.granted_capabilities.clone(),
+            granted_token: envelope.granted_token.clone(),
             device_role: envelope.device_role.clone(),
             accepted_at: now,
             relationship_id: None,
@@ -258,7 +259,7 @@ impl InvitationAcceptanceCoordinator {
             "account_id": envelope.account_id,
             "device_id": envelope.invitee,
             "role": envelope.device_role,
-            "capabilities": envelope.granted_capabilities,
+            "capabilities": "biscuit_token_serialized", // Token would be serialized to bytes
             "added_by": envelope.inviter,
             "timestamp": <AuraEffectSystem as TimeEffects>::current_timestamp(&self.effects).await,
             "invitation_id": envelope.invitation_id

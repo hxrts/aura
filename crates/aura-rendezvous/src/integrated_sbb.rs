@@ -23,7 +23,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Complete SBB system integrating all components
-#[derive(Debug)]
 pub struct IntegratedSbbSystem {
     /// Device ID for this node
     #[allow(dead_code)]
@@ -87,7 +86,11 @@ pub struct SbbDiscoveryResult {
 
 impl IntegratedSbbSystem {
     /// Create new integrated SBB system
-    pub fn new(device_id: DeviceId, config: SbbConfig) -> Self {
+    pub fn new(
+        device_id: DeviceId,
+        config: SbbConfig,
+        effects: aura_protocol::effects::AuraEffectSystem,
+    ) -> Self {
         // Initialize components
         let flooding_coordinator = CapabilityAwareSbbCoordinator::new(device_id);
 
@@ -95,7 +98,8 @@ impl IntegratedSbbSystem {
         let key_manager = RelationshipKeyManager::new(device_id, root_key);
         let encryption = EnvelopeEncryption::new(key_manager);
 
-        let transport_bridge = SbbTransportBridge::new(device_id);
+        // Note: effect system cannot be cloned directly, so we pass it by value
+        let transport_bridge = SbbTransportBridge::new(device_id, effects);
 
         Self {
             device_id,
@@ -111,6 +115,7 @@ impl IntegratedSbbSystem {
         device_id: DeviceId,
         transport: Arc<RwLock<NetworkTransport>>,
         config: SbbConfig,
+        effects: aura_protocol::effects::AuraEffectSystem,
     ) -> Self {
         let flooding_coordinator = CapabilityAwareSbbCoordinator::new(device_id);
 
@@ -118,7 +123,8 @@ impl IntegratedSbbSystem {
         let key_manager = RelationshipKeyManager::new(device_id, root_key);
         let encryption = EnvelopeEncryption::new(key_manager);
 
-        let transport_bridge = SbbTransportBridge::with_network_transport(device_id, transport);
+        let transport_bridge =
+            SbbTransportBridge::with_network_transport(device_id, transport, effects);
 
         Self {
             device_id,
@@ -137,8 +143,13 @@ impl IntegratedSbbSystem {
         trust_level: TrustLevel,
         now: u64,
     ) {
-        self.flooding_coordinator
-            .add_relationship(peer_id, relationship_id, trust_level, false, now);
+        self.flooding_coordinator.add_relationship(
+            peer_id,
+            relationship_id,
+            trust_level,
+            false,
+            now,
+        );
         self.transport_bridge.add_friend(peer_id).await;
     }
 
@@ -150,8 +161,13 @@ impl IntegratedSbbSystem {
         trust_level: TrustLevel,
         now: u64,
     ) {
-        self.flooding_coordinator
-            .add_relationship(peer_id, relationship_id, trust_level, true, now);
+        self.flooding_coordinator.add_relationship(
+            peer_id,
+            relationship_id,
+            trust_level,
+            true,
+            now,
+        );
         self.transport_bridge.add_guardian(peer_id).await;
     }
 
@@ -297,7 +313,12 @@ impl IntegratedSbbSystem {
     }
 
     /// Check if peer can receive SBB messages
-    pub async fn can_forward_to_peer(&self, peer_id: DeviceId, message_size: u64, now: u64) -> bool {
+    pub async fn can_forward_to_peer(
+        &self,
+        peer_id: DeviceId,
+        message_size: u64,
+        now: u64,
+    ) -> bool {
         self.flooding_coordinator
             .can_forward_to(&peer_id, message_size, now)
             .await
@@ -305,7 +326,11 @@ impl IntegratedSbbSystem {
     }
 
     /// Get eligible peers for forwarding
-    pub async fn get_eligible_peers(&self, message_size: u64, now: u64) -> AuraResult<Vec<DeviceId>> {
+    pub async fn get_eligible_peers(
+        &self,
+        message_size: u64,
+        now: u64,
+    ) -> AuraResult<Vec<DeviceId>> {
         self.flooding_coordinator
             .get_capability_aware_forwarding_peers(None, message_size, &self.forwarding_policy, now)
             .await
@@ -313,7 +338,6 @@ impl IntegratedSbbSystem {
 }
 
 /// Builder for IntegratedSbbSystem
-#[derive(Debug)]
 pub struct SbbSystemBuilder {
     device_id: DeviceId,
     config: SbbConfig,
@@ -361,12 +385,15 @@ impl SbbSystemBuilder {
     }
 
     /// Build the integrated SBB system
-    pub fn build(self) -> IntegratedSbbSystem {
+    pub fn build(self, effects: aura_protocol::effects::AuraEffectSystem) -> IntegratedSbbSystem {
         match self.transport {
-            Some(transport) => {
-                IntegratedSbbSystem::with_network_transport(self.device_id, transport, self.config)
-            }
-            None => IntegratedSbbSystem::new(self.device_id, self.config),
+            Some(transport) => IntegratedSbbSystem::with_network_transport(
+                self.device_id,
+                transport,
+                self.config,
+                effects,
+            ),
+            None => IntegratedSbbSystem::new(self.device_id, self.config, effects),
         }
     }
 }

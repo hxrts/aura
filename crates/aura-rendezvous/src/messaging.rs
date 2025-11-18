@@ -4,30 +4,110 @@
 //! for actual message delivery across peer connections.
 
 use crate::sbb::{RendezvousEnvelope, SbbFlooding, SbbFloodingCoordinator};
+use aura_core::effects::{NetworkEffects, NetworkError};
 use aura_core::{AuraError, AuraResult, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-// TODO: Replace with actual NetworkTransport when transport layer is implemented
-#[derive(Debug, Clone)]
+/// Real NetworkTransport implementation using aura-effects transport handlers
 pub struct NetworkTransport {
     device_id: DeviceId,
+    /// Network effect handler for actual message transmission
+    network_effects: Arc<dyn NetworkEffects>,
 }
 
 impl NetworkTransport {
-    pub fn new(device_id: DeviceId, _config: NetworkConfig) -> Arc<RwLock<Self>> {
-        Arc::new(RwLock::new(Self { device_id }))
+    /// Create new NetworkTransport with effect handler
+    pub fn new(device_id: DeviceId, network_effects: Arc<dyn NetworkEffects>) -> Arc<RwLock<Self>> {
+        Arc::new(RwLock::new(Self {
+            device_id,
+            network_effects,
+        }))
     }
 
-    pub async fn send(&self, _recipient: &DeviceId, _data: Vec<u8>) -> AuraResult<()> {
-        // TODO: Implement actual transport sending
+    /// Send data to a specific peer using the network effect system
+    pub async fn send(&self, recipient: &DeviceId, data: Vec<u8>) -> AuraResult<()> {
+        tracing::debug!(
+            "Sending {} bytes from {} to {}",
+            data.len(),
+            self.device_id,
+            recipient
+        );
+
+        // Use the actual network effect handler for transmission
+        self.network_effects
+            .send_to_peer(recipient.0, data)
+            .await
+            .map_err(|e| match e {
+                NetworkError::SendFailed { reason, .. } => {
+                    AuraError::network(format!("Failed to send to {}: {}", recipient, reason))
+                }
+                NetworkError::PeerUnreachable { peer_id } => {
+                    AuraError::network(format!("Peer unreachable: {}", peer_id))
+                }
+                NetworkError::RateLimitExceeded { limit, window_ms } => AuraError::network(
+                    format!("Rate limit exceeded: {} req/{}ms", limit, window_ms),
+                ),
+                NetworkError::OperationTimeout {
+                    operation,
+                    timeout_ms,
+                } => AuraError::network(format!(
+                    "Operation '{}' timed out after {}ms",
+                    operation, timeout_ms
+                )),
+                _ => AuraError::network(format!("Network error: {}", e)),
+            })
+    }
+
+    /// Check if a peer is connected using the network effect system
+    pub async fn is_peer_connected(&self, peer: DeviceId) -> bool {
+        self.network_effects.is_peer_connected(peer.0).await
+    }
+
+    /// Get list of currently connected peers
+    pub async fn connected_peers(&self) -> Vec<DeviceId> {
+        self.network_effects
+            .connected_peers()
+            .await
+            .into_iter()
+            .map(DeviceId)
+            .collect()
+    }
+
+    /// Broadcast a message to all connected peers
+    pub async fn broadcast(&self, data: Vec<u8>) -> AuraResult<()> {
+        tracing::debug!("Broadcasting {} bytes from {}", data.len(), self.device_id);
+
+        self.network_effects
+            .broadcast(data)
+            .await
+            .map_err(|e| AuraError::network(format!("Broadcast failed: {}", e)))
+    }
+
+    /// Receive next available message from any peer
+    pub async fn receive(&self) -> AuraResult<(DeviceId, Vec<u8>)> {
+        let (peer_uuid, data) = self
+            .network_effects
+            .receive()
+            .await
+            .map_err(|e| AuraError::network(format!("Receive failed: {}", e)))?;
+
+        Ok((DeviceId(peer_uuid), data))
+    }
+
+    /// Connect to a peer (for testing/simulation)
+    pub async fn connect_peer(&mut self, peer: DeviceId) -> AuraResult<()> {
+        tracing::info!("Connected to peer {}", peer);
+        // Connection management is handled by the underlying NetworkEffects implementation
         Ok(())
     }
 
-    pub async fn is_peer_connected(&self, _peer: DeviceId) -> bool {
-        // TODO: Implement actual peer connection checking
-        false
+    /// Disconnect from a peer
+    pub async fn disconnect_peer(&mut self, peer: DeviceId) -> AuraResult<()> {
+        tracing::info!("Disconnected from peer {}", peer);
+        // Connection management is handled by the underlying NetworkEffects implementation
+        Ok(())
     }
 }
 
@@ -76,7 +156,6 @@ pub enum TransportMethod {
 }
 
 /// SBB transport bridge connecting flooding to actual transport
-#[derive(Debug)]
 pub struct SbbTransportBridge {
     /// SBB flooding coordinator
     flooding_coordinator: Arc<RwLock<SbbFloodingCoordinator>>,
@@ -103,8 +182,9 @@ pub struct MockTransportSender {
 
 impl SbbTransportBridge {
     /// Create new SBB transport bridge
-    pub fn new(device_id: DeviceId) -> Self {
-        let flooding_coordinator = Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id)));
+    pub fn new(device_id: DeviceId, effects: aura_protocol::effects::AuraEffectSystem) -> Self {
+        let flooding_coordinator =
+            Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id, effects)));
 
         Self {
             flooding_coordinator,
@@ -116,8 +196,10 @@ impl SbbTransportBridge {
     pub fn with_network_transport(
         device_id: DeviceId,
         transport: Arc<RwLock<NetworkTransport>>,
+        effects: aura_protocol::effects::AuraEffectSystem,
     ) -> Self {
-        let flooding_coordinator = Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id)));
+        let flooding_coordinator =
+            Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id, effects)));
         let sender = NetworkTransportSender::new(transport);
 
         Self {
@@ -137,7 +219,7 @@ impl SbbTransportBridge {
         coordinator.add_friend(friend_id);
     }
 
-    /// Add guardian relationship for SBB flooding  
+    /// Add guardian relationship for SBB flooding
     pub async fn add_guardian(&self, guardian_id: DeviceId) {
         let mut coordinator = self.flooding_coordinator.write().await;
         coordinator.add_guardian(guardian_id);
@@ -329,12 +411,21 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
         coordinator.flood_envelope(envelope, from_peer, now).await
     }
 
-    async fn get_forwarding_peers(&self, exclude: Option<DeviceId>, now: u64) -> AuraResult<Vec<DeviceId>> {
+    async fn get_forwarding_peers(
+        &self,
+        exclude: Option<DeviceId>,
+        now: u64,
+    ) -> AuraResult<Vec<DeviceId>> {
         let coordinator = self.flooding_coordinator.read().await;
         coordinator.get_forwarding_peers(exclude, now).await
     }
 
-    async fn can_forward_to(&self, peer: &DeviceId, message_size: u64, now: u64) -> AuraResult<bool> {
+    async fn can_forward_to(
+        &self,
+        peer: &DeviceId,
+        message_size: u64,
+        now: u64,
+    ) -> AuraResult<bool> {
         let coordinator = self.flooding_coordinator.read().await;
         coordinator.can_forward_to(peer, message_size, now).await
     }
@@ -462,7 +553,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_network_transport_sender_creation() {
-        use aura_transport::{NetworkConfig, NetworkTransport};
+        use super::{NetworkConfig, NetworkTransport};
 
         let device_id = DeviceId::new();
         let config = NetworkConfig::default();
@@ -478,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sbb_bridge_with_network_transport() {
-        use aura_transport::{NetworkConfig, NetworkTransport};
+        use super::{NetworkConfig, NetworkTransport};
 
         let device_id = DeviceId::new();
         let mut bridge = SbbTransportBridge::new(device_id);

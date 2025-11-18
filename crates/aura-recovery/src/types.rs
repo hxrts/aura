@@ -2,6 +2,7 @@
 
 use aura_core::frost::ThresholdSignature;
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId, TrustLevel};
+use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
 
 /// Metadata describing a guardian that can participate in recovery.
@@ -148,6 +149,8 @@ pub struct RecoveryRequest {
     pub threshold: usize,
     /// Available guardians for the operation
     pub guardians: GuardianSet,
+    /// Biscuit token for authorization (serialized)
+    pub auth_token: Option<Vec<u8>>,
 }
 
 /// Generic response for guardian operations
@@ -165,4 +168,22 @@ pub struct RecoveryResponse {
     pub evidence: RecoveryEvidence,
     /// Threshold signature
     pub signature: ThresholdSignature,
+}
+
+impl RecoveryRequest {
+    /// Deserialize the auth token if present
+    pub fn get_auth_token(
+        &self,
+        root_public_key: &biscuit_auth::PublicKey,
+    ) -> Option<Result<Biscuit, biscuit_auth::error::Token>> {
+        self.auth_token
+            .as_ref()
+            .map(|bytes| Biscuit::from(bytes.as_slice(), *root_public_key))
+    }
+
+    /// Set the auth token from a Biscuit
+    pub fn with_auth_token(mut self, token: &Biscuit) -> Result<Self, biscuit_auth::error::Token> {
+        self.auth_token = Some(token.to_vec()?);
+        Ok(self)
+    }
 }

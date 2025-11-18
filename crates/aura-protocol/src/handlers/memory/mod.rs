@@ -27,9 +27,9 @@
 //! handler contracts while avoiding external dependencies or persistence overhead.
 
 pub mod choreographic_memory;
-pub mod guardian_authorization;
+// pub mod guardian_authorization; // Removed - replaced by Biscuit-based authorization
 pub mod ledger_memory;
 
 pub use choreographic_memory::MemoryChoreographicHandler;
-pub use guardian_authorization::GuardianAuthorizationHandler;
+// pub use guardian_authorization::GuardianAuthorizationHandler; // Removed
 pub use ledger_memory::MemoryLedgerHandler;

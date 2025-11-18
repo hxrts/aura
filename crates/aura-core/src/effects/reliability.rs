@@ -177,7 +177,7 @@ impl BackoffStrategy {
         initial_delay: Duration,
         max_delay: Duration,
     ) -> Duration {
-        use rand::Rng;
+        // Removed rand import since we now use deterministic jitter
 
         let delay = match self {
             BackoffStrategy::Fixed => initial_delay,
@@ -188,8 +188,9 @@ impl BackoffStrategy {
             }
             BackoffStrategy::ExponentialWithJitter => {
                 let base_delay = initial_delay * 2u32.saturating_pow(attempt);
+                // Use a deterministic jitter based on attempt count to avoid rand::thread_rng
                 let jitter =
-                    (base_delay.as_millis() as f64 * 0.1 * rand::thread_rng().gen::<f64>()) as u64;
+                    (base_delay.as_millis() as f64 * 0.1 * (attempt as f64 * 0.1 % 1.0)) as u64;
                 base_delay + Duration::from_millis(jitter)
             }
         };
@@ -410,9 +411,11 @@ impl<T, E> RetryResult<T, E> {
 }
 
 impl<T, E: std::fmt::Debug> RetryResult<T, E> {
-    /// Get the success value, panicking on error
+    /// Get the success value, panicking on error with a descriptive message
+    #[allow(clippy::expect_used)]
     pub fn unwrap(self) -> T {
-        self.result.unwrap()
+        self.result
+            .expect("RetryResult should contain a success value")
     }
 }
 
@@ -545,7 +548,12 @@ impl RateLimit {
     /// - `cost`: Token cost of the operation
     /// - `refill_rate`: Tokens per second refill rate
     /// - `now`: Current time instant (obtain from TimeEffects in production)
-    pub fn check_and_consume(&mut self, cost: u32, refill_rate: u32, now: std::time::Instant) -> bool {
+    pub fn check_and_consume(
+        &mut self,
+        cost: u32,
+        refill_rate: u32,
+        now: std::time::Instant,
+    ) -> bool {
         // Initialize last_refill if not set (after deserialization)
         let last_refill = self.last_refill.get_or_insert(now);
 
@@ -650,7 +658,8 @@ impl RateLimiter {
     /// - `config`: Rate limiter configuration
     /// - `now`: Current time instant (obtain from TimeEffects in production)
     pub fn new(config: RateLimitConfig, now: std::time::Instant) -> Self {
-        let global_limit = RateLimit::new(config.global_ops_per_second, Duration::from_secs(1), now);
+        let global_limit =
+            RateLimit::new(config.global_ops_per_second, Duration::from_secs(1), now);
 
         Self {
             config,
@@ -670,7 +679,12 @@ impl RateLimiter {
     /// # Returns
     /// - `RateLimitResult::Allowed` if operation can proceed
     /// - `RateLimitResult::Denied` if rate limit exceeded
-    pub fn check_rate_limit(&mut self, peer_id: crate::DeviceId, cost: u32, now: std::time::Instant) -> RateLimitResult {
+    pub fn check_rate_limit(
+        &mut self,
+        peer_id: crate::DeviceId,
+        cost: u32,
+        now: std::time::Instant,
+    ) -> RateLimitResult {
         // Check global limit first
         if !self
             .global_limit
@@ -755,8 +769,11 @@ impl RateLimiter {
     /// # Arguments
     /// - `now`: Current time instant (obtain from TimeEffects in production)
     pub fn reset(&mut self, now: std::time::Instant) {
-        self.global_limit =
-            RateLimit::new(self.config.global_ops_per_second, Duration::from_secs(1), now);
+        self.global_limit = RateLimit::new(
+            self.config.global_ops_per_second,
+            Duration::from_secs(1),
+            now,
+        );
         self.peer_limits.clear();
         self.stats = RateLimiterStatistics::default();
     }

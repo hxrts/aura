@@ -7,7 +7,6 @@
 //! ## Architecture
 //!
 //! - **crdt_sync**: CRDT synchronization message types and utilities (shared infrastructure)
-//! - **epoch_management**: Generic epoch rotation coordination patterns
 //! - **handler_bridge**: Clean trait abstractions for choreographic handlers
 //!
 //! ## Protocol Organization
@@ -15,6 +14,7 @@
 //! Domain-specific choreographies have been moved to their appropriate feature crates:
 //! - **Snapshot protocols** → `aura-journal::choreography`
 //! - **Anti-entropy protocols** → `aura-sync::choreography`
+//! - **Epoch management** → `aura-sync::protocols`
 //!
 //! CRDT synchronization types remain here (aura-protocol) to avoid circular dependencies,
 //! but are re-exported by aura-sync for convenient access.
@@ -23,20 +23,19 @@
 //! feature-specific implementations.
 
 pub mod crdt_sync;
-pub mod epoch_management;
-pub mod handler_bridge;
+// pub mod handler_bridge; // Disabled - needs Capability type rewrite
 
 // Re-export CRDT synchronization types
 pub use crdt_sync::{CrdtOperation, CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 
-// Re-export the clean handler bridge traits
-pub use handler_bridge::{
-    ChoreographicAdapter, ChoreographicEndpoint, ChoreographicHandler, DefaultEndpoint,
-    SendGuardProfile,
-};
+// Re-export the clean handler bridge traits (temporarily disabled)
+// pub use handler_bridge::{
+//     ChoreographicAdapter, ChoreographicEndpoint, ChoreographicHandler, DefaultEndpoint,
+//     SendGuardProfile,
+// };
 
-// Re-export epoch management utilities
-pub use epoch_management::{EpochConfig, EpochRotation, EpochRotationCoordinator, RotationStatus};
+// NOTE: Epoch management has been moved to aura-sync (Layer 5)
+// Import aura-sync directly if you need epoch coordination protocols
 
-#[cfg(test)]
-pub use handler_bridge::MockChoreographicAdapter;
+// #[cfg(test)]
+// pub use handler_bridge::MockChoreographicAdapter;

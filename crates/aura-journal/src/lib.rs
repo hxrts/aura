@@ -22,8 +22,14 @@ pub mod journal;
 pub mod ledger;
 pub mod semilattice;
 
+// CRDT causal context module moved from aura-core
+pub mod causal_context;
+
 // New ratchet tree implementation (Phase 2)
 pub mod ratchet_tree;
+
+// Clean Journal API (Phase 1 API cleanup)
+pub mod journal_api;
 
 // Note: Choreographic protocols moved to aura-sync (Layer 5)
 
@@ -44,14 +50,45 @@ pub use ledger::{
 };
 // Note: TreeOp and TreeOpRecord are now aura_core::tree::TreeOpKind and aura_core::tree::AttestedOp
 pub use aura_core::tree::{AttestedOp as TreeOpRecord, TreeOpKind as TreeOp};
+// Primary Journal API (STABLE)
+pub use journal_api::{AccountSummary, Journal, JournalFact};
+
+// CRDT Implementation Details (INTERNAL - subject to change without notice)
+#[doc(hidden)]
 pub use semilattice::{
     integration, DeviceRegistry, EpochLog, GuardianRegistry, IntentPool,
     JournalMap as CRDTJournalMap, MaxCounter, ModernAccountState as AccountState, OpLog,
 };
 
-// New ratchet tree re-exports
-pub use ratchet_tree::{reduce, TreeState};
+// New ratchet tree re-exports (tree types moved from aura-core)
+pub use ratchet_tree::{
+    // Re-export tree types for consumers that expect them from aura-journal
+    commit_branch,
+    commit_leaf,
+    compute_root_commitment,
+    policy_hash,
+    reduce,
+    AttestedOp,
+    BranchNode,
+    Epoch,
+    LeafId,
+    LeafNode,
+    LeafRole,
+    NodeIndex,
+    NodeKind,
+    Policy,
+    TreeCommitment,
+    TreeOpKind,
+    TreeState,
+};
+
+// Causal context re-exports
+pub use causal_context::{ActorId, CausalContext, OperationId, VectorClock};
 
 // Selective re-exports to avoid conflicts
 pub use middleware::JournalContext;
 pub use types::{DeviceMetadata, DeviceType, GuardianMetadata, Session};
+
+// Tests
+#[cfg(test)]
+mod tests;

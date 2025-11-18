@@ -63,10 +63,11 @@
 pub use cm_handler::CmHandler;
 pub use crdt_coordinator::{CrdtCoordinator, CrdtCoordinatorError};
 pub use cv_handler::CvHandler;
-pub use delivery::{
-    CausalContext, DeliveryConfig, DeliveryEffect, DeliveryGuarantee, GossipStrategy, TopicId,
-};
+pub use delivery::{DeliveryConfig, DeliveryEffect, DeliveryGuarantee, GossipStrategy, TopicId};
 pub use delta_handler::DeltaHandler;
+
+// Re-export causal context types from aura-journal
+pub use aura_journal::{CausalContext, VectorClock};
 pub use mv_handler::{ConstraintEvent, ConstraintResult, MultiConstraintHandler, MvHandler};
 
 pub mod cm_handler;
@@ -97,7 +98,7 @@ impl HandlerFactory {
     pub fn cm_handler<S, Op, Id>(state: S) -> CmHandler<S, Op, Id>
     where
         S: CmApply<Op> + Dedup<Id>,
-        Op: CausalOp<Id = Id, Ctx = aura_core::CausalContext>,
+        Op: CausalOp<Id = Id, Ctx = aura_journal::CausalContext>,
         Id: Clone + PartialEq,
     {
         CmHandler::new(state)
@@ -177,7 +178,7 @@ pub mod execution {
     ) -> Result<(), Box<dyn std::error::Error>>
     where
         S: CmApply<Op> + Dedup<Id>,
-        Op: CausalOp<Id = Id, Ctx = aura_core::CausalContext>,
+        Op: CausalOp<Id = Id, Ctx = aura_journal::CausalContext>,
         Id: Clone + PartialEq,
     {
         // TODO: Integrate with choreographic execution
@@ -229,7 +230,7 @@ pub mod composition {
             config: DeliveryConfig,
         ) where
             S: CmApply<Op> + Dedup<Id> + Send + Sync + 'static,
-            Op: CausalOp<Id = Id, Ctx = aura_core::CausalContext> + Send + Sync + 'static,
+            Op: CausalOp<Id = Id, Ctx = aura_journal::CausalContext> + Send + Sync + 'static,
             Id: Clone + PartialEq + Send + Sync + 'static,
         {
             self.handlers.insert(type_name.clone(), Box::new(handler));

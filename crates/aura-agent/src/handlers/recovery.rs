@@ -51,7 +51,9 @@ impl RecoveryOperations {
     ) -> Result<RecoveryResponse> {
         // TODO: Fix coordinator creation - requires refactoring to use Arc<dyn AuraEffects>
         let _ = self.effects.read().await;
-        Err(AuraError::internal("Guardian key recovery not yet implemented - requires Arc-based effect system"))
+        Err(AuraError::internal(
+            "Guardian key recovery not yet implemented - requires Arc-based effect system",
+        ))
 
         /*
         let request = RecoveryRequest {

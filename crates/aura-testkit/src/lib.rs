@@ -48,80 +48,42 @@
 //! }
 //! ```
 
-pub mod account;
-pub mod assertions;
-pub mod choreography;
-pub mod clean_fixtures;
-pub mod config;
-pub mod device;
-pub mod effects_integration;
-pub mod factories;
+// Existing modular structure
+pub mod builders;
+pub mod configuration;
 pub mod fixtures;
-pub mod foundation; // New: Architecturally-compliant test infrastructure
-pub mod keys;
+pub mod foundation;
+pub mod infrastructure;
 pub mod ledger;
 pub mod mocks;
-pub mod network_sim;
-pub mod privacy;
-pub mod protocol;
-pub mod strategies; // Property test strategies for proptest
-pub mod test_harness;
+pub mod simulation;
 pub mod time;
-pub mod transport;
-pub mod verification; // Formal property verification tools moved from aura-protocol
+pub mod verification;
 
-// Re-export commonly used items
-pub use account::*;
-pub use assertions::*;
-pub use choreography::{
-    test_device_pair, test_device_trio, test_threshold_group, ChoreographyTestHarness,
-    CoordinatedSession, MockChoreographyTransport, MockSessionCoordinator, PerformanceSnapshot,
-    SimulatorCompatibleContext, TestError, TransportError,
-};
-pub use clean_fixtures::TestFixtures;
-pub use config::*;
-pub use device::{DeviceSetBuilder, DeviceTestFixture};
-pub use effects_integration::{MockHandlerConfig, TestEffectsBuilder, TestExecutionMode};
-pub use factories::*;
-pub use fixtures::{
-    AccountTestFixture, CryptoTestFixture, ProtocolTestFixture, StatelessFixtureConfig,
-    StatelessFixtureError,
-};
-pub use foundation::{
-    create_integration_context, create_mock_test_context, create_simulation_context,
-    SimpleTestContext, TestEffectComposer, TestEffectHandler,
-};
-pub use keys::KeyTestFixture;
+// Re-export commonly used items from modular structure
+pub use builders::*;
+pub use configuration::TestConfig as ConfigTestConfig;
+pub use fixtures::*;
+pub use foundation::*;
+pub use infrastructure::*;
 pub use ledger::*;
 pub use mocks::*;
-pub use protocol::*;
-pub use strategies::{
-    arb_account_id, arb_attested_op, arb_device_id, arb_key_pair, arb_non_empty_bytes,
-    arb_non_empty_vec, arb_oplog, arb_session_id, arb_small_count, arb_threshold_config,
-    arb_timestamp, create_test_tree_op,
-};
-pub use transport::*;
-pub use verification::{
-    CapabilitySoundnessVerifier, CapabilityState, SoundnessProperty, SoundnessReport,
-    SoundnessVerificationResult, VerificationConfig,
-};
+pub use simulation::*;
+pub use time::*;
+pub use verification::*;
 
 // Re-export commonly used external types for convenience
 pub use aura_core::{AccountId, DeviceId};
-pub use aura_journal::semilattice::ModernAccountState as AccountState;
+pub use aura_journal::journal_api::{AccountSummary, Journal};
+
+// Re-export Journal as AccountState for backward compatibility in tests
+pub type AccountState = Journal;
 pub use aura_journal::{DeviceMetadata, DeviceType};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 pub use std::collections::BTreeMap;
 pub use uuid::Uuid;
 
-// Re-export the test harness functions as convenience exports
-pub use test_harness::{
-    create_test_context, create_test_context_with_config, init_test_tracing, TestConfig,
-    TestContext, TestFixture,
-};
-
-// Re-export FROST key generation helper
-pub use keys::helpers::test_frost_key_shares;
+// Test harness functions available through infrastructure re-exports
 
 /// Create a test key pair with deterministic seed
 ///
@@ -140,8 +102,8 @@ pub fn test_key_pair(seed: u64) -> (SigningKey, VerifyingKey) {
 ///
 /// Convenience function that replaces the deprecated `AuraEffectSystem::for_testing()` pattern.
 /// This function creates a TestFixture with the effect system already initialized.
-pub async fn create_test_fixture() -> aura_core::AuraResult<TestFixture> {
-    TestFixture::new().await
+pub async fn create_test_fixture() -> aura_core::AuraResult<infrastructure::harness::TestFixture> {
+    infrastructure::harness::TestFixture::new().await
 }
 
 /// Create a test fixture with a specific device ID (deterministic)
@@ -149,8 +111,9 @@ pub async fn create_test_fixture() -> aura_core::AuraResult<TestFixture> {
 /// This is useful for tests that need predictable device IDs.
 pub async fn create_test_fixture_with_device_id(
     _device_id: DeviceId,
-) -> aura_core::AuraResult<TestFixture> {
-    let config = TestConfig {
+) -> aura_core::AuraResult<infrastructure::harness::TestFixture> {
+    // Use the harness TestConfig directly to avoid ambiguity
+    let config = infrastructure::harness::TestConfig {
         name: "test_with_device_id".to_string(),
         deterministic_time: true,
         capture_effects: false,
@@ -159,5 +122,5 @@ pub async fn create_test_fixture_with_device_id(
 
     // We'll need to create the context manually to specify the device ID
     // For now, create normal fixture and document this as a TODO for enhancement
-    TestFixture::with_config(config).await
+    infrastructure::harness::TestFixture::with_config(config).await
 }

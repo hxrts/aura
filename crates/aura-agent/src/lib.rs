@@ -16,18 +16,20 @@
 //!
 //! ```rust,ignore
 //! use aura_agent::{AuraAgent, create_production_agent};
+//! use aura_protocol::standard_patterns::EffectRegistry;
 //!
-//! // Production runtime with real effect handlers
+//! // Production runtime with real effect handlers (NEW: uses EffectRegistry)
 //! let agent = create_production_agent(device_id).await?;
 //!
 //! // Testing runtime with mock handlers
 //! let agent = AuraAgent::for_testing(device_id);
 //!
-//! // Custom runtime composition using effect system
-//! let config = aura_protocol::effects::EffectSystemConfig::for_production(device_id)?
-//!     .with_logging(true)
-//!     .with_metrics(true);
-//! let effects = aura_protocol::effects::AuraEffectSystem::new(config)?;
+//! // Custom runtime composition using new effect registry pattern
+//! let effects = EffectRegistry::production()
+//!     .with_device_id(device_id)
+//!     .with_logging()
+//!     .with_metrics()
+//!     .build()?;
 //! let agent = AuraAgent::new(effects, device_id);
 //! ```
 
@@ -74,6 +76,9 @@ pub use aura_core::{
     AuraError, AuraResult,
 };
 
+// Re-export maintenance types (moved from aura-core)
+pub use maintenance::{AdminReplaced, MaintenanceEvent};
+
 // Re-export runtime types for backward compatibility
 // These were previously in aura_protocol::effects but belong in Layer 6
 pub use runtime::{
@@ -86,10 +91,13 @@ pub use runtime::{
 /// This is a convenience function for creating an agent runtime with production
 /// effect handlers. The runtime composes real system effects into device workflows.
 pub async fn create_production_agent(device_id: DeviceId) -> AgentResult<AuraAgent> {
-    let config = runtime::EffectSystemConfig::for_production(device_id)?;
-    let core_effects = aura_protocol::effects::AuraEffectSystemFactory::new(
-        aura_protocol::effects::EffectSystemConfig { device_id },
-    )?;
+    // Use new EffectRegistry pattern for standardized production setup
+    let core_effects = aura_protocol::effects::EffectRegistry::production()
+        .with_device_id(device_id)
+        .with_logging()
+        .with_metrics()
+        .build()
+        .map_err(|e| AuraError::internal(format!("Failed to create production effects: {}", e)))?;
 
     Ok(AuraAgent::new(core_effects, device_id))
 }
@@ -106,11 +114,13 @@ pub fn create_testing_agent(device_id: DeviceId) -> AuraAgent {
 ///
 /// This creates an agent runtime with controlled effects for simulation scenarios.
 /// The seed ensures deterministic behavior across simulation runs.
-pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AuraAgent {
-    let config = runtime::EffectSystemConfig::for_simulation(device_id, seed);
-    let core_effects = aura_protocol::effects::AuraEffectSystemFactory::new(
-        aura_protocol::effects::EffectSystemConfig { device_id },
-    )
-    .expect("Failed to create simulation effect system");
-    AuraAgent::new(core_effects, device_id)
+pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AgentResult<AuraAgent> {
+    // Use new EffectRegistry pattern for standardized simulation setup
+    let core_effects = aura_protocol::effects::EffectRegistry::simulation(seed)
+        .with_device_id(device_id)
+        .with_logging()
+        .build()
+        .map_err(|e| AuraError::internal(format!("Failed to create simulation effects: {}", e)))?;
+
+    Ok(AuraAgent::new(core_effects, device_id))
 }

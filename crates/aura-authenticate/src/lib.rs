@@ -40,8 +40,11 @@ pub mod session_creation;
 /// Guardian authentication coordinator for recovery operations
 pub mod guardian_auth;
 
+/// Distributed Key Derivation (DKD) protocol implementation
+pub mod dkd;
+
 // Re-export core types from aura-core (Layer 1)
-pub use aura_core::{AccountId, AuraError, AuraResult, Cap, DeviceId, Journal};
+pub use aura_core::{AccountId, AuraError, AuraResult, DeviceId, Journal};
 
 // Re-export verification types from aura-verify (Layer 2)
 pub use aura_verify::session::{SessionScope, SessionTicket};
@@ -52,3 +55,16 @@ pub use aura_verify::{
 
 // Re-export effect system types
 pub use aura_protocol::AuraEffectSystem;
+
+// Re-export Biscuit authorization types
+pub use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
+pub use aura_wot::{
+    AccountAuthority, AdminOperation, BiscuitTokenManager, JournalOp, RecoveryType, ResourceScope,
+    StorageCategory,
+};
+
+// Re-export DKD types
+pub use dkd::{
+    create_test_config, execute_simple_dkd, DkdConfig, DkdError, DkdProtocol, DkdResult,
+    DkdSessionId, KeyDerivationContext, ParticipantContribution,
+};

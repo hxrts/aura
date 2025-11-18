@@ -410,7 +410,9 @@ mod tests {
 
         // Flow should be blocked
         let now = chrono::Utc::now();
-        assert!(isolation.record_flow(rid1, rid2, "test_info", 100, now).is_err());
+        assert!(isolation
+            .record_flow(rid1, rid2, "test_info", 100, now)
+            .is_err());
     }
 
     #[test]

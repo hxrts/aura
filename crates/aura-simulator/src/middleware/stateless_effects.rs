@@ -10,8 +10,8 @@ use crate::{
     Result as SimResult, SimulatorConfig, SimulatorContext, SimulatorError, SimulatorHandler,
     SimulatorMiddleware, SimulatorOperation,
 };
-use aura_core::DeviceId;
 use aura_agent::runtime::{AuraEffectSystem, EffectSystemBuilder, EffectSystemConfig};
+use aura_core::DeviceId;
 use aura_protocol::handlers::EffectType;
 use serde_json::Value;
 use std::collections::HashMap;

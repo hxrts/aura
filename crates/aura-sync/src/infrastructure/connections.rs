@@ -40,12 +40,12 @@
 //! ```
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::{sync_resource_exhausted, sync_session_error, SyncResult};
 use aura_core::{DeviceId, SessionId};
-use crate::core::{SyncError, SyncResult};
 
 // =============================================================================
 // Configuration
@@ -281,9 +281,7 @@ impl ConnectionPool {
         let session_id = SessionId::new();
 
         if let Some(connections) = self.connections.get_mut(&peer_id) {
-            if let Some(idle_conn) = connections.iter_mut()
-                .find(|c| c.is_idle() && c.healthy)
-            {
+            if let Some(idle_conn) = connections.iter_mut().find(|c| c.is_idle() && c.healthy) {
                 idle_conn.acquire(session_id, now);
                 self.stats.connections_reused += 1;
 
@@ -299,20 +297,19 @@ impl ConnectionPool {
         // Check limits before creating new connection
         if self.total_connections >= self.config.max_total_connections {
             self.stats.connection_limit_hits += 1;
-            return Err(SyncError::resource_exhausted(
+            return Err(sync_resource_exhausted(
                 "connections",
-                "Connection pool limit reached"
+                "Connection pool limit reached",
             ));
         }
 
-        let peer_connections = self.connections.entry(peer_id)
-            .or_insert_with(Vec::new);
+        let peer_connections = self.connections.entry(peer_id).or_insert_with(Vec::new);
 
         if peer_connections.len() >= self.config.max_connections_per_peer {
             self.stats.connection_limit_hits += 1;
-            return Err(SyncError::resource_exhausted(
+            return Err(sync_resource_exhausted(
                 "connections",
-                &format!("Per-peer connection limit reached for {:?}", peer_id)
+                &format!("Per-peer connection limit reached for {:?}", peer_id),
             ));
         }
 
@@ -326,18 +323,30 @@ impl ConnectionPool {
         self.total_connections += 1;
         self.stats.connections_created += 1;
 
-        Ok(ConnectionHandle::new(connection_id, peer_id, session_id, now))
+        Ok(ConnectionHandle::new(
+            connection_id,
+            peer_id,
+            session_id,
+            now,
+        ))
     }
 
     /// Release a connection back to the pool
-    pub fn release(&mut self, peer_id: DeviceId, handle: ConnectionHandle, now: u64) -> SyncResult<()> {
+    pub fn release(
+        &mut self,
+        peer_id: DeviceId,
+        handle: ConnectionHandle,
+        now: u64,
+    ) -> SyncResult<()> {
+        let connections = self
+            .connections
+            .get_mut(&peer_id)
+            .ok_or_else(|| sync_session_error("No connections for peer"))?;
 
-        let connections = self.connections.get_mut(&peer_id)
-            .ok_or_else(|| SyncError::session("No connections for peer"))?;
-
-        let conn = connections.iter_mut()
+        let conn = connections
+            .iter_mut()
             .find(|c| c.connection_id == handle.id)
-            .ok_or_else(|| SyncError::session("Connection not found in pool"))?;
+            .ok_or_else(|| sync_session_error("Connection not found in pool"))?;
 
         conn.release(now);
         self.stats.connections_released += 1;
@@ -347,10 +356,15 @@ impl ConnectionPool {
 
     /// Close a connection
     pub fn close(&mut self, peer_id: DeviceId, connection_id: &str) -> SyncResult<()> {
-        let connections = self.connections.get_mut(&peer_id)
-            .ok_or_else(|| SyncError::session("No connections for peer"))?;
+        let connections = self
+            .connections
+            .get_mut(&peer_id)
+            .ok_or_else(|| sync_session_error("No connections for peer"))?;
 
-        if let Some(pos) = connections.iter().position(|c| c.connection_id == connection_id) {
+        if let Some(pos) = connections
+            .iter()
+            .position(|c| c.connection_id == connection_id)
+        {
             let removed = connections.remove(pos);
             if self.total_connections > 0 {
                 self.total_connections -= 1;
@@ -360,7 +374,7 @@ impl ConnectionPool {
             // TODO: Actually close connection via aura-transport
             Ok(())
         } else {
-            Err(SyncError::session("Connection not found"))
+            Err(sync_session_error("Connection not found"))
         }
     }
 
@@ -400,7 +414,8 @@ impl ConnectionPool {
         peer_id: &DeviceId,
         connection_id: &str,
     ) -> Option<&ConnectionMetadata> {
-        self.connections.get(peer_id)?
+        self.connections
+            .get(peer_id)?
             .iter()
             .find(|c| c.connection_id == connection_id)
     }
@@ -550,7 +565,9 @@ mod tests {
         // Release and check again
         pool.release(peer_id, handle, now).unwrap();
 
-        let metadata = pool.get_connection_metadata(&peer_id, &connection_id).unwrap();
+        let metadata = pool
+            .get_connection_metadata(&peer_id, &connection_id)
+            .unwrap();
         assert_eq!(metadata.state, ConnectionState::Idle);
     }
 }

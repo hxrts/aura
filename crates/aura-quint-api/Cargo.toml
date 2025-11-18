@@ -9,6 +9,7 @@ description = "Native Rust interface to Quint formal verification using direct e
 
 [dependencies]
 # Core dependencies
+aura-core = { path = "../aura-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

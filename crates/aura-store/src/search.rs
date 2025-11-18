@@ -258,10 +258,7 @@ impl SearchIndexEntry {
             content_id,
             terms,
             required_capabilities,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            timestamp: aura_core::time::current_unix_timestamp(),
         }
     }
 

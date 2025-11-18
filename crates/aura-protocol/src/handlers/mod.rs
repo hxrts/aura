@@ -390,7 +390,9 @@ pub use bridges::{TypedHandlerBridge, UnifiedAuraHandlerBridge, UnifiedHandlerBr
 
 // Memory-based handlers
 pub mod memory;
-pub use memory::{GuardianAuthorizationHandler, MemoryChoreographicHandler, MemoryLedgerHandler};
+pub use memory::{
+    /* GuardianAuthorizationHandler, */ MemoryChoreographicHandler, MemoryLedgerHandler,
+};
 
 // Convert AuraHandlerError to AuraError for ? operator
 impl From<AuraHandlerError> for aura_core::AuraError {

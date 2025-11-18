@@ -497,7 +497,12 @@ impl MetricsSystemHandler {
     /// Create a timing guard for automatic duration measurement
     ///
     /// Note: Callers should obtain `start` via `TimeEffects::now_instant()` and pass it to this method
-    pub fn timing_guard(&self, name: String, labels: HashMap<String, String>, start: Instant) -> TimingGuard {
+    pub fn timing_guard(
+        &self,
+        name: String,
+        labels: HashMap<String, String>,
+        start: Instant,
+    ) -> TimingGuard {
         TimingGuard {
             name,
             labels,

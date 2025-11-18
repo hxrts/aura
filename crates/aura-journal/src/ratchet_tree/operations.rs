@@ -4,7 +4,7 @@
 //! including validation, application, and state synchronization.
 
 use super::{
-    application::{apply_verified, validate_invariants, ApplicationError},
+    application::{apply_verified_sync, validate_invariants, ApplicationError},
     reduction::{reduce, ReductionError},
     TreeState,
 };
@@ -128,8 +128,8 @@ impl TreeOperationProcessor {
         let mut error_msg = None;
         let mut affected_nodes = Vec::new();
 
-        // Attempt to apply the operation
-        match apply_verified(&mut self.current_state, attested) {
+        // Attempt to apply the operation (using sync version for backwards compatibility)
+        match apply_verified_sync(&mut self.current_state, attested) {
             Ok(()) => {
                 // Extract affected nodes based on operation type
                 affected_nodes = self.extract_affected_nodes(&attested.op);

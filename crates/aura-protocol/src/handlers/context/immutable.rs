@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::handlers::{AuraHandlerError, ExecutionMode};
 use crate::effects::choreographic::ChoreographicRole;
+use crate::handlers::{AuraHandlerError, ExecutionMode};
 use aura_core::{AccountId, DeviceId, SessionId};
 
 /// Immutable context for choreographic operations

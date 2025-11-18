@@ -86,12 +86,15 @@ pub type AuthResult<T> = Result<T, AuthenticationError>;
 
 // Re-export core types
 pub use aura_core::{
-    AccountId, AuraError, AuraResult, Cap, DeviceId, GuardianId, Journal, RelationshipId,
+    AccountId, AuraError, AuraResult, DeviceId, GuardianId, Journal, RelationshipId,
     RelationshipType, TrustLevel,
 };
 
-// Re-export WoT types
-pub use aura_wot::{CapabilitySet, TreePolicy as TrustPolicy};
+// Re-export WoT types (using Biscuit tokens instead of legacy capabilities)
+pub use aura_wot::{
+    AccountAuthority, BiscuitError, BiscuitTokenManager, TreePolicy as TrustPolicy,
+};
+pub use biscuit_auth::Biscuit as BiscuitToken;
 
 // Re-export auth types
 pub use aura_authenticate::{

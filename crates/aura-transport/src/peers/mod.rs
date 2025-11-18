@@ -9,6 +9,6 @@ pub mod selection;
 #[cfg(test)]
 mod tests;
 
-// Public API - curated exports only  
+// Public API - curated exports only
 pub use info::{PeerInfo, BlindedPeerCapabilities, ScopedPeerMetrics};
 pub use selection::{PrivacyAwareSelectionCriteria, RelationshipScopedDiscovery};

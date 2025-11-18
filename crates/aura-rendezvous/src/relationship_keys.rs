@@ -4,14 +4,45 @@
 //! envelope encryption. It extends the existing DKD system to create deterministic
 //! relationship keys that Alice and Bob can derive independently.
 
-use aura_core::hash::hasher;
-use aura_core::{derive_encryption_key, IdentityKeyContext, KeyDerivationSpec};
+use aura_core::hash;
+use aura_core::{IdentityKeyContext, KeyDerivationSpec};
+// Remove aura_effects dependency - use aura_core crypto functions instead
 use aura_core::{AuraError, AuraResult, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// 32-byte relationship encryption key
 pub type RelationshipKey = [u8; 32];
+
+/// Derive a relationship encryption key using simple key derivation
+///
+/// This is a placeholder implementation using hash-based key derivation.
+/// In production, would use proper HKDF or similar.
+fn derive_relationship_key(
+    root_key: &[u8; 32],
+    spec: &KeyDerivationSpec,
+) -> Result<RelationshipKey, String> {
+    // Create derivation material by combining root key with spec context
+    let mut derivation_input = Vec::new();
+    derivation_input.extend_from_slice(root_key);
+
+    // Add identity context
+    match &spec.identity_context {
+        IdentityKeyContext::RelationshipKeys { relationship_id } => {
+            derivation_input.extend_from_slice(&relationship_id);
+        }
+        _ => {
+            derivation_input.extend_from_slice(b"default_context");
+        }
+    }
+
+    // Add key version
+    derivation_input.extend_from_slice(&spec.key_version.to_le_bytes());
+
+    // Hash to derive key
+    let hash_result = hash::hash(&derivation_input);
+    Ok(hash_result)
+}
 
 /// Relationship key context for deterministic derivation
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -59,7 +90,7 @@ impl RelationshipContext {
 
     /// Build relationship identifier for key derivation
     fn build_relationship_id(&self) -> Vec<u8> {
-        let mut h = hasher();
+        let mut h = hash::hasher();
         h.update(b"aura-sbb-relationship-v1");
         h.update(self.device_a.0.as_bytes());
         h.update(self.device_b.0.as_bytes());
@@ -113,7 +144,7 @@ impl RelationshipKeyManager {
             key_version: 1,
         };
 
-        let key = derive_encryption_key(&self.root_key, &spec)
+        let key = derive_relationship_key(&self.root_key, &spec)
             .map_err(|e| AuraError::crypto(format!("Relationship key derivation failed: {}", e)))?;
 
         // Cache the derived key
@@ -145,7 +176,7 @@ impl RelationshipKeyManager {
             key_version: 1,
         };
 
-        let key = derive_encryption_key(&self.root_key, &spec)
+        let key = derive_relationship_key(&self.root_key, &spec)
             .map_err(|e| AuraError::crypto(format!("Relationship key derivation failed: {}", e)))?;
 
         self.key_cache.insert(context, key);
@@ -177,9 +208,9 @@ impl RelationshipKeyManager {
 /// Generate deterministic root key from device ID for testing
 /// In production, this would come from the distributed DKD protocol
 pub fn derive_test_root_key(device_id: DeviceId) -> [u8; 32] {
-    use aura_core::hash::hasher;
+    use aura_core::hash;
 
-    let mut h = hasher();
+    let mut h = hash::hasher();
     h.update(b"aura-test-root-key-v1");
     h.update(device_id.0.as_bytes());
     h.finalize()

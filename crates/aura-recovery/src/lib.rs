@@ -53,5 +53,9 @@ pub use guardian_key_recovery::GuardianKeyRecoveryCoordinator;
 pub use guardian_membership::GuardianMembershipCoordinator;
 pub use guardian_setup::GuardianSetupCoordinator;
 
+// Re-export Biscuit types for convenience
+pub use aura_protocol::guards::BiscuitGuardEvaluator;
+pub use aura_wot::{BiscuitTokenManager, ResourceScope};
+
 // Re-export membership change types
 pub use guardian_membership::{MembershipChange, MembershipChangeRequest};

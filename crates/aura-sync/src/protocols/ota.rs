@@ -36,8 +36,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::core::{sync_protocol_error, SyncResult};
 use aura_core::{DeviceId, Hash32};
-use crate::core::{SyncError, SyncResult};
 
 // =============================================================================
 // Types
@@ -184,8 +184,9 @@ impl OTAProtocol {
         proposer: DeviceId,
     ) -> SyncResult<UpgradeProposal> {
         if self.pending_proposal.is_some() {
-            return Err(SyncError::protocol("sync", 
-                "Upgrade proposal already pending"
+            return Err(sync_protocol_error(
+                "sync",
+                "Upgrade proposal already pending",
             ));
         }
 
@@ -212,9 +213,7 @@ impl OTAProtocol {
         status: ReadinessStatus,
     ) -> SyncResult<()> {
         if self.pending_proposal.is_none() {
-            return Err(SyncError::protocol("sync", 
-                "No pending upgrade proposal"
-            ));
+            return Err(sync_protocol_error("sync", "No pending upgrade proposal"));
         }
 
         self.readiness.insert(device, status);
@@ -223,7 +222,9 @@ impl OTAProtocol {
 
     /// Check if activation threshold is met
     pub fn check_threshold(&self) -> bool {
-        let ready_count = self.readiness.values()
+        let ready_count = self
+            .readiness
+            .values()
             .filter(|s| matches!(s, ReadinessStatus::Ready))
             .count();
 
@@ -232,18 +233,18 @@ impl OTAProtocol {
 
     /// Activate upgrade if threshold is met
     pub fn activate(&mut self) -> SyncResult<OTAResult> {
-        let proposal = self.pending_proposal.take()
-            .ok_or_else(|| SyncError::protocol("sync", 
-                "No pending proposal to activate"
-            ))?;
+        let proposal = self
+            .pending_proposal
+            .take()
+            .ok_or_else(|| sync_protocol_error("sync", "No pending proposal to activate"))?;
 
         if !self.check_threshold() {
-            return Err(SyncError::protocol("sync", 
-                "Readiness threshold not met"
-            ));
+            return Err(sync_protocol_error("sync", "Readiness threshold not met"));
         }
 
-        let ready_devices: Vec<DeviceId> = self.readiness.iter()
+        let ready_devices: Vec<DeviceId> = self
+            .readiness
+            .iter()
             .filter_map(|(device, status)| {
                 if matches!(status, ReadinessStatus::Ready) {
                     Some(*device)
@@ -269,9 +270,7 @@ impl OTAProtocol {
     /// Cancel pending proposal
     pub fn cancel(&mut self) -> SyncResult<()> {
         if self.pending_proposal.is_none() {
-            return Err(SyncError::protocol("sync", 
-                "No pending proposal to cancel"
-            ));
+            return Err(sync_protocol_error("sync", "No pending proposal to cancel"));
         }
 
         self.pending_proposal = None;
@@ -300,14 +299,16 @@ mod tests {
         let mut protocol = OTAProtocol::default();
         let device = DeviceId::from_bytes([1; 32]);
 
-        let proposal = protocol.propose_upgrade(
-            Uuid::new_v4(),  // proposal_id
-            Uuid::new_v4(),  // package_id
-            "2.0.0".to_string(),
-            UpgradeKind::SoftFork,
-            Hash32([0; 32]),
-            device,
-        ).unwrap();
+        let proposal = protocol
+            .propose_upgrade(
+                Uuid::new_v4(), // proposal_id
+                Uuid::new_v4(), // package_id
+                "2.0.0".to_string(),
+                UpgradeKind::SoftFork,
+                Hash32([0; 32]),
+                device,
+            )
+            .unwrap();
 
         assert!(protocol.get_pending().is_some());
         assert_eq!(proposal.version, "2.0.0");
@@ -323,27 +324,27 @@ mod tests {
 
         let mut protocol = OTAProtocol::new(config);
 
-        protocol.propose_upgrade(
-            Uuid::new_v4(),  // proposal_id
-            Uuid::new_v4(),  // package_id
-            "2.0.0".to_string(),
-            UpgradeKind::SoftFork,
-            Hash32([0; 32]),
-            DeviceId::from_bytes([1; 32]),
-        ).unwrap();
+        protocol
+            .propose_upgrade(
+                Uuid::new_v4(), // proposal_id
+                Uuid::new_v4(), // package_id
+                "2.0.0".to_string(),
+                UpgradeKind::SoftFork,
+                Hash32([0; 32]),
+                DeviceId::from_bytes([1; 32]),
+            )
+            .unwrap();
 
         // One ready - not enough
-        protocol.declare_readiness(
-            DeviceId::from_bytes([2; 32]),
-            ReadinessStatus::Ready,
-        ).unwrap();
+        protocol
+            .declare_readiness(DeviceId::from_bytes([2; 32]), ReadinessStatus::Ready)
+            .unwrap();
         assert!(!protocol.check_threshold());
 
         // Two ready - threshold met
-        protocol.declare_readiness(
-            DeviceId::from_bytes([3; 32]),
-            ReadinessStatus::Ready,
-        ).unwrap();
+        protocol
+            .declare_readiness(DeviceId::from_bytes([3; 32]), ReadinessStatus::Ready)
+            .unwrap();
         assert!(protocol.check_threshold());
     }
 
@@ -351,17 +352,23 @@ mod tests {
     fn test_activation() {
         let mut protocol = OTAProtocol::default();
 
-        protocol.propose_upgrade(
-            Uuid::new_v4(),  // proposal_id
-            Uuid::new_v4(),  // package_id
-            "2.0.0".to_string(),
-            UpgradeKind::SoftFork,
-            Hash32([0; 32]),
-            DeviceId::from_bytes([1; 32]),
-        ).unwrap();
+        protocol
+            .propose_upgrade(
+                Uuid::new_v4(), // proposal_id
+                Uuid::new_v4(), // package_id
+                "2.0.0".to_string(),
+                UpgradeKind::SoftFork,
+                Hash32([0; 32]),
+                DeviceId::from_bytes([1; 32]),
+            )
+            .unwrap();
 
-        protocol.declare_readiness(DeviceId::from_bytes([2; 32]), ReadinessStatus::Ready).unwrap();
-        protocol.declare_readiness(DeviceId::from_bytes([3; 32]), ReadinessStatus::Ready).unwrap();
+        protocol
+            .declare_readiness(DeviceId::from_bytes([2; 32]), ReadinessStatus::Ready)
+            .unwrap();
+        protocol
+            .declare_readiness(DeviceId::from_bytes([3; 32]), ReadinessStatus::Ready)
+            .unwrap();
 
         let result = protocol.activate().unwrap();
         assert!(result.activated);

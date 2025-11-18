@@ -4,12 +4,12 @@
 //! and Aura's effect system, enabling implementation-agnostic choreographic execution.
 
 use crate::{
-    runtime::AuraEffectSystem,
     handlers::{AuraHandlerError, ExecutionMode},
+    runtime::AuraEffectSystem,
 };
-use aura_protocol::guards::{FlowHint, LeakageBudget, ProtocolGuard};
 use async_trait::async_trait;
 use aura_core::{relationships::ContextId, DeviceId, Receipt};
+use aura_protocol::guards::{FlowHint, LeakageBudget, ProtocolGuard};
 use aura_wot::Capability;
 use rumpsteak_aura_choreography::effects::{
     ChoreoHandler, ChoreographyError, Label, Result as ChoreoResult,
@@ -297,7 +297,9 @@ impl ChoreoHandler for AuraHandlerAdapter {
     ) -> ChoreoResult<()> {
         // TODO: ChoiceMessage doesn't implement Serialize/Deserialize
         // This needs to be refactored to use a serializable type
-        Err(ChoreographyError::Transport("Choice messages not yet supported".to_string()))
+        Err(ChoreographyError::Transport(
+            "Choice messages not yet supported".to_string(),
+        ))
 
         // // Send the label as a choice message
         // let choice_msg = ChoiceMessage {
@@ -312,7 +314,9 @@ impl ChoreoHandler for AuraHandlerAdapter {
     async fn offer(&mut self, _ep: &mut Self::Endpoint, from: Self::Role) -> ChoreoResult<Label> {
         // TODO: ChoiceMessage doesn't implement Serialize/Deserialize
         // This needs to be refactored to use a serializable type
-        Err(ChoreographyError::Transport("Choice messages not yet supported".to_string()))
+        Err(ChoreographyError::Transport(
+            "Choice messages not yet supported".to_string(),
+        ))
 
         // // Receive a choice message and extract the label
         // let choice_msg: ChoiceMessage = self
@@ -358,7 +362,7 @@ impl AuraHandlerAdapterFactory {
         aura_mpst::AuraHandler::for_testing(device_id)
     }
 
-    /// Create adapter for production - uses proper AuraHandler from aura-mpst  
+    /// Create adapter for production - uses proper AuraHandler from aura-mpst
     pub fn for_production(
         device_id: DeviceId,
     ) -> Result<aura_mpst::AuraHandler, aura_mpst::MpstError> {

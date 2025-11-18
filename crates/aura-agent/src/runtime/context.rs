@@ -100,8 +100,7 @@ impl EffectContext {
 
     /// Get remaining time until deadline
     pub fn time_until_deadline(&self, now: Instant) -> Option<Duration> {
-        self.deadline
-            .map(|d| d.saturating_duration_since(now))
+        self.deadline.map(|d| d.saturating_duration_since(now))
     }
 
     /// Charge flow budget
@@ -232,10 +231,7 @@ impl Default for TraceContext {
     fn default() -> Self {
         // For Default trait, we need to use a placeholder UUID
         // Callers should use new_with_ids() when possible
-        Self::new_with_ids(
-            Uuid::from_bytes([0u8; 16]),
-            Uuid::from_bytes([0u8; 16]),
-        )
+        Self::new_with_ids(Uuid::from_bytes([0u8; 16]), Uuid::from_bytes([0u8; 16]))
     }
 }
 
@@ -369,14 +365,9 @@ mod tests {
         let device_id = DeviceId::new();
         #[allow(clippy::disallowed_methods)]
         // Test code - UUID generation acceptable for testing
-        let context = EffectContext::new(
-            device_id,
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-        )
-        .with_flow_budget(FlowBudget::new(1000))
-        .with_metadata("test", "value");
+        let context = EffectContext::new(device_id, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4())
+            .with_flow_budget(FlowBudget::new(1000))
+            .with_metadata("test", "value");
 
         assert_eq!(context.device_id, device_id);
         assert_eq!(context.flow_budget.remaining(), 1000);

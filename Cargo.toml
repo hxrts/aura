@@ -47,9 +47,11 @@ curve25519-dalek = "4.1"
 chrono = { version = "0.4", features = ["serde"] }
 hkdf = "0.12"
 sha2 = "0.10"
+sha1 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 aes-gcm = "0.10"
+chacha20 = "0.9"
 chacha20poly1305 = "0.10.1"
 zeroize = { version = "1.7", features = ["derive"] }
 blake3 = "1.5"

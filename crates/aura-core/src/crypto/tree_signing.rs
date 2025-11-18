@@ -437,8 +437,7 @@ pub fn frost_sign_partial_with_keypackage(
     let identifier = key_package.identifier();
 
     // Generate fresh nonces for this signing operation (secure approach)
-    let (frost_nonce, _our_commitment) =
-        frost::round1::commit(key_package.signing_share(), rng);
+    let (frost_nonce, _our_commitment) = frost::round1::commit(key_package.signing_share(), rng);
 
     // Convert commitments to FROST format
     let mut frost_commitments = BTreeMap::new();

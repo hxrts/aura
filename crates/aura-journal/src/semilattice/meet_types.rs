@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 pub struct CapabilitySet {
     /// Read access permissions (resource paths or patterns)
     pub read_permissions: BTreeSet<String>,
-    /// Write access permissions  
+    /// Write access permissions
     pub write_permissions: BTreeSet<String>,
     /// Administrative permissions
     pub admin_permissions: BTreeSet<String>,
@@ -127,7 +127,7 @@ impl CapabilitySet {
 pub struct TimeWindow {
     /// Window start time (Unix timestamp)
     pub start: u64,
-    /// Window end time (Unix timestamp)  
+    /// Window end time (Unix timestamp)
     pub end: u64,
     /// Time zone offset in seconds from UTC
     pub timezone_offset: Option<i32>,
@@ -418,7 +418,7 @@ pub struct DeviceCapability {
     pub required_crypto_algs: BTreeSet<String>,
     /// Required protocol versions
     pub required_protocol_versions: BTreeSet<String>,
-    /// Minimum hardware security level  
+    /// Minimum hardware security level
     pub min_hardware_security: u8,
     /// Required attestation mechanisms
     pub required_attestations: BTreeSet<String>,

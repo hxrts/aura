@@ -359,7 +359,7 @@ pub struct AuraContext {
     pub agent: Option<AgentContext>,
 
     // Cross-cutting context (explicit, not middleware)
-    /// Tracing information for observability  
+    /// Tracing information for observability
     pub tracing: TracingContext,
     /// Metrics collection context
     pub metrics: MetricsContext,

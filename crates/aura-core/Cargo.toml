@@ -58,6 +58,9 @@ tokio = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
 
+# Authorization tokens
+biscuit-auth = { workspace = true }
+
 # Property testing (optional)
 proptest = { workspace = true, optional = true }
 

@@ -41,22 +41,21 @@
 //! }
 //! ```
 
-pub mod sync;
 pub mod maintenance;
+pub mod sync;
 
 // Re-export key service types
-pub use sync::{SyncService, SyncServiceConfig, SyncServiceBuilder, SyncServiceHealth};
 pub use maintenance::{
-    MaintenanceService, MaintenanceServiceConfig,
-    MaintenanceEvent, SnapshotProposed, SnapshotCompleted,
-    CacheInvalidated, UpgradeActivated, AdminReplaced,
-    UpgradeProposal, IdentityEpochFence, CacheKey,
+    AdminReplaced, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEvent,
+    MaintenanceService, MaintenanceServiceConfig, SnapshotCompleted, SnapshotProposed,
+    UpgradeActivated, UpgradeProposal,
 };
+pub use sync::{SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth};
 
-use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, Instant};
 
-use crate::core::{SyncError, SyncResult};
+use crate::core::SyncResult;
 
 // =============================================================================
 // Unified Service Interface

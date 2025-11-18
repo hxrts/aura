@@ -23,10 +23,10 @@
 //! choreography! {
 //!     choreography Example {
 //!         roles: Alice, Bob;
-//!         
+//!
 //!         Alice[guard_capability = "send_message", flow_cost = 100]
 //!         -> Bob: Message;
-//!         
+//!
 //!         Bob[journal_facts = "message_received"]
 //!         -> Alice: Response;
 //!     }
@@ -39,7 +39,7 @@
 //! The extension system provides Aura-specific annotations like:
 //!
 //! - `[guard_capability="..."]` - Capability requirements
-//! - `[flow_cost=100]` - Resource costs  
+//! - `[flow_cost=100]` - Resource costs
 //! - `[journal_facts="..."]` - Audit logging
 //! - `[journal_merge=true]` - Journal merge operations
 //! - `[audit_log="..."]` - Audit trail entries
@@ -48,7 +48,7 @@
 //!
 //! ```text
 //! aura-mpst/              ← Regular crate (re-exports rumpsteak-aura + Aura extensions)
-//! aura-macros/            ← Proc-macro crate (custom macros)  
+//! aura-macros/            ← Proc-macro crate (custom macros)
 //! ```
 
 // Re-export core rumpsteak-aura functionality
@@ -100,20 +100,20 @@ pub use ast_extraction::{
 ///     #[namespace = "threshold_ceremony"]
 ///     protocol ThresholdExample {
 ///         roles: Coordinator, Signer[3];
-///         
+///
 ///         choice at Coordinator {
 ///             start_ceremony: {
 ///                 Coordinator[guard_capability = "coordinate_signing",
 ///                            flow_cost = 200,
 ///                            journal_facts = "ceremony_started"]
 ///                 -> Signer[*]: StartRequest;
-///                 
+///
 ///                 Signer[*][guard_capability = "participate_signing",
 ///                          flow_cost = 150]
 ///                 -> Coordinator: Commitment;
 ///             }
 ///             abort: {
-///                 Coordinator -> Signer[*]: Abort;  
+///                 Coordinator -> Signer[*]: Abort;
 ///             }
 ///         }
 ///     }

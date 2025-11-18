@@ -1,4 +1,3 @@
-
 //! Delta fact application for join-semilattice updates
 //!
 //! This module implements atomic delta fact application that integrates with
@@ -169,18 +168,29 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
         // New fact types for enhanced journal support
         "relationship_formation" => {
             // Parse relationship formation fact (invitation acceptance)
-            // TODO: Implement proper FormRelationship variant
-            Ok(JournalOperation::RegisterDevice {
-                device_id: parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string()),
-                metadata: fact.clone(),
+            let device_a = parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
+            let device_b = parse_target_device_from_fact(fact).unwrap_or_else(|_| "peer".to_string());
+            let trust_level = parse_trust_level_from_fact(fact).unwrap_or_else(|_| "trusted".to_string());
+            let relationship_id = format!("{}:{}", device_a, device_b);
+
+            Ok(JournalOperation::FormRelationship {
+                relationship_id,
+                device_a,
+                device_b,
+                trust_level,
             })
         }
         "guardian_enrollment" => {
             // Parse guardian enrollment fact
-            // TODO: Implement proper EnrollGuardian variant
-            Ok(JournalOperation::RegisterDevice {
-                device_id: parse_device_id_from_fact(fact).unwrap_or_else(|_| "guardian".to_string()),
-                metadata: fact.clone(),
+            let device_id = parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
+            let guardian_id = parse_guardian_id_from_fact(fact).unwrap_or_else(|_| "guardian".to_string());
+            let capabilities = parse_guardian_capabilities_from_fact(fact)
+                .unwrap_or_else(|_| vec!["recovery:approve".to_string(), "guardian:vote".to_string()]);
+
+            Ok(JournalOperation::EnrollGuardian {
+                guardian_id,
+                device_id,
+                capabilities,
             })
         }
         // NOTE: threshold_ceremony_completion facts are now handled by the aura-frost crate
@@ -192,44 +202,67 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
         }
         "key_derivation" => {
             // Parse key derivation fact (DKD operations)
-            // TODO: Implement proper DeriveKey variant
-            Ok(JournalOperation::GrantCapability {
-                capability: parse_derivation_id_from_fact(fact).unwrap_or_else(|_| "derive_key".to_string()),
-                target_device: parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string()),
-                expiry: None,
+            let derivation_id = parse_derivation_id_from_fact(fact).unwrap_or_else(|_| "dkd_operation".to_string());
+            let context = parse_derivation_context_from_fact(fact).unwrap_or_else(|_| "default".to_string());
+            let derived_for = parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
+
+            Ok(JournalOperation::DeriveKey {
+                derivation_id,
+                context,
+                derived_for,
             })
         }
         "flow_budget_update" => {
             // Parse flow budget update fact
-            // TODO: Implement proper UpdateFlowBudget variant
-            Ok(JournalOperation::GrantCapability {
-                capability: "flow_budget".to_string(),
-                target_device: parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string()),
-                expiry: None,
+            let context_id = parse_context_id_from_fact(fact).unwrap_or_else(|_| "default_context".to_string());
+            let peer_id = parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
+            let new_limit = parse_budget_limit_from_fact(fact).unwrap_or_else(|_| 10000);
+            let cost = parse_budget_cost_from_fact(fact).ok();
+
+            Ok(JournalOperation::UpdateFlowBudget {
+                context_id,
+                peer_id,
+                new_limit,
+                cost,
             })
         }
         "recovery_initiation" => {
             // Parse recovery initiation fact
-            // TODO: Implement proper InitiateRecovery variant
-            Ok(JournalOperation::AttestSession {
-                session_id: parse_recovery_id_from_fact(fact).unwrap_or_else(|_| "recovery".to_string()),
-                attestation: fact.clone(),
+            let recovery_id = parse_recovery_id_from_fact(fact).unwrap_or_else(|_| "recovery_session".to_string());
+            let account_id = parse_account_id_from_fact(fact).unwrap_or_else(|_| "unknown_account".to_string());
+            let requester = parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
+            let guardians_required = parse_guardian_threshold_from_fact(fact).unwrap_or_else(|_| 2);
+
+            Ok(JournalOperation::InitiateRecovery {
+                recovery_id,
+                account_id,
+                requester,
+                guardians_required,
             })
         }
         "storage_commitment" => {
             // Parse storage commitment fact (content-addressed storage)
-            // TODO: Implement proper CommitStorage variant
-            Ok(JournalOperation::FinalizeIntent {
-                intent_id: parse_content_hash_from_fact(fact).unwrap_or_else(|_| "storage".to_string()),
-                result: fact.clone(),
+            let content_hash = parse_content_hash_from_fact(fact).unwrap_or_else(|_| "unknown_hash".to_string());
+            let size = parse_content_size_from_fact(fact).unwrap_or_else(|_| 0);
+            let storage_nodes = parse_storage_nodes_from_fact(fact)
+                .unwrap_or_else(|_| vec!["local_node".to_string()]);
+
+            Ok(JournalOperation::CommitStorage {
+                content_hash,
+                size,
+                storage_nodes,
             })
         }
         "ota_deployment" => {
             // Parse OTA deployment fact
-            // TODO: Implement proper DeployOta variant
-            Ok(JournalOperation::FinalizeIntent {
-                intent_id: parse_deployment_id_from_fact(fact).unwrap_or_else(|_| "ota_deploy".to_string()),
-                result: fact.clone(),
+            let version = parse_ota_version_from_fact(fact).unwrap_or_else(|_| "unknown_version".to_string());
+            let target_epoch = parse_target_epoch_from_fact(fact).unwrap_or_else(|_| 1);
+            let deployment_hash = parse_deployment_hash_from_fact(fact).unwrap_or_else(|_| "unknown_hash".to_string());
+
+            Ok(JournalOperation::DeployOta {
+                version,
+                target_epoch,
+                deployment_hash,
             })
         }
         _ => Err(AuraError::invalid(format!(
@@ -355,6 +388,44 @@ pub enum JournalOperation {
     FinalizeIntent {
         intent_id: String,
         result: JsonValue,
+    },
+    FormRelationship {
+        relationship_id: String,
+        device_a: String,
+        device_b: String,
+        trust_level: String,
+    },
+    EnrollGuardian {
+        guardian_id: String,
+        device_id: String,
+        capabilities: Vec<String>,
+    },
+    DeriveKey {
+        derivation_id: String,
+        context: String,
+        derived_for: String,
+    },
+    UpdateFlowBudget {
+        context_id: String,
+        peer_id: String,
+        new_limit: u32,
+        cost: Option<u32>,
+    },
+    InitiateRecovery {
+        recovery_id: String,
+        account_id: String,
+        requester: String,
+        guardians_required: usize,
+    },
+    CommitStorage {
+        content_hash: String,
+        size: u64,
+        storage_nodes: Vec<String>,
+    },
+    DeployOta {
+        version: String,
+        target_epoch: u64,
+        deployment_hash: String,
     },
 }
 
@@ -708,6 +779,11 @@ impl<E: GuardEffectSystem> JournalOperationExt for E {
                 tracing::info!("Applying intent finalization fact: {}", intent_fact);
                 merge_json_fact(self, &intent_fact).await?;
             }
+            // TODO: Add support for other operation types
+            _ => {
+                tracing::warn!("Unsupported journal operation: {:?}", operation);
+                return Err(AuraError::invalid("Unsupported journal operation"));
+            }
         }
 
         Ok(())
@@ -884,4 +960,103 @@ fn parse_deployment_hash_from_fact(fact: &JsonValue) -> AuraResult<String> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| AuraError::invalid("Missing deployment_hash in fact"))
+}
+
+fn parse_target_device_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("target_device")
+        .or_else(|| fact.get("peer_device"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing target_device in fact"))
+}
+
+fn parse_trust_level_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("trust_level")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing trust_level in fact"))
+}
+
+fn parse_guardian_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("guardian_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing guardian_id in fact"))
+}
+
+fn parse_guardian_capabilities_from_fact(fact: &JsonValue) -> AuraResult<Vec<String>> {
+    fact.get("capabilities")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .ok_or_else(|| AuraError::invalid("Missing or invalid capabilities in fact"))
+}
+
+fn parse_derivation_context_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("context")
+        .or_else(|| fact.get("derivation_context"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing derivation context in fact"))
+}
+
+fn parse_budget_limit_from_fact(fact: &JsonValue) -> AuraResult<u32> {
+    fact.get("budget_limit")
+        .or_else(|| fact.get("limit"))
+        .and_then(|v| v.as_u64())
+        .map(|n| n as u32)
+        .ok_or_else(|| AuraError::invalid("Missing budget_limit in fact"))
+}
+
+fn parse_budget_cost_from_fact(fact: &JsonValue) -> AuraResult<u32> {
+    fact.get("cost")
+        .or_else(|| fact.get("flow_cost"))
+        .and_then(|v| v.as_u64())
+        .map(|n| n as u32)
+        .ok_or_else(|| AuraError::invalid("Missing cost in fact"))
+}
+
+fn parse_guardian_threshold_from_fact(fact: &JsonValue) -> AuraResult<usize> {
+    fact.get("guardians_required")
+        .or_else(|| fact.get("threshold"))
+        .and_then(|v| v.as_u64())
+        .map(|n| n as usize)
+        .ok_or_else(|| AuraError::invalid("Missing guardians_required in fact"))
+}
+
+fn parse_content_size_from_fact(fact: &JsonValue) -> AuraResult<u64> {
+    fact.get("size")
+        .or_else(|| fact.get("content_size"))
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| AuraError::invalid("Missing size in fact"))
+}
+
+fn parse_storage_nodes_from_fact(fact: &JsonValue) -> AuraResult<Vec<String>> {
+    fact.get("storage_nodes")
+        .or_else(|| fact.get("nodes"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .ok_or_else(|| AuraError::invalid("Missing or invalid storage_nodes in fact"))
+}
+
+fn parse_ota_version_from_fact(fact: &JsonValue) -> AuraResult<String> {
+    fact.get("version")
+        .or_else(|| fact.get("ota_version"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuraError::invalid("Missing version in fact"))
+}
+
+fn parse_target_epoch_from_fact(fact: &JsonValue) -> AuraResult<u64> {
+    fact.get("target_epoch")
+        .or_else(|| fact.get("epoch"))
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| AuraError::invalid("Missing target_epoch in fact"))
 }

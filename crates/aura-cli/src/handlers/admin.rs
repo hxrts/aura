@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use aura_agent::{runtime::EffectSystemBuilder, AuraAgent};
 use aura_core::identifiers::{AccountId, DeviceId};
-use aura_protocol::effects::ConsoleEffects;
+use aura_protocol::effect_traits::ConsoleEffects;
 
 use crate::AdminAction;
 

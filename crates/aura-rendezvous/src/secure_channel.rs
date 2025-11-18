@@ -125,12 +125,10 @@ impl SecureChannelCoordinator {
     pub fn init_channel(
         &mut self,
         peer_id: DeviceId,
-        context_id: ContextId,
+        _context_id: ContextId,
     ) -> Result<String, AuraError> {
         if self.active_channels.len() >= self.channel_config.max_concurrent_channels {
-            return Err(AuraError::invalid(
-                "Maximum concurrent channels exceeded",
-            ));
+            return Err(AuraError::invalid("Maximum concurrent channels exceeded"));
         }
 
         let channel_id = format!(
