@@ -19,7 +19,7 @@ use aura_invitation::{
 use aura_journal::semilattice::{InvitationLedger, InvitationStatus};
 use aura_macros::aura_test;
 use aura_testkit::effects_integration::TestEffectsBuilder;
-use aura_wot::AccountAuthority;
+use aura_wot::{AccountAuthority, SerializableBiscuit};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -90,12 +90,14 @@ impl InvitationIntegrationTest {
         // Create an account authority and device token for testing
         let authority = AccountAuthority::new(self.account_id);
         let device_token = authority.create_device_token(self.invitee_device).unwrap();
+        let root_key = authority.root_public_key();
+        let serializable_token = SerializableBiscuit::new(device_token, root_key);
 
         DeviceInvitationRequest {
             inviter: self.inviter_device,
             invitee: self.invitee_device,
             account_id: self.account_id,
-            granted_token: device_token,
+            granted_token: serializable_token,
             device_role: role.to_string(),
             ttl_secs: ttl,
         }
@@ -416,12 +418,14 @@ async fn test_error_handling_integration() -> aura_core::AuraResult<()> {
     // Test invalid invitation creation
     let authority = AccountAuthority::new(test.account_id);
     let device_token = authority.create_device_token(test.invitee_device).unwrap();
+    let root_key = authority.root_public_key();
+    let serializable_token = SerializableBiscuit::new(device_token, root_key);
 
     let invalid_request = DeviceInvitationRequest {
         inviter: test.inviter_device,
         invitee: test.invitee_device,
         account_id: test.account_id,
-        granted_token: device_token,
+        granted_token: serializable_token,
         device_role: "test".to_string(),
         ttl_secs: Some(0), // Invalid TTL
     };
