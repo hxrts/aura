@@ -118,6 +118,17 @@ impl TestFixture {
         DeviceId::new()
     }
 
+    /// Get an effect system for testing
+    ///
+    /// This creates a mock effect system configured for testing.
+    pub fn effect_system(&self) -> aura_protocol::effects::AuraEffectSystem {
+        let config = aura_protocol::effects::EffectSystemConfig {
+            device_id: self.device_id(),
+        };
+        aura_protocol::effects::AuraEffectSystemFactory::new(config)
+            .expect("Failed to create test effect system")
+    }
+
     /// Get a reference to the test context for effect access
     ///
     /// Note: The architecture has shifted to stateless effect handlers.

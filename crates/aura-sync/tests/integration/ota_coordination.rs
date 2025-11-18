@@ -191,7 +191,7 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
             println!("Epoch fencing activated - device 3 must sync epochs first");
 
             // Step 3: Sync epochs before allowing OTA
-            let context = aura_core::ContextId::new();
+            let context = aura_core::ContextId::new("epoch_sync_before_ota");
             let rotation_id = coord1.initiate_rotation(vec![device2, device3], context)?;
 
             // Process epoch confirmations

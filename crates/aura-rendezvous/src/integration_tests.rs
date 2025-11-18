@@ -17,6 +17,7 @@ use crate::{
     messaging::{TransportMethod, TransportOfferPayload},
 };
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
+use aura_protocol::effects::{AuraEffectSystemFactory, EffectSystemConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -127,10 +128,11 @@ impl TestDevice {
             app_context: "test-sbb-e2e".to_string(),
         };
 
+        let effects = AuraEffectSystemFactory::new(EffectSystemConfig { device_id })?;
         let sbb_system = SbbSystemBuilder::new(device_id)
             .with_config(sbb_config)
             .with_transport(Arc::clone(&transport))
-            .build();
+            .build(effects);
 
         Ok(Self {
             device_id,
@@ -552,11 +554,15 @@ impl SbbTestNetwork {
             let (alice_id, bob_id) = (device_ids[0], device_ids[1]);
 
             // Upgrade Alice's trust in Bob
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
             self.devices
                 .get_mut(&alice_id)
                 .unwrap()
                 .sbb_system
-                .update_trust_level(bob_id, TrustLevel::High)?;
+                .update_trust_level(bob_id, TrustLevel::High, now)?;
 
             let result2 = self.test_alice_bob_connection().await?;
             results.push(result2);
