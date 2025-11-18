@@ -16,8 +16,7 @@ use crate::{
     integrated_sbb::{IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbSystemBuilder},
     messaging::{TransportMethod, TransportOfferPayload},
 };
-use aura_core::{AuraResult, DeviceId, RelationshipId};
-use aura_wot::TrustLevel;
+use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -108,11 +107,8 @@ impl TestDevice {
     ) -> AuraResult<Self> {
         // Create network transport
         let net_config = NetworkConfig {
-            bind_addr: "127.0.0.1".to_string(),
-            port: 0, // OS assigns port
+            max_connections: 100,
             timeout_ms: 5000,
-            max_message_size: 64 * 1024, // 64KB
-            keepalive_interval: 30,
         };
 
         let mut transport = NetworkTransport::new(device_id, net_config);
