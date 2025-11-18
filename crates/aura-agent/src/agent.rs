@@ -12,9 +12,8 @@ use crate::handlers::{
 };
 use crate::maintenance::{MaintenanceController, SnapshotOutcome};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::{ConsoleEffects, StorageEffects};
+use aura_core::effects::{agent::SessionType, ConsoleEffects, StorageEffects};
 use aura_core::identifiers::{AccountId, DeviceId};
-use aura_core::SessionType;
 use aura_sync::WriterFence;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

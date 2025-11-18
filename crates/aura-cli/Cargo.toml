@@ -23,6 +23,7 @@ aura-recovery = { path = "../aura-recovery" }
 aura-invitation = { path = "../aura-invitation" }
 aura-authenticate = { path = "../aura-authenticate" }
 aura-sync = { path = "../aura-sync" }
+aura-wot = { path = "../aura-wot" }
 
 # Effect system
 async-trait = { workspace = true }

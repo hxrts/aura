@@ -16,8 +16,7 @@ use crate::{
     relationship_keys::{derive_test_root_key, RelationshipKeyManager},
     sbb::{FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding},
 };
-use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId};
-use aura_wot::TrustLevel;
+use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId, TrustLevel};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;

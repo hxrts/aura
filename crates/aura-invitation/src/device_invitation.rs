@@ -11,12 +11,14 @@ use aura_core::hash;
 use aura_core::{AccountId, DeviceId};
 use aura_journal::semilattice::{InvitationLedger, InvitationRecord};
 use aura_macros::choreography;
+use aura_wot::SerializableBiscuit;
 use biscuit_auth::Biscuit;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
 
 static GLOBAL_INVITATION_LEDGER: Lazy<Arc<Mutex<InvitationLedger>>> =
     Lazy::new(|| Arc::new(Mutex::new(InvitationLedger::new())));
@@ -31,7 +33,7 @@ pub struct DeviceInvitationRequest {
     /// Account for device addition
     pub account_id: AccountId,
     /// Capabilities to grant to new device (as Biscuit token)
-    pub granted_token: Biscuit,
+    pub granted_token: SerializableBiscuit,
     /// Device role description
     pub device_role: String,
     /// Invitation TTL in seconds (optional override)
@@ -61,7 +63,7 @@ pub struct InvitationEnvelope {
     /// Account context
     pub account_id: AccountId,
     /// Capabilities being granted (as Biscuit token)
-    pub granted_token: Biscuit,
+    pub granted_token: SerializableBiscuit,
     /// Role assigned to invitee
     pub device_role: String,
     /// Creation timestamp
@@ -136,7 +138,7 @@ pub struct InvitationRequest {
     pub inviter: DeviceId,
     pub invitee: DeviceId,
     pub account_id: AccountId,
-    pub granted_token: Biscuit,
+    pub granted_token: SerializableBiscuit,
     pub device_role: String,
     pub ttl_secs: u64,
     pub invitation_id: String,

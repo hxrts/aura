@@ -4,15 +4,13 @@
 
 use anyhow::Result;
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
-use aura_core::effects::{AuthorizationEffects, JournalEffects};
-use aura_core::hash::hash;
+use aura_core::effects::JournalEffects;
 use aura_core::identifiers::GuardianId;
-use aura_core::TrustLevel;
 use aura_core::{AccountId, DeviceId};
 use aura_protocol::orchestration::AuraEffectSystem;
 use aura_protocol::effect_traits::ConsoleEffects;
 use aura_recovery::types::{GuardianProfile, GuardianSet};
-use aura_recovery::{GuardianKeyRecoveryCoordinator, RecoveryRequest, RecoveryResponse};
+use aura_recovery::{RecoveryRequest, RecoveryResponse};
 use std::path::Path;
 
 use crate::RecoveryAction;
@@ -84,38 +82,33 @@ async fn start_recovery(
     }
 
     // Convert to guardian profiles with Journal integration
-    let guardian_profiles: Result<Vec<GuardianProfile>, _> = guardian_ids
-        .iter()
-        .enumerate()
-        .map(|(i, guardian_str)| {
-            // Parse guardian ID
-            let guardian_id = guardian_str
-                .parse::<GuardianId>()
-                .map_err(|e| anyhow::anyhow!("Invalid guardian ID '{}': {}", guardian_str, e))?;
+    let mut guardian_profiles = Vec::new();
+    for (i, guardian_str) in guardian_ids.iter().enumerate() {
+        // Parse guardian ID
+        let guardian_id = guardian_str
+            .parse::<GuardianId>()
+            .map_err(|e| anyhow::anyhow!("Invalid guardian ID '{}': {}", guardian_str, e))?;
 
-            // Query actual device IDs from Journal/Web-of-Trust
-            let device_id = match query_guardian_device_id(effects, &guardian_id).await {
-                Ok(id) => id,
-                Err(_) => {
-                    // Fallback to generated device ID for now
-                    tracing::warn!(
-                        guardian_id = ?guardian_id,
-                        "Guardian device ID not found in Journal, using generated ID"
-                    );
-                    DeviceId::try_from(format!("guardian-device-{}", i).as_str())
-                        .map_err(|e| anyhow::anyhow!("Failed to create device ID: {}", e))?
-                }
-            };
+        // Query actual device IDs from Journal/Web-of-Trust
+        let device_id = match query_guardian_device_id(effects, &guardian_id).await {
+            Ok(id) => id,
+            Err(_) => {
+                // Fallback to generated device ID for now
+                tracing::warn!(
+                    guardian_id = ?guardian_id,
+                    "Guardian device ID not found in Journal, using generated ID"
+                );
+                DeviceId::try_from(format!("guardian-device-{}", i).as_str())
+                    .map_err(|e| anyhow::anyhow!("Failed to create device ID: {}", e))?
+            }
+        };
 
-            Ok::<GuardianProfile, anyhow::Error>(GuardianProfile::new(
-                guardian_id,
-                device_id,
-                format!("Guardian {}", i + 1),
-            ))
-        })
-        .collect();
-
-    let guardian_profiles = guardian_profiles?;
+        guardian_profiles.push(GuardianProfile::new(
+            guardian_id,
+            device_id,
+            format!("Guardian {}", i + 1),
+        ));
+    }
     let guardian_set = GuardianSet::new(guardian_profiles);
 
     if guardian_set.len() < threshold as usize {
@@ -145,24 +138,25 @@ async fn start_recovery(
         .map_err(|e| anyhow::anyhow!("Failed to create device ID: {}", e))?;
 
     // Create recovery request
-    let recovery_request = RecoveryRequest {
+    let _recovery_request = RecoveryRequest {
         requesting_device,
         account_id,
         context,
         threshold: threshold as usize,
         guardians: guardian_set,
+        auth_token: None,
     };
-
-    // Initialize coordinator with effect system
-    let coordinator = GuardianKeyRecoveryCoordinator::new(effects.clone());
 
     let _ = effects.log_info("Executing recovery choreography...").await;
 
-    // Execute recovery coordinator integration
-    let recovery_result = coordinator
-        .execute_key_recovery(request)
-        .await
-        .map_err(|e| e.to_string());
+    // TODO: Initialize coordinator with effect system when trait object cloning is resolved
+    // The coordinator needs an owned AuraEffectSystem but we only have a reference
+    // This requires either making AuraEffects cloneable or restructuring the coordinator
+
+    // Execute recovery coordinator integration (stub for now)
+    let recovery_result: Result<RecoveryResponse, String> =
+        Err("Recovery coordinator integration pending - trait object ownership issue".to_string());
+
     match recovery_result {
         Ok(response) => {
             if response.success {
@@ -257,8 +251,8 @@ async fn approve_recovery(effects: &AuraEffectSystem, request_file: &Path) -> Re
             // Fallback to a device ID derived from the first guardian ID in the request
             let first_guardian = recovery_request
                 .guardians
-                .guardians
-                .first()
+                .iter()
+                .next()
                 .ok_or_else(|| anyhow::anyhow!("No guardians in recovery request"))?;
             first_guardian.device_id
         }
@@ -281,9 +275,6 @@ async fn approve_recovery(effects: &AuraEffectSystem, request_file: &Path) -> Re
             guardian_profile.label, guardian_profile.guardian_id
         ))
         .await;
-
-    // Initialize coordinator with effect system
-    let coordinator = GuardianKeyRecoveryCoordinator::new(effects.clone());
 
     // Execute guardian approval through choreographic system
     let _ = effects
@@ -509,7 +500,8 @@ async fn dispute_recovery(effects: &AuraEffectSystem, evidence: &str, reason: &s
                 .get("dispute_window_ends_at")
                 .and_then(|v| v.as_u64())
             {
-                let current_time = effects.current_time().await;
+                use aura_core::effects::TimeEffects;
+                let current_time = effects.current_timestamp().await;
                 if current_time > dispute_window_ends {
                     return Err(anyhow::anyhow!(
                         "Dispute window has closed for evidence {}",
@@ -531,7 +523,6 @@ async fn dispute_recovery(effects: &AuraEffectSystem, evidence: &str, reason: &s
     }
 
     // Create dispute record
-    use aura_core::effects::TimeEffects;
     use aura_recovery::types::RecoveryDispute;
 
     let current_timestamp = std::time::SystemTime::now()
@@ -657,7 +648,8 @@ async fn simulate_guardian_approval(
     let partial_signature = vec![0x43; 64]; // Simulated 64-byte signature
 
     // Get current timestamp
-    let timestamp = effects.current_time().await;
+    use aura_core::effects::TimeEffects;
+    let timestamp = effects.current_timestamp().await;
 
     let _ = effects
         .log_info(&format!(

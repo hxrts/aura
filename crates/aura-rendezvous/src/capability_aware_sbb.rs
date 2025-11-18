@@ -5,8 +5,8 @@
 //! and respects relay capabilities and flow budgets.
 
 use crate::sbb::{FloodResult, RendezvousEnvelope, SbbFlooding, SBB_MESSAGE_SIZE};
-use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId};
-use aura_wot::{Capability, CapabilitySet, TrustLevel};
+use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId, TrustLevel};
+use aura_wot::{Capability, CapabilitySet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -167,6 +167,7 @@ impl SbbRelationship {
             TrustLevel::Low => (10 * 1024, 3600), // 10KB/hour
             TrustLevel::Medium => (100 * 1024, 3600), // 100KB/hour
             TrustLevel::High => (10 * 1024 * 1024, 3600), // 10MB/hour
+            TrustLevel::Full => (100 * 1024 * 1024, 3600), // 100MB/hour
         };
 
         let relay_capability = Capability::Relay {
@@ -176,9 +177,9 @@ impl SbbRelationship {
         };
 
         let relay_capabilities = {
-            let mut caps = CapabilitySet::empty();
+            let mut caps = std::collections::BTreeSet::new();
             caps.insert(relay_capability);
-            caps
+            CapabilitySet::from_capabilities(caps)
         };
         let flow_budget = SbbFlowBudget::new(flow_limit, period, now);
 
@@ -262,6 +263,7 @@ impl CapabilityAwareSbbCoordinator {
                     TrustLevel::Low => (10 * 1024, 3600),
                     TrustLevel::Medium => (100 * 1024, 3600),
                     TrustLevel::High => (10 * 1024 * 1024, 3600),
+                    TrustLevel::Full => (100 * 1024 * 1024, 3600),
                 };
                 rel.flow_budget = SbbFlowBudget::new(flow_limit, period, now);
                 Ok(())
@@ -341,6 +343,7 @@ impl CapabilityAwareSbbCoordinator {
                 TrustLevel::Low => stats.low_count += 1,
                 TrustLevel::Medium => stats.medium_count += 1,
                 TrustLevel::High => stats.high_count += 1,
+                TrustLevel::Full => stats.full_count += 1,
             }
 
             if relationship.is_guardian {

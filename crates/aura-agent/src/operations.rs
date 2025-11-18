@@ -74,13 +74,30 @@
 
 use crate::errors::{AuraError, Result as AgentResult};
 use aura_core::{AccountId, DeviceId, GuardianId};
-use aura_protocol::authorization_bridge::{
-    AuthorizationContext, AuthorizationMetadata, AuthorizationRequest, AuthorizationService,
-};
+use aura_core::tree::{LeafRole, TreeOp, TreeOpKind};
 use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};
-use aura_wot::{CapabilitySet, TreeAuthzContext, TreeOp, TreeOpKind};
+use aura_wot::CapabilitySet;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+
+// Placeholder types for authorization integration (to be implemented with Biscuit tokens)
+#[derive(Debug, Clone)]
+pub struct TreeAuthzContext {
+    pub account_id: AccountId,
+    pub epoch: u64,
+}
+
+impl TreeAuthzContext {
+    pub fn new(account_id: AccountId, epoch: u64) -> Self {
+        Self { account_id, epoch }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PermissionGrant {
+    pub authorized: bool,
+    pub denial_reason: Option<String>,
+}
 
 /// Agent operation request with identity proof
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,8 +187,6 @@ pub struct AuthorizedAgentOperations {
     tree_context: TreeAuthzContext,
     /// Device ID for this agent
     _device_id: DeviceId,
-    /// Unified authorization service instance
-    authorization: AuthorizationService,
 }
 
 impl AuthorizedAgentOperations {
@@ -185,7 +200,6 @@ impl AuthorizedAgentOperations {
             key_material,
             tree_context,
             _device_id: device_id,
-            authorization: AuthorizationService::new(),
         }
     }
 
@@ -275,52 +289,21 @@ impl AuthorizedAgentOperations {
     }
 
     /// Authorize operation using bridge pattern
+    ///
+    /// TODO: Implement full authorization using Biscuit tokens
+    /// Currently returns a placeholder authorization result
     async fn authorize_operation(
         &self,
-        verified_identity: &aura_verify::VerifiedIdentity,
-        operation: &AgentOperation,
-        context: &AgentOperationContext,
-        required_capabilities: CapabilitySet,
-    ) -> AgentResult<aura_protocol::authorization_bridge::PermissionGrant> {
-        // Convert agent operation to tree operation if applicable
-        let tree_op = match operation {
-            AgentOperation::TreeOperation { operation } => operation.clone(),
-            _ => {
-                // For non-tree operations, create a synthetic tree operation
-                // This allows us to use the tree authorization model for all operations
-                TreeOp {
-                    parent_epoch: 1,
-                    parent_commitment: [0u8; 32],
-                    op: TreeOpKind::AddLeaf {
-                        leaf_id: 0,
-                        role: aura_wot::LeafRole::Device,
-                        under: 0,
-                    },
-                    version: 1,
-                }
-            }
-        };
-
-        // Create authorization context
-        let authz_context = AuthorizationContext::new(
-            context.account_id,
-            required_capabilities,
-            self.tree_context.clone(),
-        );
-
-        // Create authorization request
-        let authz_request = AuthorizationRequest {
-            verified_identity: verified_identity.clone(),
-            operation: tree_op,
-            context: authz_context,
-            additional_signers: BTreeSet::new(),
-            guardian_signers: BTreeSet::new(),
-            metadata: AuthorizationMetadata::default(),
-        };
-
-        // Evaluate authorization
-        self.authorization.authorize(authz_request).map_err(|e| {
-            AuraError::permission_denied(format!("Authorization evaluation failed: {:?}", e))
+        _verified_identity: &aura_verify::VerifiedIdentity,
+        _operation: &AgentOperation,
+        _context: &AgentOperationContext,
+        _required_capabilities: CapabilitySet,
+    ) -> AgentResult<PermissionGrant> {
+        // TODO: Implement authorization using Biscuit tokens from aura-protocol/authorization
+        // For now, return a placeholder that allows all operations
+        Ok(PermissionGrant {
+            authorized: true,
+            denial_reason: None,
         })
     }
 

@@ -12,8 +12,8 @@
 
 // Re-export core effect trait definitions from aura-core (interface layer)
 pub use aura_core::effects::{
-    ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, RandomEffects, StorageEffects,
-    TimeEffects,
+    agent::SessionType, ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects,
+    RandomEffects, StorageEffects, TimeEffects,
 };
 
 // Re-export individual effect traits

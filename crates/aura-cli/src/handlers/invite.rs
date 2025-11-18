@@ -3,12 +3,13 @@
 use crate::InvitationAction;
 use anyhow::{anyhow, Context, Result};
 use aura_agent::runtime::EffectSystemBuilder;
-use aura_core::{AccountId, Cap, DeviceId};
+use aura_core::{AccountId, DeviceId};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
     invitation_acceptance::InvitationAcceptanceCoordinator,
 };
 use aura_protocol::effect_traits::ConsoleEffects;
+use aura_wot::{AccountAuthority, SerializableBiscuit};
 use std::{fs, str::FromStr};
 
 /// Handle invitation-related CLI commands
@@ -91,11 +92,19 @@ fn build_request(
     let invitee_id = DeviceId::from_str(invitee)
         .map_err(|err| anyhow!("invalid invitee device id '{}': {}", invitee, err))?;
 
+    // Create a Biscuit token for the invitation
+    // TODO: Load actual account authority from storage
+    let authority = AccountAuthority::new(account_id);
+    let device_token = authority
+        .create_device_token(invitee_id)
+        .map_err(|e| anyhow!("failed to create device token: {}", e))?;
+    let granted_token = SerializableBiscuit::new(device_token, authority.root_public_key());
+
     Ok(DeviceInvitationRequest {
         inviter: device_id,
         invitee: invitee_id,
         account_id,
-        granted_capabilities: Cap::top(),
+        granted_token,
         device_role: role.to_string(),
         ttl_secs: ttl,
     })
