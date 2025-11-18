@@ -75,7 +75,7 @@
 use crate::errors::{AuraError, Result as AgentResult};
 use aura_core::{AccountId, DeviceId, GuardianId};
 use aura_core::tree::{LeafRole, TreeOp, TreeOpKind};
-use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};
+use aura_verify::{IdentityProof, KeyMaterial, SimpleIdentityVerifier};
 use aura_wot::CapabilitySet;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -181,12 +181,14 @@ pub enum AuthenticationOperation {
 
 /// Agent operations handler with authorization integration
 pub struct AuthorizedAgentOperations {
-    /// Key material for identity verification
-    key_material: KeyMaterial,
+    /// Identity verifier for signature verification
+    verifier: SimpleIdentityVerifier,
     /// Tree authorization context
     tree_context: TreeAuthzContext,
     /// Device ID for this agent
     _device_id: DeviceId,
+    /// Account ID for threshold verification
+    account_id: AccountId,
 }
 
 impl AuthorizedAgentOperations {
@@ -197,7 +199,8 @@ impl AuthorizedAgentOperations {
         device_id: DeviceId,
     ) -> Self {
         Self {
-            key_material,
+            verifier: SimpleIdentityVerifier::from_key_material(key_material),
+            account_id: tree_context.account_id,
             tree_context,
             _device_id: device_id,
         }
@@ -208,12 +211,18 @@ impl AuthorizedAgentOperations {
         &self,
         request: AgentOperationRequest,
     ) -> AgentResult<AgentOperationResult> {
-        // Step 1: Verify identity proof
-        let verified_identity = verify_identity_proof(
-            &request.identity_proof,
-            &request.signed_message,
-            &self.key_material,
-        )
+        // Step 1: Verify identity proof using simplified verifier
+        let verified_identity = match &request.identity_proof {
+            IdentityProof::Device { .. } => {
+                self.verifier.verify_device_signature(&request.identity_proof)
+            }
+            IdentityProof::Threshold(_) => {
+                self.verifier.verify_threshold_signature(&request.identity_proof, self.account_id)
+            }
+            IdentityProof::Guardian { .. } => {
+                self.verifier.verify_guardian_signature(&request.identity_proof, &request.signed_message)
+            }
+        }
         .map_err(|e| {
             AuraError::permission_denied(format!("Identity verification failed: {}", e))
         })?;
@@ -415,22 +424,22 @@ impl AuthorizedAgentOperations {
         })
     }
 
-    /// Update key material with new device key
+    /// Update identity verifier with new device key
     pub fn add_device_key(
         &mut self,
         device_id: DeviceId,
         public_key: aura_core::Ed25519VerifyingKey,
     ) {
-        self.key_material.add_device_key(device_id, public_key);
+        self.verifier.add_device_key(device_id, public_key);
     }
 
-    /// Update key material with new guardian key
+    /// Update identity verifier with new guardian key
     pub fn add_guardian_key(
         &mut self,
         guardian_id: GuardianId,
         public_key: aura_core::Ed25519VerifyingKey,
     ) {
-        self.key_material.add_guardian_key(guardian_id, public_key);
+        self.verifier.add_guardian_key(guardian_id, public_key);
     }
 }
 

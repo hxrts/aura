@@ -37,9 +37,14 @@ pub mod threshold;
 
 // Re-export commonly used types
 pub use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
+
+// Legacy low-level verification functions - prefer SimpleIdentityVerifier instead
+#[deprecated(since = "0.2.0", note = "Use SimpleIdentityVerifier::verify_device_signature instead")]
 pub use device::verify_device_signature;
+#[deprecated(since = "0.2.0", note = "Use SimpleIdentityVerifier::verify_guardian_signature instead")]
 pub use guardian::verify_guardian_signature;
 pub use session::verify_session_ticket;
+#[deprecated(since = "0.2.0", note = "Use SimpleIdentityVerifier::verify_threshold_signature instead")]
 pub use threshold::verify_threshold_signature;
 
 // Re-export identity validation functions
@@ -81,6 +86,10 @@ pub enum AuthenticationError {
 pub type Result<T> = std::result::Result<T, AuthenticationError>;
 
 /// Key material for identity verification
+///
+/// **Note**: For most use cases, prefer `SimpleIdentityVerifier` which provides
+/// a cleaner API. `KeyMaterial` is primarily used for serialization in protocol
+/// messages and advanced use cases.
 ///
 /// This provides access to public keys needed for signature verification.
 /// No policies or authorization data - pure cryptographic material only.
@@ -277,10 +286,10 @@ impl SimpleIdentityVerifier {
                 let message = account_id.0.as_bytes();
                 let message_hash = hash(message);
                 let group_key = self.key_material.get_group_public_key(&account_id)?;
-                
+
                 // Calculate minimum signers from the signature shares
                 let min_signers = threshold_sig.signers.len().max(1);
-                
+
                 verify_threshold_signature(message, &threshold_sig.signature, group_key, min_signers)?;
                 Ok(VerifiedIdentity {
                     proof: proof.clone(),
@@ -289,6 +298,24 @@ impl SimpleIdentityVerifier {
             }
             _ => Err(AuthenticationError::InvalidThresholdSignature(
                 "Proof is not a threshold signature".to_string()
+            ))
+        }
+    }
+
+    /// Verify a guardian signature
+    pub fn verify_guardian_signature(&self, proof: &IdentityProof, message: &[u8]) -> Result<VerifiedIdentity> {
+        match proof {
+            IdentityProof::Guardian { guardian_id, signature } => {
+                let message_hash = hash(message);
+                let public_key = self.key_material.get_guardian_public_key(guardian_id)?;
+                verify_guardian_signature(*guardian_id, message, signature, public_key)?;
+                Ok(VerifiedIdentity {
+                    proof: proof.clone(),
+                    message_hash,
+                })
+            }
+            _ => Err(AuthenticationError::InvalidGuardianSignature(
+                "Proof is not a guardian signature".to_string()
             ))
         }
     }
@@ -305,7 +332,11 @@ impl Default for SimpleIdentityVerifier {
     }
 }
 
-/// Verify an identity proof against a message (legacy function - prefer SimpleIdentityVerifier)
+/// Verify an identity proof against a message
+///
+/// **Deprecated**: Use `SimpleIdentityVerifier` methods instead for better API and complete
+/// support for all identity proof types including threshold signatures.
+#[deprecated(since = "0.2.0", note = "Use SimpleIdentityVerifier methods instead")]
 pub fn verify_identity_proof(
     proof: &IdentityProof,
     message: &[u8],
