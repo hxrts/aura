@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn test_causal_context_empty() {
         let ctx = CausalContext::empty();
-        assert!(ctx.clock.clock.is_empty());
+        assert!(ctx.clock.clocks.is_empty());
         assert!(ctx.dependencies.is_none());
     }
 
@@ -214,12 +214,12 @@ mod tests {
         let device_b = DeviceId::new();
 
         let mut ctx1 = CausalContext::empty();
-        ctx1.clock.clock.insert(device_a, 1);
-        ctx1.clock.clock.insert(device_b, 0);
+        ctx1.clock.clocks.insert(device_a, 1);
+        ctx1.clock.clocks.insert(device_b, 0);
 
         let mut ctx2 = CausalContext::empty();
-        ctx2.clock.clock.insert(device_a, 2);
-        ctx2.clock.clock.insert(device_b, 0);
+        ctx2.clock.clocks.insert(device_a, 2);
+        ctx2.clock.clocks.insert(device_b, 0);
 
         assert!(ctx1.happens_before(&ctx2));
         assert!(!ctx2.happens_before(&ctx1));
@@ -231,12 +231,12 @@ mod tests {
         let device_b = DeviceId::new();
 
         let mut ctx1 = CausalContext::empty();
-        ctx1.clock.clock.insert(device_a, 1);
-        ctx1.clock.clock.insert(device_b, 0);
+        ctx1.clock.clocks.insert(device_a, 1);
+        ctx1.clock.clocks.insert(device_b, 0);
 
         let mut ctx2 = CausalContext::empty();
-        ctx2.clock.clock.insert(device_a, 0);
-        ctx2.clock.clock.insert(device_b, 1);
+        ctx2.clock.clocks.insert(device_a, 0);
+        ctx2.clock.clocks.insert(device_b, 1);
 
         assert!(ctx1.is_concurrent_with(&ctx2));
         assert!(ctx2.is_concurrent_with(&ctx1));
@@ -248,10 +248,10 @@ mod tests {
         let mut ctx = CausalContext::empty();
 
         ctx.increment(device);
-        assert_eq!(ctx.clock.clock.get(&device), Some(&1));
+        assert_eq!(ctx.clock.clocks.get(&device), Some(&1));
 
         ctx.increment(device);
-        assert_eq!(ctx.clock.clock.get(&device), Some(&2));
+        assert_eq!(ctx.clock.clocks.get(&device), Some(&2));
     }
 
     #[test]
@@ -260,16 +260,16 @@ mod tests {
         let device_b = DeviceId::new();
 
         let mut ctx1 = CausalContext::empty();
-        ctx1.clock.clock.insert(device_a, 2);
-        ctx1.clock.clock.insert(device_b, 1);
+        ctx1.clock.clocks.insert(device_a, 2);
+        ctx1.clock.clocks.insert(device_b, 1);
 
         let mut ctx2 = CausalContext::empty();
-        ctx2.clock.clock.insert(device_a, 1);
-        ctx2.clock.clock.insert(device_b, 3);
+        ctx2.clock.clocks.insert(device_a, 1);
+        ctx2.clock.clocks.insert(device_b, 3);
 
         ctx1.merge(&ctx2);
 
-        assert_eq!(ctx1.clock.clock.get(&device_a), Some(&2)); // max(2, 1)
-        assert_eq!(ctx1.clock.clock.get(&device_b), Some(&3)); // max(1, 3)
+        assert_eq!(ctx1.clock.clocks.get(&device_a), Some(&2)); // max(2, 1)
+        assert_eq!(ctx1.clock.clocks.get(&device_b), Some(&3)); // max(1, 3)
     }
 }
