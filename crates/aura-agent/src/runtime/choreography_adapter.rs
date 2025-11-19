@@ -470,8 +470,8 @@ mod tests {
         let fixture = create_test_fixture().await?;
         let device_a = fixture.device_id();
         let device_b = DeviceId::new();
-        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone());
-        adapter.set_flow_context_for_peer(device_b, ContextId::new("custom.ctx"));
+        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone(), device_a);
+        adapter.set_flow_context_for_peer(device_b, ContextId::new());
 
         let profile = SendGuardProfile {
             flow_cost: 64,
@@ -494,8 +494,8 @@ mod tests {
         let device_b = fixture_b.device_id();
 
         // Create adapters with proper testing setup
-        let mut adapter_a = AuraHandlerAdapter::with_effect_system((*fixture_a.effects()).clone());
-        let mut adapter_b = AuraHandlerAdapter::with_effect_system((*fixture_b.effects()).clone());
+        let mut adapter_a = AuraHandlerAdapter::with_effect_system((*fixture_a.effects()).clone(), device_a);
+        let mut adapter_b = AuraHandlerAdapter::with_effect_system((*fixture_b.effects()).clone(), device_b);
 
         // The network delivery should work via shared memory network registry
         adapter_a
