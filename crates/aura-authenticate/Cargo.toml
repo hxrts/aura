@@ -13,8 +13,10 @@ aura-effects = { path = "../aura-effects" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
 aura-protocol = { path = "../aura-protocol" }
+aura-relational = { path = "../aura-relational" }
 aura-verify = { path = "../aura-verify" }
 aura-wot = { path = "../aura-wot" }
+ed25519-dalek = { workspace = true }
 
 # Choreography dependencies (required by aura-macros)
 rumpsteak-aura-choreography = "0.6.0"

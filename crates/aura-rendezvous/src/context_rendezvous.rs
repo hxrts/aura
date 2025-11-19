@@ -107,7 +107,7 @@ impl ContextRendezvousCoordinator {
 
     /// Add a relational context
     pub fn add_context(&mut self, context: Arc<RelationalContext>) {
-        self.contexts.insert(context.context_id(), context);
+        self.contexts.insert(context.context_id, context);
     }
 
     /// Create a rendezvous descriptor for a context
@@ -123,7 +123,7 @@ impl ContextRendezvousCoordinator {
             .get(&context_id)
             .ok_or_else(|| AuraError::not_found("Context not found"))?;
 
-        if !context.is_participant(&self.local_authority).await? {
+        if !context.is_participant(&self.local_authority) {
             return Err(AuraError::permission_denied(
                 "Not a participant in context".to_string(),
             ));
@@ -214,7 +214,7 @@ impl ContextRendezvousCoordinator {
             .get(&envelope.context_id)
             .ok_or_else(|| AuraError::not_found("Context not found"))?;
 
-        if !context.is_participant(&self.local_authority).await? {
+        if !context.is_participant(&self.local_authority) {
             return Ok(FloodResult::Dropped);
         }
 
@@ -288,7 +288,7 @@ impl ContextRendezvousCoordinator {
         // TODO: Implement actual guard chain evaluation
         // For now, check basic context membership
         if let Some(context) = self.contexts.get(&envelope.context_id) {
-            context.is_participant(&envelope.source_authority).await
+            context.is_participant(&envelope.source_authority)
         } else {
             Ok(false)
         }
@@ -304,7 +304,7 @@ impl ContextRendezvousCoordinator {
             .get(context_id)
             .ok_or_else(|| AuraError::not_found("Context not found"))?;
 
-        context.get_participants().await
+        Ok(context.get_participants())
     }
 
     /// Forward envelope to another authority

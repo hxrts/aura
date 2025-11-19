@@ -555,6 +555,16 @@ impl ContextId {
     pub fn uuid(&self) -> Uuid {
         self.0
     }
+
+    /// Get bytes representation
+    pub fn to_bytes(&self) -> [u8; 16] {
+        *self.0.as_bytes()
+    }
+
+    /// Get bytes as slice
+    pub fn as_bytes(&self) -> &[u8; 16] {
+        self.0.as_bytes()
+    }
 }
 
 impl Default for ContextId {
