@@ -5,7 +5,7 @@
 
 use aura_core::identifiers::ContextId;
 use aura_core::{AuraError, AuthorityId, Result};
-use aura_journal::{Fact, Journal, JournalNamespace};
+use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -86,8 +86,8 @@ impl NamespacedSync {
                 .check_sync_authorization(effects, peer, &authority_id)
                 .await?
             {
-                return Err(AuraError::Authorization(
-                    "Peer not authorized to sync this authority".to_string(),
+                return Err(AuraError::permission_denied(
+                    "Peer not authorized to sync this authority",
                 ));
             }
         }
@@ -110,8 +110,8 @@ impl NamespacedSync {
             .check_context_participant(effects, peer, &context_id)
             .await?
         {
-            return Err(AuraError::Authorization(
-                "Peer not a participant in this context".to_string(),
+            return Err(AuraError::permission_denied(
+                "Peer not a participant in this context",
             ));
         }
 
@@ -152,7 +152,7 @@ impl NamespacedSync {
     ) -> Result<SyncResponse> {
         // Verify namespace matches
         if request.namespace != self.namespace {
-            return Err(AuraError::Verification("Namespace mismatch".to_string()));
+            return Err(AuraError::invalid("Namespace mismatch"));
         }
 
         // Get facts to sync
@@ -183,8 +183,8 @@ impl NamespacedSync {
 
         // Verify namespace matches
         if response.namespace != self.namespace {
-            return Err(AuraError::Verification(
-                "Response namespace mismatch".to_string(),
+            return Err(AuraError::invalid(
+                "Response namespace mismatch",
             ));
         }
 

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::{SyncError, SyncResult};
 use crate::infrastructure::RetryPolicy;
 use aura_core::{AuraError, Authority, AuthorityId, Result};
-use aura_journal::{Fact, FactId, Journal, JournalNamespace};
+use aura_journal::{Fact, FactId, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
 
 /// Authority-based journal sync configuration

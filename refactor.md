@@ -2,18 +2,27 @@
 
 This document outlines the complete transformation from the current graph-based, device-centric architecture to the target authority-centric, fact-based architecture with relational contexts.
 
-## Current Status (2025-11-19)
+## Current Status (2025-11-19 Update 2)
 
 **Recent Progress:**
 - ✅ Removed legacy graph-based journal_ops directory
 - ✅ Fixed authority effects circular dependency (RelationalContext import)
 - ✅ Fixed aura-transport Capability import and dependency
 - ✅ Refactored aura-store to use authority-based ResourceScope
-- ⚠️ Compilation errors remain in aura-journal (fact type mismatches)
+- ✅ Fixed aura-sync Journal imports (use FactJournal instead of journal_api::Journal)
+- ✅ Fixed several AuraError::Authorization/Verification calls in aura-sync
+- ✅ Fixed ResourceScope::Journal reference in aura-sync/anti_entropy.rs
+- ⚠️ Compilation errors remain across multiple crates
+
+**Blocking Issues:**
+1. **API Migration Incomplete**: Many files still use old error variants (AuraError::Verification → AuraError::invalid)
+2. **ResourceScope Migration**: aura-authenticate and aura-rendezvous still reference removed variants (Recovery, Journal)
+3. **RelationalContext API**: Missing methods (is_participant, get_participants, context_id accessor)
+4. **Import Issues**: Missing dependency declarations (aura_relational, bincode, ed25519_dalek)
 
 **Remaining Work:**
-See Phase 8.2 "Remove device-centric types" - significant type refactoring needed
-in aura-journal to align fact-based and legacy structures.
+See Phase 8.2 "Remove device-centric types" - blocked by compilation errors that must be fixed first.
+Priority: Fix compilation errors before proceeding with DeviceMetadata removal.
 
 ## Executive Summary
 
