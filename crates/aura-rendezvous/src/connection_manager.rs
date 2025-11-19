@@ -1330,7 +1330,8 @@ mod tests {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
         let effects = std::sync::Arc::new(AuraEffectSystem::new());
-        let manager = ConnectionManager::new(device_id, stun_config, effects);
+        let random = std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let manager = ConnectionManager::new(device_id, stun_config, effects, random);
 
         assert_eq!(manager.device_id, device_id);
     }
@@ -1340,7 +1341,8 @@ mod tests {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
         let effects = std::sync::Arc::new(AuraEffectSystem::new());
-        let manager = ConnectionManager::new(device_id, stun_config, effects);
+        let random = std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let manager = ConnectionManager::new(device_id, stun_config, effects, random);
 
         let offers = vec![
             TransportDescriptor::quic("192.168.1.100:8080".to_string(), "aura".to_string()),
@@ -1427,7 +1429,8 @@ mod tests {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
         let effects = std::sync::Arc::new(AuraEffectSystem::new());
-        let manager = ConnectionManager::new(device_id, stun_config, effects);
+        let random = std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let manager = ConnectionManager::new(device_id, stun_config, effects, random);
 
         // Create transport with reflexive address
         let transport = TransportDescriptor {

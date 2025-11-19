@@ -227,6 +227,19 @@ pub struct SbbFloodingCoordinator {
     effects: SharedEffects,
 }
 
+impl std::fmt::Debug for SbbFloodingCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SbbFloodingCoordinator")
+            .field("device_id", &self.device_id)
+            .field("friends", &self.friends)
+            .field("guardians", &self.guardians)
+            .field("seen_envelopes", &self.seen_envelopes)
+            .field("envelope_cache", &self.envelope_cache)
+            .field("effects", &"<dyn AuraEffects>")
+            .finish()
+    }
+}
+
 impl RendezvousEnvelope {
     /// Create new rendezvous envelope with content-addressed ID
     pub fn new(payload: Vec<u8>, ttl: Option<u8>) -> Self {

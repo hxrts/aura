@@ -17,6 +17,7 @@ use crate::{
     messaging::{TransportMethod, TransportOfferPayload},
 };
 use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+use aura_agent::NetworkEffects;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
 use aura_protocol::effects::AuraEffects;
 use std::collections::HashMap;
@@ -107,15 +108,12 @@ impl TestDevice {
         name: String,
         _config: &E2eTestConfig,
     ) -> AuraResult<Self> {
-        // Create network transport
-        let net_config = NetworkConfig {
-            max_connections: 100,
-            timeout_ms: 5000,
-        };
+        // Create shared effect system
+        let effects = Arc::new(AuraEffectSystem::new());
+        let network_effects = Arc::clone(&effects) as Arc<dyn NetworkEffects>;
 
-        let mut transport = NetworkTransport::new(device_id, net_config);
-        transport.start_listener().await?;
-        let transport = Arc::new(RwLock::new(transport));
+        // Create network transport
+        let transport = NetworkTransport::new(device_id, network_effects);
 
         // Create SBB system
         let sbb_config = SbbConfig {
@@ -129,12 +127,11 @@ impl TestDevice {
             app_context: "test-sbb-e2e".to_string(),
         };
 
-        let effects = AuraEffectSystem::new();
-        let effects = Arc::new(effects) as Arc<dyn aura_protocol::effects::AuraEffects>;
+        let aura_effects = Arc::clone(&effects) as Arc<dyn aura_protocol::effects::AuraEffects>;
         let sbb_system = SbbSystemBuilder::new(device_id)
             .with_config(sbb_config)
             .with_transport(Arc::clone(&transport))
-            .build(effects);
+            .build(aura_effects);
 
         Ok(Self {
             device_id,

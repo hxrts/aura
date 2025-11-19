@@ -23,6 +23,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Complete SBB system integrating all components
+#[derive(Debug)]
 pub struct IntegratedSbbSystem {
     /// Device ID for this node
     #[allow(dead_code)]
@@ -553,7 +554,7 @@ mod tests {
 
         // Update to high trust
         system
-            .update_trust_level(peer_id, TrustLevel::High)
+            .update_trust_level(peer_id, TrustLevel::High, now)
             .unwrap();
 
         let stats2 = system.get_statistics();
@@ -575,10 +576,10 @@ mod tests {
         system.add_friend(peer_id, rel_id, TrustLevel::Medium, now).await;
 
         // Should be able to forward small messages
-        assert!(system.can_forward_to_peer(peer_id, 1024).await);
+        assert!(system.can_forward_to_peer(peer_id, 1024, now).await);
 
         // Check eligible peers
-        let peers = system.get_eligible_peers(1024).await.unwrap();
+        let peers = system.get_eligible_peers(1024, now).await.unwrap();
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0], peer_id);
 
@@ -586,9 +587,9 @@ mod tests {
         system.remove_relationship(peer_id).await;
 
         // Should no longer be able to forward
-        assert!(!system.can_forward_to_peer(peer_id, 1024).await);
+        assert!(!system.can_forward_to_peer(peer_id, 1024, now).await);
 
-        let peers = system.get_eligible_peers(1024).await.unwrap();
+        let peers = system.get_eligible_peers(1024, now).await.unwrap();
         assert!(peers.is_empty());
     }
 }

@@ -18,6 +18,15 @@ pub struct NetworkTransport {
     network_effects: Arc<dyn NetworkEffects>,
 }
 
+impl std::fmt::Debug for NetworkTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NetworkTransport")
+            .field("device_id", &self.device_id)
+            .field("network_effects", &"<dyn NetworkEffects>")
+            .finish()
+    }
+}
+
 impl NetworkTransport {
     /// Create new NetworkTransport with effect handler
     pub fn new(device_id: DeviceId, network_effects: Arc<dyn NetworkEffects>) -> Arc<RwLock<Self>> {
@@ -157,6 +166,7 @@ pub enum TransportMethod {
 }
 
 /// SBB transport bridge connecting flooding to actual transport
+#[derive(Debug)]
 pub struct SbbTransportBridge {
     /// SBB flooding coordinator
     flooding_coordinator: Arc<RwLock<SbbFloodingCoordinator>>,
@@ -565,14 +575,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_network_transport_sender_creation() {
-        use super::{NetworkConfig, NetworkTransport};
+        use super::NetworkTransport;
 
         let device_id = DeviceId::new();
-        let config = NetworkConfig::default();
-        let transport = NetworkTransport::new(device_id, config);
-        let transport_ref = Arc::new(RwLock::new(transport));
+        let effects = Arc::new(AuraEffectSystem::new()) as Arc<dyn NetworkEffects>;
+        let transport = NetworkTransport::new(device_id, effects);
 
-        let sender = NetworkTransportSender::new(transport_ref);
+        let sender = NetworkTransportSender::new(transport);
 
         // Should create successfully
         let unreachable_peer = DeviceId::new();
@@ -581,17 +590,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_sbb_bridge_with_network_transport() {
-        use super::{NetworkConfig, NetworkTransport};
+        use super::NetworkTransport;
 
         let device_id = DeviceId::new();
         let effects = test_effects(device_id);
         let mut bridge = SbbTransportBridge::new(device_id, effects);
 
         // Set up real transport sender
-        let config = NetworkConfig::default();
-        let transport = NetworkTransport::new(device_id, config);
-        let transport_ref = Arc::new(RwLock::new(transport));
-        let sender = NetworkTransportSender::new(transport_ref);
+        let network_effects = Arc::new(AuraEffectSystem::new()) as Arc<dyn NetworkEffects>;
+        let transport = NetworkTransport::new(device_id, network_effects);
+        let sender = NetworkTransportSender::new(transport);
 
         bridge.set_transport_sender(Box::new(sender));
 

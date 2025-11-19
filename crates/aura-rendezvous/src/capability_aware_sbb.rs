@@ -568,20 +568,20 @@ mod tests {
         let now = 1000000u64; // Test timestamp
         let mut budget = SbbFlowBudget::new(1024, 3600, now);
 
-        assert_eq!(budget.remaining(), 1024);
-        assert_eq!(budget.utilization(), 0.0);
+        assert_eq!(budget.remaining(now), 1024);
+        assert_eq!(budget.utilization(now), 0.0);
 
         assert!(budget.can_spend(512, now));
         budget.spend(512, now).unwrap();
-        assert_eq!(budget.remaining(), 512);
-        assert_eq!(budget.utilization(), 0.5);
+        assert_eq!(budget.remaining(now), 512);
+        assert_eq!(budget.utilization(now), 0.5);
 
         assert!(budget.can_spend(512, now));
         assert!(!budget.can_spend(513, now));
 
         budget.spend(512, now).unwrap();
-        assert_eq!(budget.remaining(), 0);
-        assert_eq!(budget.utilization(), 1.0);
+        assert_eq!(budget.remaining(now), 0);
+        assert_eq!(budget.utilization(now), 1.0);
 
         assert!(budget.spend(1, now).is_err());
     }
@@ -590,13 +590,13 @@ mod tests {
     fn test_relationship_forwarding_logic() {
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new([0u8; 32]);
+        let now = 1000000u64; // Test timestamp
 
         // Test different trust levels
-        let low_trust_rel = SbbRelationship::new(peer_id, rel_id.clone(), TrustLevel::Low, false);
-        let high_trust_rel = SbbRelationship::new(peer_id, rel_id.clone(), TrustLevel::High, true);
+        let low_trust_rel = SbbRelationship::new(peer_id, rel_id.clone(), TrustLevel::Low, false, now);
+        let high_trust_rel = SbbRelationship::new(peer_id, rel_id.clone(), TrustLevel::High, true, now);
 
         let policy = SbbForwardingPolicy::default();
-        let now = 1000000u64; // Test timestamp
 
         // High trust should allow forwarding
         assert!(high_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &policy, now));
@@ -605,7 +605,7 @@ mod tests {
         assert!(low_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &policy, now));
 
         // No trust should be rejected
-        let no_trust_rel = SbbRelationship::new(peer_id, rel_id, TrustLevel::None, false);
+        let no_trust_rel = SbbRelationship::new(peer_id, rel_id, TrustLevel::None, false, now);
         let strict_policy = SbbForwardingPolicy {
             min_trust_level: TrustLevel::Low,
             ..Default::default()
@@ -621,13 +621,13 @@ mod tests {
         let peer1 = DeviceId::new();
         let peer2 = DeviceId::new();
         let rel_id = RelationshipId::new([0u8; 32]);
+        let now = 1000000u64; // Test timestamp
 
         // Add relationships with different trust levels
-        coordinator.add_relationship(peer1, rel_id.clone(), TrustLevel::High, true); // Guardian
-        coordinator.add_relationship(peer2, rel_id, TrustLevel::Low, false); // Friend
+        coordinator.add_relationship(peer1, rel_id.clone(), TrustLevel::High, true, now); // Guardian
+        coordinator.add_relationship(peer2, rel_id, TrustLevel::Low, false, now); // Friend
 
         let policy = SbbForwardingPolicy::default();
-        let now = 1000000u64; // Test timestamp
         let peers = coordinator
             .get_capability_aware_forwarding_peers(None, SBB_MESSAGE_SIZE, &policy, now)
             .await
@@ -652,14 +652,15 @@ mod tests {
 
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new([0u8; 32]);
-        coordinator.add_relationship(peer_id, rel_id, TrustLevel::Medium, false);
+        let now = 1000000u64; // Test timestamp
+        coordinator.add_relationship(peer_id, rel_id, TrustLevel::Medium, false, now);
 
         let payload = b"test envelope".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(2));
 
         // Should succeed with capable peer
         let result = coordinator
-            .flood_envelope(envelope.clone(), None)
+            .flood_envelope(envelope.clone(), None, now)
             .await
             .unwrap();
         match result {
@@ -668,7 +669,7 @@ mod tests {
         }
 
         // Duplicate should be dropped
-        let result2 = coordinator.flood_envelope(envelope, None).await.unwrap();
+        let result2 = coordinator.flood_envelope(envelope, None, now).await.unwrap();
         match result2 {
             FloodResult::Dropped => (), // Expected
             _ => panic!("Expected duplicate to be dropped"),
