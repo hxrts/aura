@@ -614,8 +614,9 @@ mod tests {
 
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(0));
+        let now = 1000000u64; // Test timestamp
 
-        let result = coordinator.flood_envelope(envelope, None).await.unwrap();
+        let result = coordinator.flood_envelope(envelope, None, now).await.unwrap();
         match result {
             FloodResult::Dropped => (), // Expected
             _ => panic!("Expected envelope with TTL 0 to be dropped"),
@@ -630,17 +631,18 @@ mod tests {
 
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(2));
+        let now = 1000000u64; // Test timestamp
 
         // First flood should succeed (though no peers to forward to)
         let result1 = coordinator
-            .flood_envelope(envelope.clone(), None)
+            .flood_envelope(envelope.clone(), None, now)
             .await
             .unwrap();
         // No peers to forward to - result should be Dropped
         if let FloodResult::Dropped = result1 {}
 
         // Second flood of same envelope should be dropped as duplicate
-        let result2 = coordinator.flood_envelope(envelope, None).await.unwrap();
+        let result2 = coordinator.flood_envelope(envelope, None, now).await.unwrap();
         match result2 {
             FloodResult::Dropped => (), // Expected duplicate
             _ => panic!("Expected duplicate envelope to be dropped"),

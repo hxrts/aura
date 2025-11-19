@@ -129,8 +129,7 @@ impl TestDevice {
             app_context: "test-sbb-e2e".to_string(),
         };
 
-        let config = EffectSystemConfig::for_testing(device_id);
-        let effects = AuraEffectSystem::new(config)?;
+        let effects = AuraEffectSystem::new();
         let effects = Arc::new(effects) as Arc<dyn aura_protocol::effects::AuraEffects>;
         let sbb_system = SbbSystemBuilder::new(device_id)
             .with_config(sbb_config)

@@ -565,24 +565,25 @@ mod tests {
 
     #[test]
     fn test_flow_budget_spending() {
-        let mut budget = SbbFlowBudget::new(1024, 3600);
+        let now = 1000000u64; // Test timestamp
+        let mut budget = SbbFlowBudget::new(1024, 3600, now);
 
         assert_eq!(budget.remaining(), 1024);
         assert_eq!(budget.utilization(), 0.0);
 
-        assert!(budget.can_spend(512));
-        budget.spend(512).unwrap();
+        assert!(budget.can_spend(512, now));
+        budget.spend(512, now).unwrap();
         assert_eq!(budget.remaining(), 512);
         assert_eq!(budget.utilization(), 0.5);
 
-        assert!(budget.can_spend(512));
-        assert!(!budget.can_spend(513));
+        assert!(budget.can_spend(512, now));
+        assert!(!budget.can_spend(513, now));
 
-        budget.spend(512).unwrap();
+        budget.spend(512, now).unwrap();
         assert_eq!(budget.remaining(), 0);
         assert_eq!(budget.utilization(), 1.0);
 
-        assert!(budget.spend(1).is_err());
+        assert!(budget.spend(1, now).is_err());
     }
 
     #[test]
@@ -595,12 +596,13 @@ mod tests {
         let high_trust_rel = SbbRelationship::new(peer_id, rel_id.clone(), TrustLevel::High, true);
 
         let policy = SbbForwardingPolicy::default();
+        let now = 1000000u64; // Test timestamp
 
         // High trust should allow forwarding
-        assert!(high_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &policy));
+        assert!(high_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &policy, now));
 
         // Low trust should allow forwarding if policy permits
-        assert!(low_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &policy));
+        assert!(low_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &policy, now));
 
         // No trust should be rejected
         let no_trust_rel = SbbRelationship::new(peer_id, rel_id, TrustLevel::None, false);
@@ -608,7 +610,7 @@ mod tests {
             min_trust_level: TrustLevel::Low,
             ..Default::default()
         };
-        assert!(!no_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &strict_policy));
+        assert!(!no_trust_rel.can_forward_sbb(SBB_MESSAGE_SIZE, &strict_policy, now));
     }
 
     #[tokio::test]
