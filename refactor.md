@@ -38,10 +38,22 @@ This document outlines the complete transformation from the current graph-based,
 6. **Method access** - RelationalContext journal.compute_commitment() (E0599)
 7. **Arc mutability** - Commented TODOs for interior mutability pattern (E0596)
 
-**Remaining Work (Non-blocking):**
-1. ⚠️ JournalOperation still used in guard infrastructure (aura-protocol) - kept for now
-2. ⚠️ DeviceMetadata/DeviceType still in types.rs - requires broader refactor
-3. ⚠️ aura-agent compilation errors - runtime layer (not protocol layer)
+**Remaining Work (Non-blocking for Protocol Layer):**
+1. ⚠️ **aura-agent refactoring (90 errors)** - Runtime composition layer (Layer 6)
+   - Missing modules: choreographic, ledger, tree, agent, system_traits, handler_adapters
+   - These modules were part of old architecture and need to be re-implemented using new patterns
+   - Added aura-relational dependency
+   - Fixed ContextId imports (aura_core::ContextId)
+   - Status: Requires separate refactoring effort focused on runtime composition
+
+2. ⚠️ JournalOperation still used in guard infrastructure (aura-protocol/guards)
+   - Currently used for guard chain delta tracking
+   - Can be migrated incrementally
+
+3. ⚠️ DeviceMetadata/DeviceType still in types.rs
+   - Still referenced by testkit and legacy code
+   - Requires broader refactor of test infrastructure
+
 4. 📝 Documentation updates for new authority-centric patterns
 
 **Achievement Summary:**

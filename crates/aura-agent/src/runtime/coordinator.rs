@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aura_core::hash::hash;
-use aura_core::relationships::ContextId;
+use aura_core::ContextId;
 use aura_core::session_epochs::Epoch;
 use aura_core::{
     effects::{

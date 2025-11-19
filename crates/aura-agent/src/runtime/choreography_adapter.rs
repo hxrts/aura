@@ -8,7 +8,7 @@ use crate::{
     runtime::AuraEffectSystem,
 };
 use async_trait::async_trait;
-use aura_core::{relationships::ContextId, DeviceId, Receipt};
+use aura_core::{ContextId, DeviceId, Receipt};
 use aura_protocol::guards::{FlowHint, LeakageBudget, ProtocolGuard};
 use aura_wot::Capability;
 use rumpsteak_aura_choreography::effects::{

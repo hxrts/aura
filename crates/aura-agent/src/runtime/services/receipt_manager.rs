@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use aura_core::relationships::ContextId;
+use aura_core::ContextId;
 use aura_core::{AuraResult, Receipt};
 
 /// A chain of receipts for tracking flow budget charges
