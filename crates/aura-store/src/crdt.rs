@@ -119,7 +119,8 @@ impl StorageOpLog {
 
     /// Add an operation to the log
     pub fn add_operation(&mut self, op: StorageOperation) {
-        self.counter += 1;
+        // Update log counter to track the maximum counter seen
+        self.counter = self.counter.max(op.counter);
         self.operations.push(op);
     }
 
