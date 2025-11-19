@@ -21,8 +21,21 @@ pub use aura_core::{
 
 /// Device metadata stored in CRDT
 ///
+/// **DEPRECATED**: This type is part of the legacy device-centric architecture.
+/// In the authority-centric model, device information is derived from AttestedOps
+/// in the ratchet tree, not stored as a separate CRDT type.
+///
+/// **Migration Path**:
+/// - Device information should be queried from TreeState via TreeEffects
+/// - LeafNode in the ratchet tree contains device public keys
+/// - Device membership is implicit from tree structure, not explicit metadata
+///
 /// Tracks device information, cryptographic keys, and replay protection state.
 /// Reference: 080 spec Part 3: Ledger Compaction
+#[deprecated(
+    since = "0.1.0",
+    note = "Use authority-derived device views from TreeState instead. Device metadata should be derived from AttestedOps in the ratchet tree."
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceMetadata {
     /// Unique identifier for this device
@@ -52,6 +65,19 @@ pub struct DeviceMetadata {
 }
 
 /// Device type classification
+///
+/// **DEPRECATED**: This enum is part of the legacy device-centric architecture.
+/// In the authority-centric model, device roles are not explicitly classified.
+/// All devices are represented as LeafNodes in the ratchet tree with equal capability.
+///
+/// **Migration Path**:
+/// - Remove device_type fields from code
+/// - Device capabilities are derived from tree position and Biscuit tokens, not type labels
+/// - Use Policy objects to control what operations devices can perform
+#[deprecated(
+    since = "0.1.0",
+    note = "Device type classification removed in authority-centric model. Use Policy for capability control."
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeviceType {
     /// User's primary device with full account control

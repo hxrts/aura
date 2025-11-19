@@ -50,10 +50,12 @@ This document outlines the complete transformation from the current graph-based,
 7. **Arc mutability** - Commented TODOs for interior mutability pattern (E0596)
 
 **Remaining Work:**
-1. ⚠️ DeviceMetadata/DeviceType cleanup (Phase 8.2)
-   - Still referenced by testkit and legacy code in types.rs
-   - Requires broader refactor of test infrastructure (see Phase 8.2 below)
-   - Work plan outlined in lines 949-986
+1. ✅ DeviceMetadata/DeviceType deprecation (Phase 8.2 - STARTED)
+   - ✅ Marked DeviceMetadata as deprecated with migration guidance
+   - ✅ Marked DeviceType as deprecated with migration guidance
+   - ✅ Marked DeviceRegistry as deprecated with migration guidance
+   - ⚠️ Legacy types kept for backward compatibility while fact-based device views are implemented
+   - 📝 Migration path documented: derive device info from TreeState AttestedOps
 
 2. ⚠️ JournalOperation legacy plumbing removal
    - Still used in guard infrastructure (aura-protocol/guards)
@@ -957,11 +959,15 @@ The refactoring involves a **fundamental architectural transformation** from:
   - [x] Delete entire `journal_ops` directory
   - [x] Remove graph.rs, types.rs, views.rs, derivation.rs
 
-#### Task: Remove device-centric types
-- [ ] **File**: `crates/aura-journal/src/types.rs`
-  - [ ] Delete DeviceMetadata, DeviceType
-  - [ ] Remove device-specific logic
-  - [ ] Delete legacy DeviceMetadata/DeviceType references:
+#### Task: Deprecate and remove device-centric types
+- [x] **File**: `crates/aura-journal/src/types.rs`
+  - [x] Mark DeviceMetadata as deprecated with migration guidance
+  - [x] Mark DeviceType as deprecated with migration guidance
+  - [x] Document that device info should be derived from TreeState AttestedOps
+- [x] **File**: `crates/aura-journal/src/semilattice/concrete_types.rs`
+  - [x] Mark DeviceRegistry as deprecated with migration guidance
+- [ ] **Future work**: Delete legacy DeviceMetadata/DeviceType references (currently kept for backward compatibility):
+  - [ ] Delete legacy references once fact-based device views are fully implemented
     - [ ] `crates/aura-journal/src/semilattice/account_state.rs`
     - [ ] `crates/aura-journal/src/semilattice/concrete_types.rs`
     - [ ] `crates/aura-journal/src/operations.rs`
