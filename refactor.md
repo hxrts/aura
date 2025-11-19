@@ -2,6 +2,19 @@
 
 This document outlines the complete transformation from the current graph-based, device-centric architecture to the target authority-centric, fact-based architecture with relational contexts.
 
+## Current Status (2025-11-19)
+
+**Recent Progress:**
+- ✅ Removed legacy graph-based journal_ops directory
+- ✅ Fixed authority effects circular dependency (RelationalContext import)
+- ✅ Fixed aura-transport Capability import and dependency
+- ✅ Refactored aura-store to use authority-based ResourceScope
+- ⚠️ Compilation errors remain in aura-journal (fact type mismatches)
+
+**Remaining Work:**
+See Phase 8.2 "Remove device-centric types" - significant type refactoring needed
+in aura-journal to align fact-based and legacy structures.
+
 ## Executive Summary
 
 The refactoring involves a **fundamental architectural transformation** from:
