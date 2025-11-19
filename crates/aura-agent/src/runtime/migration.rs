@@ -315,7 +315,7 @@ mod tests {
         let mock = MockNetworkEffects;
         let adapter = MigrationAdapter::new(mock, device_id);
 
-        let mut ctx = EffectContext::new(device_id).with_flow_budget(FlowBudget::new(100));
+        let mut ctx = EffectContext::new(device_id).with_flow_budget(FlowBudget::new(100, Epoch(0)));
 
         // Should work with contextual interface
         adapter.send_to_peer(&mut ctx, device_id, vec![]).await?;

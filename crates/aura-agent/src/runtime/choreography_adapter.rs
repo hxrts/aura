@@ -419,7 +419,7 @@ mod tests {
     async fn test_adapter_creation() -> aura_core::AuraResult<()> {
         let fixture = create_test_fixture().await?;
         let device_id = fixture.device_id();
-        let adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone());
+        let adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone(), device_id);
 
         // Should create without error
         assert_eq!(adapter.device_id(), device_id);
@@ -430,7 +430,7 @@ mod tests {
     async fn test_role_mapping() -> aura_core::AuraResult<()> {
         let fixture = create_test_fixture().await?;
         let device_id = fixture.device_id();
-        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone());
+        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone(), device_id);
 
         let peer_device = DeviceId::new();
         adapter.add_role_mapping("alice".to_string(), peer_device);
@@ -445,8 +445,8 @@ mod tests {
         let fixture = create_test_fixture().await?;
         let device_a = fixture.device_id();
         let device_b = DeviceId::new();
-        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone());
-        adapter.set_flow_context_for_peer(device_b, ContextId::new("test.ctx"));
+        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone(), device_a);
+        adapter.set_flow_context_for_peer(device_b, ContextId::new());
 
         // Network send will fail due to missing peers, but guard execution should still emit a receipt.
         let _ = adapter
