@@ -26,6 +26,11 @@ impl Hash32 {
         Self(bytes)
     }
 
+    /// Create a zero hash (for testing/defaults)
+    pub fn zero() -> Self {
+        Self([0u8; 32])
+    }
+
     /// Hash arbitrary bytes using the system hash algorithm
     pub fn from_bytes(data: &[u8]) -> Self {
         Self(hash::hash(data))
@@ -68,6 +73,12 @@ impl fmt::Display for Hash32 {
 impl AsRef<[u8]> for Hash32 {
     fn as_ref(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl Default for Hash32 {
+    fn default() -> Self {
+        Self::zero()
     }
 }
 
