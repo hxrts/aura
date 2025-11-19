@@ -52,7 +52,7 @@ fn create_biscuit_components(
         .expect("Failed to create device token");
     let token_manager = BiscuitTokenManager::new(device_id, token);
 
-    let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key());
+    let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), device_id);
     let guard_evaluator = BiscuitGuardEvaluator::new(bridge);
 
     (token_manager, guard_evaluator)
