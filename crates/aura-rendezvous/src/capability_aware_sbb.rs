@@ -627,8 +627,9 @@ mod tests {
         coordinator.add_relationship(peer2, rel_id, TrustLevel::Low, false); // Friend
 
         let policy = SbbForwardingPolicy::default();
+        let now = 1000000u64; // Test timestamp
         let peers = coordinator
-            .get_capability_aware_forwarding_peers(None, SBB_MESSAGE_SIZE, &policy)
+            .get_capability_aware_forwarding_peers(None, SBB_MESSAGE_SIZE, &policy, now)
             .await
             .unwrap();
 

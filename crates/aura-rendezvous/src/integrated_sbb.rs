@@ -453,13 +453,14 @@ mod tests {
         let friend_id = DeviceId::new();
         let guardian_id = DeviceId::new();
         let rel_id = RelationshipId::new([0u8; 32]);
+        let now = 1000000u64; // Test timestamp
 
         // Add relationships
         system
-            .add_friend(friend_id, rel_id.clone(), TrustLevel::Medium)
+            .add_friend(friend_id, rel_id.clone(), TrustLevel::Medium, now)
             .await;
         system
-            .add_guardian(guardian_id, rel_id, TrustLevel::High)
+            .add_guardian(guardian_id, rel_id, TrustLevel::High, now)
             .await;
 
         // Check statistics
@@ -479,8 +480,9 @@ mod tests {
             IntegratedSbbSystem::new(alice_id, SbbConfig::default(), alice_effects);
 
         let rel_id = RelationshipId::new([0u8; 32]);
+        let now = 1000000u64; // Test timestamp
         alice_system
-            .add_friend(bob_id, rel_id, TrustLevel::Medium)
+            .add_friend(bob_id, rel_id, TrustLevel::Medium, now)
             .await;
 
         let transport_offer = create_test_transport_offer(alice_id);
@@ -540,9 +542,10 @@ mod tests {
 
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new([0u8; 32]);
+        let now = 1000000u64; // Test timestamp
 
         // Add with low trust
-        system.add_friend(peer_id, rel_id, TrustLevel::Low).await;
+        system.add_friend(peer_id, rel_id, TrustLevel::Low, now).await;
 
         let stats1 = system.get_statistics();
         assert_eq!(stats1.low_count, 1);
@@ -566,9 +569,10 @@ mod tests {
 
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new([0u8; 32]);
+        let now = 1000000u64; // Test timestamp
 
         // Add peer with medium trust
-        system.add_friend(peer_id, rel_id, TrustLevel::Medium).await;
+        system.add_friend(peer_id, rel_id, TrustLevel::Medium, now).await;
 
         // Should be able to forward small messages
         assert!(system.can_forward_to_peer(peer_id, 1024).await);
