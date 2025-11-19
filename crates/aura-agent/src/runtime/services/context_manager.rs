@@ -140,7 +140,7 @@ mod tests {
 
         // Snapshots should be equal but independent
         assert_eq!(snapshot1.device_id, snapshot2.device_id);
-        assert_eq!(snapshot1.epoch, snapshot2.epoch);
+        // Note: AuraContext no longer has epoch field
 
         Ok(())
     }
@@ -154,18 +154,19 @@ mod tests {
         // Initialize context
         manager.initialize(device_id).await?;
 
-        // Update atomically
+        // Update atomically - AuraContext now only has device_id
         let updated = manager
-            .update_with(device_id, |ctx| {
-                ctx.epoch = 42;
+            .update_with(device_id, |_ctx| {
+                // Note: AuraContext no longer has epoch field
+                // Just testing that update_with works
             })
             .await?;
 
-        assert_eq!(updated.epoch, 42);
+        assert_eq!(updated.device_id, device_id);
 
         // Verify update persisted
         let snapshot = manager.get_snapshot(device_id).await?;
-        assert_eq!(snapshot.epoch, 42);
+        assert_eq!(snapshot.device_id, device_id);
 
         Ok(())
     }

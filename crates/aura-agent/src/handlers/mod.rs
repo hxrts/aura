@@ -56,6 +56,14 @@ impl AuraContext {
     }
 }
 
+impl Default for AuraContext {
+    fn default() -> Self {
+        Self {
+            device_id: crate::DeviceId::new(),
+        }
+    }
+}
+
 /// Errors from Aura handler operations
 #[derive(Debug, Clone)]
 pub enum AuraHandlerError {
