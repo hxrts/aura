@@ -245,12 +245,9 @@ mod tests {
     #[tokio::test]
     async fn test_effect_composition_manual() {
         let device_id = DeviceId::new();
-        let config = EffectSystemConfig::for_testing(device_id);
 
         let environment = SimulationEffectComposer::new(device_id)
             .with_seed(123)
-            .with_effect_system(config)
-            .unwrap()
             .with_time_control()
             .with_fault_injection()
             .build()

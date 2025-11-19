@@ -222,7 +222,7 @@ mod tests {
         let handler = SimulationTimeHandler::new();
 
         // Should provide current timestamp
-        let timestamp = handler.current_timestamp().await.unwrap();
+        let timestamp = handler.current_timestamp().await;
         assert!(timestamp >= 0);
     }
 
@@ -231,9 +231,9 @@ mod tests {
         let mut handler = SimulationTimeHandler::new();
         handler.set_acceleration(2.0);
 
-        let timestamp1 = handler.current_timestamp().await.unwrap();
+        let timestamp1 = handler.current_timestamp().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let timestamp2 = handler.current_timestamp().await.unwrap();
+        let timestamp2 = handler.current_timestamp().await;
 
         // Time should advance faster with acceleration
         assert!(timestamp2 > timestamp1);
@@ -244,16 +244,16 @@ mod tests {
         let mut handler = SimulationTimeHandler::new();
 
         handler.pause();
-        let timestamp1 = handler.current_timestamp().await.unwrap();
+        let timestamp1 = handler.current_timestamp().await;
         tokio::time::sleep(Duration::from_millis(50)).await;
-        let timestamp2 = handler.current_timestamp().await.unwrap();
+        let timestamp2 = handler.current_timestamp().await;
 
         // Time should be frozen when paused
         assert_eq!(timestamp1, timestamp2);
 
         handler.resume();
         // Time should advance again after resume
-        let timestamp3 = handler.current_timestamp().await.unwrap();
+        let timestamp3 = handler.current_timestamp().await;
         assert!(timestamp3 >= timestamp2);
     }
 
@@ -264,7 +264,7 @@ mod tests {
         let target = Duration::from_secs(3600); // Jump to 1 hour
         handler.jump_to_time(target);
 
-        let timestamp = handler.current_timestamp().await.unwrap();
+        let timestamp = handler.current_timestamp().await;
         assert!(timestamp >= target.as_secs());
     }
 }
