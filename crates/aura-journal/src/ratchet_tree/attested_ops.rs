@@ -43,32 +43,11 @@ impl From<TreeOp> for Fact {
 
         Fact {
             fact_id: FactId::new(),
-            authority_id: op.authority_id,
+            // Note: authority_id removed - facts are scoped by Journal namespace
             content: FactContent::AttestedOp(attested),
         }
     }
 }
 
-/// Convert from core AttestedOp to fact-based AttestedOp
-impl From<CoreAttestedOp> for AttestedOp {
-    fn from(core_op: CoreAttestedOp) -> Self {
-        // Map core operation types to our fact-based types
-        let tree_op = match &core_op.operation {
-            // TODO: Map specific core operations to TreeOpKind
-            // For now, use a placeholder
-            _ => TreeOpKind::RotateEpoch,
-        };
-
-        // Convert TreeHash32 to Hash32
-        let parent_commitment = Hash32::new(core_op.parent_commitment);
-        let new_commitment = Hash32::new([0; 32]); // TODO: Compute from operation
-
-        AttestedOp {
-            tree_op,
-            parent_commitment,
-            new_commitment,
-            witness_threshold: 1,  // TODO: Get from operation context
-            signature: Vec::new(), // TODO: Extract from core op
-        }
-    }
-}
+// NOTE: From<CoreAttestedOp> for AttestedOp implementation moved to ratchet_integration.rs
+// to avoid duplicate trait implementations. See ratchet_integration.rs for the canonical conversion.

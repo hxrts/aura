@@ -62,7 +62,7 @@ pub async fn run_consensus<T: Serialize>(
 /// Hash an operation for consensus
 fn hash_operation<T: Serialize>(operation: &T) -> Result<Hash32> {
     let bytes = serde_json::to_vec(operation)
-        .map_err(|e| aura_core::AuraError::SerializationError(e.to_string()))?;
+        .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
 
     let mut h = hash::hasher();
     h.update(b"AURA_CONSENSUS_OP");

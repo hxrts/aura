@@ -39,7 +39,7 @@ impl ConsensusCoordinator {
     ) -> Result<Hash32> {
         // Serialize operation
         let operation_bytes = serde_json::to_vec(operation)
-            .map_err(|e| AuraError::SerializationError(e.to_string()))?;
+            .map_err(|e| AuraError::serialization(e.to_string()))?;
 
         // Compute hashes
         let prestate_hash = prestate.compute_hash();

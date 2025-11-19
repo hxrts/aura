@@ -128,6 +128,16 @@ pub fn reduce_context(journal: &Journal) -> RelationalState {
                                 context_id: *context_id,
                                 data: grant_hash.0.to_vec(),
                             },
+                            RelationalFact::Consensus {
+                                consensus_id,
+                                operation_hash,
+                                threshold_met: _,
+                                participant_count: _,
+                            } => RelationalBinding {
+                                binding_type: RelationalBindingType::Generic("consensus".to_string()),
+                                context_id: *context_id,
+                                data: [consensus_id.0.to_vec(), operation_hash.0.to_vec()].concat(),
+                            },
                             RelationalFact::Generic {
                                 context_id: _,
                                 binding_type,
@@ -168,14 +178,14 @@ pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<crate:
     // Compute hash of current state
     let state_hash = match &journal.namespace {
         JournalNamespace::Authority(_) => {
-            let state = reduce_authority(journal);
+            let _state = reduce_authority(journal);
             // TODO: Implement proper state hashing
-            Hash32::default()
+            Hash32::new([0; 32])
         }
         JournalNamespace::Context(_) => {
-            let state = reduce_context(journal);
+            let _state = reduce_context(journal);
             // TODO: Implement proper state hashing
-            Hash32::default()
+            Hash32::new([0; 32])
         }
     };
 
