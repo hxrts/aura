@@ -2,27 +2,32 @@
 
 This document outlines the complete transformation from the current graph-based, device-centric architecture to the target authority-centric, fact-based architecture with relational contexts.
 
-## Current Status (2025-11-19 Update 2)
+## Current Status (2025-11-19 Update 3)
 
 **Recent Progress:**
 - ✅ Removed legacy graph-based journal_ops directory
-- ✅ Fixed authority effects circular dependency (RelationalContext import)
+- ✅ Fixed all authority effects circular dependencies
 - ✅ Fixed aura-transport Capability import and dependency
 - ✅ Refactored aura-store to use authority-based ResourceScope
 - ✅ Fixed aura-sync Journal imports (use FactJournal instead of journal_api::Journal)
-- ✅ Fixed several AuraError::Authorization/Verification calls in aura-sync
-- ✅ Fixed ResourceScope::Journal reference in aura-sync/anti_entropy.rs
-- ⚠️ Compilation errors remain across multiple crates
+- ✅ Batch-fixed all AuraError::Verification → AuraError::invalid/crypto/permission_denied
+- ✅ Added ResourceScope::Recovery and ::Journal legacy variants (deprecated)
+- ✅ Enhanced RelationalContext API (is_participant, get_participants methods)
+- ✅ Added ContextId::as_bytes() and to_bytes() methods
+- ✅ Fixed dependency issues (aura-relational, ed25519-dalek, bincode)
+- ✅ **aura-sync compiles successfully!**
+- ⚠️ 19 compilation errors remain (down from 40+)
 
-**Blocking Issues:**
-1. **API Migration Incomplete**: Many files still use old error variants (AuraError::Verification → AuraError::invalid)
-2. **ResourceScope Migration**: aura-authenticate and aura-rendezvous still reference removed variants (Recovery, Journal)
-3. **RelationalContext API**: Missing methods (is_participant, get_participants, context_id accessor)
-4. **Import Issues**: Missing dependency declarations (aura_relational, bincode, ed25519_dalek)
+**Remaining Compilation Errors (19 total):**
+- **aura-authenticate** (14 errors): E0034 (ambiguous method calls), E0277 (? operator), E0308 (type mismatches)
+- **aura-rendezvous** (5 errors): Similar patterns
 
-**Remaining Work:**
-See Phase 8.2 "Remove device-centric types" - blocked by compilation errors that must be fixed first.
-Priority: Fix compilation errors before proceeding with DeviceMetadata removal.
+**Next Steps:**
+1. Fix remaining E0034/E0277/E0308 errors (~1-2 hours)
+2. Verify clean build across all crates
+3. Remove JournalOperation legacy plumbing
+4. Remove DeviceMetadata/DeviceType (Phase 8.2)
+5. Final integration testing
 
 ## Executive Summary
 
