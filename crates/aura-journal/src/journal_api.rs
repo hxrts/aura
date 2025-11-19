@@ -4,7 +4,7 @@
 //! that hides CRDT implementation details behind user-friendly abstractions.
 
 use crate::semilattice::*;
-use aura_core::relationships::ContextId;
+use aura_core::identifiers::ContextId;
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::{AccountId, AuraError, DeviceId};
 use serde::{Deserialize, Serialize};
