@@ -25,17 +25,82 @@ pub use aura_core::effects::ExecutionMode;
 
 // Temporary stubs until refactored
 pub type AuraHandler = ();
-pub type EffectType = ();
-pub type AuraContext = ();
 pub type AgentEffectSystemHandler = ();
 
+/// Effect types for handler routing
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EffectType {
+    /// Network communication effects
+    Network,
+    /// Storage effects
+    Storage,
+    /// Cryptographic effects
+    Crypto,
+    /// Time effects
+    Time,
+    /// Journal effects
+    Journal,
+}
+
+/// Execution context for effect handlers
 #[derive(Debug, Clone)]
-pub struct AuraHandlerError(pub String);
-impl std::fmt::Display for AuraHandlerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+pub struct AuraContext {
+    /// Device ID for this context
+    pub device_id: crate::DeviceId,
+}
+
+impl AuraContext {
+    /// Create a testing context
+    pub fn for_testing(device_id: crate::DeviceId) -> Self {
+        Self { device_id }
     }
 }
+
+/// Errors from Aura handler operations
+#[derive(Debug, Clone)]
+pub enum AuraHandlerError {
+    /// Effect serialization failed
+    EffectSerialization {
+        /// Effect type that failed
+        effect_type: EffectType,
+        /// Operation that failed
+        operation: String,
+        /// Error source
+        source: String,
+    },
+    /// Effect deserialization failed
+    EffectDeserialization {
+        /// Effect type that failed
+        effect_type: EffectType,
+        /// Operation that failed
+        operation: String,
+        /// Error source
+        source: String,
+    },
+    /// Context error
+    ContextError {
+        /// Error message
+        message: String,
+    },
+    /// Generic handler error
+    Generic(String),
+}
+
+impl std::fmt::Display for AuraHandlerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EffectSerialization { effect_type, operation, source } => {
+                write!(f, "Effect serialization failed for {:?} operation {}: {}", effect_type, operation, source)
+            }
+            Self::EffectDeserialization { effect_type, operation, source } => {
+                write!(f, "Effect deserialization failed for {:?} operation {}: {}", effect_type, operation, source)
+            }
+            Self::ContextError { message } => write!(f, "Context error: {}", message),
+            Self::Generic(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
 impl std::error::Error for AuraHandlerError {}
 
 // Re-export local agent handlers

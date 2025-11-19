@@ -107,8 +107,8 @@ impl AuthorityManager {
         device_public_key: Vec<u8>,
     ) -> Result<()> {
         let _ = (authority_id, device_public_key);
-        Err(AuraError::NotImplemented(
-            "Device management not yet implemented".to_string(),
+        Err(AuraError::internal(
+            "Device management not yet implemented"
         ))
     }
 }

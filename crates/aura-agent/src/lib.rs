@@ -36,6 +36,8 @@
 // Allow expect() for testing and development code in this crate
 #![allow(clippy::expect_used)]
 
+use std::sync::Arc;
+
 // Core agent runtime
 pub mod agent;
 pub mod config;
@@ -92,12 +94,16 @@ pub use runtime::{
 /// effect handlers. The runtime composes real system effects into device workflows.
 pub async fn create_production_agent(device_id: DeviceId) -> AgentResult<AuraAgent> {
     // Use new EffectRegistry pattern for standardized production setup
-    let core_effects = crate::runtime::EffectRegistry::production()
+    let core_effects_arc = crate::runtime::EffectRegistry::production()
         .with_device_id(device_id)
         .with_logging()
         .with_metrics()
         .build()
         .map_err(|e| AuraError::internal(format!("Failed to create production effects: {}", e)))?;
+
+    // Unwrap the Arc - we're the only owner at this point
+    let core_effects = Arc::try_unwrap(core_effects_arc)
+        .unwrap_or_else(|arc| (*arc).clone());
 
     Ok(AuraAgent::new(core_effects, device_id))
 }
@@ -116,11 +122,15 @@ pub fn create_testing_agent(device_id: DeviceId) -> AuraAgent {
 /// The seed ensures deterministic behavior across simulation runs.
 pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AgentResult<AuraAgent> {
     // Use new EffectRegistry pattern for standardized simulation setup
-    let core_effects = crate::runtime::EffectRegistry::simulation(seed)
+    let core_effects_arc = crate::runtime::EffectRegistry::simulation(seed)
         .with_device_id(device_id)
         .with_logging()
         .build()
         .map_err(|e| AuraError::internal(format!("Failed to create simulation effects: {}", e)))?;
+
+    // Unwrap the Arc - we're the only owner at this point
+    let core_effects = Arc::try_unwrap(core_effects_arc)
+        .unwrap_or_else(|arc| (*arc).clone());
 
     Ok(AuraAgent::new(core_effects, device_id))
 }

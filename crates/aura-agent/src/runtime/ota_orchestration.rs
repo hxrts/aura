@@ -42,7 +42,7 @@ use aura_core::{
     Hash32,
     SemanticVersion,
 };
-use aura_protocol::AuraHandlerError as ChoreographyError;
+use crate::runtime::choreographic::ChoreographyError;
 use aura_protocol::AuraHandlerError;
 
 // TODO: These types should be moved to aura-core maintenance module when it's created
@@ -188,12 +188,8 @@ pub enum OtaError {
 
 impl From<OtaError> for ChoreographyError {
     fn from(e: OtaError) -> Self {
-        // TODO: Add ProtocolViolation variant to AuraHandlerError or use a different error type
-        // For now, use UnknownOperation as a placeholder
-        ChoreographyError::UnknownOperation {
-            effect_type: crate::handlers::EffectType::Network,
-            operation: format!("OTA error: {}", e),
-        }
+        // Convert OTA errors to choreography errors
+        ChoreographyError::ExecutionFailed(format!("OTA error: {}", e))
     }
 }
 
@@ -301,7 +297,7 @@ impl UpgradeOrchestrator {
         proposal: &UpgradeProposal,
     ) -> Result<(), OtaError> {
         let timestamp =
-            aura_core::effects::TimeEffects::current_timestamp(&**adapter.effects()).await;
+            aura_core::effects::TimeEffects::current_timestamp(adapter.effects()).await;
 
         let message = UpgradeMessage {
             proposal_id: Uuid::parse_str(&proposal.package_id).map_err(|e| {
@@ -339,7 +335,7 @@ impl UpgradeOrchestrator {
 
         for participant in &self.config.participants {
             let timestamp =
-                aura_core::effects::TimeEffects::current_timestamp(&**adapter.effects()).await;
+                aura_core::effects::TimeEffects::current_timestamp(adapter.effects()).await;
 
             // For this device: simulate local adoption decision
             if participant == &device_id {
@@ -372,7 +368,7 @@ impl UpgradeOrchestrator {
         quorum_count: u16,
     ) -> Result<(), OtaError> {
         let timestamp =
-            aura_core::effects::TimeEffects::current_timestamp(&**adapter.effects()).await;
+            aura_core::effects::TimeEffects::current_timestamp(adapter.effects()).await;
 
         let activation_epoch = proposal.activation_fence;
 

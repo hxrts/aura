@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 /// Minimal stub effect system that composes handlers from aura-effects
+#[derive(Clone)]
 pub struct AuraEffectSystem {
     console: Arc<RealConsoleHandler>,
     crypto: Arc<RealCryptoHandler>,

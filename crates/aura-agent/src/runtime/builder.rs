@@ -126,13 +126,11 @@ impl AuraEffectSystemBuilder {
     /// This method performs async initialization and is suitable for
     /// production use where async operations are expected.
     pub async fn build(self) -> AuraResult<AuraEffectSystem> {
-        let config = self.resolve_config()?;
+        let _config = self.resolve_config()?;
 
-        // For now, use the factory method from aura-protocol
+        // Use the stub coordinator for now while refactoring
         // TODO: Implement custom executor-based composition when handler adapters are available
-        use aura_protocol::handlers::CompositeHandler;
-        let handler: AuraEffectSystem = Box::new(CompositeHandler::for_testing(config.device_id.0));
-        Ok(handler)
+        Ok(AuraEffectSystem::new())
     }
 
     /// Build the effect system synchronously
@@ -140,13 +138,11 @@ impl AuraEffectSystemBuilder {
     /// This method avoids async operations and is suitable for use in
     /// test contexts where async runtimes might already be active.
     pub fn build_sync(self) -> AuraResult<AuraEffectSystem> {
-        let config = self.resolve_config()?;
+        let _config = self.resolve_config()?;
 
-        // For now, use the factory method from aura-protocol
+        // Use the stub coordinator for now while refactoring
         // TODO: Implement custom executor-based composition when handler adapters are available
-        use aura_protocol::handlers::CompositeHandler;
-        let handler: AuraEffectSystem = Box::new(CompositeHandler::for_testing(config.device_id.0));
-        Ok(handler)
+        Ok(AuraEffectSystem::new())
     }
 
     /// Resolve the final configuration from builder settings

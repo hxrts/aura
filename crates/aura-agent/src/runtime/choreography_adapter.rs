@@ -77,10 +77,8 @@ impl AuraHandlerAdapter {
         };
 
         // TODO: Create effect system based on configuration
-        // Box<dyn AuraEffects> doesn't have a new() method yet
-        // For now, create a mock system
-        use aura_protocol::handlers::CompositeHandler;
-        let effect_system: AuraEffectSystem = Box::new(CompositeHandler::for_testing(device_id.0));
+        // Create a stub effect system for testing
+        let effect_system = AuraEffectSystem::new();
         Self::from_effect_system(effect_system, device_id)
     }
 
@@ -157,7 +155,7 @@ impl AuraHandlerAdapter {
             bincode::serialize(&message).map_err(|e| AuraHandlerError::EffectSerialization {
                 effect_type: crate::handlers::EffectType::Network,
                 operation: "send_to_peer".to_string(),
-                source: Box::new(e),
+                source: e.to_string(),
             })?;
 
         let guard_profile = self
@@ -182,14 +180,17 @@ impl AuraHandlerAdapter {
         // ));
 
         // Charge flow and generate receipt
-        use aura_protocol::guards::FlowBudgetEffects;
-        let _receipt = self
-            .effect_system
-            .charge_flow(&flow_context, &target_device, flow_cost)
-            .await
-            .map_err(|e| AuraHandlerError::ContextError {
-                message: format!("Flow budget charging failed: {}", e),
-            })?;
+        use aura_core::effects::JournalEffects;
+        let _receipt = JournalEffects::charge_flow_budget(
+            &self.effect_system,
+            &flow_context,
+            &target_device,
+            flow_cost,
+        )
+        .await
+        .map_err(|e| AuraHandlerError::ContextError {
+            message: format!("Flow budget charging failed: {}", e),
+        })?;
 
         // TODO: Apply guard constraints properly
         // For now, execute the operation directly to avoid lifetime issues
@@ -224,7 +225,7 @@ impl AuraHandlerAdapter {
             AuraHandlerError::EffectDeserialization {
                 effect_type: crate::handlers::EffectType::Network,
                 operation: "receive_from".to_string(),
-                source: Box::new(e),
+                source: e.to_string(),
             }
         })?;
 
@@ -235,7 +236,11 @@ impl AuraHandlerAdapter {
     fn ensure_flow_context(&mut self, peer: &DeviceId) -> ContextId {
         self.flow_contexts
             .entry(*peer)
-            .or_insert_with(|| ContextId::new(format!("choreo://{}->{}", self.device_id, peer)))
+            .or_insert_with(|| {
+                // Create a deterministic context ID from the peer relationship
+                // TODO: Use a stable naming scheme or store in metadata
+                ContextId::new()
+            })
             .clone()
     }
 }
