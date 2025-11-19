@@ -42,25 +42,25 @@ fn map_guard_capability_to_resource(
         | "submit_guardian_proof" => ResourceScope::Recovery {
             recovery_type: recovery_type
                 .map(|rt| match rt {
-                    RecoveryOperationType::DeviceKeyRecovery => RecoveryType::DeviceKey,
-                    RecoveryOperationType::AccountAccessRecovery => RecoveryType::AccountAccess,
-                    RecoveryOperationType::GuardianSetModification => RecoveryType::GuardianSet,
+                    RecoveryOperationType::DeviceKeyRecovery => "DeviceKey".to_string(),
+                    RecoveryOperationType::AccountAccessRecovery => "AccountAccess".to_string(),
+                    RecoveryOperationType::GuardianSetModification => "GuardianSet".to_string(),
                     RecoveryOperationType::EmergencyFreeze
-                    | RecoveryOperationType::AccountUnfreeze => RecoveryType::EmergencyFreeze,
+                    | RecoveryOperationType::AccountUnfreeze => "EmergencyFreeze".to_string(),
                 })
-                .unwrap_or(RecoveryType::DeviceKey),
+                .unwrap_or_else(|| "DeviceKey".to_string()),
         },
         // Guardian decision operations
         "approve_recovery_request" | "deny_recovery_request" => ResourceScope::Recovery {
             recovery_type: recovery_type
                 .map(|rt| match rt {
-                    RecoveryOperationType::DeviceKeyRecovery => RecoveryType::DeviceKey,
-                    RecoveryOperationType::AccountAccessRecovery => RecoveryType::AccountAccess,
-                    RecoveryOperationType::GuardianSetModification => RecoveryType::GuardianSet,
+                    RecoveryOperationType::DeviceKeyRecovery => "DeviceKey".to_string(),
+                    RecoveryOperationType::AccountAccessRecovery => "AccountAccess".to_string(),
+                    RecoveryOperationType::GuardianSetModification => "GuardianSet".to_string(),
                     RecoveryOperationType::EmergencyFreeze
-                    | RecoveryOperationType::AccountUnfreeze => RecoveryType::EmergencyFreeze,
+                    | RecoveryOperationType::AccountUnfreeze => "EmergencyFreeze".to_string(),
                 })
-                .unwrap_or(RecoveryType::DeviceKey),
+                .unwrap_or_else(|| "DeviceKey".to_string()),
         },
         // Guardian coordination operations
         "grant_recovery_approval"
@@ -69,28 +69,28 @@ fn map_guard_capability_to_resource(
         | "notify_guardians_failure" => ResourceScope::Recovery {
             recovery_type: recovery_type
                 .map(|rt| match rt {
-                    RecoveryOperationType::DeviceKeyRecovery => RecoveryType::DeviceKey,
-                    RecoveryOperationType::AccountAccessRecovery => RecoveryType::AccountAccess,
-                    RecoveryOperationType::GuardianSetModification => RecoveryType::GuardianSet,
+                    RecoveryOperationType::DeviceKeyRecovery => "DeviceKey".to_string(),
+                    RecoveryOperationType::AccountAccessRecovery => "AccountAccess".to_string(),
+                    RecoveryOperationType::GuardianSetModification => "GuardianSet".to_string(),
                     RecoveryOperationType::EmergencyFreeze
-                    | RecoveryOperationType::AccountUnfreeze => RecoveryType::EmergencyFreeze,
+                    | RecoveryOperationType::AccountUnfreeze => "EmergencyFreeze".to_string(),
                 })
-                .unwrap_or(RecoveryType::DeviceKey),
+                .unwrap_or_else(|| "DeviceKey".to_string()),
         },
         // Journal operations
         _ if guard_capability.contains("journal") => ResourceScope::Journal {
             account_id: account_id.map(|id| id.to_string()).unwrap_or_default(),
             operation: if guard_capability.contains("write") {
-                JournalOp::Write
+                "Write".to_string()
             } else if guard_capability.contains("sync") {
-                JournalOp::Sync
+                "Sync".to_string()
             } else {
-                JournalOp::Read
+                "Read".to_string()
             },
         },
         // Default fallback
         _ => ResourceScope::Recovery {
-            recovery_type: RecoveryType::DeviceKey,
+            recovery_type: "DeviceKey".to_string(),
         },
     }
 }
@@ -1070,15 +1070,15 @@ where
                     "recovery:initiate",
                     &ResourceScope::Recovery {
                         recovery_type: match request.recovery_context.operation_type {
-                            RecoveryOperationType::DeviceKeyRecovery => RecoveryType::DeviceKey,
+                            RecoveryOperationType::DeviceKeyRecovery => "DeviceKey".to_string(),
                             RecoveryOperationType::AccountAccessRecovery => {
-                                RecoveryType::AccountAccess
+                                "AccountAccess".to_string()
                             }
                             RecoveryOperationType::GuardianSetModification => {
-                                RecoveryType::GuardianSet
+                                "GuardianSet".to_string()
                             }
-                            RecoveryOperationType::EmergencyFreeze => RecoveryType::EmergencyFreeze,
-                            RecoveryOperationType::AccountUnfreeze => RecoveryType::EmergencyFreeze, // Reuse for unfreeze
+                            RecoveryOperationType::EmergencyFreeze => "EmergencyFreeze".to_string(),
+                            RecoveryOperationType::AccountUnfreeze => "EmergencyFreeze".to_string(), // Reuse for unfreeze
                         },
                     },
                 )
@@ -1181,7 +1181,7 @@ where
                     guard_evaluator,
                     "recovery:approve",
                     &ResourceScope::Recovery {
-                        recovery_type: RecoveryType::DeviceKey, // General guardian approval resource
+                        recovery_type: "DeviceKey".to_string(), // General guardian approval resource
                     },
                 )
                 .await;
@@ -1324,7 +1324,8 @@ mod tests {
             expires_at,
         );
 
-        let verified_challenge = state.verify_guardian_challenge(&request_id, guardian_id);
+        // Verify with timestamp before expiration
+        let verified_challenge = state.verify_guardian_challenge(&request_id, guardian_id, expires_at - 1000);
         assert_eq!(verified_challenge, Some(&challenge));
 
         assert!(!state.has_sufficient_approvals(&request_id, 1));
@@ -1353,7 +1354,7 @@ mod tests {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
 
-        let coordinator = GuardianAuthCoordinator::new(**fixture.effects());
+        let coordinator = GuardianAuthCoordinator::new(fixture.effect_system());
         assert!(!coordinator.has_active_choreography());
 
         // Just test basic coordinator creation and state

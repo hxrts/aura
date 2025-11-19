@@ -5,7 +5,7 @@
 
 use super::{GuardError, GuardResult};
 use crate::authorization::BiscuitAuthorizationBridge;
-use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, Result};
+use aura_core::{AuraError, AuthorityId, ContextId, Epoch, FlowBudget, Result};
 use aura_wot::{AuthorityOp, ContextOp, ResourceScope};
 use biscuit_auth::Biscuit;
 
@@ -195,7 +195,7 @@ mod tests {
         let guard = CapabilityGuard::new(bridge);
 
         // Create flow budget
-        let mut budget = FlowBudget::new(1000);
+        let mut budget = FlowBudget::new(1000, Epoch(0)); // limit=1000, epoch=0
 
         // Test without token (should fail)
         let result = guard
@@ -208,6 +208,6 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert_eq!(budget.spent(), 0); // No charge on failure
+        assert_eq!(budget.spent, 0); // No charge on failure
     }
 }

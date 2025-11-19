@@ -205,7 +205,7 @@ mod tests {
     fn test_causal_context_empty() {
         let ctx = CausalContext::empty();
         assert!(ctx.clock.clocks.is_empty());
-        assert!(ctx.dependencies.is_none());
+        assert!(ctx.dependencies.is_empty());
     }
 
     #[test]

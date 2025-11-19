@@ -1323,14 +1323,15 @@ impl<N: NetworkEffects> ConnectionManager<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_effects::MockRandomHandler;
+    use aura_agent::AuraEffectSystem;
 
     #[tokio::test]
     async fn test_connection_manager_creation() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
-        let manager = ConnectionManager::new(device_id, stun_config, random);
+        let effects = std::sync::Arc::new(AuraEffectSystem::new());
+        let random = std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let manager = ConnectionManager::new(device_id, stun_config, effects, random);
 
         assert_eq!(manager.device_id, device_id);
     }
@@ -1339,8 +1340,9 @@ mod tests {
     async fn test_connection_priority_logic() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
-        let manager = ConnectionManager::new(device_id, stun_config, random);
+        let effects = std::sync::Arc::new(AuraEffectSystem::new());
+        let random = std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let manager = ConnectionManager::new(device_id, stun_config, effects, random);
 
         let offers = vec![
             TransportDescriptor::quic("192.168.1.100:8080".to_string(), "aura".to_string()),
@@ -1426,8 +1428,9 @@ mod tests {
 
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
-        let manager = ConnectionManager::new(device_id, stun_config, random);
+        let effects = std::sync::Arc::new(AuraEffectSystem::new());
+        let random = std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let manager = ConnectionManager::new(device_id, stun_config, effects, random);
 
         // Create transport with reflexive address
         let transport = TransportDescriptor {
@@ -1456,10 +1459,11 @@ mod tests {
             enable_hole_punch: true,
             enable_relay_fallback: false,
             punch_config: PunchConfig {
-                punch_duration: Duration::from_millis(50),
+                max_attempts: 10,
+                punch_timeout: Duration::from_millis(50),
                 punch_interval: Duration::from_millis(10),
-                receive_timeout: Duration::from_millis(5),
-                max_packet_size: 256,
+                enable_symmetric_detection: false,
+                relay_servers: vec![],
             },
         };
 

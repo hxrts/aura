@@ -74,7 +74,7 @@
 
 use crate::errors::{AuraError, Result as AgentResult};
 use aura_core::{AccountId, DeviceId, GuardianId};
-use aura_core::tree::{LeafRole, TreeOp, TreeOpKind};
+use aura_core::tree::{LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
 use aura_verify::{IdentityProof, KeyMaterial, SimpleIdentityVerifier};
 use aura_wot::CapabilitySet;
 use serde::{Deserialize, Serialize};
@@ -515,9 +515,14 @@ mod tests {
                 parent_epoch: 1,
                 parent_commitment: [0u8; 32],
                 op: TreeOpKind::AddLeaf {
-                    leaf_id: 0,
-                    role: aura_wot::LeafRole::Device,
-                    under: 0,
+                    leaf: LeafNode {
+                        leaf_id: LeafId(0),
+                        device_id: DeviceId::new(),
+                        role: LeafRole::Device,
+                        public_key: vec![],
+                        meta: vec![],
+                    },
+                    under: NodeIndex(0),
                 },
                 version: 1,
             },

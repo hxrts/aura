@@ -227,6 +227,19 @@ pub struct SbbFloodingCoordinator {
     effects: SharedEffects,
 }
 
+impl std::fmt::Debug for SbbFloodingCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SbbFloodingCoordinator")
+            .field("device_id", &self.device_id)
+            .field("friends", &self.friends)
+            .field("guardians", &self.guardians)
+            .field("seen_envelopes", &self.seen_envelopes)
+            .field("envelope_cache", &self.envelope_cache)
+            .field("effects", &"<dyn AuraEffects>")
+            .finish()
+    }
+}
+
 impl RendezvousEnvelope {
     /// Create new rendezvous envelope with content-addressed ID
     pub fn new(payload: Vec<u8>, ttl: Option<u8>) -> Self {
@@ -547,7 +560,7 @@ mod tests {
         use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
 
         let config = EffectSystemConfig::for_testing(device_id);
-        let system = AuraEffectSystem::new(config).expect("Failed to create test effects");
+        let system = AuraEffectSystem::new();
         Arc::new(system)
     }
 
@@ -614,8 +627,9 @@ mod tests {
 
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(0));
+        let now = 1000000u64; // Test timestamp
 
-        let result = coordinator.flood_envelope(envelope, None).await.unwrap();
+        let result = coordinator.flood_envelope(envelope, None, now).await.unwrap();
         match result {
             FloodResult::Dropped => (), // Expected
             _ => panic!("Expected envelope with TTL 0 to be dropped"),
@@ -630,17 +644,18 @@ mod tests {
 
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(2));
+        let now = 1000000u64; // Test timestamp
 
         // First flood should succeed (though no peers to forward to)
         let result1 = coordinator
-            .flood_envelope(envelope.clone(), None)
+            .flood_envelope(envelope.clone(), None, now)
             .await
             .unwrap();
         // No peers to forward to - result should be Dropped
         if let FloodResult::Dropped = result1 {}
 
         // Second flood of same envelope should be dropped as duplicate
-        let result2 = coordinator.flood_envelope(envelope, None).await.unwrap();
+        let result2 = coordinator.flood_envelope(envelope, None, now).await.unwrap();
         match result2 {
             FloodResult::Dropped => (), // Expected duplicate
             _ => panic!("Expected duplicate envelope to be dropped"),

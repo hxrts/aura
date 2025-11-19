@@ -45,6 +45,7 @@ use aura_core::{
 ///
 /// This replaces the complex orchestration-layer effect runtime with a simple
 /// composition suitable for testing foundational functionality.
+#[derive(Clone)]
 pub struct SimpleTestContext {
     execution_mode: ExecutionMode,
     device_id: DeviceId,

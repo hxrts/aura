@@ -73,9 +73,14 @@ impl ChunkLayout {
             return Err(AuraError::invalid("Chunk count mismatch with sizes"));
         }
 
+        // Note: total_size represents the original content size (data only)
+        // chunk_sizes includes both data chunks and parity chunks
+        // So sum(chunk_sizes) will be >= total_size when parity chunks are included
         let computed_total: u64 = chunk_sizes.iter().map(|&size| size as u64).sum();
-        if computed_total != total_size.0 {
-            return Err(AuraError::invalid("Total size mismatch"));
+        if computed_total < total_size.0 {
+            return Err(AuraError::invalid(
+                "Total chunk sizes less than content size",
+            ));
         }
 
         Ok(Self {

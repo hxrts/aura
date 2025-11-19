@@ -559,7 +559,9 @@ pub async fn derive_context_id<E: RelationshipFormationEffects>(
     }
 
     let hash = aura_core::hash::hash(&input);
-    Ok(ContextId::new(hex::encode(hash)))
+    // Create a deterministic ContextId from the hash
+    let uuid_bytes: [u8; 16] = hash[..16].try_into().unwrap();
+    Ok(ContextId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes)))
 }
 
 /// Derive public key from private key (simplified Ed25519-like operation)
@@ -605,19 +607,19 @@ pub async fn derive_relationship_keys<E: RelationshipFormationEffects>(
     let mut enc_input = Vec::new();
     enc_input.extend_from_slice(b"aura.relationship.encryption_key:");
     enc_input.extend_from_slice(&secret_hash);
-    enc_input.extend_from_slice(context_id.as_str().as_bytes());
+    enc_input.extend_from_slice(context_id.as_bytes());
     let encryption_key = aura_core::hash::hash(&enc_input);
 
     // Derive MAC key
     let mut mac_input = Vec::new();
     mac_input.extend_from_slice(b"aura.relationship.mac_key:");
     mac_input.extend_from_slice(&secret_hash);
-    mac_input.extend_from_slice(context_id.as_str().as_bytes());
+    mac_input.extend_from_slice(context_id.as_bytes());
     let mac_key = aura_core::hash::hash(&mac_input);
 
     // Create derivation context for future key rotation
     let mut derivation_context = Vec::new();
-    derivation_context.extend_from_slice(context_id.as_str().as_bytes());
+    derivation_context.extend_from_slice(context_id.as_bytes());
     derivation_context.extend_from_slice(&secret_hash);
 
     Ok(RelationshipKeys {
@@ -695,7 +697,7 @@ pub async fn create_trust_record<E: RelationshipFormationEffects>(
     // Create trust record structure
     let mut record = Vec::new();
     record.extend_from_slice(b"aura.trust_record:");
-    record.extend_from_slice(context_id.as_str().as_bytes());
+    record.extend_from_slice(context_id.as_bytes());
     record.extend_from_slice(peer_id.0.as_bytes());
     record.extend_from_slice(&relationship_keys.derivation_context);
     record.extend_from_slice(&effects.current_timestamp().await.to_le_bytes());
@@ -831,7 +833,7 @@ impl<E: RelationshipFormationEffects> RelationshipFormationCoordinator<E> {
             Ok(result) => {
                 // Convert ceremony result to legacy response
                 let relationship = Relationship {
-                    id: result.context_id.as_str().as_bytes().to_vec(),
+                    id: result.context_id.as_bytes().to_vec(),
                     parties: vec![request.party_a, request.party_b],
                     account_id: request.account_id,
                     trust_level: request.initial_trust_level,

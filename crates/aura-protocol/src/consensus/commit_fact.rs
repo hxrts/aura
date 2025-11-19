@@ -169,7 +169,7 @@ mod tests {
             prestate_hash: Hash32::default(),
             operation_hash: Hash32::default(),
             operation_bytes: vec![],
-            threshold_signature: ThresholdSignature::default(),
+            threshold_signature: ThresholdSignature::new(vec![], vec![]),
             participants: vec![AuthorityId::new(), AuthorityId::new()],
             threshold: 2,
             timestamp_ms: 0,

@@ -14,6 +14,7 @@ aura-authenticate = { path = "../aura-authenticate" }
 aura-wot = { path = "../aura-wot" }
 aura-effects = { path = "../aura-effects" }
 aura-protocol = { path = "../aura-protocol" }
+aura-relational = { path = "../aura-relational" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
 
@@ -36,7 +37,8 @@ biscuit-auth = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
-# aura-testkit = { path = "../aura-testkit" }  # Temporarily disabled due to workspace exclusion
+aura-testkit = { path = "../aura-testkit" }
+aura-agent = { path = "../aura-agent" }
 
 [lints]
 workspace = true

@@ -334,10 +334,11 @@ mod tests {
 
         assert!(!coordinator.has_nonce_threshold());
 
-        // Add nonces
-        for witness in &coordinator.config.witnesses[..2] {
+        // Add nonces (collect witnesses first to avoid borrow checker issues)
+        let witnesses_to_commit: Vec<_> = coordinator.config.witnesses[..2].to_vec();
+        for witness in witnesses_to_commit {
             coordinator
-                .handle_nonce_commit(*witness, NonceCommitment {
+                .handle_nonce_commit(witness, NonceCommitment {
                     signer: 0,
                     commitment: vec![],
                 })

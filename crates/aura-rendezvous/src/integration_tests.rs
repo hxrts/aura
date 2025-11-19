@@ -17,6 +17,7 @@ use crate::{
     messaging::{TransportMethod, TransportOfferPayload},
 };
 use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+use aura_agent::NetworkEffects;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
 use aura_protocol::effects::AuraEffects;
 use std::collections::HashMap;
@@ -107,15 +108,12 @@ impl TestDevice {
         name: String,
         _config: &E2eTestConfig,
     ) -> AuraResult<Self> {
-        // Create network transport
-        let net_config = NetworkConfig {
-            max_connections: 100,
-            timeout_ms: 5000,
-        };
+        // Create shared effect system
+        let effects = Arc::new(AuraEffectSystem::new());
+        let network_effects = Arc::clone(&effects) as Arc<dyn NetworkEffects>;
 
-        let mut transport = NetworkTransport::new(device_id, net_config);
-        transport.start_listener().await?;
-        let transport = Arc::new(RwLock::new(transport));
+        // Create network transport
+        let transport = NetworkTransport::new(device_id, network_effects);
 
         // Create SBB system
         let sbb_config = SbbConfig {
@@ -129,13 +127,11 @@ impl TestDevice {
             app_context: "test-sbb-e2e".to_string(),
         };
 
-        let config = EffectSystemConfig::for_testing(device_id);
-        let effects = AuraEffectSystem::new(config)?;
-        let effects = Arc::new(effects) as Arc<dyn aura_protocol::effects::AuraEffects>;
+        let aura_effects = Arc::clone(&effects) as Arc<dyn aura_protocol::effects::AuraEffects>;
         let sbb_system = SbbSystemBuilder::new(device_id)
             .with_config(sbb_config)
             .with_transport(Arc::clone(&transport))
-            .build(effects);
+            .build(aura_effects);
 
         Ok(Self {
             device_id,
@@ -168,7 +164,8 @@ impl TestDevice {
         // Add peer to transport (simulate network connectivity)
         // Note: NetworkTransport API changed - add_peer method removed
         // TODO: Update to use add_peer_for_context with proper ContextId
-        let _peer_config = peer_device.transport.read().await.config().clone();
+        // Config API no longer exposed - NetworkTransport uses network_effects directly
+        // let _peer_config = peer_device.transport.read().await.config().clone();
         // let peer_addr = format!("{}:{}", peer_config.bind_addr, peer_config.port)
         //     .parse()
         //     .map_err(|e| {
@@ -322,13 +319,12 @@ impl SbbTestNetwork {
         // Alice adds Bob as friend
         {
             // Clone the necessary data from bob_device to avoid simultaneous borrows
-            let (bob_device_id, bob_name, bob_transport_config) = {
+            let (bob_device_id, bob_name) = {
                 let bob_device = self.devices.get(&bob_id).unwrap();
-                let transport_config = bob_device.transport.read().await.config().clone();
+                // NetworkTransport no longer exposes config() - it uses network_effects directly
                 (
                     bob_device.device_id,
                     bob_device.name.clone(),
-                    transport_config,
                 )
             };
 
@@ -336,7 +332,7 @@ impl SbbTestNetwork {
             let temp_bob = TempDeviceInfo {
                 device_id: bob_device_id,
                 name: bob_name,
-                transport_config: bob_transport_config,
+                transport_config: NetworkConfig::default(), // Placeholder - field is dead_code
             };
 
             self.devices
@@ -351,7 +347,8 @@ impl SbbTestNetwork {
             // Clone the necessary data from alice_device to avoid simultaneous borrows
             let (alice_device_id, alice_name, alice_transport_config) = {
                 let alice_device = self.devices.get(&alice_id).unwrap();
-                let transport_config = alice_device.transport.read().await.config().clone();
+                // NetworkTransport no longer exposes config()
+                let transport_config = NetworkConfig::default();
                 (
                     alice_device.device_id,
                     alice_device.name.clone(),
@@ -382,7 +379,8 @@ impl SbbTestNetwork {
                 // Clone the necessary data from charlie_device to avoid simultaneous borrows
                 let (charlie_device_id, charlie_name, charlie_transport_config) = {
                     let charlie_device = self.devices.get(&charlie_id).unwrap();
-                    let transport_config = charlie_device.transport.read().await.config().clone();
+                    // NetworkTransport no longer exposes config()
+                    let transport_config = NetworkConfig::default();
                     (
                         charlie_device.device_id,
                         charlie_device.name.clone(),
@@ -408,7 +406,8 @@ impl SbbTestNetwork {
                 // Clone the necessary data from bob_device to avoid simultaneous borrows
                 let (bob_device_id, bob_name, bob_transport_config) = {
                     let bob_device = self.devices.get(&bob_id).unwrap();
-                    let transport_config = bob_device.transport.read().await.config().clone();
+                    // NetworkTransport no longer exposes config()
+                let transport_config = NetworkConfig::default();
                     (
                         bob_device.device_id,
                         bob_device.name.clone(),
@@ -447,7 +446,8 @@ impl SbbTestNetwork {
                     // Clone the necessary data from device_b to avoid simultaneous borrows
                     let (device_b_device_id, device_b_name, device_b_transport_config) = {
                         let device_b = self.devices.get(&device_b_id).unwrap();
-                        let transport_config = device_b.transport.read().await.config().clone();
+                        // NetworkTransport no longer exposes config()
+                        let transport_config = NetworkConfig::default();
                         (device_b.device_id, device_b.name.clone(), transport_config)
                     };
 

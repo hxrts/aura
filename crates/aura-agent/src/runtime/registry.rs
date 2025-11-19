@@ -274,8 +274,8 @@ impl EffectRegistry {
         }
 
         // Build the effect system
-        let effect_system = AuraEffectSystem::new(config)
-            .map_err(|e| EffectRegistryError::build_failed(e))?;
+        let _config = config; // TODO: Use config when implementing proper builder
+        let effect_system = AuraEffectSystem::new();
 
         Ok(Arc::new(effect_system))
     }

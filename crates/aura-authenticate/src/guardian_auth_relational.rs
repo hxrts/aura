@@ -77,19 +77,19 @@ pub async fn authenticate_guardian(
         .participants
         .contains(&guardian_authority.authority_id())
     {
-        return Err(AuraError::Verification(
-            "Guardian not in context".to_string(),
+        return Err(AuraError::permission_denied(
+            "Guardian not in context",
         ));
     }
 
     // Find guardian binding in context facts
     let binding = context
         .get_guardian_binding(guardian_authority.authority_id())
-        .ok_or_else(|| AuraError::Verification("Guardian binding not found".to_string()))?;
+        .ok_or_else(|| AuraError::not_found("Guardian binding not found"))?;
 
     // Sign the operation
     let operation_bytes = bincode::serialize(&request.operation)
-        .map_err(|e| AuraError::Serialization(e.to_string()))?;
+        .map_err(|e| AuraError::serialization(e.to_string()))?;
 
     let signature = guardian_authority.sign_operation(&operation_bytes).await?;
 
@@ -128,7 +128,7 @@ pub async fn verify_guardian_proof(
     // Get guardian binding
     let binding = context
         .get_guardian_binding(proof.guardian_id)
-        .ok_or_else(|| AuraError::Verification("Guardian binding not found".to_string()))?;
+        .ok_or_else(|| AuraError::not_found("Guardian binding not found"))?;
 
     // Verify consensus proof if present
     if let Some(consensus_proof) = &binding.consensus_proof {
@@ -219,7 +219,7 @@ impl GuardianAuthHandler {
         let binding = self
             .context
             .get_guardian_binding(guardian_id)
-            .ok_or_else(|| AuraError::Verification("Guardian not bound to account".to_string()))?;
+            .ok_or_else(|| AuraError::not_found("Guardian not bound to account"))?;
 
         // Check operation-specific requirements
         match operation {

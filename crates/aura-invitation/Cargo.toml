@@ -34,6 +34,7 @@ biscuit-auth = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true }
 aura-testkit = { path = "../aura-testkit" }
+aura-agent = { path = "../aura-agent" }
 
 [lints]
 workspace = true

@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use aura_core::{
     effects::{NetworkError, StorageError, TimeError},
-    AuraError, AuraResult, DeviceId,
+    AuraError, AuraResult, DeviceId, Epoch, FlowBudget,
 };
 
 use super::context::EffectContext;
@@ -315,7 +315,10 @@ mod tests {
             _message: Vec<u8>,
         ) -> Result<(), NetworkError> {
             // Charge flow for network operation
-            ctx.charge_flow(10).map_err(|_| NetworkError::Timeout)?;
+            ctx.charge_flow(10).map_err(|_| NetworkError::SendFailed {
+                peer_id: None,
+                reason: "Insufficient flow budget".to_string(),
+            })?;
             Ok(())
         }
 
@@ -333,7 +336,9 @@ mod tests {
             _message: Vec<u8>,
         ) -> Result<(), NetworkError> {
             // Charge more for broadcast
-            ctx.charge_flow(50).map_err(|_| NetworkError::Timeout)?;
+            ctx.charge_flow(50).map_err(|_| NetworkError::BroadcastFailed {
+                reason: "Insufficient flow budget".to_string(),
+            })?;
             Ok(())
         }
     }
@@ -344,15 +349,20 @@ mod tests {
         let device_id = fixture.device_id();
         let effects = MockContextualEffects { device_id };
 
-        let mut context = EffectContext::new(device_id).with_flow_budget(FlowBudget::new(100));
+        #[allow(clippy::disallowed_methods)]
+        let mut context = EffectContext::new(device_id, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4())
+            .with_flow_budget(FlowBudget::new(100, Epoch(0)));
 
         // Test flow budget charging
         effects
             .send_to_peer(&mut context, device_id, vec![])
-            .await?;
+            .await
+            .map_err(|e| AuraError::internal(e.to_string()))?;
         assert_eq!(context.flow_budget.remaining(), 90);
 
-        effects.broadcast(&mut context, vec![]).await?;
+        effects.broadcast(&mut context, vec![])
+            .await
+            .map_err(|e| AuraError::internal(e.to_string()))?;
         assert_eq!(context.flow_budget.remaining(), 40);
         Ok(())
     }

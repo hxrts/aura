@@ -310,7 +310,20 @@ impl<T: Clone> Default for EpochLog<T> {
 
 /// Device registry CRDT
 ///
+/// **DEPRECATED**: This type is part of the legacy device-centric architecture.
+/// Device registry should be replaced with fact-derived views from TreeState.
+///
+/// **Migration Path**:
+/// - Query device information from TreeState via TreeEffects::get_current_state()
+/// - Iterate over LeafNodes in the tree to get device public keys
+/// - Use authority-derived snapshots instead of grow-only registry
+/// - Device membership is implicit from tree structure, not explicit metadata
+///
 /// Maintains a grow-only set of registered devices with metadata.
+#[deprecated(
+    since = "0.1.0",
+    note = "Replace with fact-derived device views from TreeState. Query devices via TreeEffects instead."
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceRegistry {
     /// Registered devices with their metadata

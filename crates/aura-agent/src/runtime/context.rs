@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use tracing::{Level, Span};
 use uuid::Uuid;
 
-use aura_core::{AuraError, AuraResult, DeviceId, FlowBudget};
+use aura_core::{AuraError, AuraResult, DeviceId, Epoch, FlowBudget};
 
 /// Context that flows through effect execution
 #[derive(Debug, Clone)]
@@ -366,7 +366,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)]
         // Test code - UUID generation acceptable for testing
         let context = EffectContext::new(device_id, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4())
-            .with_flow_budget(FlowBudget::new(1000))
+            .with_flow_budget(FlowBudget::new(1000, Epoch(0)))
             .with_metadata("test", "value");
 
         assert_eq!(context.device_id, device_id);
@@ -403,7 +403,7 @@ mod tests {
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
-        .with_flow_budget(FlowBudget::new(100));
+        .with_flow_budget(FlowBudget::new(100, Epoch(0)));
 
         assert!(context.charge_flow(50).is_ok());
         assert_eq!(context.flow_budget.remaining(), 50);

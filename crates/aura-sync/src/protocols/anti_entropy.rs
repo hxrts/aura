@@ -225,9 +225,11 @@ impl AntiEntropyProtocol {
             (&self.token_manager, &self.guard_evaluator)
         {
             let token = token_manager.current_token();
-            let resource = ResourceScope::Journal {
-                account_id: "default".to_string(), // TODO: Use actual account ID
-                operation: aura_wot::JournalOp::Sync,
+            // TODO: Get actual authority ID from context
+            let authority_id = aura_core::AuthorityId::from_uuid(uuid::Uuid::nil());
+            let resource = ResourceScope::Authority {
+                authority_id,
+                operation: aura_wot::AuthorityOp::UpdateTree, // Sync requires authority access
             };
 
             let mut flow_budget = FlowBudget::new(1000, aura_core::session_epochs::Epoch::new(0)); // Standard sync budget
@@ -878,11 +880,15 @@ mod tests {
     fn sample_op(epoch: u64) -> AttestedOp {
         AttestedOp {
             op: TreeOp {
-                kind: TreeOpKind::AddDevice,
                 parent_epoch: epoch,
-                data: vec![],
+                parent_commitment: [0u8; 32],
+                op: TreeOpKind::RotateEpoch {
+                    affected: vec![],
+                },
+                version: 1,
             },
-            attestation: vec![],
+            agg_sig: vec![],
+            signer_count: 1,
         }
     }
 

@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aura_core::hash::hash;
-use aura_core::relationships::ContextId;
+use aura_core::ContextId;
 use aura_core::session_epochs::Epoch;
 use aura_core::{
     effects::{
@@ -1524,7 +1524,7 @@ impl JournalEffects for AuraEffectSystem {
 
     async fn get_flow_budget(
         &self,
-        context: &aura_core::relationships::ContextId,
+        context: &aura_core::ContextId,
         peer: &aura_core::DeviceId,
     ) -> Result<aura_core::FlowBudget, AuraError> {
         let params = bincode::serialize(&(context, peer))
@@ -1541,7 +1541,7 @@ impl JournalEffects for AuraEffectSystem {
 
     async fn update_flow_budget(
         &self,
-        context: &aura_core::relationships::ContextId,
+        context: &aura_core::ContextId,
         peer: &aura_core::DeviceId,
         budget: &aura_core::FlowBudget,
     ) -> Result<aura_core::FlowBudget, AuraError> {
@@ -1559,7 +1559,7 @@ impl JournalEffects for AuraEffectSystem {
 
     async fn charge_flow_budget(
         &self,
-        context: &aura_core::relationships::ContextId,
+        context: &aura_core::ContextId,
         peer: &aura_core::DeviceId,
         cost: u32,
     ) -> Result<aura_core::FlowBudget, AuraError> {

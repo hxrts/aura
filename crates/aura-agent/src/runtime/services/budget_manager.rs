@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use aura_core::relationships::ContextId;
+use aura_core::ContextId;
 use aura_core::session_epochs::Epoch;
 use aura_core::{AuraError, AuraResult, DeviceId, FlowBudget};
 
@@ -233,7 +233,7 @@ mod tests {
     async fn test_budget_charging() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
-        let context = ContextId::from("test-context");
+        let context = ContextId::new();
         let peer = fixture.device_id();
         let epoch = Epoch::from(1);
 
@@ -268,7 +268,7 @@ mod tests {
     async fn test_epoch_rotation() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
-        let context = ContextId::from("test-context");
+        let context = ContextId::new();
         let peer = fixture.device_id();
         let epoch1 = Epoch::from(1);
         let epoch2 = Epoch::from(2);
@@ -297,7 +297,7 @@ mod tests {
     async fn test_charge_or_init() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
-        let context = ContextId::from("test-context");
+        let context = ContextId::new();
         let peer = fixture.device_id();
         let epoch = Epoch::from(1);
 
@@ -323,7 +323,7 @@ mod tests {
     async fn test_concurrent_charging() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
-        let context = ContextId::from("test-context");
+        let context = ContextId::new();
         let peer = fixture.device_id();
         let epoch = Epoch::from(1);
 

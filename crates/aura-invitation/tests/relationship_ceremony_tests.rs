@@ -50,7 +50,7 @@ async fn test_successful_relationship_formation() -> aura_core::AuraResult<()> {
             assert!(formation_result.success);
             assert_ne!(
                 formation_result.context_id,
-                ContextId(Uuid::new_v4().to_string())
+                ContextId(Uuid::new_v4())
             ); // Should be derived
             assert_ne!(formation_result.relationship_keys.encryption_key, [0u8; 32]); // Should be generated
             assert_ne!(formation_result.relationship_keys.mac_key, [0u8; 32]); // Should be generated
@@ -136,7 +136,7 @@ async fn test_relationship_key_properties() -> aura_core::AuraResult<()> {
     // Test that identical inputs produce identical keys
     let private_key = [42u8; 32];
     let peer_public_key = [24u8; 32];
-    let context_id = ContextId(Uuid::new_v4().to_string());
+    let context_id = ContextId(Uuid::new_v4());
 
     let keys1 = aura_invitation::relationship_formation::derive_relationship_keys(
         &private_key,
@@ -184,7 +184,7 @@ async fn test_bidirectional_key_symmetry() -> aura_core::AuraResult<()> {
 
     let alice_private = [1u8; 32];
     let bob_private = [2u8; 32];
-    let context_id = ContextId(Uuid::new_v4().to_string());
+    let context_id = ContextId(Uuid::new_v4());
 
     // Derive public keys (simplified)
     let alice_public =
@@ -262,13 +262,13 @@ async fn test_validation_proof_system() -> aura_core::AuraResult<()> {
 
     // Create validation structures
     let alice_validation = aura_invitation::relationship_formation::RelationshipValidation {
-        context_id: ContextId(Uuid::new_v4().to_string()),
+        context_id: ContextId(Uuid::new_v4()),
         validation_proof: alice_proof,
         key_hash: key_hash.clone(),
     };
 
     let bob_validation = aura_invitation::relationship_formation::RelationshipValidation {
-        context_id: ContextId(Uuid::new_v4().to_string()),
+        context_id: ContextId(Uuid::new_v4()),
         validation_proof: bob_proof,
         key_hash,
     };
@@ -317,7 +317,7 @@ async fn test_trust_record_system() -> aura_core::AuraResult<()> {
     let fixture = aura_testkit::create_test_fixture_with_device_id(alice_device).await?;
     let effect_system = fixture.effect_system();
 
-    let context_id = ContextId(Uuid::new_v4().to_string());
+    let context_id = ContextId(Uuid::new_v4());
     let relationship_keys = RelationshipKeys {
         encryption_key: [50u8; 32].to_vec(),
         mac_key: [60u8; 32].to_vec(),

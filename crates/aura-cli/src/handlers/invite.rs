@@ -36,7 +36,7 @@ pub async fn handle_invitation(
                 .with_device_id(device_id)
                 .build_sync()?;
 
-            let coordinator = DeviceInvitationCoordinator::new(coord_effects);
+            let coordinator = DeviceInvitationCoordinator::new(std::sync::Arc::new(coord_effects));
             let response = coordinator
                 .invite_device(request)
                 .await
@@ -63,7 +63,7 @@ pub async fn handle_invitation(
                 .with_device_id(device_id)
                 .build_sync()?;
 
-            let coordinator = InvitationAcceptanceCoordinator::new(coord_effects);
+            let coordinator = InvitationAcceptanceCoordinator::new(std::sync::Arc::new(coord_effects));
             let acceptance = coordinator
                 .accept_invitation(envelope)
                 .await

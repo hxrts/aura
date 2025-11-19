@@ -301,7 +301,7 @@ mod tests {
             SecureChannelCoordinator::new(DeviceId::from([1u8; 32]), ChannelConfig::default());
 
         let peer_id = DeviceId::from([2u8; 32]);
-        let context_id = ContextId::new("test");
+        let context_id = ContextId::new();
 
         let result = coordinator.init_channel(peer_id, context_id);
         assert!(result.is_ok());
@@ -318,7 +318,7 @@ mod tests {
             SecureChannelCoordinator::new(DeviceId::from([1u8; 32]), ChannelConfig::default());
 
         let peer_id = DeviceId::from([2u8; 32]);
-        let context_id = ContextId::new("test");
+        let context_id = ContextId::new();
         let channel_id = coordinator.init_channel(peer_id, context_id).unwrap();
 
         let response = HandshakeResponse {

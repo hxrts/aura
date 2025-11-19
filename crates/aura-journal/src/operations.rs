@@ -83,6 +83,20 @@ pub struct Capability {
 }
 
 /// Operations that can be applied to the ledger
+///
+/// **DEPRECATED**: This enum represents legacy device-centric ledger operations.
+/// In the authority-centric model, these operations are replaced by AttestedOps in the ratchet tree.
+///
+/// **Migration Path**:
+/// - Device operations: Use TreeEffects (add_leaf, remove_leaf, etc.)
+/// - Guardian operations: Use RelationalContext for guardian bindings
+/// - Epoch/resharing: Use TreeEffects::rotate_epoch()
+/// - Protocol tracking: Use the choreography system for multi-party coordination
+/// - All state changes are now expressed as facts (AttestedOps) rather than imperative operations
+#[deprecated(
+    since = "0.1.0",
+    note = "Use TreeEffects and RelationalContext instead. Operations are now fact-based AttestedOps."
+)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Operation {
     /// Add a new device to the account
@@ -333,6 +347,23 @@ pub enum ValidationError {
 }
 
 /// Journal operations for effect system processing
+///
+/// **DEPRECATED**: This enum represents legacy device-centric operations.
+/// In the authority-centric model, device and guardian operations are replaced by AttestedOps.
+///
+/// **Migration Path**:
+/// - Device operations: Use TreeEffects to add/remove leaves in the ratchet tree
+/// - Guardian operations: Use RelationalContext to manage guardian bindings
+/// - Epoch operations: Use TreeEffects::rotate_epoch() for key rotation
+/// - Queries: Use TreeEffects::get_current_state() to query tree state
+///
+/// **Note**: The JournalOperation type in aura-protocol/guards/journal_coupler.rs is separate
+/// and represents fact-based delta tracking (MergeFacts, RefineCapabilities, etc.), which is
+/// aligned with the new architecture.
+#[deprecated(
+    since = "0.1.0",
+    note = "Use TreeEffects for device operations and RelationalContext for guardian operations. See migration path in doc comments."
+)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum JournalOperation {
     /// Add a device to the account

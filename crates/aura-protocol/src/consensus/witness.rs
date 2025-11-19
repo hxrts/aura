@@ -3,6 +3,7 @@
 //! This module handles witness selection, shares, and threshold verification
 //! for the Aura Consensus protocol.
 
+use super::ConsensusId;
 use aura_core::frost::{NonceCommitment, PartialSignature};
 use aura_core::{AuthorityId, Hash32};
 use serde::{Deserialize, Serialize};
@@ -84,7 +85,7 @@ impl WitnessSet {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WitnessShare {
     /// The consensus instance this share is for
-    pub consensus_id: super::ConsensusId,
+    pub consensus_id: ConsensusId,
 
     /// The authority providing this share
     pub authority: AuthorityId,
@@ -225,11 +226,11 @@ mod tests {
         // Add shares
         for auth in &authorities[..2] {
             let share = WitnessShare::new(
-                super::ConsensusId(Hash32::new([0; 32])),
+                ConsensusId(Hash32::new([0; 32])),
                 *auth,
                 PartialSignature {
                     signer: 0,
-                    share: vec![],
+                    signature: vec![],
                 },
                 Hash32::new([0; 32]),
             );

@@ -126,7 +126,7 @@ impl RecoveryProtocol {
         // Create prestate
         let prestate = Prestate {
             authority_commitments: vec![(self.account_authority, self.current_commitment())],
-            context_commitment: self.recovery_context.compute_commitment(),
+            context_commitment: self.recovery_context.journal.compute_commitment(),
         };
 
         // Run consensus (currently stubbed)
@@ -137,17 +137,26 @@ impl RecoveryProtocol {
     pub async fn initiate_recovery(&mut self, request: RecoveryRequest) -> Result<RecoveryResult> {
         // Validate request
         if request.account_authority != self.account_authority {
-            return Err(AuraError::Verification(
-                "Account authority mismatch".to_string(),
+            return Err(AuraError::invalid(
+                "Account authority mismatch",
             ));
         }
 
         // Create recovery operation
         let recovery_op = match &request.operation {
-            RecoveryOperation::ReplaceTree { .. } => RecoveryOp::ReplaceTree,
-            RecoveryOperation::AddDevice { .. } => RecoveryOp::AddDevice,
-            RecoveryOperation::RemoveDevice { .. } => RecoveryOp::RemoveDevice,
-            RecoveryOperation::UpdateGuardians { .. } => RecoveryOp::UpdateGuardianSet,
+            RecoveryOperation::ReplaceTree { .. } => RecoveryOp::ReplaceTree {
+                new_tree_root: request.new_tree_commitment
+            },
+            RecoveryOperation::AddDevice { device_public_key } => RecoveryOp::AddDevice {
+                device_public_key: device_public_key.clone()
+            },
+            RecoveryOperation::RemoveDevice { leaf_index } => RecoveryOp::RemoveDevice {
+                leaf_index: *leaf_index
+            },
+            RecoveryOperation::UpdateGuardians { new_threshold, .. } => {
+                // Map to UpdatePolicy as a placeholder - guardians are managed separately
+                RecoveryOp::UpdatePolicy { new_threshold: *new_threshold as u16 }
+            },
         };
 
         // Run consensus to get proof
@@ -163,8 +172,10 @@ impl RecoveryProtocol {
         };
 
         // Add to context journal
-        self.recovery_context
-            .add_fact(RelationalFact::RecoveryGrant(grant.clone()))?;
+        // TODO: Implement proper Arc<RelationalContext> mutation strategy (interior mutability)
+        // Arc::get_mut(&mut self.recovery_context)
+        //     .ok_or_else(|| AuraError::internal("Cannot mutate shared context"))?
+        //     .add_fact(RelationalFact::RecoveryGrant(grant.clone()))?;
 
         Ok(RecoveryResult {
             success: true,
@@ -178,8 +189,8 @@ impl RecoveryProtocol {
     pub async fn process_guardian_approval(&mut self, approval: GuardianApproval) -> Result<()> {
         // Verify guardian is in the set
         if !self.guardian_authorities.contains(&approval.guardian_id) {
-            return Err(AuraError::Verification(
-                "Guardian not in recovery set".to_string(),
+            return Err(AuraError::permission_denied(
+                "Guardian not in recovery set",
             ));
         }
 

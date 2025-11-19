@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use aura_core::relationships::ContextId;
+use aura_core::ContextId;
 use aura_core::{AuraResult, Receipt};
 
 /// A chain of receipts for tracking flow budget charges
@@ -250,7 +250,7 @@ mod tests {
     async fn test_receipt_chain() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
-        let context = ContextId::from("test-context");
+        let context = ContextId::new();
         let src = fixture.device_id();
         let dst = fixture.create_device_id();
 
@@ -286,7 +286,7 @@ mod tests {
     async fn test_chain_verification() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
-        let context = ContextId::from("test-context");
+        let context = ContextId::new();
         let src = fixture.device_id();
         let dst = fixture.create_device_id();
 
@@ -311,7 +311,7 @@ mod tests {
     async fn test_range_queries() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
-        let context = ContextId::from("test-context");
+        let context = ContextId::new();
         let src = fixture.device_id();
         let dst = fixture.create_device_id();
 
@@ -337,7 +337,7 @@ mod tests {
     async fn test_concurrent_access() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
-        let context = ContextId::from("test-context");
+        let context = ContextId::new();
         let src = fixture.device_id();
         let dst = fixture.create_device_id();
 
@@ -368,7 +368,7 @@ mod tests {
     async fn test_chain_removal() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
         let manager = ReceiptManager::new();
-        let context = ContextId::from("test-context");
+        let context = ContextId::new();
         let src = fixture.device_id();
         let dst = fixture.create_device_id();
 

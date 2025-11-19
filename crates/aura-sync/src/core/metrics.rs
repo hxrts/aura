@@ -758,13 +758,14 @@ mod tests {
     #[test]
     fn test_sync_session_lifecycle() {
         let collector = MetricsCollector::new();
+        let now = 1000000u64; // Test timestamp
 
-        collector.record_sync_start("test_session_1");
+        collector.record_sync_start("test_session_1", now);
         let snapshot1 = collector.export_snapshot();
         assert_eq!(snapshot1.operational.sync_sessions_total, 1);
         assert_eq!(snapshot1.operational.active_sync_sessions, 1);
 
-        collector.record_sync_completion("test_session_1", 50, 1024);
+        collector.record_sync_completion("test_session_1", 50, 1024, now + 100);
         let snapshot2 = collector.export_snapshot();
         assert_eq!(snapshot2.operational.sync_sessions_completed_total, 1);
         assert_eq!(snapshot2.operational.active_sync_sessions, 0);
@@ -804,8 +805,9 @@ mod tests {
     #[test]
     fn test_prometheus_export() {
         let collector = MetricsCollector::new();
-        collector.record_sync_start("test");
-        collector.record_sync_completion("test", 10, 100);
+        let now = 1000000u64;
+        collector.record_sync_start("test", now);
+        collector.record_sync_completion("test", 10, 100, now + 50);
 
         let prometheus_output = collector.export_prometheus();
         assert!(prometheus_output.contains("aura_sync_sessions_total 1"));
@@ -821,8 +823,9 @@ mod tests {
         for i in 0..10 {
             let collector_clone = collector.clone();
             let handle = thread::spawn(move || {
-                collector_clone.record_sync_start(&format!("session_{}", i));
-                collector_clone.record_sync_completion(&format!("session_{}", i), i, i * 100);
+                let now = 1000000u64 + i as u64;
+                collector_clone.record_sync_start(&format!("session_{}", i), now);
+                collector_clone.record_sync_completion(&format!("session_{}", i), i, i * 100, now + 50);
             });
             handles.push(handle);
         }

@@ -938,11 +938,11 @@ mod rng_adapter_tests {
     use super::*;
     use rand::RngCore;
 
-    #[tokio::test]
-    async fn test_rng_adapter_with_mock() {
+    #[test]
+    fn test_rng_adapter_with_mock() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
         let crypto = MockCryptoHandler::with_seed(12345);
-        let runtime = tokio::runtime::Handle::current();
-        let mut rng = EffectSystemRng::new(&crypto, runtime);
+        let mut rng = EffectSystemRng::new(&crypto, runtime.handle().clone());
 
         // Test next_u32
         let val1 = rng.next_u32();
@@ -960,15 +960,16 @@ mod rng_adapter_tests {
         assert_ne!(bytes, [0u8; 32], "Should fill with random bytes");
     }
 
-    #[tokio::test]
-    async fn test_rng_adapter_deterministic() {
+    #[test]
+    fn test_rng_adapter_deterministic() {
         // Same seed should produce same sequence
+        let runtime = tokio::runtime::Runtime::new().unwrap();
         let crypto1 = MockCryptoHandler::with_seed(42);
         let crypto2 = MockCryptoHandler::with_seed(42);
 
-        let runtime = tokio::runtime::Handle::current();
-        let mut rng1 = EffectSystemRng::new(&crypto1, runtime.clone());
-        let mut rng2 = EffectSystemRng::new(&crypto2, runtime);
+        let handle = runtime.handle().clone();
+        let mut rng1 = EffectSystemRng::new(&crypto1, handle.clone());
+        let mut rng2 = EffectSystemRng::new(&crypto2, handle);
 
         let val1 = rng1.next_u64();
         let val2 = rng2.next_u64();
@@ -984,8 +985,12 @@ mod rng_adapter_tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_rng_adapter_from_current_runtime() {
+    #[test]
+    fn test_rng_adapter_from_current_runtime() {
+        let _runtime = tokio::runtime::Runtime::new().unwrap();
+        // Enter the runtime context so from_current_runtime() can get the handle
+        let _guard = _runtime.enter();
+
         let crypto = MockCryptoHandler::new();
         let mut rng = EffectSystemRng::from_current_runtime(&crypto);
 

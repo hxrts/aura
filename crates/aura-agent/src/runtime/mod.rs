@@ -7,7 +7,9 @@
 //! system and manages the lifecycle of effect handlers.
 
 // Core runtime coordinator (formerly system.rs in aura-protocol)
-pub mod coordinator;
+// Temporarily using stub coordinator while refactoring to authority-centric architecture
+pub mod coordinator_stub;
+// pub mod coordinator_old;  // Original coordinator, needs refactoring
 
 // Runtime builder and container
 pub mod builder;
@@ -28,6 +30,14 @@ pub mod propagation;
 
 // Runtime services
 pub mod services;
+
+// Effect trait definitions (stubs for old architecture)
+pub mod agent;
+pub mod choreographic;
+pub mod ledger;
+pub mod tree;
+pub mod system_traits;
+pub mod handler_adapters;
 
 // Initialization - DISABLED: incomplete code with missing handler adapters
 // pub mod initialization;
@@ -51,7 +61,7 @@ pub use choreography_adapter::AuraHandlerAdapter;
 pub use container::EffectContainer;
 pub use context::EffectContext;
 use aura_core::effects::ExecutionMode;
-pub use coordinator::AuraEffectSystem;
+pub use coordinator_stub::AuraEffectSystem;
 pub use effect_builder::{EffectBuilder, QuickBuilder, ProtocolRequirements, EffectBundle};
 pub use registry::{EffectRegistry, EffectRegistryError, EffectRegistryExt};
 

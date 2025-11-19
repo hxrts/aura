@@ -426,17 +426,17 @@ where
         // Map recovery operation type to resource scope
         let resource_scope = match request.context.operation_type {
             RecoveryOperationType::DeviceKeyRecovery => ResourceScope::Recovery {
-                recovery_type: aura_wot::RecoveryType::DeviceKey,
+                recovery_type: "DeviceKey".to_string(),
             },
             RecoveryOperationType::AccountAccessRecovery => ResourceScope::Recovery {
-                recovery_type: aura_wot::RecoveryType::AccountAccess,
+                recovery_type: "AccountAccess".to_string(),
             },
             RecoveryOperationType::GuardianSetModification => ResourceScope::Recovery {
-                recovery_type: aura_wot::RecoveryType::GuardianSet,
+                recovery_type: "GuardianSet".to_string(),
             },
             RecoveryOperationType::EmergencyFreeze | RecoveryOperationType::AccountUnfreeze => {
                 ResourceScope::Recovery {
-                    recovery_type: aura_wot::RecoveryType::EmergencyFreeze,
+                    recovery_type: "EmergencyFreeze".to_string(),
                 }
             }
         };
