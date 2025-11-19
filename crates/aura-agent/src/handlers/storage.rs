@@ -5,13 +5,10 @@
 //!
 //! **Phase 5 Update**: Now integrated with authorization operations system.
 
-use crate::{errors::Result, operations::*};
+use crate::{errors::Result, operations::*, runtime::AuraEffectSystem};
 use aura_core::AuraError;
 use aura_core::DeviceId;
-use aura_protocol::{
-    orchestration::AuraEffectSystem,
-    effect_traits::{ConsoleEffects, StorageEffects, TimeEffects},
-};
+use aura_core::effects::{ConsoleEffects, StorageEffects, TimeEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

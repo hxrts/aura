@@ -27,6 +27,8 @@ pub use aura_core::effects::ExecutionMode;
 pub type AuraHandler = ();
 pub type EffectType = ();
 pub type AuraContext = ();
+pub type AgentEffectSystemHandler = ();
+
 #[derive(Debug, Clone)]
 pub struct AuraHandlerError(pub String);
 impl std::fmt::Display for AuraHandlerError {

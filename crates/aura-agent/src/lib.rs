@@ -92,7 +92,7 @@ pub use runtime::{
 /// effect handlers. The runtime composes real system effects into device workflows.
 pub async fn create_production_agent(device_id: DeviceId) -> AgentResult<AuraAgent> {
     // Use new EffectRegistry pattern for standardized production setup
-    let core_effects = aura_protocol::effects::EffectRegistry::production()
+    let core_effects = crate::runtime::EffectRegistry::production()
         .with_device_id(device_id)
         .with_logging()
         .with_metrics()
@@ -116,7 +116,7 @@ pub fn create_testing_agent(device_id: DeviceId) -> AuraAgent {
 /// The seed ensures deterministic behavior across simulation runs.
 pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AgentResult<AuraAgent> {
     // Use new EffectRegistry pattern for standardized simulation setup
-    let core_effects = aura_protocol::effects::EffectRegistry::simulation(seed)
+    let core_effects = crate::runtime::EffectRegistry::simulation(seed)
         .with_device_id(device_id)
         .with_logging()
         .build()

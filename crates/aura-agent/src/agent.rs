@@ -115,7 +115,7 @@ impl AuraAgent {
     /// and construct agent via `AuraAgent::new()` in new code.
     pub fn for_testing(device_id: DeviceId) -> Self {
         // Use new EffectRegistry pattern for standardized testing setup
-        let effects = aura_protocol::effects::EffectRegistry::testing()
+        let effects = crate::runtime::EffectRegistry::testing()
             .with_device_id(device_id)
             .build()
             .expect("Failed to create test effect system");

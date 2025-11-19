@@ -47,7 +47,8 @@ pub struct AuraEffectSystemBuilder {
     storage_config: Option<StorageConfig>,
     default_flow_limit: Option<u64>,
     initial_epoch: Option<Epoch>,
-    custom_handlers: HashMap<EffectType, Box<dyn AuraHandler>>,
+    // TODO: Restore when AuraHandler trait is properly defined
+    // custom_handlers: HashMap<EffectType, Box<dyn AuraHandler>>,
     container: Option<Arc<EffectContainer>>,
 }
 
@@ -61,7 +62,7 @@ impl AuraEffectSystemBuilder {
             storage_config: None,
             default_flow_limit: None,
             initial_epoch: None,
-            custom_handlers: HashMap::new(),
+            // custom_handlers: HashMap::new(),
             container: None,
         }
     }
@@ -102,14 +103,15 @@ impl AuraEffectSystemBuilder {
         self
     }
 
-    /// Add a custom handler for a specific effect type
-    ///
-    /// This allows replacing the default handler for any effect type
-    /// with a custom implementation.
-    pub fn with_handler(mut self, effect_type: EffectType, handler: Box<dyn AuraHandler>) -> Self {
-        self.custom_handlers.insert(effect_type, handler);
-        self
-    }
+    // TODO: Restore when AuraHandler trait is properly defined
+    // /// Add a custom handler for a specific effect type
+    // ///
+    // /// This allows replacing the default handler for any effect type
+    // /// with a custom implementation.
+    // pub fn with_handler(mut self, effect_type: EffectType, handler: Box<dyn AuraHandler>) -> Self {
+    //     self.custom_handlers.insert(effect_type, handler);
+    //     self
+    // }
 
     /// Use a custom effect container for dependency injection
     ///
