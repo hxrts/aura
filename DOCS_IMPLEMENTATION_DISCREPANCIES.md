@@ -451,10 +451,11 @@ The following code examples in guides should be verified to compile with current
 
 ### High Priority (Required for Developer Success)
 
-1. **Fix Testing Guide (805)**: Either implement `#[aura_test]` or rewrite guide to match current testkit
-2. **Fix Simulation Guide (806)**: Update to match actual simulator API
-3. **Update All Guide Examples**: Replace `DeviceId` with `AuthorityId` throughout
-4. **Document FROST Status**: Add warnings that threshold signing is temporarily unavailable
+1. ✅ **FIXED: Testing Guide (805)**: Completely rewritten to match actual testkit API
+2. ✅ **FIXED: Simulation Guide (806)**: Completely rewritten to match handler/middleware architecture
+3. ✅ **FIXED: Hello World Guide (801)**: Updated test examples to use correct API (`AuraEffectSystem::new()`)
+4. **Update Remaining Guides (802-804)**: Replace `DeviceId` with `AuthorityId` examples where appropriate
+5. **Document FROST Status**: Add warnings that threshold signing is temporarily unavailable
 
 ### Medium Priority (Improves Developer Experience)
 
@@ -504,4 +505,64 @@ The implementation is often **more sophisticated** than documented, particularly
 
 **Overall Grade**: B+ (Solid architecture documentation, needs guide maintenance)
 
-**Primary Action Item**: Update guides 803-806 to reflect current APIs or implement aspirational features
+**Primary Action Item**: ~~Update guides 803-806 to reflect current APIs or implement aspirational features~~
+
+---
+
+## Updates Applied (2025-11-19)
+
+The following critical guides have been completely rewritten to match actual implementation:
+
+### Guide 805 (Testing) - Complete Rewrite ✅
+
+**Changes**:
+- Accurately documented `#[aura_test]` macro (wraps `tokio::test` + tracing + timeout)
+- Removed references to unimplemented features:
+  - `freeze_time()`, `advance_time_by()`, `current_time()` - not implemented
+  - `PerformanceMonitor`, `AllocationTracker`, `MemoryProfiler` - not available
+  - `NetworkSimulator` in testkit - use aura-simulator instead
+  - Context injection via `ctx` parameter - create fixtures explicitly
+- Documented actual `TestFixture` API from `aura-testkit`
+- Added limitations section explaining what's available vs. documented
+- All code examples now compile against current APIs
+
+**Impact**: Developers can now successfully follow the testing guide
+
+### Guide 806 (Simulation) - Complete Rewrite ✅
+
+**Changes**:
+- Replaced `AsyncSimulationEngine` examples with actual handler/middleware pattern
+- Documented real APIs:
+  - `SimulationTimeHandler`, `SimulationFaultHandler`, `SimulationScenarioHandler`
+  - `SimulationEffectComposer` for building simulation environments
+  - `SimulatorMiddleware` for fault injection
+  - `TestkitSimulatorBridge` for integration
+- Removed references to unimplemented APIs:
+  - `sim.add_participants(count)` - use manual handler creation
+  - `sim.add_byzantine_participant(interceptor)` - use `SimulationFaultHandler`
+  - `sim.run_until_idle()` - use explicit protocol execution
+- Added architecture explanation (distributed handler model vs. centralized engine)
+- All examples match actual simulator crate structure
+
+**Impact**: Developers can now use simulator correctly for fault injection testing
+
+### Guide 801 (Hello World) - API Fixes ✅
+
+**Changes**:
+- Fixed test example: `AuraEffectSystem::new()` (no args, not `new(config)`)
+- Added `#[aura_test]` macro usage
+- Corrected `TestFixture` usage pattern
+- Example now compiles and runs
+
+**Impact**: First-time users won't hit API errors in hello world example
+
+### Remaining Work
+
+Guides 802-804 (Core Systems, Coordination, Advanced Coordination) still contain:
+- Examples using `DeviceId` where `AuthorityId` would be more appropriate
+- Possible API drift in CRDT coordinator examples
+- Choreography syntax that needs verification
+
+These are lower priority as the core concepts are correct; only example details need updating.
+
+**Overall Status**: Critical testing/simulation documentation now accurate. Architecture docs remain excellent.
