@@ -287,7 +287,7 @@ mod tests {
                         checksum: aura_core::Hash32([0u8; 32]),
                         artifact_uri: None,
                         kind: UpgradeKind::SoftFork,
-                        activation_fence: Epoch(0),
+                        activation_fence: 0,
                     },
                     status: UpgradeStatus::Proposed,
                     adoptions: 0,
