@@ -4,7 +4,6 @@
 //! in the authority-centric model.
 
 use crate::identifiers::ContextId;
-use crate::relationships::RelationalContext;
 use crate::{Authority, AuthorityId, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -37,13 +36,18 @@ pub trait AuthorityEffects: Send + Sync {
 }
 
 /// Effect trait for relational context operations
+///
+/// Note: get_context returns Box<dyn Any> to avoid circular dependencies.
+/// Implementations should return their concrete RelationalContext type wrapped in Arc<dyn Any>.
+/// Callers can downcast to the specific RelationalContext type they expect.
 #[async_trait]
 pub trait RelationalEffects: Send + Sync {
     /// Create a new relational context
     async fn create_context(&self, participants: Vec<AuthorityId>) -> Result<ContextId>;
 
     /// Get a relational context by ID
-    async fn get_context(&self, id: ContextId) -> Result<Arc<RelationalContext>>;
+    /// Returns an opaque Arc<dyn Any> that can be downcast to the concrete context type
+    async fn get_context(&self, id: ContextId) -> Result<Arc<dyn std::any::Any + Send + Sync>>;
 
     /// List contexts for an authority
     async fn list_contexts_for_authority(
