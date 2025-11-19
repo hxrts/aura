@@ -62,7 +62,7 @@ pub mod execution;
 pub mod flow;
 pub mod journal_coupler;
 pub mod privacy;
-// pub mod send_guard; // Disabled - needs Capability type rewrite
+pub mod send_guard;
 
 // Biscuit-based guards (new implementation)
 pub mod biscuit_evaluator;
@@ -74,7 +74,7 @@ pub use flow::{FlowBudgetEffects, FlowGuard, FlowHint};
 pub use journal_coupler::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
-// pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult}; // Disabled
+pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
 use crate::wot::EffectSystemInterface;
 use aura_core::AuraResult;
