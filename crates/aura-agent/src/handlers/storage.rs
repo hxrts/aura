@@ -472,8 +472,7 @@ mod tests {
     #[aura_test]
     async fn test_storage_operations() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-        let effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::new()));
         let storage = StorageOperations::new(effects, device_id, "test".to_string());
 
         // Store data
@@ -511,8 +510,7 @@ mod tests {
     #[aura_test]
     async fn test_backup_restore() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-        let effects = Arc::new(RwLock::new((*fixture.effects()).clone()));
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::new()));
         let storage = StorageOperations::new(effects, device_id, "backup_test".to_string());
 
         // Store some test data

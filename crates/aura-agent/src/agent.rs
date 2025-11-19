@@ -496,8 +496,7 @@ mod tests {
     #[aura_test]
     async fn test_agent_creation() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-        let effects = fixture.effects().as_ref().clone();
+        let effects = AuraEffectSystem::new();
         let agent = AuraAgent::new(effects, device_id);
 
         assert_eq!(agent.device_id(), device_id);
@@ -507,8 +506,7 @@ mod tests {
     #[aura_test]
     async fn test_agent_initialization() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-        let effects = fixture.effects().as_ref().clone();
+        let effects = AuraEffectSystem::new();
         let agent = AuraAgent::new(effects, device_id);
 
         // Should not panic and should complete successfully
@@ -523,8 +521,7 @@ mod tests {
     #[aura_test]
     async fn test_secure_storage_operations() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-        let effects = fixture.effects().as_ref().clone();
+        let effects = AuraEffectSystem::new();
         let agent = AuraAgent::new(effects, device_id);
 
         agent.initialize().await?;
@@ -582,8 +579,7 @@ mod tests {
     #[aura_test]
     async fn test_config_management() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
-        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-        let effects = fixture.effects().as_ref().clone();
+        let effects = AuraEffectSystem::new();
         let agent = AuraAgent::new(effects, device_id);
 
         agent.initialize().await?;

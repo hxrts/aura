@@ -92,8 +92,7 @@ mod tests {
     async fn test_emergency_recovery() {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let account_id = AccountId(uuid::Uuid::from_bytes([1u8; 16]));
-        let config = EffectSystemConfig::for_testing(device_id);
-        let effects = Arc::new(RwLock::new(AuraEffectSystem::new(config).unwrap()));
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::new()));
 
         let recovery_ops = RecoveryOperations::new(effects, device_id, account_id);
 
