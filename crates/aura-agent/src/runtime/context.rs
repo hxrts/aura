@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use tracing::{Level, Span};
 use uuid::Uuid;
 
-use aura_core::{AuraError, AuraResult, DeviceId, FlowBudget};
+use aura_core::{AuraError, AuraResult, DeviceId, Epoch, FlowBudget};
 
 /// Context that flows through effect execution
 #[derive(Debug, Clone)]

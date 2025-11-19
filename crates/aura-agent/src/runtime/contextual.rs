@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use aura_core::{
     effects::{NetworkError, StorageError, TimeError},
-    AuraError, AuraResult, DeviceId,
+    AuraError, AuraResult, DeviceId, Epoch,
 };
 
 use super::context::EffectContext;
@@ -344,7 +344,9 @@ mod tests {
         let device_id = fixture.device_id();
         let effects = MockContextualEffects { device_id };
 
-        let mut context = EffectContext::new(device_id).with_flow_budget(FlowBudget::new(100));
+        #[allow(clippy::disallowed_methods)]
+        let mut context = EffectContext::new(device_id, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4())
+            .with_flow_budget(FlowBudget::new(100, Epoch(0)));
 
         // Test flow budget charging
         effects

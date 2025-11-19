@@ -12,7 +12,7 @@ use aura_core::{
         CryptoEffects, NetworkEffects, NetworkError, StorageEffects, StorageError, TimeEffects,
         TimeError,
     },
-    AuraError, AuraResult, DeviceId, FlowBudget,
+    AuraError, AuraResult, DeviceId, Epoch, FlowBudget,
 };
 
 use super::context::{thread_local, EffectContext};

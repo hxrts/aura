@@ -282,7 +282,7 @@ mod tests {
                 UpgradeProposalState {
                     proposal_id,
                     proposal: UpgradeProposal {
-                        package_id: proposal_id,
+                        package_id: proposal_id.to_string(),
                         version: aura_core::SemanticVersion::new(1, 0, 0),
                         artifact_hash: aura_core::Hash32([0u8; 32]),
                         artifact_uri: None,
