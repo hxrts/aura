@@ -85,9 +85,13 @@ choreography! {
         -> Guardian1: SendInvitation(GuardianInvitation);
 
         SetupInitiator[guard_capability = "initiate_guardian_setup",
+                       journal_facts = "guardian_setup_initiated",
+                       leakage_budget = [1, 0, 0]]
         -> Guardian2: SendInvitation(GuardianInvitation);
 
         SetupInitiator[guard_capability = "initiate_guardian_setup",
+                       journal_facts = "guardian_setup_initiated",
+                       leakage_budget = [1, 0, 0]]
         -> Guardian3: SendInvitation(GuardianInvitation);
 
         // Phase 2: Guardian acceptances back to setup initiator
@@ -407,7 +411,7 @@ where
         let token = token_manager.current_token();
 
         let resource_scope = ResourceScope::Recovery {
-            recovery_type: aura_wot::RecoveryType::GuardianSet,
+            recovery_type: "GuardianSet".to_string(),
         };
 
         // Check authorization for guardian setup initiation

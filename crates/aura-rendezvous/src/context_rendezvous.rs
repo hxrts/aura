@@ -129,7 +129,7 @@ impl ContextRendezvousCoordinator {
             ));
         }
 
-        let now = self.effects.current_timestamp().await?;
+        let now = aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await;
         let expires_at = now + 3600; // 1 hour expiration
 
         Ok(ContextRendezvousDescriptor {
@@ -139,7 +139,10 @@ impl ContextRendezvousCoordinator {
             ttl,
             created_at: now,
             expires_at,
-            nonce: self.effects.random_bytes(32).await?.try_into().unwrap(),
+            nonce: {
+                let bytes = self.effects.random_bytes(32).await;
+                bytes.try_into().unwrap()
+            },
         })
     }
 
@@ -288,7 +291,7 @@ impl ContextRendezvousCoordinator {
         // TODO: Implement actual guard chain evaluation
         // For now, check basic context membership
         if let Some(context) = self.contexts.get(&envelope.context_id) {
-            context.is_participant(&envelope.source_authority)
+            Ok(context.is_participant(&envelope.source_authority))
         } else {
             Ok(false)
         }
@@ -304,7 +307,7 @@ impl ContextRendezvousCoordinator {
             .get(context_id)
             .ok_or_else(|| AuraError::not_found("Context not found"))?;
 
-        Ok(context.get_participants())
+        Ok(context.get_participants().to_vec())
     }
 
     /// Forward envelope to another authority
@@ -328,7 +331,7 @@ impl ContextRendezvousCoordinator {
         envelope: &ContextEnvelope,
     ) -> AuraResult<Option<RendezvousReceipt>> {
         // TODO: Check if receipts are enabled for this context
-        let timestamp = self.effects.current_timestamp().await?;
+        let timestamp = aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await;
 
         let receipt = RendezvousReceipt {
             envelope_id: envelope.id,

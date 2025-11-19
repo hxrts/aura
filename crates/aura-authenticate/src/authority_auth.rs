@@ -206,13 +206,14 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
     ) -> Result<AuthorityAuthResponse> {
         // Generate challenge nonce
         let mut nonce = [0u8; 32];
-        self.effects.random_bytes(&mut nonce).await?;
+        let nonce_bytes = self.effects.random_bytes(32).await;
+        nonce.copy_from_slice(&nonce_bytes[..32]);
 
         // Create challenge data
         let challenge = ChallengeData {
             nonce,
             session_id: uuid::Uuid::new_v4().to_string(),
-            timestamp: self.effects.current_timestamp().await?,
+            timestamp: aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await,
         };
 
         // TODO: Complete verifier implementation
