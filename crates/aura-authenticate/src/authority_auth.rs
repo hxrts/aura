@@ -61,7 +61,7 @@ pub async fn authenticate_authority(
 ) -> Result<AuthorityAuthProof> {
     // Verify the authority ID matches
     if authority.authority_id() != request.authority_id {
-        return Err(AuraError::Verification("Authority ID mismatch".to_string()));
+        return Err(AuraError::invalid("Authority ID mismatch"));
     }
 
     // Sign the challenge nonce with authority's key
@@ -102,22 +102,22 @@ pub async fn verify_authority_proof(
             .public_key
             .as_slice()
             .try_into()
-            .map_err(|_| AuraError::Verification("Invalid public key".to_string()))?,
+            .map_err(|_| AuraError::crypto("Invalid public key"))?,
     )
-    .map_err(|e| AuraError::Verification(format!("Public key error: {}", e)))?;
+    .map_err(|e| AuraError::crypto(format!("Public key error: {}", e)))?;
 
     let signature = Signature::from_bytes(
         &proof
             .signature
             .as_slice()
             .try_into()
-            .map_err(|_| AuraError::Verification("Invalid signature".to_string()))?,
+            .map_err(|_| AuraError::crypto("Invalid signature"))?,
     );
 
     public_key
         .verify(&request.nonce, &signature)
         .map(|_| true)
-        .map_err(|e| AuraError::Verification(format!("Signature verification failed: {}", e)))
+        .map_err(|e| AuraError::crypto(format!("Signature verification failed: {}", e)))
 }
 
 // Authority Authentication Choreography Protocol

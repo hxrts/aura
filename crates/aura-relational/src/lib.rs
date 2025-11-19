@@ -88,6 +88,16 @@ impl RelationalContext {
         self.participants.contains(authority_id)
     }
 
+    /// Check if an authority is a participant (alias for has_participant)
+    pub fn is_participant(&self, authority_id: &AuthorityId) -> bool {
+        self.has_participant(authority_id)
+    }
+
+    /// Get all participants in this context
+    pub fn get_participants(&self) -> &[AuthorityId] {
+        &self.participants
+    }
+
     /// Compute the current prestate for consensus
     pub fn compute_prestate(&self, authority_commitments: Vec<(AuthorityId, Hash32)>) -> Prestate {
         Prestate {

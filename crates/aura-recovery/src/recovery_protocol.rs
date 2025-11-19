@@ -137,8 +137,8 @@ impl RecoveryProtocol {
     pub async fn initiate_recovery(&mut self, request: RecoveryRequest) -> Result<RecoveryResult> {
         // Validate request
         if request.account_authority != self.account_authority {
-            return Err(AuraError::Verification(
-                "Account authority mismatch".to_string(),
+            return Err(AuraError::invalid(
+                "Account authority mismatch",
             ));
         }
 
@@ -178,8 +178,8 @@ impl RecoveryProtocol {
     pub async fn process_guardian_approval(&mut self, approval: GuardianApproval) -> Result<()> {
         // Verify guardian is in the set
         if !self.guardian_authorities.contains(&approval.guardian_id) {
-            return Err(AuraError::Verification(
-                "Guardian not in recovery set".to_string(),
+            return Err(AuraError::permission_denied(
+                "Guardian not in recovery set",
             ));
         }
 

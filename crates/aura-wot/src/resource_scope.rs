@@ -24,6 +24,17 @@ pub enum ResourceScope {
         authority_id: AuthorityId,
         path: String,
     },
+    /// Recovery operations (legacy - maps to Context)
+    #[deprecated(note = "Use ResourceScope::Context instead")]
+    Recovery {
+        recovery_type: String,
+    },
+    /// Journal operations (legacy - maps to Authority)
+    #[deprecated(note = "Use ResourceScope::Authority instead")]
+    Journal {
+        account_id: String,
+        operation: String,
+    },
 }
 
 /// Operations that can be performed on an authority
@@ -80,6 +91,23 @@ impl ResourceScope {
                     authority_id, path
                 )
             }
+            #[allow(deprecated)]
+            ResourceScope::Recovery { recovery_type } => {
+                format!(
+                    "resource(\"/recovery/{}\"), resource_type(\"recovery\")",
+                    recovery_type
+                )
+            }
+            #[allow(deprecated)]
+            ResourceScope::Journal {
+                account_id,
+                operation,
+            } => {
+                format!(
+                    "resource(\"/journal/{}/{}\"), resource_type(\"journal\")",
+                    account_id, operation
+                )
+            }
         }
     }
 
@@ -100,6 +128,17 @@ impl ResourceScope {
             }
             ResourceScope::Storage { authority_id, path } => {
                 format!("/storage/{}/{}", authority_id, path)
+            }
+            #[allow(deprecated)]
+            ResourceScope::Recovery { recovery_type } => {
+                format!("/recovery/{}", recovery_type)
+            }
+            #[allow(deprecated)]
+            ResourceScope::Journal {
+                account_id,
+                operation,
+            } => {
+                format!("/journal/{}/{}", account_id, operation)
             }
         }
     }
