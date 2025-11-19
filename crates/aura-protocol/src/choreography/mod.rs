@@ -23,16 +23,16 @@
 //! feature-specific implementations.
 
 pub mod crdt_sync;
-// pub mod handler_bridge; // Disabled - needs Capability type rewrite
+pub mod handler_bridge;
 
 // Re-export CRDT synchronization types
 pub use crdt_sync::{CrdtOperation, CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 
-// Re-export the clean handler bridge traits (temporarily disabled)
-// pub use handler_bridge::{
-//     ChoreographicAdapter, ChoreographicEndpoint, ChoreographicHandler, DefaultEndpoint,
-//     SendGuardProfile,
-// };
+// Re-export the clean handler bridge traits
+pub use handler_bridge::{
+    ChoreographicAdapter, ChoreographicEndpoint, ChoreographicHandler, DefaultEndpoint,
+    SendGuardProfile,
+};
 
 // NOTE: Epoch management has been moved to aura-sync (Layer 5)
 // Import aura-sync directly if you need epoch coordination protocols

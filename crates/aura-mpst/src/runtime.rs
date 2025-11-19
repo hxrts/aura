@@ -600,14 +600,25 @@ impl AuraHandler {
                             actual: ext.type_name(),
                         })?;
 
-                    // TODO: Implement flow cost charging logic
-                    // For now, just log the flow cost charge
+                    // Store flow cost in endpoint metadata for higher-layer processing
+                    // The orchestrator will retrieve this and execute FlowBudgetEffects
+                    let flow_costs_key = format!("flow_costs_{}", flow_cost.role);
+                    let current_cost: u64 = endpoint
+                        .metadata
+                        .get(&flow_costs_key)
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    endpoint
+                        .metadata
+                        .insert(flow_costs_key, (current_cost + flow_cost.cost).to_string());
+
                     tracing::debug!(
                         device_id = ?endpoint.device_id,
                         cost = flow_cost.cost,
+                        total_cost = current_cost + flow_cost.cost,
                         operation = %flow_cost.operation,
                         role = %flow_cost.role,
-                        "Charging flow cost"
+                        "Accumulated flow cost for later charging"
                     );
 
                     Ok(())
@@ -628,14 +639,35 @@ impl AuraHandler {
                             actual: ext.type_name(),
                         })?;
 
-                    // TODO: Implement journal fact recording logic
-                    // For now, just log the journal fact
+                    // Store journal fact in endpoint metadata for higher-layer processing
+                    // The orchestrator will retrieve this and execute JournalEffects
+                    let facts_key = format!("journal_facts_{}", journal_fact.role);
+                    let existing_facts = endpoint.metadata.get(&facts_key).cloned().unwrap_or_default();
+                    let mut facts: Vec<String> = if existing_facts.is_empty() {
+                        Vec::new()
+                    } else {
+                        serde_json::from_str(&existing_facts).unwrap_or_default()
+                    };
+
+                    // Add new fact with operation context
+                    let fact_entry = serde_json::json!({
+                        "fact": journal_fact.fact,
+                        "operation": journal_fact.operation,
+                        "role": journal_fact.role,
+                    });
+                    facts.push(fact_entry.to_string());
+
+                    endpoint
+                        .metadata
+                        .insert(facts_key, serde_json::to_string(&facts).unwrap_or_default());
+
                     tracing::debug!(
                         device_id = ?endpoint.device_id,
                         fact = %journal_fact.fact,
                         operation = %journal_fact.operation,
                         role = %journal_fact.role,
-                        "Recording journal fact"
+                        total_facts = facts.len(),
+                        "Accumulated journal fact for later recording"
                     );
 
                     Ok(())
@@ -656,13 +688,33 @@ impl AuraHandler {
                             actual: ext.type_name(),
                         })?;
 
-                    // TODO: Implement journal merge logic
-                    // For now, just log the journal merge operation
+                    // Store journal merge request in endpoint metadata for higher-layer processing
+                    // The orchestrator will retrieve this and execute journal merge via JournalEffects
+                    let merge_key = "journal_merges";
+                    let existing_merges = endpoint.metadata.get(merge_key).cloned().unwrap_or_default();
+                    let mut merges: Vec<String> = if existing_merges.is_empty() {
+                        Vec::new()
+                    } else {
+                        serde_json::from_str(&existing_merges).unwrap_or_default()
+                    };
+
+                    // Add new merge request
+                    let merge_entry = serde_json::json!({
+                        "merge_type": journal_merge.merge_type,
+                        "roles": journal_merge.roles,
+                    });
+                    merges.push(merge_entry.to_string());
+
+                    endpoint
+                        .metadata
+                        .insert(merge_key.to_string(), serde_json::to_string(&merges).unwrap_or_default());
+
                     tracing::debug!(
                         device_id = ?endpoint.device_id,
                         merge_type = %journal_merge.merge_type,
                         roles = ?journal_merge.roles,
-                        "Executing journal merge"
+                        total_merges = merges.len(),
+                        "Accumulated journal merge request for later execution"
                     );
 
                     Ok(())
@@ -683,14 +735,37 @@ impl AuraHandler {
                             actual: ext.type_name(),
                         })?;
 
-                    // TODO: Implement guard chain execution logic
-                    // For now, just log the guard chain execution
+                    // Store guard chain execution request in endpoint metadata for higher-layer processing
+                    // The orchestrator will retrieve this and execute the guard chain:
+                    // AuthorizationEffects (Biscuit/capabilities) → FlowBudgetEffects →
+                    // LeakageEffects → JournalEffects → TransportEffects
+                    let guard_key = format!("guard_chains_{}", guard_chain.role);
+                    let existing_guards = endpoint.metadata.get(&guard_key).cloned().unwrap_or_default();
+                    let mut guards: Vec<String> = if existing_guards.is_empty() {
+                        Vec::new()
+                    } else {
+                        serde_json::from_str(&existing_guards).unwrap_or_default()
+                    };
+
+                    // Add new guard chain request
+                    let guard_entry = serde_json::json!({
+                        "guards": guard_chain.guards,
+                        "operation": guard_chain.operation,
+                        "role": guard_chain.role,
+                    });
+                    guards.push(guard_entry.to_string());
+
+                    endpoint
+                        .metadata
+                        .insert(guard_key, serde_json::to_string(&guards).unwrap_or_default());
+
                     tracing::debug!(
                         device_id = ?endpoint.device_id,
                         guards = ?guard_chain.guards,
                         operation = %guard_chain.operation,
                         role = %guard_chain.role,
-                        "Executing guard chain"
+                        total_guard_chains = guards.len(),
+                        "Accumulated guard chain for later execution"
                     );
 
                     Ok(())

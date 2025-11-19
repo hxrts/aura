@@ -7,8 +7,9 @@
 use crate::guards::LeakageBudget;
 use async_trait::async_trait;
 use aura_core::effects::ExecutionMode;
-use aura_core::{relationships::ContextId, DeviceId};
-// use aura_wot::Capability; // Removed
+use aura_core::identifiers::ContextId;
+use aura_core::DeviceId;
+use aura_wot::Capability;
 use rumpsteak_aura_choreography::effects::{
     ChoreoHandler, ChoreographyError, Label, Result as ChoreoResult,
 };

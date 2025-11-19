@@ -7,7 +7,7 @@ use super::effect_system_trait::GuardEffectSystem;
 use super::ProtocolGuard;
 use crate::wot::{CapabilityEvaluator, EffectSystemInterface, EffectiveCapabilitySet};
 use aura_core::{AuraError, AuraResult, DeviceId};
-// use aura_wot::Capability; // Removed
+use aura_wot::Capability;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 

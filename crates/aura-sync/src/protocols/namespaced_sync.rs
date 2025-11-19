@@ -7,6 +7,7 @@ use aura_core::identifiers::ContextId;
 use aura_core::{AuraError, AuthorityId, Result};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -15,8 +16,8 @@ use std::sync::Arc;
 pub struct NamespacedSync {
     /// Namespace being synchronized
     pub namespace: JournalNamespace,
-    /// Journal instance
-    pub journal: Arc<Journal>,
+    /// Journal instance with interior mutability for concurrent access
+    pub journal: Arc<RwLock<Journal>>,
 }
 
 /// Synchronization request for a specific namespace
@@ -56,7 +57,7 @@ pub struct SyncStats {
 
 impl NamespacedSync {
     /// Create a new namespace-aware sync instance
-    pub fn new(namespace: JournalNamespace, journal: Arc<Journal>) -> Self {
+    pub fn new(namespace: JournalNamespace, journal: Arc<RwLock<Journal>>) -> Self {
         Self { namespace, journal }
     }
 
@@ -92,8 +93,8 @@ impl NamespacedSync {
             }
         }
 
-        // Get facts from journal
-        let facts: Vec<Fact> = self.journal.iter_facts().cloned().collect();
+        // Get facts from journal (acquire read lock)
+        let facts: Vec<Fact> = self.journal.read().iter_facts().cloned().collect();
 
         Ok(facts)
     }
@@ -115,8 +116,8 @@ impl NamespacedSync {
             ));
         }
 
-        // Get facts from journal
-        let facts: Vec<Fact> = self.journal.iter_facts().cloned().collect();
+        // Get facts from journal (acquire read lock)
+        let facts: Vec<Fact> = self.journal.read().iter_facts().cloned().collect();
 
         Ok(facts)
     }
@@ -188,14 +189,14 @@ impl NamespacedSync {
             ));
         }
 
-        // Apply facts to journal (merge operation)
-        // TODO: Implement proper Arc<Journal> mutation strategy
-        // Options: Interior mutability (RwLock), or make journal_sync own the Journal
-        for _fact in response.facts {
-            // Journal merge will handle deduplication via semilattice properties
-            // Temporarily disabled due to Arc<Journal> mutability
-            // self.journal.add_fact(fact)?;
-            stats.facts_received += 1;
+        // Apply facts to journal (merge operation with write lock)
+        // Journal merge will handle deduplication via semilattice properties
+        {
+            let mut journal = self.journal.write();
+            for fact in response.facts {
+                journal.add_fact(fact)?;
+                stats.facts_received += 1;
+            }
         }
 
         stats.duration_ms = start.elapsed().as_millis() as u64;
@@ -219,7 +220,7 @@ impl NamespacedAntiEntropy {
     pub async fn run<E: AuraEffects>(
         &self,
         effects: &E,
-        journal: Arc<Journal>,
+        journal: Arc<RwLock<Journal>>,
         peer: AuthorityId,
     ) -> Result<SyncStats> {
         let mut sync = NamespacedSync::new(self.namespace.clone(), journal);
@@ -230,6 +231,7 @@ impl NamespacedAntiEntropy {
             requester: self.get_local_authority(effects).await?,
             known_fact_ids: sync
                 .journal
+                .read()
                 .iter_facts()
                 .map(|f| f.fact_id.clone())
                 .collect(),

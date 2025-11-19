@@ -3,14 +3,16 @@
 //! This module provides simplified interfaces for common aura-protocol operations,
 //! making it easier to use the protocol orchestration capabilities without
 //! needing to understand all the implementation details.
+//!
+//! ## Architecture Note
+//!
+//! This module contains only trait definitions appropriate for Layer 4.
+//! Concrete implementations belong in aura-agent (Layer 6) where they can
+//! depend on the full effect system infrastructure. This maintains proper
+//! layering while providing useful abstractions.
 
-// NOTE: Facade currently disabled - uses AuraEffectSystem and EffectBundle from aura-agent (Layer 6)
-// aura-protocol (Layer 4) should not depend on aura-agent types
-// TODO: Refactor to use only aura-core effect traits
-
-use crate::effects::ChoreographicEffects;
 use async_trait::async_trait;
-use aura_core::{AuraResult, DeviceId};
+use aura_core::DeviceId;
 
 /// High-level protocol orchestrator for executing distributed protocols
 ///
@@ -25,11 +27,16 @@ use aura_core::{AuraResult, DeviceId};
 /// let orchestrator = MyOrchestrator::new(effect_system);
 /// let result = orchestrator.execute_choreography(my_protocol).await?;
 /// ```
+///
+/// # Implementation Note
+///
+/// Implementations of this trait should be provided in aura-agent (Layer 6)
+/// where concrete effect system types are available.
 #[async_trait]
 pub trait ProtocolOrchestrator {
     /// The type of protocol this orchestrator can execute
     type Protocol;
-    /// The output type produced by protocol execution  
+    /// The output type produced by protocol execution
     type Output;
     /// Error type for protocol execution failures
     type Error: From<aura_core::AuraError>;
@@ -38,7 +45,7 @@ pub trait ProtocolOrchestrator {
     ///
     /// This method handles:
     /// - Session establishment and coordination
-    /// - Effect system integration  
+    /// - Effect system integration
     /// - Error handling and recovery
     /// - Resource cleanup
     async fn execute_choreography(
@@ -46,54 +53,7 @@ pub trait ProtocolOrchestrator {
         protocol: Self::Protocol,
     ) -> Result<Self::Output, Self::Error>;
 
-    /// Execute a protocol with custom effect coordination
-    ///
-    /// This provides more control over the effect system used during execution,
-    /// allowing for custom configurations and middleware.
-    async fn execute_with_effects<E: EffectBundle + Send>(
-        &self,
-        protocol: Self::Protocol,
-        effects: E,
-    ) -> Result<Self::Output, Self::Error>;
-
     /// Get the device ID for this orchestrator
-    fn device_id(&self) -> DeviceId;
-}
-
-/// Effect system composer for assembling and configuring effect systems
-///
-/// This facade simplifies effect system creation by providing a unified interface
-/// for common composition patterns and configurations.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use aura_protocol::facades::EffectComposer;
-///
-/// let composer = StandardEffectComposer::new(device_id);
-/// let system = composer.compose_for_testing().await?;
-/// ```
-#[async_trait]
-pub trait EffectComposer {
-    /// Error type for composition failures
-    type Error: From<aura_core::AuraError>;
-
-    /// Compose an effect system for testing with deterministic behavior
-    async fn compose_for_testing(&self) -> Result<AuraEffectSystem, Self::Error>;
-
-    /// Compose an effect system for production with real handlers
-    async fn compose_for_production(&self) -> Result<AuraEffectSystem, Self::Error>;
-
-    /// Compose an effect system for simulation with controllable behavior
-    async fn compose_for_simulation(&self, seed: u64) -> Result<AuraEffectSystem, Self::Error>;
-
-    /// Compose a custom effect system with specific bundle configuration
-    async fn compose_with_bundle<B: EffectBundle>(
-        &self,
-        bundle: B,
-    ) -> Result<AuraEffectSystem, Self::Error>;
-
-    /// Get the device ID for this composer
     fn device_id(&self) -> DeviceId;
 }
 
@@ -110,6 +70,11 @@ pub trait EffectComposer {
 /// let patterns = MyStandardPatterns::new(effect_system);
 /// let result = patterns.anti_entropy_sync(peers).await?;
 /// ```
+///
+/// # Implementation Note
+///
+/// Implementations of this trait should be provided in aura-agent (Layer 6)
+/// where concrete effect system types are available.
 #[async_trait]
 pub trait StandardPatterns {
     /// Error type for pattern execution failures
@@ -157,59 +122,19 @@ pub trait StandardPatterns {
     fn device_id(&self) -> DeviceId;
 }
 
-/// Default implementation of ProtocolOrchestrator using AuraEffectSystem
-///
-/// This provides a standard implementation that works with any choreographic
-/// effect system, suitable for most use cases.
-pub struct DefaultProtocolOrchestrator {
-    device_id: DeviceId,
-    effect_system: AuraEffectSystem,
-}
-
-impl DefaultProtocolOrchestrator {
-    /// Create a new default protocol orchestrator
-    pub fn new(device_id: DeviceId, effect_system: AuraEffectSystem) -> Self {
-        Self {
-            device_id,
-            effect_system,
-        }
-    }
-
-    /// Get access to the underlying effect system
-    pub fn effect_system(&self) -> &AuraEffectSystem {
-        &self.effect_system
-    }
-}
-
-#[async_trait]
-impl ProtocolOrchestrator for DefaultProtocolOrchestrator {
-    type Protocol = Box<dyn ChoreographicEffects + Send + Sync>;
-    type Output = ();
-    type Error = aura_core::AuraError;
-
-    async fn execute_choreography(
-        &self,
-        _protocol: Self::Protocol,
-    ) -> Result<Self::Output, Self::Error> {
-        // TODO: Implement choreographic protocol execution
-        // This would integrate with the choreography system to execute protocols
-        todo!("Choreographic protocol execution not yet implemented")
-    }
-
-    async fn execute_with_effects<E: EffectBundle + Send>(
-        &self,
-        _protocol: Self::Protocol,
-        _effects: E,
-    ) -> Result<Self::Output, Self::Error> {
-        // TODO: Implement custom effect coordination
-        todo!("Custom effect coordination not yet implemented")
-    }
-
-    fn device_id(&self) -> DeviceId {
-        self.device_id
-    }
-}
-
-// TODO: Implement DefaultEffectComposer and DefaultStandardPatterns
-// These would provide standard implementations of the facade traits
-// using the existing effect system infrastructure.
+// NOTE: Concrete implementations (DefaultProtocolOrchestrator, etc.) have been
+// moved to aura-agent where they belong architecturally. This file now contains
+// only trait definitions that are appropriate for Layer 4 (aura-protocol).
+//
+// To use these traits:
+// 1. Import the traits from aura-protocol::facades
+// 2. Use implementations from aura-agent::facades (or implement your own)
+//
+// Example:
+// ```rust,ignore
+// use aura_protocol::facades::ProtocolOrchestrator;
+// use aura_agent::facades::DefaultProtocolOrchestrator;
+//
+// let orchestrator = DefaultProtocolOrchestrator::new(device_id, effect_system);
+// orchestrator.execute_choreography(protocol).await?;
+// ```

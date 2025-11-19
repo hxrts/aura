@@ -19,7 +19,7 @@ aura-mpst = { path = "../aura-mpst" }
 
 # Choreography dependencies (required by aura-macros)
 rumpsteak-aura-choreography = "0.6.0"
-# aura-verify = { path = "../aura-verify" }  # Temporarily disabled due to compilation issues
+aura-verify = { path = "../aura-verify" }
 # Note: Cannot import aura-protocol due to circular dependency (aura-protocol imports journal)
 # Protocol types are now available through aura-core
 # aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
@@ -61,8 +61,9 @@ petgraph = { workspace = true }
 
 [dev-dependencies]
 # Test utilities
-# aura-testkit = { path = "../aura-testkit" }  # Temporarily disabled due to aura-protocol compilation issues
-# aura-protocol = { path = "../aura-protocol" }  # Temporarily disabled due to circular dependency
+aura-testkit = { path = "../aura-testkit" }
+# Note: Cannot add aura-protocol directly due to circular dependency (aura-protocol depends on aura-journal)
+# aura-protocol types are available through aura-testkit which includes aura-protocol
 async-trait = { workspace = true }
 # tokio-test = { workspace = true } # removed - unused
 rand_chacha = { workspace = true }

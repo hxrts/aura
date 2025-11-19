@@ -41,7 +41,7 @@ The second pillar is protocol specification and safety. Multi-party session type
 
 The third pillar is stateless effect system composition. Effects are capabilities code can request without shared mutable state. Effect traits live in `aura-core`, stateless handlers in `aura-effects`, and orchestrators in `aura-protocol`/`aura-agent`. The guard chain is explicit: `AuthorizationEffects` (Biscuit/policy evaluation) → `FlowBudgetEffects` (charge-before-send) → `LeakageEffects` (observer-class budgets) → `JournalEffects` (fact commit) → `TransportEffects`. This sequencing eliminates deadlocks, enables deterministic testing, and keeps architectural boundaries clean.
 
-These three pillars combine into an 8-layer architecture from interface definitions through user-facing applications. See [System Architecture](docs_2/001_system_architecture.md) for the complete layer breakdown, [Theoretical Model](docs_2/001_theoretical_model.md) for mathematical foundations, [Distributed Systems Contract](docs_2/004_distributed_systems_contract.md) for safety/liveness assumptions, and [Project Structure](999_project_structure.md) for dependency details.
+These three pillars combine into an 8-layer architecture from interface definitions through user-facing applications. See [System Architecture](001_system_architecture.md) for the complete layer breakdown, [Theoretical Model](001_theoretical_model.md) for mathematical foundations, [Distributed Systems Contract](004_distributed_systems_contract.md) for safety/liveness assumptions, and [Project Structure](999_project_structure.md) for dependency details.
 
 ## Documentation Index
 
@@ -50,34 +50,20 @@ Additional documentation covers specific aspects of the system:
 | Category | Document | Description |
 |----------|----------|-------------|
 | Foundation | [Theoretical Model](001_theoretical_model.md) | Mathematical foundation including formal calculus, algebraic types, and semilattice semantics |
-| Foundation | [System Architecture](002_system_architecture.md) | Implementation architecture including effect system patterns, CRDT implementations, and choreographic protocols |
-| Foundation | [Information Flow](003_information_flow.md) | Consent-based privacy framework with trust boundaries aligned to social relationships |
-| Core Systems | [Identity System](100_identity_system.md) | Threshold identity management using cryptographic commitments and distributed key derivation |
-| Core Systems | [Authentication & Authorization System](101_auth_authz_system.md) | Authentication and authorization architecture separating WHO and WHAT concerns |
-| Core Systems | [Maintenance System](102_maintenance_system.md) | Distributed maintenance stack including snapshots, garbage collection, and over-the-air updates |
-| Core Systems | [Flow Budget System](docs_2/003_privacy_and_information_flow.md#flow-budget-system-reference) | Unified flow budget + leakage contract for privacy and spam resistance |
-| Core Systems | [Peer Discovery & Transport](docs_2/107_transport_and_information_flow.md) | Guard chain enforcement, secure channel lifecycle, FlowBudget receipts |
-| Core Systems | [Rendezvous Architecture](docs_2/108_rendezvous.md) | Context-scoped rendezvous envelopes/descriptors and channel establishment |
-| Core Systems | [Journal System](docs_2/102_journal.md) | Fact-based journal, validation, and deterministic reduction flows |
-| Trust and Privacy | [Web of Trust](200_web_of_trust.md) | Capability-based Web of Trust system for authorization and spam prevention |
-| Trust and Privacy | [Trust Relationships](201_trust_relationships.md) | Trust relationship formation through cryptographic ceremonies |
-| Trust and Privacy | [Capability System](202_capability_system.md) | Capability-based access control using meet-semilattice operations |
-| Implementation | [Ratchet Tree](300_ratchet_tree.md) | Ratchet tree structure for threshold identity management |
-| Implementation | [Identifier System](301_identifier_system.md) | Identifier system and context isolation |
-| Reference | [Effects API](500_effects_api.md) | Legacy reference for effect traits/handlers; see `aura-agent` runtime docs for the new registry/builder |
-| Reference | [Semilattice API](501_semilattice_api.md) | CRDT types and semilattice operations reference |
-| Reference | [Choreography API](502_choreography_api.md) | Choreographic programming patterns reference |
-| Reference | [Access Control API](503_access_control_api.md) | Capability/Biscuit-based access control reference |
-| Reference | [Error Handling Reference](503_error_handling_reference.md) | Error handling patterns and types reference |
-| Reference | [Configuration Reference](505_configuration_reference.md) | Configuration system reference |
-| Reference | [Distributed Systems Contract](docs_2/004_distributed_systems_contract.md) | Safety/liveness guarantees, synchrony model, latency bounds, adversarial assumptions |
-| Testing and Verification | [Simulation and Verification](600_simulation_verification.md) | Deterministic simulation framework with Quint formal verification integration |
-| Testing and Verification | [Testing and Debugging](601_testing_debugging.md) | Testing strategies and debugging tools for distributed systems |
-| Developer Guides | [Hello World Guide](801_hello_world_guide.md) | Development environment setup and building first applications |
-| Developer Guides | [Core Systems Guide](802_core_systems_guide.md) | Core system architecture and patterns |
-| Developer Guides | [Coordination Systems Guide](803_coordination_systems_guide.md) | Distributed coordination and protocol composition |
-| Developer Guides | [Advanced Choreography Guide](804_advanced_choreography_guide.md) | Advanced choreographic programming patterns |
-| Developer Guides | [Testing Guide](805_testing_guide.md) | Testing strategies for distributed systems |
-| Developer Guides | [Simulation Guide](806_simulation_guide.md) | Deterministic simulation and verification |
-| Project Meta | [Glossary](998_glossary.md) | Canonical definitions for architectural concepts |
+| Foundation | [System Architecture](001_system_architecture.md) | Implementation architecture including effect system patterns, CRDT implementations, and choreographic protocols |
+| Foundation | [Privacy & Information Flow](003_privacy_and_information_flow.md) | Consent-based privacy framework with trust boundaries, flow budgets, and leakage tracking |
+| Foundation | [Distributed Systems Contract](004_distributed_systems_contract.md) | Safety/liveness guarantees, synchrony model, latency bounds, adversarial assumptions |
+| Core Systems | [Authority & Identity](100_authority_and_identity.md) | Authority-centric identity model with opaque authorities and relational contexts |
+| Core Systems | [Accounts & Ratchet Tree](101_accounts_and_ratchet_tree.md) | Ratchet tree structure for threshold identity management |
+| Core Systems | [Journal System](102_journal.md) | Fact-based journal, validation, and deterministic reduction flows |
+| Core Systems | [Relational Contexts](103_relational_contexts.md) | Guardian bindings, recovery grants, and context-scoped journals |
+| Core Systems | [Consensus](104_consensus.md) | Aura Consensus protocol for strong agreement |
+| Core Systems | [Effect System & Runtime](105_effect_system_and_runtime.md) | Effect system architecture and runtime composition |
+| Core Systems | [MPST & Choreography](106_mpst_and_choreography.md) | Multi-party session types and choreographic programming |
+| Core Systems | [Transport & Information Flow](107_transport_and_information_flow.md) | Guard chain enforcement, secure channel lifecycle, FlowBudget receipts |
+| Core Systems | [Authorization Pipeline](108_authorization_pipeline.md) | Authorization flow from capabilities to Biscuit tokens |
+| Core Systems | [Rendezvous Architecture](108_rendezvous.md) | Context-scoped rendezvous envelopes/descriptors and channel establishment |
+| Core Systems | [Identifiers & Boundaries](109_identifiers_and_boundaries.md) | Identifier system and context isolation |
+| Core Systems | [Maintenance](109_maintenance.md) | Distributed maintenance stack including snapshots and garbage collection |
+| Core Systems | [State Reduction Flows](110_state_reduction_flows.md) | Deterministic state reduction from fact journals |
 | Project Meta | [Project Structure](999_project_structure.md) | Comprehensive crate structure overview with dependency graph |

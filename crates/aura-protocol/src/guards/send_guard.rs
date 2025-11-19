@@ -9,8 +9,9 @@ use crate::{
     guards::{flow::FlowGuard, ProtocolGuard},
     wot::{EffectSystemInterface, EffectiveCapabilitySet},
 };
-use aura_core::{relationships::ContextId, AuraError, AuraResult, DeviceId, Receipt};
-// use aura_wot::Capability; // Removed
+use aura_core::identifiers::ContextId;
+use aura_core::{AuraError, AuraResult, DeviceId, Receipt};
+use aura_wot::Capability;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 

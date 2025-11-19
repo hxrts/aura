@@ -57,34 +57,35 @@
 pub mod deltas;
 pub mod effect_system_bridge;
 pub mod effect_system_trait;
-// pub mod evaluation; // Disabled - needs Capability type rewrite
+pub mod evaluation;
 pub mod execution;
 pub mod flow;
 pub mod journal_coupler;
 pub mod privacy;
-// pub mod send_guard; // Disabled - needs Capability type rewrite
+pub mod send_guard;
 
 // Biscuit-based guards (new implementation)
 pub mod biscuit_evaluator;
 pub mod capability_guard; // Authority-based capability guards
 
 pub use effect_system_trait::GuardEffectSystem;
+pub use evaluation::{GuardEvaluationMetrics, GuardEvaluationResult, GuardEvaluator};
 pub use flow::{FlowBudgetEffects, FlowGuard, FlowHint};
 pub use journal_coupler::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
-// pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult}; // Disabled
+pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
 use crate::wot::EffectSystemInterface;
 use aura_core::AuraResult;
-// use aura_wot::Capability; // Removed
+use aura_wot::Capability;
 use std::future::Future;
 
 /// Protocol execution guard combining capability checking, delta application, and privacy tracking
 #[derive(Debug, Clone)]
 pub struct ProtocolGuard {
-    /// Required capabilities for this operation (temporarily disabled)
-    // pub required_capabilities: Vec<Capability>,
+    /// Required capabilities for this operation
+    pub required_capabilities: Vec<Capability>,
     /// Facts to be merged into the journal after successful execution
     pub delta_facts: Vec<serde_json::Value>, // Placeholder for actual fact types
     /// Privacy leakage budget for this operation
@@ -138,24 +139,24 @@ impl ProtocolGuard {
     /// Create a new protocol guard with no requirements
     pub fn new(operation_id: impl Into<String>) -> Self {
         Self {
-            // required_capabilities: Vec::new(),
+            required_capabilities: Vec::new(),
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
             operation_id: operation_id.into(),
         }
     }
 
-    /// Add a required capability to this guard (temporarily disabled)
-    // pub fn require_capability(mut self, cap: Capability) -> Self {
-    //     self.required_capabilities.push(cap);
-    //     self
-    // }
+    /// Add a required capability to this guard
+    pub fn require_capability(mut self, cap: Capability) -> Self {
+        self.required_capabilities.push(cap);
+        self
+    }
 
-    /// Add multiple required capabilities to this guard (temporarily disabled)
-    // pub fn require_capabilities(mut self, caps: Vec<Capability>) -> Self {
-    //     self.required_capabilities.extend(caps);
-    //     self
-    // }
+    /// Add multiple required capabilities to this guard
+    pub fn require_capabilities(mut self, caps: Vec<Capability>) -> Self {
+        self.required_capabilities.extend(caps);
+        self
+    }
 
     /// Add delta facts to be applied after successful execution
     pub fn delta_facts(mut self, facts: Vec<serde_json::Value>) -> Self {

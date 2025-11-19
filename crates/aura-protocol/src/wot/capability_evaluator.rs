@@ -11,8 +11,8 @@
 
 use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_wot::{
-    evaluation::{evaluate_capabilities, EvaluationContext, LocalChecks},
-    Capability, CapabilitySet, DelegationChain, Policy,
+    evaluate_capabilities, Capability, CapabilitySet, DelegationLink, EvaluationContext,
+    LocalChecks, Policy,
 };
 use chrono::Utc;
 use std::collections::HashMap;
@@ -37,9 +37,15 @@ pub struct EffectiveCapabilitySet {
 impl EffectiveCapabilitySet {
     /// Check if these capabilities can satisfy a requirement
     pub fn can_satisfy(&self, required: &Capability) -> bool {
-        self.capabilities
-            .capabilities()
-            .any(|cap| cap.implies(required))
+        // Check if we have All (top element) or if required is None (bottom element)
+        if self.capabilities.capabilities().any(|cap| matches!(cap, Capability::All)) {
+            return true;
+        }
+        if matches!(required, Capability::None) {
+            return true;
+        }
+        // Check if we have the exact capability (simplified check)
+        self.capabilities.capabilities().any(|cap| cap == required)
     }
 }
 
@@ -79,7 +85,7 @@ impl CapabilityEvaluator {
 
         debug!(
             device_id = ?self.device_id,
-            operation = %context.operation,
+            operation = %context.operation_context,
             "Computing effective capabilities"
         );
 
@@ -185,8 +191,9 @@ impl CapabilityEvaluator {
     async fn get_delegation_chains(
         &self,
         _effect_system: &dyn EffectSystemInterface,
-    ) -> AuraResult<Vec<DelegationChain>> {
+    ) -> AuraResult<Vec<DelegationLink>> {
         // Placeholder: In actual implementation, this would query delegation chains
+        // and flatten them into individual links
         Ok(Vec::new())
     }
 
