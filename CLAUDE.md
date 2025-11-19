@@ -77,7 +77,7 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 
 8. **Testing & Tools** (`aura-testkit`, `aura-quint-api`): Shared fixtures, simulation harnesses, property tests, Quint interop.
 
-**Where does my code go?** See the docs under `docs/001_system_architecture.md` and `docs/AUTHORITY_ARCHITECTURE.md` for the latest authority-centric guidance.
+**Where does my code go?** See the docs under `docs/001_system_architecture.md` and `docs/100_authority_and_identity.md` for the latest authority-centric guidance.
 
 ## Architecture Essentials (Authority Model)
 
@@ -113,10 +113,10 @@ Reference `docs/003_privacy_and_information_flow.md` for the unified flow-budget
 - Architecture: `docs/001_system_architecture.md`
 - Privacy: `docs/003_privacy_and_information_flow.md`
 - Distributed systems contract: `docs/004_distributed_systems_contract.md`
-- Authority/Relational identity: `docs/AUTHORITY_ARCHITECTURE.md`, `docs/103_relational_contexts.md`
+- Authority/Relational identity: `docs/100_authority_and_identity.md`, `docs/103_relational_contexts.md`
 - Consensus: `docs/104_consensus.md`
 - Transport/receipts: `docs/107_transport_and_information_flow.md`, `docs/108_rendezvous.md`
-- Developer guides: `docs/803_coordination_systems_guide.md`, `docs/804_advanced_choreography_guide.md`, `docs/805_testing_guide.md`
+- Developer guides: `docs/106_mpst_and_choreography.md`, `docs/105_effect_system_and_runtime.md`
 - Reference: `docs/999_project_structure.md`
 
 ## Legacy Cleanup Status
