@@ -57,10 +57,13 @@ This document outlines the complete transformation from the current graph-based,
    - ⚠️ Legacy types kept for backward compatibility while fact-based device views are implemented
    - 📝 Migration path documented: derive device info from TreeState AttestedOps
 
-2. ⚠️ JournalOperation legacy plumbing removal
-   - Still used in guard infrastructure (aura-protocol/guards)
-   - Currently used for guard chain delta tracking
-   - Can be migrated incrementally to fact-based deltas
+2. ✅ JournalOperation legacy plumbing deprecation
+   - ✅ Marked legacy Operation enum as deprecated (aura-journal/operations.rs)
+   - ✅ Marked legacy JournalOperation enum as deprecated (aura-journal/operations.rs)
+   - ✅ Documented migration path: use TreeEffects and RelationalContext
+   - ℹ️  Note: JournalOperation in aura-protocol/guards/journal_coupler.rs is separate
+     - Represents fact-based delta tracking (MergeFacts, RefineCapabilities, etc.)
+     - This is aligned with the new architecture and should be kept
 
 3. ⚠️ Test suite execution
    - Need to run all tests and fix any broken tests
