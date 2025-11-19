@@ -7,8 +7,7 @@
 use super::{SimulationFaultHandler, SimulationScenarioHandler, SimulationTimeHandler};
 use aura_core::effects::{ChaosEffects, TestingEffects, TimeEffects};
 use aura_core::DeviceId;
-use aura_protocol::orchestration::AuraEffectSystem;
-use aura_protocol::standard_patterns::EffectRegistry;
+use aura_agent::runtime::{AuraEffectSystem, EffectRegistry};
 use std::sync::Arc;
 
 /// Effect-based simulation composer
@@ -45,13 +44,11 @@ impl SimulationEffectComposer {
 
     /// Add core effect system using new EffectRegistry pattern
     pub fn with_effect_system(mut self) -> Result<Self, SimulationComposerError> {
-        let effect_system = Arc::new(
-            EffectRegistry::simulation(self.seed)
-                .with_device_id(self.device_id)
-                .with_logging()
-                .build()
-                .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?,
-        );
+        let effect_system = EffectRegistry::simulation(self.seed)
+            .with_device_id(self.device_id)
+            .with_logging()
+            .build()
+            .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
 
         self.effect_system = Some(effect_system);
         Ok(self)

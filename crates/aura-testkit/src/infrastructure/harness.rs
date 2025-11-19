@@ -124,8 +124,8 @@ impl TestFixture {
     ///
     /// This creates a mock effect system configured for testing.
     pub fn effect_system(&self) -> Arc<AuraEffectSystem> {
-        let config = EffectSystemConfig::for_testing(self.device_id());
-        let system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+        let _config = EffectSystemConfig::for_testing(self.device_id());
+        let system = AuraEffectSystem::new(); // Stub coordinator takes no arguments
         Arc::new(system)
     }
 

@@ -3,6 +3,7 @@
 use crate::commands::authority::AuthorityCommands;
 use anyhow::Result;
 use aura_agent::runtime::AuraEffectSystem;
+use aura_core::effects::ConsoleEffects;
 
 /// Execute authority management commands.
 pub async fn handle_authority(
@@ -18,31 +19,37 @@ pub async fn handle_authority(
                 ),
                 None => "Authority creation is not yet wired".to_string(),
             };
-            let _ = effect_system.log_info(&msg).await;
+            let _ = ConsoleEffects::log_info(effect_system, &msg).await;
         }
         AuthorityCommands::Status { authority_id } => {
-            let _ = effect_system
-                .log_info(&format!(
+            let _ = ConsoleEffects::log_info(
+                effect_system,
+                &format!(
                     "Authority status inspection is not yet available for {}",
                     authority_id
-                ))
-                .await;
+                ),
+            )
+            .await;
         }
         AuthorityCommands::List => {
-            let _ = effect_system
-                .log_info("Authority listing is not yet available in this build")
-                .await;
+            let _ = ConsoleEffects::log_info(
+                effect_system,
+                "Authority listing is not yet available in this build",
+            )
+            .await;
         }
         AuthorityCommands::AddDevice {
             authority_id,
             public_key,
         } => {
-            let _ = effect_system
-                .log_info(&format!(
+            let _ = ConsoleEffects::log_info(
+                effect_system,
+                &format!(
                     "Add-device flow is not yet wired (authority={} key={})",
                     authority_id, public_key
-                ))
-                .await;
+                ),
+            )
+            .await;
         }
     }
     Ok(())
