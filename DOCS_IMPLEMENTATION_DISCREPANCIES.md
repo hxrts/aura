@@ -48,6 +48,8 @@ Overall assessment: **Documentation is comprehensive for design/architecture but
 
 **Recommendation**: Either implement the documented testing infrastructure OR update the guide to reflect current testkit patterns
 
+**Architectural Opinion**: 📝 **UPDATE DOCS (ALREADY DONE)** - The aspirational testing APIs (`freeze_time()`, `PerformanceMonitor`, etc.) are nice-to-have features but not essential for clean architecture. The current `#[aura_test]` macro is simpler and more pragmatic. Implementing deterministic time control would be valuable, but the simpler current approach is architecturally sound. The advanced features can be added incrementally as needs arise.
+
 ---
 
 ### 1.2 Simulation Infrastructure (`docs/806_simulation_guide.md`)
@@ -71,6 +73,8 @@ Overall assessment: **Documentation is comprehensive for design/architecture but
 **Impact**: Simulation guide examples won't work; developers can't follow documented patterns
 
 **Recommendation**: Update guide to reflect actual simulator capabilities or implement documented interface
+
+**Architectural Opinion**: 📝 **UPDATE DOCS (ALREADY DONE)** - The handler/middleware pattern is **architecturally superior** to a monolithic `AsyncSimulationEngine`. It provides better composition, follows the effect system architecture, and allows fine-grained control. A centralized engine would violate the stateless effect handler principle. The current distributed handler model is the correct design for clean architecture.
 
 ---
 
@@ -100,6 +104,8 @@ choreography! {
 
 **Recommendation**: Validate all choreography! examples compile or update with current syntax
 
+**Architectural Opinion**: 📝 **UPDATE DOCS** - Verify every choreography example compiles and update syntax where needed. Create CI job to compile-test all examples. The choreography DSL is core to the architecture, so examples MUST be correct and compilable.
+
 ---
 
 ### 1.4 CRDT Coordinator API (`docs/803_coordination_guide.md`)
@@ -121,6 +127,8 @@ let coordinator = CrdtCoordinator::with_delta_threshold(device_id, 100);
 **Impact**: Examples in coordination guide won't work as-is
 
 **Recommendation**: Update examples to current CrdtCoordinator API
+
+**Architectural Opinion**: 🔧 **UPDATE IMPLEMENTATION** - The examples show `device_id` but the architecture is authority-centric. The `CrdtCoordinator` API should use `AuthorityId` exclusively. Remove `device_id` parameters from public APIs entirely. Internal device management should be hidden within the Authority abstraction. This aligns with the documented authority-centric model and improves architectural clarity.
 
 ---
 
@@ -151,6 +159,15 @@ let coordinator = CrdtCoordinator::with_delta_threshold(device_id, 100);
 
 **Recommendation**: Update all guide examples to use `AuthorityId` where appropriate, clarify when `DeviceId` is internal-only
 
+**Architectural Opinion**: 🔧 **UPDATE IMPLEMENTATION (HIGH PRIORITY)** - This is a **critical architectural issue**. For clean architecture with zero backwards compatibility:
+1. **Remove `DeviceId` from ALL public APIs** - It should never appear in function signatures, public structs, or protocol messages
+2. **Make `DeviceId` internal-only** - Only used within `aura-journal/src/ratchet_tree/` for internal device management
+3. **Update all protocols** to use `AuthorityId` exclusively
+4. **Delete `DeviceMetadata` and `DeviceType`** entirely (already marked deprecated)
+5. **Derive device info from facts** when needed internally
+
+The authority-centric model is the documented architecture. DeviceId exposure is legacy technical debt that should be eliminated.
+
 ---
 
 ### 2.2 Effect Trait Locations
@@ -175,6 +192,8 @@ AuthorityEffects, RelationalEffects, LeakageEffects
 **Impact**: Developers don't know about all available effect traits
 
 **Recommendation**: Update project structure doc to list all effect traits
+
+**Architectural Opinion**: 📝 **UPDATE DOCS** - Simple documentation fix. List all 16 effect traits: `AgentEffects`, `AuthorizationEffects`, `AuthorityEffects`, `ChaosEffects`, `ConsoleEffects`, `CryptoEffects`, `JournalEffects`, `LeakageEffects`, `NetworkEffects`, `RandomEffects`, `RelationalEffects`, `ReliabilityEffects`, `StorageEffects`, `SystemEffects`, `TestingEffects`, `TimeEffects`, `TransportEffects`. The implementation is correct; docs just need updating.
 
 ---
 
@@ -201,6 +220,14 @@ AuthorityEffects, RelationalEffects, LeakageEffects
 **Impact**: Positive - implementation is more complete than docs suggest
 
 **Recommendation**: Document the full guard chain implementation, especially privacy.rs and deltas.rs
+
+**Architectural Opinion**: 📝 **UPDATE DOCS** - The sophisticated guard chain implementation (privacy tracking, delta application, metrics) is **excellent architecture**. Create detailed documentation for:
+- `privacy.rs` (14KB) - Privacy budget enforcement and leakage tracking
+- `deltas.rs` (38KB) - Fact delta application and journal coupling
+- `biscuit_evaluator.rs` - Token evaluation integration
+- `evaluation.rs` - Guard metrics and monitoring
+
+This implementation demonstrates the guard chain is more powerful than initially documented. Showcase this as a strength.
 
 ---
 
@@ -231,6 +258,13 @@ pub enum RelationalFact {
 
 **Recommendation**: Either implement specific fact types or update docs to clarify Generic is the intended pattern
 
+**Architectural Opinion**: 📝 **UPDATE DOCS** - The `Generic(GenericBinding)` pattern is **better architecture** than specific enum variants for each use case. It provides:
+- **Extensibility** - New fact types without enum changes
+- **Forward compatibility** - Old code handles new fact types gracefully
+- **Simpler codebase** - No pattern matching explosion
+
+Update docs to explain that `Generic` is the **intended design**, not a limitation. RendezvousReceipt and DKDNegotiation should use Generic. Keep `GuardianBinding` and `RecoveryGrant` as specific types only because they're core to the security model and need special handling.
+
 ---
 
 ### 2.5 FROST Integration Status
@@ -253,6 +287,14 @@ pub enum RelationalFact {
 **Impact**: Threshold signing capabilities referenced throughout guides may not work
 
 **Recommendation**: Add prominent note to guides that reference FROST that the feature is temporarily unavailable
+
+**Architectural Opinion**: 📝 **UPDATE DOCS** - External dependency issue, not architectural. Add clear warnings to all guides that reference FROST:
+```
+⚠️ **FROST Threshold Signatures Currently Unavailable**
+The aura-frost crate is temporarily excluded due to frost-ed25519 API compatibility.
+Threshold operations will return errors until re-integrated.
+```
+Also consider forking/vendoring frost-ed25519 to control the dependency, or switching to a different threshold signature library if frost-ed25519 remains problematic.
 
 ---
 
@@ -277,6 +319,15 @@ pub enum RelationalFact {
 **Impact**: Developers don't know how to implement maintenance routines
 
 **Recommendation**: Create maintenance guide or expand 109_maintenance.md with usage examples
+
+**Architectural Opinion**: 📝 **UPDATE DOCS** - Create practical maintenance guide (Guide 807) covering:
+- Garbage collection scheduling and execution
+- Snapshot creation and restoration
+- Epoch fence enforcement
+- OTA update mechanisms
+- Maintenance effect usage patterns
+
+The implementation exists and is sound; it just needs guide-level documentation with runnable examples.
 
 ---
 
@@ -309,6 +360,19 @@ tree_types.rs
 
 **Recommendation**: Add implementation architecture section to 101 or create separate impl guide
 
+**Architectural Opinion**: 📝 **UPDATE DOCS** - Add "Implementation Architecture" section to docs/101_accounts_and_ratchet_tree.md explaining the 9-file structure:
+- **attested_ops.rs** - AttestedOp fact types
+- **local_types.rs** - Internal device identifiers (not exposed)
+- **state.rs** - Tree state representation
+- **application.rs** - Operation application logic
+- **operations.rs** - Tree operation types
+- **authority_state.rs** - Authority derivation from tree
+- **reduction.rs** - Fact→State reduction
+- **compaction.rs** - State compression
+- **tree_types.rs** - Core tree data structures
+
+The implementation is clean; developers just need a map to navigate it.
+
 ---
 
 ### 3.3 Leakage Tracking System
@@ -331,6 +395,14 @@ tree_types.rs
 **Impact**: Developers won't know how to properly enforce privacy budgets
 
 **Recommendation**: Add practical leakage tracking examples to privacy guide
+
+**Architectural Opinion**: 📝 **UPDATE DOCS** - Expand docs/003_privacy_and_information_flow.md with practical section:
+```rust
+// How to use LeakageTracker in choreographies
+#[flow_cost = 50, leak = [(External, 100), (Neighbor, 50), (Group, 10)]]
+Alice -> Bob: SensitiveMessage;
+```
+Document the `UndefinedBudgetPolicy::Deny` default (security-first) and explain when to use permissive mode. The 14KB `LeakageTracker` implementation is sophisticated - showcase it properly.
 
 ---
 
@@ -422,6 +494,17 @@ The following code examples in guides should be verified to compile with current
 
 **Recommendation**: Expand authorization documentation to highlight the dual-mode capability system
 
+**Architectural Opinion**: 📝 **UPDATE DOCS** - Document BOTH authorization modes in docs/108_authorization_pipeline.md:
+1. **Traditional Capability Semantics** (aura-wot) - Meet-semilattice for local checks, fast evaluation
+2. **Biscuit Tokens** (cryptographically verifiable, delegatable, attenuated)
+
+Explain when to use each:
+- **Local checks**: Use capability semilattice (fast, simple)
+- **Cross-authority delegation**: Use Biscuit tokens (cryptographically verifiable)
+- **Production systems**: Use both (Biscuit for verification, capabilities for performance)
+
+The dual-mode design is **excellent architecture** - provides both performance and security.
+
 ---
 
 ### 6.2 Guard Chain Sophistication
@@ -432,6 +515,14 @@ The following code examples in guides should be verified to compile with current
 - Metrics and evaluation infrastructure
 
 **Recommendation**: Create advanced guard chain documentation showcasing full capabilities
+
+**Architectural Opinion**: 📝 **UPDATE DOCS** - Create "Advanced Guard Chain Guide" (Guide 808) covering:
+- **Privacy Tracking** (privacy.rs) - How leakage budgets are enforced per message
+- **Delta Application** (deltas.rs) - How fact deltas are applied atomically
+- **Metrics Collection** (evaluation.rs) - Guard performance monitoring
+- **Biscuit Integration** (biscuit_evaluator.rs) - Token evaluation in the chain
+
+The guard chain implementation demonstrates that Aura has a **production-quality authorization system**. Document it thoroughly to help developers understand and extend it.
 
 ---
 
@@ -444,6 +535,14 @@ The following code examples in guides should be verified to compile with current
 - Journal integration clean
 
 **Status**: ✅ Implementation quality exceeds documentation detail
+
+**Architectural Opinion**: 📝 **UPDATE DOCS** - Document the actual implementation patterns in docs/103_relational_contexts.md:
+- How guardian bindings are created and verified
+- How recovery grants are issued and checked
+- How prestate computation ensures consensus integrity
+- How journal integration maintains consistency
+
+The implementation is **exemplary** - clean separation of concerns, proper use of semilattice properties, correct consensus integration. Showcase these patterns as best practices.
 
 ---
 
@@ -566,3 +665,56 @@ Guides 802-804 (Core Systems, Coordination, Advanced Coordination) still contain
 These are lower priority as the core concepts are correct; only example details need updating.
 
 **Overall Status**: Critical testing/simulation documentation now accurate. Architecture docs remain excellent.
+
+---
+
+## Architectural Decision Summary
+
+Based on the clean architecture principle with zero backwards compatibility concerns:
+
+### 🔧 IMPLEMENTATION CHANGES REQUIRED (High Priority)
+
+**1. DeviceId Elimination (CRITICAL)**
+- Remove `DeviceId` from ALL public APIs immediately
+- Make it internal-only to `aura-journal/src/ratchet_tree/`
+- Update CrdtCoordinator, protocols, and all public interfaces to use `AuthorityId`
+- Delete `DeviceMetadata` and `DeviceType` types entirely
+- This is **non-negotiable** for clean authority-centric architecture
+
+**2. CrdtCoordinator API Refactoring**
+- Replace `device_id` parameters with `authority_id`
+- Update builder methods to be authority-centric
+- Ensure all guide examples compile after this change
+
+### 📝 DOCUMENTATION UPDATES REQUIRED
+
+**Must Document (Architecture is Good, Just Underdocumented)**:
+1. **Guard Chain Details** - Create Guide 808 for privacy.rs, deltas.rs, metrics
+2. **Dual Authorization Modes** - Document capability semilattice + Biscuit tokens
+3. **Maintenance Guide** - Create Guide 807 for GC, snapshots, OTA
+4. **Leakage Tracking** - Add practical examples to privacy guide
+5. **Ratchet Tree Implementation** - Add 9-file architecture map to docs/101
+6. **Effect Trait List** - Update docs/999 to list all 16 traits
+7. **Relational Context Patterns** - Document exemplary implementation patterns
+8. **FROST Status** - Add warnings to all guides referencing threshold signatures
+
+**Verify and Update**:
+9. **Choreography Examples** - Create CI job to compile-test all examples
+10. **Generic Pattern** - Document that Generic(GenericBinding) is intentional design
+
+### ✅ ALREADY CORRECT
+
+**Keep These As-Is (Implementation is Right)**:
+- Handler/middleware pattern for simulation (superior to monolithic engine)
+- `#[aura_test]` macro simplicity (pragmatic, can add features incrementally)
+- Generic RelationalFact pattern (more extensible than specific variants)
+- Guard chain sophistication (production-quality implementation)
+- Relational context implementation (exemplary code quality)
+
+### Key Architectural Insight
+
+The **implementation is often better than the documentation suggests**. The guard chain, authorization system, and relational contexts are production-quality with sophisticated features. The main work is:
+1. **Eliminate DeviceId exposure** (implementation cleanup)
+2. **Document what exists** (showcase the quality implementation)
+
+Rather than "fixing" a broken implementation, we're **revealing and documenting an excellent one** while removing legacy DeviceId technical debt.
