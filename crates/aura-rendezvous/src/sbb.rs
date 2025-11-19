@@ -547,7 +547,7 @@ mod tests {
         use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
 
         let config = EffectSystemConfig::for_testing(device_id);
-        let system = AuraEffectSystem::new(config).expect("Failed to create test effects");
+        let system = AuraEffectSystem::new();
         Arc::new(system)
     }
 
