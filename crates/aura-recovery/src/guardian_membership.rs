@@ -521,7 +521,7 @@ where
         let token = token_manager.current_token();
 
         let resource_scope = ResourceScope::Recovery {
-            recovery_type: aura_wot::RecoveryType::GuardianSet,
+            recovery_type: "GuardianSet".to_string(),
         };
 
         // Check authorization for membership change initiation

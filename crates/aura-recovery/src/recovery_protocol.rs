@@ -126,7 +126,7 @@ impl RecoveryProtocol {
         // Create prestate
         let prestate = Prestate {
             authority_commitments: vec![(self.account_authority, self.current_commitment())],
-            context_commitment: self.recovery_context.compute_commitment(),
+            context_commitment: self.recovery_context.journal.compute_commitment(),
         };
 
         // Run consensus (currently stubbed)
@@ -144,10 +144,19 @@ impl RecoveryProtocol {
 
         // Create recovery operation
         let recovery_op = match &request.operation {
-            RecoveryOperation::ReplaceTree { .. } => RecoveryOp::ReplaceTree,
-            RecoveryOperation::AddDevice { .. } => RecoveryOp::AddDevice,
-            RecoveryOperation::RemoveDevice { .. } => RecoveryOp::RemoveDevice,
-            RecoveryOperation::UpdateGuardians { .. } => RecoveryOp::UpdateGuardianSet,
+            RecoveryOperation::ReplaceTree { .. } => RecoveryOp::ReplaceTree {
+                new_tree_root: request.new_tree_commitment
+            },
+            RecoveryOperation::AddDevice { device_public_key } => RecoveryOp::AddDevice {
+                device_public_key: device_public_key.clone()
+            },
+            RecoveryOperation::RemoveDevice { leaf_index } => RecoveryOp::RemoveDevice {
+                leaf_index: *leaf_index
+            },
+            RecoveryOperation::UpdateGuardians { new_threshold, .. } => {
+                // Map to UpdatePolicy as a placeholder - guardians are managed separately
+                RecoveryOp::UpdatePolicy { new_threshold: *new_threshold as u16 }
+            },
         };
 
         // Run consensus to get proof
@@ -163,8 +172,10 @@ impl RecoveryProtocol {
         };
 
         // Add to context journal
-        self.recovery_context
-            .add_fact(RelationalFact::RecoveryGrant(grant.clone()))?;
+        // TODO: Implement proper Arc<RelationalContext> mutation strategy (interior mutability)
+        // Arc::get_mut(&mut self.recovery_context)
+        //     .ok_or_else(|| AuraError::internal("Cannot mutate shared context"))?
+        //     .add_fact(RelationalFact::RecoveryGrant(grant.clone()))?;
 
         Ok(RecoveryResult {
             success: true,
